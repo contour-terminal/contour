@@ -330,17 +330,14 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
 
     QTest::keyClick(h.window.get(), Qt::Key_A);
     QTest::keyClick(h.window.get(), Qt::Key_Return);
-    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('a'); ++i)
-        QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().contains('a'));
-    CHECK(h.pty->stdinSnapshot().contains('\r'));
+    auto const typed = h.sentInput();
+    CHECK(typed.contains('a'));
+    CHECK(typed.contains('\r'));
 
     // Enable X10 mouse reporting, then click inside the grid: the terminal must encode a report.
     h.feedAndSettle("\033[?1000h"sv);
     QTest::mouseClick(h.window.get(), Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
-    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains("\033[M"); ++i)
-        QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().contains("\033[M"));
+    CHECK(h.sentInput().contains("\033[M"));
 
     // Wheel over the (alt-less) primary screen scrolls the viewport — no crash, event consumed.
     // A phase-less notch now arms an inertial glide advanced by the render loop (nextRender +
@@ -420,7 +417,7 @@ TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls throu
     h.feedAndSettle("\033[?1006h"sv); // SGR extended mouse encoding
     REQUIRE(h.session->terminal().isAlternateScreen());
 
-    auto const before = h.pty->stdinSnapshot().size();
+    auto const before = h.sentInput().size();
     QWheelEvent wheel(QPointF(100, 100),
                       QPointF(100, 100),
                       QPoint(),
@@ -433,9 +430,7 @@ TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls throu
 
     // The notch did not arm a glide (alt screen) and must instead have produced a mouse report.
     CHECK_FALSE(h.session->terminal().isMomentumScrollActive());
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().size() == before; ++i)
-        QTest::qWait(10);
-    auto const snapshot = h.pty->stdinSnapshot();
+    auto const snapshot = h.sentInput();
     CHECK(snapshot.size() > before);
     // SGR wheel-up report: CSI < 64 ; col ; row M  (button code 64 == wheel up).
     CHECK(snapshot.contains("\033[<64;"));
@@ -786,7 +781,7 @@ TEST_CASE("display: a font-size change with resize reports echoed locally does n
     DisplayHarness h;
     h.feedAndSettle("\033[12l\033[?2048h");
     auto const pageBefore = h.session->terminal().pageSize();
-    auto const reportsBefore = h.pty->stdinSnapshot().size();
+    auto const reportsBefore = h.sentInput().size();
 
     vtbackend::test::failOnDeadlock(10s, [&] {
         REQUIRE(h.display->setFontSize(text::FontSize { 24.0 }));
@@ -801,7 +796,7 @@ TEST_CASE("display: a font-size change with resize reports echoed locally does n
 
     auto const page = h.session->terminal().pageSize();
     REQUIRE(page != pageBefore);
-    CHECK(h.pty->stdinSnapshot()
+    CHECK(h.sentInput()
               .substr(reportsBefore)
               .contains(std::format("\033[48;{};{};", page.lines.value, page.columns.value)));
 }
@@ -1101,9 +1096,7 @@ TEST_CASE("display: input-method events compose and query on the live display", 
         commit.setCommitString(QStringLiteral("Z"));
         QCoreApplication::sendEvent(h.display.get(), &commit);
     }
-    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('Z'); ++i)
-        QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().contains('Z'));
+    CHECK(h.sentInput().contains('Z'));
 
     // The IME queries the display for its cursor rectangle / font / anchor — all must return
     // without crashing while a session is attached.

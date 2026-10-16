@@ -18,10 +18,13 @@
 #include <QtGui/QImage>
 #include <QtQuick/QQuickWindow>
 
+#include <catch2/catch_test_macros.hpp>
+
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <ranges>
+#include <string>
 #include <string_view>
 
 #include <QtTest/QTest>
@@ -131,6 +134,20 @@ struct DisplayHarness
             QTest::qWait(10);
         }
         pump();
+    }
+
+    /// Everything the application has been sent, once the terminal has nothing left queued for it.
+    ///
+    /// What the GUI thread raises -- a key, a mouse report, a resize's report -- only queues its bytes: the
+    /// session's PTY reader writes them, woken for it (vtbackend::InputWriter::ReaderThread), so they reach
+    /// the PTY after whatever raised them has returned. The queue is emptied only once the write is made, so
+    /// a drained queue means everything raised so far is in the PTY.
+    /// @return The PTY's input so far.
+    [[nodiscard]] std::string sentInput() const
+    {
+        auto const& terminal = session->terminal();
+        REQUIRE(QTest::qWaitFor([&] { return !terminal.hasInput(); }));
+        return pty->stdinSnapshot();
     }
 
     ~DisplayHarness()
