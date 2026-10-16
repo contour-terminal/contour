@@ -566,18 +566,19 @@ TEST_CASE("WindowGeometry.isInGutter.covers the strip and nothing else", "[conto
     auto constexpr MarginLeft = 5;
     auto constexpr Gutter = 10;
     auto constexpr PageMarginLeft = MarginLeft + Gutter;
+    auto constexpr Strip = GutterExtent { .columns = Gutter };
 
     // The margin to the left of the gutter is not the gutter.
-    CHECK(!isInGutter(0, PageMarginLeft, GutterExtent { .columns = Gutter }));
-    CHECK(!isInGutter(4, PageMarginLeft, GutterExtent { .columns = Gutter }));
+    CHECK(!isInGutter(0, PageMarginLeft, Strip));
+    CHECK(!isInGutter(4, PageMarginLeft, Strip));
 
     // The strip itself, both edges.
-    CHECK(isInGutter(5, PageMarginLeft, GutterExtent { .columns = Gutter }));
-    CHECK(isInGutter(14, PageMarginLeft, GutterExtent { .columns = Gutter }));
+    CHECK(isInGutter(5, PageMarginLeft, Strip));
+    CHECK(isInGutter(14, PageMarginLeft, Strip));
 
     // The first cell column is past it -- half-open, so 15 is already the grid.
-    CHECK(!isInGutter(15, PageMarginLeft, GutterExtent { .columns = Gutter }));
-    CHECK(!isInGutter(500, PageMarginLeft, GutterExtent { .columns = Gutter }));
+    CHECK(!isInGutter(15, PageMarginLeft, Strip));
+    CHECK(!isInGutter(500, PageMarginLeft, Strip));
 }
 
 TEST_CASE("WindowGeometry.isInGutter.no gutter means nothing is ever in it", "[contour][geometry]")

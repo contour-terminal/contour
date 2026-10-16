@@ -2547,32 +2547,39 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
     // Validated rather than clamped or trusted: a width out of range and a format the gutter cannot draw
     // are typos, and either taken as written would resize the page or blank the column.
-    if (child["block_column_width"])
+    struct BoundedWidth
     {
-        auto width = where.blockColumnWidth;
-        loadGuarded(child, "block_column_width", width);
-        if (width >= vtbackend::MinBlockColumnWidth && width <= vtbackend::MaxBlockColumnWidth)
-            where.blockColumnWidth = width;
-        else
-            errorLog()("gutter.block_column_width must be between {} and {}, not {}; keeping {}.",
-                       vtbackend::MinBlockColumnWidth,
-                       vtbackend::MaxBlockColumnWidth,
-                       width,
-                       where.blockColumnWidth);
-    }
-
-    if (child["line_number_width"])
+        char const* key;
+        int GutterConfig::* member;
+        int min;
+        int max;
+    };
+    constexpr auto BoundedWidths = std::to_array<BoundedWidth>({
+        { .key = "block_column_width",
+          .member = &GutterConfig::blockColumnWidth,
+          .min = vtbackend::MinBlockColumnWidth,
+          .max = vtbackend::MaxBlockColumnWidth },
+        { .key = "line_number_width",
+          .member = &GutterConfig::lineNumberWidth,
+          .min = vtbackend::MinLineNumberWidth,
+          .max = vtbackend::MaxLineNumberWidth },
+    });
+    for (auto const& bounded: BoundedWidths)
     {
-        auto width = where.lineNumberWidth;
-        loadGuarded(child, "line_number_width", width);
-        if (width >= vtbackend::MinLineNumberWidth && width <= vtbackend::MaxLineNumberWidth)
-            where.lineNumberWidth = width;
+        if (!child[bounded.key])
+            continue;
+        auto& kept = where.*bounded.member;
+        auto width = kept;
+        loadGuarded(child, bounded.key, width);
+        if (width >= bounded.min && width <= bounded.max)
+            kept = width;
         else
-            errorLog()("gutter.line_number_width must be between {} and {}, not {}; keeping {}.",
-                       vtbackend::MinLineNumberWidth,
-                       vtbackend::MaxLineNumberWidth,
+            errorLog()("gutter.{} must be between {} and {}, not {}; keeping {}.",
+                       bounded.key,
+                       bounded.min,
+                       bounded.max,
                        width,
-                       where.lineNumberWidth);
+                       kept);
     }
 
     if (child["timestamp_format"])

@@ -62,6 +62,16 @@ class TerminalSession;
 /// @return vtbackend::gutterLayoutFor(config::gutterSettingsFor(config)).
 [[nodiscard]] vtbackend::GutterLayout configuredGutterLayout(config::Config const& config);
 
+/// The gutter @p layout reserves, in device pixels, in its two parts: the blank lead-in against the pane's
+/// edge, and the columns behind it.
+/// @param layout The gutter's segments.
+/// @param cellSize The cell size in device pixels.
+/// @param scale The device-pixel ratio, which the lead-in is scaled by.
+/// @return Both parts; both 0 when the layout has no columns.
+[[nodiscard]] geometry::GutterExtent gutterExtentFor(vtbackend::GutterLayout const& layout,
+                                                     vtbackend::ImageSize cellSize,
+                                                     double scale);
+
 /// The gutter @p config reserves, in device pixels, in its two parts: the blank lead-in against the pane's
 /// edge, and the columns behind it. What the hit-test maps a pointer onto, the lead-in included.
 /// @param config The loaded configuration.

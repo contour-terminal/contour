@@ -1607,6 +1607,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param block The block.
     void openBlockMenu(vtbackend::CommandBlockId block);
 
+    /// Runs @p action with @p block as the block a context menu it opens describes (_contextMenuBlock), and
+    /// forgets it afterwards.
+    /// @param block The block the sticky header's or the gutter's press stands for.
+    /// @param action What the press runs.
+    void withContextMenuBlock(vtbackend::CommandBlockId block, std::invocable auto&& action);
+
     /// Whether the mouse cursor shape must be re-decided on the next motion, even over the same cell.
     ///
     /// The move path changes the shape only when the pointer changes grid CELL, that being the only

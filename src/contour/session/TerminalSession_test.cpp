@@ -5537,6 +5537,14 @@ class StickyHeaderScene
     /// @return What reached the PTY: the application's input.
     [[nodiscard]] std::string& written() const { return mockPtyOf(*_held).stdinBuffer(); }
 
+    /// Turns on normal (1000) and SGR (1006) mouse reporting: a press the grid takes is written to the PTY.
+    void reportMouse() const { terminal().writeToScreen("\033[?1000h\033[?1006h"); }
+
+    /// A point in the gutter's block column beside page row @p row: the 8 pixels left of the page, one 8x16
+    /// cell per row.
+    /// @param row The page row.
+    [[nodiscard]] static QPointF besideRow(int row) { return { 4.0, (row * 16.0) + 4.0 }; }
+
     /// Runs `make` through the shell integration, printing @p output.
     /// @param output The lines it prints.
     void runCommand(std::vector<std::string> const& output) const
@@ -5723,8 +5731,7 @@ TEST_CASE("TerminalSession: a Qt press on row 0 reaches the sticky header where 
     auto& terminal = scene.terminal();
     REQUIRE(terminal.mainPageTopRow() == vtbackend::LineOffset(0));
 
-    // Normal (1000) and SGR (1006) mouse reporting: a press the grid takes is written to the PTY.
-    terminal.writeToScreen("\033[?1000h\033[?1006h");
+    scene.reportMouse();
     scene.scrollBackIntoCommand(numberedOutput(60));
     scene.written().clear();
 
@@ -5772,15 +5779,12 @@ TEST_CASE("TerminalSession: the gutter's block column swallows its presses, and 
     TestApp testApp;
     auto const scene = StickyHeaderScene { testApp.app() };
     auto& terminal = scene.terminal();
-    // Normal (1000) and SGR (1006) mouse reporting: a press the grid takes is written to the PTY.
-    terminal.writeToScreen("\033[?1000h\033[?1006h");
+    scene.reportMouse();
     terminal.writeToScreen(vtbackend::test::commandRun("true", {}));         // row 0: ●, nothing to fold
     terminal.writeToScreen(vtbackend::test::commandRun("make", { "a" }, 2)); // rows 1-2: a fold
     scene.written().clear();
 
-    auto const beside = [](int row) {
-        return QPointF(4, (row * 16) + 4);
-    };
+    auto const beside = &StickyHeaderScene::besideRow;
 
     SECTION("on a fold control, the fold")
     {
@@ -5880,8 +5884,7 @@ TEST_CASE(
     TestApp testApp;
     auto const scene = StickyHeaderScene { testApp.app() };
     auto& terminal = scene.terminal();
-    // Normal (1000) and SGR (1006) mouse reporting: a press the grid takes is written to the PTY.
-    terminal.writeToScreen("\033[?1000h\033[?1006h");
+    scene.reportMouse();
     terminal.writeToScreen(vtbackend::test::commandRun("true", {}));              // row 0: a disc
     terminal.writeToScreen(vtbackend::test::commandRun("make", { "a", "b" }, 2)); // rows 1-3: a fold
     scene.written().clear();
@@ -5895,9 +5898,7 @@ TEST_CASE(
                          if (auto const pointed = acting->contextMenuState().blockUnderCursor)
                              menuBlock = pointed->id;
                      });
-    auto const beside = [](int row) {
-        return QPointF(4, (row * 16) + 4);
-    };
+    auto const beside = &StickyHeaderScene::besideRow;
     auto const blockAt = [&](int row) {
         auto const* const record = terminal.commandBlockAt(vtbackend::LineOffset(row));
         REQUIRE(record != nullptr);
@@ -5942,7 +5943,7 @@ TEST_CASE("TerminalSession: a click on a collapsed fold's label expands it",
     TestApp testApp;
     auto const scene = StickyHeaderScene { testApp.app() };
     auto& terminal = scene.terminal();
-    terminal.writeToScreen("\033[?1000h\033[?1006h"); // a press the grid takes is written to the PTY
+    scene.reportMouse();
     terminal.writeToScreen(vtbackend::test::commandRun("make", { "a", "b" })); // "$ make" on row 0
     REQUIRE(terminal.toggleFoldContaining(vtbackend::LineOffset(0)));
     scene.written().clear();
@@ -5972,7 +5973,7 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
     auto session = makeSessionWithSurface(testApp.app());
     auto& terminal = session->terminal();
     terminal.writeToScreen(vtbackend::test::commandRun("make", { "a" }));
-    terminal.writeToScreen("\033]133;A\033\\$ "); // the next prompt, at which the shell waits
+    terminal.writeToScreen(vtbackend::test::PromptStart); // the next prompt, at which the shell waits
     auto& written = mockPtyOf(*session).stdinBuffer();
     written.clear();
     auto asked = QSignalSpy(session.session.get(),
@@ -6038,7 +6039,8 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
         // before it as a command of its own.
         terminal.writeToScreen(std::string { vtbackend::test::PromptStart } + "\033]133;B\033\\\r\n"
                                + vtbackend::test::reportedOutputStart("echo%20a%0Aecho%20b")
-                               + vtbackend::test::commandEnd(0) + "\033]133;A\033\\$ ");
+                               + vtbackend::test::commandEnd(0)
+                               + std::string { vtbackend::test::PromptStart });
         CHECK_FALSE((*session)(RerunCommand {}));
         CHECK(asked.count() == 0);
     }
@@ -6221,7 +6223,7 @@ TEST_CASE("TerminalSession: each button on the sticky header acts for the header
 
     auto const scene = StickyHeaderScene { testApp.app() };
     auto& terminal = scene.terminal();
-    terminal.writeToScreen("\033[?1000h\033[?1006h");
+    scene.reportMouse();
     scene.scrollBackIntoCommand(numberedOutput(60));
     auto const block = terminal.stickyHeaderBlock();
     REQUIRE(block.has_value());
