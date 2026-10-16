@@ -2019,6 +2019,13 @@ void Terminal::sendPaste(string_view text)
     flushInput();
 }
 
+bool Terminal::pastesUnchanged(string_view text) const
+{
+    auto const purpose =
+        isModeEnabled(DECMode::BracketedPaste) ? SanitizePurpose::Insert : SanitizePurpose::Type;
+    return isUnchangedBySanitizing(text, purpose);
+}
+
 void Terminal::sendPasteFromClipboard(unsigned count, bool strip)
 {
     runOutsideStateLock([this, count, strip] { _eventListener.pasteFromClipboard(count, strip); });
@@ -3096,11 +3103,15 @@ BlockColumnPress Terminal::blockColumnPressAt(LineOffset gridLine) const
     if (!foldingAppliesToDisplayedPage())
         return BlockColumnPress::Swallow;
 
+    // The fold looked up once, for the toggle and the glyph alike: foldContaining() without its page check,
+    // already made above.
+    auto const id = primaryScreen().grid().stableLineIdOf(gridLine);
+    auto const range = foldCovering(foldRanges(), id);
     auto const& gutter = _settings.gutter;
-    auto const fold = isFoldingAvailable() && gutter.foldMarkers && foldContaining(gridLine).has_value()
+    auto const fold = isFoldingAvailable() && gutter.foldMarkers && range.has_value()
                           ? FoldToggle::Available
                           : FoldToggle::Unavailable;
-    return blockColumnPressFor(blockColumnGlyph(blockColumnFactsAt(gridLine), gutter), fold);
+    return blockColumnPressFor(blockColumnGlyph(blockColumnFactsAt(gridLine, id, range), gutter), fold);
 }
 
 bool Terminal::shellIsPrompting() const noexcept
@@ -3111,13 +3122,16 @@ bool Terminal::shellIsPrompting() const noexcept
 
 BlockColumnFacts Terminal::blockColumnFactsAt(LineOffset gridLine) const
 {
-    auto const& grid = primaryScreen().grid();
-    auto const id = grid.stableLineIdOf(gridLine);
-    auto const* const record = commandBlockAt(gridLine);
+    auto const id = primaryScreen().grid().stableLineIdOf(gridLine);
+    return blockColumnFactsAt(gridLine, id, foldCovering(foldRanges(), id));
+}
 
-    // Asked for here rather than handed in: foldRanges() hands back a span over a CACHE, which a caller
-    // walking rows re-enters per row. A cache hit is three integer comparisons.
-    auto const range = foldCovering(foldRanges(), id);
+BlockColumnFacts Terminal::blockColumnFactsAt(LineOffset gridLine,
+                                              int64_t id,
+                                              std::optional<FoldRange> const& range) const
+{
+    auto const& grid = primaryScreen().grid();
+    auto const* const record = commandBlockAt(gridLine);
     return BlockColumnFacts {
         .fold = range ? markerIn(*range, id) : FoldMarker::None,
         .head = blockHeadStateOf(record, id, grid.stableIdGeneration()),
@@ -3301,9 +3315,7 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
     // lies below its output, often where the next prompt begins.
     auto const* const hoveredBlock = _gutterHoverLine ? commandBlockAt(*_gutterHoverLine) : nullptr;
     auto const hoveredBlockHead =
-        hoveredBlock != nullptr && !hoveredHead && hoveredBlock->headIdGeneration == grid.stableIdGeneration()
-            ? std::optional { hoveredBlock->headStableId }
-            : std::nullopt;
+        hoveredBlock != nullptr && !hoveredHead ? headOffsetOf(grid, *hoveredBlock) : std::nullopt;
 
     // Shifted by baseLine for the same reason every cell is: a status line at the top moves the main page
     // down, and a gutter left where it was would point at the wrong row.
@@ -3316,10 +3328,12 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
         // Asked for per row rather than held across the loop: foldRanges() hands back a span over a
         // CACHE, and the translation above re-enters that cache once per row. Holding it survives only as
         // long as no key input can move inside a frame -- one that could, and the remaining rows would be
-        // reading freed memory. A cache hit here is three integer comparisons.
-        auto const range = foldCovering(foldRanges(), grid.stableLineIdOf(gridLine));
+        // reading freed memory. A cache hit here is three integer comparisons. Asked once, for the hover
+        // and the glyph alike.
+        auto const id = grid.stableLineIdOf(gridLine);
+        auto const range = foldCovering(foldRanges(), id);
 
-        auto const facts = blockColumnFactsAt(gridLine);
+        auto const facts = blockColumnFactsAt(gridLine, id, range);
         auto const glyph = blockColumnGlyph(facts, gutter);
         auto const& outcome = facts.outcome;
 
@@ -3327,7 +3341,7 @@ void Terminal::fillGutter(RenderBuffer& output, LineOffset baseLine) const
                                ? GutterHover::Hovered
                                : GutterHover::Rest;
 
-        auto const band = hover == GutterHover::Hovered || hoveredBlockHead == grid.stableLineIdOf(gridLine)
+        auto const band = hover == GutterHover::Hovered || hoveredBlockHead == gridLine
                               ? std::optional { blockBandColor(_colorPalette, outcome) }
                               : std::nullopt;
 
@@ -3364,11 +3378,11 @@ std::optional<LineOffset> Terminal::collapsedFoldLabelAt(CellLocation position) 
 {
     for (auto const& placement: foldLabelPlacements())
     {
-        if (_viewport.translateGridToScreenCoordinate(placement.gridLine) != position.line)
-            continue;
-        auto const extent =
-            foldLabelExtent(placement.textColumns, pageSize().columns, placement.label.size());
-        if (extent && position.column >= extent->first && position.column < extent->second)
+        auto const extent = foldLabelExtent(_viewport.translateGridToScreenCoordinate(placement.gridLine),
+                                            placement.textColumns,
+                                            pageSize().columns,
+                                            placement.label.size());
+        if (extent && extent->contains(position))
             return primaryScreen().grid().lineOffsetOf(placement.range.headStableId);
     }
     return std::nullopt;
@@ -4738,18 +4752,14 @@ void Terminal::applyHintOverlay(RenderBuffer& output, LineOffset baseLine) const
 
 namespace
 {
-    /// Pastes a hint's text into @p terminal, unless it cannot arrive as it is. A path resolved against the
-    /// working directory carries whatever the OSC 7 URL decoded into it -- an ESC, a line feed. Under
-    /// bracketed paste the paste drops ESC (InputGenerator::generatePaste), and without it a shell reads
-    /// TAB and LF as keys; either way a path with a character taken out names another file, so it is not
-    /// pasted at all.
+    /// Pastes a hint's text into @p terminal, unless it cannot arrive as it is (Terminal::pastesUnchanged()):
+    /// a path resolved against the working directory carries whatever the OSC 7 URL decoded into it -- an
+    /// ESC, a line feed.
     /// @param terminal The terminal to paste into.
     /// @param text The hint's text.
     void typeHint(Terminal& terminal, std::string const& text)
     {
-        auto const purpose =
-            terminal.isModeEnabled(DECMode::BracketedPaste) ? SanitizePurpose::Insert : SanitizePurpose::Type;
-        if (!isUnchangedBySanitizing(text, purpose))
+        if (!terminal.pastesUnchanged(text))
         {
             terminalLog()("Not typing the hint \"{}\": a shell would read part of it as keys.",
                           core::escape(text));

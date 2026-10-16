@@ -421,6 +421,13 @@ namespace
     /// The blank column between a row's text and its fold label.
     constexpr auto FoldLabelGap = 1;
 
+    /// The column a fold label starts at, for the drawing and the click alike.
+    /// @param textColumns How many columns of the row hold text.
+    [[nodiscard]] constexpr ColumnOffset foldLabelStart(ColumnCount textColumns) noexcept
+    {
+        return ColumnOffset(unbox<int>(textColumns) + FoldLabelGap);
+    }
+
     /// Digits per thousands group in a fold label's count.
     constexpr auto DigitsPerGroup = std::size_t { 3 };
 } // namespace
@@ -615,15 +622,17 @@ std::u32string collapsedFoldLabel(uint64_t hiddenLines)
     return label;
 }
 
-std::optional<std::pair<ColumnOffset, ColumnOffset>> foldLabelExtent(ColumnCount textColumns,
-                                                                     ColumnCount pageColumns,
-                                                                     std::size_t labelColumns) noexcept
+std::optional<ColumnRange> foldLabelExtent(LineOffset screenLine,
+                                           ColumnCount textColumns,
+                                           ColumnCount pageColumns,
+                                           std::size_t labelColumns) noexcept
 {
-    auto const begin = unbox<int>(textColumns) + FoldLabelGap;
-    auto const end = std::min(begin + static_cast<int>(labelColumns), unbox<int>(pageColumns));
+    auto const begin = foldLabelStart(textColumns);
+    auto const end =
+        std::min(begin + ColumnOffset::cast_from(labelColumns), boxed_cast<ColumnOffset>(pageColumns));
     if (begin >= end)
         return std::nullopt;
-    return std::pair { ColumnOffset(begin), ColumnOffset(end) };
+    return ColumnRange { .line = screenLine, .fromColumn = begin, .toColumn = end - ColumnOffset(1) };
 }
 
 void layoutFoldLabel(std::vector<RenderCell>& output,
@@ -634,12 +643,11 @@ void layoutFoldLabel(std::vector<RenderCell>& output,
                      RenderAttributes const& attributes)
 {
     // The layout stops at the page's edge, glyph by glyph: a wide one that would cross it is dropped whole.
-    layoutRenderText(
-        output,
-        label,
-        attributes,
-        CellLocation { .line = screenLine, .column = ColumnOffset(unbox<int>(textColumns) + FoldLabelGap) },
-        boxed_cast<ColumnOffset>(pageColumns));
+    layoutRenderText(output,
+                     label,
+                     attributes,
+                     CellLocation { .line = screenLine, .column = foldLabelStart(textColumns) },
+                     boxed_cast<ColumnOffset>(pageColumns));
 }
 
 } // namespace vtbackend

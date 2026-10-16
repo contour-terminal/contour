@@ -800,13 +800,17 @@ TEST_CASE("Gutter.paint.textStopsAtItsSegmentsEdge", "[gutter]")
 TEST_CASE("Gutter.foldLabel.extentIsWhereItIsDrawn", "[gutter]")
 {
     // One blank column after the text, then the label, clipped at the page's edge.
-    CHECK(foldLabelExtent(ColumnCount(6), ColumnCount(40), 9)
-          == std::pair { ColumnOffset(7), ColumnOffset(16) });
-    CHECK(foldLabelExtent(ColumnCount(30), ColumnCount(40), 15)
-          == std::pair { ColumnOffset(31), ColumnOffset(40) });
+    auto const extent = [](int textColumns, std::size_t labelColumns) {
+        return foldLabelExtent(LineOffset(4), ColumnCount(textColumns), ColumnCount(40), labelColumns)
+            .transform(
+                [](ColumnRange const& range) { return std::pair { range.fromColumn, range.toColumn }; });
+    };
+    CHECK(extent(6, 9) == std::pair { ColumnOffset(7), ColumnOffset(15) });
+    CHECK(extent(30, 15) == std::pair { ColumnOffset(31), ColumnOffset(39) });
+    CHECK(foldLabelExtent(LineOffset(4), ColumnCount(6), ColumnCount(40), 9)->line == LineOffset(4));
     // Nothing of it fits: no extent to click.
-    CHECK_FALSE(foldLabelExtent(ColumnCount(39), ColumnCount(40), 9).has_value());
-    CHECK_FALSE(foldLabelExtent(ColumnCount(40), ColumnCount(40), 9).has_value());
+    CHECK_FALSE(extent(39, 9).has_value());
+    CHECK_FALSE(extent(40, 9).has_value());
 }
 
 TEST_CASE("Gutter.foldLabel.countsTheHiddenLines", "[gutter]")

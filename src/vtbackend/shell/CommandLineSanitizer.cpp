@@ -129,38 +129,48 @@ namespace
     /// U+FFFD REPLACEMENT CHARACTER, UTF-8 encoded.
     constexpr auto ReplacementCharacter = std::string_view { "\xEF\xBF\xBD" };
 
-    static_assert(std::ranges::is_sorted(Rules, {}, &Rule::first)
-                      && std::ranges::adjacent_find(Rules,
-                                                    [](Rule const& a, Rule const& b) {
-                                                        return a.last >= b.first;
-                                                    })
-                             == Rules.end(),
-                  "treatmentOf() searches the rules by bisection: they must be sorted and disjoint");
+    /// Whether @p ranges -- runs of code points with inclusive `first` and `last` ends -- are sorted and
+    /// disjoint: what findRange() needs of them to bisect.
+    /// @param ranges The table.
+    /// @return Whether it is.
+    template <typename Range, std::size_t N>
+    [[nodiscard]] constexpr bool isSortedAndDisjoint(std::array<Range, N> const& ranges) noexcept
+    {
+        return std::ranges::is_sorted(ranges, {}, &Range::first)
+               && std::ranges::adjacent_find(ranges, [](Range const& a, Range const& b) {
+                      return a.last >= b.first;
+                  }) == ranges.end();
+    }
 
-    static_assert(std::ranges::is_sorted(WhiteSpace, {}, &CodePointRange::first)
-                      && std::ranges::adjacent_find(WhiteSpace,
-                                                    [](CodePointRange const& a, CodePointRange const& b) {
-                                                        return a.last >= b.first;
-                                                    })
-                             == WhiteSpace.end(),
-                  "isWhiteSpace() searches the ranges by bisection: they must be sorted and disjoint");
+    /// The run of @p ranges holding @p codePoint, by bisection.
+    /// @param ranges The table, sorted and disjoint (isSortedAndDisjoint()).
+    /// @param codePoint The code point to look up.
+    /// @return The run, or nullptr when none holds it.
+    template <typename Range, std::size_t N>
+    [[nodiscard]] constexpr Range const* findRange(std::array<Range, N> const& ranges,
+                                                   char32_t codePoint) noexcept
+    {
+        // The first run not wholly below the code point is the only one that can hold it.
+        auto const range = std::ranges::lower_bound(ranges, codePoint, {}, &Range::last);
+        return range != ranges.end() && range->first <= codePoint ? &*range : nullptr;
+    }
+
+    static_assert(isSortedAndDisjoint(Rules),
+                  "treatmentOf() bisects the rules: they must be sorted and disjoint");
+    static_assert(isSortedAndDisjoint(WhiteSpace),
+                  "isWhiteSpace() bisects the ranges: they must be sorted and disjoint");
 
     /// @return Whether @p codePoint has Unicode's White_Space property.
     [[nodiscard]] constexpr bool isWhiteSpace(char32_t codePoint) noexcept
     {
-        // The first range not wholly below the code point is the only one that can hold it.
-        auto const range = std::ranges::lower_bound(WhiteSpace, codePoint, {}, &CodePointRange::last);
-        return range != WhiteSpace.end() && range->first <= codePoint;
+        return findRange(WhiteSpace, codePoint) != nullptr;
     }
 
     /// @return What @p purpose does with @p codePoint.
     [[nodiscard]] constexpr Treatment treatmentOf(char32_t codePoint, SanitizePurpose purpose) noexcept
     {
-        // The first rule not wholly below the code point is the only one that can hold it.
-        auto const rule = std::ranges::lower_bound(Rules, codePoint, {}, &Rule::last);
-        if (rule == Rules.end() || codePoint < rule->first)
-            return Treatment::Keep;
-        return rule->treatment[std::to_underlying(purpose)];
+        auto const* const rule = findRange(Rules, codePoint);
+        return rule != nullptr ? rule->treatment[std::to_underlying(purpose)] : Treatment::Keep;
     }
 
     /// @return The rule for @p codeUnit as a lead byte, or nullopt when it can never lead.

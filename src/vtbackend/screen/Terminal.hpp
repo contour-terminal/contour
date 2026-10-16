@@ -1307,6 +1307,16 @@ class Terminal
     bool sendFocusOutEvent();
     void sendPaste(std::string_view text); // Sends verbatim text in bracketed mode to application.
 
+    /// Whether @p text would reach the application exactly as it is if pasted now (sendPaste()).
+    ///
+    /// Inside a bracketed paste, where the application asked for one, the paste drops ESC
+    /// (InputGenerator::generatePaste); without one, a shell reads TAB and a line break as keys. A text that
+    /// loses a character either way -- a hint's path, a command line run again -- names another file or runs
+    /// another command, and is not to be pasted at all.
+    /// @param text The text to paste.
+    /// @return Whether sanitizing it for the way it would arrive leaves it unchanged.
+    [[nodiscard]] bool pastesUnchanged(std::string_view text) const;
+
     /// Asks the frontend to paste its clipboard. @see Events::pasteFromClipboard.
     ///
     /// Asked from the key path, which holds the state lock, the request goes out once that lock is released:
@@ -4562,6 +4572,16 @@ class Terminal
     /// @param gridLine A grid line of the primary screen.
     /// @return The row's fold marker, head state, user mark and its block's outcome (with exit status on).
     [[nodiscard]] BlockColumnFacts blockColumnFactsAt(LineOffset gridLine) const;
+
+    /// blockColumnFactsAt() for a row whose stable id and covering fold the caller has already looked up:
+    /// the gutter's walk and the press, which need the fold for their own decisions too.
+    /// @param gridLine A grid line of the primary screen.
+    /// @param id Its stable id.
+    /// @param range The fold covering @p id (foldCovering()), if one does.
+    /// @return As blockColumnFactsAt().
+    [[nodiscard]] BlockColumnFacts blockColumnFactsAt(LineOffset gridLine,
+                                                      int64_t id,
+                                                      std::optional<FoldRange> const& range) const;
 
     /// Fills @p output's gutter: per drawn row its timestamp, line number and block-column glyph, each at
     /// its own negative column, as GutterLayout places them and appendGutterCells() paints them.

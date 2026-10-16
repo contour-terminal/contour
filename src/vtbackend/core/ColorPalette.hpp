@@ -338,8 +338,10 @@ struct ColorPalette
     /// behind the column in both states.
     [[nodiscard]] RGBColorPair foldMarkerColors() const noexcept
     {
-        return foldMarker.value_or(
-            RGBColorPair { .foreground = restingForeground(), .background = defaultBackground });
+        // Not value_or(): its argument is computed whether or not it is used.
+        return foldMarker
+                   ? *foldMarker
+                   : RGBColorPair { .foreground = restingForeground(), .background = defaultBackground };
     }
 
     /// The fold column's colors while the pointer is over it, with the unset case resolved.
@@ -400,7 +402,7 @@ struct ColorPalette
     /// @return The scheme's gutter text colour, or the faded foreground when the scheme sets none.
     [[nodiscard]] RGBColor gutterTextColor() const noexcept
     {
-        return gutterText.value_or(restingForeground());
+        return gutterText ? *gutterText : restingForeground();
     }
 
     /// The gutter's text colour on the page's own background: what its line numbers, its timestamps and a
