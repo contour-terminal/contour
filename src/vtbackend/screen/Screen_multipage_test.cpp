@@ -152,6 +152,133 @@ TEST_CASE("MultiPage.DECPCCM_coupling", "[screen]")
     CHECK(terminal.displayedPageIndex() == PageIndex(4)); // synced to cursor page
 }
 
+// The viewport is DEC STD 070's window: it shows the page on display, and "cannot be moved beyond the
+// boundaries of the page" (SU/SD). Where the cursor writes plays no part in it. The primary page is the only
+// one with a history; 40 lines on a 5-row page leave "line 36" to "line 39" on it and "line 0" to "line 35"
+// above. The crossfade is off, so that a frame shows the page on display rather than the one it replaced.
+
+TEST_CASE("MultiPage.DECPCCM_reset.anotherPageOnDisplayHasNothingToScrollInto", "[screen]")
+{
+    // The cursor writes to the primary page, whose history grows, while page 3, which has none, is on
+    // display.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    mock.writeToScreen("\033[3 Ppage three");
+    mock.writeToScreen("\033[?64l\033[1 P"); // DECPCCM reset, then the cursor back to page 1
+    REQUIRE(terminal.cursorPageIndex() == PageIndex(0));
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+    printLines(mock, "line", 40);
+    REQUIRE(terminal.primaryScreen().historyLineCount() == LineCount(36));
+
+    CHECK(terminal.viewport().scrollingDisabled());
+    CHECK_FALSE(terminal.viewport().scrollUp(LineCount(20)));
+    CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
+
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "page three");
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.thePrimaryPageOnDisplayScrollsWhileTheCursorIsElsewhere", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    printLines(mock, "line", 40);
+    mock.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, then the cursor to page 3
+    REQUIRE(terminal.cursorPageIndex() == PageIndex(2));
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(0));
+
+    CHECK_FALSE(terminal.viewport().scrollingDisabled());
+    CHECK(terminal.viewport().scrollUp(LineCount(20)));
+    CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "line 16\nline 17\nline 18\nline 19\nline 20");
+
+    // Setting DECPCCM puts the cursor's page on display, and the window comes back inside it.
+    mock.writeToScreen("\033[?64h");
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+    CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock).empty());
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.outputToAnotherPageLeavesTheWindowWhereItIs", "[screen]")
+{
+    // Page 1 on display, scrolled back, while the cursor writes to page 3. Page 3 has no history, so every
+    // line feed at its bottom scrolls it, but page 1's content does not move, and neither does the window
+    // onto it: whether the view stays with what it shows or follows new output, only output to the page on
+    // display moves it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    mock.following = GENERATE(OutputFollowing::Stay, OutputFollowing::Follow);
+    terminal.settings().autoScrollOnUpdate = mock.following == OutputFollowing::Follow;
+    printLines(mock, "line", 40);
+    mock.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, then the cursor to page 3
+    REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
+
+    printLines(mock, "three", 20);
+
+    CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "line 16\nline 17\nline 18\nline 19\nline 20");
+}
+
+TEST_CASE("MultiPage.DECPCCM_set.theViewportScrollsAsItDid", "[screen]")
+{
+    // Coupled, the page on display is the cursor's, so the window and the cursor are on one page.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    printLines(mock, "line", 40);
+
+    CHECK_FALSE(terminal.viewport().scrollingDisabled());
+    CHECK(terminal.viewport().scrollUp(LineCount(20)));
+    CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "line 16\nline 17\nline 18\nline 19\nline 20");
+
+    SECTION("a page with no history comes on display: the window comes back inside it")
+    {
+        mock.writeToScreen("\033[3 Ppage three");
+        REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+        CHECK(terminal.viewport().scrollingDisabled());
+        CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
+        terminal.refreshRenderBuffer();
+        CHECK(trimmedTextScreenshot(mock) == "page three");
+
+        mock.writeToScreen("\033[1 P");
+        CHECK_FALSE(terminal.viewport().scrollingDisabled());
+        CHECK(terminal.viewport().scrollUp(LineCount(20)));
+        CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+    }
+
+    SECTION("the alternate screen comes on display: the window comes back inside it")
+    {
+        mock.writeToScreen("\033[?1049hfull screen");
+        CHECK(terminal.viewport().scrollingDisabled());
+        CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
+        terminal.refreshRenderBuffer();
+        CHECK(trimmedTextScreenshot(mock) == "full screen");
+    }
+}
+
+TEST_CASE("MultiPage.theViewportScrollsThePageOnDisplayWhileTheStatusLineIsWritten", "[screen]")
+{
+    // DECSASD sends output to the host-writable status line, which is no page: the window stays on the page
+    // on display, and scrolls as far into its history as it did before.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    printLines(mock, "line", 40);
+    mock.writeToScreen("\033[2$~\033[1$}"); // DECSSDT host-writable, DECSASD status line
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+
+    CHECK(terminal.viewport().scrollUp(LineCount(5)));
+    CHECK(terminal.viewport().scrollOffset() == ScrollOffset(5));
+}
+
 TEST_CASE("MultiPage.DECRQDE_response", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };

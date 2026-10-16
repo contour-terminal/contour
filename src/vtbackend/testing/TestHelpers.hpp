@@ -235,7 +235,7 @@ void printLines(MockTerm<T>& mt, std::string_view prefix, int count)
 }
 
 /// Moves the cursor to page 3 with DECPCCM reset, so page 0, the primary screen, stays on display: the page
-/// on display and the cursor's part ways, and the viewport, which follows the cursor's page, may not scroll.
+/// on display and the cursor's part ways. The viewport, the window onto the page on display, still scrolls.
 /// @param mt The terminal, its cursor on page 0.
 template <typename T = vtpty::MockPty>
 void moveCursorOffTheDisplayedPage(MockTerm<T>& mt)
@@ -244,6 +244,21 @@ void moveCursorOffTheDisplayedPage(MockTerm<T>& mt)
     mt.terminal.setPage(PageIndex(3), /*moveCursorHome*/ true);
     REQUIRE(mt.terminal.isAlternateScreen());
     REQUIRE(mt.terminal.foldingAppliesToDisplayedPage());
+}
+
+/// Puts page 3 on display, then brings the cursor back to page 0 with DECPCCM reset: the cursor writes to the
+/// primary screen while a page with no history is on display, so the viewport, the window onto it, may not
+/// scroll.
+/// @param mt The terminal, its cursor on page 0.
+template <typename T = vtpty::MockPty>
+void moveDisplayOffTheCursorsPage(MockTerm<T>& mt)
+{
+    mt.writeToScreen("\033[?64h");
+    mt.terminal.setPage(PageIndex(3), /*moveCursorHome*/ true);
+    mt.writeToScreen("\033[?64l");
+    mt.terminal.setPage(PageIndex(0), /*moveCursorHome*/ false);
+    REQUIRE(mt.terminal.isPrimaryScreen());
+    REQUIRE_FALSE(mt.terminal.foldingAppliesToDisplayedPage());
 }
 
 /// Collapses the one fold @p mt has, through the fold state as a click would leave it.
