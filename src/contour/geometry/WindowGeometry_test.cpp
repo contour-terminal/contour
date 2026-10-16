@@ -385,6 +385,22 @@ TEST_CASE("WindowGeometry.gutter.costsExactlyItsOwnWidth", "[contour][geometry]"
     CHECK(withGutter.lines == without.lines);
 }
 
+TEST_CASE("WindowGeometry.gutterLeadIn.isTheSmallestWholeDevicePixelCountCoveringTheResizeBorder",
+          "[contour][geometry][gutter]")
+{
+    // A frameless window's left resize zone is ResizeBorderThickness logical pixels wide. The block column
+    // has to start where that zone ends -- not a rounding pixel inside it at a fractional scale, where the
+    // product is not a whole number of device pixels -- and not a pixel later than it needs to.
+    auto const scale = GENERATE(1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0);
+    INFO("scale " << scale);
+    auto const zoneDevicePx = ResizeBorderThickness * scale;
+
+    auto const leadIn = gutterLeadIn(scale);
+
+    CHECK(static_cast<double>(leadIn) >= zoneDevicePx);
+    CHECK(static_cast<double>(leadIn - 1) < zoneDevicePx);
+}
+
 TEST_CASE("WindowGeometry.gutter.landsInsideThePageMarginLeft", "[contour][geometry]")
 {
     // The load-bearing placement: the gutter is folded into pageMargin.left, which is already the single

@@ -143,8 +143,10 @@ TEST_CASE("the size hints reserve the gutter the configuration lays out", "[cont
     controller->updateSizeHintsFor(requester,
                                    contour::window::WindowController::HintApplyMode::RespectWindowState);
 
-    // The minimum is the one hint every platform applies (geometry::sizeHintPolicyFor).
-    auto const gutterDevicePx = 7 * unbox<int>(requester.cellSizeValue.width);
+    // The minimum is the one hint every platform applies (geometry::sizeHintPolicyFor). Seven cells behind
+    // the blank lead-in every reserved gutter begins with.
+    auto const gutterDevicePx = contour::geometry::gutterLeadIn(requester.devicePixelRatioValue)
+                                + (7 * unbox<int>(requester.cellSizeValue.width));
     auto const expected = contour::geometry::sizeHintsFor(
         requester.cellSizeValue,
         contour::session::toGeometryMargins(session->profile().margins.value()),

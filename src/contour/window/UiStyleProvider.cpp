@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
+#include <contour/geometry/WindowGeometry.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/vt/ProgressState.hpp>
@@ -230,6 +231,11 @@ QFont resolveChromeFont(config::Config const& config, std::string const& profile
     // would not.
     font.setStyleHint(QFont::Monospace);
     return font;
+}
+
+int UiStyleProvider::resizeBorderThickness() const noexcept
+{
+    return geometry::ResizeBorderThickness;
 }
 
 } // namespace contour::window

@@ -1054,13 +1054,13 @@ void WindowController::showInitial()
     auto const marginsDevice =
         geometry::scaled(session::toGeometryMargins(session->profile().margins.value()), scale);
     auto const totalPage = session->terminal().totalPageSize();
-    auto const size =
-        geometry::windowSizeForPage(totalPage,
-                                    display->cellSize(),
-                                    marginsDevice,
-                                    scale,
-                                    chrome(),
-                                    session::configuredGutterWidth(session->config(), display->cellSize()));
+    auto const size = geometry::windowSizeForPage(
+        totalPage,
+        display->cellSize(),
+        marginsDevice,
+        scale,
+        chrome(),
+        session::configuredGutterWidth(session->config(), display->cellSize(), scale));
 
     display::displayLog()("Initial window size {}x{} (page {}, cell {}, scale {}, chrome {}).",
                           size.width,
@@ -1186,7 +1186,7 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
     auto const margins = session::toGeometryMargins(requester.session().profile().margins.value());
     // Handed over in DEVICE pixels, the unit it is decided in: sizeHintsFor converts it once, where
     // unscaling it here and letting it be scaled back would truncate a pixel off at fractional DPR.
-    auto const gutterDevicePx = session::configuredGutterWidth(requester.session().config(), cellSize);
+    auto const gutterDevicePx = session::configuredGutterWidth(requester.session().config(), cellSize, scale);
     auto const hints = geometry::sizeHintsFor(cellSize, margins, scale, chrome(), gutterDevicePx);
 
     // The character-cell resize grid (base + increment) is cleared while maximized/fullscreen. An
@@ -1349,7 +1349,7 @@ bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,
         marginsDevice,
         scale,
         geometry::Chrome {},
-        session::configuredGutterWidth(requester.session().config(), requester.cellSize()));
+        session::configuredGutterWidth(requester.session().config(), requester.cellSize(), scale));
     return applyContentDrivenResize(requester, leafLogical);
 }
 

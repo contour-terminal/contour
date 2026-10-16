@@ -127,6 +127,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(int radius READ radius CONSTANT)
     Q_PROPERTY(int borderWidth READ borderWidth CONSTANT)
     Q_PROPERTY(int dropCaretWidth READ dropCaretWidth CONSTANT)
+    Q_PROPERTY(int resizeBorderThickness READ resizeBorderThickness CONSTANT)
 
     Q_PROPERTY(int shadowBlur READ shadowBlur CONSTANT)
     Q_PROPERTY(qreal shadowOffsetY READ shadowOffsetY CONSTANT)
@@ -184,6 +185,10 @@ class UiStyleProvider: public QObject
     [[nodiscard]] int radius() const noexcept { return _tokens.cornerRadiusPixels; }
     [[nodiscard]] int borderWidth() const noexcept { return _tokens.borderWidthPixels; }
     [[nodiscard]] int dropCaretWidth() const noexcept { return _tokens.dropCaretPixels; }
+
+    /// How far a frameless window's resize border reaches in from each edge, in logical pixels.
+    /// @see geometry::ResizeBorderThickness, geometry::gutterLeadIn
+    [[nodiscard]] int resizeBorderThickness() const noexcept;
 
     /// Blur radius of a popup's drop shadow, in logical pixels. 0 draws a hard-edged one.
     [[nodiscard]] int shadowBlur() const noexcept { return _tokens.shadowBlurPixels; }

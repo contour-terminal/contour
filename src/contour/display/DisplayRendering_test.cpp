@@ -461,8 +461,8 @@ TEST_CASE("display: the page leaves the configured gutter's columns left of the 
           "[display][geometry][gutter]")
 {
     // Line numbers six columns wide beside the block column: a gutter of seven cells, where the fold
-    // markers alone took one. Fitted around any other width, the grid would be drawn across the numbers,
-    // or a blank strip away from them.
+    // markers alone took one, behind the blank lead-in that keeps them off the window's edge. Fitted around
+    // any other width, the grid would be drawn across the numbers, or a blank strip away from them.
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness const h { HarnessWindow::Shown, [](contour::config::Config& config) {
                                 config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
@@ -474,11 +474,13 @@ TEST_CASE("display: the page leaves the configured gutter's columns left of the 
     auto const margins =
         contour::geometry::scaled(contour::session::toGeometryMargins(h.session->profile().margins.value()),
                                   h.display->devicePixelRatio());
-    CHECK(metrics.pageMargin.left == margins.horizontal + (7 * cellWidth));
+    auto const leadIn = contour::geometry::gutterLeadIn(h.display->devicePixelRatio());
+    CHECK(metrics.pageMargin.left == margins.horizontal + leadIn + (7 * cellWidth));
 
-    // And the extent the window is told the page needs counts the same seven cells.
+    // And the extent the window is told the page needs counts the same seven cells and the same lead-in.
     auto const columns = unbox<int>(h.session->terminal().totalPageSize().columns);
-    CHECK(unbox<int>(h.display->pixelSize().width) == (2 * margins.horizontal) + ((7 + columns) * cellWidth));
+    CHECK(unbox<int>(h.display->pixelSize().width)
+          == (2 * margins.horizontal) + leadIn + ((7 + columns) * cellWidth));
 }
 
 TEST_CASE("display: a reload that widens the gutter widens the window's minimum with the page",
