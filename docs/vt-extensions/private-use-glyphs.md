@@ -36,12 +36,25 @@ nothing to anyone who is already using it.
 | `U+10F002` | BLOCK RUNNING | A small filled triangle pointing right, as `U+25B8` ▸. |
 | `U+10F003` | USER MARK | A filled diamond, as `U+25C6` ◆. |
 | `U+10F004` | BLOCK FINISHED | A filled disc, as `U+25CF` ●. |
+| `U+10F005` | BLOCK FAILED | A diagonal cross, as `U+2717` ✗. |
+| `U+10F006` | FOLD BODY | A vertical line through the cell, in the stem's column, as `U+2502` │. |
+| `U+10F007` | FOLD BODY END | A vertical line from the cell's top to its middle, turning right to the cell's edge, as `U+2514` └. |
+| `U+10F008` | FOLD HEAD OPEN HEAVY | `U+10F000` drawn at twice the stroke. |
+| `U+10F009` | FOLD HEAD CLOSED HEAVY | `U+10F001` drawn at twice the stroke. |
+| `U+10F00A` | FOLD BODY HEAVY | `U+10F006` drawn at twice the stroke. |
+| `U+10F00B` | FOLD BODY END HEAVY | `U+10F007` drawn at twice the stroke. |
+| `U+10F00C` | FOLD HEAD OPEN HEAVIER | `U+10F000` drawn at three times the stroke. |
+| `U+10F00D` | FOLD HEAD CLOSED HEAVIER | `U+10F001` drawn at three times the stroke. |
+| `U+10F00E` | FOLD BODY HEAVIER | `U+10F006` drawn at three times the stroke. |
+| `U+10F00F` | FOLD BODY END HEAVIER | `U+10F007` drawn at three times the stroke. |
 
-The fold heads are drawn as line art at the current foreground colour, scaled to the cell: the box is
-square whatever the cell's aspect ratio, and the stem shares its column with `U+2502` so that the two
-meet exactly.
+The fold column is drawn as line art at the current foreground colour, scaled to the cell: the box is
+square whatever the cell's aspect ratio, and every glyph of the column shares one stroke and one column,
+so that the head's stem, the body and its end meet exactly. The stroke is the cell's own line weight --
+twice it for the heavy four, three times for the heavier four -- even where the gutter draws its glyphs
+two cells wide.
 
-The three marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
+The four marks are filled shapes at the current foreground colour, anti-aliased, centred in the cell
 and spanning 60% of its shorter side, so they sit on the same line as the fold column's stem.
 
 ### What they are for
@@ -51,17 +64,20 @@ marks each foldable [OSC 133](osc-133-shell-integration.md) command block:
 
 ```
 ⊟─ $ make -j8          <- U+10F000, the block is open
-│    [  1/120] cc a.c
+│    [  1/120] cc a.c  <- U+10F006
 │    [  2/120] cc b.c
-┕    ... done          <- U+2515, the block's last row
+└    ... done          <- U+10F007, the block's last row
 
 ⊞  $ make -j8          <- U+10F001, the block is collapsed
 ```
 
-The body and tail need no private codepoints — `U+2502` (BOX DRAWINGS LIGHT VERTICAL) and `U+2515`
-(BOX DRAWINGS UP LIGHT AND RIGHT HEAVY) already describe them exactly.
+The body and its end look like `U+2502` (BOX DRAWINGS LIGHT VERTICAL) and `U+2514` (BOX DRAWINGS LIGHT
+UP AND RIGHT), and once were. They are Contour's own because of the two-cell gutter: a box-drawing
+character drawn two cells wide takes the doubled stroke of a DECDWL row, whose text is stretched to twice
+its width, while the head beside it does not -- so the body stepped out of the stem's weight at every head.
+Drawn here, the column has one stroke in either width.
 
-The head does. `U+229F` SQUARED MINUS and `U+229E` SQUARED PLUS are the box and its sign, but
+The head needs a codepoint of its own in any case. `U+229F` SQUARED MINUS and `U+229E` SQUARED PLUS are the box and its sign, but
 neither carries the stem that joins an open head to the body beneath it, and a head that did not
 connect would read as two unrelated marks rather than as one bracket down the side of a block.
 
@@ -69,10 +85,16 @@ A box carrying a plus or a minus, rather than a triangle, because that is the fo
 has already met in editors, tree views and file managers.
 
 The marks share that column. A command that is still running heads its block with `U+10F002`, a
-finished one with no fold control beside it with `U+10F004`, and a row the user marked (vi `mm`) carries
-`U+10F003`.
+finished one with no fold control beside it with `U+10F004` -- or `U+10F005` when it failed -- and a row
+the user marked (vi `mm`) carries `U+10F003`. A failed command whose output folds draws its whole fold
+heavy, head and body, with `U+10F008` to `U+10F00B`, so failure reads by shape as well as by colour --
+collapsed too, where only the head is drawn. The fold under the pointer is drawn one step heavier again
+(`gutter.bold_on_hover`): heavy for a light fold, `U+10F00C` to `U+10F00F` for a failed one.
 
-Unicode has these three shapes at `U+25B8`, `U+25C6` and `U+25CF`, but the gutter does not use them:
+The gutter's block column may be two cells wide (`gutter.block_column_width`); its glyphs are then drawn
+across both cells, each twice the size.
+
+Unicode has these four shapes at `U+25B8`, `U+25C6`, `U+25CF` and `U+2717`, but the gutter does not use them:
 the renderer's claim on a codepoint is global, so claiming those would draw every one a program
 writes -- the ● of `systemctl status`, a prompt theme's ▸ or ◆, DEC Special Graphics' `` ` `` -- as a
 gutter mark instead of in its font's own size and weight.

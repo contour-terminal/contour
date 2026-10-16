@@ -460,9 +460,9 @@ TEST_CASE("display: window resize reflows the grid through the real render loop"
 TEST_CASE("display: the page leaves the configured gutter's columns left of the grid",
           "[display][geometry][gutter]")
 {
-    // Line numbers six columns wide beside the block column: a gutter of seven cells, where the fold
-    // markers alone took one, behind the blank lead-in that keeps them off the window's edge. Fitted around
-    // any other width, the grid would be drawn across the numbers, or a blank strip away from them.
+    // Line numbers six columns wide beside the two-cell block column: a gutter of eight cells, behind the
+    // blank lead-in that keeps them off the window's edge. Fitted around any other width, the grid would be
+    // drawn across the numbers, or a blank strip away from them.
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness const h { HarnessWindow::Shown, [](contour::config::Config& config) {
                                 config.gutter.value().lineNumbers = vtbackend::LineNumberMode::Absolute;
@@ -475,12 +475,12 @@ TEST_CASE("display: the page leaves the configured gutter's columns left of the 
         contour::geometry::scaled(contour::session::toGeometryMargins(h.session->profile().margins.value()),
                                   h.display->devicePixelRatio());
     auto const leadIn = contour::geometry::gutterLeadIn(h.display->devicePixelRatio());
-    CHECK(metrics.pageMargin.left == margins.horizontal + leadIn + (7 * cellWidth));
+    CHECK(metrics.pageMargin.left == margins.horizontal + leadIn + (8 * cellWidth));
 
-    // And the extent the window is told the page needs counts the same seven cells and the same lead-in.
+    // And the extent the window is told the page needs counts the same eight cells and the same lead-in.
     auto const columns = unbox<int>(h.session->terminal().totalPageSize().columns);
     CHECK(unbox<int>(h.display->pixelSize().width)
-          == (2 * margins.horizontal) + leadIn + ((7 + columns) * cellWidth));
+          == (2 * margins.horizontal) + leadIn + ((8 + columns) * cellWidth));
 }
 
 TEST_CASE("display: a reload that widens the gutter widens the window's minimum with the page",
@@ -1440,12 +1440,12 @@ TEST_CASE("display: a press beside the line numbers is the gutter's, and one on 
     auto const& terminal = h.session->terminal();
 
     // The centre of gutter column @p column beside the first row, in the item's logical pixels. The
-    // gutter ends where the grid begins, so it starts seven cells before that.
+    // gutter ends where the grid begins, so it starts eight cells before that.
     auto const metrics = h.display->gridMetrics();
     auto const dpr = h.display->devicePixelRatio();
     auto const cellWidth = unbox<int>(metrics.cellSize.width);
     auto const gutterColumnCentre = [&](int column) {
-        auto const x = metrics.pageMargin.left - (7 * cellWidth) + (column * cellWidth) + (cellWidth / 2);
+        auto const x = metrics.pageMargin.left - (8 * cellWidth) + (column * cellWidth) + (cellWidth / 2);
         auto const y = metrics.pageMargin.top + (unbox<int>(metrics.cellSize.height) / 2);
         return QPointF { double(x) / dpr, double(y) / dpr };
     };
@@ -1460,7 +1460,7 @@ TEST_CASE("display: a press beside the line numbers is the gutter's, and one on 
     CHECK(terminal.foldState().empty());
     CHECK_FALSE(terminal.selectionAvailable());
 
-    // The block column keeps its fold control.
+    // The block column keeps its fold control, across both of its cells: its far one, here.
     sendMouse(h.display.get(), QEvent::MouseButtonPress, gutterColumnCentre(6));
     sendMouse(h.display.get(), QEvent::MouseButtonRelease, gutterColumnCentre(6));
     h.pump();

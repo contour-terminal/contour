@@ -59,6 +59,7 @@ namespace
         .blockUnderCursor = PointedBlock { .id = vtbackend::CommandBlockId(5),
                                            .output = OutputPresence::Present,
                                            .commandLine = CommandLinePresence::Present },
+        .livePrompt = PromptPresence::Present,
         .activeProfile = "dark",
         .profileNames = { "dark", "light", "work" },
     };
@@ -425,6 +426,29 @@ TEST_CASE("ContextMenu.blockRows.pinTheRightClickedBlock", "[contextmenu][semant
             unpinned);
         CHECK(commandId(row->action) != commandId(unpinned));
     }
+}
+
+TEST_CASE("ContextMenu.blockRows.rerunWantsACommandLineAndAPrompt", "[contextmenu][semanticblocks]")
+{
+    // Pinned to the block as the other block rows are, and grayed rather than hidden where it cannot run.
+    auto state = fullyEnabledState();
+    auto const menu = buildContextMenu(state);
+    auto const* rerun = find(menu, "Rerun Command…");
+    REQUIRE(rerun != nullptr);
+    CHECK(rerun->enabled);
+    REQUIRE(std::holds_alternative<actions::RerunCommand>(rerun->action));
+    CHECK(std::get<actions::RerunCommand>(rerun->action).block == vtbackend::CommandBlockId(5));
+    CHECK(std::get<actions::RerunCommand>(rerun->action).target == vtbackend::CommandBlockTarget::Pointer);
+
+    // While a command runs there is no prompt to type at: the line would be that command's input.
+    state.livePrompt = PromptPresence::Absent;
+    REQUIRE(find(buildContextMenu(state), "Rerun Command…") != nullptr);
+    CHECK_FALSE(find(buildContextMenu(state), "Rerun Command…")->enabled);
+
+    // Nor without a command line to type.
+    state = fullyEnabledState();
+    state.blockUnderCursor->commandLine = CommandLinePresence::Absent;
+    CHECK_FALSE(find(buildContextMenu(state), "Rerun Command…")->enabled);
 }
 
 TEST_CASE("ContextMenu.blockRows.grayedOffABlock", "[contextmenu][semanticblocks]")

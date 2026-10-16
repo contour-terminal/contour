@@ -16,6 +16,71 @@ using namespace std::string_view_literals;
 namespace vtbackend
 {
 
+namespace
+{
+    /// sRGB's transfer function undone for each of a channel's 256 values, computed once: the gutter asks
+    /// for a luminance per glyph per frame, and a contrast search asks some dozens of times.
+    [[nodiscard]] std::array<double, 256> const& linearChannels() noexcept
+    {
+        static auto const table = [] {
+            auto values = std::array<double, 256> {};
+            for (auto const [channel, value]: std::views::zip(std::views::iota(0), values))
+            {
+                auto const c = static_cast<double>(channel) / 255.0;
+                value = c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+            }
+            return values;
+        }();
+        return table;
+    }
+
+    /// The WCAG 2 contrast ratio between two relative luminances, in either order.
+    [[nodiscard]] double contrastRatioOf(double first, double second) noexcept
+    {
+        return (std::max(first, second) + 0.05) / (std::min(first, second) + 0.05);
+    }
+} // namespace
+
+double relativeLuminance(RGBColor color) noexcept
+{
+    // Weighted by how bright each primary looks.
+    auto const& linear = linearChannels();
+    return (0.2126 * linear[color.red]) + (0.7152 * linear[color.green]) + (0.0722 * linear[color.blue]);
+}
+
+double contrastRatio(RGBColor a, RGBColor b) noexcept
+{
+    return contrastRatioOf(relativeLuminance(a), relativeLuminance(b));
+}
+
+RGBColor fadeKeepingContrast(RGBColor from, RGBColor toward, float t, double minimumContrast) noexcept
+{
+    auto const towardLuminance = relativeLuminance(toward);
+    auto const keepsContrast = [&](RGBColor color) {
+        return contrastRatioOf(relativeLuminance(color), towardLuminance) >= minimumContrast;
+    };
+
+    // The common case -- a scheme with contrast to spare -- is the full fade, asked about once. A scheme
+    // whose very text is under the floor cannot keep it: fading less would only take away the step between
+    // the faded colour and the text, the one cue left. The fade stays what it was.
+    auto const full = mixColor(from, toward, t);
+    if (keepsContrast(full) || !keepsContrast(from))
+        return full;
+
+    // Otherwise the furthest fade that still keeps it, to well under one channel step.
+    auto kept = 0.0F;
+    auto lost = t;
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 12))
+    {
+        auto const middle = (kept + lost) / 2.0F;
+        if (keepsContrast(mixColor(from, toward, middle)))
+            kept = middle;
+        else
+            lost = middle;
+    }
+    return mixColor(from, toward, kept);
+}
+
 string toString(Color color)
 {
     using Type = ColorType;

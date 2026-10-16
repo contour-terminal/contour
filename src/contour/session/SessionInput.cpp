@@ -159,8 +159,10 @@ namespace
         auto const layout = configuredGutterLayout(session.config());
 
         auto const sx = static_cast<int>(positionPx.x() * dpr);
+        // The layout built once, for the extent and the segment both: with timestamps on, building one
+        // formats a sample time, and this runs on every pointer motion.
         auto const column = geometry::gutterColumnAt(
-            sx, pageMargin.left, gutterWidthFor(layout, cellSize), unbox<int>(cellSize.width));
+            sx, pageMargin.left, gutterExtentFor(layout, cellSize, dpr), unbox<int>(cellSize.width));
         auto const segment = column ? vtbackend::gutterSegmentAt(layout, *column) : std::nullopt;
         if (!segment)
             return std::nullopt;
@@ -736,7 +738,8 @@ void sendMousePressEvent(QMouseEvent* event, TerminalSession& session)
         return;
 
     if (session.sendGutterPressEvent(gutterHitAt(event->position(), session),
-                                     input::makeMouseButton(event->button()))
+                                     input::makeMouseButton(event->button()),
+                                     input::makeModifiers(event->modifiers()).chord)
         == ConsumedByGutter::Yes)
     {
         event->accept();
@@ -793,7 +796,11 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     if (session.display() == nullptr)
         return;
 
-    if (session.sendGutterHoverEvent(gutterHitAt(event->position(), session)) == ConsumedByGutter::Yes)
+    // A mouse move is a drag: the hover comes as a QHoverEvent. One the grid's own press began stays the
+    // grid's over the gutter, clamped onto column 0 as it is past the page's right edge, so a selection
+    // dragged out to the left keeps extending. Only a drag from a press the gutter took is the gutter's.
+    if (session.pressOwner() != PressOwner::None
+        && session.sendGutterHoverEvent(gutterHitAt(event->position(), session)) == ConsumedByGutter::Yes)
     {
         event->accept();
         return;

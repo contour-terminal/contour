@@ -1001,6 +1001,37 @@ TEST_CASE("Folding.terminal.hoveringTheGutterLightsTheWholeRun", "[folding]")
     CHECK(buffer.gutter[0].attributes.foregroundColor == unhovered[0].attributes.foregroundColor);
 }
 
+TEST_CASE("Folding.terminal.hoveringAFoldDrawsItsWholeRunBolderWhereAsked", "[folding]")
+{
+    // gutter.bold_on_hover: the hovered fold's head, body and end one stroke heavier, and back at rest.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter.foldMarkers = true;
+    mc.terminal.settings().gutter.hoverStroke = FoldHoverStroke::Bolder;
+    runCommand(mc, "ls", { "file1", "file2" });
+    auto const codepoints = [&] {
+        auto buffer = RenderBuffer {};
+        mc.terminal.fillRenderBuffer(buffer, true);
+        return std::ranges::to<std::vector<char32_t>>(buffer.gutter
+                                                      | std::views::transform(&RenderGutterCell::codepoint));
+    };
+    auto const at = [](FoldWeight weight) {
+        return std::vector { blockColumnCodepoint(BlockColumnGlyph::FoldExpanded, weight),
+                             blockColumnCodepoint(BlockColumnGlyph::FoldBody, weight),
+                             blockColumnCodepoint(BlockColumnGlyph::FoldBodyEnd, weight) };
+    };
+
+    CHECK(codepoints() == at(FoldWeight::Light));
+    mc.terminal.setGutterHoverLine(LineOffset(1));
+    CHECK(codepoints() == at(FoldWeight::Heavy));
+    mc.terminal.setGutterHoverLine(std::nullopt);
+    CHECK(codepoints() == at(FoldWeight::Light));
+
+    // Asked not to, hovering lights the run without making it heavier.
+    mc.terminal.settings().gutter.hoverStroke = FoldHoverStroke::Unchanged;
+    mc.terminal.setGutterHoverLine(LineOffset(1));
+    CHECK(codepoints() == at(FoldWeight::Light));
+}
+
 TEST_CASE("Folding.terminal.togglingFromAnyLineOfTheBlock", "[folding]")
 {
     auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };

@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace vtbackend
@@ -131,7 +132,22 @@ enum class BlockColumnGlyph : uint8_t
     UserMark,      ///< A diamond, U+10F003 -- a row the user marked with vi `mm`.
     Running,       ///< A small triangle, U+10F002 -- the head of a command that has not finished.
     Finished,      ///< A disc, U+10F004 -- the head of a finished command with no fold drawn beside it.
+    Failed,        ///< A cross, U+10F005 -- the head of a FAILED command with no fold drawn beside it.
     Count,         ///< Not a glyph; pins the codepoint table.
+};
+
+/// How heavy a row's fold strokes are drawn: its head's outline and stem, its body, its end.
+///
+/// One step heavier for a command that failed -- failure told by shape as well as by colour, which a reader
+/// who cannot tell red from grey needs -- and one more for the fold under the pointer, where
+/// GutterSettings::hoverStroke asks for it. A weight rather than more glyphs: what a row shows and how heavy
+/// it is drawn are two facts, decided apart.
+enum class FoldWeight : uint8_t
+{
+    Light = 0, ///< The text's own stroke.
+    Heavy,     ///< Twice it.
+    Heavier,   ///< Three times it.
+    Count,     ///< Not a weight; pins the codepoint table.
 };
 
 /// Whether a row heads a command block, and in which state.
@@ -163,30 +179,72 @@ struct BlockColumnFacts
     BlockHeadState head = BlockHeadState::None;       ///< Whether it heads a running or a finished block.
     UserMarkPresence mark = UserMarkPresence::Absent; ///< Whether the user marked it.
 
+    /// How the row's block ended; nullopt for a row of no block, or with exit status off.
+    std::optional<CommandBlockOutcome> outcome {};
+
     bool operator==(BlockColumnFacts const&) const = default;
 };
 
 /// What the block column shows beside a row with @p facts, by precedence: a fold head, a user mark on any
 /// other row, a fold body, a running command's head, a finished command's head.
 ///
-/// The precedence alone gives a finished block with no foldable output its dot: a finished head that has
-/// a fold drawn shows the fold control, which outranks the dot. With fold markers off no fold is drawn,
-/// so every finished head shows the dot.
+/// The precedence alone gives a finished block with no foldable output its mark: a finished head that has
+/// a fold drawn shows the fold control, which outranks the mark. With fold markers off no fold is drawn,
+/// so every finished head shows its mark.
+///
+/// A failed command is told apart by shape as well as by colour: a cross rather than a disc on its head, and
+/// its fold drawn heavier (foldWeightOf()) -- both only with exit status on, which is what colours them too.
 /// @param facts What is true of the row.
 /// @param settings Which of the column's jobs are switched on.
 /// @return The glyph, or BlockColumnGlyph::None.
 [[nodiscard]] BlockColumnGlyph blockColumnGlyph(BlockColumnFacts const& facts,
                                                 GutterSettings const& settings) noexcept;
 
-/// The character @p glyph is drawn as.
+/// How heavy the fold strokes beside a row with @p facts are drawn.
+/// @param facts What is true of the row.
+/// @param settings The gutter's settings: exit status, and what hovering does.
+/// @param hover Whether the pointer is over the row's fold.
+/// @return Light, one step heavier where the command failed, and one more where the fold is hovered and
+///         GutterSettings::hoverStroke asks for it.
+[[nodiscard]] FoldWeight foldWeightOf(BlockColumnFacts const& facts,
+                                      GutterSettings const& settings,
+                                      GutterHover hover) noexcept;
+
+/// Whether a press on the block column beside a row can toggle a fold there.
+enum class FoldToggle : uint8_t
+{
+    Unavailable = 0, ///< No fold reaches the row, or folding or its controls are off.
+    Available,       ///< A fold reaches the row, and a press may toggle it.
+};
+
+/// What a left press on the block column beside a row does.
+enum class BlockColumnPress : uint8_t
+{
+    Swallow = 0,   ///< Nothing to act on there: the press is the gutter's all the same, and does nothing.
+    ToggleFold,    ///< Collapse or expand the fold that reaches the row, wherever in its run.
+    OpenBlockMenu, ///< Open the menu of the block the row heads: its status mark, with nothing to fold.
+};
+
+/// What a left press beside a row showing @p glyph does.
 ///
-/// The status marks are Contour's private-use codepoints, as the fold heads are, rather than the Unicode
-/// shapes they resemble (U+25C6, U+25B8, U+25CF): vtrasterizer draws what it claims wherever it appears, and
-/// those three stay the font's in program output.
+/// A fold wins wherever it reaches -- a user mark inside a fold's run toggles the fold as the rest of the run
+/// does -- and a status mark with no fold to toggle opens its block's menu: the click a ● or a ✗ invites
+/// then has something to do.
+/// @param glyph The glyph the row shows (blockColumnGlyph()).
+/// @param fold Whether a fold reaches the row and may be toggled.
+/// @return What the press does.
+[[nodiscard]] BlockColumnPress blockColumnPressFor(BlockColumnGlyph glyph, FoldToggle fold) noexcept;
+
+/// The character @p glyph is drawn as at @p weight.
+///
+/// All are Contour's private-use codepoints, the fold's four in each of FoldWeight's three weights, and the
+/// status marks in one, rather than the Unicode shapes they resemble (U+25C6, U+25B8, U+25CF): vtrasterizer
+/// draws what it claims wherever it appears, and those three stay the font's in program output.
 /// @param glyph The glyph.
+/// @param weight The weight of its strokes (foldWeightOf()); a status mark has one.
 /// @return Its codepoint; U+0000 for BlockColumnGlyph::None.
 /// @see docs/vt-extensions/private-use-glyphs.md
-[[nodiscard]] char32_t blockColumnCodepoint(BlockColumnGlyph glyph) noexcept;
+[[nodiscard]] char32_t blockColumnCodepoint(BlockColumnGlyph glyph, FoldWeight weight) noexcept;
 
 /// Whether the row with stable id @p stableId heads @p record's block, and in which state.
 /// @param record The block the row belongs to (Terminal::commandBlockAt), or nullptr for none.
@@ -197,8 +255,13 @@ struct BlockColumnFacts
                                               int64_t stableId,
                                               uint64_t stableIdGeneration) noexcept;
 
-/// How far a scheme-set status colour is lifted toward the text colour while its fold is hovered.
-inline constexpr float BlockStatusHoverLift = 0.5F;
+/// The colour a block is highlighted in as a whole -- the line a jump to it lands on: the block's own, as
+/// its hovered glyphs take it.
+/// @param palette The colour scheme.
+/// @param outcome How the block ended; nullopt with exit status off.
+/// @return The highlight's colour.
+[[nodiscard]] RGBColor blockHighlightColor(ColorPalette const& palette,
+                                           std::optional<CommandBlockOutcome> outcome) noexcept;
 
 /// The colours a block-column glyph is drawn in.
 ///
@@ -225,6 +288,16 @@ inline constexpr float BlockStatusHoverLift = 0.5F;
 /// @return @p colors, with any decoration in the foreground's colour.
 [[nodiscard]] RenderAttributes gutterCellAttributes(RGBColorPair colors) noexcept;
 
+/// The attributes the block column's glyph cell is drawn with: @p colors, and across the whole column.
+///
+/// One cell wide, the glyph fills its cell. Two wide, it is drawn as one glyph twice the width -- a fold
+/// control and a status mark about twice the size -- rather than as one cell-sized glyph beside a blank.
+/// @param block The block column's segment.
+/// @param colors The glyph's colours, as blockColumnColors() picks them.
+/// @return The attributes; flagged LineFlag::DoubleWidth for a column two cells wide.
+[[nodiscard]] RenderAttributes blockColumnCellAttributes(GutterSegment const& block,
+                                                         RGBColorPair colors) noexcept;
+
 /// Everything one gutter row shows, gathered by Terminal::fillGutter and painted by appendGutterCells().
 ///
 /// Every member has a default, so a row names only what it shows.
@@ -234,7 +307,8 @@ struct GutterRow
     std::string timestamp {};     ///< The time to show, UTF-8; empty for none.
     LineNumberText lineNumber {}; ///< The number, already aligned to its segment; empty for none.
     BlockColumnGlyph glyph = BlockColumnGlyph::None; ///< The block column's glyph.
-    RGBColorPair glyphColors {}; ///< The glyph's colours, as blockColumnColors() picks them.
+    RGBColorPair glyphColors {};           ///< The glyph's colours, as blockColumnColors() picks them.
+    FoldWeight weight = FoldWeight::Light; ///< How heavy the glyph's strokes are (foldWeightOf()).
 };
 
 /// Appends the cells @p row is drawn as -- one per non-blank character, each at its own negative column,
@@ -256,6 +330,18 @@ void appendGutterCells(GutterLayout const& layout,
 /// @param hiddenLines How many rows the fold hides.
 /// @return The label, one column per codepoint.
 [[nodiscard]] std::u32string collapsedFoldLabel(uint64_t hiddenLines);
+
+/// The cells a collapsed fold's label covers on its row: one blank column after the row's text, clipped at
+/// the page's edge -- where layoutFoldLabel() draws it, and so where a click on it lands.
+/// @param screenLine The screen row the label is drawn on.
+/// @param textColumns How many columns of that row hold text (Line::trimmedColumns()).
+/// @param pageColumns The page's width.
+/// @param labelColumns How many columns the label takes (collapsedFoldLabel()'s, one per codepoint).
+/// @return The cells, or nullopt when not one of them fits on the page.
+[[nodiscard]] std::optional<ColumnRange> foldLabelExtent(LineOffset screenLine,
+                                                         ColumnCount textColumns,
+                                                         ColumnCount pageColumns,
+                                                         std::size_t labelColumns) noexcept;
 
 /// Lays @p label out one blank column after a row's text, clipped by width at the page edge, appending
 /// its cells to @p output -- nothing when not one glyph of it fits.

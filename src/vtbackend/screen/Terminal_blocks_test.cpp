@@ -561,6 +561,16 @@ TEST_CASE("Terminal.blocks.theCommandLineIsRecoveredFromTheGridAfterPromptEnd", 
         REQUIRE(mc.terminal.commandBlocks().current() != nullptr);
         CHECK(mc.terminal.commandBlocks().current()->commandLine.raw() == "echo a \\\n> b");
     }
+
+    SECTION("a row of the shell's own below the input, blank but for a no-break space, is not input")
+    {
+        // endo keeps a spacer row below its input and starts it with U+00A0, so that the row is never blank;
+        // on Enter it steps the cursor past that row before it says ;C.
+        mc.writeToScreen("\033]133;A\033\\$ \r\n\xC2\xA0\033[1A\r\033[2C\033]133;B\033\\ls");
+        mc.writeToScreen("\033[1B\r\r\n\033]133;C\033\\");
+        REQUIRE(mc.terminal.commandBlocks().current() != nullptr);
+        CHECK(mc.terminal.commandBlocks().current()->commandLine.raw() == "ls");
+    }
 }
 
 TEST_CASE("Terminal.blocks.aPromptRedrawnInPlaceStillSaysWhereItsInputBegins", "[terminal][semanticblocks]")
