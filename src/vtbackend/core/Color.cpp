@@ -16,6 +16,48 @@ using namespace std::string_view_literals;
 namespace vtbackend
 {
 
+double relativeLuminance(RGBColor color) noexcept
+{
+    // sRGB's transfer function undone per channel, then weighted by how bright each primary looks.
+    auto const linear = [](uint8_t channel) {
+        auto const c = static_cast<double>(channel) / 255.0;
+        return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+    };
+    return (0.2126 * linear(color.red)) + (0.7152 * linear(color.green)) + (0.0722 * linear(color.blue));
+}
+
+double contrastRatio(RGBColor a, RGBColor b) noexcept
+{
+    // Held by value: std::minmax hands back references, which into two temporaries would dangle.
+    auto const first = relativeLuminance(a);
+    auto const second = relativeLuminance(b);
+    return (std::max(first, second) + 0.05) / (std::min(first, second) + 0.05);
+}
+
+RGBColor fadeKeepingContrast(RGBColor from, RGBColor toward, float t, double minimumContrast) noexcept
+{
+    // The common case -- a scheme with contrast to spare -- is the full fade, asked about once.
+    if (contrastRatio(mixColor(from, toward, t), toward) >= minimumContrast)
+        return mixColor(from, toward, t);
+    // A scheme whose very text is under the floor cannot keep it: fading less would only take away the step
+    // between the faded colour and the text, the one cue left. The fade stays what it was.
+    if (contrastRatio(from, toward) < minimumContrast)
+        return mixColor(from, toward, t);
+
+    // Otherwise the furthest fade that still keeps it, to well under one channel step.
+    auto kept = 0.0F;
+    auto lost = t;
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 12))
+    {
+        auto const middle = (kept + lost) / 2.0F;
+        if (contrastRatio(mixColor(from, toward, middle), toward) >= minimumContrast)
+            kept = middle;
+        else
+            lost = middle;
+    }
+    return mixColor(from, toward, kept);
+}
+
 string toString(Color color)
 {
     using Type = ColorType;

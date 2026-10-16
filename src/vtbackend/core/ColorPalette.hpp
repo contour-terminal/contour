@@ -326,6 +326,11 @@ struct ColorPalette
     /// the marker quieter than the text beside it in every theme, which a constant grey manages in none.
     static constexpr float FoldMarkerRestFade = 0.45f;
 
+    /// The contrast the fade stops short of: WCAG 1.4.11's minimum for what a user must make out to operate
+    /// something. A scheme with less between its text and its background fades less, rather than leaving
+    /// the gutter's marks a shade off the background.
+    static constexpr double FoldMarkerRestMinimumContrast = 3.0;
+
     /// The fold column's colors at rest, with the unset case resolved.
     ///
     /// The background is the page's own, exactly -- as it is when hovered, so the gutter never draws a
@@ -488,11 +493,13 @@ struct ColorPalette
     bool operator==(ColorPalette const&) const = default;
 
   private:
-    /// The scheme's foreground faded toward its background by FoldMarkerRestFade: what the gutter derives
-    /// its quiet colours from when the scheme sets none.
+    /// The scheme's foreground faded toward its background by FoldMarkerRestFade, but never below
+    /// FoldMarkerRestMinimumContrast against it: what the gutter derives its quiet colours from when the
+    /// scheme sets none.
     [[nodiscard]] RGBColor restingForeground() const noexcept
     {
-        return mixColor(defaultForeground, defaultBackground, FoldMarkerRestFade);
+        return fadeKeepingContrast(
+            defaultForeground, defaultBackground, FoldMarkerRestFade, FoldMarkerRestMinimumContrast);
     }
 };
 

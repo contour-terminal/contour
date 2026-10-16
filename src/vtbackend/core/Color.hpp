@@ -103,6 +103,33 @@ constexpr RGBColor mixColor(RGBColor const& a, RGBColor const& b, float t = 0.5)
                       lerpChannel(a.blue, b.blue, t) };
 }
 
+/// The WCAG 2 relative luminance of @p color, an sRGB colour: 0 for black, 1 for white.
+/// @param color The colour.
+/// @return Its luminance.
+[[nodiscard]] double relativeLuminance(RGBColor color) noexcept;
+
+/// The WCAG 2 contrast ratio between @p a and @p b, in either order: 1 for two equal colours, 21 for
+/// black against white.
+/// @param a One colour.
+/// @param b The other.
+/// @return The ratio.
+[[nodiscard]] double contrastRatio(RGBColor a, RGBColor b) noexcept;
+
+/// @p from faded toward @p toward by @p t (mixColor()), but no further than still contrasts with @p toward
+/// at @p minimumContrast. Where @p from itself does not, no fade can keep it, and the fade is @p t.
+///
+/// What a colour derived by fading the text toward the background needs in a low-contrast scheme: the
+/// same fade that leaves a mark quiet in one theme leaves it all but invisible in another.
+/// @param from The colour faded: the scheme's text colour.
+/// @param toward The colour faded toward, and contrasted with: the scheme's background.
+/// @param t How far to fade, at most; 0 is @p from, 1 is @p toward.
+/// @param minimumContrast The contrast ratio the result keeps against @p toward, where @p from has it.
+/// @return The faded colour.
+[[nodiscard]] RGBColor fadeKeepingContrast(RGBColor from,
+                                           RGBColor toward,
+                                           float t,
+                                           double minimumContrast) noexcept;
+
 inline double distance(RGBColor e1, RGBColor e2) noexcept
 {
     auto const rmean = (uint32_t(e1.red) + uint32_t(e2.red)) / 2;
