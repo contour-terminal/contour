@@ -24,6 +24,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -399,11 +400,38 @@ TEST_CASE("a server-side clear drops the mirror's local scrollback", "[vthost][m
 TEST_CASE("a mirror's scrolled-back view follows the host's output as its listener asks", "[vthost][mirror]")
 {
     // The mirror applies the host's output as a parse batch applies a local application's: under the terminal
-    // lock, where a view scrolled back into the history is brought down to it if the listener follows output.
-    for (auto const following: { vtbackend::OutputFollowing::Stay, vtbackend::OutputFollowing::Follow })
+    // lock, where a view scrolled back into the history is brought down to the lines it added if the listener
+    // follows output. A row the host repainted in place added none.
+    using vtbackend::OutputFollowing;
+    struct Row
     {
+        std::string_view name;
+        OutputFollowing following;
+        /// The host's viewport base after the output: one past the seed's scrolls a row in.
+        int64_t outputBase;
+        OutputFollowing outcome;
+    };
+    auto const rows = std::array {
+        Row { .name = "a listener that stays",
+              .following = OutputFollowing::Stay,
+              .outputBase = 11,
+              .outcome = OutputFollowing::Stay },
+        Row { .name = "a listener that follows",
+              .following = OutputFollowing::Follow,
+              .outputBase = 11,
+              .outcome = OutputFollowing::Follow },
+        Row { .name = "a row repainted in place",
+              .following = OutputFollowing::Follow,
+              .outputBase = 10,
+              .outcome = OutputFollowing::Stay },
+    };
+
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
         auto bare = BareMirror { vtbackend::LineCount(100) };
-        bare.events.following = following;
+        bare.events.following = row.following;
+        bare.terminal->settings().autoScrollOnUpdate = true;
         auto screen = vthost::client::RemoteScreen {};
         screen.columns = 5;
         screen.lines = 1;
@@ -419,15 +447,15 @@ TEST_CASE("a mirror's scrolled-back view follows the host's output as its listen
         REQUIRE(bare.terminal->viewport().scrollUp(vtbackend::LineCount(2)));
 
         auto output = proto::Delta {};
-        output.stableViewportBase = 10;
+        output.stableViewportBase = row.outputBase;
         output.stableFloor = 7;
-        output.lines.push_back(rowAt(10, "new"));
+        output.lines.push_back(rowAt(row.outputBase, "new"));
         screen.apply(output);
         bare.mirror->apply(screen, output);
 
-        auto const outcome = bare.terminal->viewport().scrolled() ? vtbackend::OutputFollowing::Stay
-                                                                  : vtbackend::OutputFollowing::Follow;
-        CHECK(outcome == following);
+        auto const outcome =
+            bare.terminal->viewport().scrolled() ? OutputFollowing::Stay : OutputFollowing::Follow;
+        CHECK(outcome == row.outcome);
     }
 }
 

@@ -1276,6 +1276,10 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
     }();
     updateCursorIterator();
 
+    // Whichever branch scrolled: a top-anchored region feeds the history as the whole page does, and a view
+    // scrolled back follows those lines too (a progress bar pinned below such a region is a common case).
+    _terminal->outputScrolledIntoHistory(scrollCount);
+
     // Only notify the viewport/Vi-cursor/selection of a scrollback scroll when the
     // scroll covered the whole page. A scroll confined to a sub-page margin region
     // (e.g. a top-anchored partial DECSTBM region) may still feed lines into

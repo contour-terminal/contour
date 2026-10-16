@@ -5548,6 +5548,17 @@ class StickyHeaderScene
         REQUIRE(vtbackend::test::drawFrame(terminal()).stickyHeader.has_value());
     }
 
+    /// runCommand() under the `always` mode, with the view left following the output, and draws the frame:
+    /// the header then covers a row of the live page rather than one of the history.
+    /// @param output The lines it prints.
+    void followIntoCommand(std::vector<std::string> const& output) const
+    {
+        terminal().settings().stickyHeader.mode = vtbackend::StickyHeaderMode::Always;
+        runCommand(output);
+        REQUIRE_FALSE(terminal().viewport().scrolled());
+        REQUIRE(vtbackend::test::drawFrame(terminal()).stickyHeader.has_value());
+    }
+
     /// Presses @p button at @p position, @p held being every button down once it is.
     void press(QPointF position, Qt::MouseButton button, Qt::MouseButtons held) const
     {
@@ -5800,27 +5811,15 @@ TEST_CASE("TerminalSession: pointer motion over the sticky header acts on the he
         CHECK(scene.surface().cursorShapes.back() == MouseCursorShape::Arrow);
     }
 
-    SECTION("an application tracking every motion hears none of it")
+    SECTION("leaving the band gives the row below its link and its shape back")
     {
-        terminal.writeToScreen("\033[?1003h\033[?1006h"); // any-event tracking (1003), SGR (1006)
-        scene.written().clear();
         scene.hover(overHeader);
-        scene.move(overHeader + QPointF(8, 0));
-        CHECK(scene.written().empty());
-    }
-
-    SECTION("leaving the band gives the row below its link, its shape and its reports back")
-    {
-        terminal.writeToScreen("\033[?1003h\033[?1006h");
-        scene.hover(overHeader);
-        scene.written().clear();
 
         // Back onto the very cell it left from.
         scene.hover(belowHeader);
         CHECK_FALSE(session.hyperlinkTooltipText().isEmpty());
         CHECK(terminal.isMouseHoveringHyperlink());
         CHECK(scene.surface().cursorShapes.back() == MouseCursorShape::PointingHand);
-        CHECK_FALSE(scene.written().empty());
     }
 
     SECTION("without a header row 0 is the grid's")
@@ -5830,6 +5829,37 @@ TEST_CASE("TerminalSession: pointer motion over the sticky header acts on the he
         scene.hover(overHeader);
         CHECK_FALSE(session.hyperlinkTooltipText().isEmpty());
         CHECK(terminal.isMouseHoveringHyperlink());
+    }
+}
+
+TEST_CASE("TerminalSession: an application tracking motion hears none of it over the sticky header",
+          "[contour][session][input][stickyheader]")
+{
+    // Over rows of the live page, the only rows a mouse report can name: the history has no coordinates to
+    // report (InputGenerator::mouseTransport refuses them), so beside a view scrolled back there is nothing
+    // to hear with or without the header.
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    scene.followIntoCommand(linkedOutput(60));
+    scene.terminal().writeToScreen("\033[?1003h\033[?1006h"); // any-event tracking (1003), SGR (1006)
+
+    auto const overHeader = QPointF(40, 4);   // column 4 of row 0
+    auto const belowHeader = QPointF(40, 20); // column 4 of row 1
+
+    SECTION("none of it over the header")
+    {
+        scene.written().clear();
+        scene.hover(overHeader);
+        scene.move(overHeader + QPointF(8, 0));
+        CHECK(scene.written().empty());
+    }
+
+    SECTION("leaving the band gives the row below its reports back")
+    {
+        scene.hover(overHeader);
+        scene.written().clear();
+        scene.hover(belowHeader);
+        CHECK_FALSE(scene.written().empty());
     }
 }
 
