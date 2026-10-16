@@ -2286,6 +2286,27 @@ TEST_CASE("Renderer.stickyHeader.staysPutWhileThePageScrollsSmoothly", "[rendere
     CHECK(prompt->y == 0);
 }
 
+namespace
+{
+/// The status bar the frame last built for @p mc's terminal describes.
+/// @param mc The terminal, rendered.
+/// @return RenderBuffer::statusBar.
+[[nodiscard]] std::optional<vtbackend::RenderStatusBar> statusBarOf(vtbackend::MockTerm<>& mc)
+{
+    auto const buffer = mc.terminal.renderBuffer();
+    return buffer.get().statusBar;
+}
+
+/// Scrolls @p mc's page by a quarter cell, so the renderer draws it in two passes.
+/// @param mc The terminal, with 10x20 pixel cells.
+void scrollPartway(vtbackend::MockTerm<>& mc)
+{
+    mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+    REQUIRE(mc.terminal.smoothScrollPixelOffset() != 0.0f);
+}
+} // namespace
+
 TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[renderer][statusline]")
 {
     // #2139: the indicator status line's bar reaches both edges of the window -- over the gutter and the
@@ -2306,17 +2327,12 @@ TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[rend
     }
     SECTION("in two, while the page scrolls smoothly")
     {
-        mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
-        REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
-        REQUIRE(mc.terminal.smoothScrollPixelOffset() != 0.0f);
+        scrollPartway(mc);
     }
 
     (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
 
-    auto const bar = [&] {
-        auto const buffer = mc.terminal.renderBuffer();
-        return buffer.get().statusBar;
-    }();
+    auto const bar = statusBarOf(mc);
     REQUIRE(bar.has_value());
     REQUIRE(bar->lineOffset == LineOffset(5));
 
@@ -2357,10 +2373,7 @@ TEST_CASE("Renderer.statusBar.reachesPastTheMarginOfTheEdgeItSitsOn", "[renderer
 
     (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
 
-    auto const bar = [&] {
-        auto const buffer = mc.terminal.renderBuffer();
-        return buffer.get().statusBar;
-    }();
+    auto const bar = statusBarOf(mc);
     REQUIRE(bar.has_value());
     REQUIRE(bar->lineOffset == LineOffset(0));
 
@@ -2398,16 +2411,12 @@ TEST_CASE("Renderer.statusBar.drawsTheIndicatorFromTheGuttersLeftEdge", "[render
     }
     SECTION("in two, while the page scrolls smoothly")
     {
-        mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
-        REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+        scrollPartway(mc);
     }
 
     (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
 
-    auto const bar = [&] {
-        auto const buffer = mc.terminal.renderBuffer();
-        return buffer.get().statusBar;
-    }();
+    auto const bar = statusBarOf(mc);
     REQUIRE(bar.has_value());
     REQUIRE(bar->leadingColumns == vtbackend::ColumnCount(2));
 

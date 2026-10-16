@@ -772,10 +772,10 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     // bottom, the status line first with it at the top.
     struct StatusSplit
     {
-        std::span<vtbackend::RenderCell const> mainCells;
-        std::span<vtbackend::RenderLine const> mainLines;
-        std::span<vtbackend::RenderCell const> statusCells;
-        std::span<vtbackend::RenderLine const> statusLines;
+        std::span<vtbackend::RenderCell const> mainCells {};
+        std::span<vtbackend::RenderLine const> mainLines {};
+        std::span<vtbackend::RenderCell const> statusCells {};
+        std::span<vtbackend::RenderLine const> statusLines {};
     };
     auto const splitStatus = [&](vtbackend::RenderBuffer const& buffer) {
         auto const cellSplit = findCellPartitionPoint(buffer.cells, statusLineBoundary);
@@ -821,9 +821,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
             buffer.statusBar && buffer.statusBar->leadingColumns > vtbackend::ColumnCount(0);
         auto const split = statusShifted ? splitStatus(buffer)
                                          : StatusSplit { .mainCells = std::span(buffer.cells),
-                                                         .mainLines = std::span(buffer.lines),
-                                                         .statusCells = {},
-                                                         .statusLines = {} };
+                                                         .mainLines = std::span(buffer.lines) };
         renderPass(primaryPressure, [&] {
             if (auto const& bar = buffer.statusBar)
                 renderStatusBar(*bar);
@@ -1038,13 +1036,11 @@ void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)
     }();
 
     // Opaque, as the BackgroundRenderer draws the status line's own cells: the bar reads as one piece.
-    auto constexpr Opaque = uint8_t { 0xFF };
-
     _renderTarget->renderRectangle(0,
                                    top,
                                    renderSize.width,
                                    vtbackend::Height::cast_from(bottom - top),
-                                   vtbackend::RGBAColor(bar.background, Opaque));
+                                   vtbackend::RGBAColor(bar.background));
 }
 
 void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,
