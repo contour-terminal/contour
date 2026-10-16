@@ -93,17 +93,23 @@ endif()
 # std::stop_token only behind -fexperimental-library. core-cpp's StopToken uses them when __cpp_lib_jthread says
 # they exist, and the threaded tests use std::jthread outright. libc++ 20 (Xcode 26), libstdc++ and Microsoft's
 # library declare them without the flag, so it is passed only where std::jthread needs it.
+#
+# The probe starts a thread, so it links the thread library: FreeBSD's libc has no pthread_create, and without
+# Threads::Threads the probe fails to link there whether std::jthread is declared or not.
 include(CheckCXXSourceCompiles)
+include(CMakePushCheckState)
 set(_jthreadProbe "#include <thread>\nint main() { auto thread = std::jthread { [] {} }; }")
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_LIBRARIES Threads::Threads)
 check_cxx_source_compiles("${_jthreadProbe}" CONTOUR_STD_HAS_JTHREAD)
 if(NOT CONTOUR_STD_HAS_JTHREAD)
     set(CMAKE_REQUIRED_FLAGS "-fexperimental-library")
     check_cxx_source_compiles("${_jthreadProbe}" CONTOUR_STD_HAS_EXPERIMENTAL_JTHREAD)
-    unset(CMAKE_REQUIRED_FLAGS)
     if(CONTOUR_STD_HAS_EXPERIMENTAL_JTHREAD)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fexperimental-library")
     endif()
 endif()
+cmake_pop_check_state()
 
 if (CONTOUR_BUILD_WITH_MIMALLOC)
     add_definitions(-DCONTOUR_BUILD_WITH_MIMALLOC)

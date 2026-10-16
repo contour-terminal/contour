@@ -54,6 +54,7 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,6 +76,14 @@ PRUNABLE_PLUGIN_CATEGORIES = frozenset((
 # otool accepts many files per invocation, which turns ~135 process spawns into one.
 # Chunked so a bundle with very long paths cannot overflow the argument list.
 _OTOOL_BATCH = 500
+
+# stapler fetches the notarization ticket from Apple's CloudKit, which drops connections
+# from CI runners often enough to fail a packaging run that did nothing wrong. Those
+# failures name NSURLErrorDomain and are retried; any other stapler error is a verdict
+# about the artifact and fails at once.
+_STAPLER_NETWORK_ERROR = 'NSURLErrorDomain'
+_STAPLER_ATTEMPTS = 5
+_STAPLER_RETRY_DELAY_SECONDS = 30
 
 
 class Failure(Exception):
@@ -585,10 +594,25 @@ def notarize(artifact: Path, profile: str) -> int:
 
     log(f"notarize: accepted (submission {submission_id})")
     log(f"notarize: stapling ticket to {artifact.name}")
-    run(['xcrun', 'stapler', 'staple', str(artifact)])
-    run(['xcrun', 'stapler', 'validate', str(artifact)])
+    run_stapler('staple', artifact)
+    run_stapler('validate', artifact)
     log(f"notarize: OK, {artifact.name} is notarized and stapled")
     return 0
+
+
+def run_stapler(action: str, artifact: Path) -> None:
+    """Run ``xcrun stapler <action>``, retrying while Apple's ticket service is unreachable."""
+    for attempt in range(1, _STAPLER_ATTEMPTS + 1):
+        try:
+            run(['xcrun', 'stapler', action, str(artifact)])
+            return
+        except Failure as failure:
+            if _STAPLER_NETWORK_ERROR not in str(failure) or attempt == _STAPLER_ATTEMPTS:
+                raise
+            log(f"notarize: stapler {action} lost its connection to Apple "
+                f"(attempt {attempt} of {_STAPLER_ATTEMPTS}), "
+                f"retrying in {_STAPLER_RETRY_DELAY_SECONDS} s")
+            time.sleep(_STAPLER_RETRY_DELAY_SECONDS)
 
 
 def parse_submission(output: str) -> tuple[str, str]:
