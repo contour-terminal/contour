@@ -2431,9 +2431,10 @@ void TerminalSession::sendKeyEvent(Key key,
         return;
     }
 
-    // Guarded like sendCharEvent: a display-less session (background pane, headless test) has no
-    // mouse cursor to hide.
-    if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
+    // A bare modifier is no typing: hiding the pointer then hides the very link Ctrl is held to reach.
+    // Guarded for display-less sessions (background pane, headless test), which have no cursor to hide.
+    auto const modifierOnly = vtbackend::isModifierKey(key);
+    if (_profile.mouse.value().hideWhileTyping && _display != nullptr && !modifierOnly)
         _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)

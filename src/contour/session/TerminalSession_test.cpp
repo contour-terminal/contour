@@ -557,6 +557,34 @@ TEST_CASE("TerminalSession: key and char events write their encoding into the PT
     CHECK(mockPtyOf(*session).stdinBuffer() == "a\r");
 }
 
+TEST_CASE("TerminalSession: a bare Ctrl press does not hide the pointer", "[contour][session]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    // hide_while_typing is on by default (Config.hpp ~596); assert that rather than assume it
+    REQUIRE(session->profile().mouse.value().hideWhileTyping);
+    auto const now = std::chrono::steady_clock::now();
+    session->sendKeyEvent(vtbackend::Key::LeftControl,
+                          vtbackend::KeyboardModifiers { vtbackend::Modifier::Control },
+                          vtbackend::KeyboardEventType::Press,
+                          now);
+    CHECK((session.surface->cursorShapes.empty()
+           || session.surface->cursorShapes.back() != contour::input::MouseCursorShape::Hidden));
+}
+
+TEST_CASE("TerminalSession: a non-modifier key still hides the pointer while typing", "[contour][session]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    REQUIRE(session->profile().mouse.value().hideWhileTyping);
+    session.surface->cursorShapes.clear();
+    auto const now = std::chrono::steady_clock::now();
+    session->sendKeyEvent(
+        vtbackend::Key::F5, vtbackend::KeyboardModifiers {}, vtbackend::KeyboardEventType::Press, now);
+    REQUIRE_FALSE(session.surface->cursorShapes.empty());
+    CHECK(session.surface->cursorShapes.back() == contour::input::MouseCursorShape::Hidden);
+}
+
 TEST_CASE("TerminalSession: mouse events without a mouse protocol write nothing and do not crash",
           "[contour][session][input]")
 {
