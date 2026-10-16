@@ -141,8 +141,9 @@ int main(int argc, char* argv[])
     }
 
     // Run-wide gate: no test reaches the machine's session bus. A session gets the harness's notifier,
-    // and the cases that drive a real transport run only on the private bus the wedged-bus harness
-    // stands up (contour::test::onPrivateSessionBus()).
+    // and the cases that drive a real transport run only on a private bus a harness stands up
+    // (contour::test::onPrivateSessionBus()): the wedged-bus harness's, or the display route's, where
+    // a real platform plugin reaches the bus whatever the tests do.
     if (!contour::test::onPrivateSessionBus() && reachedSessionBus())
     {
         std::cerr << "\n=================================================================\n"
