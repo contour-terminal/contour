@@ -169,11 +169,27 @@ struct RenderCursor
     std::optional<RGBColor> animateFromColor {}; ///< Cursor color at animation source position.
 };
 
+/// A status line whose bar spans the window's whole width: the gutter and the page margins beside it, too.
+///
+/// Only its background reaches that far. Its cells stay on the page's columns, where everything that walks
+/// @ref RenderBuffer::cells expects them, so its text lines up with the page's.
+struct RenderStatusBar
+{
+    LineOffset lineOffset; ///< Its first row.
+    LineCount lines;       ///< How many rows it takes.
+    RGBColor background;   ///< What the bar is filled with.
+};
+
 struct RenderBuffer
 {
     std::vector<RenderCell> cells {};
     std::vector<RenderLine> lines {};
     std::vector<RenderGutterCell> gutter {};
+
+    /// The indicator status line's bar, edge to edge. Absent for a host-writable status line: that one is
+    /// the application's, gets no wider than the main page, and leaves the strip beside it to the default
+    /// background.
+    std::optional<RenderStatusBar> statusBar {};
 
     /// Render-only text the terminal lays over the page -- a collapsed fold's `⋯ 1,234 lines` -- already
     /// laid out (@see layoutRenderText), one shaping group per annotation.
@@ -205,6 +221,7 @@ struct RenderBuffer
         cells.clear();
         lines.clear();
         gutter.clear();
+        statusBar.reset();
         annotations.clear();
         cursor.reset();
         if (stickyHeader)

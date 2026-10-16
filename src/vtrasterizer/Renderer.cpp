@@ -778,6 +778,8 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         vtbackend::RenderBufferRef const renderBuffer = terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
         renderPass(primaryPressure, [&] {
+            if (auto const& bar = renderBuffer.get().statusBar)
+                renderStatusBar(*bar);
             renderCells(std::span(renderBuffer.get().cells));
             renderLines(std::span(renderBuffer.get().lines));
             renderGutter(std::span(renderBuffer.get().gutter));
@@ -843,6 +845,8 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         // Pass 2: Status line (no scroll offset, no scissor).
         setSmoothScrollOffset(0);
         renderPass(false, [&] {
+            if (auto const& bar = renderBuffer.get().statusBar)
+                renderStatusBar(*bar);
             renderCells(statusCells);
             renderLines(statusLines);
         });
@@ -979,6 +983,19 @@ void Renderer::renderOverlayCell(vtbackend::RenderCell const& cell, std::string_
     {
         errorLog()("{}: skipping a cell on line {} due to exception: {}", what, cell.position.line, e.what());
     }
+}
+
+void Renderer::renderStatusBar(vtbackend::RenderStatusBar const& bar)
+{
+    ZoneScoped;
+    auto const top = _gridMetrics.mapTopLeft(bar.lineOffset, vtbackend::ColumnOffset(0));
+    auto const height = _gridMetrics.cellSize.height * vtbackend::Height::cast_from(bar.lines);
+
+    // Opaque, as the BackgroundRenderer draws the status line's own cells: the bar reads as one piece.
+    auto constexpr Opaque = uint8_t { 0xFF };
+
+    _renderTarget->renderRectangle(
+        0, top.y, _renderTarget->renderSize().width, height, vtbackend::RGBAColor(bar.background, Opaque));
 }
 
 void Renderer::renderStickyHeader(vtbackend::RenderStickyHeader const& header,

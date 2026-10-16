@@ -512,3 +512,56 @@ TEST_CASE("Gutter.terminal.rowsBelowTheProjectionStayEmpty", "[gutter]")
         if (cell.column == ColumnOffset(-1))
             CHECK(blockColumnRows.insert(unbox<int>(cell.lineOffset)).second);
 }
+
+TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][statusline]")
+{
+    // #2139: the indicator status line is the terminal's own bar, so the frame names the color it reaches
+    // the window's edges in -- over the gutter beside it and the page margins. The host-writable one is the
+    // application's, gets no wider than the main page, and names none.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    auto& palette = mc.terminal.colorPalette();
+    palette.indicatorStatusLineInactive.background = 0x111111_rgb;
+    palette.indicatorStatusLineInsertMode.background = 0x222222_rgb;
+
+    SECTION("no status line, no bar")
+    {
+        CHECK_FALSE(renderOf(mc.terminal).statusBar.has_value());
+    }
+
+    SECTION("the indicator's bar, on its row below the main page")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        auto const buffer = renderOf(mc.terminal);
+        REQUIRE(buffer.statusBar.has_value());
+        CHECK(buffer.statusBar->lineOffset == LineOffset(4));
+        CHECK(buffer.statusBar->lines == LineCount(1));
+        // The gutter itself stays beside the main page.
+        CHECK(std::ranges::none_of(buffer.gutter,
+                                   [](auto const& cell) { return cell.lineOffset >= LineOffset(4); }));
+    }
+
+    SECTION("the indicator's bar, on its row above the main page")
+    {
+        mc.terminal.settings().statusDisplayPosition = StatusDisplayPosition::Top;
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        auto const buffer = renderOf(mc.terminal);
+        REQUIRE(buffer.statusBar.has_value());
+        CHECK(buffer.statusBar->lineOffset == LineOffset(0));
+    }
+
+    SECTION("in the colors the indicator wears for the focus")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        (void) mc.terminal.sendFocusOutEvent();
+        CHECK(renderOf(mc.terminal).statusBar->background == 0x111111_rgb);
+        (void) mc.terminal.sendFocusInEvent();
+        CHECK(renderOf(mc.terminal).statusBar->background == 0x222222_rgb);
+    }
+
+    SECTION("the host-writable status line leaves the strip to the default background")
+    {
+        mc.terminal.setStatusDisplay(StatusDisplayType::HostWritable);
+        CHECK_FALSE(renderOf(mc.terminal).statusBar.has_value());
+    }
+}

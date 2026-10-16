@@ -3445,6 +3445,9 @@ class Terminal
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
+
+    /// The indicator status line's colors for the focus and the input mode as they are now.
+    [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
     void updateCursorVisibilityState() const noexcept;
 
     /// Shows the cursor and starts its blink over, as a key does.

@@ -430,6 +430,15 @@ class Renderer
                             vtbackend::LineOffset row,
                             vtbackend::ColumnCount columns);
 
+    /// Fills the status line's rows from the window's left edge to its right with the bar's background,
+    /// under the status line's own cells: the gutter and the page margins beside it take its color.
+    ///
+    /// Drawn in the step that draws the status line, ahead of its cells, because one step draws its
+    /// rectangles in the order they were issued.
+    ///
+    /// @param bar The bar the render buffer carries.
+    void renderStatusBar(vtbackend::RenderStatusBar const& bar);
+
     void executeImageDiscards();
 
     /// The atlas sizing the *configuration* asked for, kept apart from the effective sizing below.

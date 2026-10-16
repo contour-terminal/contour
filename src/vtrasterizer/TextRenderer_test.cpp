@@ -2286,6 +2286,58 @@ TEST_CASE("Renderer.stickyHeader.staysPutWhileThePageScrollsSmoothly", "[rendere
     CHECK(prompt->y == 0);
 }
 
+TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[renderer][statusline]")
+{
+    // #2139: the indicator status line's bar reaches both edges of the window -- over the gutter and the
+    // page margins beside it -- and the status line's own cells are drawn over it, in the same step.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+    // Wider than the page's 20 columns of 10 pixels: the strips beside the page are what the bar adds.
+    fixture.renderTarget.setRenderSize(vtbackend::ImageSize { Width(260), Height(140) });
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    mc.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    vtbackend::test::printLines(mc, "out", 20);
+
+    SECTION("in one pass")
+    {
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() == 0.0f);
+    }
+    SECTION("in two, while the page scrolls smoothly")
+    {
+        mc.terminal.setCellPixelSize(vtbackend::ImageSize { vtpty::Width(10), vtpty::Height(20) });
+        REQUIRE(mc.terminal.applySmoothScrollPixelDelta(5.0f) == SmoothScrollResult::Applied);
+        REQUIRE(mc.terminal.smoothScrollPixelOffset() != 0.0f);
+    }
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const bar = [&] {
+        auto const buffer = mc.terminal.renderBuffer();
+        return buffer.get().statusBar;
+    }();
+    REQUIRE(bar.has_value());
+    REQUIRE(bar->lineOffset == LineOffset(5));
+
+    // Seeded metrics: 10x20 cells, no margin -- so the status line's row spans y 100..119.
+    auto const& rectangles = fixture.renderTarget.rectangles;
+    auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
+        return r.x == 0 && r.y == 100 && r.height == Height(20)
+               && r.color == RGBAColor(bar->background, 0xFF);
+    });
+    REQUIRE(band != rectangles.end());
+    CHECK(band->width == fixture.renderTarget.renderSize().width);
+    CHECK(band->width == Width(260));
+
+    // The status line paints its own background on its cells, after the bar and in the same step.
+    auto const ownBackground = std::ranges::find_if(std::next(band), rectangles.end(), [&](auto const& r) {
+        return r.y == 100 && r.color.rgb() == bar->background;
+    });
+    REQUIRE(ownBackground != rectangles.end());
+    CHECK(ownBackground->step == band->step);
+}
+
 int main(int argc, char* argv[])
 {
     core::testing::suppressWindowsDialogs();

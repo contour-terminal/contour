@@ -1181,6 +1181,10 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 nullopt,
                                                                 includeSelection },
                                           ScrollOffset(0));
+            // The terminal's own furniture, so its bar may span the window's whole width (#2139).
+            output.statusBar = RenderStatusBar { .lineOffset = base,
+                                                 .lines = _indicatorStatusScreen.pageSize().lines,
+                                                 .background = indicatorStatusLineColors().background };
             return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
             _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,
@@ -1200,29 +1204,28 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
 }
 // }}}
 
+RGBColorPair Terminal::indicatorStatusLineColors() const
+{
+    if (!_focused)
+        return colorPalette().indicatorStatusLineInactive;
+
+    switch (_inputHandler.mode())
+    {
+        case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
+        case ViMode::Normal:
+        case ViMode::Hint: return colorPalette().indicatorStatusLineNormalMode;
+        case ViMode::Visual:
+        case ViMode::VisualLine:
+        case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
+    }
+    core::unreachable();
+}
+
 void Terminal::updateIndicatorStatusLine()
 {
     Require(_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto const colors = [&]() {
-        if (!_focused)
-        {
-            return colorPalette().indicatorStatusLineInactive;
-        }
-        else
-        {
-            switch (_inputHandler.mode())
-            {
-                case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
-                case ViMode::Normal:
-                case ViMode::Hint: return colorPalette().indicatorStatusLineNormalMode;
-                case ViMode::Visual:
-                case ViMode::VisualLine:
-                case ViMode::VisualBlock: return colorPalette().indicatorStatusLineVisualMode;
-            }
-        }
-        core::unreachable();
-    }();
+    auto const colors = indicatorStatusLineColors();
 
     auto const backupForeground = _colorPalette.defaultForeground;
     auto const backupBackground = _colorPalette.defaultBackground;
