@@ -355,8 +355,10 @@ enum class LeftButtonPress : uint8_t
 /// Where the pointer stands, for what it hovers.
 enum class PointerPlacement : uint8_t
 {
-    OnGrid = 0, ///< On the grid cell the last move or press named.
-    OffGrid,    ///< On no cell: beside the grid, over something drawn on top of it, or outside the terminal.
+    /// On no cell: beside the grid, over something drawn on top of it, outside the terminal, or nowhere yet,
+    /// before the first pointer event.
+    OffGrid = 0,
+    OnGrid, ///< On the grid cell the last move or press named.
 };
 
 /// Asked, with a press's click count (1..ClickCounter::MaxClickCount), whether a binding takes the press.
@@ -3833,8 +3835,9 @@ class Terminal
     // {{{ mouse related state (helpers for detecting double/triple clicks)
     ClickCounter _clickCounter; ///< Multi-click sequences (drag, word, extended word, line).
     vtbackend::CellLocation _currentMousePosition {}; // current mouse position
-    /// Whether _currentMousePosition is where the pointer stands, or only where it last was on the grid.
-    PointerPlacement _pointerPlacement = PointerPlacement::OnGrid;
+    /// Whether _currentMousePosition is where the pointer stands, or only where it last was on the grid. Off
+    /// until a pointer event names a cell: until then the position is only its default, not the pointer's.
+    PointerPlacement _pointerPlacement = PointerPlacement::OffGrid;
     vtbackend::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
     LeftButtonPress _leftButtonPress = LeftButtonPress::Released; ///< What the held left button does.
     /// Moves on whenever a selection is installed or cleared, so a release can tell whether the action a

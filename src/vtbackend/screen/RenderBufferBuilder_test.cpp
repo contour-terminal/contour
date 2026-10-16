@@ -107,8 +107,6 @@ TEST_CASE("RenderBufferBuilder.osc8LinkCarriesARoleNotAHardcodedUnderline", "[re
     mock.writeToScreen("\033]8;;https://a.b/\033\\link\033]8;;\033\\ rest");
     auto const& palette = mock.terminal.colorPalette();
 
-    // The pointer of a fresh terminal rests over cell (0, 0), which would read the link as hovered.
-    mock.terminal.sendMouseLeaveEvent();
     auto cells = renderedRow(mock, LineOffset(0));
     CHECK(cells.at(0).linkRole == LinkDecorationRole::Normal);
     CHECK_FALSE(cells.at(0).attributes.flags.any(UnderlineMask));
@@ -126,6 +124,20 @@ TEST_CASE("RenderBufferBuilder.osc8LinkCarriesARoleNotAHardcodedUnderline", "[re
     CHECK(cells.at(3).linkRole == LinkDecorationRole::Hover);
     CHECK(cells.at(3).attributes.decorationColor == palette.hyperlinkDecoration.hover);
     CHECK(cells.at(5).linkRole == LinkDecorationRole::None);
+}
+
+TEST_CASE("RenderBufferBuilder.aLinkInTheTopLeftCellIsAtRestBeforeAnyPointerEvent", "[renderbuffer][links]")
+{
+    // Until a pointer event names a cell the pointer is on none -- not on the top-left one, which a fresh
+    // terminal's pointer position reads as -- so a link there is neither under the pointer nor drawn hovered.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    mock.writeToScreen("\033]8;;https://a.b/\033\\link\033]8;;\033\\");
+
+    CHECK_FALSE(mock.terminal.currentMouseGridPosition().has_value());
+    CHECK(mock.terminal.hyperlinkIdUnderPointer() == HyperlinkId {});
+    CHECK(mock.terminal.tryGetHoveringHyperlink() == nullptr);
+    CHECK_FALSE(mock.terminal.isMouseHoveringHyperlink());
+    CHECK(renderedRow(mock, LineOffset(0)).at(0).linkRole == LinkDecorationRole::Normal);
 }
 
 TEST_CASE("RenderBufferBuilder.hoverNamesOnlyTheLinkUnderThePointer", "[renderbuffer][links]")
@@ -194,7 +206,6 @@ TEST_CASE("RenderBufferBuilder.anEvictedLinkIsNotDecorated", "[renderbuffer][lin
 {
     // A link the terminal no longer holds opens nothing, so it is not drawn as one; a link it still holds is.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
-    mock.terminal.sendMouseLeaveEvent();
     mock.writeToScreen("\033]8;;https://old.example/\033\\old\033]8;;\033\\ "
                        "\033]8;;https://kept.example/\033\\kept\033]8;;\033\\");
     auto const& screen = mock.terminal.primaryScreen();
@@ -232,7 +243,6 @@ TEST_CASE("RenderBufferBuilder.aRowOneLinkFillsIsDecorated", "[renderbuffer][lin
     // Every column carries the same link, so the row is a batched line, and a batched line draws no
     // decoration at all. The cursor is on the row below: a row under it is never batched.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
-    mock.terminal.sendMouseLeaveEvent(); // a fresh terminal's pointer rests over cell (0, 0)
     mock.writeToScreen("\r\n");
     auto const link = replaceRowWithLinkedText(mock, LineOffset(0), "0123456789");
     REQUIRE(mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).isTrivialBuffer());
