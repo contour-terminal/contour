@@ -513,6 +513,40 @@ TEST_CASE("Gutter.terminal.rowsBelowTheProjectionStayEmpty", "[gutter]")
             CHECK(blockColumnRows.insert(unbox<int>(cell.lineOffset)).second);
 }
 
+TEST_CASE("Gutter.terminal.aClickTogglesAFoldOnlyWhereItDrawsAControl", "[gutter]")
+{
+    // The hover's hand and the press's toggle ask this one question, so it must say no wherever the block
+    // column draws no fold control -- or would toggle nothing.
+    auto mc = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mc.terminal.settings().gutter = GutterSettings { .foldMarkers = true, .exitStatus = true };
+    runCommand(mc, "true", {}, 0);      // row 0: nothing to fold
+    runCommand(mc, "make", { "a" }, 2); // rows 1-2: a fold
+
+    SECTION("on a fold, its head and its body alike")
+    {
+        CHECK(mc.terminal.gutterTogglesFoldAt(LineOffset(1)));
+        CHECK(mc.terminal.gutterTogglesFoldAt(LineOffset(2)));
+    }
+
+    SECTION("beside a block with nothing to fold, and below every block")
+    {
+        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(0)));
+        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(8)));
+    }
+
+    SECTION("with the fold controls hidden")
+    {
+        mc.terminal.settings().gutter.foldMarkers = false;
+        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(1)));
+    }
+
+    SECTION("with folding off")
+    {
+        mc.terminal.settings().foldingAvailability = FoldingAvailability::Disabled;
+        CHECK_FALSE(mc.terminal.gutterTogglesFoldAt(LineOffset(1)));
+    }
+}
+
 TEST_CASE("Gutter.terminal.theIndicatorStatusLineSpansTheGutterToo", "[gutter][statusline]")
 {
     // #2139: the indicator status line is the terminal's own bar, so the frame names the color it reaches

@@ -2690,7 +2690,7 @@ ConsumedByGutter TerminalSession::sendGutterHoverEvent(std::optional<GutterHit> 
         auto const* record = onControl && _terminal.foldingAppliesToDisplayedPage()
                                  ? _terminal.commandBlockAt(hit->gridLine)
                                  : nullptr;
-        return std::pair { onControl && _terminal.foldContaining(hit->gridLine).has_value(),
+        return std::pair { onControl && _terminal.gutterTogglesFoldAt(hit->gridLine),
                            record != nullptr ? std::optional { record->id } : std::nullopt };
     });
 
@@ -2716,20 +2716,18 @@ ConsumedByGutter TerminalSession::sendGutterPressEvent(std::optional<GutterHit> 
     if (button != vtbackend::MouseButton::Left || !hit)
         return ConsumedByGutter::No;
 
-    // Beside the timestamps or the line numbers there is nothing to act on, but the press is the gutter's:
-    // neither the child nor a selection may see it, nor its release.
-    if (!carriesFoldControls(hit->segment))
-    {
-        _owedRelease = { .owner = PressOwner::Gutter, .button = button };
-        return ConsumedByGutter::Yes;
-    }
-
     // Through the one path every folding action takes: it takes the lock and republishes the scrollable
-    // count, and the terminal refuses the toggle while folding is off. None of that is the click's to
-    // restate.
-    if (!withScrollableChange([&](auto& terminal) { return terminal.toggleFoldContaining(hit->gridLine); }))
-        return ConsumedByGutter::No;
+    // count. Only where the hover offered a hand -- the same question, asked under the same lock.
+    if (carriesFoldControls(hit->segment))
+        withScrollableChange([&](auto& terminal) {
+            return terminal.gutterTogglesFoldAt(hit->gridLine)
+                   && terminal.toggleFoldContaining(hit->gridLine);
+        });
 
+    // The press is the gutter's wherever it lands, a fold toggled or not: beside the timestamps, on a ● or a
+    // blank row, or with folding off, neither the child nor a selection may see it -- nor its release. Let
+    // through, it reached them as a press on column 0 of the row.
+    //
     // Remembered here rather than by the caller, so the two halves of the handshake cannot drift: a
     // release reported for a press the child never saw leaves it holding a button down that was never
     // pressed.
@@ -3284,14 +3282,15 @@ command::ContextMenuState TerminalSession::contextMenuState()
         // The header is no cell, so no link is under it.
         auto const hyperlink = overStickyHeader ? nullptr : terminal().tryGetHoveringHyperlink();
 
-        // The grid line under the pointer. _currentMousePosition is in MAIN-PAGE rows -- which is the
-        // space translateScreenToGridLine() speaks, so it is fed in unadjusted -- and was last written by
-        // the move that necessarily preceded this right-click, so it still names the clicked cell. Adding
-        // mainPageTopRow() here would reintroduce the off-by-a-status-line the gutter hit-test
-        // (gutterHitAt in SessionInput.cpp) already had. Over the header, a row of its block.
+        // The grid line under the pointer, where the right press just put the terminal's: the very position
+        // `block` above was resolved from, so the fold row and the block rows name the same block. Not this
+        // session's own copy, which only a move over the grid writes -- a right-click in the gutter came
+        // with none, and named whichever row the pointer last crossed on the grid. Over the header, a row
+        // of its block.
         auto const pointerLine = [&]() -> std::optional<vtbackend::LineOffset> {
             if (!overStickyHeader)
-                return terminal().viewport().translateScreenToGridLine(_currentMousePosition.line);
+                return terminal().currentMouseGridPosition().transform(
+                    [](vtbackend::CellLocation position) { return position.line; });
             if (block == nullptr)
                 return std::nullopt;
             return terminal().commandBlockAnchor(*block);

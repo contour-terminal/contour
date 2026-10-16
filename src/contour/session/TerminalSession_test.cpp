@@ -5598,6 +5598,14 @@ class StickyHeaderScene
         contour::session::sendMouseMoveEvent(&event, session());
     }
 
+    /// Drags the pointer to @p position with the left button down, as the item that took the press hears it.
+    void drag(QPointF position) const
+    {
+        auto event =
+            QMouseEvent(QEvent::MouseMove, position, position, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        contour::session::sendMouseMoveEvent(&event, session());
+    }
+
   private:
     SessionWithSurface _held;
 };
@@ -5749,6 +5757,109 @@ TEST_CASE("TerminalSession: a Qt press on row 0 reaches the sticky header where 
         scene.click(QPointF(8 + pageWidth + 2, 4));
         CHECK(terminal.viewport().topLine() == topLine);
     }
+}
+
+TEST_CASE("TerminalSession: the gutter's block column swallows its presses, and toggles only what it draws",
+          "[contour][session][input][gutter]")
+{
+    // The scene's gutter is the 8 pixels left of the page: the block column, one 8x16 cell per row.
+    using contour::input::MouseCursorShape;
+
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    // Normal (1000) and SGR (1006) mouse reporting: a press the grid takes is written to the PTY.
+    terminal.writeToScreen("\033[?1000h\033[?1006h");
+    terminal.writeToScreen(vtbackend::test::commandRun("true", {}));         // row 0: ●, nothing to fold
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a" }, 2)); // rows 1-2: a fold
+    scene.written().clear();
+
+    auto const beside = [](int row) {
+        return QPointF(4, (row * 16) + 4);
+    };
+
+    SECTION("on a fold control, the fold")
+    {
+        scene.hover(beside(1));
+        CHECK(scene.surface().cursorShapes.back() == MouseCursorShape::PointingHand);
+        scene.click(beside(1));
+        CHECK_FALSE(terminal.foldState().empty());
+    }
+
+    SECTION("beside a block with nothing to fold, nothing")
+    {
+        scene.click(beside(0));
+    }
+
+    SECTION("below the last block, nothing")
+    {
+        scene.click(beside(10));
+    }
+
+    SECTION("with folding off, no hand and nothing")
+    {
+        terminal.settings().foldingAvailability = vtbackend::FoldingAvailability::Disabled;
+        scene.hover(beside(1));
+        CHECK(scene.surface().cursorShapes.back() != MouseCursorShape::PointingHand);
+        scene.click(beside(1));
+        CHECK(terminal.foldState().empty());
+    }
+
+    SECTION("with the fold controls hidden, no hand and nothing")
+    {
+        terminal.settings().gutter.foldMarkers = false;
+        scene.hover(beside(1));
+        CHECK(scene.surface().cursorShapes.back() != MouseCursorShape::PointingHand);
+        scene.click(beside(1));
+        CHECK(terminal.foldState().empty());
+    }
+
+    // Let through, the press reached the application as one on column 0 of the row, and began a selection.
+    CHECK(scene.written().empty());
+    CHECK_FALSE(terminal.leftMouseButtonPressed());
+    CHECK(scene.session().pressOwner() == contour::session::PressOwner::None);
+}
+
+TEST_CASE("TerminalSession: a selection dragged from the grid into the gutter keeps extending",
+          "[contour][session][input][gutter]")
+{
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    terminal.writeToScreen("line 0\r\nline 1\r\nline 2\r\n");
+
+    // From row 2's fourth column, out to the left over the gutter beside row 0: clamped onto column 0 of row
+    // 0, as a drag past the page's right edge is clamped onto its last column.
+    scene.press(QPointF(8 + (3 * 8) + 4, (2 * 16) + 4), Qt::LeftButton, Qt::LeftButton);
+    scene.drag(QPointF(4, 4));
+    scene.release(QPointF(4, 4), Qt::LeftButton, Qt::NoButton);
+
+    REQUIRE(terminal.selectionAvailable());
+    auto const text = terminal.extractSelectionText();
+    CHECK(text.starts_with("line 0"));
+    CHECK(text.contains("line 1"));
+}
+
+TEST_CASE(
+    "TerminalSession: a right press in the gutter opens the menu of the block beside it, its fold row too",
+    "[contour][session][input][gutter]")
+{
+    TestApp testApp;
+    auto const scene = StickyHeaderScene { testApp.app() };
+    auto& terminal = scene.terminal();
+    terminal.writeToScreen(vtbackend::test::commandRun("make", { "a", "b" })); // rows 0-2
+    terminal.writeToScreen(vtbackend::test::commandRun("test", { "c", "d" })); // rows 3-5
+
+    // The pointer crosses the grid over the first block, then the gutter to the second, and presses there.
+    scene.hover(QPointF(40, (1 * 16) + 4));
+    scene.hover(QPointF(4, (4 * 16) + 4));
+    scene.press(QPointF(4, (4 * 16) + 4), Qt::RightButton, Qt::RightButton);
+
+    auto const state = scene.session().contextMenuState();
+    REQUIRE(state.blockUnderCursor.has_value());
+    CHECK(state.blockUnderCursor->id == terminal.commandBlockAt(vtbackend::LineOffset(4))->id);
+    REQUIRE(state.foldLine.has_value());
+    CHECK(terminal.foldContaining(*state.foldLine) == terminal.foldContaining(vtbackend::LineOffset(4)));
 }
 
 TEST_CASE("TerminalSession: with a status line on top the sticky header is pressed a row lower",

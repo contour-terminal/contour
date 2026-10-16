@@ -863,22 +863,25 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Reports where the pointer is over the gutter, or that it is not over it at all.
     ///
     /// Consulted BEFORE the ordinary move path and, when it claims the event, instead of it: the
-    /// gutter is not part of the grid, so a move there must not reach the mouse protocol, extend a
-    /// selection, or hover a hyperlink at the column-0 cell it would otherwise be clamped onto. Only
-    /// the block column lights a fold; beside the timestamps or the line numbers the pointer is the
-    /// gutter's all the same.
+    /// gutter is not part of the grid, so a hover there must not reach the mouse protocol or hover a
+    /// hyperlink at the column-0 cell it would otherwise be clamped onto. Only the block column lights
+    /// a fold; beside the timestamps or the line numbers the pointer is the gutter's all the same.
+    ///
+    /// Not consulted for a drag the grid's own press began (@see pressOwner): that one stays the grid's
+    /// over the gutter, as it does past the page's right edge, so a selection keeps extending.
     ///
     /// @param hit Where over the gutter the pointer is, or nullopt when it is not over the gutter.
     /// @return Whether the gutter consumed the event.
     ConsumedByGutter sendGutterHoverEvent(std::optional<GutterHit> hit);
 
-    /// Toggles the fold beside @p hit when the press landed on the block column.
+    /// Toggles the fold beside @p hit when the press landed on the block column where a fold control is
+    /// drawn (vtbackend::Terminal::gutterTogglesFoldAt).
     ///
     /// The press half of the gutter's click handshake, and the only place that arms it: a press the
     /// child never saw must be followed by a release it never sees either, and leaving that to the
     /// caller means a third event path re-deriving the rule (@see sendOwedRelease).
     ///
-    /// A left press beside the timestamps or the line numbers is consumed and does nothing.
+    /// Every left press on the gutter is consumed; one with no fold to toggle does nothing.
     ///
     /// @param hit Where over the gutter the pointer is, or nullopt when it is not over the gutter.
     /// @param button The button that went down.
@@ -911,6 +914,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param button The button that went up.
     /// @return Who the release was owed to; PressOwner::None when it is the grid's.
     [[nodiscard]] PressOwner sendOwedRelease(vtbackend::MouseButton button);
+
+    /// Who took the press whose release is still owed, if anyone did.
+    /// @return PressOwner::None while no button is down, or while the one that is belongs to the grid.
+    [[nodiscard]] PressOwner pressOwner() const noexcept { return _owedRelease.owner; }
 
     /// Forgets a release still owed: the pointer grab ended without one -- a popup, such as the context menu
     /// a right press opens, took the button's release -- so none is coming.

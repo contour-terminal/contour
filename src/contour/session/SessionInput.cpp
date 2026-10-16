@@ -793,7 +793,11 @@ void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session)
     if (session.display() == nullptr)
         return;
 
-    if (session.sendGutterHoverEvent(gutterHitAt(event->position(), session)) == ConsumedByGutter::Yes)
+    // A mouse move is a drag: the hover comes as a QHoverEvent. One the grid's own press began stays the
+    // grid's over the gutter, clamped onto column 0 as it is past the page's right edge, so a selection
+    // dragged out to the left keeps extending. Only a drag from a press the gutter took is the gutter's.
+    if (session.pressOwner() != PressOwner::None
+        && session.sendGutterHoverEvent(gutterHitAt(event->position(), session)) == ConsumedByGutter::Yes)
     {
         event->accept();
         return;

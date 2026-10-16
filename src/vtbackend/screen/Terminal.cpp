@@ -3072,6 +3072,11 @@ bool Terminal::toggleFoldContaining(LineOffset gridLine)
     return true;
 }
 
+bool Terminal::gutterTogglesFoldAt(LineOffset gridLine) const
+{
+    return isFoldingAvailable() && _settings.gutter.foldMarkers && foldContaining(gridLine).has_value();
+}
+
 bool Terminal::expandFoldContaining(LineOffset gridLine)
 {
     auto const range = foldContaining(gridLine);

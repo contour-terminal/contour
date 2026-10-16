@@ -1516,6 +1516,15 @@ class Terminal
     /// @return Whether a fold was found and toggled; false while folding is unavailable.
     bool toggleFoldContaining(LineOffset gridLine);
 
+    /// Whether a click on the gutter's block column beside @p gridLine toggles a fold: folding is available,
+    /// the column draws fold controls (GutterSettings::foldMarkers), and a fold reaches that line.
+    ///
+    /// The one question the hover that turns the pointer into a hand and the press that toggles both ask,
+    /// so the gutter never offers a click it then ignores, nor acts where it drew nothing to click.
+    /// @param gridLine A grid line (0 = page top, negative = into the scrollback).
+    /// @return Whether that click toggles a fold.
+    [[nodiscard]] bool gutterTogglesFoldAt(LineOffset gridLine) const;
+
     /// Expands the fold covering @p gridLine, if a collapsed one does.
     ///
     /// What FoldJumpBehavior::Expand reaches for: a jump that names a hidden target opens the block
