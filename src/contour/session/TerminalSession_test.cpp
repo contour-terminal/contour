@@ -7571,6 +7571,46 @@ TEST_CASE("TerminalSession: the context menu pins the command block that was rig
     QGuiApplication::clipboard()->clear();
 }
 
+TEST_CASE("TerminalSession: the context menu offers a line's fold and block only while the pointer is on it",
+          "[contour][session][contextmenu][semanticblocks]")
+{
+    // The rows act on the line the pointer is on, and there is none while the pointer is on no cell: not the
+    // top-left one before any pointer event, nor the one it left. A menu opened from the keyboard then
+    // offers no line's fold or block.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    writeFinishedBlock(*session, "make", "built\r\nlinked\r\n");
+    auto const* make = session->terminal().commandBlockAt(vtbackend::LineOffset(0));
+    REQUIRE(make != nullptr);
+    REQUIRE(session->terminal().foldContaining(vtbackend::LineOffset(0)).has_value());
+    auto const onTheOutput = vtbackend::CellLocation { vtbackend::LineOffset(1), vtbackend::ColumnOffset(0) };
+
+    SECTION("before any pointer event")
+    {
+        auto const state = session->contextMenuState();
+        CHECK_FALSE(state.foldLine.has_value());
+        CHECK_FALSE(state.blockUnderCursor.has_value());
+    }
+
+    SECTION("with the pointer on the block's output")
+    {
+        session->sendMouseMoveEvent(Modifiers {}, onTheOutput, vtbackend::PixelCoordinate {});
+        auto const state = session->contextMenuState();
+        CHECK(state.foldLine == vtbackend::LineOffset(1));
+        REQUIRE(state.blockUnderCursor.has_value());
+        CHECK(state.blockUnderCursor->id == make->id);
+    }
+
+    SECTION("once the pointer has left the grid")
+    {
+        session->sendMouseMoveEvent(Modifiers {}, onTheOutput, vtbackend::PixelCoordinate {});
+        session->onPointerLeft();
+        auto const state = session->contextMenuState();
+        CHECK_FALSE(state.foldLine.has_value());
+        CHECK_FALSE(state.blockUnderCursor.has_value());
+    }
+}
+
 TEST_CASE("TerminalSession: a right-click on an output tail the next prompt shares pins the prompt's block",
           "[contour][session][contextmenu][semanticblocks]")
 {
