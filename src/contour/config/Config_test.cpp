@@ -3851,6 +3851,33 @@ TEST_CASE("config.builtinFallbackKeyMappings", "[config]")
         CHECK(std::holds_alternative<contour::actions::SwitchToTabLeft>(backTab->front()));
     }
 
+    SECTION("Ctrl+Shift+Up and Down go from prompt to prompt, on the primary screen only")
+    {
+        auto const config = Config {};
+
+        auto const* up = contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, modeFlags);
+        REQUIRE(up != nullptr);
+        REQUIRE(up->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::ScrollMarkUp>(up->front()));
+
+        auto const* down =
+            contour::config::applyBuiltinFallback(config, Key::DownArrow, ctrlShift, modeFlags);
+        REQUIRE(down != nullptr);
+        REQUIRE(down->size() == 1);
+        CHECK(std::holds_alternative<contour::actions::ScrollMarkDown>(down->front()));
+
+        // A full-screen application keeps the chord.
+        auto const alternateScreen = uint8_t { vtbackend::MatchModes::AlternateScreen };
+        CHECK(contour::config::applyBuiltinFallback(config, Key::UpArrow, ctrlShift, alternateScreen)
+              == nullptr);
+
+        // And the plain defaults leave it free, so a user's own binding of it is found first.
+        CHECK(std::ranges::none_of(config.inputMappings.value().keyMappings, [&](auto const& mapping) {
+            return (mapping.input == Key::UpArrow || mapping.input == Key::DownArrow)
+                   && mapping.modifiers == ctrlShift;
+        }));
+    }
+
     SECTION("matching is on the exact chord")
     {
         auto const config = Config {};

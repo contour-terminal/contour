@@ -170,6 +170,20 @@ std::vector<FallbackKeyMapping> const& builtinFallbackKeyMappings()
                                                                               vtbackend::Modifier::Shift } },
                                           .input = vtbackend::Key::Tab,
                                           .binding = { { actions::SwitchToTabLeft {} } } } },
+        // From one command's prompt to the next, as Ghostty's jump_to_prompt binds it. Bound nowhere in the
+        // defaults when it was added -- Shift alone scrolls a line, Alt+Shift focuses a pane, Ctrl+Alt swaps
+        // one, Ctrl+Shift+Alt resizes one. On the primary screen only, where the prompts are; an
+        // alternate-screen application keeps the chord.
+        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
+                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                              vtbackend::Modifier::Shift } },
+                                          .input = vtbackend::Key::UpArrow,
+                                          .binding = { { actions::ScrollMarkUp {} } } } },
+        FallbackKeyMapping { .mapping = { .modes { PrimaryScreenOnly },
+                                          .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                              vtbackend::Modifier::Shift } },
+                                          .input = vtbackend::Key::DownArrow,
+                                          .binding = { { actions::ScrollMarkDown {} } } } },
     };
     return mappings;
 }
