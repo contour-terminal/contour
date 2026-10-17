@@ -1301,6 +1301,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void restoreCursor();
     void restoreCursor(Cursor const& savedCursor);
 
+    /// Takes @p cursor over as this screen's cursor -- its position, rendition, character sets, origin mode
+    /// and pending wrap -- as a switch of screen that carries the cursor across hands it on.
+    /// @param cursor The cursor to take over; its position is held to the page.
+    void adoptCursor(Cursor const& cursor) noexcept;
+
     void restoreGraphicsRendition();
     void saveGraphicsRendition();
 

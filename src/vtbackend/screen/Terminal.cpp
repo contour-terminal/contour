@@ -6358,7 +6358,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         if (_displayedPage != _cursorPage)
             showPage(_cursorPage);
         if (behavior->carryCursor)
-            _currentScreen->cursor() = carried;
+            _currentScreen->adoptCursor(carried);
         if (behavior->clearOnEnter)
             clearScreen();
     }
@@ -6377,7 +6377,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         if (!isModeEnabled(DECMode::PageCursorCoupling))
             showPage(_pagesBeforeAlternateScreen.displayed);
         if (behavior->carryCursor)
-            _currentScreen->cursor() = carried;
+            _currentScreen->adoptCursor(carried);
     }
 
     // Modes 47, 1047 and 1049 are three views of one piece of state -- whether the alternate screen

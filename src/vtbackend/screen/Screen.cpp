@@ -4897,11 +4897,17 @@ void Screen::restoreCursor(Cursor const& savedCursor)
     // DECRC restores cursor state -- position, SGR, charsets, origin mode (DECOM), and the last-column
     // (wrap-pending) flag -- but NOT the autowrap mode (DECAWM): that is a terminal mode, not cursor
     // state (DEC STD 070), so a DECRC after a DECRESET DECAWM leaves autowrap off. Matches xterm.
-    _cursor = savedCursor;
-    _cursor.position = clampCoordinate(_cursor.position);
+    adoptCursor(savedCursor);
     _terminal->setMode(DECMode::Origin, savedCursor.originMode);
-    updateCursorIterator();
     verifyState();
+}
+
+void Screen::adoptCursor(Cursor const& cursor) noexcept
+{
+    _cursor = cursor;
+    _cursor.position = clampCoordinate(_cursor.position);
+    // Writing goes through the cached cursor line, which must follow the cursor to its row here.
+    updateCursorIterator();
 }
 
 void Screen::reply(std::string_view text)
