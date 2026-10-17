@@ -1135,10 +1135,16 @@ enum class DECMode : std::uint8_t
 /// rather than three near-duplicate handlers -- adding a fourth alternate-screen variant would be a
 /// new row here, not new control flow.
 ///
-/// The four members stay `bool`: each is one yes/no of a mode's policy, independent of the others, every
+/// The five members stay `bool`: each is one yes/no of a mode's policy, independent of the others, every
 /// combination of them is legal, and the table's designated initialisers name each one at every use.
 struct AlternateScreenBehavior
 {
+    /// Whether entering saves the cursor into the main screen's DECSC buffer first, as DECSC would (mode
+    /// 1049): xterm's 1049 runs CursorSave before ToAlternate, and Windows Terminal's CursorSaveState()
+    /// before it switches buffers. A DECRC after leaving then returns to where the alternate screen was
+    /// entered. DEC STD 070 defines no alternate screen.
+    bool savesCursor;
+
     /// Whether the cursor is carried into the alternate page, so that it appears not to move (all three
     /// modes). xterm's cursor is a terminal-level entity -- SwitchBufs swaps only the line storage, never
     /// the cursor -- Windows Terminal copies the main cursor into its new alternate buffer, and foot's
@@ -1147,7 +1153,8 @@ struct AlternateScreenBehavior
 
     /// Whether the cursor is carried back out of the alternate page (modes 47 and 1047). When false (mode
     /// 1049), the main page's own cursor, which waited untouched while the application worked on the
-    /// alternate one, comes back: xterm's 1049 restores the cursor it saved on the way in.
+    /// alternate one, comes back: the cursor 1049 saved on the way in (savesCursor), as xterm's CursorRestore
+    /// and Windows Terminal's CursorRestoreState() return to it.
     bool carriesCursorOut;
 
     /// Whether the alternate page is erased when entering it (mode 1049 clears; 47 and 1047 keep it).
@@ -1167,9 +1174,9 @@ struct AlternateScreenBehavior
     switch (mode)
     {
             // clang-format off
-        case DECMode::UseAlternateScreen: return AlternateScreenBehavior { .carriesCursorIn = true, .carriesCursorOut = true,  .clearsOnEntry = false, .clearsOnExit = false }; // 47
-        case DECMode::OptionalAltScreen:  return AlternateScreenBehavior { .carriesCursorIn = true, .carriesCursorOut = true,  .clearsOnEntry = false, .clearsOnExit = true  }; // 1047
-        case DECMode::ExtendedAltScreen:  return AlternateScreenBehavior { .carriesCursorIn = true, .carriesCursorOut = false, .clearsOnEntry = true,  .clearsOnExit = false }; // 1049
+        case DECMode::UseAlternateScreen: return AlternateScreenBehavior { .savesCursor = false, .carriesCursorIn = true, .carriesCursorOut = true,  .clearsOnEntry = false, .clearsOnExit = false }; // 47
+        case DECMode::OptionalAltScreen:  return AlternateScreenBehavior { .savesCursor = false, .carriesCursorIn = true, .carriesCursorOut = true,  .clearsOnEntry = false, .clearsOnExit = true  }; // 1047
+        case DECMode::ExtendedAltScreen:  return AlternateScreenBehavior { .savesCursor = true,  .carriesCursorIn = true, .carriesCursorOut = false, .clearsOnEntry = true,  .clearsOnExit = false }; // 1049
         // clang-format on
         default: return std::nullopt;
     }

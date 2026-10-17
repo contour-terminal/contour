@@ -2552,6 +2552,42 @@ TEST_CASE("AlternateScreen.1049_entersWithTheCursorWhereItWas", "[screen]")
     CHECK(terminal.primaryScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
 }
 
+TEST_CASE("AlternateScreen.1049_savesTheCursorAsDECSCDoes", "[screen]")
+{
+    // ?1049h saves the cursor into the main screen's DECSC buffer before it switches: xterm's CursorSave
+    // before ToAlternate, Windows Terminal's CursorSaveState() in _SetAlternateScreenBufferMode. A DECRC
+    // after ?1049l therefore returns to where ?1049h was received, not to an older DECSC. 47 and 1047 save
+    // nothing.
+    auto const [mode, line, column] = GENERATE(table<int, int, int>({
+        { 1049, 3, 4 }, // B, where ?1049h was received
+        { 1047, 1, 2 }, // A, the DECSC
+        { 47, 1, 2 },
+    }));
+    CAPTURE(mode);
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mock.writeToScreen("\033[2;3H\0337"); // DECSC at A
+    mock.writeToScreen("\033[4;5H");      // B
+    mock.writeToScreen(std::format("\033[?{}h\033[?{}l", mode, mode));
+    mock.writeToScreen("\033[H\0338"); // DECRC
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { LineOffset(line), ColumnOffset(column) });
+}
+
+TEST_CASE("AlternateScreen.1049_savesTheCursorPageAlsoFromTheStatusLine", "[screen]")
+{
+    // ?1049h received while DECSASD selects the status line still enters the alternate screen from the cursor
+    // page, and so saves that page's cursor, the page with it, as DECSC on it would.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[3 P\0337");                  // DECSC on page 3
+    mock.writeToScreen("\033[1 P\033[4;5H");              // page 1, B
+    mock.writeToScreen("\033[2$~\033[1$}");               // the status line
+    mock.writeToScreen("\033[?1049h\033[?1049l\033[0$}"); // received there; back to the main display
+    mock.writeToScreen("\033[H\0338");                    // DECRC
+    CHECK(terminal.cursorPageIndex() == PageIndex(0));
+    CHECK(terminal.primaryScreen().cursor().position == CellLocation { LineOffset(3), ColumnOffset(4) });
+}
+
 TEST_CASE("AlternateScreen.textAfterTheSwitchLandsWhereTheCarriedCursorIs", "[screen]")
 {
     // 47 and 1047 carry the cursor across the switch both ways, so the next character is written where the

@@ -2218,7 +2218,8 @@ class Terminal
     /// following the cursor-carry and clear policy that alternateScreenBehavior() describes for @p mode.
     /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so all three
     /// modes carry it into the alternate screen (it does not move), and 47 and 1047 carry it back out, while
-    /// mode 1049 returns to the cursor the page kept, its implicit DECRC.
+    /// mode 1049 returns to the cursor the page kept, its implicit DECRC, having saved it into the DECSC
+    /// buffer on the way in.
     ///
     /// The alternate screen is entered from any page, and shown whatever DECPCCM says. Leaving it returns the
     /// cursor to the page it was entered from; with DECPCCM reset the page that was on display before is

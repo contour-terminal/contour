@@ -6364,9 +6364,9 @@ void Terminal::clearScreen()
 void Terminal::setAlternateScreen(DECMode mode, bool enable)
 {
     // Modes 47, 1047 and 1049 all switch between the primary and alternate screen buffers; they differ
-    // only in whether they carry the cursor across, and whether they erase the alternate page on the
-    // way in or out. That policy is data (alternateScreenBehavior), so the switch below is a single
-    // path, modelled on xterm's ToAlternate / FromAlternate (charproc.c).
+    // only in whether they save the cursor first, whether they carry it across, and whether they erase the
+    // alternate page on the way in or out. That policy is data (alternateScreenBehavior), so the switch below
+    // is a single path, modelled on xterm's ToAlternate / FromAlternate (charproc.c).
     auto const behavior = alternateScreenBehavior(mode);
     Require(behavior.has_value());
 
@@ -6374,9 +6374,16 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
     // screen is entered from whichever page the cursor is on.
     if (enable && !isAlternateScreenBufferInUse())
     {
-        // xterm's ToAlternate: switch in, carrying the cursor across (it is terminal-level, not
-        // per-buffer, so it does not move), then optionally erase the alternate page. The margins stay
-        // as they are: the alternate screen shares the main display's.
+        // xterm's 1049 saves the cursor as DECSC does first. Then its ToAlternate: switch in, carrying the
+        // cursor across (it is terminal-level, not per-buffer, so it does not move), then optionally erase
+        // the alternate page. The margins stay as they are: the alternate screen shares the main display's.
+        if (behavior->savesCursor)
+        {
+            pageAt(_cursorPage).saveCursor();
+            // The page too, also when received while DECSASD selects the status line, for which DECSC on the
+            // status line keeps its own buffer and saveCursorPage() records nothing.
+            _savedCursorPage[savedCursorPageSlot()] = _cursorPage;
+        }
         auto const carried = pageAt(_cursorPage).cursor();
         _pagesBeforeAlternateScreen = { .cursor = _cursorPage, .displayed = _displayedPage };
         setScreen(ScreenType::Alternate);
