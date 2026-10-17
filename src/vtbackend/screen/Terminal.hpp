@@ -3239,6 +3239,29 @@ class Terminal
 
     StatusDisplayType statusDisplayType() const noexcept { return _statusDisplayType; }
     void setStatusDisplay(StatusDisplayType statusDisplayType);
+
+    /// DECSSDT: the host selects the type of status display. None and the indicator are shown at once; the
+    /// host-writable status line is asked of the frontend, unless shown already, and shown once it allows it.
+    /// Selected it is either way, which DECSASD asks for. @see answerHostWritableStatusLineRequest
+    /// @param type The type DECSSDT selects.
+    void selectStatusDisplayByHost(StatusDisplayType type);
+
+    /// The user selects the type of status display, shown at once. DEC STD 070 ch. 14 §3 DECSSDT: "The type
+    /// of Status Line can also be changed through a Set-Up field", which the user's toggle is; and ch. 14
+    /// §2.3: "If the Status Display Type is chosen to be something other than "Host Writable", the Status
+    /// Display will be exited", so another type leaves the host-writable status line should DECSASD have
+    /// selected it. A type shown for a while and then restored (pushStatusDisplay) is no selection and does
+    /// not come here.
+    /// @param type The type the user selects.
+    void selectStatusDisplayByUser(StatusDisplayType type);
+
+    /// Whether DECSASD can select the host-writable status line: the host's last DECSSDT or the user selected
+    /// it, or it is the type shown. DEC STD 070 ch. 14 §3 DECSASD: "the Host Writable Status Line must be
+    /// selected through DECSSDT for DECSASD to be able to select the Host Writable Status Line"; and DECSSDT:
+    /// "The type of Status Line can also be changed through a Set-Up field", which the configuration that
+    /// shows a type is.
+    /// @return Whether the host-writable status line is selected.
+    [[nodiscard]] bool isHostWritableStatusLineSelected() const noexcept;
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
     constexpr ActiveStatusDisplay activeStatusDisplay() const noexcept { return _activeStatusDisplay; }
 
@@ -4450,6 +4473,12 @@ class Terminal
         Owed,        ///< Denied; the next DECSASD 0 syncs, if the configuration asks for it then.
     };
     DeniedStatusLineTitle _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
+
+    /// The type of status display the host's last DECSSDT, or the user since, selected; DECSTR and RIS reset
+    /// it. It differs from the type shown, _statusDisplayType, while the host-writable status line waits for
+    /// the frontend's answer or was denied, and while the frontend shows a type it did not select.
+    /// @see isHostWritableStatusLineSelected, selectStatusDisplayByUser
+    StatusDisplayType _selectedStatusDisplayType = StatusDisplayType::None;
 
     std::optional<StatusDisplayType> _savedStatusDisplayType = std::nullopt;
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;

@@ -2453,10 +2453,12 @@ TEST_CASE("TerminalSession: a configuration reload hands the status line's layou
 namespace
 {
 
-/// Denies @p session's host-writable status line, then has the application write @p text to it and
-/// return to the main display, as a program that keeps its status in DEC's status line does.
+/// Has the application ask for @p session's host-writable status line (DECSSDT 2), denies it, then has the
+/// application write @p text to it and return to the main display, as a program that keeps its status in
+/// DEC's status line does.
 void writeToDeniedStatusLine(contour::session::TerminalSession& session, std::string_view text)
 {
+    session.terminal().writeToScreen("\033[2$~");
     session.executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
     session.terminal().writeToScreen(std::format("\033[1$}}{}\033[0$}}", text));
 }
@@ -2523,6 +2525,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
         setSyncToWindowTitle(testApp.app(), true);
         auto session = makeDisplaylessSession(testApp.app());
         session->terminal().setWindowTitle("before");
+        session->terminal().writeToScreen("\033[2$~");
         session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
         reloadSessionWith(*session,
                           "",
@@ -2536,6 +2539,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
     {
         setSyncToWindowTitle(testApp.app(), false);
         auto session = makeDisplaylessSession(testApp.app());
+        session->terminal().writeToScreen("\033[2$~");
         session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
         reloadSessionWith(*session,
                           "",
@@ -8991,6 +8995,31 @@ TEST_CASE("TerminalSession: input protection toggled on with resize reports echo
 
     CHECK_FALSE(session->terminal().allowInput());
     CHECK(reportedItsPage(*session));
+}
+
+TEST_CASE("TerminalSession: toggling the status line selects its type and leaves a host-writable one",
+          "[contour][session]")
+{
+    // DEC STD 070 ch. 14 §3 DECSSDT: "The type of Status Line can also be changed through a Set-Up field",
+    // and the user's toggle is that field; §2.3: "If the Status Display Type is chosen to be something other
+    // than "Host Writable", the Status Display will be exited". So the toggle that hides the host-writable
+    // status line leaves it, and DECSASD can no longer select it.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen("\033[2$~"); // DECSSDT: the host-writable status line
+    session->executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+    terminal.writeToScreen("\033[1$}"); // DECSASD: write to it
+    REQUIRE(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+
+    CHECK((*session)(contour::actions::ToggleStatusLine {})); // the indicator instead
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+
+    terminal.writeToScreen("\033[1$}X"); // DECSASD again, and text
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    CHECK(terminal.primaryScreen().renderMainPageText().contains('X'));
+    CHECK_FALSE(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains('X'));
 }
 
 TEST_CASE("TerminalSession: the status line toggled with resize reports echoed locally does not deadlock",

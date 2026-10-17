@@ -1892,6 +1892,7 @@ TEST_CASE("Terminal.answerHostWritableStatusLineRequest.a_denied_line_titles_the
     auto& terminal = mc.terminal;
     terminal.settings().syncWindowTitleWithHostWritableStatusDisplay = true;
     terminal.setWindowTitle("before");
+    mc.writeToScreen("\033[2$~"); // DECSSDT: the application asks for the host-writable status line
     auto const writeStatus = [&](std::string_view text) {
         mc.writeToScreen(std::format("\033[1$}}\033[2K\033[G{}\033[0$}}", text));
     };
@@ -1927,6 +1928,50 @@ TEST_CASE("Terminal.answerHostWritableStatusLineRequest.a_denied_line_titles_the
         writeStatus("status");
         CHECK(terminal.windowTitle() == "before");
     }
+}
+
+TEST_CASE("Terminal.DECSASD.selects_only_a_status_line_DECSSDT_selected", "[terminal]")
+{
+    // DEC STD 070 ch. 14 §3 DECSASD: "Note that the Host Writable Status Line must be selected through
+    // DECSSDT for DECSASD to be able to select the Host Writable Status Line." Selected, not yet shown:
+    // MockTerm never answers the request DECSSDT 2 makes. A DECSASD 1 that came first is not remembered, as
+    // in mintty. DECSSDT's note, "The type of Status Line can also be changed through a Set-Up field": the
+    // configuration showing the host-writable status line selects it as well.
+    using vtbackend::ActiveStatusDisplay;
+    using vtbackend::StatusDisplayType;
+    auto const [shown, setup, active] =
+        GENERATE(table<StatusDisplayType, std::string_view, ActiveStatusDisplay>({
+            { StatusDisplayType::None, "\033[1$}", ActiveStatusDisplay::Main },         // no DECSSDT
+            { StatusDisplayType::None, "\033[1$~\033[1$}", ActiveStatusDisplay::Main }, // the indicator
+            { StatusDisplayType::None,
+              "\033[2$~\033[0$~\033[1$}",
+              ActiveStatusDisplay::Main },                                              // selected, then none
+            { StatusDisplayType::None, "\033[1$}\033[2$~", ActiveStatusDisplay::Main }, // DECSASD first
+            { StatusDisplayType::None, "\033[2$~\033[1$}", ActiveStatusDisplay::StatusLine }, // host-writable
+            { StatusDisplayType::None,
+              "\033[2$~\033[1$~\033[2$~\033[1$}",
+              ActiveStatusDisplay::StatusLine }, // selected again
+            { StatusDisplayType::HostWritable,
+              "\033[1$}",
+              ActiveStatusDisplay::StatusLine }, // by the configuration
+        }));
+    INFO(std::format("shown {}, then {}", static_cast<int>(shown), e(setup)));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusDisplay(shown);
+    mc.writeToScreen(setup);
+    mc.writeToScreen("X");
+
+    CHECK(terminal.activeStatusDisplay() == active);
+    auto const& written = active == ActiveStatusDisplay::Main ? terminal.primaryScreen()
+                                                              : terminal.hostWritableStatusLineDisplay();
+    CHECK(written.grid().lineText(LineOffset { 0 }).starts_with('X'));
+
+    mc.resetReplyData();
+    mc.writeToScreen("\033P$q$}\033\\"); // DECRQSS DECSASD
+    terminal.flushInput();
+    CHECK(e(mc.replyData())
+          == e(std::format("\033P1$r{}$}}\033\\", active == ActiveStatusDisplay::Main ? 0 : 1)));
 }
 
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
