@@ -856,6 +856,37 @@ TEST_CASE("MultiPage.DECRC_restoresWhatDECSCSavedOnItsPage", "[screen]")
     CHECK(terminal.pageAt(PageIndex(2)).grid().lineText(LineOffset(1)) == "  \u2500       ");
 }
 
+TEST_CASE("MultiPage.RIS_and_DECSTR_resetTheSaveBufferPageIncluded", "[screen]")
+{
+    // DEC STD 070 DECSC: "On initialization or reset the values of the save buffer are cleared to the
+    // following state: position.line = 1; position.column = 1; position.page = 1; ...", and "Execution of
+    // Soft Terminal Reset (DECSTR) also causes the Save Buffer to be set to the default values". Received on
+    // the status line too: DEC STD 070's soft_terminal_reset() returns to the main display before it resets
+    // the buffer (ch. 4).
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    auto const reset = GENERATE(std::string_view { "\033c" },                    // RIS
+                                std::string_view { "\033[!p" },                  // DECSTR
+                                std::string_view { "\033[2$~\033[1$}\033[!p" }); // DECSTR on the status line
+    INFO(e(reset));
+
+    SECTION("the page")
+    {
+        mock.writeToScreen("\033[3 P\0337"); // DECSC on page 3
+        mock.writeToScreen(reset);
+        mock.writeToScreen("\0338"); // DECRC
+        CHECK(terminal.cursorPageIndex() == PageIndex(0));
+    }
+
+    SECTION("the position")
+    {
+        mock.writeToScreen("\033[2;3H\0337"); // DECSC at 2;3 on page 1
+        mock.writeToScreen(reset);
+        mock.writeToScreen("\033[4;5H\0338"); // DECRC
+        CHECK(terminal.currentScreen().cursor().position == CellLocation {});
+    }
+}
+
 TEST_CASE("MultiPage.DECCRA_cross_page_copy", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };

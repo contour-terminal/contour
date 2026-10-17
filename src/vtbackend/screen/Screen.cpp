@@ -403,6 +403,8 @@ void Screen::hardReset()
 {
     _grid.reset();
     _cursor = {};
+    // DEC STD 070 DECSC: "On initialization or reset the values of the save buffer are cleared".
+    _savedCursor = {};
     _lastCursorPosition = {};
     _outputStartMarking = OutputStartMarking::Unseen;
     resetProtection();

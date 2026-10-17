@@ -4242,7 +4242,10 @@ class Terminal
     /// DECSC-saved cursor page, kept separately per screen (index 0 = primary, 1 = alternate) so the
     /// two screens' saved cursors never cross. Defaults are each screen's own page, so a DECRC with no
     /// prior DECSC stays put.
-    std::array<PageIndex, 2> _savedCursorPage { PageIndex { 0 }, AlternateScreenPageIndex };
+    std::array<PageIndex, 2> _savedCursorPage = NoSavedCursorPages;
+    /// What _savedCursorPage holds before any DECSC, and after RIS and DECSTR: each screen's own page.
+    static constexpr auto NoSavedCursorPages =
+        std::array<PageIndex, 2> { PageIndex { 0 }, AlternateScreenPageIndex };
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
     gsl::not_null<Screen*> _currentScreen;
