@@ -6424,8 +6424,15 @@ void Terminal::softReset()
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
     _currentScreen->resetSavedCursorState();        // DECSC (Save cursor state)
-    setMode(DECMode::VisibleCursor, true);          // DECTCEM (Text cursor enable)
-    setMode(DECMode::Origin, false);                // DECOM
+    // And the main display's, the page in it too, where DECRC reads the buffer on the page DECSC saved: DEC
+    // STD 070 DECSC, "Execution of Soft Terminal Reset (DECSTR) also causes the Save Buffer to be set to the
+    // default values", position.page = 1 among them. Received on the status line as well, as DEC's
+    // soft_terminal_reset() returns to the main display before it resets the buffer (ch. 4).
+    auto const slot = savedCursorPageSlot();
+    _savedCursorPage[slot] = NoSavedCursorPages[slot];
+    pageAt(_savedCursorPage[slot]).resetSavedCursorState();
+    setMode(DECMode::VisibleCursor, true); // DECTCEM (Text cursor enable)
+    setMode(DECMode::Origin, false);       // DECOM
     // DECLRMM (left/right margin mode). DEC STD 070 lists it among the modes DECSTR resets; turning it
     // off here also restores the horizontal margins to full width and swaps DECSLRM back out for SCOSC
     // (see setMode's LeftRightMargin case), so a later DECSLRM is inert until DECLRMM is set again.
@@ -6609,6 +6616,7 @@ void Terminal::hardReset()
     _cursorPage = PageIndex(0);
     showPage(PageIndex(0));
     _pagesBeforeAlternateScreen = {};
+    _savedCursorPage = NoSavedCursorPages; // DEC STD 070 DECSC: on reset the save buffer's page is 1
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
