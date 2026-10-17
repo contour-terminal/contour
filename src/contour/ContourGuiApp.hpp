@@ -186,6 +186,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       locality by it. Null (the default) reads it once, here: the machine id and
     ///                       the host name. Tests pass a fixed one, so what counts as this machine does
     ///                       not depend on the machine they run on.
+    /// @param fileSystem     Where every session looks up the paths it shows and opens. Borrowed: it must
+    ///                       outlive the app. Null (the default) is this machine's; tests pass an in-memory
+    ///                       one, so that what a path names does not depend on the machine they run on.
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -195,7 +198,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr,
                            std::unique_ptr<session::CommandOutputFiles> commandOutputFiles = nullptr,
                            vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
-                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt);
+                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
+                           core::platform::FileSystem const* fileSystem = nullptr);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -334,9 +338,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The identity read, or handed in, at construction.
     [[nodiscard]] vtbackend::HostIdentity const& hostIdentity() const noexcept { return _hostIdentity; }
 
-    /// Where every session's terminal looks up the paths printed on its screen.
-    /// @return This machine's filesystem.
-    [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept;
+    /// Where every session looks up the paths printed on its screen, and the ones it opens.
+    /// @return The filesystem handed in at construction; this machine's by default.
+    [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept { return _fileSystem; }
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
@@ -470,6 +474,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     vtbackend::TerminalClocks _terminalClocks;
     // Likewise.
     vtbackend::HostIdentity _hostIdentity;
+    // Likewise; borrowed.
+    core::platform::FileSystem const& _fileSystem;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

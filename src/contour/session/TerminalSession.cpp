@@ -1163,12 +1163,14 @@ void TerminalSession::openDocument(std::string_view fileOrUrl)
 
     // A single-letter scheme is a Windows drive letter (e.g. "C:\path"), not a real URL scheme —
     // QUrl otherwise parses "C:" as the scheme and the path never resolves as a local file. Treat
-    // such a value (and a genuinely scheme-less one) as a filesystem path.
+    // such a value (and a genuinely scheme-less one) as a filesystem path -- asked of the app's filesystem,
+    // the one the terminal found the path under the pointer on, not of the disk.
     if (url.scheme().isEmpty() || url.scheme().size() == 1)
     {
-        auto const fileInfo = QFileInfo(text);
-        if (fileInfo.exists())
-            url = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
+        auto const& fileSystem = _app.fileSystem();
+        if (auto const path = core::pathFromUtf8(fileOrUrl); path && fileSystem.exists(*path))
+            url = QUrl::fromLocalFile(
+                platform::toQString(path->is_absolute() ? *path : fileSystem.currentPath() / *path));
     }
 
     openExternally(url, "document", fileOrUrl);

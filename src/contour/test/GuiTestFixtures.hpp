@@ -408,11 +408,13 @@ class TestApp
     ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
     ///                for what a test app gets without one.
     /// @param identity The machine the app's sessions run on. @see testHostIdentity() for the default.
+    /// @param fileSystem Where the app's sessions look up paths; null for this machine's. Borrowed.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
-                     vtbackend::HostIdentity identity = testHostIdentity()):
+                     vtbackend::HostIdentity identity = testHostIdentity(),
+                     core::platform::FileSystem const* fileSystem = nullptr):
         _app(_environment,
              withTestNotifier(std::move(factory)),
              makeRecordingLauncher(),
@@ -421,7 +423,8 @@ class TestApp
              speech ? std::move(speech) : defaultSpeech(),
              makeOutputFiles(),
              clocks(),
-             std::move(identity))
+             std::move(identity),
+             fileSystem)
     {
         char const* argv[] = { "contour", "terminal" };
         // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default
@@ -433,6 +436,13 @@ class TestApp
     /// @param identity The machine the app's sessions run on.
     explicit TestApp(vtbackend::HostIdentity identity):
         TestApp(nullptr, nullptr, nullptr, nullptr, std::move(identity))
+    {
+    }
+
+    /// A test app whose sessions look up paths on @p fileSystem: for a test of what a path names.
+    /// @param fileSystem Where the app's sessions look up paths. Borrowed: it must outlive the app.
+    explicit TestApp(core::platform::FileSystem const& fileSystem):
+        TestApp(nullptr, nullptr, nullptr, nullptr, testHostIdentity(), &fileSystem)
     {
     }
 

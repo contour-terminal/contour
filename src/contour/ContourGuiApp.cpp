@@ -275,7 +275,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer,
                              std::unique_ptr<session::CommandOutputFiles> commandOutputFiles,
                              vtbackend::TerminalClocks terminalClocks,
-                             std::optional<vtbackend::HostIdentity> hostIdentity):
+                             std::optional<vtbackend::HostIdentity> hostIdentity,
+                             core::platform::FileSystem const* fileSystem):
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeStatusLineCommandExecutor()),
@@ -295,6 +296,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _terminalClocks(terminalClocks),
     // Read once, for every session, rather than by each one on the GUI thread as it is built.
     _hostIdentity(hostIdentity ? std::move(*hostIdentity) : thisMachineIdentity()),
+    _fileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(
@@ -305,11 +307,6 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
     link("contour.client", bind(&ContourGuiApp::clientAction, this));
-}
-
-core::platform::FileSystem const& ContourGuiApp::fileSystem() const noexcept
-{
-    return core::platform::NativeFileSystem::instance();
 }
 
 ContourGuiApp::~ContourGuiApp()

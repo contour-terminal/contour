@@ -4650,6 +4650,35 @@ TEST_CASE("TerminalSession: a path a command printed on another machine opens no
     CHECK(capture.contains("Not opening \"doc.txt\": the command that printed it ran on another machine."));
 }
 
+TEST_CASE("TerminalSession: a path under the pointer opens as the app's filesystem names it",
+          "[contour][session][hyperlink]")
+{
+    // The terminal finds the path through the app's filesystem, and opening it asks the same one. Asked of
+    // the disk instead, a path only the app's filesystem holds reached the desktop as a relative URL.
+    namespace actions = contour::actions;
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {
+        core::platform::testing::FileEntry { .path = "/work", .isDirectory = true },
+        core::platform::testing::FileEntry { .path = "/work/doc.txt", .content = "x" },
+    };
+    contour::test::TestApp testApp { fileSystem };
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    auto& launcher = testApp.launcher();
+
+    terminal.setCurrentWorkingDirectory("file:///work");
+    terminal.writeToScreen("open doc.txt now");
+    terminal.sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(6) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    REQUIRE(terminal.pathTextAtMousePosition() == "doc.txt");
+
+    CHECK((*session)(actions::FollowHyperlink {}));
+    REQUIRE(launcher.openedUrls.size() == 1);
+    CHECK(launcher.openedUrls.back() == QUrl::fromLocalFile(QStringLiteral("/work/doc.txt")));
+}
+
 TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the external launcher",
           "[contour][session][hyperlink]")
 {
