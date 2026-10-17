@@ -7843,6 +7843,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSLRM: {
             if (!_terminal->isModeEnabled(DECMode::LeftRightMargin))
                 return ApplyResult::Invalid;
+            if (_terminal->activeStatusDisplay() != ActiveStatusDisplay::Main)
+                return ApplyResult::Ok; // As DECSTBM below.
             auto l = decr(seq.paramOpt<ColumnOffset>(0));
             auto r = decr(seq.paramOpt<ColumnOffset>(1));
             _terminal->setLeftRightMargin(l, r);
@@ -7857,6 +7859,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return r;
         }
         case DECSTBM:
+            // The margins are the main display's. Received on a status line, which keeps none of its own (DEC
+            // STD 070 ch. 14 §2.2) and leaves the main display's state alone (ch. 14 §2), it is ignored, as
+            // xterm drops it there.
+            if (_terminal->activeStatusDisplay() != ActiveStatusDisplay::Main)
+                return ApplyResult::Ok;
             _terminal->setTopBottomMargin(decr(seq.paramOpt<LineOffset>(0)),
                                           decr(seq.paramOpt<LineOffset>(1)));
             moveCursorTo({}, {});

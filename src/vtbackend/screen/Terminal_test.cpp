@@ -1998,6 +1998,32 @@ TEST_CASE("Terminal.DECSSDT.another_type_leaves_the_host_writable_status_line", 
     CHECK(e(mc.replyData()) == e("\033P1$r0$}\033\\"));
 }
 
+TEST_CASE("Terminal.DECSASD.margins_received_on_the_status_line_are_ignored", "[terminal]")
+{
+    // DEC STD 070 ch. 14 §2: "controls which affect some portion of the Main Display do not affect the
+    // contents or the ANSI state of the Status Display", §2.3: "most ANSI control functions received will
+    // affect only the Status Display", and §2.2 keeps no margins among the status line's own state. xterm
+    // drops DECSTBM there.
+    auto const [mode, margins, request, reply] =
+        GENERATE(table<std::string_view, std::string_view, std::string_view, std::string_view>({
+            { "", "\033[2;4r", "r", "\033P1$r1;5r\033\\" },           // DECSTBM
+            { "\033[?69h", "\033[3;6s", "s", "\033P1$r1;20s\033\\" }, // DECSLRM, DECLRMM set
+        }));
+    INFO(e(margins));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen(mode);
+    mc.writeToScreen("\033[2$~\033[1$}AB"); // DECSSDT host-writable, DECSASD: write to it
+    mc.writeToScreen(margins);
+    mc.writeToScreen("C\033[0$}"); // where the status line's cursor was; back to the main display
+    CHECK(terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset { 0 }).starts_with("ABC"));
+
+    mc.resetReplyData();
+    mc.writeToScreen(std::format("\033P$q{}\033\\", request)); // DECRQSS, on the main display
+    terminal.flushInput();
+    CHECK(e(mc.replyData()) == e(reply));
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,
