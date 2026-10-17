@@ -1198,6 +1198,44 @@ TEST_CASE("DECLRP: an unavailable locator sends no other parameter", "[screen]")
     }
 }
 
+TEST_CASE("DECLRP: one report in one-shot mode disables the locator", "[screen]")
+{
+    // DEC STD 070 ch. 13 DECLRP: "If locator reporting has been enabled to one shot mode (DECELR with Ps =
+    // 2), a single locator report (DECLRP) shall reset locator reporting mode to disabled". xterm resets
+    // after every report it sends, the answer to a request (GetLocatorPosition) as a button's
+    // (SendLocatorPosition), and the locator-unavailable one too.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[2;2'z\033[1;3'{"); // DECELR: one shot, in cells; DECSLE: presses and releases
+    pointAt(mock, 2, 3);
+
+    SECTION("the answer to a request")
+    {
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[1;0;3;4;1&w"));
+    }
+
+    SECTION("the answer to a request, the pointer off the grid")
+    {
+        mock.terminal.sendMouseLeaveEvent();
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+    }
+
+    SECTION("a button's report")
+    {
+        mock.resetReplyData();
+        pressAt(mock, MouseButton::Left, 2, 3);
+        CHECK(e(mock.replyData()) == e("\033[2;4;3;4;1&w"));
+    }
+
+    CHECK_FALSE(mock.terminal.locatorState().enabled);
+    mock.resetReplyData();
+    mock.writeToScreen("\033['|");
+    CHECK(e(mock.replyData()) == e("\033[0&w"));
+}
+
 TEST_CASE("DECLRP: the coordinates are in the unit DECELR selected", "[screen]")
 {
     // DEC STD 070 ch. 13: "The parameter values Pr, Pc, and Pp, are expressed in the units selected by the
