@@ -2003,7 +2003,7 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
         REQUIRE(pane->scrollbarMarks().size() == 1);
 
         terminal.writeToScreen("\033[?64l");
-        terminal.setPage(vtbackend::PageIndex(3), /*moveCursorHome*/ true);
+        terminal.setPage(vtbackend::PageIndex(3), vtbackend::PageCursorPlacement::Home);
         pane->refreshScrollbarMarks();
         CHECK(pane->scrollbarMarks().size() == 1);
     }
@@ -2016,9 +2016,9 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
         pane->refreshScrollbarMarks();
         REQUIRE(pane->scrollbarMarks().size() == 1);
 
-        terminal.setPage(vtbackend::PageIndex(3), /*moveCursorHome*/ true);
+        terminal.setPage(vtbackend::PageIndex(3), vtbackend::PageCursorPlacement::Home);
         terminal.writeToScreen("\033[?64l");
-        terminal.setPage(vtbackend::PageIndex(0), /*moveCursorHome*/ false);
+        terminal.setPage(vtbackend::PageIndex(0), vtbackend::PageCursorPlacement::PagesOwn);
         REQUIRE(terminal.isPrimaryScreen());
         pane->refreshScrollbarMarks();
         CHECK(pane->scrollbarMarks().isEmpty());

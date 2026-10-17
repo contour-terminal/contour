@@ -2016,7 +2016,7 @@ TEST_CASE("Folding.terminal.foldingFollowsTheDISPLAYEDPage", "[folding]")
     SECTION("another page on display folds nothing")
     {
         // DECPCCM is set, so the display follows the cursor onto page 1.
-        mc.terminal.setPage(PageIndex(1), /*moveCursorHome*/ true);
+        mc.terminal.setPage(PageIndex(1), PageCursorPlacement::Home);
         REQUIRE_FALSE(mc.terminal.foldingAppliesToDisplayedPage());
         REQUIRE_FALSE(mc.terminal.foldState().empty()); // still collapsed, just not the page shown
 
@@ -2030,7 +2030,7 @@ TEST_CASE("Folding.terminal.foldingFollowsTheDISPLAYEDPage", "[folding]")
         // case that separates the two predicates -- isAlternateScreen() reports true here, because it
         // asks about the cursor, while the render pass goes on folding the page it is drawing.
         mc.writeToScreen("\033[?64l"); // DECPCCM off
-        mc.terminal.setPage(PageIndex(3), /*moveCursorHome*/ true);
+        mc.terminal.setPage(PageIndex(3), PageCursorPlacement::Home);
 
         REQUIRE(mc.terminal.isAlternateScreen());
         REQUIRE(mc.terminal.foldingAppliesToDisplayedPage());

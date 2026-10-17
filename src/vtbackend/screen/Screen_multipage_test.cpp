@@ -751,6 +751,41 @@ TEST_CASE("MultiPage.alternate_screen_compatibility", "[screen]")
     CHECK(terminal.primaryScreen().renderMainPageText() == "Prima\n     \n     \n");
 }
 
+TEST_CASE("MultiPage.pageMovementStaysOnTheAlternateScreen", "[screen]")
+{
+    // DEC STD 070 defines no alternate screen. Windows Terminal, the one terminal with both VT420 pages and
+    // an alternate buffer, keeps page movement on it: PageManager::MoveTo returns at once outside the main
+    // buffer, and NextPage/PrecedingPage still move the cursor home after it. That is DEC's page movement on
+    // a display of one page: NP and PP home the cursor, PPA, PPR and PPB change nothing but the page, which
+    // stays.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    auto const [movement, column] = GENERATE(table<std::string_view, int>({
+        { "\033[U", 0 },   // NP
+        { "\033[V", 0 },   // PP
+        { "\033[3 P", 3 }, // PPA 3
+        { "\033[ Q", 3 },  // PPR
+        { "\033[ R", 3 },  // PPB
+    }));
+    INFO(e(movement));
+    mock.writeToScreen("main\033[?1049halt");
+    REQUIRE(terminal.cursorPageIndex() == AlternateScreenPageIndex);
+
+    mock.writeToScreen(movement);
+    CHECK(terminal.cursorPageIndex() == AlternateScreenPageIndex);
+    CHECK(terminal.displayedPageIndex() == AlternateScreenPageIndex);
+    CHECK(terminal.currentScreen().cursor().position
+          == CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) });
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "alt");
+
+    mock.writeToScreen("\033[?1049l");
+    CHECK(terminal.cursorPageIndex() == PageIndex(0));
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "main");
+}
+
 TEST_CASE("MultiPage.DECPCCM_reset.theAlternateScreenIsShownWhileInUse", "[screen]")
 {
     // DECPCCM governs page movement (NP, PP, PPA, PPR, PPB). The alternate screen is no DEC page, and

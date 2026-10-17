@@ -6701,7 +6701,20 @@ void Terminal::publishAnimationsEnd() noexcept
                          std::memory_order_relaxed);
 }
 
-void Terminal::setPage(PageIndex target, bool moveCursorHome)
+void Terminal::movePage(int page, PageCursorPlacement placement)
+{
+    // The alternate screen is a display of one page, so page movement stays on it: NP and PP move home there,
+    // and PPA, PPR and PPB leave the cursor where it is.
+    if (isAlternateScreenBufferInUse())
+    {
+        if (placement == PageCursorPlacement::Home)
+            pageAt(_cursorPage).moveCursorTo(LineOffset(0), ColumnOffset(0));
+        return;
+    }
+    setPage(PageIndex(std::clamp(page, 0, AlternateScreenPageIndex.value - 1)), placement);
+}
+
+void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
 {
     // Clamp target to valid range.
     auto const clamped = PageIndex(std::clamp(target.value, 0, MaxPageCount - 1));
@@ -6762,8 +6775,11 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
     // Ensure correct screen buffer size for the buffer we've just switched to.
     applyPageSizeToCurrentBuffer();
 
-    if (moveCursorHome)
-        _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
+    switch (placement)
+    {
+        case PageCursorPlacement::PagesOwn: break;
+        case PageCursorPlacement::Home: _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0)); break;
+    }
 
     bufferChanged(_currentScreenType);
 }
@@ -6793,12 +6809,13 @@ void Terminal::restoreCursorPage()
 {
     auto const saved = _savedCursorPage[savedCursorPageSlot()];
     if (saved != _cursorPage)
-        setPage(saved, false);
+        setPage(saved, PageCursorPlacement::PagesOwn);
 }
 
 void Terminal::setScreen(ScreenType type)
 {
-    setPage(type == ScreenType::Primary ? PageIndex(0) : AlternateScreenPageIndex, false);
+    setPage(type == ScreenType::Primary ? PageIndex(0) : AlternateScreenPageIndex,
+            PageCursorPlacement::PagesOwn);
 }
 
 void Terminal::applyPageSizeToCurrentBuffer()

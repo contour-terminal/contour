@@ -2192,42 +2192,27 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
 
 void Screen::nextPage(int count)
 {
-    // NP: Move forward by count pages, cursor goes to home position.
-    // Clamp within DEC page range [0, MaxPageCount-2], never entering the alternate screen page.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value + count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, true);
+    _terminal->movePage(_terminal->cursorPageIndex().value + count, PageCursorPlacement::Home);
 }
 
 void Screen::previousPage(int count)
 {
-    // PP: Move backward by count pages, cursor goes to home position.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value - count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, true);
+    _terminal->movePage(_terminal->cursorPageIndex().value - count, PageCursorPlacement::Home);
 }
 
 void Screen::pagePositionAbsolute(int pageNumber)
 {
-    // PPA: Move to absolute 1-based page number, preserve cursor position.
-    auto const target = PageIndex(std::clamp(pageNumber - 1, 0, MaxPageCount - 2));
-    _terminal->setPage(target, false);
+    _terminal->movePage(pageNumber - 1, PageCursorPlacement::PagesOwn);
 }
 
 void Screen::pagePositionRelative(int count)
 {
-    // PPR: Move forward by count pages, preserve cursor position.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value + count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, false);
+    _terminal->movePage(_terminal->cursorPageIndex().value + count, PageCursorPlacement::PagesOwn);
 }
 
 void Screen::pagePositionBackward(int count)
 {
-    // PPB: Move backward by count pages, preserve cursor position.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value - count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, false);
+    _terminal->movePage(_terminal->cursorPageIndex().value - count, PageCursorPlacement::PagesOwn);
 }
 
 void Screen::requestDisplayedExtent()
