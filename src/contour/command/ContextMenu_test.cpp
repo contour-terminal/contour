@@ -60,6 +60,7 @@ namespace
                                            .output = OutputPresence::Present,
                                            .commandLine = CommandLinePresence::Present },
         .livePrompt = PromptPresence::Present,
+        .lastCommandLine = CommandLinePresence::Present,
         .activeProfile = "dark",
         .profileNames = { "dark", "light", "work" },
     };
@@ -111,6 +112,7 @@ TEST_CASE("ContextMenu.lastCommand.hiddenWithoutShellIntegration", "[contextmenu
     {
         state.hasLastCommand = true;
         auto const menu = buildContextMenu(state);
+        CHECK(find(menu, "Copy Last Command") != nullptr);
         CHECK(find(menu, "Copy Last Prompt") != nullptr);
         CHECK(find(menu, "Copy Last Command Output") != nullptr);
         CHECK(find(menu, "Copy Last Prompt and Output") != nullptr);
@@ -122,10 +124,31 @@ TEST_CASE("ContextMenu.lastCommand.hiddenWithoutShellIntegration", "[contextmenu
         // simply never told the terminal where one command ended and the next began.
         state.hasLastCommand = false;
         auto const menu = buildContextMenu(state);
+        CHECK(find(menu, "Copy Last Command") == nullptr);
         CHECK(find(menu, "Copy Last Prompt") == nullptr);
         CHECK(find(menu, "Copy Last Command Output") == nullptr);
         CHECK(find(menu, "Copy Last Prompt and Output") == nullptr);
     }
+}
+
+TEST_CASE("ContextMenu.lastCommand.copiesTheCommandLineWithoutThePrompt", "[contextmenu][semanticblocks]")
+{
+    // "Copy Last Prompt" copies the prompt's lines, PS1 and all; this row copies the bare command line.
+    auto state = fullyEnabledState();
+    auto const menu = buildContextMenu(state);
+    auto const* const row = find(menu, "Copy Last Command");
+    REQUIRE(row != nullptr);
+    CHECK(row->enabled);
+    REQUIRE(std::holds_alternative<actions::CopyCommandLine>(row->action));
+    auto const& action = std::get<actions::CopyCommandLine>(row->action);
+    CHECK(action.target == vtbackend::CommandBlockTarget::Last);
+    CHECK(action.block == vtbackend::CommandBlockId {});
+
+    // A shell that reports no command line, and none was recovered: nothing to copy, so no row.
+    state.lastCommandLine = CommandLinePresence::Absent;
+    auto const noCommandLine = buildContextMenu(state);
+    CHECK(find(noCommandLine, "Copy Last Command") == nullptr);
+    CHECK(find(noCommandLine, "Copy Last Prompt") != nullptr);
 }
 
 TEST_CASE("ContextMenu.hyperlink.onlyUnderTheCursor", "[contextmenu]")
