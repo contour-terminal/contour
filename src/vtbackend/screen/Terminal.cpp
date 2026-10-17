@@ -6357,17 +6357,19 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         // keeps its alternate buffer outside paging.
         if (_displayedPage != _cursorPage)
             showPage(_cursorPage);
-        if (behavior->carryCursor)
+        if (behavior->carriesCursorIn)
             _currentScreen->adoptCursor(carried);
-        if (behavior->clearOnEnter)
+        if (behavior->clearsOnEntry)
             clearScreen();
     }
     else if (!enable && isAlternateScreenBufferInUse())
     {
         // xterm's FromAlternate: optionally erase the alternate page first (ED 2 leaves the cursor put),
-        // then switch back, carrying the cursor across. Back to the page the cursor came from: DEC STD
-        // 070's DECSC saves the page with the active position, and Windows Terminal's ?1049 restores it.
-        if (behavior->clearOnExit)
+        // then switch back, carrying the cursor across (47, 1047; on 1049 the page's own cursor is the
+        // restore of the cursor saved on the way in). Back to the page the cursor came from, as Windows
+        // Terminal's ?1049 restores the page it saved with the cursor: DEC STD 070 defines no alternate
+        // screen, and its DECSC, which saves the page with the active position, is the rule extended here.
+        if (behavior->clearsOnExit)
             clearScreen();
         auto const carried = _currentScreen->cursor();
         setPage(_pagesBeforeAlternateScreen.cursor, PageCursorPlacement::PagesOwn);
@@ -6376,7 +6378,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         // while DECPCCM is set.
         if (!isModeEnabled(DECMode::PageCursorCoupling))
             showPage(_pagesBeforeAlternateScreen.displayed);
-        if (behavior->carryCursor)
+        if (behavior->carriesCursorOut)
             _currentScreen->adoptCursor(carried);
     }
 

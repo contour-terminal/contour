@@ -388,7 +388,7 @@ TEST_CASE("MultiPage.DECPCCM_set.theViewportScrollsAsItDid", "[screen]")
 
     SECTION("the alternate screen comes on display: the window comes back inside it")
     {
-        mock.writeToScreen("\033[?1049hfull screen");
+        mock.writeToScreen("\033[?1049h\033[Hfull screen");
         CHECK(terminal.viewport().scrollingDisabled());
         CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
         terminal.refreshRenderBuffer();
@@ -769,7 +769,7 @@ TEST_CASE("MultiPage.pageMovementStaysOnTheAlternateScreen", "[screen]")
         { "\033[ R", 3 },  // PPB
     }));
     INFO(e(movement));
-    mock.writeToScreen("main\033[?1049halt");
+    mock.writeToScreen("main\033[?1049h\033[Halt");
     REQUIRE(terminal.cursorPageIndex() == AlternateScreenPageIndex);
 
     mock.writeToScreen(movement);
