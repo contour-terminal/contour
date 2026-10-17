@@ -18,9 +18,11 @@ namespace vtpty
 
 SystemdScopePlacement::SystemdScopePlacement(SystemdScopeConfig config,
                                              ScopeBusFactory connectBus,
+                                             ProcessCgroupReader readCgroup,
                                              core::platform::IClock const& clock):
     _config { std::move(config) },
     _connectBus { std::move(connectBus) },
+    _readCgroup { std::move(readCgroup) },
     _clock { clock },
     _breaker { _config.breakerCooldown }
 {
@@ -137,18 +139,33 @@ std::expected<void, ScopeError> SystemdScopePlacement::request(ParkedChild const
                                                                ScopeProtocol protocol)
 {
     auto const ownPid = ::getpid();
-    return _bus->startScope(
-        ScopeRequest {
-            .unitName =
-                std::format("{}-{}-{}-{}.scope", _config.unitPrefix, ownPid, child.pid(), ++_sequence),
-            .slice = _config.slice,
-            .description = std::format("Contour session (contour pid {})", ownPid),
-            .protocol = protocol,
-            .pid = child.pid(),
-            .pidfd = child.pidfd(),
-            .memoryLimit = _config.memoryLimit,
-        },
-        _config.deadline);
+    auto const scope = ScopeRequest {
+        .unitName = std::format("{}-{}-{}-{}.scope", _config.unitPrefix, ownPid, child.pid(), ++_sequence),
+        .slice = _config.slice,
+        .description = std::format("Contour session (contour pid {})", ownPid),
+        .protocol = protocol,
+        .pid = child.pid(),
+        .pidfd = child.pidfd(),
+        .memoryLimit = _config.memoryLimit,
+    };
+    auto const outcome = _bus->startScope(scope, _config.deadline);
+    // A late answer is still an answer. The job may have finished in time and its answer arrived late,
+    // or not at all; the kernel knows. A child that runs in its scope was placed, and the bus that
+    // placed it is not to be held off.
+    if (!outcome && outcome.error() == ScopeError::TimedOut && runsIn(child.pid(), scope.unitName))
+    {
+        ptyPlacementLog()("Session process {} runs in {}, though systemd did not answer in time.",
+                          child.pid(),
+                          scope.unitName);
+        return {};
+    }
+    return outcome;
+}
+
+bool SystemdScopePlacement::runsIn(int pid, std::string_view unit) const
+{
+    auto const cgroup = _readCgroup(pid);
+    return cgroup && isInUnit(*cgroup, unit);
 }
 
 void SystemdScopePlacement::report(ParkedChild const& child, ScopeError error)

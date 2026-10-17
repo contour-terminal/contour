@@ -51,6 +51,9 @@ out-of-memory the kernel picks a session's process before Contour.
   broker and then never dispatched -- every request would time out although systemd placed the child.
 - **A wedged bus costs one deadline (1 s), not one per tab**: the breaker skips requests for 30 s,
   then lets one trial request decide.
+- **A late answer is still an answer.** When a request runs into its deadline, the kernel is asked
+  where the child runs (`/proc/<pid>/cgroup`, through an injected reader). A child already in the
+  scope it asked for was placed: no fault, and the breaker stays closed.
 
 ## Testing
 

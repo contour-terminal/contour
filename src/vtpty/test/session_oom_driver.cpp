@@ -12,6 +12,7 @@
 ///   session_oom_driver --idle                     prints its cgroup, then waits to be killed
 
 #include <vtpty/Process.hpp>
+#include <vtpty/ProcessCgroup.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/SdBusScopeBus.hpp>
 #include <vtpty/SystemdScopePlacement.hpp>
@@ -28,13 +29,11 @@
 #include <expected>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <print>
 #include <ranges>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -68,8 +67,7 @@ constexpr auto RequestsPerPlacement = 2;
 /// Prints this process's cgroup, as /proc tells it.
 void printCgroup()
 {
-    // Streamed: /proc reports its files as empty, so a read sized by the file's size gets nothing.
-    std::print("{}", (std::ostringstream {} << std::ifstream { "/proc/self/cgroup" }.rdbuf()).str());
+    std::print("{}", vtpty::readProcessCgroup(::getpid()).value_or(""));
     std::fflush(stdout);
 }
 
@@ -236,6 +234,7 @@ int reportPlacements(std::string_view unitPrefix)
                     return std::unexpected(bus.error());
                 return std::make_unique<RecordingScopeBus>(std::move(*bus), log);
             },
+            vtpty::readProcessCgroup,
             clock);
         for (auto const request: std::views::iota(1, RequestsPerPlacement + 1))
         {
