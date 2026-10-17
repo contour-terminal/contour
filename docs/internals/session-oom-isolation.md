@@ -44,8 +44,11 @@ out-of-memory the kernel picks a session's process before Contour.
   first session, with every signal blocked: the daemon waits for `SIGTERM` with `sigwait()`.
 - **A child that exited while queued is not asked about.** Its pid may name another process by
   then; the pidfd says whether it is gone.
-- **Each request listens for its own unit's `JobRemoved` only**, through a match filtered on the
-  unit and removed afterwards; nothing queues up on the connection between spawns.
+- **Each request listens for `JobRemoved` only while it lasts**, through a match removed afterwards,
+  and picks its own unit's job out; nothing queues up on the connection between spawns. The match
+  must not name the unit: sd-bus matches `argN` only up to the first argument that is not a string,
+  and `JobRemoved` begins with the job's number, so an `arg2=` match is routed to Contour by the
+  broker and then never dispatched -- every request would time out although systemd placed the child.
 - **A wedged bus costs one deadline (1 s), not one per tab**: the breaker skips requests for 30 s,
   then lets one trial request decide.
 
@@ -54,4 +57,7 @@ out-of-memory the kernel picks a session's process before Contour.
 `vtpty_test "[placement]"` covers the gate, the breaker and the worker through a fake `ScopeBus`.
 `vtpty_session_oom_isolation` (CTest label `systemd`) proves the requirement under a real user
 manager: a driver running as a unit with `OOMPolicy=stop` must end in `oom-kill` without placement
-and in `success` with it. CI runs it under a lingering user session and fails if it skipped.
+and in `success` with it. It also places a first and a later child through fresh placements and
+requires systemd's answer to each to be heard -- systemd moves the child whether or not Contour hears
+it, so the hog's cgroup alone cannot tell. CI runs it under a lingering user session and fails if it
+skipped.

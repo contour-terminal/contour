@@ -127,15 +127,16 @@ std::expected<void, ScopeError> SdBusScopeBus::startScope(ScopeRequest const& re
 {
     auto const until = _clock.now() + deadline;
 
-    // Hear about this unit's job only, and only for as long as this request lasts. Unfiltered, every
-    // JobRemoved systemd broadcasts while some other client subscribes would queue up on this
-    // connection between spawns. Installed asynchronously: the bus handles it before the call below.
-    auto const rule =
-        std::format("type='signal',sender='{}',path='{}',interface='{}',member='JobRemoved',arg2='{}'",
-                    SystemdService,
-                    SystemdObject,
-                    ManagerInterface,
-                    request.unitName);
+    // Hear about jobs only for as long as this request lasts: a standing match would let every
+    // JobRemoved systemd broadcasts while some other client subscribes queue up on this connection
+    // between spawns. jobRemoved() picks this unit's job out. The rule cannot do that itself: sd-bus
+    // matches argN only up to the first argument that is not a string, and JobRemoved's first is the
+    // job's number, so a match on the unit (arg2) is routed here by the broker and then never
+    // dispatched. Installed asynchronously: the bus handles it before the call below.
+    auto const rule = std::format("type='signal',sender='{}',path='{}',interface='{}',member='JobRemoved'",
+                                  SystemdService,
+                                  SystemdObject,
+                                  ManagerInterface);
     sd_bus_slot* rawSlot = nullptr;
     if (auto const added =
             sd_bus_add_match_async(_bus.get(), &rawSlot, rule.c_str(), &onJobRemoved, nullptr, this);
