@@ -8,6 +8,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <future>
+#include <mutex>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace vtbackend;
@@ -138,4 +142,39 @@ TEST_CASE("RenderBuffer.clear.keepsTheStickyHeadersStorage", "[renderbuffer][sti
     CHECK(next.chip.empty());
     CHECK(next.cells.data() == storage);
     CHECK(next.cells.capacity() == capacity);
+}
+
+namespace
+{
+/// Whether a thread other than the caller finds @p lock taken: a thread may not try a mutex it owns.
+/// @param lock The front buffer's reader lock.
+/// @return true while someone holds it.
+[[nodiscard]] bool heldElsewhere(std::mutex& lock)
+{
+    return std::async(std::launch::async,
+                      [&lock] {
+                          if (!lock.try_lock())
+                              return true;
+                          lock.unlock();
+                          return false;
+                      })
+        .get();
+}
+} // namespace
+
+TEST_CASE("RenderBufferRef.isMovedNotCopied", "[renderbuffer]")
+{
+    // A reference holds the front buffer's reader lock until it goes. A copy would let two references go and
+    // unlock it twice; a moved-from one lets go of nothing.
+    static_assert(!std::is_copy_constructible_v<RenderBufferRef>);
+    static_assert(!std::is_copy_assignable_v<RenderBufferRef>);
+    static_assert(std::is_nothrow_move_constructible_v<RenderBufferRef>);
+
+    auto buffers = RenderDoubleBuffer {};
+    {
+        auto reference = buffers.frontBuffer();
+        auto const moved = std::move(reference);
+        CHECK(heldElsewhere(buffers.readerLock));
+    }
+    CHECK_FALSE(heldElsewhere(buffers.readerLock));
 }
