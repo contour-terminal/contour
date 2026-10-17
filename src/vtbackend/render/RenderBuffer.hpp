@@ -12,10 +12,9 @@
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/grid/Line.hpp>
 
-#include <gsl/pointers>
-
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -260,22 +259,22 @@ struct RenderBuffer
     RenderStickyHeader _retiredStickyHeader {};
 };
 
-/// Lock-guarded handle to a read-only RenderBuffer object.
+/// Lock-guarded handle to a read-only RenderBuffer object: holds the buffer's reader lock for as long as it
+/// lives. Move-only, as the lock is: a copy would unlock it a second time.
 ///
 /// @see RenderBuffer
 struct RenderBufferRef
 {
-    gsl::not_null<RenderBuffer const*> buffer;
-    gsl::not_null<std::mutex*> guard;
+    /// Takes @p lock, which the reference holds until it goes.
+    /// @param buf The buffer to read.
+    /// @param lock The buffer's reader lock.
+    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): _buffer { buf }, _lock { lock } {}
 
-    [[nodiscard]] RenderBuffer const& get() const noexcept { return *buffer; }
+    [[nodiscard]] RenderBuffer const& get() const noexcept { return _buffer.get(); }
 
-    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): buffer { &buf }, guard { &lock }
-    {
-        guard->lock();
-    }
-
-    ~RenderBufferRef() { guard->unlock(); }
+  private:
+    std::reference_wrapper<RenderBuffer const> _buffer;
+    std::unique_lock<std::mutex> _lock;
 };
 
 /// Reflects the current state of a RenderDoubleBuffer object.
