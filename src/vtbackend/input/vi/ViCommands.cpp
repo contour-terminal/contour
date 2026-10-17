@@ -600,7 +600,8 @@ CellLocation ViCommands::next(CellLocation location) const noexcept
 
 CellLocation ViCommands::findMatchingPairFrom(CellLocation location) const noexcept
 {
-    auto const& cell = _terminal->primaryScreen().at(cursorPosition);
+    // The screen the match is then searched on (compareCellTextAt), which is not always the primary one.
+    auto const& cell = _terminal->currentScreen().at(cursorPosition);
     if (cell.codepointCount() != 1)
         return location;
 
