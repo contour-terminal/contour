@@ -231,7 +231,11 @@ std::shared_ptr<ProcessPlacement> makeSystemdScopePlacement(SystemdScopeConfig c
 {
     auto& clock = core::platform::defaultSteadyClock();
     return std::make_shared<SystemdScopePlacement>(
-        std::move(config), [&clock] { return SdBusScopeBus::connect(clock); }, readProcessCgroup, clock);
+        std::move(config),
+        [&clock] { return SdBusScopeBus::connect(clock); },
+        readProcessCgroup,
+        logPlacement,
+        clock);
 }
 
 } // namespace vtpty

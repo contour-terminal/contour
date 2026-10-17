@@ -42,6 +42,31 @@ namespace
 } // namespace
 #endif
 
+namespace
+{
+    /// @return Whether the process behind @p pidfd has exited; false when there is no pidfd to ask.
+    [[nodiscard]] bool hasProcessExited([[maybe_unused]] OwnedFd const& pidfd) noexcept
+    {
+#if defined(__linux__) && defined(SYS_pidfd_send_signal)
+        // Signal 0 checks without sending; a pidfd answers ESRCH once its process has exited, reaped
+        // or not, and never for a process that merely reuses the pid.
+        return pidfd.isOpen() && ::syscall(SYS_pidfd_send_signal, pidfd.get(), 0, nullptr, 0) < 0
+               && errno == ESRCH;
+#else
+        return false;
+#endif
+    }
+} // namespace
+
+UnplacedChild::UnplacedChild(int pid, OwnedFd pidfd) noexcept: _pid { pid }, _pidfd { std::move(pidfd) }
+{
+}
+
+bool UnplacedChild::hasExited() const noexcept
+{
+    return hasProcessExited(_pidfd);
+}
+
 ParkedChild::ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate) noexcept:
     _pid { pid }, _pidfd { std::move(pidfd) }, _gate { std::move(gate) }
 {
@@ -54,14 +79,14 @@ ParkedChild::~ParkedChild()
 
 bool ParkedChild::hasExited() const noexcept
 {
-#if defined(__linux__) && defined(SYS_pidfd_send_signal)
-    // Signal 0 checks without sending; a pidfd answers ESRCH once its process has exited, reaped or
-    // not, and never for a process that merely reuses the pid.
-    return _pidfd.isOpen() && ::syscall(SYS_pidfd_send_signal, _pidfd.get(), 0, nullptr, 0) < 0
-           && errno == ESRCH;
-#else
-    return false;
-#endif
+    return hasProcessExited(_pidfd);
+}
+
+UnplacedChild ParkedChild::releaseUnplaced() noexcept
+{
+    auto unplaced = UnplacedChild { _pid, std::move(_pidfd) };
+    release();
+    return unplaced;
 }
 
 void ParkedChild::release() noexcept

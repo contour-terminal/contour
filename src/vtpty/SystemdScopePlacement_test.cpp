@@ -8,8 +8,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <expected>
@@ -22,11 +25,17 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include <fcntl.h>
 #include <unistd.h>
+
+#ifdef __linux__
+    #include <sys/syscall.h>
+    #include <sys/wait.h>
+#endif
 
 using namespace std::chrono_literals;
 using vtpty::ScopeError;
@@ -60,6 +69,8 @@ struct BusScript
     std::deque<Outcome> outcomes; ///< One per request, in order; success once empty.
     AfterTimeout afterTimeout = AfterTimeout::NothingYet;
     std::vector<vtpty::ScopeRequest> requests;
+    std::vector<std::thread::id> requestThreads; ///< The thread each request was made on.
+    std::condition_variable requested;           ///< Told about each request.
     std::map<int, std::string> cgroups; ///< By pid: what /proc/<pid>/cgroup reads once a scope took it.
     std::vector<int> cgroupReads;       ///< The pids the placement asked the kernel about.
     int connectCount = 0;
@@ -68,6 +79,24 @@ struct BusScript
     {
         auto const _ = std::lock_guard { mutex };
         return requests;
+    }
+
+    /// @return The pids requested so far, in order.
+    [[nodiscard]] std::vector<int> requestedPids()
+    {
+        auto const _ = std::lock_guard { mutex };
+        auto pids = std::vector<int> {};
+        for (auto const& request: requests)
+            pids.push_back(request.pid);
+        return pids;
+    }
+
+    /// @return Whether @p count requests have been made, waiting up to ten seconds for them.
+    [[nodiscard]] bool awaitRequests(std::size_t count)
+    {
+        auto lock = std::unique_lock { mutex };
+        return requested.wait_for(
+            lock, std::chrono::seconds { 10 }, [&] { return requests.size() >= count; });
     }
 
     [[nodiscard]] int connectsSoFar()
@@ -93,6 +122,8 @@ class FakeScopeBus final: public vtpty::ScopeBus
     {
         auto const _ = std::lock_guard { _script->mutex };
         _script->requests.push_back(request);
+        _script->requestThreads.push_back(std::this_thread::get_id());
+        _script->requested.notify_all();
         auto const outcome = _script->outcomes.empty() ? Outcome {} : _script->outcomes.front();
         if (!_script->outcomes.empty())
             _script->outcomes.pop_front();
@@ -142,28 +173,108 @@ vtpty::OwnedFd place(vtpty::ProcessPlacement& placement, FakeChild child)
     return std::move(child.waitingEnd);
 }
 
+/// What a placement told, in order. Shared with the test, because the placement tells it on its worker.
+struct ReportLog
+{
+    std::mutex mutex;
+    std::vector<vtpty::PlacementReport> reports;
+
+    [[nodiscard]] std::vector<vtpty::PlacementReport> soFar()
+    {
+        auto const _ = std::lock_guard { mutex };
+        return reports;
+    }
+};
+
+/// @return A reporter that notes every report in @p log.
+vtpty::PlacementReporter recordTo(std::shared_ptr<ReportLog> const& log)
+{
+    return [log](vtpty::PlacementReport const& report) {
+        auto const _ = std::lock_guard { log->mutex };
+        log->reports.push_back(report);
+    };
+}
+
 /// One placement on a fake bus and a hand-moved clock.
 struct Rig
 {
     std::shared_ptr<BusScript> script = std::make_shared<BusScript>();
+    std::shared_ptr<ReportLog> reports = std::make_shared<ReportLog>();
     core::platform::ManualClock clock {};
     vtpty::SystemdScopeConfig config {};
 
     /// @return A placement over this rig's script, configuration and clock.
     [[nodiscard]] vtpty::SystemdScopePlacement placement() const
     {
-        return vtpty::SystemdScopePlacement { config, connectFake(script), readCgroupFrom(script), clock };
+        return vtpty::SystemdScopePlacement {
+            config, connectFake(script), readCgroupFrom(script), recordTo(reports), clock
+        };
     }
 
     /// Moves the clock past the breaker's cooldown.
     void outwaitCooldown() { clock.advance(config.breakerCooldown + std::chrono::seconds { 1 }); }
 };
 
-/// @return A descriptor to stand in for a pidfd.
+/// A cooldown for tests of late placement. While children wait for one, the worker waits the cooldown
+/// out in real time before it looks at the hand-moved clock again; a short one has it notice soon.
+constexpr auto ShortCooldown = std::chrono::milliseconds { 10 };
+
+/// @return A descriptor to stand in for a pidfd: one that says its process is alive.
 vtpty::OwnedFd somePidFd()
 {
     return vtpty::OwnedFd { ::open("/dev/null", O_RDONLY | O_CLOEXEC) };
 }
+
+/// @return A report of @p status for @p pid.
+vtpty::PlacementReport told(int pid,
+                            vtpty::PlacementStatus status,
+                            std::optional<ScopeError> reason = std::nullopt)
+{
+    return vtpty::PlacementReport { .pid = pid, .status = status, .reason = reason };
+}
+
+#ifdef __linux__
+/// A process of this test's own, waiting to be ended: a session process whose tab closes later.
+class StandIn
+{
+  public:
+    StandIn(): _pid { ::fork() }
+    {
+        REQUIRE(_pid >= 0);
+        if (_pid == 0)
+        {
+            ::pause();
+            ::_exit(0);
+        }
+    }
+    ~StandIn() { end(); }
+    StandIn(StandIn const&) = delete;
+    StandIn& operator=(StandIn const&) = delete;
+    StandIn(StandIn&&) = delete;
+    StandIn& operator=(StandIn&&) = delete;
+
+    [[nodiscard]] int pid() const noexcept { return _pid; }
+
+    /// @return A fresh pidfd for it.
+    [[nodiscard]] vtpty::OwnedFd pidfd() const
+    {
+        return vtpty::OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, _pid, 0)) };
+    }
+
+    /// Kills and reaps it, so that its pid is free for reuse.
+    void end() noexcept
+    {
+        if (_pid <= 0)
+            return;
+        ::kill(_pid, SIGKILL);
+        ::waitpid(_pid, nullptr, 0);
+        _pid = -1;
+    }
+
+  private:
+    int _pid;
+};
+#endif
 
 } // namespace
 
@@ -401,4 +512,190 @@ TEST_CASE("SystemdScopePlacement.destroying the placement releases queued childr
     } // however far the worker got, every child must be let go
     for (auto const& end: waiting)
         CHECK(released(end));
+}
+
+TEST_CASE("SystemdScopePlacement.tells what became of every child", "[placement]")
+{
+    using enum vtpty::PlacementStatus;
+    auto const rig = Rig {};
+    rig.script->outcomes.emplace_back(); // placed
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::Refused));
+    {
+        auto placement = rig.placement();
+        CHECK(released(place(placement, fakeChild(1, somePidFd()))));
+        CHECK(released(place(placement, fakeChild(2, somePidFd()))));
+    } // the worker is done telling once the placement is gone
+    CHECK(rig.reports->soFar() == std::vector { told(1, Placed), told(2, Unplaced, ScopeError::Refused) });
+}
+
+TEST_CASE("SystemdScopePlacement.every child the breaker let go unplaced is told, with its pid and why",
+          "[placement]")
+{
+    // Not only the first: each is a session an out-of-memory kill can stop Contour with.
+    using enum vtpty::PlacementStatus;
+    auto const rig = Rig {};
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    {
+        auto placement = rig.placement();
+        for (auto const pid: { 1, 2, 3 })
+            CHECK(released(place(placement, fakeChild(pid, somePidFd()))));
+    }
+    CHECK(rig.script->requestsSoFar().size() == 1);
+    CHECK(rig.reports->soFar()
+          == std::vector { told(1, Deferred, ScopeError::TimedOut),
+                           told(2, Deferred, ScopeError::TimedOut),
+                           told(3, Deferred, ScopeError::TimedOut) });
+}
+
+TEST_CASE("SystemdScopePlacement.a child without a pidfd is not kept for a late placement", "[placement]")
+{
+    // Once it may have exited, nothing would tell whether its pid still names it.
+    using enum vtpty::PlacementStatus;
+    auto rig = Rig {};
+    rig.config.breakerCooldown = ShortCooldown;
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    {
+        auto placement = rig.placement();
+        CHECK(released(place(placement, fakeChild(1))));
+        CHECK(released(place(placement, fakeChild(2))));
+        rig.outwaitCooldown();
+        CHECK(released(place(placement, fakeChild(3))));
+    }
+    CHECK(rig.script->requestedPids() == std::vector { 1, 3 });
+    CHECK(rig.reports->soFar()
+          == std::vector { told(1, Unplaced, ScopeError::TimedOut),
+                           told(2, Unplaced, ScopeError::TimedOut),
+                           told(3, Placed) });
+}
+
+TEST_CASE("SystemdScopePlacement.a burst during an open breaker is placed once the cooldown passed",
+          "[placement]")
+{
+    using enum vtpty::PlacementStatus;
+    auto rig = Rig {};
+    rig.config.breakerCooldown = ShortCooldown;
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    {
+        auto placement = rig.placement();
+        for (auto const pid: { 1, 2, 3, 4 })
+            CHECK(released(place(placement, fakeChild(pid, somePidFd()))));
+        CHECK(rig.script->requestedPids() == std::vector { 1 }); // the rest were held off
+
+        // No new tab needed: the cooldown passing is enough.
+        rig.outwaitCooldown();
+        REQUIRE(rig.script->awaitRequests(5));
+    }
+    CHECK(rig.script->requestedPids() == std::vector { 1, 1, 2, 3, 4 });
+    CHECK(std::ranges::none_of(rig.script->requestThreads,
+                               [](auto const thread) { return thread == std::this_thread::get_id(); }));
+    CHECK(rig.reports->soFar()
+          == std::vector { told(1, Deferred, ScopeError::TimedOut),
+                           told(2, Deferred, ScopeError::TimedOut),
+                           told(3, Deferred, ScopeError::TimedOut),
+                           told(4, Deferred, ScopeError::TimedOut),
+                           told(1, PlacedLate, ScopeError::TimedOut),
+                           told(2, PlacedLate, ScopeError::TimedOut),
+                           told(3, PlacedLate, ScopeError::TimedOut),
+                           told(4, PlacedLate, ScopeError::TimedOut) });
+}
+
+TEST_CASE("SystemdScopePlacement.a still silent bus leaves the deferred children told and waiting",
+          "[placement]")
+{
+    using enum vtpty::PlacementStatus;
+    auto rig = Rig {};
+    rig.config.breakerCooldown = ShortCooldown;
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut)); // the trial
+    {
+        auto placement = rig.placement();
+        CHECK(released(place(placement, fakeChild(1, somePidFd()))));
+        CHECK(released(place(placement, fakeChild(2, somePidFd()))));
+        rig.outwaitCooldown();
+        REQUIRE(rig.script->awaitRequests(2));
+    }
+    // One trial per cooldown, and no word more about children told about already.
+    CHECK(rig.script->requestedPids() == std::vector { 1, 1 });
+    CHECK(
+        rig.reports->soFar()
+        == std::vector { told(1, Deferred, ScopeError::TimedOut), told(2, Deferred, ScopeError::TimedOut) });
+}
+
+TEST_CASE("SystemdScopePlacement.a refused child is not asked about again", "[placement]")
+{
+    using enum vtpty::PlacementStatus;
+    auto rig = Rig {};
+    rig.config.breakerCooldown = ShortCooldown;
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::Refused));
+    {
+        auto placement = rig.placement();
+        CHECK(released(place(placement, fakeChild(1, somePidFd()))));
+        rig.outwaitCooldown();
+        CHECK(released(place(placement, fakeChild(2, somePidFd()))));
+    }
+    CHECK(rig.script->requestedPids() == std::vector { 1, 2 });
+}
+
+#ifdef __linux__
+TEST_CASE("SystemdScopePlacement.a deferred child that exited is not placed late", "[placement]")
+{
+    // Its pid may name another process by now.
+    using enum vtpty::PlacementStatus;
+    auto rig = Rig {};
+    rig.config.breakerCooldown = ShortCooldown;
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    auto closedTab = StandIn {};
+    auto openTab = StandIn {};
+    auto const closed = closedTab.pid();
+    auto const open = openTab.pid();
+    {
+        auto placement = rig.placement();
+        CHECK(released(place(placement, fakeChild(closed, closedTab.pidfd()))));
+        CHECK(released(place(placement, fakeChild(open, openTab.pidfd()))));
+        closedTab.end();
+        rig.outwaitCooldown();
+        REQUIRE(rig.script->awaitRequests(2));
+    }
+    CHECK(rig.script->requestedPids() == std::vector { closed, open });
+    CHECK(rig.reports->soFar()
+          == std::vector { told(closed, Deferred, ScopeError::TimedOut),
+                           told(open, Deferred, ScopeError::TimedOut),
+                           told(closed, Ended),
+                           told(open, PlacedLate, ScopeError::TimedOut) });
+}
+#endif
+
+TEST_CASE("PlacementReport.describe", "[placement]")
+{
+    using enum vtpty::PlacementStatus;
+    using vtpty::ScopeErrorSeverity;
+
+    struct Row
+    {
+        vtpty::PlacementReport report;
+        ScopeErrorSeverity severity;
+        std::string_view mentions;
+    };
+    auto const rows = std::array {
+        Row { told(4242, Placed), ScopeErrorSeverity::Expected, "" },
+        Row { told(4242, Deferred, ScopeError::TimedOut),
+              ScopeErrorSeverity::Fault,
+              vtpty::traitsOf(ScopeError::TimedOut).description },
+        Row { told(4242, Deferred, ScopeError::Unavailable),
+              ScopeErrorSeverity::Expected,
+              vtpty::traitsOf(ScopeError::Unavailable).description },
+        Row { told(4242, PlacedLate, ScopeError::TimedOut), ScopeErrorSeverity::Fault, "after all" },
+        Row { told(4242, Unplaced, ScopeError::Refused),
+              ScopeErrorSeverity::Fault,
+              vtpty::traitsOf(ScopeError::Refused).description },
+        Row { told(4242, Ended), ScopeErrorSeverity::Expected, "ended" },
+    };
+    for (auto const& row: rows)
+    {
+        auto const line = vtpty::describe(row.report);
+        INFO(line.text);
+        CHECK(line.severity == row.severity);
+        CHECK(line.text.contains("4242"));
+        CHECK(line.text.contains(row.mentions));
+    }
 }

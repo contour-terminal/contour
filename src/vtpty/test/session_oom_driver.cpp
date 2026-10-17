@@ -235,6 +235,7 @@ int reportPlacements(std::string_view unitPrefix)
                 return std::make_unique<RecordingScopeBus>(std::move(*bus), log);
             },
             vtpty::readProcessCgroup,
+            vtpty::logPlacement,
             clock);
         for (auto const request: std::views::iota(1, RequestsPerPlacement + 1))
         {

@@ -26,7 +26,15 @@ act on the unit as a whole:
   systemd before 253 knows neither `PIDFDs` nor `OOMPolicy=` on scopes and refuses a request
   carrying either, so the first such refusal switches the connection to `PIDs=` and no
   `OOMPolicy=`. Its scopes do not react to an out-of-memory kill at all, which is what we want.
+  A child released unplaced because the bus fell silent -- its request timed out, or the breaker
+  held requests off -- is placed **late**: once a request may be sent again, the worker asks for a
+  scope for the running process (by pidfd; by pid only where systemd takes no pidfd). What the
+  child started in the meantime stays in Contour's unit. A refusal is not asked again.
 - `NoPlacement` (other platforms, Flatpak, builds without systemd) releases at once.
+
+What became of each child is told through an injected `PlacementReporter`, which Contour logs. Every
+child released unplaced for a fault is logged where a user sees it, with its pid and why -- each one,
+not only the first -- and so is its late placement.
 
 Before parking, the child also sets the `oom_score_adj` its placement supplies -- Contour's own plus 100 -- so in a *global*
 out-of-memory the kernel picks a session's process before Contour.
@@ -50,7 +58,10 @@ out-of-memory the kernel picks a session's process before Contour.
   and `JobRemoved` begins with the job's number, so an `arg2=` match is routed to Contour by the
   broker and then never dispatched -- every request would time out although systemd placed the child.
 - **A wedged bus costs one deadline (1 s), not one per tab**: the breaker skips requests for 30 s,
-  then lets one trial request decide.
+  then lets one trial request decide. Late placements run on the worker, a queued child before
+  them, and one of them may be that trial; a tab never waits for more than one deadline per cooldown.
+- **A deferred child is placed late only while its pidfd says it lives.** One that exited is let go
+  -- its pid may name another process by then -- and one without a pidfd is never kept.
 - **A late answer is still an answer.** When a request runs into its deadline, the kernel is asked
   where the child runs (`/proc/<pid>/cgroup`, through an injected reader). A child already in the
   scope it asked for was placed: no fault, and the breaker stays closed.
