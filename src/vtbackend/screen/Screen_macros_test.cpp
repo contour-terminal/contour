@@ -1093,6 +1093,27 @@ TEST_CASE("DECRQLP: request locator position", "[screen]")
     CHECK(reply.contains("&w"));
 }
 
+TEST_CASE("DECLRP: the page is the page on display", "[screen]")
+{
+    // DEC STD 070 ch. 13: "Pp is the page coordinate of the locator position". The locator points through the
+    // window at the page shown in it -- the page on display, not the cursor's -- and the alternate screen is
+    // page 1, as every page-number report names it.
+    auto const [setup, page] = GENERATE(table<std::string_view, int>({
+        { "", 1 },
+        { "\033[3 P\033[?64l\033[1 P", 3 }, // page 3 on display, the cursor on page 1
+        { "\033[3 P\033[?1049h", 1 },       // the alternate screen, entered from page 3
+    }));
+    INFO(e(setup));
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen(setup);
+    mock.writeToScreen("\033[1;2'z"); // DECELR: reports on, in character cells
+    pointAt(mock, 2, 3);
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033['|"); // DECRQLP
+    CHECK(e(mock.replyData()) == e(std::format("\033[1;0;3;4;{}&w", page)));
+}
+
 TEST_CASE("DECELR: soft reset disables locator", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };

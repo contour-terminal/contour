@@ -234,6 +234,47 @@ void printLines(MockTerm<T>& mt, std::string_view prefix, int count)
     mt.writeToScreen(text);
 }
 
+/// Moves the pointer over @p column of row @p line, as hovering would.
+/// @param mt     The terminal.
+/// @param line   The screen row.
+/// @param column The column.
+/// @param pixels Where that is in device pixels, from the grid's top left.
+template <typename T = vtpty::MockPty>
+void pointAt(MockTerm<T>& mt, int line, int column, PixelCoordinate pixels = {})
+{
+    mt.terminal.sendMouseMoveEvent(Modifier::None,
+                                   CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) },
+                                   pixels,
+                                   /*uiHandledHint=*/false);
+}
+
+/// Presses @p button over @p column of row @p line.
+/// @param mt     The terminal.
+/// @param button The button.
+/// @param line   The screen row.
+/// @param column The column.
+/// @param pixels Where that is in device pixels, from the grid's top left.
+template <typename T = vtpty::MockPty>
+void pressAt(MockTerm<T>& mt, MouseButton button, int line, int column, PixelCoordinate pixels = {})
+{
+    (void) mt.terminal.sendMousePressEvent(
+        Modifier::None,
+        button,
+        CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) },
+        pixels,
+        /*uiHandledHint=*/false);
+}
+
+/// Releases @p button wherever the pointer is.
+/// @param mt     The terminal.
+/// @param button The button.
+template <typename T = vtpty::MockPty>
+void release(MockTerm<T>& mt, MouseButton button)
+{
+    (void) mt.terminal.sendMouseReleaseEvent(
+        Modifier::None, button, PixelCoordinate {}, /*uiHandledHint=*/false);
+}
+
 /// Moves the cursor to page 3 with DECPCCM reset, so page 0, the primary screen, stays on display: the page
 /// on display and the cursor's part ways. The viewport, the window onto the page on display, still scrolls.
 /// @param mt The terminal, its cursor on page 0.

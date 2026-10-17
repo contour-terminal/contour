@@ -507,19 +507,6 @@ void showOnePageOfTwo(MockTerm<>& mock, std::string_view primary, std::string_vi
     REQUIRE(mock.terminal.cursorPageIndex() != expected);
 }
 
-/// Moves the pointer over @p column of row @p line, as hovering would.
-/// @param mock The terminal.
-/// @param line The screen row.
-/// @param column The column.
-void pointAt(MockTerm<>& mock, int line, int column)
-{
-    mock.terminal.sendMouseMoveEvent(
-        Modifier::None,
-        CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) },
-        PixelCoordinate {},
-        /*uiHandledHint=*/false);
-}
-
 /// Records a finished block that ran on another machine, and stamps row 0 of page 1 with it, as a daemon
 /// snapshot hands a mirror its blocks.
 /// @param mock The terminal.
