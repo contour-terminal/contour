@@ -19,6 +19,7 @@
 #include <vtbackend/vt/SequenceBuilder.hpp>
 
 #include <vtparser/Parser.hpp>
+#include <vtparser/Utf8Decoding.hpp>
 
 #include <vtpty/MockPty.hpp>
 
@@ -2367,23 +2368,22 @@ namespace
                 rowRoom = RowRoom::Filled;
         }
 
+        /// Writes a run of UTF-8 text a character at a time, decoded as the parser decodes text.
+        /// @param chars The run.
         void writeText(std::string_view chars, size_t /*cellCount*/)
         {
-            // implementation of targetScreen.writeText(chars, cellCount)
-            // is buggy and does not work correctly
-            // so we do not use optimization for
-            // ParserEvents::print(chars,cellCount)
-            // but write char by char
-            // TODO fix targetScreen.writeText(chars, cellCount)
-            for (auto c: chars)
-                writeText(c);
+            auto utf8 = unicode::utf8_decoder_state {};
+            for (auto const byte: chars)
+                if (auto const codepoint = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte)))
+                    writeText(*codepoint);
         }
 
         void writeTextEnd() { targetScreen.writeTextEnd(); }
 
         [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
         {
-            // Returning 0 here, because we do not make use of the performance optimized bulk write above.
+            // 0: the parser hands every character to writeText(char32_t), which alone decides what fits on
+            // the row.
             return 0;
         }
     };
