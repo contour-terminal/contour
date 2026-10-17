@@ -3883,6 +3883,26 @@ TEST_CASE("Terminal.indicatorStatusLine.theRightSegmentLeavesTheOnesBeforeItWhol
     CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
 }
 
+TEST_CASE("Terminal.indicatorStatusLine.theMiddleSegmentLeavesTheLeftOneWhole", "[terminal][statusline]")
+{
+    // The middle segment is not shown where it would overlap what the left segment takes, in columns: on a
+    // 20-column line "XY" starts at column 9, "XYZW" at 8. A middle segment not shown takes no columns.
+    auto const [left, middle, right, line] =
+        GENERATE(table<std::string_view, std::string_view, std::string_view, std::string>({
+            { "0123456789abcdef", "XY", "", "0123456789abcdef    " },  // the left segment reaches column 9
+            { "界界界界界", "XY", "", "界界界界界          " },        // so does a CJK one, in columns
+            { "012345678", "XY", "", "012345678XY         " },         // it ends where the middle one starts
+            { "0123456789", "XYZW", "RIGHT", "0123456789     RIGHT" }, // the right one after a hidden middle
+        }));
+    INFO(std::format("left {}, middle {}, right {}", left, middle, right));
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(left, middle, right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
 TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[terminal][history-eviction]")
 {
     // What the issue actually asks for, driven end to end through real OSC 133 sequences.

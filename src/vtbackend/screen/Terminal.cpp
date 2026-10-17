@@ -1355,12 +1355,14 @@ void Terminal::updateIndicatorStatusLine()
 
     if (!definitions.middle.empty() || !definitions.right.empty())
     {
-        // The middle segment is centred, and not shown if it is too wide.
+        // The middle segment is centred, and not shown if it is too wide, or where it would overlap what the
+        // left segment takes.
         auto const middleWidth = widthOf(definitions.middle);
+        auto const middleStart = (columns - middleWidth) / ColumnCount(2);
         if (!definitions.middle.empty()
-            && columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2))
+            && columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2)
+            && taken <= middleStart)
         {
-            auto const middleStart = (columns - middleWidth) / ColumnCount(2);
             _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(middleStart));
             writeToScreenInternal(_indicatorStatusScreen,
                                   serializeToVT(*this, definitions.middle, Styling::Enabled));
