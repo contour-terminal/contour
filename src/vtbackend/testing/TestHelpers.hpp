@@ -446,6 +446,22 @@ template <typename T = vtpty::MockPty>
         .value_or("<error>");
 }
 
+/// The cells the terminal renders on screen row @p row, by column.
+/// @param mock The terminal; its render buffer is refreshed first.
+/// @param row The screen row.
+/// @return The row's render cells, keyed by column.
+template <typename T = vtpty::MockPty>
+[[nodiscard]] std::map<int, RenderCell> renderedRow(MockTerm<T>& mock, LineOffset row)
+{
+    mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+    auto cells = std::map<int, RenderCell> {};
+    for (auto const& cell: buffer.get().cells)
+        if (cell.position.line == row)
+            cells.emplace(unbox<int>(cell.position.column), cell);
+    return cells;
+}
+
 /// @return @p directory as OSC 7 reports it.
 [[nodiscard]] inline std::string fileUrlOf(std::filesystem::path const& directory)
 {

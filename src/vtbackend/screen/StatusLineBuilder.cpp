@@ -306,8 +306,9 @@ namespace
             return result;
         }
 
-        /// What @p describe says about the grid cell under the pointer -- the cell the view shows there,
-        /// which with the view scrolled back is in the history -- or nothing while the pointer is on no cell.
+        /// What @p describe says about the grid cell under the pointer -- the cell the view shows there, a
+        /// cell of the page on display, which with the view scrolled back is in the history -- or nothing
+        /// while the pointer is on no cell.
         /// @param describe Says what the item shows for a cell.
         /// @return The item's text; empty leaves the item out.
         template <typename Describe>
@@ -323,7 +324,7 @@ namespace
         std::string visit(StatusLineDefinitions::CellSGR const&)
         {
             return describePointerCell(
-                [&](CellLocation cell) { return std::format("{}", vt.currentScreen().cellFlagsAt(cell)); });
+                [&](CellLocation cell) { return std::format("{}", vt.displayedPage().cellFlagsAt(cell)); });
         }
 
         [[nodiscard]] std::string visit(StatusLineDefinitions::CellTextUtf32 const&) const
@@ -334,7 +335,7 @@ namespace
         /// The codepoints of @p cell's text, as `U+XXXX`, separated by spaces.
         [[nodiscard]] std::string codepointsOf(CellLocation cell) const
         {
-            auto const cellText = vt.currentScreen().cellTextAt(cell);
+            auto const cellText = vt.displayedPage().cellTextAt(cell);
             auto const cellText32 = unicode::convert_to<char32_t>(std::string_view(cellText));
 
             std::string result;
@@ -352,7 +353,7 @@ namespace
         std::string visit(StatusLineDefinitions::CellTextUtf8 const&)
         {
             return describePointerCell(
-                [&](CellLocation cell) { return core::escape(vt.currentScreen().cellTextAt(cell)); });
+                [&](CellLocation cell) { return core::escape(vt.displayedPage().cellTextAt(cell)); });
         }
 
         std::string visit(StatusLineDefinitions::Clock const&)
@@ -385,7 +386,7 @@ namespace
         std::string visit(StatusLineDefinitions::Hyperlink const&)
         {
             return describePointerCell([&](CellLocation cell) {
-                auto const hyperlink = vt.currentScreen().hyperlinkAt(cell);
+                auto const hyperlink = vt.displayedPage().hyperlinkAt(cell);
                 return hyperlink ? std::format("{}", hyperlink->uri) : std::string {};
             });
         }

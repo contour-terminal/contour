@@ -515,6 +515,21 @@ TEST_CASE("serializeToVT.pointerItemsDescribeTheCellAScrolledViewShowsUnderThePo
           == describing(CellFlags { CellFlag::Italic }, "H", "U+0048", "https://h.example/"));
 }
 
+TEST_CASE("serializeToVT.pointerItemsDescribeTheCellOfThePageOnDisplay", "[statusline]")
+{
+    // DECPCCM reset: page 3 is on display while the cursor writes to page 1, whose top-left cell is A. The
+    // pointer is over page 3's top-left cell.
+    auto mc = MockTerm { PageWithHistory, LineCount(10) };
+    mc.writeToScreen(LinkedRows);
+    mc.writeToScreen("\033[3 P\033]8;;https://p.example/\033\\\033[7mP\033[m\033]8;;\033\\"); // PPA 3, then P
+    mc.writeToScreen("\033[?64l\033[1 P"); // DECPCCM reset, then the cursor back to page 1
+    REQUIRE(mc.terminal.displayedPageIndex() == PageIndex(2));
+
+    mc.terminal.sendMouseMoveEvent(Modifier::None, shownCell(0), PixelCoordinate {}, false);
+    CHECK(pointerItemTexts(mc.terminal)
+          == describing(CellFlags { CellFlag::Inverse }, "P", "U+0050", "https://p.example/"));
+}
+
 TEST_CASE("serializeToVT.clockReadsTheTerminalsWallClockInItsTimeZone", "[statusline]")
 {
     // UTC+05:30, a zone no machine's own clock is likely to share with UTC.
