@@ -7548,9 +7548,16 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
         resizeScreen(_settings.pageSize, nullopt);
 }
 
-void Terminal::selectStatusDisplayByHost(StatusDisplayType type)
+void Terminal::recordStatusDisplaySelection(StatusDisplayType type)
 {
     _selectedStatusDisplayType = type;
+    if (type != StatusDisplayType::HostWritable && _activeStatusDisplay == ActiveStatusDisplay::StatusLine)
+        exitStatusLine();
+}
+
+void Terminal::selectStatusDisplayByHost(StatusDisplayType type)
+{
+    recordStatusDisplaySelection(type);
     switch (type)
     {
         case StatusDisplayType::None:
@@ -7564,9 +7571,7 @@ void Terminal::selectStatusDisplayByHost(StatusDisplayType type)
 
 void Terminal::selectStatusDisplayByUser(StatusDisplayType type)
 {
-    _selectedStatusDisplayType = type;
-    if (type != StatusDisplayType::HostWritable && _activeStatusDisplay == ActiveStatusDisplay::StatusLine)
-        setActiveStatusDisplay(ActiveStatusDisplay::Main);
+    recordStatusDisplaySelection(type);
     setStatusDisplay(type);
 }
 
@@ -7600,6 +7605,12 @@ void Terminal::syncWindowTitleWithDeniedStatusLine()
 
     setWindowTitle(core::trimRight(_hostWritableStatusLineScreen.grid().lineText(LineOffset(0))));
     _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
+}
+
+void Terminal::exitStatusLine()
+{
+    syncWindowTitleWithDeniedStatusLine();
+    setActiveStatusDisplay(ActiveStatusDisplay::Main);
 }
 
 void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)

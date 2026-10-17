@@ -82,6 +82,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -2546,6 +2547,24 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
                           "        status_line:\n"
                           "            sync_to_window_title: true\n");
         session->terminal().writeToScreen("\033[1$}status text\033[0$}");
+        CHECK(session->terminal().windowTitle() == "status text");
+    }
+
+    // Every way out of the status line hands the text over as DECSASD 0 does: DECSSDT selecting another type
+    // exits it (DEC STD 070 ch. 14 §2.3).
+    SECTION("left by a control other than DECSASD 0")
+    {
+        using Exit = std::pair<std::string_view, std::string_view>;
+        auto const [name, exit] =
+            GENERATE(Exit { "DECSSDT 0", "\033[0$~" }, Exit { "DECSSDT 1", "\033[1$~" });
+        INFO("exit: " << name);
+        setSyncToWindowTitle(testApp.app(), true);
+        auto session = makeDisplaylessSession(testApp.app());
+        session->terminal().writeToScreen("\033[2$~");
+        session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
+        session->terminal().writeToScreen("\033[1$}status text");
+        session->terminal().writeToScreen(exit);
+        CHECK(session->terminal().activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
         CHECK(session->terminal().windowTitle() == "status text");
     }
 }

@@ -3243,7 +3243,8 @@ class Terminal
 
     /// DECSSDT: the host selects the type of status display. None and the indicator are shown at once; the
     /// host-writable status line is asked of the frontend, unless shown already, and shown once it allows it.
-    /// Selected it is either way, which DECSASD asks for. @see answerHostWritableStatusLineRequest
+    /// Selected it is either way, which DECSASD asks for. Another type leaves the host-writable status line,
+    /// should DECSASD have selected it (DEC STD 070 ch. 14 §2.3). @see answerHostWritableStatusLineRequest
     /// @param type The type DECSSDT selects.
     void selectStatusDisplayByHost(StatusDisplayType type);
 
@@ -3418,6 +3419,11 @@ class Terminal
     /// window title, should a denial have left that owed and the configuration still ask for it.
     /// @see answerHostWritableStatusLineRequest
     void syncWindowTitleWithDeniedStatusLine();
+
+    /// Leaves the status line for the main display, as DECSASD 0 does -- and every other control that exits
+    /// the status display: on the way out, a denial's text owed to the window title is handed over
+    /// (syncWindowTitleWithDeniedStatusLine), however the line is left.
+    void exitStatusLine();
 
     [[nodiscard]] std::optional<StatusDisplayType> savedStatusDisplayType() const noexcept
     {
@@ -4475,6 +4481,13 @@ class Terminal
         Owed,        ///< Denied; the next DECSASD 0 syncs, if the configuration asks for it then.
     };
     DeniedStatusLineTitle _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
+
+    /// Records @p type as the selected type of status display, the host's or the user's, and leaves the
+    /// host-writable status line for the main display, should DECSASD have selected it, when @p type is
+    /// another. DEC STD 070 ch. 14 §2.3: "If the Status Display Type is chosen to be something other than
+    /// "Host Writable", the Status Display will be exited".
+    /// @param type The type selected.
+    void recordStatusDisplaySelection(StatusDisplayType type);
 
     /// The type of status display the host's last DECSSDT, or the user since, selected; DECSTR and RIS reset
     /// it. It differs from the type shown, _statusDisplayType, while the host-writable status line waits for

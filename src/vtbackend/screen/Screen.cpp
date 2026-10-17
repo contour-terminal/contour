@@ -8087,10 +8087,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // Selects whether the terminal sends data to the main display or the status line.
             switch (seq.paramOr(0, 0))
             {
-                case 0:
-                    _terminal->syncWindowTitleWithDeniedStatusLine();
-                    _terminal->setActiveStatusDisplay(ActiveStatusDisplay::Main);
-                    break;
+                case 0: _terminal->exitStatusLine(); break;
 
                 case 1:
                     // Only a host-writable status line DECSSDT selected (DEC STD 070 ch. 14 §3 DECSASD).

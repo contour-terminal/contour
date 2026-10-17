@@ -1974,6 +1974,30 @@ TEST_CASE("Terminal.DECSASD.selects_only_a_status_line_DECSSDT_selected", "[term
           == e(std::format("\033P1$r{}$}}\033\\", active == ActiveStatusDisplay::Main ? 0 : 1)));
 }
 
+TEST_CASE("Terminal.DECSSDT.another_type_leaves_the_host_writable_status_line", "[terminal]")
+{
+    // DEC STD 070 ch. 14 §2.3: "If the Status Display Type is chosen to be something other than "Host
+    // Writable", the Status Display will be exited".
+    auto const type =
+        GENERATE(std::string_view { "\033[0$~" }, std::string_view { "\033[1$~" }); // none, indicator
+    INFO(e(type));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033[2$~\033[1$}"); // DECSSDT host-writable, DECSASD: write to it
+    REQUIRE(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+    mc.writeToScreen(type);
+    mc.writeToScreen("X");
+
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset { 0 }).starts_with('X'));
+    CHECK_FALSE(terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset { 0 }).contains('X'));
+
+    mc.resetReplyData();
+    mc.writeToScreen("\033P$q$}\033\\"); // DECRQSS DECSASD
+    terminal.flushInput();
+    CHECK(e(mc.replyData()) == e("\033P1$r0$}\033\\"));
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,
