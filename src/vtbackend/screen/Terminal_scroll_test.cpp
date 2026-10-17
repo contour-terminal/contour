@@ -977,37 +977,67 @@ TEST_CASE("Terminal.cursorMotionAnimation.chains_midanimation", "[terminal]")
     terminal.tick(ClockBase + 100ms);
     terminal.ensureFreshRenderBuffer();
 
-    // Move cursor (start first animation).
-    mc.writeToScreen("A");
+    // A far move, ten columns, started by the frame at 200 ms. A motion lasts at least three frames, 100 ms
+    // at MockTerm's 30 Hz.
+    mc.writeToScreen("\033[1;11H");
     terminal.tick(ClockBase + 200ms);
     terminal.ensureFreshRenderBuffer();
-
-    auto fromAfterFirst = std::optional<vtbackend::CellLocation> {};
     {
-        auto const buf1 = terminal.renderBuffer();
-        REQUIRE(buf1.get().cursor.has_value());
-        fromAfterFirst = buf1.get().cursor->animateFrom;
-        REQUIRE(fromAfterFirst.has_value());
+        auto const frame = terminal.renderBuffer();
+        REQUIRE(frame.get().cursor.has_value());
+        REQUIRE(frame.get().cursor->animateFrom == vtbackend::FractionalCellLocation {});
+        REQUIRE(frame.get().cursor->animationProgress < 1.0f);
     } // Release RenderBufferRef lock before next render cycle.
 
-    // Tick partway through animation (40ms into default 80ms).
-    terminal.tick(ClockBase + 240ms);
-
-    // Chain: move cursor again while animation is still in progress.
-    mc.writeToScreen("B");
-    terminal.tick(ClockBase + 300ms);
+    // Half-way along, the cursor moves on, and the frame at that instant chains: a passive build fills as the
+    // batch ends, the others when asked.
+    terminal.tick(ClockBase + 250ms);
+    mc.writeToScreen("\033[3;5H");
     terminal.ensureFreshRenderBuffer();
 
-    auto const buf2 = terminal.renderBuffer();
-    REQUIRE(buf2.get().cursor.has_value());
-    auto const& cursor = *buf2.get().cursor;
+    auto const frame = terminal.renderBuffer();
+    REQUIRE(frame.get().cursor.has_value());
+    auto const& cursor = *frame.get().cursor;
 
-    // The new animateFrom should be an interpolated position (not the original from-position).
-    CHECK(cursor.animateFrom.has_value());
+    // The chained motion starts from where the first one had got to, strictly between its ends: not from its
+    // start, and not from its end, where a fresh motion would start.
+    REQUIRE(cursor.animateFrom.has_value());
+    CHECK(cursor.animateFrom->line == 0.0f);
+    CHECK(cursor.animateFrom->column > 0.0f);
+    CHECK(cursor.animateFrom->column < 10.0f);
     CHECK(cursor.animationProgress < 1.0f);
-    // The chained from-position should differ from the first animation's from-position,
-    // because it was computed from the interpolated mid-animation point.
-    CHECK(cursor.animateFrom != fromAfterFirst);
+}
+
+TEST_CASE("Terminal.cursorMotionAnimation.aChainStartsWhereTheCursorIsDrawn", "[terminal]")
+{
+    // A moving cursor is drawn part of the way between two cells. A motion chained half-way along starts from
+    // there, not from the whole cell before it, which snapped the drawn cursor back.
+    auto mc = MockTerm { ColumnCount { 20 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+    mc.writeToScreen("\033[1;11H");
+    terminal.tick(ClockBase + 200ms);
+    terminal.ensureFreshRenderBuffer(); // starts the motion from (0, 0) to (0, 10)
+
+    // Where the cursor is drawn at 250 ms, as the renderer interpolates: from + progress * (to - from).
+    terminal.tick(ClockBase + 250ms);
+    auto const progress =
+        terminal.cursorAnimationProgress(CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) });
+    REQUIRE(progress > 0.0f);
+    REQUIRE(progress < 1.0f);
+    auto const drawnColumn = progress * 10.0f;
+
+    mc.writeToScreen("\033[3;5H");
+    terminal.ensureFreshRenderBuffer();
+
+    auto const frame = terminal.renderBuffer();
+    REQUIRE(frame.get().cursor.has_value());
+    auto const& cursor = *frame.get().cursor;
+    REQUIRE(cursor.animateFrom.has_value());
+    CHECK(cursor.animateFrom->line == Catch::Approx(0.0f));
+    CHECK(cursor.animateFrom->column == Catch::Approx(drawnColumn));
 }
 
 TEST_CASE("Terminal.screenTransition.activates_on_screen_switch", "[terminal]")

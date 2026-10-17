@@ -223,6 +223,30 @@ TEST_CASE("Terminal.sendMouseLeaveEvent.hoversNothingUntilThePointerIsBack", "[t
     }
 }
 
+TEST_CASE("Terminal.firstPointerEventOntoTheTopLeftCellHoversItsLink", "[terminal][hyperlink]")
+{
+    // The first pointer event names the pointer's cell, whichever cell that is: the top-left one too, which a
+    // fresh terminal's pointer position reads as before any event.
+    auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033]8;;https://example.com/\033\\link\033]8;;\033\\");
+    auto const topLeft = CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) };
+
+    SECTION("a move")
+    {
+        terminal.sendMouseMoveEvent(Modifier::None, topLeft, vtbackend::PixelCoordinate {}, false);
+    }
+
+    SECTION("a press")
+    {
+        std::ignore = terminal.sendMousePressEvent(
+            Modifier::None, vtbackend::MouseButton::Left, topLeft, vtbackend::PixelCoordinate {}, false);
+    }
+
+    CHECK(terminal.isMouseHoveringHyperlink());
+    CHECK(terminal.currentMouseGridPosition() == topLeft);
+}
+
 TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
 {
     namespace fs = std::filesystem;
@@ -1868,6 +1892,7 @@ TEST_CASE("Terminal.answerHostWritableStatusLineRequest.a_denied_line_titles_the
     auto& terminal = mc.terminal;
     terminal.settings().syncWindowTitleWithHostWritableStatusDisplay = true;
     terminal.setWindowTitle("before");
+    mc.writeToScreen("\033[2$~"); // DECSSDT: the application asks for the host-writable status line
     auto const writeStatus = [&](std::string_view text) {
         mc.writeToScreen(std::format("\033[1$}}\033[2K\033[G{}\033[0$}}", text));
     };
@@ -1903,6 +1928,50 @@ TEST_CASE("Terminal.answerHostWritableStatusLineRequest.a_denied_line_titles_the
         writeStatus("status");
         CHECK(terminal.windowTitle() == "before");
     }
+}
+
+TEST_CASE("Terminal.DECSASD.selects_only_a_status_line_DECSSDT_selected", "[terminal]")
+{
+    // DEC STD 070 ch. 14 §3 DECSASD: "Note that the Host Writable Status Line must be selected through
+    // DECSSDT for DECSASD to be able to select the Host Writable Status Line." Selected, not yet shown:
+    // MockTerm never answers the request DECSSDT 2 makes. A DECSASD 1 that came first is not remembered, as
+    // in mintty. DECSSDT's note, "The type of Status Line can also be changed through a Set-Up field": the
+    // configuration showing the host-writable status line selects it as well.
+    using vtbackend::ActiveStatusDisplay;
+    using vtbackend::StatusDisplayType;
+    auto const [shown, setup, active] =
+        GENERATE(table<StatusDisplayType, std::string_view, ActiveStatusDisplay>({
+            { StatusDisplayType::None, "\033[1$}", ActiveStatusDisplay::Main },         // no DECSSDT
+            { StatusDisplayType::None, "\033[1$~\033[1$}", ActiveStatusDisplay::Main }, // the indicator
+            { StatusDisplayType::None,
+              "\033[2$~\033[0$~\033[1$}",
+              ActiveStatusDisplay::Main },                                              // selected, then none
+            { StatusDisplayType::None, "\033[1$}\033[2$~", ActiveStatusDisplay::Main }, // DECSASD first
+            { StatusDisplayType::None, "\033[2$~\033[1$}", ActiveStatusDisplay::StatusLine }, // host-writable
+            { StatusDisplayType::None,
+              "\033[2$~\033[1$~\033[2$~\033[1$}",
+              ActiveStatusDisplay::StatusLine }, // selected again
+            { StatusDisplayType::HostWritable,
+              "\033[1$}",
+              ActiveStatusDisplay::StatusLine }, // by the configuration
+        }));
+    INFO(std::format("shown {}, then {}", static_cast<int>(shown), e(setup)));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusDisplay(shown);
+    mc.writeToScreen(setup);
+    mc.writeToScreen("X");
+
+    CHECK(terminal.activeStatusDisplay() == active);
+    auto const& written = active == ActiveStatusDisplay::Main ? terminal.primaryScreen()
+                                                              : terminal.hostWritableStatusLineDisplay();
+    CHECK(written.grid().lineText(LineOffset { 0 }).starts_with('X'));
+
+    mc.resetReplyData();
+    mc.writeToScreen("\033P$q$}\033\\"); // DECRQSS DECSASD
+    terminal.flushInput();
+    CHECK(e(mc.replyData())
+          == e(std::format("\033P1$r{}$}}\033\\", active == ActiveStatusDisplay::Main ? 0 : 1)));
 }
 
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
@@ -3625,6 +3694,145 @@ TEST_CASE("Terminal.historyEviction.keepsTheViCursorInsideTheAddressableGrid", "
 }
 // }}}
 
+TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorMovesNothingOnThePage", "[terminal]")
+{
+    // The indicator status line is a one-row screen of its own, written anew by every frame. Text wider than
+    // the page is cut at its last column (anOverflowingIndicatorShowsItsHead), but a line feed in the text
+    // still scrolls the one row -- which is no output to the page on display: the vi cursor and the window
+    // onto the page stay where they are, frame after frame.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+    printLines(mc, "line", 10);
+    terminal.setStatusLineDefinition(
+        vtbackend::parseStatusLineDefinition("an indicator\nwider than\nthe page", "", ""));
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal); // shows the indicator status line
+    auto const viCursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) };
+    terminal.moveNormalModeCursorTo(viCursor);
+    REQUIRE(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+
+    for ([[maybe_unused]] auto const frame: std::views::iota(0, 5))
+        terminal.refreshRenderBuffer();
+
+    CHECK(terminal.normalModeCursorPosition() == viCursor);
+    CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+}
+
+namespace
+{
+/// Whether the application leaves autowrap (DECAWM) set.
+enum class AutoWrap : uint8_t
+{
+    Reset = 0,
+    Set,
+};
+} // namespace
+
+TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorShowsItsHead", "[terminal]")
+{
+    // The indicator status line ends at the page's last column, and a segment wider than what is left of the
+    // row is cut there, with its head shown. Autowrap carried the overflow onto the next row, which on the
+    // one-row line is a scroll: the tail was shown. Without autowrap the last column took every character
+    // past it, and showed the last one.
+    auto const [definition, head] = GENERATE(table<std::string_view, std::string_view>({
+        { "0123456789", "01234567" },
+        { "0123456界9", "0123456" },                      // a wide character with one column left
+        { "012345\u2764\uFE0Fyz", "012345\u2764\uFE0F" }, // VS16 widens the heart into the last column
+        { "abcdefgh\u0301z", "abcdefgh\u0301" }, // a combining mark joins the character in the last column
+        { "012345\U0001F468\u200D\U0001F469z",
+          "012345\U0001F468\u200D\U0001F469" }, // a joined sequence stays whole
+    }));
+    auto const autoWrap = GENERATE(AutoWrap::Set, AutoWrap::Reset);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto& terminal = mc.terminal;
+    if (autoWrap == AutoWrap::Reset)
+        mc.writeToScreen("\033[?7l"); // DECAWM reset; the indicator status line writes under it too
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(definition, "", ""));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+
+    auto text = terminal.indicatorStatusLineDisplay().renderMainPageText();
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\n'))
+        text.pop_back();
+    CHECK(text == head);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theRightSegmentEndsInTheLastColumn", "[terminal][statusline]")
+{
+    // The right segment is placed by its width in columns: "│" is one column and three bytes, and a byte
+    // count put it two columns short of the last one. A segment shown is one narrower than the line (the rule
+    // kept): twelve bytes of CJK are eight columns, and fit on a ten-column line.
+    auto const [columns, right, line] = GENERATE(table<int, std::string_view, std::string>({
+        { 20, "ab│", std::string(17, ' ') + "ab│" },
+        { 10, "界界界界", "  界界界界" },
+    }));
+    INFO(right);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(columns) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", "", right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.aSegmentIsMeasuredAsTheGridLaysItOut", "[terminal][statusline]")
+{
+    // The grid gives every grapheme cluster at least one column, so a zero-width space takes one; and with
+    // DEC mode 2027 reset a cluster is as wide as its first codepoint, so a heart that VS16 would widen stays
+    // one column. Either way the right segment ends in the last column.
+    auto const [unicodeMode, right, columns, line] =
+        GENERATE(table<std::string_view, std::string_view, int, std::string>({
+            { "\033[?2027h", "ab\u200B", 20, std::string(17, ' ') + "ab\u200B" },
+            { "\033[?2027l", "\u2764\uFE0F", 10, std::string(9, ' ') + "\u2764\uFE0F" },
+        }));
+    INFO(e(right));
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(columns) } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen(unicodeMode);
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", "", right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theMiddleSegmentIsCentred", "[terminal][statusline]")
+{
+    // The middle segment starts at (columns - its width) / 2, its width in columns. A byte count put "│││"
+    // (nine bytes, three columns) one column left of the middle of a 20-column line, and hid fourteen columns
+    // of CJK (21 bytes) that fit.
+    auto const [middle, line] = GENERATE(table<std::string_view, std::string>({
+        { "│││", std::string(8, ' ') + "│││" + std::string(9, ' ') },
+        { "界界界界界界界", std::string(3, ' ') + "界界界界界界界" + std::string(3, ' ') },
+    }));
+    INFO(middle);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", middle, ""));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theRightSegmentLeavesTheOnesBeforeItWhole", "[terminal][statusline]")
+{
+    // The right segment is not shown where it would overlap what the left segment, or a middle one shown,
+    // takes, in columns: on a 20-column line "RIGHT" starts at column 15.
+    auto const [left, middle, right, line] =
+        GENERATE(table<std::string_view, std::string_view, std::string_view, std::string>({
+            { "0123456789abcdef", "", "RIGHT", "0123456789abcdef    " }, // the left segment reaches column 15
+            { "界界界界界界界界", "", "RIGHT", "界界界界界界界界    " }, // so does a CJK one, in columns
+            { "0123456789abcde", "", "RIGHT", "0123456789abcdeRIGHT" },  // it ends where the right one starts
+            { "", "0123456789", "RIGHTS", "     0123456789     " },      // the middle one ends at column 15
+            { "", "012345678", "RIGHTS", "     012345678RIGHTS" },       // it ends where the right one starts
+        }));
+    INFO(std::format("left {}, middle {}, right {}", left, middle, right));
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(left, middle, right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
 TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[terminal][history-eviction]")
 {
     // What the issue actually asks for, driven end to end through real OSC 133 sequences.
@@ -3804,6 +4012,139 @@ TEST_CASE("Terminal.processInputOnce.aReadFailingWithoutErrnoClosesThePty", "[te
     CHECK_FALSE(mock.terminal.processInputOnce());
     CHECK(mock.mockPty().isClosed());
 }
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+namespace
+{
+/// A PTY that, its output read, has nothing more: a read then fails with EAGAIN, as a real PTY's does when
+/// its wait times out. Records the wait each read was given.
+class DrainedPty final: public vtpty::MockPty
+{
+  public:
+    using vtpty::MockPty::MockPty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override
+    {
+        _lastTimeout = timeout;
+        if (!isStdoutDataAvailable())
+        {
+            errno = EAGAIN;
+            return std::nullopt;
+        }
+        return MockPty::read(storage, timeout, size);
+    }
+
+    /// @return The wait the last read was given; milliseconds::max() for none, a wait without end.
+    [[nodiscard]] std::chrono::milliseconds lastTimeout() const noexcept
+    {
+        return _lastTimeout.value_or(std::chrono::milliseconds::max());
+    }
+
+    /// Counts the wake-up, which ends the wait of a read in progress, or of the next one.
+    void wakeupReader() override { _wakeups.fetch_add(1, std::memory_order_relaxed); }
+
+    /// @return How often another thread woke the reader.
+    [[nodiscard]] int wakeups() const noexcept { return _wakeups.load(std::memory_order_relaxed); }
+
+  private:
+    std::optional<std::chrono::milliseconds> _lastTimeout;
+    std::atomic<int> _wakeups = 0;
+};
+
+/// Whether the display paints a frame -- which sets the terminal's frame clock (Terminal::tick()) -- each
+/// time a test lets time pass. A passive build's display paints only when told to, and nothing tells it while
+/// a fill waits.
+enum class DisplayPaints : uint8_t
+{
+    No = 0,
+    Yes,
+};
+} // namespace
+
+TEST_CASE("Terminal.processInputOnce.passive.aThrottledFillRunsOnceItIsDue", "[terminal]")
+{
+    // A passive build fills the render buffer on the reader thread after each batch, at most once per refresh
+    // interval. A batch that lands inside the interval leaves its fill for later: the reader waits for no
+    // more than the rest of the interval, and runs the fill when that wait finds nothing to read.
+    auto mock = MockTerm<DrainedPty> { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10), 1024 };
+    auto& terminal = mock.terminal;
+    terminal.setRefreshRate(vtbackend::RefreshRate { 50.0 });
+    constexpr auto Interval = std::chrono::milliseconds(20);
+    auto const paints = GENERATE(DisplayPaints::No, DisplayPaints::Yes);
+    auto const letTimePass = [&](std::chrono::milliseconds duration) {
+        mock.steadyClock.advance(duration);
+        if (paints == DisplayPaints::Yes)
+            terminal.tick(mock.steadyClock.now());
+    };
+    letTimePass(Interval); // the first fill is due at once
+
+    mock.mockPty().appendStdOutBuffer("first");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(trimmedTextScreenshot(mock) == "first");
+
+    mock.mockPty().appendStdOutBuffer("\r\nsecond");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(trimmedTextScreenshot(mock) == "first"); // the fill waits for the interval
+
+    // Nothing more to read, at the same instant: the reader waits for the rest of the interval, not for none.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+    CHECK(trimmedTextScreenshot(mock) == "first");
+
+    // The interval has passed: the read finds nothing again, and the fill runs.
+    letTimePass(Interval);
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == std::chrono::milliseconds(0));
+    CHECK(trimmedTextScreenshot(mock) == "first\nsecond");
+
+    // With nothing left to fill, the reader waits a whole interval, and fills nothing.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+}
+
+TEST_CASE("Terminal.processInputOnce.passive.aHeldFrontBufferIsRetriedWhenTheDisplayLetsGo",
+          "[terminal][threading]")
+{
+    // A frame filled while the display holds the front buffer waits to be swapped in. The reader does not
+    // poll to retry the swap: it waits a whole interval, which new output or the display letting go -- a
+    // wake-up -- ends, and swaps then.
+    auto mock = MockTerm<DrainedPty> { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10), 1024 };
+    auto& terminal = mock.terminal;
+    terminal.setRefreshRate(vtbackend::RefreshRate { 50.0 });
+    constexpr auto Interval = std::chrono::milliseconds(20);
+    mock.steadyClock.advance(Interval); // the first fill is due at once
+
+    // The display holds the front buffer on a thread of its own: a thread may not try a lock it owns.
+    auto held = std::promise<void> {};
+    auto letGo = std::promise<void> {};
+    auto display = std::thread([&terminal, &held, released = letGo.get_future()] {
+        auto const frame = terminal.renderBuffer();
+        held.set_value();
+        released.wait();
+    });
+    held.get_future().wait();
+
+    mock.mockPty().appendStdOutBuffer("first");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(terminal.renderBufferState() == vtbackend::RenderBufferState::TrySwapBuffers);
+
+    // Nothing more to read: a whole interval's wait, not none.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+    CHECK(mock.mockPty().wakeups() == 0);
+
+    letGo.set_value();
+    display.join();
+    CHECK(mock.mockPty().wakeups() == 1);
+
+    // Woken, the reader finds nothing to read, and swaps the frame in.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(terminal.renderBufferState() == vtbackend::RenderBufferState::WaitingForRefresh);
+    CHECK(trimmedTextScreenshot(mock) == "first");
+}
+#endif
 
 TEST_CASE("Terminal.processInputOnce.readsAheadWhileTheStateIsTaken", "[terminal][threading]")
 {

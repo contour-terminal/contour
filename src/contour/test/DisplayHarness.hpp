@@ -18,10 +18,15 @@
 #include <QtGui/QImage>
 #include <QtQuick/QQuickWindow>
 
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <ranges>
+#include <string>
 #include <string_view>
 
 #include <QtTest/QTest>
@@ -41,6 +46,17 @@ enum class HarnessWindow : uint8_t
     Unrendered, ///< A shown window that pump() never asks for a frame: geometry, input and QML only.
     Shown,      ///< A shown window whose frames pump() forces through the real renderer; needs a display.
 };
+
+/// How many times @p needle starts in @p haystack.
+/// @param needle   What to count.
+/// @param haystack Where to count it.
+/// @return The count.
+[[nodiscard]] inline std::size_t occurrencesOf(std::string_view needle, std::string_view haystack)
+{
+    return static_cast<std::size_t>(
+        std::ranges::count_if(std::views::iota(std::size_t { 0 }, haystack.size()),
+                              [&](std::size_t at) { return haystack.substr(at).starts_with(needle); }));
+}
 
 /// One live rendering session: app + session (vtpty::ChannelPty) + display item, in a shown window
 /// unless @ref HarnessWindow::None says otherwise.
@@ -120,17 +136,43 @@ struct DisplayHarness
         return image;
     }
 
-    /// Feeds VT output and pumps frames until the read loop consumed it (bounded).
+    /// The device status request (DSR 5) feedAndSettle() puts after the output it feeds.
+    static constexpr auto StatusRequest = std::string_view { "\033[5n" };
+
+    /// The terminal's answer to @ref StatusRequest: it is in good order.
+    static constexpr auto StatusAnswer = std::string_view { "\033[0n" };
+
+    /// Feeds VT output, as the application's, and pumps a frame once the terminal has parsed all of it.
+    ///
+    /// The PTY running dry says only that the session's reader has read the output: it parses what it read
+    /// once it holds the terminal, which can be after this thread has gone on to act on it. So a status
+    /// request follows the output, and this waits for its answer. The terminal answers in order, and writes
+    /// an answer only once the parse that raised it is over, so the answer in the PTY means everything before
+    /// it was parsed. The answers are application input like any other: sentInput() includes them.
+    /// @param vt Output that leaves the parser in its ground state, as complete sequences do: a sequence left
+    ///           open would take the request in, and the wait would fail.
     void feedAndSettle(std::string_view vt) const
     {
-        pty->feed(vt);
-        for ([[maybe_unused]] auto const attempt: std::views::iota(0, 50))
-        {
-            if (!pty->isStdoutPending())
-                break;
-            QTest::qWait(10);
-        }
+        // Neither the answers given already nor those the output asks for itself are the one awaited here.
+        auto const answered = occurrencesOf(StatusAnswer, sentInput()) + occurrencesOf(StatusRequest, vt);
+        pty->feed(std::string { vt } + std::string { StatusRequest });
+        REQUIRE(
+            QTest::qWaitFor([&] { return occurrencesOf(StatusAnswer, pty->stdinSnapshot()) > answered; }));
         pump();
+    }
+
+    /// Everything the application has been sent, once the terminal has nothing left queued for it.
+    ///
+    /// What the GUI thread raises -- a key, a mouse report, a resize's report -- only queues its bytes: the
+    /// session's PTY reader writes them, woken for it (vtbackend::InputWriter::ReaderThread), so they reach
+    /// the PTY after whatever raised them has returned. The queue is emptied only once the write is made, so
+    /// a drained queue means everything raised so far is in the PTY.
+    /// @return The PTY's input so far.
+    [[nodiscard]] std::string sentInput() const
+    {
+        auto const& terminal = session->terminal();
+        REQUIRE(QTest::qWaitFor([&] { return !terminal.hasInput(); }));
+        return pty->stdinSnapshot();
     }
 
     ~DisplayHarness()

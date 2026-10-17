@@ -228,20 +228,38 @@ constexpr CellLocation operator-(CellLocation c, ColumnOffset x) noexcept
     return CellLocation { .line = c.line, .column = c.column - x };
 }
 
-/// Linearly interpolates between two cell locations.
-/// At t=0 returns @p a, at t=1 returns @p b.
+/// A position that may lie between cells, counted in cells as CellLocation counts them: where a cursor moving
+/// from one cell to another is drawn part of the way along.
+struct FractionalCellLocation
+{
+    float line {};   ///< The line; its fraction is the way to the next line.
+    float column {}; ///< The column; its fraction is the way to the next column.
+
+    /// @param location The cell.
+    /// @return The position of @p location's cell.
+    [[nodiscard]] static constexpr FractionalCellLocation of(CellLocation location) noexcept
+    {
+        return FractionalCellLocation { .line = static_cast<float>(*location.line),
+                                        .column = static_cast<float>(*location.column) };
+    }
+
+    constexpr bool operator==(FractionalCellLocation const&) const noexcept = default;
+};
+
+/// Linearly interpolates from a position to a cell, keeping the fraction: where a cursor moving from @p a to
+/// @p b is drawn, as long as the lines between them are drawn one to one onto screen rows. A collapsed fold
+/// between them breaks that: the interpolation runs over grid lines the screen does not show.
 ///
-/// @param a  start location.
-/// @param b  end location.
+/// @param a  start position.
+/// @param b  end cell.
 /// @param t  interpolation factor in [0, 1].
 ///
-/// @return the component-wise interpolated CellLocation.
-constexpr CellLocation lerpCellLocation(CellLocation a, CellLocation b, float t) noexcept
+/// @return @p a at t=0, @p b's position at t=1, and the component-wise interpolated position between.
+constexpr FractionalCellLocation lerpCellLocation(FractionalCellLocation a, CellLocation b, float t) noexcept
 {
-    return CellLocation {
-        .line = a.line + LineOffset::cast_from(t * static_cast<float>(*b.line - *a.line)),
-        .column = a.column + ColumnOffset::cast_from(t * static_cast<float>(*b.column - *a.column)),
-    };
+    auto const to = FractionalCellLocation::of(b);
+    return FractionalCellLocation { .line = a.line + (t * (to.line - a.line)),
+                                    .column = a.column + (t * (to.column - a.column)) };
 }
 
 // Constructs a top-left and bottom-right coordinate-pair from given input.
@@ -1116,21 +1134,28 @@ enum class DECMode : std::uint8_t
 /// and the srm_*ALTBUF* cases). Describing them as data keeps the switch itself a single code path,
 /// rather than three near-duplicate handlers -- adding a fourth alternate-screen variant would be a
 /// new row here, not new control flow.
+///
+/// The four members stay `bool`: each is one yes/no of a mode's policy, independent of the others, every
+/// combination of them is legal, and the table's designated initialisers name each one at every use.
 struct AlternateScreenBehavior
 {
-    /// Whether the cursor is carried across the switch so that it appears not to move (modes 47 and
-    /// 1047). xterm's cursor is a terminal-level entity -- SwitchBufs swaps only the line storage, never
-    /// the cursor -- so it is continuous across the buffer swap. When false (mode 1049), each page keeps
-    /// its own cursor, which serves as an implicit DECSC/DECRC: the main cursor waits untouched on the
-    /// main page while the application works on the alternate one.
-    bool carryCursor;
+    /// Whether the cursor is carried into the alternate page, so that it appears not to move (all three
+    /// modes). xterm's cursor is a terminal-level entity -- SwitchBufs swaps only the line storage, never
+    /// the cursor -- Windows Terminal copies the main cursor into its new alternate buffer, and foot's
+    /// cursor "retains its position from the normal grid".
+    bool carriesCursorIn;
+
+    /// Whether the cursor is carried back out of the alternate page (modes 47 and 1047). When false (mode
+    /// 1049), the main page's own cursor, which waited untouched while the application worked on the
+    /// alternate one, comes back: xterm's 1049 restores the cursor it saved on the way in.
+    bool carriesCursorOut;
 
     /// Whether the alternate page is erased when entering it (mode 1049 clears; 47 and 1047 keep it).
-    bool clearOnEnter;
+    bool clearsOnEntry;
 
     /// Whether the alternate page is erased when leaving it (mode 1047 clears; 47 and 1049 keep it --
     /// 1049 relies on its clear-on-enter instead).
-    bool clearOnExit;
+    bool clearsOnExit;
 };
 
 /// Maps an alternate-screen DEC private mode to its entry/exit behavior, or std::nullopt for any other
@@ -1142,9 +1167,9 @@ struct AlternateScreenBehavior
     switch (mode)
     {
             // clang-format off
-        case DECMode::UseAlternateScreen: return AlternateScreenBehavior { .carryCursor = true,  .clearOnEnter = false, .clearOnExit = false }; // 47
-        case DECMode::OptionalAltScreen:  return AlternateScreenBehavior { .carryCursor = true,  .clearOnEnter = false, .clearOnExit = true  }; // 1047
-        case DECMode::ExtendedAltScreen:  return AlternateScreenBehavior { .carryCursor = false, .clearOnEnter = true,  .clearOnExit = false }; // 1049
+        case DECMode::UseAlternateScreen: return AlternateScreenBehavior { .carriesCursorIn = true, .carriesCursorOut = true,  .clearsOnEntry = false, .clearsOnExit = false }; // 47
+        case DECMode::OptionalAltScreen:  return AlternateScreenBehavior { .carriesCursorIn = true, .carriesCursorOut = true,  .clearsOnEntry = false, .clearsOnExit = true  }; // 1047
+        case DECMode::ExtendedAltScreen:  return AlternateScreenBehavior { .carriesCursorIn = true, .carriesCursorOut = false, .clearsOnEntry = true,  .clearsOnExit = false }; // 1049
         // clang-format on
         default: return std::nullopt;
     }

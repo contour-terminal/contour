@@ -355,8 +355,24 @@ enum class LeftButtonPress : uint8_t
 /// Where the pointer stands, for what it hovers.
 enum class PointerPlacement : uint8_t
 {
-    OnGrid = 0, ///< On the grid cell the last move or press named.
-    OffGrid,    ///< On no cell: beside the grid, over something drawn on top of it, or outside the terminal.
+    /// On no cell: beside the grid, over something drawn on top of it, outside the terminal, or nowhere yet,
+    /// before the first pointer event.
+    OffGrid = 0,
+    OnGrid, ///< On the grid cell the last move or press named.
+};
+
+/// Where the cursor stands on the page a change of page takes it to.
+enum class PageCursorPlacement : uint8_t
+{
+    /// The page's own cursor, where it was left: a cursor restore (DECRC, leaving the alternate screen on
+    /// 1049) brings it back.
+    PagesOwn = 0,
+    /// The cursor moves on, with its rendition and character sets, to the same line and column (PPA, PPR,
+    /// PPB).
+    SameLineAndColumn,
+    /// The cursor moves on, with its rendition and character sets, to the home position obeying origin mode
+    /// (NP, PP).
+    Home,
 };
 
 /// Asked, with a press's click count (1..ClickCounter::MaxClickCount), whether a binding takes the press.
@@ -943,14 +959,32 @@ class Terminal
         bool reportButtonUp = true;
     };
 
-    /// Enables or disables DEC Locator reporting.
+    /// DECELR: enables or disables DEC Locator reporting, in the unit it selects. An undefined Ps or Pu
+    /// ignores the whole sequence (DEC STD 070 ch. 13: "Undefined values for Ps or Pu causes the entire
+    /// sequence to be ignored").
+    /// @param ps 0 disables the locator, 1 enables it, 2 enables it for one report (one shot).
+    /// @param pu 0 (or omitted) and 2 report in character cells, 1 in device pixels.
     void setLocatorMode(int ps, int pu) noexcept;
 
     /// Selects which locator events generate reports.
     void selectLocatorEvents(std::span<int const> params) noexcept;
 
-    /// Sends a DEC Locator report (DECLRP) to the PTY.
-    void sendLocatorReport(int event, int button, int row, int col);
+    /// A button going down or up, as the DEC locator reports it.
+    enum class LocatorEvent : uint8_t
+    {
+        ButtonDown = 0, ///< DECLRP's event 2, 4 or 6, by the button.
+        ButtonUp,       ///< DECLRP's event 3, 5 or 7, by the button.
+    };
+
+    /// Sends a DEC locator report (DECLRP) of the pointer to the PTY: `CSI Pe ; Pb ; Pr ; Pc ; Pp & w`, Pb
+    /// the buttons held down, Pr and Pc in the unit DECELR selected (cells or device pixels, from 1) and Pp
+    /// the page on display. For Pe 0 it is `CSI 0 & w` alone (DEC STD 070 ch. 13: "If Pe is 0 or omitted,
+    /// all other parameters shall not be sent"), and so it is while the pointer, or in device pixels its
+    /// pixel, is off the grid, as xterm answers a position outside its window; DEC STD 070's DECRQLP would
+    /// answer that with event 1 and the coordinates omitted. In one shot mode (DECELR Ps 2) the report, any
+    /// of these, disables the locator.
+    /// @param event Pe, the event code: 0 for an unavailable locator, 1 for a request, 2 to 7 for a button.
+    void sendLocatorReport(int event);
 
     /// Requests the current locator position.
     void requestLocatorPosition();
@@ -961,8 +995,12 @@ class Terminal
     /// Resets locator state (called by soft reset).
     void resetLocator() noexcept { _locatorState = {}; }
 
-    /// Called from sendMousePressEvent/sendMouseReleaseEvent when locator mode is active.
-    bool handleLocatorMouseEvent(int button, bool press, CellLocation pos);
+    /// Reports a button going down or up to the host, as DECLRP, while the locator is on and DECSLE selects
+    /// the event. Keeps the buttons held down, which every report names, also while the locator is off.
+    /// @param event  Whether the button went down or up.
+    /// @param button The button; one the locator has no code for is not reported.
+    /// @return Whether the event was reported, and is therefore not the application's.
+    [[nodiscard]] Handled handleLocatorMouseEvent(LocatorEvent event, MouseButton button);
     // }}}
 
     // {{{ Image canvas size
@@ -1460,15 +1498,12 @@ class Terminal
     }
 
     /// Whether a line of the primary screen's scrollback can be brought into view: that screen is the page
-    /// on display, and the viewport may scroll, which it may not while the cursor stands on another page.
+    /// on display. The viewport, the window onto the page on display, scrolls exactly while page 1 is.
     ///
     /// The one question the scrollbar's ticks (scrollbarMarkInputs()) and the reveal a click on one performs
     /// (revealStableLineAtTop()) both ask, so a tick is offered exactly where a click on it lands. With
-    /// DECPCCM reset the page on display and the cursor's part ways, and either can leave the other.
-    [[nodiscard]] bool canRevealScrollback() const noexcept
-    {
-        return foldingAppliesToDisplayedPage() && !_viewport.scrollingDisabled();
-    }
+    /// DECPCCM reset the cursor may write to another page meanwhile, which changes neither.
+    [[nodiscard]] bool canRevealScrollback() const noexcept { return foldingAppliesToDisplayedPage(); }
 
     /// Drops fold state the grid can no longer account for: heads evicted from the scrollback, and
     /// everything at all when a reflow destroyed row identity wholesale.
@@ -2172,13 +2207,22 @@ class Terminal
     bool isPrimaryScreen() const noexcept { return _currentScreenType == ScreenType::Primary; }
     bool isAlternateScreen() const noexcept { return _currentScreenType == ScreenType::Alternate; }
     ScreenType screenType() const noexcept { return _currentScreenType; }
+
+    /// Switches the cursor to the primary or the alternate screen's page. The page on display follows as for
+    /// any page movement, while DECPCCM is set; what the alternate screen modes show is
+    /// setAlternateScreen()'s to say.
+    /// @param screenType The screen to switch to.
     void setScreen(ScreenType screenType);
 
     /// Enters or leaves the alternate screen buffer for one of the DEC private modes 47, 1047 or 1049,
     /// following the cursor-carry and clear policy that alternateScreenBehavior() describes for @p mode.
-    /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so modes
-    /// 47 and 1047 carry it across the switch (it does not move), while mode 1049 lets each page keep
-    /// its own cursor as an implicit DECSC/DECRC.
+    /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so all three
+    /// modes carry it into the alternate screen (it does not move), and 47 and 1047 carry it back out, while
+    /// mode 1049 returns to the cursor the page kept, its implicit DECRC.
+    ///
+    /// The alternate screen is entered from any page, and shown whatever DECPCCM says. Leaving it returns the
+    /// cursor to the page it was entered from; with DECPCCM reset the page that was on display before is
+    /// shown again, as Windows Terminal does, and with DECPCCM set the display follows the cursor.
     /// @param mode   One of DECMode::UseAlternateScreen (47), OptionalAltScreen (1047) or
     ///               ExtendedAltScreen (1049); other modes violate the precondition.
     /// @param enable true to switch to the alternate buffer, false to switch back to the primary.
@@ -2213,24 +2257,72 @@ class Terminal
     [[nodiscard]] Screen& displayedPage() noexcept { return pageAt(_displayedPage); }
     [[nodiscard]] Screen const& displayedPage() const noexcept { return pageAt(_displayedPage); }
 
+    /// Whether the page on display is the primary screen or another one. Not screenType(), which is the
+    /// cursor's page: with DECPCCM reset the two differ.
+    /// @return The screen type of the page on display.
+    [[nodiscard]] ScreenType displayedScreenType() const noexcept
+    {
+        return screenTypeFromPage(_displayedPage);
+    }
+
     /// Returns the 1-based page number where the cursor is active (for VT replies).
-    [[nodiscard]] int cursorPageNumber() const noexcept { return _cursorPage.value + 1; }
+    [[nodiscard]] int cursorPageNumber() const noexcept { return pageNumberOf(_cursorPage); }
 
     /// Returns the 1-based page number of the displayed page (for VT replies).
-    [[nodiscard]] int displayedPageNumber() const noexcept { return _displayedPage.value + 1; }
+    [[nodiscard]] int displayedPageNumber() const noexcept { return pageNumberOf(_displayedPage); }
 
-    /// Switches the active cursor page. See Phase 2 for full implementation.
-    void setPage(PageIndex target, bool moveCursorHome);
+    /// The number a VT report gives a page: its index plus one, and 1 for the alternate screen, which is no
+    /// DEC page. xterm's DECXCPR "assumes the default page", Windows Terminal's PageManager::Get answers for
+    /// its alternate buffer with "a fixed page number of 1", and mlterm regards its alternate edit as page 1.
+    /// @param page The page.
+    /// @return Its 1-based page number.
+    [[nodiscard]] static constexpr int pageNumberOf(PageIndex page) noexcept
+    {
+        return page == AlternateScreenPageIndex ? 1 : page.value + 1;
+    }
 
-    /// Saves the current cursor page index (called by DECSC).
+    /// Switches the cursor to another page; the page on display follows while DECPCCM is set.
+    /// @param target    The page to switch to; clamped to the pages there are.
+    /// @param placement Where the cursor stands on @p target.
+    void setPage(PageIndex target, PageCursorPlacement placement);
+
+    /// Page movement (NP, PP, PPA, PPR, PPB): moves the cursor to another DEC page. A page beyond the last
+    /// one is the last one, and one before the first is the first, as DEC STD 070 §4.7 says. DEC STD 070
+    /// defines no alternate screen. Windows Terminal, the one terminal with both pages and an alternate
+    /// buffer, keeps page movement on it, a display of one page: NP and PP move the cursor home there
+    /// (NextPage/PrecedingPage), and PPA, PPR and PPB leave it (PageManager::MoveTo returns outside the main
+    /// buffer). Ignored while DECSASD selects the status line, a one-line
+    /// display of its own on which vertical cursor positioning is ignored (DEC STD 070 ch. 14 §2.3).
+    /// @param page      The zero-based index of the page to move to.
+    /// @param placement Where the cursor stands on that page.
+    void movePage(int page, PageCursorPlacement placement);
+
+    /// Whether the cursor is on the alternate screen buffer, as xterm's whichBuf says. Not
+    /// isAlternateScreen(), which answers for every page but page 1.
+    /// @return Whether the cursor is on the alternate screen's page.
+    [[nodiscard]] bool isAlternateScreenBufferInUse() const noexcept
+    {
+        return _cursorPage == AlternateScreenPageIndex;
+    }
+
+    /// Saves the current cursor page index (called by DECSC). Not while DECSASD selects the status line,
+    /// which keeps a Cursor Save Buffer of its own (DEC STD 070 ch. 14 §2.2).
     void saveCursorPage();
 
-    /// Restores the previously saved cursor page index (called by DECRC).
-    void restoreCursorPage();
+    /// DECRC's page half: returns the cursor to the page DECSC saved. DEC STD 070 keeps one save buffer, the
+    /// page in its position; Contour keeps it on the page DECSC saved (its Screen::_savedCursor, which a
+    /// resize of that page carries along), one per screen buffer as xterm and Windows Terminal do, so the
+    /// rest of the buffer is that page's. Not while DECSASD selects the status line, which keeps a Cursor
+    /// Save Buffer of its own (DEC STD 070 ch. 14 §2.2).
+    /// @param receiving The display DECRC was received on.
+    /// @return The display whose save buffer DECRC restores: the saved page, or @p receiving on the status
+    /// line.
+    [[nodiscard]] Screen& restoreCursorPage(Screen& receiving);
 
-    /// Returns the margin for the page where the cursor is currently active.
-    [[nodiscard]] Margin& currentPageMargin() noexcept { return _pageMargins[_cursorPage.value]; }
-    [[nodiscard]] Margin const& currentPageMargin() const noexcept { return _pageMargins[_cursorPage.value]; }
+    /// Returns the margins of the main display, one set that every page and the alternate screen share.
+    [[nodiscard]] Margin& mainDisplayMargin() noexcept { return _mainDisplayMargin; }
+    /// @copydoc mainDisplayMargin()
+    [[nodiscard]] Margin const& mainDisplayMargin() const noexcept { return _mainDisplayMargin; }
 
     /// Creates a default margin for the given page size (full-screen, no restriction).
     [[nodiscard]] static Margin makeDefaultMargin(PageSize pageSize) noexcept
@@ -2303,12 +2395,15 @@ class Terminal
 
     [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
 
+    /// The cell under the pointer, a cell of the page on display (displayedPage()) -- not of the page the
+    /// cursor writes to, which DECPCCM reset or a status line DECSASD selected makes another one.
+    ///
     /// Not noexcept: the coordinate translation goes through the fold projection, which allocates.
     /// @return The grid cell under the pointer; nullopt while the pointer is on none (@see
     /// sendMouseLeaveEvent).
     [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const
     {
-        if (_pointerPlacement == PointerPlacement::OnGrid && _currentScreen->contains(_currentMousePosition))
+        if (_pointerPlacement == PointerPlacement::OnGrid && displayedPage().contains(_currentMousePosition))
             return _viewport.translateScreenToGridCoordinate(_currentMousePosition);
         return std::nullopt;
     }
@@ -2700,12 +2795,26 @@ class Terminal
         return _hoveringHyperlinkId.load().value != 0;
     }
 
+    /// The OSC 8 hyperlink under the pointer as of the last pointer event (press, move, leave); none when
+    /// there was none. Safe from any thread, without the lock. A scroll, a screen switch or new output
+    /// moves the link under a still pointer without an event, so this can be stale then; a frame asks
+    /// hyperlinkIdUnderPointer() instead.
+    [[nodiscard]] HyperlinkId hoveringHyperlinkId() const noexcept { return _hoveringHyperlinkId.load(); }
+
+    /// The OSC 8 hyperlink in the cell the pointer is over right now, read from the page on display; none
+    /// when the pointer is on no cell or the cell links nowhere. A pure query: nothing is stored or notified.
+    ///
+    /// The caller holds the lock: the cell is read from the grid, which the parser thread changes. Not
+    /// noexcept, for the reason currentMouseGridPosition() gives.
+    /// @see hoveringHyperlinkId
+    [[nodiscard]] HyperlinkId hyperlinkIdUnderPointer() const;
+
     /// Retrieves the HyperlinkInfo that is currently being hovered by the mouse, if so,
-    /// or a nothing otherwise.
+    /// or a nothing otherwise. Read from the page on display, as hyperlinkIdUnderPointer() is.
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
     {
         if (auto const gridPosition = currentMouseGridPosition())
-            return _currentScreen->hyperlinkAt(*gridPosition);
+            return displayedPage().hyperlinkAt(*gridPosition);
         return {};
     }
 
@@ -2765,10 +2874,11 @@ class Terminal
 
     /// Brings a view scrolled back into the history down to the output just applied, as
     /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
-    /// (@see Events::outputFollowing). Only output that scrolled lines off the page since the last call
-    /// counts (@see outputScrolledIntoHistory): a prompt, a progress bar or a clock repainted in place is not
-    /// new output. Called with the state lock held, where output is applied and before it is published: by
-    /// the parse batch, and by a mirror applying a remote screen's update.
+    /// (@see Events::outputFollowing). Only output that scrolled lines of the page on display into its
+    /// history since the last call counts (@see Screen::linesScrolledIntoHistory): a prompt, a progress bar
+    /// or a clock repainted in place is not new output, and neither is output to a page that is not on
+    /// display. Called with the state lock held, where output is applied and before it is published: by the
+    /// parse batch, and by a mirror applying a remote screen's update.
     void followOutput();
 
     /// Runs @p pause with the parser thread's hold of the state lock released, and takes the lock back as
@@ -3031,13 +3141,14 @@ class Terminal
     /// A no-op unless DEC mode 2048 is set. Sent on every resize, and once when the mode is enabled.
     void reportInBandWindowResize();
 
-    /// Notes that output scrolled @p n lines off the top of the page, which is what followOutput() follows.
-    /// Called for every scroll Screen::scrollUp makes: a top-anchored scroll region's as well as the whole
-    /// page's, which onBufferScrolled() alone is told of.
+    /// Keeps the viewer's state on its rows when output scrolls the whole of @p scrolled up: the Normal-mode
+    /// cursor, the viewport (while scrolled back, part-row offset or in Normal mode), an open hint session
+    /// and the selection move up with the content. Only where @p scrolled is the page on display, which all
+    /// of that state is on: a page the cursor writes to with DECPCCM reset, the status line DECSASD selected
+    /// and the indicator status line scroll under nobody's view.
+    /// @param scrolled The screen whose page scrolled.
     /// @param n The lines scrolled, as the grid reports them.
-    void outputScrolledIntoHistory(LineCount n) noexcept;
-
-    void onBufferScrolled(LineCount n) noexcept;
+    void onBufferScrolled(Screen const& scrolled, LineCount n) noexcept;
 
     /// Pulls the viewport and the Normal-mode cursor back inside the scrollback that still exists.
     ///
@@ -3129,6 +3240,29 @@ class Terminal
 
     StatusDisplayType statusDisplayType() const noexcept { return _statusDisplayType; }
     void setStatusDisplay(StatusDisplayType statusDisplayType);
+
+    /// DECSSDT: the host selects the type of status display. None and the indicator are shown at once; the
+    /// host-writable status line is asked of the frontend, unless shown already, and shown once it allows it.
+    /// Selected it is either way, which DECSASD asks for. @see answerHostWritableStatusLineRequest
+    /// @param type The type DECSSDT selects.
+    void selectStatusDisplayByHost(StatusDisplayType type);
+
+    /// The user selects the type of status display, shown at once. DEC STD 070 ch. 14 §3 DECSSDT: "The type
+    /// of Status Line can also be changed through a Set-Up field", which the user's toggle is; and ch. 14
+    /// §2.3: "If the Status Display Type is chosen to be something other than "Host Writable", the Status
+    /// Display will be exited", so another type leaves the host-writable status line should DECSASD have
+    /// selected it. A type shown for a while and then restored (pushStatusDisplay) is no selection and does
+    /// not come here.
+    /// @param type The type the user selects.
+    void selectStatusDisplayByUser(StatusDisplayType type);
+
+    /// Whether DECSASD can select the host-writable status line: the host's last DECSSDT or the user selected
+    /// it, or it is the type shown. DEC STD 070 ch. 14 §3 DECSASD: "the Host Writable Status Line must be
+    /// selected through DECSSDT for DECSASD to be able to select the Host Writable Status Line"; and DECSSDT:
+    /// "The type of Status Line can also be changed through a Set-Up field", which the configuration that
+    /// shows a type is.
+    /// @return Whether the host-writable status line is selected.
+    [[nodiscard]] bool isHostWritableStatusLineSelected() const noexcept;
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
     constexpr ActiveStatusDisplay activeStatusDisplay() const noexcept { return _activeStatusDisplay; }
 
@@ -3339,6 +3473,14 @@ class Terminal
     /// @param output Whether the displayed text changed.
     void onStatusLineCommandCompleted(StatusLineCommandOutput output);
 
+    /// Puts @p page on display, and brings the viewport, the window onto it, back inside its history.
+    ///
+    /// The one place the page on display changes. The page coming on display may have less history than the
+    /// one it replaces -- every page but the primary has none -- and the frame draws it with the viewport's
+    /// offset.
+    /// @param page The page to display.
+    void showPage(PageIndex page);
+
     /// One batch's birth stamp, in force on the primary screen for exactly as long as this lives.
     ///
     /// Rows the cursor first reaches meanwhile are born with it. When it ends the stamp is withdrawn, so a
@@ -3536,18 +3678,19 @@ class Terminal
     /// The directories a relative path printed on @p row resolves against: those of the command that printed
     /// it (localPathBaseFor()), and outside any block the working directory for opening locally.
     ///
-    /// The block is commandBlockAt()'s, as for every other action on a row, so the row an output tail shares
-    /// with the next prompt resolves against that prompt's command. Does NOT take the lock, for the reason
-    /// commandBlocks() gives.
-    /// @param row A grid row of the current screen; a row of an alternate screen belongs to no block.
+    /// The block is pathBlockAt()'s -- commandBlockAt()'s while the primary page is on display, as for every
+    /// other action on a row --, so the row an output tail shares with the next prompt resolves against that
+    /// prompt's command. Does NOT take the lock, for the reason commandBlocks() gives.
+    /// @param row A grid row of the page on display; a row of any other page than the primary one belongs to
+    ///            no block.
     /// @return Where to look, first to last; none when there is nowhere. Why, when no path printed there
     ///         names a file on this machine: its command ran on another one, or this terminal replicates
     ///         another machine's.
     [[nodiscard]] std::expected<PathBases, PathRefusal> localPathBaseAt(LineOffset row) const;
 
-    /// The block whose command printed what a path on @p row names: commandBlockAt()'s, and none on an
-    /// alternate screen, whose rows belong to no block. Does NOT take the lock.
-    /// @param row A grid row of the current screen.
+    /// The block whose command printed what a path on @p row names: commandBlockAt()'s while the primary page
+    /// is on display, and none on any other page, whose rows belong to no block. Does NOT take the lock.
+    /// @param row A grid row of the page on display.
     /// @return The block's record, or nullptr.
     [[nodiscard]] CommandBlockRecord const* pathBlockAt(LineOffset row) const;
 
@@ -3612,6 +3755,32 @@ class Terminal
         crispy::BufferObjectPtr<char> buffer; // The buffer that was read into
     };
     [[nodiscard]] std::optional<PtyReadResult> readFromPty();
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    /// Whether a passive build has a fill to run: the screen changed since the last one, or the frame last
+    /// filled still waits to be swapped in.
+    [[nodiscard]] bool isPassiveFillPending() const noexcept;
+
+    /// How long a passive build's reader waits for output: until the refresh interval lets a pending fill
+    /// run, or a whole interval while none is pending.
+    /// @return The wait, never negative.
+    [[nodiscard]] std::chrono::milliseconds passiveReadTimeout() const noexcept;
+
+    /// Runs a passive build's fill on the reader thread, measured against the steady clock.
+    ///
+    /// The throttle measures the terminal's clock (currentTime()), which the display moves only as it paints
+    /// -- and nothing makes it paint while a fill waits. So the clock is first brought forward to the time
+    /// the frame is built at, as synchronizedOutput(false) sets it for the frame it builds on the parser
+    /// thread.
+    void refreshPassively();
+
+    /// Wakes the reader where the frame it filled last waits for the front buffer the display held: the swap
+    /// is retried then, rather than polled for. Called on the display's thread as it lets go of the front
+    /// buffer, without the state lock: the state is atomic, and Pty::wakeupReader() is the cross-thread
+    /// wake-up. A wake-up lost to a race costs one refresh interval, after which the read times out and the
+    /// reader retries.
+    void onFrontBufferReleased();
+#endif
 
     /// Reads on while another thread holds the terminal's state, rather than waiting for it idle.
     ///
@@ -3819,8 +3988,13 @@ class Terminal
     // {{{ mouse related state (helpers for detecting double/triple clicks)
     ClickCounter _clickCounter; ///< Multi-click sequences (drag, word, extended word, line).
     vtbackend::CellLocation _currentMousePosition {}; // current mouse position
-    /// Whether _currentMousePosition is where the pointer stands, or only where it last was on the grid.
-    PointerPlacement _pointerPlacement = PointerPlacement::OnGrid;
+    /// Where the pointer is in device pixels, from the grid's top left, as of the last move or press: what a
+    /// DEC locator report gives while DECELR selects device pixels. xterm's pixel origin is its VT window,
+    /// internal border included; the grid's is the sounder one, as the cells count from it too.
+    PixelCoordinate _currentMousePixelPosition {};
+    /// Whether _currentMousePosition is where the pointer stands, or only where it last was on the grid. Off
+    /// until a pointer event names a cell: until then the position is only its default, not the pointer's.
+    PointerPlacement _pointerPlacement = PointerPlacement::OffGrid;
     vtbackend::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
     LeftButtonPress _leftButtonPress = LeftButtonPress::Released; ///< What the held left button does.
     /// Moves on whenever a selection is installed or cleared, so a release can tell whether the action a
@@ -3930,7 +4104,7 @@ class Terminal
     /// Holds state for an ongoing cursor motion animation between grid cells.
     struct CursorMotionState: crispy::AnimationState<crispy::EaseOutCubic>
     {
-        CellLocation fromPosition {};
+        FractionalCellLocation fromPosition {}; ///< Between cells where the motion took over from another.
         CellLocation toPosition {};
         RGBColor fromColor {}; ///< Cursor color at the animation source position.
         RGBColor toColor {};   ///< Cursor color at the animation target position.
@@ -4075,25 +4249,40 @@ class Terminal
     std::vector<std::unique_ptr<Screen>> _pages; ///< 16 pages: page 0 = primary, page 15 = alt screen
     PageIndex _cursorPage { 0 };                 ///< Page where cursor/VT output goes
     PageIndex _displayedPage { 0 };              ///< Page shown to user (== _cursorPage when DECPCCM set)
+    /// Where paging stood when the alternate screen was last entered, so that leaving it resumes there.
+    struct PagesBeforeAlternateScreen
+    {
+        /// The page the cursor was on; leaving returns the cursor there, as Windows Terminal's ?1049 restores
+        /// the cursor's page.
+        PageIndex cursor {};
+        /// The page on display; leaving with DECPCCM reset shows it again: Windows Terminal's cursor restore
+        /// moves its visible page only while DECPCCM is set.
+        PageIndex displayed {};
+    };
+    PagesBeforeAlternateScreen _pagesBeforeAlternateScreen {};
     /// Which slot of _savedCursorPage the current screen uses: 1 for the alternate page, 0 for any
     /// primary page. Keyed on page identity, not _currentScreenType, so a primary VT420 page reached
     /// via PPA/NP/PP still resolves to the primary slot.
     [[nodiscard]] size_t savedCursorPageSlot() const noexcept
     {
-        return _cursorPage == AlternateScreenPageIndex ? 1 : 0;
+        return isAlternateScreenBufferInUse() ? 1 : 0;
     }
 
     /// DECSC-saved cursor page, kept separately per screen (index 0 = primary, 1 = alternate) so the
     /// two screens' saved cursors never cross. Defaults are each screen's own page, so a DECRC with no
     /// prior DECSC stays put.
-    std::array<PageIndex, 2> _savedCursorPage { PageIndex { 0 }, AlternateScreenPageIndex };
+    std::array<PageIndex, 2> _savedCursorPage = NoSavedCursorPages;
+    /// What _savedCursorPage holds before any DECSC, and after RIS and DECSTR: each screen's own page.
+    static constexpr auto NoSavedCursorPages =
+        std::array<PageIndex, 2> { PageIndex { 0 }, AlternateScreenPageIndex };
     Screen _hostWritableStatusLineScreen;
     Screen _indicatorStatusScreen;
     gsl::not_null<Screen*> _currentScreen;
     Viewport _viewport;
-    /// Lines output scrolled into the history since followOutput() last ran. Under the state lock.
-    /// @see outputScrolledIntoHistory
-    LineCount _linesScrolledSinceFollow {};
+    /// The page on display's Screen::linesScrolledIntoHistory() as followOutput() last read it, or as the
+    /// page came on display (showPage()): what it scrolled since is the output to follow. Under the state
+    /// lock.
+    uint64_t _displayedPageLinesFollowed = 0;
     StatusLineDefinition _indicatorStatusLineDefinition;
 
     // {{{ tabs info
@@ -4131,7 +4320,12 @@ class Terminal
     /// the render thread as it asks when the next frame is due and by the parser thread as it refreshes the
     /// render buffer, none under the state lock. @see RelaxedAtomic
     RelaxedAtomic<RefreshInterval> _refreshInterval;
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    /// Wakes the reader to swap in a frame the display held up, as it lets go (@see onFrontBufferReleased).
+    RenderDoubleBuffer _renderBuffer { [this] { onFrontBufferReleased(); } };
+#else
     RenderDoubleBuffer _renderBuffer {};
+#endif
     std::atomic<uint64_t> _lastFrameID = 0;
     /// What the last frame built found on screen. Atomic: written by the fill on whichever thread builds the
     /// frame, and read by nextRender() on the render thread without the state lock.
@@ -4223,16 +4417,20 @@ class Terminal
     bool _udkLocked = false;
 
     LocatorState _locatorState;
+    /// The locator's buttons held down, as DECLRP's Pb names them (right 1, middle 2, left 4): what a report
+    /// says of them after its event. Kept on every press and release, the locator on or off.
+    uint8_t _locatorButtonsHeld = 0;
     std::unordered_map<int, DRCSCharset> _drcsCharsets;
     std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
 
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
 
-    /// Per-page screen margins for DEC multi-page support.
-    /// Each page has its own independent margin (DECSTBM/DECSLRM apply per-page).
-    /// This excludes all status lines, title lines, etc.
-    std::array<Margin, MaxPageCount> _pageMargins;
+    /// The margins of the main display (DECSTBM, DECSLRM): one set, which the Screen of every page, the
+    /// alternate screen's included, points at. DEC STD 070 keeps one top, bottom, left and right margin for
+    /// the terminal (ch. 5 §3), and xterm, Windows Terminal, foot, vte and kitty share theirs between the
+    /// main and the alternate screen. The status lines keep their own.
+    Margin _mainDisplayMargin;
     Margin _hostWritableScreenMargin;
     Margin _indicatorScreenMargin;
 
@@ -4277,6 +4475,12 @@ class Terminal
         Owed,        ///< Denied; the next DECSASD 0 syncs, if the configuration asks for it then.
     };
     DeniedStatusLineTitle _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
+
+    /// The type of status display the host's last DECSSDT, or the user since, selected; DECSTR and RIS reset
+    /// it. It differs from the type shown, _statusDisplayType, while the host-writable status line waits for
+    /// the frontend's answer or was denied, and while the frontend shows a type it did not select.
+    /// @see isHostWritableStatusLineSelected, selectStatusDisplayByUser
+    StatusDisplayType _selectedStatusDisplayType = StatusDisplayType::None;
 
     std::optional<StatusDisplayType> _savedStatusDisplayType = std::nullopt;
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
@@ -4401,13 +4605,12 @@ class Terminal
     /// Everything scrollbarMarkInputs() is a function of, as scrollbarMarksRevision() last saw it.
     struct ScrollbarMarksInputs
     {
-        uint64_t blockRevision = 0;                    ///< CommandBlockStore::revision()
-        uint64_t userMarkRevision = 0;                 ///< UserMarkIndex::revision()
-        uint64_t foldRevision = 0;                     ///< FoldState::revision()
-        uint64_t stableIdGeneration = 0;               ///< What the heads' and marks' ids mean
-        int64_t stableFloor = 0;                       ///< Eviction moves every row up
-        PageIndex displayedPage {};                    ///< canRevealScrollback(): the page on display...
-        ScreenType cursorScreen = ScreenType::Primary; ///< ...and whether the viewport may scroll
+        uint64_t blockRevision = 0;      ///< CommandBlockStore::revision()
+        uint64_t userMarkRevision = 0;   ///< UserMarkIndex::revision()
+        uint64_t foldRevision = 0;       ///< FoldState::revision()
+        uint64_t stableIdGeneration = 0; ///< What the heads' and marks' ids mean
+        int64_t stableFloor = 0;         ///< Eviction moves every row up
+        PageIndex displayedPage {};      ///< canRevealScrollback(): the page on display
 
         bool operator==(ScrollbarMarksInputs const&) const = default;
     };

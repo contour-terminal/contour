@@ -19,6 +19,7 @@
 #include <vtbackend/vt/SequenceBuilder.hpp>
 
 #include <vtparser/Parser.hpp>
+#include <vtparser/Utf8Decoding.hpp>
 
 #include <vtpty/MockPty.hpp>
 
@@ -30,6 +31,8 @@
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
+#include <libunicode/utf8_grapheme_segmenter.h>
+#include <libunicode/width.h>
 
 #include <gsl/pointers>
 
@@ -39,6 +42,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -334,7 +338,7 @@ Terminal::Terminal(Events& eventListener,
     _focused { _settings.focused },
     _terminalId { _settings.terminalId },
     _operatingLevel { _settings.terminalId },
-    _pageMargins {},
+    _mainDisplayMargin { makeDefaultMargin(_settings.pageSize) },
     _hostWritableScreenMargin { .vertical = Margin::Vertical { .from = {}, .to = LineOffset(0) },
                                 .horizontal =
                                     Margin::Horizontal { .from = {},
@@ -364,20 +368,21 @@ Terminal::Terminal(Events& eventListener,
     // VT220, yet still executed DECFRA/DECCRA off the full VT525 table.
     setTerminalId(_settings.terminalId);
 
-    // Initialize all page margins to defaults.
-    _pageMargins.fill(makeDefaultMargin(_settings.pageSize));
-
     // Populate the 16-page array: page 0 (primary) gets scrollback/reflow, pages 1-15 do not.
     _pages.reserve(MaxPageCount);
     _pages.push_back(std::make_unique<Screen>(*this,
-                                              _pageMargins.data(),
+                                              &_mainDisplayMargin,
                                               _settings.pageSize,
                                               _settings.primaryScreen.allowReflowOnResize,
                                               _settings.historyLimits,
                                               "page-1"));
     for (auto const i: std::views::iota(1, MaxPageCount))
-        _pages.push_back(std::make_unique<Screen>(
-            *this, &_pageMargins[i], _settings.pageSize, false, LineCount(0), std::format("page-{}", i + 1)));
+        _pages.push_back(std::make_unique<Screen>(*this,
+                                                  &_mainDisplayMargin,
+                                                  _settings.pageSize,
+                                                  false,
+                                                  LineCount(0),
+                                                  std::format("page-{}", i + 1)));
     _currentScreen = _pages[0].get();
 
     _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
@@ -465,9 +470,7 @@ std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
     ZoneScoped;
     auto timeout =
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
-        (_renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty)
-            ? std::optional { _refreshInterval.get().value }
-            : std::chrono::milliseconds(0);
+        std::optional { passiveReadTimeout() };
 #else
         std::optional<std::chrono::milliseconds> { std::nullopt };
 #endif
@@ -655,7 +658,14 @@ bool Terminal::processInputOnce()
     {
         terminalLog()("PTY read failed. {}", std::generic_category().message(errno));
         if (errno == EINTR || errno == EAGAIN)
+        {
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+            // Nothing arrived within the wait, which ends when the refresh interval lets a pending fill run.
+            if (isPassiveFillPending())
+                refreshPassively();
+#endif
             return true;
+        }
 
         _pty->close();
         return false;
@@ -701,11 +711,52 @@ bool Terminal::processInputOnce()
     });
 
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
-    ensureFreshRenderBuffer();
+    refreshPassively();
 #endif
 
     return true;
 }
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+bool Terminal::isPassiveFillPending() const noexcept
+{
+    return _renderBuffer.state != RenderBufferState::WaitingForRefresh || _screenDirty;
+}
+
+std::chrono::milliseconds Terminal::passiveReadTimeout() const noexcept
+{
+    auto const interval = _refreshInterval.get().value;
+
+    // A frame that waits for the display to let go of the front buffer is swapped in when the display wakes
+    // the reader (@see onFrontBufferReleased); new output ends the wait too. Polling meanwhile would only
+    // fail the swap again, for as long as a paint lasts.
+    if (!isPassiveFillPending() || _renderBuffer.state == RenderBufferState::TrySwapBuffers)
+        return interval;
+
+    // Measured at the time refreshPassively() measures the throttle at, and rounded up: a wait that ended
+    // short of the interval would find the fill still held back.
+    auto const now = std::max(currentTime(), _clocks.steady.now());
+    auto const elapsed = now - _renderBuffer.lastUpdate.load(std::memory_order_relaxed);
+    return std::max(chrono::milliseconds(0), chrono::ceil<chrono::milliseconds>(interval - elapsed));
+}
+
+void Terminal::refreshPassively()
+{
+    // Forward only: the display's tick() may have set it later meanwhile.
+    auto const now = _clocks.steady.now();
+    auto clock = _currentTime.load(std::memory_order_relaxed);
+    while (clock < now && !_currentTime.compare_exchange_weak(clock, now, std::memory_order_relaxed))
+    {
+    }
+    ensureFreshRenderBuffer();
+}
+
+void Terminal::onFrontBufferReleased()
+{
+    if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
+        _pty->wakeupReader();
+}
+#endif
 
 // {{{ RenderBuffer synchronization
 void Terminal::breakLoopAndRefreshRenderBuffer()
@@ -831,31 +882,6 @@ int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
     return terminal->currentScreen().cellWidthAt(pos);
 }
 
-namespace
-{
-    /**
-     * Sets the hyperlink into hovering state if mouse is currently hovering it
-     * and unsets the state when the object is being destroyed.
-     */
-    struct ScopedHyperlinkHover
-    {
-        std::shared_ptr<HyperlinkInfo const> href;
-
-        ScopedHyperlinkHover(Terminal const& terminal, Screen const& /*screen*/):
-            href { terminal.tryGetHoveringHyperlink() }
-        {
-            if (href)
-                href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-        }
-
-        ~ScopedHyperlinkHover()
-        {
-            if (href)
-                href->state = HyperlinkState::Inactive;
-        }
-    };
-} // namespace
-
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
 {
     auto const composing = !preeditString.empty();
@@ -910,8 +936,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // grid drawn somewhere else would answer for a row the user did not point at.
     assert(baseLine == mainPageTopRow());
 
-    auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, *_currentScreen };
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
+
+    // The link under the pointer is asked for once, here, as this frame's own: the pointer's cell holds
+    // another link after a scroll, a screen switch or new output even while the pointer stands still, and
+    // no pointer event says so. A pure query -- unlike updateHoveringHyperlinkState() it tells nobody.
+    auto const hoveredHyperlink = hyperlinkIdUnderPointer();
 
     // A non-empty search pattern forces every visible line onto the per-cell render path (the
     // uniform-line fast path emits one RenderLine and no per-cell data). Hint mode needs the same:
@@ -953,7 +983,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             HighlightSearchMatches::Yes,
                                                                             inputMethodData(),
                                                                             effectiveCursorPosition,
-                                                                            includeSelection },
+                                                                            includeSelection,
+                                                                            hoveredHyperlink },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell,
                                                       smoothScrollExtra,
@@ -968,7 +999,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             HighlightSearchMatches::Yes,
                                                                             inputMethodData(),
                                                                             effectiveCursorPosition,
-                                                                            includeSelection },
+                                                                            includeSelection,
+                                                                            hoveredHyperlink },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell);
 
@@ -1033,9 +1065,13 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     // renderCursor() already computed through the very same translation.
     auto const baseLine =
         output.cursor->position.line - _viewport.translateGridToScreenCoordinate(gridCursorPos.line);
-    auto const toScreen = [&](CellLocation gridPosition) {
-        return CellLocation { .line = baseLine + _viewport.translateGridToScreenCoordinate(gridPosition.line),
-                              .column = gridPosition.column };
+    // A position between two lines is translated by the line it starts on, and keeps its fraction past it.
+    auto const toScreen = [&](FractionalCellLocation gridPosition) {
+        auto const line = std::floor(gridPosition.line);
+        auto const screenLine =
+            baseLine + _viewport.translateGridToScreenCoordinate(LineOffset::cast_from(line));
+        return FractionalCellLocation { .line = static_cast<float>(*screenLine) + (gridPosition.line - line),
+                                        .column = gridPosition.column };
     };
 
     if (_cursorMotion.active && !_cursorMotion.isComplete(now))
@@ -1043,7 +1079,11 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
         // Animation in progress — check if target changed (chaining)
         if (gridCursorPos != _cursorMotion.toPosition)
         {
-            // Chain: start new animation from current interpolated position
+            // Chain: start new animation from current interpolated position, where the cursor is drawn -- a
+            // whole cell short of it would snap the drawn cursor back toward where it came from. The two
+            // agree where grid lines map one to one onto screen rows between the ends; a collapsed fold
+            // between them puts the interpolated grid line on a row the screen does not show, as whole cells
+            // did before.
             auto const currentProgress = _cursorMotion.progress(now);
             _cursorMotion.fromPosition =
                 lerpCellLocation(_cursorMotion.fromPosition, _cursorMotion.toPosition, currentProgress);
@@ -1063,8 +1103,8 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     {
         // Start new animation (store grid positions)
         _cursorMotion.active = true;
-        _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
-        _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
+        _cursorMotion.fromPosition = FractionalCellLocation::of(_cursorMotion.toPosition); // previous target
+        _cursorMotion.fromColor = _cursorMotion.toColor; // previous target's color
         _cursorMotion.toPosition = gridCursorPos;
         _cursorMotion.toColor = output.cursor->cursorColor;
         _cursorMotion.startTime = now;
@@ -1180,7 +1220,8 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 HighlightSearchMatches::No,
                                                                 InputMethodData {},
                                                                 nullopt,
-                                                                includeSelection },
+                                                                includeSelection,
+                                                                HyperlinkId {} },
                                           ScrollOffset(0));
             // The terminal's own furniture, so its bar may span the window's whole width (#2139), and its
             // text the gutter's columns as well as the page's.
@@ -1202,7 +1243,8 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                        HighlightSearchMatches::No,
                                                                        InputMethodData {},
                                                                        nullopt,
-                                                                       includeSelection },
+                                                                       includeSelection,
+                                                                       HyperlinkId {} },
                                                  ScrollOffset(0));
             return _hostWritableStatusLineScreen.pageSize().lines;
     }
@@ -1232,6 +1274,35 @@ RGBColorPair Terminal::indicatorStatusLineColors() const
     }
     core::unreachable();
 }
+
+namespace
+{
+    /// The columns @p text takes when a screen writes it. libunicode measures each grapheme cluster; the grid
+    /// gives a cluster at least one column (appendCodepointToCluster, LineSoA.cpp), as wide as its first
+    /// codepoint, or, under ClusterWidthPolicy::ClusterAware, as the whole cluster where that is wider -- a
+    /// cluster widens and never narrows (Screen::applyClusterWidthChange).
+    /// @param text   UTF-8 text.
+    /// @param policy How the screen measures a cluster (DEC mode 2027).
+    /// @return The columns @p text takes.
+    [[nodiscard]] ColumnCount columnsOnTheGrid(std::string_view text, ClusterWidthPolicy policy)
+    {
+        auto columns = 0u;
+        for (auto const& cluster: unicode::utf8_grapheme_segmenter(text))
+        {
+            if (cluster.empty())
+                continue;
+            auto const first = std::max(1u, unicode::width(cluster.front()));
+            switch (policy)
+            {
+                case ClusterWidthPolicy::FirstCodepoint: columns += first; break;
+                case ClusterWidthPolicy::ClusterAware:
+                    columns += std::max(first, unicode::grapheme_cluster_width(cluster));
+                    break;
+            }
+        }
+        return ColumnCount::cast_from(columns);
+    }
+} // namespace
 
 void Terminal::updateIndicatorStatusLine()
 {
@@ -1265,38 +1336,45 @@ void Terminal::updateIndicatorStatusLine()
     using Styling = StatusLineStyling;
     auto const& definitions = _indicatorStatusLineDefinition;
 
+    // A segment is placed by the columns the screen lays its text out in, not by its bytes.
+    auto const widthOf = [&](StatusLineSegment const& segment) {
+        return columnsOnTheGrid(serializeToVT(*this, segment, Styling::Disabled),
+                                _indicatorStatusScreen.clusterWidthPolicy());
+    };
+    auto const columns = _indicatorStatusScreen.pageSize().columns;
+
+    // The columns, from the first, that the left segment and a middle one shown take.
+    auto taken = ColumnCount(0);
+
     if (!definitions.left.empty())
     {
         auto const leftVT = serializeToVT(*this, definitions.left, Styling::Enabled);
         writeToScreenInternal(_indicatorStatusScreen, leftVT);
+        taken = widthOf(definitions.left);
     }
 
     if (!definitions.middle.empty() || !definitions.right.empty())
     {
-        // Don't show the middle segment if text is too long.
-        auto const middleLength = serializeToVT(*this, definitions.middle, Styling::Disabled).size();
-        // Centred on the bar, the gutter's columns and the page's together.
-        auto const center = _indicatorStatusScreen.pageSize().columns / ColumnCount(2) - ColumnCount(1);
-        // size of middleVT segment is less that number of elements in the string due to formatting
-        // and on average we can assume that the middle segment is half the size of the string
-        _indicatorStatusScreen.moveCursorToColumn(
-            ColumnOffset::cast_from(center - ColumnOffset::cast_from(middleLength / 4)));
-        auto const middleVT = serializeToVT(*this, definitions.middle, Styling::Enabled);
-        if (unbox<size_t>(center) > static_cast<size_t>(middleLength / 2))
-            writeToScreenInternal(_indicatorStatusScreen, middleVT);
-
-        // Don't show the right part if the left and middle segments are too long.
-        // That is, if the current cursor position is past the beginning of the right segment.
-        // Also don't show if the right text is too long.
-        auto const rightLength = serializeToVT(*this, definitions.right, Styling::Disabled).size();
-        if (ColumnCount::cast_from(rightLength) < _indicatorStatusScreen.pageSize().columns)
+        // The middle segment is centred, and not shown if it is too wide.
+        auto const middleWidth = widthOf(definitions.middle);
+        if (!definitions.middle.empty()
+            && columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2))
         {
-            _indicatorStatusScreen.moveCursorToColumn(
-                boxed_cast<ColumnOffset>(_indicatorStatusScreen.pageSize().columns)
-                - ColumnOffset::cast_from(rightLength));
+            auto const middleStart = (columns - middleWidth) / ColumnCount(2);
+            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(middleStart));
+            writeToScreenInternal(_indicatorStatusScreen,
+                                  serializeToVT(*this, definitions.middle, Styling::Enabled));
+            taken = std::max(taken, middleStart + middleWidth);
+        }
 
-            auto const rightVT = serializeToVT(*this, definitions.right, Styling::Enabled);
-            writeToScreenInternal(_indicatorStatusScreen, rightVT);
+        // The right segment ends in the last column, and is not shown if it is as wide as the line, or
+        // where it would overlap what the segments before it take.
+        auto const rightWidth = widthOf(definitions.right);
+        if (rightWidth < columns && taken + rightWidth <= columns)
+        {
+            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(columns - rightWidth));
+            writeToScreenInternal(_indicatorStatusScreen,
+                                  serializeToVT(*this, definitions.right, Styling::Enabled));
         }
     }
 }
@@ -1523,6 +1601,8 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                                       bool uiHandledHint,
                                       MousePressClaimant const& claimant)
 {
+    _currentMousePixelPosition = pixelPosition;
+
     // A press is not necessarily preceded by a MouseMove landing exactly here: the windowing system
     // usually delivers one, which is why a slow, deliberate drag never showed this, but a fast click
     // can arrive as a bare press while _currentMousePosition is still wherever the pointer last idled
@@ -1567,21 +1647,9 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
 
     verifyState();
 
-    // DEC Locator: intercept mouse press if locator mode is active
-    if (_locatorState.enabled)
-    {
-        auto const btn = [&]() -> int {
-            switch (button)
-            {
-                case MouseButton::Left: return 1;
-                case MouseButton::Middle: return 2;
-                case MouseButton::Right: return 4;
-                default: return 0;
-            }
-        }();
-        if (btn != 0 && handleLocatorMouseEvent(btn, true, _currentMousePosition))
-            return Handled { true };
-    }
+    // A press the DEC locator reports is not the application's.
+    if (handleLocatorMouseEvent(LocatorEvent::ButtonDown, button))
+        return Handled { true };
 
     // Hand the event to the input generator for app tracking or wheel->cursor-key translation;
     // generateMousePress() self-rejects the cases where neither applies.
@@ -1861,6 +1929,8 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     if (!(isPrimaryScreen() || isAlternateScreen()))
         return;
 
+    _currentMousePixelPosition = pixelPosition;
+
     // Back from off the grid is a move too, even onto the cell it left from.
     if (newPosition != _currentMousePosition || _pointerPlacement == PointerPlacement::OffGrid)
     {
@@ -1959,12 +2029,9 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
         }
     }
 
-    // DEC Locator: intercept mouse release if locator mode is active
-    if (_locatorState.enabled)
-    {
-        if (handleLocatorMouseEvent(0, false, _currentMousePosition))
-            return Handled { true };
-    }
+    // A release the DEC locator reports is not the application's.
+    if (handleLocatorMouseEvent(LocatorEvent::ButtonUp, button))
+        return Handled { true };
 
     if (allowPassMouseEventToApp(modifiers) && core::locked(_inputMutex, [&] {
             return _inputGenerator.generateMouseRelease(
@@ -2236,9 +2303,22 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 // We use this for rendering the status line.
 namespace
 {
+    /// Whether the row a status line segment is written into has room for more of it.
+    enum class RowRoom : uint8_t
+    {
+        Left = 0, ///< The next character is written if it fits.
+        Filled,   ///< The screen holds the cursor at the row's end: only what joins the last character goes.
+        Closed,   ///< A character did not fit, or one followed a filled row: nothing more is written.
+    };
+
     struct SimpleSequenceHandler
     {
         Screen& targetScreen;
+
+        /// The indicator status line ends at the page's last column, so a segment is cut there and shows its
+        /// head. Autowrap would carry the overflow onto the next row, which on the one-row line is a scroll
+        /// that leaves the tail; without autowrap the last column would take every character past it.
+        RowRoom rowRoom = RowRoom::Left;
 
         void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
 
@@ -2251,25 +2331,67 @@ namespace
 
         void processAPC(std::string_view body) { targetScreen.processAPC(body); }
 
-        void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
+        /// Writes @p codepoint where it fits on the row, and nothing once one has not.
+        /// @param codepoint The character.
+        void writeText(char32_t codepoint)
+        {
+            if (rowRoom == RowRoom::Closed)
+                return;
 
+            auto& cursor = targetScreen.cursor();
+            auto const joins = targetScreen.joinsLastCluster(codepoint);
+            if (rowRoom == RowRoom::Filled)
+            {
+                if (!joins)
+                {
+                    rowRoom = RowRoom::Closed;
+                    return;
+                }
+                // The screen takes a pending wrap before it places a codepoint: held back, what joins the
+                // row's last character stays on it.
+                auto const wrapPending = std::exchange(cursor.wrapPending, false);
+                targetScreen.writeText(codepoint);
+                cursor.wrapPending = wrapPending;
+                return;
+            }
+
+            // A wide character with too few columns left would wrap, or, without autowrap, be dropped.
+            auto const width = static_cast<int>(unicode::width(codepoint));
+            auto const lastColumn = boxed_cast<ColumnOffset>(targetScreen.pageSize().columns) - 1;
+            if (!joins && width > 1 && cursor.position.column + ColumnOffset(width - 1) > lastColumn)
+            {
+                rowRoom = RowRoom::Closed;
+                return;
+            }
+
+            auto const column = cursor.position.column;
+            targetScreen.writeText(codepoint);
+
+            // The screen says when the row is full. Autowrap holds the cursor on the last column with a wrap
+            // pending; without autowrap the cursor stays on what was written last -- on the cell a character
+            // started, or inside a cluster a variation selector widened -- and the next character would
+            // overwrite it.
+            if (cursor.wrapPending || (!joins && cursor.position.column == column)
+                || targetScreen.at(cursor.position).isFlagEnabled(CellFlag::WideCharContinuation))
+                rowRoom = RowRoom::Filled;
+        }
+
+        /// Writes a run of UTF-8 text a character at a time, decoded as the parser decodes text.
+        /// @param chars The run.
         void writeText(std::string_view chars, size_t /*cellCount*/)
         {
-            // implementation of targetScreen.writeText(chars, cellCount)
-            // is buggy and does not work correctly
-            // so we do not use optimization for
-            // ParserEvents::print(chars,cellCount)
-            // but write char by char
-            // TODO fix targetScreen.writeText(chars, cellCount)
-            for (auto c: chars)
-                targetScreen.writeText(c);
+            auto utf8 = unicode::utf8_decoder_state {};
+            for (auto const byte: chars)
+                if (auto const codepoint = vtparser::decodeUtf8Byte(utf8, static_cast<uint8_t>(byte)))
+                    writeText(*codepoint);
         }
 
         void writeTextEnd() { targetScreen.writeTextEnd(); }
 
         [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept
         {
-            // Returning 0 here, because we do not make use of the performance optimized bulk write above.
+            // 0: the parser hands every character to writeText(char32_t), which alone decides what fits on
+            // the row.
             return 0;
         }
     };
@@ -2311,11 +2433,16 @@ void Terminal::updateCursorVisibilityState() const noexcept
     }
 }
 
+HyperlinkId Terminal::hyperlinkIdUnderPointer() const
+{
+    auto const position = currentMouseGridPosition();
+    return position ? displayedPage().hyperlinkIdAt(*position) : HyperlinkId {};
+}
+
 void Terminal::updateHoveringHyperlinkState()
 {
-    // The cell the frame's hover highlight reads too (@see tryGetHoveringHyperlink), so the two agree.
-    auto const position = currentMouseGridPosition();
-    auto const newState = position ? _currentScreen->hyperlinkIdAt(*position) : HyperlinkId {};
+    // The cell the hover tooltip reads too (@see tryGetHoveringHyperlink), so the two agree.
+    auto const newState = hyperlinkIdUnderPointer();
 
     auto const oldState = _hoveringHyperlinkId.exchange(newState);
 
@@ -2713,8 +2840,8 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
         // that error compounded by roughly a pixel per call.
         setCellPixelSize(pixels.value() / totalPageSize);
 
-    // Reset margins for all pages to defaults on resize.
-    _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
+    // Reset the margins to their defaults on resize.
+    _mainDisplayMargin = makeDefaultMargin(mainDisplayPageSize);
 
     applyPageSizeToCurrentBuffer();
 
@@ -2806,10 +2933,10 @@ void Terminal::verifyState()
     // master fd), so any grid change after the shell exited (DPR settlement, window growth, pane
     // teardown reflows) made the two legitimately diverge and aborted debug builds.
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
-    Require(0 <= *currentPageMargin().horizontal.from
-            && *currentPageMargin().horizontal.to < *mainDisplayPageSize.columns);
-    Require(0 <= *currentPageMargin().vertical.from
-            && *currentPageMargin().vertical.to < *mainDisplayPageSize.lines);
+    Require(0 <= *mainDisplayMargin().horizontal.from
+            && *mainDisplayMargin().horizontal.to < *mainDisplayPageSize.columns);
+    Require(0 <= *mainDisplayMargin().vertical.from
+            && *mainDisplayMargin().vertical.to < *mainDisplayPageSize.lines);
 #endif
 }
 
@@ -4019,8 +4146,8 @@ LineOffset Terminal::snapToVisibleLine(LineOffset line, VerticalDirection direct
 std::vector<ScrollbarMarkInput> Terminal::scrollbarMarkInputs() const
 {
     // The alternate screen keeps no history and no marks: the scrollbar over it has nothing to point into.
-    // Nor is a tick offered while the primary screen is shown but cannot scroll, or the other way round:
-    // the gate is the reveal's, so no tick is drawn that a click would refuse.
+    // Nor is a tick offered while another page is on display, wherever the cursor is: the gate is the
+    // reveal's, so no tick is drawn that a click would refuse.
     if (!canRevealScrollback())
         return {};
 
@@ -4082,7 +4209,6 @@ uint64_t Terminal::scrollbarMarksRevision() const
         .stableIdGeneration = grid.stableIdGeneration(),
         .stableFloor = grid.stableRangeFloor(),
         .displayedPage = _displayedPage,
-        .cursorScreen = _currentScreenType,
     };
     if (inputs != _scrollbarMarksInputs)
     {
@@ -4303,8 +4429,10 @@ void Terminal::followOutput()
     // followed later, by a batch that added nothing. A shell's line editor that repaints its prompt on a
     // timer (endo, once a second) adds nothing, and used to bring a view taken back to read the history down
     // with every repaint: xterm's scrollTtyOutput follows any byte read, ghostty only a bottom row that
-    // moved.
-    if (std::exchange(_linesScrolledSinceFollow, LineCount(0)) == LineCount(0))
+    // moved. Only what the page on display scrolled counts: output to another page is no output to follow,
+    // wherever the cursor ends the batch.
+    auto const scrolled = displayedPage().linesScrolledIntoHistory();
+    if (std::exchange(_displayedPageLinesFollowed, scrolled) == scrolled)
         return;
 
     if (!_settings.autoScrollOnUpdate || !_viewport.scrolled() || _inputHandler.mode() != ViMode::Insert)
@@ -4421,13 +4549,50 @@ void Terminal::openDocument(string_view data)
     runOutsideStateLock([this, document = string(data)] { _eventListener.openDocument(document); });
 }
 
+namespace
+{
+
+    /// A row's text as the grid lays it out, with every byte tied to the columns of the cell it came from.
+    struct RowTextWithColumns
+    {
+        std::string text;                ///< The row's text: a cell's own text, a space for an empty cell.
+        std::vector<size_t> firstColumn; ///< Per byte of @ref text: the first column of its cell.
+        std::vector<size_t> lastColumn;  ///< Per byte of @ref text: the last column of its cell.
+    };
+
+    /// Reads @p line cell by cell, so a byte offset into the text can be mapped back to a grid column.
+    ///
+    /// The cells decide their own width and text: a wide character's second cell and a cell with no text
+    /// of its own add nothing, a grapheme cluster is one cell however many codepoints it holds, and an
+    /// empty cell is one space, so a path is not glued to the text across a gap.
+    /// @param line The row to read.
+    /// @return The row's text and, per byte, the columns of the cell holding it.
+    [[nodiscard]] RowTextWithColumns rowTextWithColumns(Line const& line)
+    {
+        auto row = RowTextWithColumns {};
+        auto const columns = static_cast<size_t>(*line.size());
+        for (auto const column: std::views::iota(size_t { 0 }, columns))
+        {
+            auto const offset = ColumnOffset::cast_from(column);
+            auto const cellText = line.toUtf8(offset, offset + ColumnOffset(1));
+            auto const width = static_cast<size_t>(std::max<uint8_t>(line.cellWidthAt(offset), 1));
+            row.text += cellText;
+            row.firstColumn.insert(row.firstColumn.end(), cellText.size(), column);
+            row.lastColumn.insert(row.lastColumn.end(), cellText.size(), column + width - 1);
+        }
+        return row;
+    }
+
+} // namespace
+
 std::optional<std::string> Terminal::pathTextAtMousePosition() const
 {
     auto const mousePosition = currentMouseGridPosition();
     if (!mousePosition)
         return std::nullopt;
 
-    auto const lineText = currentScreen().lineTextAt(mousePosition->line, false, false);
+    auto const row = rowTextWithColumns(displayedPage().grid().lineAt(mousePosition->line));
+    auto const& lineText = row.text;
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
 
     static auto const localPathRegex = [] {
@@ -4450,11 +4615,8 @@ std::optional<std::string> Terminal::pathTextAtMousePosition() const
         if (match.empty())
             continue;
 
-        auto const startColumn =
-            utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position()));
-        auto const endColumn =
-            utf8ByteOffsetToCodepointIndex(lineText, static_cast<size_t>(match.position() + match.length()))
-            - 1;
+        auto const startColumn = row.firstColumn[static_cast<size_t>(match.position())];
+        auto const endColumn = row.lastColumn[static_cast<size_t>(match.position() + match.length()) - 1];
 
         // Matches do not overlap, so the first that spans the mouse is the only one.
         if (startColumn <= mouseColumn && mouseColumn <= endColumn)
@@ -4472,8 +4634,8 @@ std::expected<PathBases, PathRefusal> Terminal::localPathBaseAt(LineOffset row) 
 
 CommandBlockRecord const* Terminal::pathBlockAt(LineOffset row) const
 {
-    // Blocks live on the primary screen; a row of an alternate screen belongs to none.
-    return isPrimaryScreen() ? commandBlockAt(row) : nullptr;
+    // Blocks live on the primary screen; a row of any other page on display belongs to none.
+    return displayedScreenType() == ScreenType::Primary ? commandBlockAt(row) : nullptr;
 }
 
 std::expected<TerminalDirectory, PathRefusal> Terminal::terminalDirectory() const
@@ -4521,7 +4683,8 @@ std::expected<std::optional<std::string>, PathRefusal> Terminal::localPathAtMous
 
 HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollbackLimit) const
 {
-    auto const& screen = currentScreen();
+    // The page on display, which the labels are drawn over.
+    auto const& screen = displayedPage();
     auto const gridBottom = pageSize().lines.as<LineOffset>() - LineOffset(1);
     auto const historyTop = -screen.historyLineCount().as<LineOffset>();
 
@@ -5548,8 +5711,8 @@ std::optional<LineOffset> Terminal::commandBlockAnchor(CommandBlockTarget target
     switch (target)
     {
         case CommandBlockTarget::Pointer:
-            // Over an alternate screen, the pointer is over no block.
-            if (!isPrimaryScreen())
+            // Over any page on display but the primary one, the pointer is over no block.
+            if (displayedScreenType() != ScreenType::Primary)
                 return std::nullopt;
             return currentMouseGridPosition().transform([](CellLocation position) { return position.line; });
         case CommandBlockTarget::Cursor:
@@ -5976,7 +6139,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
             {
-                currentPageMargin().horizontal =
+                mainDisplayMargin().horizontal =
                     Margin::Horizontal { .from = ColumnOffset(0),
                                          .to = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
                 _supportedVTSequences.enableSequence(SCOSC);
@@ -6131,7 +6294,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             break;
         case DECMode::PageCursorCoupling:
             if (enable && _displayedPage != _cursorPage)
-                _displayedPage = _cursorPage;
+                showPage(_cursorPage);
             break;
         case DECMode::DesignateCharsetUSASCII:
             // DEC private mode 2 is DECANM: reset (`CSI ? 2 l`) enters VT52. The set form (`CSI ? 2 h`,
@@ -6173,8 +6336,8 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
 
     if (sanitizedTop < sanitizedBottom)
     {
-        currentPageMargin().vertical.from = sanitizedTop;
-        currentPageMargin().vertical.to = sanitizedBottom;
+        mainDisplayMargin().vertical.from = sanitizedTop;
+        mainDisplayMargin().vertical.to = sanitizedBottom;
     }
 }
 
@@ -6186,8 +6349,8 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
     auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
     if (sanitizedLeft < sanitizedRight)
     {
-        currentPageMargin().horizontal.from = sanitizedLeft;
-        currentPageMargin().horizontal.to = sanitizedRight;
+        mainDisplayMargin().horizontal.from = sanitizedLeft;
+        mainDisplayMargin().horizontal.to = sanitizedRight;
     }
 }
 
@@ -6205,36 +6368,51 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
     auto const behavior = alternateScreenBehavior(mode);
     Require(behavior.has_value());
 
-    if (enable && !isAlternateScreen())
+    // The guards ask which buffer is in use, as xterm's whichBuf and mlterm's edit identity do: the alternate
+    // screen is entered from whichever page the cursor is on.
+    if (enable && !isAlternateScreenBufferInUse())
     {
         // xterm's ToAlternate: switch in, carrying the cursor across (it is terminal-level, not
-        // per-buffer, so it does not move), then optionally erase the alternate page. The alternate
-        // page inherits the primary's margins, as xterm's alternate screen traditionally does.
-        _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
-        auto const carried = _currentScreen->cursor();
+        // per-buffer, so it does not move), then optionally erase the alternate page. The margins stay
+        // as they are: the alternate screen shares the main display's.
+        auto const carried = pageAt(_cursorPage).cursor();
+        _pagesBeforeAlternateScreen = { .cursor = _cursorPage, .displayed = _displayedPage };
         setScreen(ScreenType::Alternate);
-        if (behavior->carryCursor)
-            _currentScreen->cursor() = carried;
-        if (behavior->clearOnEnter)
+        // A switch of screen buffer is no page movement, which is all DECPCCM governs: the alternate screen
+        // is shown whatever DECPCCM says, as xterm shows the buffer it switches to, and as Windows Terminal
+        // keeps its alternate buffer outside paging.
+        if (_displayedPage != _cursorPage)
+            showPage(_cursorPage);
+        if (behavior->carriesCursorIn)
+            pageAt(_cursorPage).adoptCursor(carried);
+        if (behavior->clearsOnEntry)
             clearScreen();
     }
-    else if (!enable && isAlternateScreen())
+    else if (!enable && isAlternateScreenBufferInUse())
     {
         // xterm's FromAlternate: optionally erase the alternate page first (ED 2 leaves the cursor put),
-        // then switch back, carrying the cursor across.
-        if (behavior->clearOnExit)
+        // then switch back, carrying the cursor across (47, 1047; on 1049 the page's own cursor is the
+        // restore of the cursor saved on the way in). Back to the page the cursor came from, as Windows
+        // Terminal's ?1049 restores the page it saved with the cursor: DEC STD 070 defines no alternate
+        // screen, and its DECSC, which saves the page with the active position, is the rule extended here.
+        if (behavior->clearsOnExit)
             clearScreen();
-        auto const carried = _currentScreen->cursor();
-        setScreen(ScreenType::Primary);
-        if (behavior->carryCursor)
-            _currentScreen->cursor() = carried;
+        auto const carried = pageAt(_cursorPage).cursor();
+        setPage(_pagesBeforeAlternateScreen.cursor, PageCursorPlacement::PagesOwn);
+        // Coupled, the page on display followed the cursor. Reset, the page on display before the alternate
+        // screen came up is shown again, as Windows Terminal's cursor restore moves its visible page only
+        // while DECPCCM is set.
+        if (!isModeEnabled(DECMode::PageCursorCoupling))
+            showPage(_pagesBeforeAlternateScreen.displayed);
+        if (behavior->carriesCursorOut)
+            pageAt(_cursorPage).adoptCursor(carried);
     }
 
     // Modes 47, 1047 and 1049 are three views of one piece of state -- whether the alternate screen
     // buffer is in use -- so DECRQM must report all three consistently, no matter which one switched
     // (xterm keys every one off screen->whichBuf). Mirror the resulting buffer state onto all three
     // bits; the trailing _modes.set(mode, enable) in setMode() then agrees with it.
-    auto const onAlternate = isAlternateScreen();
+    auto const onAlternate = isAlternateScreenBufferInUse();
     for (auto const altMode:
          { DECMode::UseAlternateScreen, DECMode::OptionalAltScreen, DECMode::ExtendedAltScreen })
         _modes.set(altMode, onAlternate);
@@ -6253,8 +6431,15 @@ void Terminal::softReset()
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
     _currentScreen->resetSavedCursorState();        // DECSC (Save cursor state)
-    setMode(DECMode::VisibleCursor, true);          // DECTCEM (Text cursor enable)
-    setMode(DECMode::Origin, false);                // DECOM
+    // And the main display's, the page in it too, where DECRC reads the buffer on the page DECSC saved: DEC
+    // STD 070 DECSC, "Execution of Soft Terminal Reset (DECSTR) also causes the Save Buffer to be set to the
+    // default values", position.page = 1 among them. Received on the status line as well, as DEC's
+    // soft_terminal_reset() returns to the main display before it resets the buffer (ch. 4).
+    auto const slot = savedCursorPageSlot();
+    _savedCursorPage[slot] = NoSavedCursorPages[slot];
+    pageAt(_savedCursorPage[slot]).resetSavedCursorState();
+    setMode(DECMode::VisibleCursor, true); // DECTCEM (Text cursor enable)
+    setMode(DECMode::Origin, false);       // DECOM
     // DECLRMM (left/right margin mode). DEC STD 070 lists it among the modes DECSTR resets; turning it
     // off here also restores the horizontal margins to full width and swaps DECSLRM back out for SCOSC
     // (see setMode's LeftRightMargin case), so a later DECSLRM is inert until DECLRMM is set again.
@@ -6298,6 +6483,7 @@ void Terminal::softReset()
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
+    _selectedStatusDisplayType = StatusDisplayType::None;
 
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
     setMode(DECMode::AutoRepeat, true);         // DECARM
@@ -6436,7 +6622,9 @@ void Terminal::hardReset()
     for (auto& page: _pages)
         page->hardReset();
     _cursorPage = PageIndex(0);
-    _displayedPage = PageIndex(0);
+    showPage(PageIndex(0));
+    _pagesBeforeAlternateScreen = {};
+    _savedCursorPage = NoSavedCursorPages; // DEC STD 070 DECSC: on reset the save buffer's page is 1
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
@@ -6500,11 +6688,12 @@ void Terminal::hardReset()
 
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
-    // Reset margins for all pages to defaults.
-    _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
+    // Reset the margins to their defaults.
+    _mainDisplayMargin = makeDefaultMargin(mainDisplayPageSize);
     primaryScreen().verifyState();
 
     setStatusDisplay(_factorySettings.statusDisplayType);
+    _selectedStatusDisplayType = StatusDisplayType::None;
 
     // NB: _inputGenerator.reset() deliberately runs near the top of this function, before the mode
     // register is replayed. @see the comment there.
@@ -6553,12 +6742,32 @@ void Terminal::publishAnimationsEnd() noexcept
                          std::memory_order_relaxed);
 }
 
-void Terminal::setPage(PageIndex target, bool moveCursorHome)
+void Terminal::movePage(int page, PageCursorPlacement placement)
+{
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
+        return;
+    // The alternate screen is a display of one page, so page movement stays on it: NP and PP move home there,
+    // and PPA, PPR and PPB leave the cursor where it is.
+    if (isAlternateScreenBufferInUse())
+    {
+        if (placement == PageCursorPlacement::Home)
+            pageAt(_cursorPage).moveCursorTo(LineOffset(0), ColumnOffset(0));
+        return;
+    }
+    setPage(PageIndex(std::clamp(page, 0, AlternateScreenPageIndex.value - 1)), placement);
+}
+
+void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
 {
     // Clamp target to valid range.
     auto const clamped = PageIndex(std::clamp(target.value, 0, MaxPageCount - 1));
     if (clamped == _cursorPage)
+    {
+        // NP and PP move home on the last and the first page too, as DEC STD 070's algorithms do.
+        if (placement == PageCursorPlacement::Home)
+            pageAt(clamped).moveCursorTo(LineOffset(0), ColumnOffset(0));
         return;
+    }
 
     // Cancel any active cursor motion animation on page change.
     _cursorMotion.active = false;
@@ -6593,8 +6802,13 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
         publishAnimationsEnd();
     }
 
+    // DEC STD 070 keeps one active position and one rendition, so a page movement carries the cursor on.
+    auto const leaving = pageAt(_cursorPage).cursor();
     _cursorPage = clamped;
-    _currentScreen = _pages[clamped.value].get();
+    // While DECSASD selects the status line, it stays the screen the terminal acts on; the page takes over
+    // when DECSASD returns to the main display (setActiveStatusDisplay).
+    if (_activeStatusDisplay == ActiveStatusDisplay::Main)
+        _currentScreen = _pages[clamped.value].get();
 
     // Update mouse wheel mode based on whether this is the primary page.
     if (clamped == PageIndex(0))
@@ -6606,7 +6820,7 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
 
     // When DECPCCM is set, the displayed page follows the cursor page.
     if (isModeEnabled(DECMode::PageCursorCoupling))
-        _displayedPage = clamped;
+        showPage(clamped);
 
     _currentScreenType = screenTypeFromPage(clamped);
     publishBindingModes();
@@ -6614,10 +6828,26 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
     // Ensure correct screen buffer size for the buffer we've just switched to.
     applyPageSizeToCurrentBuffer();
 
-    if (moveCursorHome)
-        _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
+    switch (placement)
+    {
+        case PageCursorPlacement::PagesOwn: break;
+        case PageCursorPlacement::SameLineAndColumn: pageAt(clamped).adoptCursor(leaving); break;
+        case PageCursorPlacement::Home:
+            pageAt(clamped).adoptCursor(leaving);
+            pageAt(clamped).moveCursorTo(LineOffset(0), ColumnOffset(0));
+            break;
+    }
 
     bufferChanged(_currentScreenType);
+}
+
+void Terminal::showPage(PageIndex page)
+{
+    // What a page scrolled before it came on display is no output to follow.
+    if (page != _displayedPage)
+        _displayedPageLinesFollowed = pageAt(page).linesScrolledIntoHistory();
+    _displayedPage = page;
+    _viewport.clampScrollOffset();
 }
 
 void Terminal::saveCursorPage()
@@ -6629,19 +6859,25 @@ void Terminal::saveCursorPage()
     // DECSC/DECRC's. xterm likewise keeps saved-cursor state separate per screen. The slot is keyed on
     // the page identity (is this THE alternate page?), not _currentScreenType, so a primary VT420 page
     // reached via PPA/NP/PP still uses the primary slot.
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
+        return;
     _savedCursorPage[savedCursorPageSlot()] = _cursorPage;
 }
 
-void Terminal::restoreCursorPage()
+Screen& Terminal::restoreCursorPage(Screen& receiving)
 {
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
+        return receiving;
     auto const saved = _savedCursorPage[savedCursorPageSlot()];
     if (saved != _cursorPage)
-        setPage(saved, false);
+        setPage(saved, PageCursorPlacement::PagesOwn);
+    return pageAt(saved);
 }
 
 void Terminal::setScreen(ScreenType type)
 {
-    setPage(type == ScreenType::Primary ? PageIndex(0) : AlternateScreenPageIndex, false);
+    setPage(type == ScreenType::Primary ? PageIndex(0) : AlternateScreenPageIndex,
+            PageCursorPlacement::PagesOwn);
 }
 
 void Terminal::applyPageSizeToCurrentBuffer()
@@ -6756,8 +6992,10 @@ void Terminal::synchronizedOutput(bool enabled)
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
     {
-        // Instrumentation only. This branch drops a repaint that the throttle would have allowed,
-        // and nothing re-arms it -- @see the lost-wakeup entry in docs/internals/performance-backlog.md.
+        // Instrumentation only. This branch drops a repaint that the throttle would have allowed, and
+        // nothing re-arms it: while this state lasts, the batch's screenUpdated() only retries the swap of
+        // the frame built before and tells the display nothing, so the block's end shows only with the next
+        // repaint something else asks for.
         ZoneScopedN("syncOut.dropped.trySwap");
         return;
     }
@@ -6769,13 +7007,14 @@ void Terminal::synchronizedOutput(bool enabled)
     }
 }
 
-void Terminal::outputScrolledIntoHistory(LineCount n) noexcept
+void Terminal::onBufferScrolled(Screen const& scrolled, LineCount n) noexcept
 {
-    _linesScrolledSinceFollow += n;
-}
+    // The viewer's state is on the page on display, which the viewport is the window onto. A page the cursor
+    // writes to with DECPCCM reset, the status line DECSASD selected and the indicator status line, which
+    // every frame writes, each scroll under nobody's view: none of it moves.
+    if (&scrolled != &displayedPage())
+        return;
 
-void Terminal::onBufferScrolled(LineCount n) noexcept
-{
     // Adjust Normal-mode's cursor accordingly to make it fixed at the scroll-offset as if nothing has
     // happened.
     _viCommands.cursorPosition.line -= n;
@@ -7089,31 +7328,17 @@ void Terminal::defineDRCS(int fontNumber,
 
 void Terminal::setLocatorMode(int ps, int pu) noexcept
 {
-    switch (ps)
-    {
-        case 0: // Locator disabled
-            _locatorState.enabled = false;
-            _locatorState.oneShot = false;
-            break;
-        case 1: // Locator enabled — reports on button press/release
-            _locatorState.enabled = true;
-            _locatorState.oneShot = false;
-            break;
-        case 2: // One-shot mode — report once then disable
-            _locatorState.enabled = true;
-            _locatorState.oneShot = true;
-            break;
-        default: break;
-    }
+    // DEC STD 070 ch. 13 DECELR: "Undefined values for Ps or Pu causes the entire sequence to be ignored."
+    // Ps: 0 disabled, 1 enabled, 2 one shot. Pu: 0 (or omitted) and 2 character cells, 1 device pixels.
+    auto const defined = [](int value) {
+        return 0 <= value && value <= 2;
+    };
+    if (!defined(ps) || !defined(pu))
+        return;
 
-    // Pu: coordinate unit
-    switch (pu)
-    {
-        case 1: _locatorState.coordUnit = LocatorCoordUnit::DevicePixels; break;
-        case 0: [[fallthrough]];
-        case 2: [[fallthrough]];
-        default: _locatorState.coordUnit = LocatorCoordUnit::CharacterCells; break;
-    }
+    _locatorState.enabled = ps != 0;
+    _locatorState.oneShot = ps == 2;
+    _locatorState.coordUnit = pu == 1 ? LocatorCoordUnit::DevicePixels : LocatorCoordUnit::CharacterCells;
 }
 
 void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
@@ -7143,57 +7368,101 @@ void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
     }
 }
 
-void Terminal::sendLocatorReport(int event, int button, int row, int col)
+void Terminal::sendLocatorReport(int event)
 {
-    // DECLRP — Locator Report: CSI Pe ; Pb ; Pr ; Pc ; Pp & w
-    // Pp = page number (always 1)
-    reply("\033[{};{};{};{};1&w", event, button, row, col);
-    flushInput();
-}
-
-void Terminal::requestLocatorPosition()
-{
-    if (!_locatorState.enabled)
+    // Off the grid the locator is unavailable, as xterm answers a position outside its window (LocatorCoords'
+    // out-of-range flag). In device pixels that also takes a pixel outside the grid -- over the window's
+    // padding, where the cell is still the one at the edge -- and every pixel while the cell's size is not
+    // known.
+    auto const offTheGrid = [&] {
+        if (_pointerPlacement == PointerPlacement::OffGrid)
+            return true;
+        if (_locatorState.coordUnit != LocatorCoordUnit::DevicePixels)
+            return false;
+        auto const extent = cellPixelSize() * pageSize();
+        auto const [x, y] = _currentMousePixelPosition;
+        return x.value < 0 || y.value < 0 || x.value >= unbox<int>(extent.width)
+               || y.value >= unbox<int>(extent.height);
+    }();
+    if (event == 0 || offTheGrid)
+        reply("\033[0&w");
+    else
     {
-        // If locator is not enabled, report locator unavailable
-        sendLocatorReport(0, 0, 0, 0);
-        return;
+        // Pr and Pc, from 1, in the unit DECELR selected: device pixels as xterm's LocatorCoords gives them,
+        // or cells.
+        auto const [row, column] = [&]() -> std::pair<int, int> {
+            switch (_locatorState.coordUnit)
+            {
+                case LocatorCoordUnit::CharacterCells:
+                    return { *_currentMousePosition.line + 1, *_currentMousePosition.column + 1 };
+                case LocatorCoordUnit::DevicePixels:
+                    return { _currentMousePixelPosition.y.value + 1, _currentMousePixelPosition.x.value + 1 };
+            }
+            core::unreachable();
+        }();
+        // Pp: the page seen through the window, always sent.
+        reply("\033[{};{};{};{};{}&w", event, _locatorButtonsHeld, row, column, displayedPageNumber());
     }
-    // Report last known mouse position (1-based)
-    auto const row = *_currentMousePosition.line + 1;
-    auto const col = *_currentMousePosition.column + 1;
-    sendLocatorReport(1, 0, row, col);
-}
+    flushInput();
 
-bool Terminal::handleLocatorMouseEvent(int button, bool press, CellLocation pos)
-{
-    if (!_locatorState.enabled)
-        return false;
-
-    if (press && !_locatorState.reportButtonDown)
-        return false;
-    if (!press && !_locatorState.reportButtonUp)
-        return false;
-
-    // Pe: 2 = button down, 3 = button up
-    auto const event = press ? 2 : 3;
-
-    // Pb: button encoding (1=left, 2=middle, 4=right; 0 for up with no button info)
-    auto const pb = press ? button : 0;
-
-    // Row and column are 1-based
-    auto const row = *pos.line + 1;
-    auto const col = *pos.column + 1;
-
-    sendLocatorReport(event, pb, row, col);
-
+    // DEC STD 070 ch. 13 DECLRP: in one shot mode "a single locator report (DECLRP) shall reset locator
+    // reporting mode to disabled" -- a request's answer as a button's, and as xterm the unavailable one too.
     if (_locatorState.oneShot)
     {
         _locatorState.enabled = false;
         _locatorState.oneShot = false;
     }
+}
 
-    return true;
+void Terminal::requestLocatorPosition()
+{
+    sendLocatorReport(_locatorState.enabled ? 1 : 0);
+}
+
+namespace
+{
+    /// A button of the DEC locator, as DECLRP encodes it (DEC STD 070 ch. 13).
+    struct LocatorButtonCode
+    {
+        MouseButton button; ///< The button.
+        int down;           ///< Pe when it goes down.
+        int up;             ///< Pe when it goes up.
+        uint8_t held;       ///< Its bit in Pb, which names the buttons held down.
+    };
+
+    /// The buttons the locator reports, a row each, as DEC STD 070 and xterm encode them.
+    constexpr auto LocatorButtonCodes = std::array {
+        LocatorButtonCode { .button = MouseButton::Left, .down = 2, .up = 3, .held = 0b100 },
+        LocatorButtonCode { .button = MouseButton::Middle, .down = 4, .up = 5, .held = 0b010 },
+        LocatorButtonCode { .button = MouseButton::Right, .down = 6, .up = 7, .held = 0b001 },
+    };
+} // namespace
+
+Handled Terminal::handleLocatorMouseEvent(LocatorEvent event, MouseButton button)
+{
+    auto const code = std::ranges::find(LocatorButtonCodes, button, &LocatorButtonCode::button);
+    if (code == LocatorButtonCodes.end())
+        return Handled { false };
+
+    switch (event)
+    {
+        case LocatorEvent::ButtonDown: _locatorButtonsHeld |= code->held; break;
+        case LocatorEvent::ButtonUp: _locatorButtonsHeld &= static_cast<uint8_t>(~code->held); break;
+    }
+
+    auto const selected = [&] {
+        switch (event)
+        {
+            case LocatorEvent::ButtonDown: return _locatorState.reportButtonDown;
+            case LocatorEvent::ButtonUp: return _locatorState.reportButtonUp;
+        }
+        core::unreachable();
+    }();
+    if (!_locatorState.enabled || !selected)
+        return Handled { false };
+
+    sendLocatorReport(event == LocatorEvent::ButtonDown ? code->down : code->up);
+    return Handled { true };
 }
 
 void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)
@@ -7277,6 +7546,34 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
         resizeScreen(_settings.pageSize, nullopt);
+}
+
+void Terminal::selectStatusDisplayByHost(StatusDisplayType type)
+{
+    _selectedStatusDisplayType = type;
+    switch (type)
+    {
+        case StatusDisplayType::None:
+        case StatusDisplayType::Indicator: setStatusDisplay(type); break;
+        case StatusDisplayType::HostWritable:
+            if (_statusDisplayType != StatusDisplayType::HostWritable)
+                requestShowHostWritableStatusLine();
+            break;
+    }
+}
+
+void Terminal::selectStatusDisplayByUser(StatusDisplayType type)
+{
+    _selectedStatusDisplayType = type;
+    if (type != StatusDisplayType::HostWritable && _activeStatusDisplay == ActiveStatusDisplay::StatusLine)
+        setActiveStatusDisplay(ActiveStatusDisplay::Main);
+    setStatusDisplay(type);
+}
+
+bool Terminal::isHostWritableStatusLineSelected() const noexcept
+{
+    return _selectedStatusDisplayType == StatusDisplayType::HostWritable
+           || _statusDisplayType == StatusDisplayType::HostWritable;
 }
 
 void Terminal::answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer answer)

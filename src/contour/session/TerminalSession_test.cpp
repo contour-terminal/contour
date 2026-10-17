@@ -557,6 +557,34 @@ TEST_CASE("TerminalSession: key and char events write their encoding into the PT
     CHECK(mockPtyOf(*session).stdinBuffer() == "a\r");
 }
 
+TEST_CASE("TerminalSession: a bare Ctrl press does not hide the pointer", "[contour][session]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    // hide_while_typing is on by default (Config.hpp ~596); assert that rather than assume it
+    REQUIRE(session->profile().mouse.value().hideWhileTyping);
+    auto const now = std::chrono::steady_clock::now();
+    session->sendKeyEvent(vtbackend::Key::LeftControl,
+                          vtbackend::KeyboardModifiers { vtbackend::Modifier::Control },
+                          vtbackend::KeyboardEventType::Press,
+                          now);
+    CHECK((session.surface->cursorShapes.empty()
+           || session.surface->cursorShapes.back() != contour::input::MouseCursorShape::Hidden));
+}
+
+TEST_CASE("TerminalSession: a non-modifier key still hides the pointer while typing", "[contour][session]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    REQUIRE(session->profile().mouse.value().hideWhileTyping);
+    session.surface->cursorShapes.clear();
+    auto const now = std::chrono::steady_clock::now();
+    session->sendKeyEvent(
+        vtbackend::Key::F5, vtbackend::KeyboardModifiers {}, vtbackend::KeyboardEventType::Press, now);
+    REQUIRE_FALSE(session.surface->cursorShapes.empty());
+    CHECK(session.surface->cursorShapes.back() == contour::input::MouseCursorShape::Hidden);
+}
+
 TEST_CASE("TerminalSession: mouse events without a mouse protocol write nothing and do not crash",
           "[contour][session][input]")
 {
@@ -1968,15 +1996,16 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
 
     SECTION("the cursor leaving for another page")
     {
-        // DECPCCM reset: page 0 stays on display, but the viewport cannot scroll while the cursor is away.
+        // DECPCCM reset: page 0 stays on display, and the viewport, the window onto it, still scrolls to a
+        // tick wherever the cursor writes.
         terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(3), 0));
         pane->refreshScrollbarMarks();
         REQUIRE(pane->scrollbarMarks().size() == 1);
 
         terminal.writeToScreen("\033[?64l");
-        terminal.setPage(vtbackend::PageIndex(3), /*moveCursorHome*/ true);
+        terminal.setPage(vtbackend::PageIndex(3), vtbackend::PageCursorPlacement::Home);
         pane->refreshScrollbarMarks();
-        CHECK(pane->scrollbarMarks().isEmpty());
+        CHECK(pane->scrollbarMarks().size() == 1);
     }
 
     SECTION("another page put on display")
@@ -1987,9 +2016,9 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
         pane->refreshScrollbarMarks();
         REQUIRE(pane->scrollbarMarks().size() == 1);
 
-        terminal.setPage(vtbackend::PageIndex(3), /*moveCursorHome*/ true);
+        terminal.setPage(vtbackend::PageIndex(3), vtbackend::PageCursorPlacement::Home);
         terminal.writeToScreen("\033[?64l");
-        terminal.setPage(vtbackend::PageIndex(0), /*moveCursorHome*/ false);
+        terminal.setPage(vtbackend::PageIndex(0), vtbackend::PageCursorPlacement::PagesOwn);
         REQUIRE(terminal.isPrimaryScreen());
         pane->refreshScrollbarMarks();
         CHECK(pane->scrollbarMarks().isEmpty());
@@ -2424,10 +2453,12 @@ TEST_CASE("TerminalSession: a configuration reload hands the status line's layou
 namespace
 {
 
-/// Denies @p session's host-writable status line, then has the application write @p text to it and
-/// return to the main display, as a program that keeps its status in DEC's status line does.
+/// Has the application ask for @p session's host-writable status line (DECSSDT 2), denies it, then has the
+/// application write @p text to it and return to the main display, as a program that keeps its status in
+/// DEC's status line does.
 void writeToDeniedStatusLine(contour::session::TerminalSession& session, std::string_view text)
 {
+    session.terminal().writeToScreen("\033[2$~");
     session.executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
     session.terminal().writeToScreen(std::format("\033[1$}}{}\033[0$}}", text));
 }
@@ -2494,6 +2525,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
         setSyncToWindowTitle(testApp.app(), true);
         auto session = makeDisplaylessSession(testApp.app());
         session->terminal().setWindowTitle("before");
+        session->terminal().writeToScreen("\033[2$~");
         session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
         reloadSessionWith(*session,
                           "",
@@ -2507,6 +2539,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
     {
         setSyncToWindowTitle(testApp.app(), false);
         auto session = makeDisplaylessSession(testApp.app());
+        session->terminal().writeToScreen("\033[2$~");
         session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
         reloadSessionWith(*session,
                           "",
@@ -7543,6 +7576,46 @@ TEST_CASE("TerminalSession: the context menu pins the command block that was rig
     QGuiApplication::clipboard()->clear();
 }
 
+TEST_CASE("TerminalSession: the context menu offers a line's fold and block only while the pointer is on it",
+          "[contour][session][contextmenu][semanticblocks]")
+{
+    // The rows act on the line the pointer is on, and there is none while the pointer is on no cell: not the
+    // top-left one before any pointer event, nor the one it left. A menu opened from the keyboard then
+    // offers no line's fold or block.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    writeFinishedBlock(*session, "make", "built\r\nlinked\r\n");
+    auto const* make = session->terminal().commandBlockAt(vtbackend::LineOffset(0));
+    REQUIRE(make != nullptr);
+    REQUIRE(session->terminal().foldContaining(vtbackend::LineOffset(0)).has_value());
+    auto const onTheOutput = vtbackend::CellLocation { vtbackend::LineOffset(1), vtbackend::ColumnOffset(0) };
+
+    SECTION("before any pointer event")
+    {
+        auto const state = session->contextMenuState();
+        CHECK_FALSE(state.foldLine.has_value());
+        CHECK_FALSE(state.blockUnderCursor.has_value());
+    }
+
+    SECTION("with the pointer on the block's output")
+    {
+        session->sendMouseMoveEvent(Modifiers {}, onTheOutput, vtbackend::PixelCoordinate {});
+        auto const state = session->contextMenuState();
+        CHECK(state.foldLine == vtbackend::LineOffset(1));
+        REQUIRE(state.blockUnderCursor.has_value());
+        CHECK(state.blockUnderCursor->id == make->id);
+    }
+
+    SECTION("once the pointer has left the grid")
+    {
+        session->sendMouseMoveEvent(Modifiers {}, onTheOutput, vtbackend::PixelCoordinate {});
+        session->onPointerLeft();
+        auto const state = session->contextMenuState();
+        CHECK_FALSE(state.foldLine.has_value());
+        CHECK_FALSE(state.blockUnderCursor.has_value());
+    }
+}
+
 TEST_CASE("TerminalSession: a right-click on an output tail the next prompt shares pins the prompt's block",
           "[contour][session][contextmenu][semanticblocks]")
 {
@@ -8924,6 +8997,31 @@ TEST_CASE("TerminalSession: input protection toggled on with resize reports echo
     CHECK(reportedItsPage(*session));
 }
 
+TEST_CASE("TerminalSession: toggling the status line selects its type and leaves a host-writable one",
+          "[contour][session]")
+{
+    // DEC STD 070 ch. 14 §3 DECSSDT: "The type of Status Line can also be changed through a Set-Up field",
+    // and the user's toggle is that field; §2.3: "If the Status Display Type is chosen to be something other
+    // than "Host Writable", the Status Display will be exited". So the toggle that hides the host-writable
+    // status line leaves it, and DECSASD can no longer select it.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen("\033[2$~"); // DECSSDT: the host-writable status line
+    session->executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+    terminal.writeToScreen("\033[1$}"); // DECSASD: write to it
+    REQUIRE(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+
+    CHECK((*session)(contour::actions::ToggleStatusLine {})); // the indicator instead
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+
+    terminal.writeToScreen("\033[1$}X"); // DECSASD again, and text
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    CHECK(terminal.primaryScreen().renderMainPageText().contains('X'));
+    CHECK_FALSE(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains('X'));
+}
+
 TEST_CASE("TerminalSession: the status line toggled with resize reports echoed locally does not deadlock",
           "[contour][session]")
 {
@@ -9195,6 +9293,57 @@ TEST_CASE("TerminalSession: a selection report the wheel raises reaches the PTY 
 
     INFO("queued: " << core::escape(pane->terminal().peekInput()));
     CHECK(mockPtyOf(*pane).stdinBuffer().contains("\033[>"));
+}
+
+TEST_CASE("TerminalSession: a horizontal wheel notch is reported at the cell it turns over",
+          "[contour][session][input]")
+{
+    // A notch is not a press at a new spot, but it happens where the pointer is, and its event says where
+    // that is. Remembered positions are not the pointer's: before any pointer event the terminal's is only
+    // its default, the top-left cell, and once the pointer has left the grid it is the cell it left from.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    pane->terminal().writeToScreen("\033[?1000h\033[?1006h"); // button events, SGR encoding
+    auto const& cellSize = pane.surface->cellSizeValue;
+    auto const pixelCentreOf = [&](vtbackend::CellLocation cell) {
+        return QPointF((unbox<double>(cell.column) + 0.5) * unbox<double>(cellSize.width),
+                       (unbox<double>(cell.line) + 0.5) * unbox<double>(cellSize.height));
+    };
+    auto const underTheWheel =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(3) };
+
+    SECTION("before any pointer event")
+    {
+    }
+
+    SECTION("once the pointer has left the grid")
+    {
+        pane->terminal().sendMouseMoveEvent(Modifiers {},
+                                            vtbackend::CellLocation { .line = vtbackend::LineOffset(5),
+                                                                      .column = vtbackend::ColumnOffset(7) },
+                                            vtbackend::PixelCoordinate {},
+                                            false);
+        pane->terminal().sendMouseLeaveEvent();
+    }
+
+    SECTION("with the pointer moved onto that cell")
+    {
+        pane->terminal().sendMouseMoveEvent(
+            Modifiers {}, underTheWheel, vtbackend::PixelCoordinate {}, false);
+    }
+
+    discardWrittenInput(*pane);
+    auto const position = pixelCentreOf(underTheWheel);
+    auto wheel = QWheelEvent { position,     position,       QPoint(0, 0),      QPoint(120, 0),
+                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false };
+    contour::session::sendWheelEvent(&wheel, *pane);
+
+    auto const& reports = mockPtyOf(*pane).stdinBuffer();
+    INFO("reports: " << core::escape(reports));
+    CHECK(reports.contains(";4;3M"));
+    CHECK_FALSE(reports.contains(";1;1M"));
+    CHECK_FALSE(reports.contains(";8;6M"));
+    CHECK(pane->terminal().currentMouseGridPosition() == underTheWheel);
 }
 
 TEST_CASE("TerminalSession: a desktop notification's answer reaches the PTY at once",

@@ -113,6 +113,12 @@ void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
                              _gridMetrics.mapBottomLeft(cell.position, _smoothScrollYOffset),
                              vtbackend::ColumnCount(cell.width * scale),
                              cell.attributes.decorationColor);
+
+    if (auto const decorator = decoratorFor(cell.linkRole, _hyperlinkNormal, _hyperlinkHover))
+        renderDecoration(*decorator,
+                         _gridMetrics.mapBottomLeft(cell.position, _smoothScrollYOffset),
+                         vtbackend::ColumnCount(cell.width * scale),
+                         cell.attributes.decorationColor);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

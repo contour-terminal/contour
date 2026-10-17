@@ -2431,9 +2431,10 @@ void TerminalSession::sendKeyEvent(Key key,
         return;
     }
 
-    // Guarded like sendCharEvent: a display-less session (background pane, headless test) has no
-    // mouse cursor to hide.
-    if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
+    // A bare modifier is no typing: hiding the pointer then hides the very link Ctrl is held to reach.
+    // Guarded for display-less sessions (background pane, headless test), which have no cursor to hide.
+    auto const modifierOnly = vtbackend::isModifierKey(key);
+    if (_profile.mouse.value().hideWhileTyping && _display != nullptr && !modifierOnly)
         _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
@@ -2703,7 +2704,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // cell it came from. The flag is that invalidation: without it the gutter's pointing hand survived
     // over the grid until the pointer happened to cross into another cell.
     auto const decidesPointerShape =
-        (pos != _currentMousePosition || _isPointerShapeStale) && _display != nullptr;
+        (pos != _pointerShapeCell || _isPointerShapeStale) && _display != nullptr;
 
     // The hovered link is read inside the lock the move already takes, rather than asked for again
     // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
@@ -2733,7 +2734,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     if (decidesPointerShape)
     {
         _isPointerShapeStale = false;
-        _currentMousePosition = pos;
+        _pointerShapeCell = pos;
         if (hover.targetShape)
             _display->setMouseCursorShape(*hover.targetShape);
         else
@@ -4532,13 +4533,14 @@ bool TerminalSession::operator()(actions::ToggleInputProtection)
 
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
-    // Locked: the status line resizes the page. See ViNormalMode.
+    // Locked: the status line resizes the page. See ViNormalMode. The user's choice is a selection, which a
+    // host-writable status line DECSASD had selected gives way to.
     {
         auto const _ = std::scoped_lock { _terminal };
         if (terminal().statusDisplayType() != StatusDisplayType::Indicator)
-            terminal().setStatusDisplay(StatusDisplayType::Indicator);
+            terminal().selectStatusDisplayByUser(StatusDisplayType::Indicator);
         else
-            terminal().setStatusDisplay(StatusDisplayType::None);
+            terminal().selectStatusDisplayByUser(StatusDisplayType::None);
 
         // `savedStatusDisplayType` holds only a value if the application has been overriding
         // the status display type. But the user now actively requests a given type,

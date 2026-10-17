@@ -306,23 +306,36 @@ namespace
             return result;
         }
 
+        /// What @p describe says about the grid cell under the pointer -- the cell the view shows there, a
+        /// cell of the page on display, which with the view scrolled back is in the history -- or nothing
+        /// while the pointer is on no cell.
+        /// @param describe Says what the item shows for a cell.
+        /// @return The item's text; empty leaves the item out.
+        template <typename Describe>
+        [[nodiscard]] std::string describePointerCell(Describe const& describe) const
+        {
+            auto const cell = vt.currentMouseGridPosition();
+            return cell ? describe(*cell) : std::string {};
+        }
+
         // {{{
         std::string visit(StatusLineDefinitions::Title const&) { return vt.windowTitle(); }
 
         std::string visit(StatusLineDefinitions::CellSGR const&)
         {
-            auto const currentMousePosition = vt.currentMousePosition();
-            auto const cellFlags = vt.currentScreen().cellFlagsAt(currentMousePosition);
-            return std::format("{}", cellFlags);
+            return describePointerCell(
+                [&](CellLocation cell) { return std::format("{}", vt.displayedPage().cellFlagsAt(cell)); });
         }
 
-        std::string visit(StatusLineDefinitions::CellTextUtf32 const&)
+        [[nodiscard]] std::string visit(StatusLineDefinitions::CellTextUtf32 const&) const
         {
-            auto const currentMousePosition = vt.currentMousePosition();
-            if (!vt.contains(currentMousePosition))
-                return {};
+            return describePointerCell([&](CellLocation cell) { return codepointsOf(cell); });
+        }
 
-            auto const cellText = vt.currentScreen().cellTextAt(currentMousePosition);
+        /// The codepoints of @p cell's text, as `U+XXXX`, separated by spaces.
+        [[nodiscard]] std::string codepointsOf(CellLocation cell) const
+        {
+            auto const cellText = vt.displayedPage().cellTextAt(cell);
             auto const cellText32 = unicode::convert_to<char32_t>(std::string_view(cellText));
 
             std::string result;
@@ -339,10 +352,8 @@ namespace
 
         std::string visit(StatusLineDefinitions::CellTextUtf8 const&)
         {
-            auto const currentMousePosition = vt.currentMousePosition();
-            if (!vt.contains(currentMousePosition))
-                return {};
-            return core::escape(vt.currentScreen().cellTextAt(currentMousePosition));
+            return describePointerCell(
+                [&](CellLocation cell) { return core::escape(vt.displayedPage().cellTextAt(cell)); });
         }
 
         std::string visit(StatusLineDefinitions::Clock const&)
@@ -374,10 +385,10 @@ namespace
 
         std::string visit(StatusLineDefinitions::Hyperlink const&)
         {
-            if (auto const hyperlink = vt.currentScreen().hyperlinkAt(vt.currentMousePosition()))
-                return std::format("{}", hyperlink->uri);
-
-            return {};
+            return describePointerCell([&](CellLocation cell) {
+                auto const hyperlink = vt.displayedPage().hyperlinkAt(cell);
+                return hyperlink ? std::format("{}", hyperlink->uri) : std::string {};
+            });
         }
 
         std::string visit(StatusLineDefinitions::InputMode const&)

@@ -330,17 +330,14 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
 
     QTest::keyClick(h.window.get(), Qt::Key_A);
     QTest::keyClick(h.window.get(), Qt::Key_Return);
-    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('a'); ++i)
-        QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().contains('a'));
-    CHECK(h.pty->stdinSnapshot().contains('\r'));
+    auto const typed = h.sentInput();
+    CHECK(typed.contains('a'));
+    CHECK(typed.contains('\r'));
 
     // Enable X10 mouse reporting, then click inside the grid: the terminal must encode a report.
     h.feedAndSettle("\033[?1000h"sv);
     QTest::mouseClick(h.window.get(), Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
-    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains("\033[M"); ++i)
-        QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().contains("\033[M"));
+    CHECK(h.sentInput().contains("\033[M"));
 
     // Wheel over the (alt-less) primary screen scrolls the viewport — no crash, event consumed.
     // A phase-less notch now arms an inertial glide advanced by the render loop (nextRender +
@@ -360,14 +357,12 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
     // The glide decays on real wall-clock time (tick() reads steady_clock), advanced by the
     // _updateTimer. Bound the wait by elapsed time, not iteration count: a bare pump() loop can burn
     // 60 iterations in well under the ~300ms the glide needs on a fast host, firing the timer too
-    // few times and leaving the glide active. qWait() lets real time pass so the timer runs; the
-    // generous ceiling keeps the test deterministic without being slow in the common case.
-    for (int waited = 0; waited < 1500 && h.session->terminal().isMomentumScrollActive(); waited += 16)
-    {
-        QTest::qWait(16);
+    // few times and leaving the glide active. qWaitFor() lets real time pass between frames so the
+    // timer runs; the generous ceiling keeps the test deterministic without being slow in the common case.
+    CHECK(QTest::qWaitFor([&] {
         h.pump();
-    }
-    CHECK_FALSE(h.session->terminal().isMomentumScrollActive());
+        return !h.session->terminal().isMomentumScrollActive();
+    }));
     CHECK(h.session->terminal().viewport().scrollOffset().value > 0);
 
     // A pixel-delta wheel with a scroll phase drives the smooth-scroll / phase-mapping branches
@@ -420,7 +415,7 @@ TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls throu
     h.feedAndSettle("\033[?1006h"sv); // SGR extended mouse encoding
     REQUIRE(h.session->terminal().isAlternateScreen());
 
-    auto const before = h.pty->stdinSnapshot().size();
+    auto const before = h.sentInput().size();
     QWheelEvent wheel(QPointF(100, 100),
                       QPointF(100, 100),
                       QPoint(),
@@ -433,9 +428,7 @@ TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls throu
 
     // The notch did not arm a glide (alt screen) and must instead have produced a mouse report.
     CHECK_FALSE(h.session->terminal().isMomentumScrollActive());
-    for (int i = 0; i < 50 && h.pty->stdinSnapshot().size() == before; ++i)
-        QTest::qWait(10);
-    auto const snapshot = h.pty->stdinSnapshot();
+    auto const snapshot = h.sentInput();
     CHECK(snapshot.size() > before);
     // SGR wheel-up report: CSI < 64 ; col ; row M  (button code 64 == wheel up).
     CHECK(snapshot.contains("\033[<64;"));
@@ -449,12 +442,10 @@ TEST_CASE("display: window resize reflows the grid through the real render loop"
     auto const pageBefore = h.session->terminal().pageSize();
     h.window->resize(1000, 760);
     h.display->setSize(QSizeF(1000, 760));
-    for (int i = 0; i < 50 && h.session->terminal().pageSize() == pageBefore; ++i)
-    {
-        QTest::qWait(10);
+    CHECK(QTest::qWaitFor([&] {
         h.pump();
-    }
-    CHECK(h.session->terminal().pageSize() != pageBefore);
+        return h.session->terminal().pageSize() != pageBefore;
+    }));
 }
 
 TEST_CASE("display: the page leaves the configured gutter's columns left of the grid",
@@ -509,38 +500,6 @@ TEST_CASE("display: a reload that widens the gutter widens the window's minimum 
     // The minimum is the one hint every platform applies (geometry::sizeHintsFor).
     CHECK(h.window->minimumSize().width() > minimumBefore.width());
     CHECK(h.window->minimumSize().height() == minimumBefore.height());
-}
-
-TEST_CASE("display: FollowHyperlink over a hovered OSC-8 link opens it via the launcher",
-          "[display][launcher]")
-{
-    // The hovered-hyperlink lookup only resolves after a real render (the hover state is updated on
-    // the display), so this path is exercised here rather than headlessly. Seed an OSC-8 remote link,
-    // move the mouse over its first cell, then dispatch FollowHyperlink and assert the injected
-    // launcher recorded the openUrl (no browser launched).
-    REQUIRE_DISPLAY_OR_SKIP();
-    DisplayHarness h;
-    namespace actions = contour::actions;
-
-    h.display->forceActiveFocus();
-    h.feedAndSettle("\033]8;;https://example.com/page\033\\LINK\033]8;;\033\\\r\n"sv);
-
-    // Hover the top-left cell (where the link text begins) via a real mouse move + render.
-    QTest::mouseMove(h.window.get(), QPoint(6, 6));
-    QCoreApplication::sendEvent(h.display.get(), [] {
-        static QHoverEvent ev(QEvent::HoverMove, QPointF(6, 6), QPointF(6, 6), QPointF(0, 0), Qt::NoModifier);
-        return &ev;
-    }());
-    h.pump();
-
-    if (h.session->terminal().isMouseHoveringHyperlink())
-    {
-        auto const before = h.testApp.launcher().openedUrls.size();
-        CHECK((*h.session)(actions::FollowHyperlink {}));
-        CHECK(h.testApp.launcher().openedUrls.size() == before + 1);
-    }
-    else
-        WARN("hyperlink hover not detected even under the live display; follow assertion skipped");
 }
 
 TEST_CASE("display: the deferred screenshot readback delivers a real image", "[display][screenshot]")
@@ -645,16 +604,15 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
                      [&fontAsks]() { ++fontAsks; });
 
     h.session->setFontDef(fontRequest(RequestedFontSize));
-    for (int i = 0; i < 50 && fontAsks == 0; ++i)
-        QTest::qWait(10);
+    REQUIRE(QTest::qWaitFor([&] { return fontAsks != 0; }));
     REQUIRE(fontAsks == 1);
     h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/true);
-    QTest::qWait(20);
+    REQUIRE(QTest::qWaitFor([&] { return h.display->fontSize().pt == RequestedFontSize; }));
     h.pump();
 
+    // Only the gate applies the next request's font, so the font applied says the gate has run.
     h.session->setFontDef(fontRequest(RequestedFontSize + 1.0));
-    for (int i = 0; i < 50 && h.display->fontSize().pt < 13.9; ++i)
-        QTest::qWait(10);
+    REQUIRE(QTest::qWaitFor([&] { return h.display->fontSize().pt == RequestedFontSize + 1.0; }));
     CHECK(fontAsks == 1); // remembered: applied without asking again
 
     // CaptureBuffer rides the same queue. requestCaptureBuffer() only ENQUEUES the request and posts the
@@ -666,24 +624,26 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
                      h.session.get(),
                      [&captureAsks]() { ++captureAsks; });
 
+    // The chunk that ends every answer to a capture request (Screen::replyCaptureBufferEnd), and is the
+    // whole of a refusal. Only a verdict on the request writes it.
+    constexpr auto CaptureAnswerEnd = "\033^314;\033\\"sv;
+
     h.feedAndSettle("capture me\r\n"sv);
     h.session->requestCaptureBuffer(vtbackend::LineCount(2), /*logical=*/false);
-    for (int i = 0; i < 50 && captureAsks == 0; ++i)
-        QTest::qWait(10);
+    REQUIRE(QTest::qWaitFor([&] { return captureAsks != 0; }));
     REQUIRE(captureAsks == 1);
     h.session->executePendingBufferCapture(/*allow=*/true, /*remember=*/false);
-    QTest::qWait(20);
+    CHECK(contour::test::occurrencesOf(CaptureAnswerEnd, h.sentInput()) == 1); // allowed: answered
 
     // A remembered deny resolves the next request without asking again -- and still answers it, since a
     // refused capture owes its client the terminating chunk.
     h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
-    for (int i = 0; i < 50 && captureAsks == 1; ++i)
-        QTest::qWait(10);
+    REQUIRE(QTest::qWaitFor([&] { return captureAsks != 1; }));
     REQUIRE(captureAsks == 2);
     h.session->executePendingBufferCapture(/*allow=*/false, /*remember=*/true);
     h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
-    QTest::qWait(20);
-    h.pump();
+    REQUIRE(QTest::qWaitFor(
+        [&] { return contour::test::occurrencesOf(CaptureAnswerEnd, h.pty->stdinSnapshot()) == 3; }));
     CHECK(captureAsks == 2); // remembered: resolved without asking again
 
     // ShowHostWritableStatusLine rides the display queue too; a remembered deny resolves silently.
@@ -708,8 +668,7 @@ TEST_CASE("display: bell rings the session signals and the alert path", "[displa
                      [&alerts]() { ++alerts; });
 
     h.feedAndSettle("\a"sv);
-    for (int i = 0; i < 50 && bells == 0; ++i)
-        QTest::qWait(10);
+    CHECK(QTest::qWaitFor([&] { return bells != 0; }));
     CHECK(bells == 1);
     // The default profile bell alerts as well (bell.alert = true).
     CHECK(alerts == 1);
@@ -750,27 +709,24 @@ TEST_CASE("display: font zoom keeps the window fixed and changes the page size i
     CHECK(h.display->setFontSize(text::FontSize { 24.0 }));
     // pageSize is republished over subsequent frames (recomputeGeometryAfterFontReconfig runs async);
     // wait for it to settle, mirroring the window-resize case above.
-    for (int i = 0; i < 50 && h.session->terminal().pageSize() == pageBefore; ++i)
-    {
-        QTest::qWait(10);
+    CHECK(QTest::qWaitFor([&] {
         h.pump();
-    }
+        return h.session->terminal().pageSize() != pageBefore;
+    }));
 
     // The window (and therefore the pane) did NOT resize...
     CHECK(h.window->size() == windowSizeBefore);
     // ...but the page shrank: a bigger font at fixed pixels yields fewer columns and/or lines.
     auto const pageAfter = h.session->terminal().pageSize();
-    CHECK(pageAfter != pageBefore);
     CHECK(pageAfter.lines <= pageBefore.lines);
     CHECK(pageAfter.columns <= pageBefore.columns);
 
     // Shrinking the font back grows the page again, still without touching the window.
     CHECK(h.display->setFontSize(text::FontSize { 8.0 }));
-    for (int i = 0; i < 50 && h.session->terminal().pageSize() == pageAfter; ++i)
-    {
-        QTest::qWait(10);
+    CHECK(QTest::qWaitFor([&] {
         h.pump();
-    }
+        return h.session->terminal().pageSize() != pageAfter;
+    }));
     CHECK(h.window->size() == windowSizeBefore);
     CHECK(h.session->terminal().pageSize().lines >= pageAfter.lines);
     CHECK(h.session->terminal().pageSize().columns >= pageAfter.columns);
@@ -786,7 +742,7 @@ TEST_CASE("display: a font-size change with resize reports echoed locally does n
     DisplayHarness h;
     h.feedAndSettle("\033[12l\033[?2048h");
     auto const pageBefore = h.session->terminal().pageSize();
-    auto const reportsBefore = h.pty->stdinSnapshot().size();
+    auto const reportsBefore = h.sentInput().size();
 
     vtbackend::test::failOnDeadlock(10s, [&] {
         REQUIRE(h.display->setFontSize(text::FontSize { 24.0 }));
@@ -801,7 +757,7 @@ TEST_CASE("display: a font-size change with resize reports echoed locally does n
 
     auto const page = h.session->terminal().pageSize();
     REQUIRE(page != pageBefore);
-    CHECK(h.pty->stdinSnapshot()
+    CHECK(h.sentInput()
               .substr(reportsBefore)
               .contains(std::format("\033[48;{};{};", page.lines.value, page.columns.value)));
 }
@@ -930,9 +886,7 @@ TEST_CASE("display: title and color-preference updates repaint the live display"
     // OSC 0 sets the window title; the resolved title must reflect it and the change reaches the
     // display's title signal.
     h.feedAndSettle("\033]0;coverage title\a"sv);
-    for (int i = 0; i < 50 && !h.session->title().contains(QStringLiteral("coverage title")); ++i)
-        QTest::qWait(10);
-    CHECK(h.session->title().contains(QStringLiteral("coverage title")));
+    CHECK(QTest::qWaitFor([&] { return h.session->title().contains(QStringLiteral("coverage title")); }));
 
     // A runtime color-preference flip (dark<->light) re-derives the palette and repaints.
     h.session->updateColorPreference(vtbackend::ColorPreference::Light);
@@ -952,15 +906,13 @@ TEST_CASE("display: alt-screen switches drive bufferChanged through the live dis
     // scrollbar-visibility re-evaluation end-to-end.
     REQUIRE(h.session->terminal().screenType() == vtbackend::ScreenType::Primary);
     h.feedAndSettle("\033[?1049h"sv); // enter alt screen
-    for (int i = 0; i < 50 && h.session->terminal().screenType() != vtbackend::ScreenType::Alternate; ++i)
-        QTest::qWait(10);
-    CHECK(h.session->terminal().screenType() == vtbackend::ScreenType::Alternate);
+    CHECK(QTest::qWaitFor(
+        [&] { return h.session->terminal().screenType() == vtbackend::ScreenType::Alternate; }));
     h.pump();
 
     h.feedAndSettle("\033[?1049l"sv); // back to primary
-    for (int i = 0; i < 50 && h.session->terminal().screenType() != vtbackend::ScreenType::Primary; ++i)
-        QTest::qWait(10);
-    CHECK(h.session->terminal().screenType() == vtbackend::ScreenType::Primary);
+    CHECK(QTest::qWaitFor(
+        [&] { return h.session->terminal().screenType() == vtbackend::ScreenType::Primary; }));
     h.pump();
 }
 
@@ -1101,9 +1053,7 @@ TEST_CASE("display: input-method events compose and query on the live display", 
         commit.setCommitString(QStringLiteral("Z"));
         QCoreApplication::sendEvent(h.display.get(), &commit);
     }
-    for (int i = 0; i < 50 && !h.pty->stdinSnapshot().contains('Z'); ++i)
-        QTest::qWait(10);
-    CHECK(h.pty->stdinSnapshot().contains('Z'));
+    CHECK(h.sentInput().contains('Z'));
 
     // The IME queries the display for its cursor rectangle / font / anchor — all must return
     // without crashing while a session is attached.
@@ -1377,6 +1327,37 @@ void sendMouse(contour::display::TerminalDisplay* display,
                      double(cellSize.height.as<int>()) / dpr / 2.0);
 }
 } // namespace
+
+TEST_CASE("display: FollowHyperlink over a hovered OSC-8 link opens it via the launcher",
+          "[display][launcher]")
+{
+    // The hovered-hyperlink lookup only resolves after a real render (the hover state is updated on
+    // the display), so this path is exercised here rather than headlessly. Seed an OSC-8 remote link,
+    // hover its first cell, then dispatch FollowHyperlink and assert the injected launcher recorded the
+    // openUrl (no browser launched).
+    //
+    // The cell's position comes from the display's own geometry: the grid begins right of the gutter, so a
+    // pixel guessed at the top-left lands on the gutter, and the link is never hovered.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+    namespace actions = contour::actions;
+
+    h.display->forceActiveFocus();
+    h.feedAndSettle("\033]8;;https://example.com/page\033\\LINK\033]8;;\033\\\r\n"sv);
+
+    // A pointer with no button down reaches the display as a hover, through hoverMoveEvent().
+    auto const onLink = logicalCellCenter(*h.display, vtbackend::LineOffset(0), vtbackend::ColumnOffset(0));
+    auto hover =
+        QHoverEvent(QEvent::HoverMove, onLink, h.display->mapToGlobal(onLink), onLink, Qt::NoModifier);
+    QCoreApplication::sendEvent(h.display.get(), &hover);
+    h.pump();
+    REQUIRE(h.session->terminal().isMouseHoveringHyperlink());
+
+    auto const before = h.testApp.launcher().openedUrls.size();
+    CHECK((*h.session)(actions::FollowHyperlink {}));
+    REQUIRE(h.testApp.launcher().openedUrls.size() == before + 1);
+    CHECK(h.testApp.launcher().openedUrls.back().toString().toStdString() == "https://example.com/page");
+}
 
 TEST_CASE("display: a mouse drag spanning multiple lines selects the exact cell range", "[display][mouse]")
 {
@@ -2045,13 +2026,12 @@ TEST_CASE("display: a session re-bound onto a resized display adopts the live gr
     auto const pageBefore = h.session->terminal().totalPageSize();
     h.window->resize(1200, 820);
     h.display->setSize(QSizeF(1200, 820));
-    for (int i = 0; i < 50 && h.session->terminal().totalPageSize() == pageBefore; ++i)
-    {
-        QTest::qWait(10);
+    // The display now fits a different grid than at startup.
+    REQUIRE(QTest::qWaitFor([&] {
         h.pump();
-    }
+        return h.session->terminal().totalPageSize() != pageBefore;
+    }));
     auto const resizedGrid = h.session->terminal().totalPageSize();
-    REQUIRE(resizedGrid != pageBefore); // the display now fits a different grid than at startup
 
     // A "background tab" session born at the small profile default (25x80), as createBackingSession would
     // produce for a brand-new window — deliberately NOT pre-sized to the resized display.
@@ -2097,13 +2077,8 @@ TEST_CASE("display: attaching a display to an already-closed session does not re
     // Close the session the way the shell exiting does: terminate() closes the PTY device and drives
     // the session to its closed state.
     h.session->terminate();
-    for (int i = 0; i < 50 && !h.session->isClosed(); ++i)
-    {
-        QTest::qWait(10);
-        QCoreApplication::processEvents();
-    }
+    REQUIRE(QTest::qWaitFor([&] { return h.session->isClosed(); }));
     REQUIRE(h.pty->isClosed());
-    REQUIRE(h.session->isClosed());
 
     // Whatever the close path itself did is not what this test is about; only what the *re-attach*
     // does after it.
@@ -2271,13 +2246,11 @@ TEST_CASE("display: a font change approved across a render-target teardown still
     CHECK(h.display->fontSize().pt == sizeBefore); // nothing published yet
 
     // The next sync re-enters createRenderer(), which materializes whatever is staged.
-    for (int i = 0; i < 50 && h.display->fontSize().pt < RequestedFontSize; ++i)
-    {
-        QTest::qWait(10);
+    CHECK(QTest::qWaitFor([&] {
         h.pump();
-    }
+        return h.display->fontSize().pt == RequestedFontSize;
+    }));
     CHECK(h.display->hasRenderTarget());
-    CHECK(h.display->fontSize().pt == RequestedFontSize);
 }
 
 TEST_CASE("display: rebinding the session under live frames does not tear a frame apart",

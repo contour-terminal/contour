@@ -1069,6 +1069,21 @@ TEST_CASE("DECELR: pixel coordinates (Pu=1)", "[screen]")
     CHECK(mock.terminal.locatorState().coordUnit == LocatorCoordUnit::DevicePixels);
 }
 
+TEST_CASE("DECELR: an undefined parameter ignores the sequence", "[screen]")
+{
+    // DEC STD 070 ch. 13 DECELR: "Undefined values for Ps or Pu causes the entire sequence to be ignored."
+    using LocatorCoordUnit = Terminal::LocatorCoordUnit;
+    auto const sequence = GENERATE(std::string_view { "\033[5;1'z" },  // Ps undefined
+                                   std::string_view { "\033[1;7'z" }); // Pu undefined
+    INFO(e(sequence));
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[2;2'z"); // one-shot, character cells
+    mock.writeToScreen(sequence);
+    CHECK(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().oneShot);
+    CHECK(mock.terminal.locatorState().coordUnit == LocatorCoordUnit::CharacterCells);
+}
+
 TEST_CASE("DECSLE: select locator events", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
@@ -1091,6 +1106,166 @@ TEST_CASE("DECRQLP: request locator position", "[screen]")
     auto const reply = mock.replyData();
     // Should contain DECLRP format: CSI 0 ; ... & w
     CHECK(reply.contains("&w"));
+}
+
+TEST_CASE("DECLRP: the page is the page on display", "[screen]")
+{
+    // DEC STD 070 ch. 13: "Pp is the page coordinate of the locator position". The locator points through the
+    // window at the page shown in it -- the page on display, not the cursor's -- and the alternate screen is
+    // page 1, as every page-number report names it.
+    auto const [setup, page] = GENERATE(table<std::string_view, int>({
+        { "", 1 },
+        { "\033[3 P\033[?64l\033[1 P", 3 }, // page 3 on display, the cursor on page 1
+        { "\033[3 P\033[?1049h", 1 },       // the alternate screen, entered from page 3
+    }));
+    INFO(e(setup));
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen(setup);
+    mock.writeToScreen("\033[1;2'z"); // DECELR: reports on, in character cells
+    pointAt(mock, 2, 3);
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033['|"); // DECRQLP
+    CHECK(e(mock.replyData()) == e(std::format("\033[1;0;3;4;{}&w", page)));
+}
+
+TEST_CASE("DECLRP: each button reports its own events and its bit", "[screen]")
+{
+    // DEC STD 070 ch. 13: Pe is 2/3 for the left button going down/up, 4/5 for the middle one, 6/7 for the
+    // right one; Pb names the buttons held down, right 1, middle 2, left 4. xterm's SendLocatorPosition sends
+    // 2 + (button << 1) and 3 + (button << 1), and the mask after the event.
+    auto const [button, down, up, bit] = GENERATE(table<MouseButton, int, int, int>({
+        { MouseButton::Left, 2, 3, 4 },
+        { MouseButton::Middle, 4, 5, 2 },
+        { MouseButton::Right, 6, 7, 1 },
+    }));
+    CAPTURE(down);
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z\033[1;3'{"); // DECELR on; DECSLE: report presses and releases
+
+    mock.resetReplyData();
+    pressAt(mock, button, 2, 3);
+    CHECK(e(mock.replyData()) == e(std::format("\033[{};{};3;4;1&w", down, bit)));
+    mock.resetReplyData();
+    release(mock, button);
+    CHECK(e(mock.replyData()) == e(std::format("\033[{};0;3;4;1&w", up)));
+}
+
+TEST_CASE("DECLRP: the button mask names every button held down", "[screen]")
+{
+    // Pb is the state of all the buttons after the event, not the one that moved: DEC STD 070 ch. 13
+    // ("indicating which, if any, of up to 4 buttons are down"), and xterm's "mask should be the state after
+    // the button press/release". A request (Pe 1) names them too.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z\033[1;3'{");
+    auto const reportOf = [&](auto const& event) {
+        mock.resetReplyData();
+        event();
+        return e(mock.replyData());
+    };
+    CHECK(reportOf([&] { pressAt(mock, MouseButton::Left, 0, 0); }) == e("\033[2;4;1;1;1&w"));
+    CHECK(reportOf([&] { pressAt(mock, MouseButton::Right, 0, 0); }) == e("\033[6;5;1;1;1&w"));
+    CHECK(reportOf([&] { mock.writeToScreen("\033['|"); }) == e("\033[1;5;1;1;1&w"));
+    CHECK(reportOf([&] { release(mock, MouseButton::Left); }) == e("\033[3;1;1;1;1&w"));
+    CHECK(reportOf([&] { release(mock, MouseButton::Right); }) == e("\033[7;0;1;1;1&w"));
+}
+
+TEST_CASE("DECLRP: an unavailable locator sends no other parameter", "[screen]")
+{
+    // DEC STD 070 ch. 13: "If Pe is 0 or omitted, all other parameters shall not be sent because the locator
+    // is unavailable". xterm answers CSI 0 & w both while the locator is off and while the pointer is outside
+    // its window (GetLocatorPosition, SendLocatorPosition).
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    SECTION("the locator is off")
+    {
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+    }
+
+    SECTION("the pointer is off the grid")
+    {
+        mock.writeToScreen("\033[1;2'z\033[1;3'{");
+        pressAt(mock, MouseButton::Left, 2, 3);
+        mock.terminal.sendMouseLeaveEvent();
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+        mock.resetReplyData();
+        release(mock, MouseButton::Left);
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+    }
+}
+
+TEST_CASE("DECLRP: one report in one-shot mode disables the locator", "[screen]")
+{
+    // DEC STD 070 ch. 13 DECLRP: "If locator reporting has been enabled to one shot mode (DECELR with Ps =
+    // 2), a single locator report (DECLRP) shall reset locator reporting mode to disabled". xterm resets
+    // after every report it sends, the answer to a request (GetLocatorPosition) as a button's
+    // (SendLocatorPosition), and the locator-unavailable one too.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[2;2'z\033[1;3'{"); // DECELR: one shot, in cells; DECSLE: presses and releases
+    pointAt(mock, 2, 3);
+
+    SECTION("the answer to a request")
+    {
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[1;0;3;4;1&w"));
+    }
+
+    SECTION("the answer to a request, the pointer off the grid")
+    {
+        mock.terminal.sendMouseLeaveEvent();
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+    }
+
+    SECTION("a button's report")
+    {
+        mock.resetReplyData();
+        pressAt(mock, MouseButton::Left, 2, 3);
+        CHECK(e(mock.replyData()) == e("\033[2;4;3;4;1&w"));
+    }
+
+    CHECK_FALSE(mock.terminal.locatorState().enabled);
+    mock.resetReplyData();
+    mock.writeToScreen("\033['|");
+    CHECK(e(mock.replyData()) == e("\033[0&w"));
+}
+
+TEST_CASE("DECLRP: the coordinates are in the unit DECELR selected", "[screen]")
+{
+    // DEC STD 070 ch. 13: "The parameter values Pr, Pc, and Pp, are expressed in the units selected by the
+    // last received Enable Locator Reports (DECELR) command", Pu 1 being "Device physical pixels". xterm's
+    // LocatorCoords reports y + 1 and x + 1 in its pixel mode, and a position outside its window as out of
+    // range, which it answers with CSI 0 & w. Over the window's padding the cell is still the one at the
+    // edge, but the pixel is off the grid. The page stays a page number. The grid is 20 x 10 cells of 10 x 20
+    // pixels.
+    auto const [decelr, line, column, x, y, report] =
+        GENERATE(table<std::string_view, int, int, int, int, std::string_view>({
+            { "\033[1;1'z", 2, 3, 35, 47, "\033[1;0;48;36;1&w" },      // device pixels
+            { "\033[1;1'z", 9, 19, 199, 199, "\033[1;0;200;200;1&w" }, // the grid's last pixel
+            { "\033[1;1'z", 2, 0, -3, 47, "\033[0&w" },                // over the left padding
+            { "\033[1;1'z", 0, 3, 35, -1, "\033[0&w" },                // over the top padding
+            { "\033[1;1'z", 2, 19, 200, 47, "\033[0&w" },              // past the right edge
+            { "\033[1;1'z", 9, 3, 35, 200, "\033[0&w" },               // past the bottom edge
+            { "\033[1;2'z", 2, 3, 35, 47, "\033[1;0;3;4;1&w" },        // character cells
+            { "\033[1;2'z", 2, 0, -3, 47, "\033[1;0;3;1;1&w" }, // cells: the edge cell, whatever the pixel
+            { "\033[1'z", 2, 3, 35, 47, "\033[1;0;3;4;1&w" },   // character cells, the default
+        }));
+    INFO(std::format("{} at pixel ({}, {})", e(decelr), x, y));
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+    mock.writeToScreen(decelr);
+    pointAt(
+        mock, line, column, PixelCoordinate { .x = PixelCoordinate::X { x }, .y = PixelCoordinate::Y { y } });
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033['|");
+    CHECK(e(mock.replyData()) == e(report));
 }
 
 TEST_CASE("DECELR: soft reset disables locator", "[screen]")

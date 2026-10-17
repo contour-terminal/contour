@@ -107,8 +107,12 @@ class Viewport
     ///         while scrolling is disabled.
     bool scrollLineToTop(LineOffset line);
 
-    /// Whether the viewport may not scroll into the history at all: while the cursor's page is not the
-    /// primary screen's.
+    /// Whether the viewport may not scroll into the history at all: while the page on display is not the
+    /// primary screen.
+    ///
+    /// The page on display, not the cursor's: the viewport is the window onto the page on display. DEC STD
+    /// 070's DECRPDE reports the window's top line (Pmt) as a line of the page shown through it (Pmp), and
+    /// Windows Terminal's user scroll moves over its visible page. With DECPCCM reset the two pages differ.
     [[nodiscard]] bool scrollingDisabled() const noexcept;
 
     /// Ensures given line is visible by optionally scrolling the
@@ -230,6 +234,7 @@ class Viewport
     [[nodiscard]] std::optional<LineOffset> findVisibleMarker(LineOffset start,
                                                               VerticalDirection direction) const;
 
+    /// The history of the page on display, which bounds the scroll offset the frame draws that page with.
     [[nodiscard]] LineCount historyLineCount() const noexcept;
 
     [[nodiscard]] LineCount screenLineCount() const noexcept;

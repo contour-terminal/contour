@@ -5,7 +5,9 @@
 
 #include <core/platform/Clock.hpp>
 
+#include <algorithm>
 #include <expected>
+#include <optional>
 
 namespace vtpty
 {
@@ -28,6 +30,24 @@ class PlacementBreaker
         return now >= _retryAfter;
     }
 
+    /// @param now The current time.
+    /// @return The failure that holds requests off until the cooldown has passed, or nothing when a
+    ///         request may be sent now.
+    [[nodiscard]] std::optional<ScopeError> heldOffBy(core::platform::SteadyTimePoint now) const noexcept
+    {
+        if (shouldAttempt(now))
+            return std::nullopt;
+        return _silence;
+    }
+
+    /// @param now The current time.
+    /// @return How long requests are still held off: zero once one may be sent.
+    [[nodiscard]] core::platform::SteadyDuration cooldownLeft(
+        core::platform::SteadyTimePoint now) const noexcept
+    {
+        return std::max(_retryAfter - now, core::platform::SteadyDuration::zero());
+    }
+
     /// Records the outcome of a request.
     /// @param outcome What the request came back with.
     /// @param now     The current time.
@@ -35,11 +55,14 @@ class PlacementBreaker
     {
         auto const responsive = outcome || traitsOf(outcome.error()).health == BusHealth::Responsive;
         _retryAfter = responsive ? core::platform::SteadyTimePoint {} : now + _cooldown;
+        if (!responsive)
+            _silence = outcome.error();
     }
 
   private:
     core::platform::SteadyDuration _cooldown;
     core::platform::SteadyTimePoint _retryAfter {};
+    ScopeError _silence = ScopeError::TimedOut; ///< What the bus last fell silent with; read while held off.
 };
 
 } // namespace vtpty

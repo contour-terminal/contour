@@ -942,6 +942,33 @@ TEST_CASE("StickyHeader.jump.expandsTheBlocksCollapsedFold", "[stickyheader][jum
     CHECK(mc.terminal.viewport().topLine() == *head);
 }
 
+TEST_CASE("StickyHeader.jump.landsWhileTheCursorWritesToAnotherPage", "[stickyheader][jump][folding]")
+{
+    // DECPCCM reset: the cursor moves to page 3 and page 0 stays on display, so the header still shows -- the
+    // decision keys on the displayed page -- and the viewport, the window onto page 0, scrolls to its head.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
+    mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
+    startCommand(mc, "ls");
+    printLines(mc, "out", 20);
+    mc.writeToScreen(commandEnd(0));
+    startCommand(mc, "make");
+    printLines(mc, "more", 20);
+    auto const* const ls = mc.terminal.commandBlocks().lastFinished();
+    REQUIRE(ls != nullptr);
+    auto const lsId = ls->id;
+    auto const headStableId = ls->headStableId;
+    auto const head = headOffsetOf(mc.terminal.primaryScreen().grid(), *ls);
+    REQUIRE(head.has_value());
+    REQUIRE(mc.terminal.toggleFoldContaining(*head));
+
+    moveCursorOffTheDisplayedPage(mc);
+    REQUIRE(renderOf(mc.terminal).stickyHeader.has_value());
+
+    REQUIRE(mc.terminal.scrollToCommandBlockHead(lsId).has_value());
+    CHECK_FALSE(mc.terminal.foldState().isCollapsed(headStableId));
+    CHECK(mc.terminal.viewport().topLine() == *head);
+}
+
 TEST_CASE("StickyHeader.jump.saysWhyItCannotLand", "[stickyheader][jump]")
 {
     SECTION("a block nobody has heard of")
@@ -977,11 +1004,10 @@ TEST_CASE("StickyHeader.jump.saysWhyItCannotLand", "[stickyheader][jump]")
         CHECK(jump.error() == CommandBlockJumpError::HeadNotPlaced);
     }
 
-    SECTION("the cursor on another page while the primary one is shown: the viewport cannot move")
+    SECTION("another page on display: the viewport cannot move")
     {
-        // DECPCCM reset: the cursor moves to page 3 and page 0 stays on display, so the header still shows
-        // -- the decision keys on the displayed page -- while the viewport follows the cursor's and may
-        // not scroll.
+        // DECPCCM reset: page 3 is on display while the cursor writes to page 0. The viewport is the window
+        // onto page 3, which has no history, so a jump into page 0's cannot land.
         auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
         mc.terminal.settings().stickyHeader.mode = StickyHeaderMode::Always;
         startCommand(mc, "ls");
@@ -997,8 +1023,7 @@ TEST_CASE("StickyHeader.jump.saysWhyItCannotLand", "[stickyheader][jump]")
         REQUIRE(head.has_value());
         REQUIRE(mc.terminal.toggleFoldContaining(*head));
 
-        moveCursorOffTheDisplayedPage(mc);
-        REQUIRE(renderOf(mc.terminal).stickyHeader.has_value());
+        moveDisplayOffTheCursorsPage(mc);
         auto const topLine = mc.terminal.viewport().topLine();
 
         auto const jump = mc.terminal.scrollToCommandBlockHead(lsId);
