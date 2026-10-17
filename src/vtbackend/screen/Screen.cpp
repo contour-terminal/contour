@@ -1266,28 +1266,29 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
         margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
         && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
 
-    // A scroll of the whole page carries every row along with its id, so there is no row move to follow
-    // (Grid::rowMoveOfScrollUp() says so too), and no margin for the grid to look at either: the line
-    // feed that scrolls the page goes straight to the grid's whole-page scroll.
-    auto const scrollCount = [&]() {
-        if (isFullPageMargin) [[likely]]
-            return _grid.scrollUp(n, sgr);
+    if (isFullPageMargin) [[likely]]
+    {
+        // A scroll of the whole page carries every row along with its id, so there is no row move to follow
+        // (Grid::rowMoveOfScrollUp() says so too), and no margin for the grid to look at either: the line
+        // feed that scrolls the page goes straight to the grid's whole-page scroll. The terminal moves the
+        // viewport, the Normal-mode cursor and the selection with the rows, where this screen is the page on
+        // display.
+        auto const scrollCount = _grid.scrollUp(n, sgr);
+        updateCursorIterator();
+        _linesScrolledIntoHistory += unbox<uint64_t>(scrollCount);
+        _terminal->onBufferScrolled(*this, scrollCount);
+    }
+    else
+    {
         followScrollUp(n, margin);
-        return _grid.scrollUp(n, sgr, margin);
-    }();
-    updateCursorIterator();
-
-    // Whichever branch scrolled: a top-anchored region feeds the history as the whole page does, and a view
-    // scrolled back follows those lines too (a progress bar pinned below such a region is a common case).
-    _terminal->outputScrolledIntoHistory(scrollCount);
-
-    // Only notify the viewport/Vi-cursor/selection of a scrollback scroll when the
-    // scroll covered the whole page. A scroll confined to a sub-page margin region
-    // (e.g. a top-anchored partial DECSTBM region) may still feed lines into
-    // scrollback, but the live area below the region did not move, so shifting the
-    // viewport, the Normal-mode cursor, or the active selection would be wrong.
-    if (isFullPageMargin)
-        _terminal->onBufferScrolled(scrollCount);
+        auto const scrollCount = _grid.scrollUp(n, sgr, margin);
+        updateCursorIterator();
+        // A top-anchored region (a partial DECSTBM region) feeds the history as the whole page does, and a
+        // view scrolled back follows those lines too (a progress bar pinned below such a region is a common
+        // case): counted here, for the terminal to read once per batch. But the live area below the region
+        // did not move, so shifting the viewport, the Normal-mode cursor or the selection would be wrong.
+        _linesScrolledIntoHistory += unbox<uint64_t>(scrollCount);
+    }
 
     // After either branch, because the scrollback may have just LOST rows rather than gained them.
     // Block-atomic eviction drops a whole command at once, and it reaches this path even for a

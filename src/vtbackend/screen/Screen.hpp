@@ -1263,6 +1263,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     [[nodiscard]] LineCount historyLineCount() const noexcept { return _grid.historyLineCount(); }
 
+    /// How many lines this screen's output has scrolled into its history since the screen was made: by the
+    /// whole page or by a top-anchored region, as Grid::scrollUp() reports them. Only ever grows; the
+    /// terminal follows output by its difference on the page on display (@see Terminal::followOutput).
+    [[nodiscard]] uint64_t linesScrolledIntoHistory() const noexcept { return _linesScrolledIntoHistory; }
+
     [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept
     {
         auto cell = at(position);
@@ -1649,6 +1654,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     GraphicsAttributes _savedGraphicsRenditions {};
 
     CellLocation _lastCursorPosition {};
+
+    /// @see linesScrolledIntoHistory()
+    uint64_t _linesScrolledIntoHistory = 0;
 
     Line* _currentLine = nullptr;
     std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
