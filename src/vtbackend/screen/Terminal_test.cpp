@@ -3711,6 +3711,62 @@ TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorShowsItsHead", "[t
     CHECK(text == head);
 }
 
+TEST_CASE("Terminal.indicatorStatusLine.theRightSegmentEndsInTheLastColumn", "[terminal][statusline]")
+{
+    // The right segment is placed by its width in columns: "│" is one column and three bytes, and a byte
+    // count put it two columns short of the last one. A segment shown is one narrower than the line (the rule
+    // kept): twelve bytes of CJK are eight columns, and fit on a ten-column line.
+    auto const [columns, right, line] = GENERATE(table<int, std::string_view, std::string>({
+        { 20, "ab│", std::string(17, ' ') + "ab│" },
+        { 10, "界界界界", "  界界界界" },
+    }));
+    INFO(right);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(columns) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", "", right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.aSegmentIsMeasuredAsTheGridLaysItOut", "[terminal][statusline]")
+{
+    // The grid gives every grapheme cluster at least one column, so a zero-width space takes one; and with
+    // DEC mode 2027 reset a cluster is as wide as its first codepoint, so a heart that VS16 would widen stays
+    // one column. Either way the right segment ends in the last column.
+    auto const [unicodeMode, right, columns, line] =
+        GENERATE(table<std::string_view, std::string_view, int, std::string>({
+            { "\033[?2027h", "ab\u200B", 20, std::string(17, ' ') + "ab\u200B" },
+            { "\033[?2027l", "\u2764\uFE0F", 10, std::string(9, ' ') + "\u2764\uFE0F" },
+        }));
+    INFO(e(right));
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(columns) } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen(unicodeMode);
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", "", right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theMiddleSegmentIsCentred", "[terminal][statusline]")
+{
+    // The middle segment starts at (columns - its width) / 2, its width in columns. A byte count put "│││"
+    // (nine bytes, three columns) one column left of the middle of a 20-column line, and hid fourteen columns
+    // of CJK (21 bytes) that fit.
+    auto const [middle, line] = GENERATE(table<std::string_view, std::string>({
+        { "│││", std::string(8, ' ') + "│││" + std::string(9, ' ') },
+        { "界界界界界界界", std::string(3, ' ') + "界界界界界界界" + std::string(3, ' ') },
+    }));
+    INFO(middle);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", middle, ""));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
 TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[terminal][history-eviction]")
 {
     // What the issue actually asks for, driven end to end through real OSC 133 sequences.

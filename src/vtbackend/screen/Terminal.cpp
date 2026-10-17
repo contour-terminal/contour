@@ -30,6 +30,7 @@
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
+#include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/width.h>
 
 #include <gsl/pointers>
@@ -1272,6 +1273,35 @@ RGBColorPair Terminal::indicatorStatusLineColors() const
     core::unreachable();
 }
 
+namespace
+{
+    /// The columns @p text takes when a screen writes it. libunicode measures each grapheme cluster; the grid
+    /// gives a cluster at least one column (appendCodepointToCluster, LineSoA.cpp), as wide as its first
+    /// codepoint, or, under ClusterWidthPolicy::ClusterAware, as the whole cluster where that is wider -- a
+    /// cluster widens and never narrows (Screen::applyClusterWidthChange).
+    /// @param text   UTF-8 text.
+    /// @param policy How the screen measures a cluster (DEC mode 2027).
+    /// @return The columns @p text takes.
+    [[nodiscard]] ColumnCount columnsOnTheGrid(std::string_view text, ClusterWidthPolicy policy)
+    {
+        auto columns = 0u;
+        for (auto const& cluster: unicode::utf8_grapheme_segmenter(text))
+        {
+            if (cluster.empty())
+                continue;
+            auto const first = std::max(1u, unicode::width(cluster.front()));
+            switch (policy)
+            {
+                case ClusterWidthPolicy::FirstCodepoint: columns += first; break;
+                case ClusterWidthPolicy::ClusterAware:
+                    columns += std::max(first, unicode::grapheme_cluster_width(cluster));
+                    break;
+            }
+        }
+        return ColumnCount::cast_from(columns);
+    }
+} // namespace
+
 void Terminal::updateIndicatorStatusLine()
 {
     Require(_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
@@ -1312,30 +1342,30 @@ void Terminal::updateIndicatorStatusLine()
 
     if (!definitions.middle.empty() || !definitions.right.empty())
     {
-        // Don't show the middle segment if text is too long.
-        auto const middleLength = serializeToVT(*this, definitions.middle, Styling::Disabled).size();
-        // Centred on the bar, the gutter's columns and the page's together.
-        auto const center = _indicatorStatusScreen.pageSize().columns / ColumnCount(2) - ColumnCount(1);
-        // size of middleVT segment is less that number of elements in the string due to formatting
-        // and on average we can assume that the middle segment is half the size of the string
-        _indicatorStatusScreen.moveCursorToColumn(
-            ColumnOffset::cast_from(center - ColumnOffset::cast_from(middleLength / 4)));
-        auto const middleVT = serializeToVT(*this, definitions.middle, Styling::Enabled);
-        if (unbox<size_t>(center) > static_cast<size_t>(middleLength / 2))
-            writeToScreenInternal(_indicatorStatusScreen, middleVT);
+        // A segment is placed by the columns the screen lays its text out in, not by its bytes.
+        auto const widthOf = [&](StatusLineSegment const& segment) {
+            return columnsOnTheGrid(serializeToVT(*this, segment, Styling::Disabled),
+                                    _indicatorStatusScreen.clusterWidthPolicy());
+        };
+        auto const columns = _indicatorStatusScreen.pageSize().columns;
 
-        // Don't show the right part if the left and middle segments are too long.
-        // That is, if the current cursor position is past the beginning of the right segment.
-        // Also don't show if the right text is too long.
-        auto const rightLength = serializeToVT(*this, definitions.right, Styling::Disabled).size();
-        if (ColumnCount::cast_from(rightLength) < _indicatorStatusScreen.pageSize().columns)
+        // The middle segment is centred, and not shown if it is too wide.
+        auto const middleWidth = widthOf(definitions.middle);
+        if (columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2))
         {
             _indicatorStatusScreen.moveCursorToColumn(
-                boxed_cast<ColumnOffset>(_indicatorStatusScreen.pageSize().columns)
-                - ColumnOffset::cast_from(rightLength));
+                boxed_cast<ColumnOffset>((columns - middleWidth) / ColumnCount(2)));
+            writeToScreenInternal(_indicatorStatusScreen,
+                                  serializeToVT(*this, definitions.middle, Styling::Enabled));
+        }
 
-            auto const rightVT = serializeToVT(*this, definitions.right, Styling::Enabled);
-            writeToScreenInternal(_indicatorStatusScreen, rightVT);
+        // The right segment ends in the last column, and is not shown if it is as wide as the line.
+        auto const rightWidth = widthOf(definitions.right);
+        if (rightWidth < columns)
+        {
+            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(columns - rightWidth));
+            writeToScreenInternal(_indicatorStatusScreen,
+                                  serializeToVT(*this, definitions.right, Styling::Enabled));
         }
     }
 }
