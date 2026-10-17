@@ -14,6 +14,7 @@
 
 #include <vtbackend/core/TerminalContext.hpp>
 
+#include <vtpty/DetachedProcess.hpp>
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
 
@@ -286,63 +287,46 @@ namespace
     /// Starts the daemon described by @p args detached from this process, so the client may exit
     /// without taking the daemon down with it.
     ///
-    /// Takes the argv prebuilt (see daemonSpawnArgs) rather than composing it here: between fork and
-    /// exec the child may only call async-signal-safe functions, and allocating an argv would not be
-    /// one, so it has to exist already. It also gives the flag list ONE spelling for both platforms.
-    /// @param args The full argv; args[0] is the binary to exec. Mutable because execv takes
-    ///        `char* const*` and CreateProcess may write to its command-line buffer.
+    /// Takes the argv prebuilt (see daemonSpawnArgs) rather than composing it here. It gives the flag
+    /// list ONE spelling for both platforms.
+    /// @param args The full argv; args[0] is the binary to exec. Mutable because CreateProcess may
+    ///        write to its command-line buffer.
+    /// @param placement Places the daemon before it runs, as a session's shell is placed. POSIX only.
     /// @return False if the process could not be started.
-    [[nodiscard]] bool spawnDetachedDaemon(std::vector<std::string>& args)
+    [[nodiscard]] bool spawnDetachedDaemon(std::vector<std::string>& args,
+                                           [[maybe_unused]] vtpty::ProcessPlacement& placement)
     {
 #ifndef _WIN32
-        // Resolved in the PARENT: the child may only call async-signal-safe functions between fork
-        // and exec, and a PATH walk is not one. argv[0] itself stays as the caller named it — that
-        // is what the daemon's `ps` line and its own commandLine() replay should show.
+        // Resolved here, not in the child, which may only call async-signal-safe functions before it
+        // execs: a PATH walk is not one. argv[0] itself stays as the caller named it -- that is what
+        // the daemon's `ps` line and its own commandLine() replay should show.
         // core::Environment, not getenv: this runs on a client that already has a live reactor
         // thread, and the snapshot exists precisely so an environment read is not racing it.
-        auto const image = vtpty::resolveExecutablePath(args[0],
-                                                        core::defaultEnvironment().get("PATH").value_or(""),
-                                                        core::platform::NativeFileSystem::instance());
+        auto image = vtpty::resolveExecutablePath(args[0],
+                                                  core::defaultEnvironment().get("PATH").value_or(""),
+                                                  core::platform::NativeFileSystem::instance());
 
-        auto argv = std::vector<char*> {};
-        argv.reserve(args.size() + 1);
-        for (auto& arg: args)
-            argv.push_back(arg.data());
-        argv.push_back(nullptr);
-
-        auto const pid = ::fork();
-        if (pid < 0)
-            return false;
-        if (pid == 0)
-        {
-            // Detached means detached from the SESSION, not merely from the parent's lifetime —
-            // this is the POSIX half of what Windows gets from DETACHED_PROCESS below. Without it
-            // the daemon stays in the invoking shell's session and foreground process group, so
-            // Ctrl-C in that terminal delivers SIGINT to the whole group and the daemon's own
-            // handler shuts down every hosted session it exists to keep alive; closing the terminal
-            // is worse, because SIGHUP is not among the signals runDaemon blocks and its default
-            // action kills the process outright, leaving the socket file behind unbound.
-            //
-            // A session leader has no controlling terminal, which is also why the descriptors are
-            // reopened on /dev/null: keeping the tty open would hold the shell's terminal from
-            // being released and let the daemon write into a terminal that has moved on. Its
-            // diagnostics go to --log-file, which the backgrounding path always supplies.
-            //
-            // Only async-signal-safe calls, as everything between fork and exec must be — setsid,
-            // open, dup2 and close all are.
-            ::setsid();
-            if (auto const devNull = ::open("/dev/null", O_RDWR); devNull >= 0)
-            {
-                ::dup2(devNull, STDIN_FILENO);
-                ::dup2(devNull, STDOUT_FILENO);
-                ::dup2(devNull, STDERR_FILENO);
-                if (devNull > STDERR_FILENO)
-                    ::close(devNull);
-            }
-            ::execv(image.c_str(), argv.data());
-            ::_exit(EXIT_FAILURE);
-        }
-        return true;
+        // Detached means detached from the SESSION, not merely from the parent's lifetime -- this is
+        // the POSIX half of what Windows gets from DETACHED_PROCESS below. Without it the daemon stays
+        // in the invoking shell's session and foreground process group, so Ctrl-C in that terminal
+        // delivers SIGINT to the whole group and the daemon's own handler shuts down every hosted
+        // session it exists to keep alive; closing the terminal is worse, because SIGHUP is not among
+        // the signals runDaemon blocks and its default action kills the process outright, leaving the
+        // socket file behind unbound. startDetached() gives it a session of its own.
+        //
+        // Its standard streams are /dev/null: holding the shell's terminal open would keep it from
+        // being released, and let the daemon write into a terminal that has moved on. Its
+        // diagnostics go to --log-file, which the backgrounding path always supplies.
+        //
+        // Placed, as a session's shell is: the daemon holds the scrollback of every session it hosts,
+        // and an out-of-memory kill elsewhere in the client's unit, or in the tab it was typed into,
+        // must not end it.
+        return vtpty::startDetached(vtpty::DetachedCommand { .image = std::move(image),
+                                                             .argv = args,
+                                                             .standardInput = "/dev/null",
+                                                             .output = vtpty::DetachedOutput::Discarded },
+                                    placement)
+            .has_value();
 #else
         // CreateProcess parses its command line in place and may write to it, so the buffer must be
         // mutable. joinCommandLine quotes an argument, argv[0] included, where it holds a space
@@ -377,16 +361,18 @@ namespace
     /// back and only then discovers the daemon never bound has no way to tell that from a
     /// daemon that bound and died.
     /// @param loop The reactor driving each readiness probe (not owned).
-    /// @param args The full argv; mutable because execv/CreateProcess want it so.
+    /// @param args The full argv; mutable because CreateProcess wants it so.
+    /// @param placement Places the daemon before it runs.
     /// @param nativePath The native endpoint probed for readiness.
     /// @param timeout How long to wait before giving up.
     /// @return EXIT_SUCCESS once it accepts, EXIT_FAILURE on spawn failure or timeout.
     [[nodiscard]] int spawnAndAwaitDaemon(core::net::EventLoop& loop,
                                           std::vector<std::string>& args,
+                                          vtpty::ProcessPlacement& placement,
                                           std::string const& nativePath,
                                           std::chrono::seconds timeout)
     {
-        if (!spawnDetachedDaemon(args))
+        if (!spawnDetachedDaemon(args, placement))
             return EXIT_FAILURE;
 
         // Poll until the socket accepts connections or the timeout elapses.
@@ -642,6 +628,7 @@ int runDaemon(DaemonConfig const& config)
 
 int ensureDaemon(AttachEndpoint const& endpoint,
                  std::string_view daemonBinary,
+                 vtpty::ProcessPlacement& placement,
                  DaemonSpawnOptions const& spawnOptions,
                  std::chrono::seconds timeout)
 {
@@ -664,16 +651,18 @@ int ensureDaemon(AttachEndpoint const& endpoint,
     // `--exit-with-last-session` and ends when the work it was spawned for is done.
     auto args =
         daemonSpawnArgs(daemonBinary, unixEp.socketPath, spawnOptions, DaemonLifecycle::ExitWhenEmpty);
-    return spawnAndAwaitDaemon(loop, args, nativePath, timeout);
+    return spawnAndAwaitDaemon(loop, args, placement, nativePath, timeout);
 }
 
 int runDaemonDetached(std::vector<std::string> commandLine,
                       std::filesystem::path const& socketPath,
+                      vtpty::ProcessPlacement& placement,
                       std::chrono::seconds timeout)
 {
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
-    return spawnAndAwaitDaemon(loop, commandLine, core::pathToUtf8(nativeSocketPath(socketPath)), timeout);
+    return spawnAndAwaitDaemon(
+        loop, commandLine, placement, core::pathToUtf8(nativeSocketPath(socketPath)), timeout);
 }
 
 #ifdef _WIN32

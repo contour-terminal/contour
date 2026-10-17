@@ -597,7 +597,7 @@ int ContourGuiApp::clientAction()
                                                                 .configPath = attachConfig,
                                                                 .profileName = attachProfile,
                                                                 .sizePolicy = *sizePolicy };
-        if (vthost::ensureDaemon(endpoint, programPath(), daemonOptions) != EXIT_SUCCESS)
+        if (vthost::ensureDaemon(endpoint, programPath(), *_processPlacement, daemonOptions) != EXIT_SUCCESS)
         {
             cerr << std::format("contour client: daemon did not start within 5 seconds.\n");
             return EXIT_FAILURE;

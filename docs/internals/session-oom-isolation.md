@@ -48,6 +48,11 @@ second Contour that follows a link to an executable file or opens one in `$EDITO
 double-forks -- the program is not Contour's child, and outlives it -- and parks the program's
 process on a gate exactly as `Process::start()` parks a shell. `ContourGuiApp` hands the sessions'
 factory and the launcher one placement. Windows starts them through `QProcess`, having no placement.
+The daemon `contour client` spawns, and the one `contour daemon --background` starts, go through
+`startDetached()` and a placement too: the daemon holds every hosted session's scrollback, and must
+live in neither the client's unit nor the scope of the tab it was typed into. `--background`'s
+placement lasts only as long as the command does, which returns once the daemon accepts: a daemon
+deferred there because systemd fell silent is never placed late, and stays where it was started.
 
 What can still end up in Contour's unit -- a child released unplaced, what a late-placed one
 started before, and the shells the status line's `Command` segments run (`CommandCapture`,

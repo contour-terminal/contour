@@ -846,7 +846,9 @@ int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
         childArgs.push_back(std::format("--log-file={}", logFile));
     }
 
-    if (vthost::runDaemonDetached(std::move(childArgs), socketPath) != EXIT_SUCCESS)
+    // Placed, as a session's shell is: typed into a tab, it would otherwise live in that tab's scope.
+    auto const placement = vtpty::makeDefaultProcessPlacement();
+    if (vthost::runDaemonDetached(std::move(childArgs), socketPath, *placement) != EXIT_SUCCESS)
     {
         cerr << std::format("contour daemon: the background daemon did not start; see {}\n", logFile);
         return EXIT_FAILURE;
@@ -1206,7 +1208,9 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "is accepting connections, instead of holding the terminal. "
                                   "Without --log-file the detached daemon logs beside its socket "
                                   "(SOCKET.log), since a detached process has no console to write "
-                                  "its diagnostics to." },
+                                  "its diagnostics to. On Linux the daemon runs in a systemd scope of "
+                                  "its own where systemd answers before this command returns; "
+                                  "otherwise it stays where it was started." },
                     CLI::Option { "exit-with-last-session",
                                   CLI::Value { false },
                                   "Terminates the daemon once its last hosted session is gone "

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
+#include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/WindowsCommandLineSplit.hpp>
 
 #include <core/Utf8Path.hpp>
@@ -77,7 +79,9 @@ TEST_CASE("ensureDaemon: a TCP endpoint is a no-op", "[vthost][daemon]")
     // probe: the address below is TEST-NET-1 and is deliberately unreachable.
     auto const endpoint = vthost::AttachEndpoint { vthost::TcpEndpoint {
         .host = "192.0.2.1", .port = 1, .token = {}, .caPem = {} } };
-    REQUIRE(vthost::ensureDaemon(endpoint, "contour", {}, std::chrono::seconds { 0 }) == EXIT_SUCCESS);
+    auto placement = vtpty::NoPlacement {};
+    REQUIRE(vthost::ensureDaemon(endpoint, "contour", placement, {}, std::chrono::seconds { 0 })
+            == EXIT_SUCCESS);
 }
 
 // [afunix]: skips where AF_UNIX is missing, and Windows CI asserts it does not. @see the tag's
@@ -112,9 +116,28 @@ TEST_CASE("ensureDaemon: a listening daemon is detected, nothing is spawned", "[
     // The binary name is bogus on purpose: taking the spawn path at all is the
     // failure this guards against, and a zero timeout leaves no room to recover.
     auto const endpoint = vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = controlSocket } };
-    REQUIRE(vthost::ensureDaemon(endpoint, "contour-no-such-binary", {}, std::chrono::seconds { 0 })
-            == EXIT_SUCCESS);
+    auto placement = vtpty::NoPlacement {};
+    REQUIRE(
+        vthost::ensureDaemon(endpoint, "contour-no-such-binary", placement, {}, std::chrono::seconds { 0 })
+        == EXIT_SUCCESS);
 }
+
+#ifndef _WIN32
+TEST_CASE("ensureDaemon: the daemon it spawns is placed as a session is", "[vthost][daemon]")
+{
+    // The daemon holds the scrollback of every session it hosts. Spawned into the client's own systemd
+    // unit -- or into the scope of the tab `contour client` was typed into -- an out-of-memory kill of
+    // anything there would end it too.
+    auto const tmp = TempDir {};
+    auto const endpoint =
+        vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = tmp.path / "control" } };
+    auto placement = vtpty::testing::ReleasingPlacement {};
+    REQUIRE(
+        vthost::ensureDaemon(endpoint, "contour-no-such-binary", placement, {}, std::chrono::seconds { 0 })
+        == EXIT_FAILURE);
+    CHECK(placement.pids().size() == 1);
+}
+#endif
 
 TEST_CASE("ensureDaemon: an unreachable socket fails once the timeout elapses", "[vthost][daemon]")
 {
@@ -124,8 +147,10 @@ TEST_CASE("ensureDaemon: an unreachable socket fails once the timeout elapses", 
     auto const tmp = TempDir {};
     auto const endpoint =
         vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = tmp.path / "control" } };
-    REQUIRE(vthost::ensureDaemon(endpoint, "contour-no-such-binary", {}, std::chrono::seconds { 0 })
-            == EXIT_FAILURE);
+    auto placement = vtpty::NoPlacement {};
+    REQUIRE(
+        vthost::ensureDaemon(endpoint, "contour-no-such-binary", placement, {}, std::chrono::seconds { 0 })
+        == EXIT_FAILURE);
 }
 
 // ---------------------------------------------------------------------------
