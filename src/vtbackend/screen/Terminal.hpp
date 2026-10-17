@@ -2171,6 +2171,11 @@ class Terminal
     bool isPrimaryScreen() const noexcept { return _currentScreenType == ScreenType::Primary; }
     bool isAlternateScreen() const noexcept { return _currentScreenType == ScreenType::Alternate; }
     ScreenType screenType() const noexcept { return _currentScreenType; }
+
+    /// Switches the cursor to the primary or the alternate screen's page. The page on display follows as for
+    /// any page movement, while DECPCCM is set; what the alternate screen modes show is
+    /// setAlternateScreen()'s to say.
+    /// @param screenType The screen to switch to.
     void setScreen(ScreenType screenType);
 
     /// Enters or leaves the alternate screen buffer for one of the DEC private modes 47, 1047 or 1049,
@@ -2178,6 +2183,10 @@ class Terminal
     /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so modes
     /// 47 and 1047 carry it across the switch (it does not move), while mode 1049 lets each page keep
     /// its own cursor as an implicit DECSC/DECRC.
+    ///
+    /// The alternate screen is shown whatever DECPCCM says. Leaving it with DECPCCM reset shows again the
+    /// page that was on display before, as Windows Terminal does; with DECPCCM set the display follows the
+    /// cursor.
     /// @param mode   One of DECMode::UseAlternateScreen (47), OptionalAltScreen (1047) or
     ///               ExtendedAltScreen (1049); other modes violate the precondition.
     /// @param enable true to switch to the alternate buffer, false to switch back to the primary.
@@ -4128,6 +4137,9 @@ class Terminal
     std::vector<std::unique_ptr<Screen>> _pages; ///< 16 pages: page 0 = primary, page 15 = alt screen
     PageIndex _cursorPage { 0 };                 ///< Page where cursor/VT output goes
     PageIndex _displayedPage { 0 };              ///< Page shown to user (== _cursorPage when DECPCCM set)
+    /// The page on display when the alternate screen was last entered. Leaving it with DECPCCM reset shows
+    /// this page again: Windows Terminal's cursor restore moves its visible page only while DECPCCM is set.
+    PageIndex _pageShownBeforeAlternate { 0 };
     /// Which slot of _savedCursorPage the current screen uses: 1 for the alternate page, 0 for any
     /// primary page. Keyed on page identity, not _currentScreenType, so a primary VT420 page reached
     /// via PPA/NP/PP still resolves to the primary slot.

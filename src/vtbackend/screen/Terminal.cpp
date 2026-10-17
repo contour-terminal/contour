@@ -6274,7 +6274,13 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         // page inherits the primary's margins, as xterm's alternate screen traditionally does.
         _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
         auto const carried = _currentScreen->cursor();
+        _pageShownBeforeAlternate = _displayedPage;
         setScreen(ScreenType::Alternate);
+        // A switch of screen buffer is no page movement, which is all DECPCCM governs: the alternate screen
+        // is shown whatever DECPCCM says, as xterm shows the buffer it switches to, and as Windows Terminal
+        // keeps its alternate buffer outside paging.
+        if (_displayedPage != _cursorPage)
+            showPage(_cursorPage);
         if (behavior->carryCursor)
             _currentScreen->cursor() = carried;
         if (behavior->clearOnEnter)
@@ -6288,6 +6294,11 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
             clearScreen();
         auto const carried = _currentScreen->cursor();
         setScreen(ScreenType::Primary);
+        // Coupled, the page on display followed the cursor. Reset, the page on display before the alternate
+        // screen came up is shown again, as Windows Terminal's cursor restore moves its visible page only
+        // while DECPCCM is set.
+        if (!isModeEnabled(DECMode::PageCursorCoupling))
+            showPage(_pageShownBeforeAlternate);
         if (behavior->carryCursor)
             _currentScreen->cursor() = carried;
     }
@@ -6499,6 +6510,7 @@ void Terminal::hardReset()
         page->hardReset();
     _cursorPage = PageIndex(0);
     showPage(PageIndex(0));
+    _pageShownBeforeAlternate = PageIndex(0);
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 
