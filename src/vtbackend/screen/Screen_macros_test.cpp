@@ -1036,8 +1036,7 @@ TEST_CASE("DECELR: enable locator reporting", "[screen]")
     // Enable locator: CSI 1 ; 2 ' z  (Ps=1 enable, Pu=2 character cells)
     mock.writeToScreen("\033[1;2'z");
     mock.terminal.flushInput();
-    CHECK(mock.terminal.locatorState().enabled);
-    CHECK_FALSE(mock.terminal.locatorState().oneShot);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::Continuous);
 }
 
 TEST_CASE("DECELR: disable locator reporting", "[screen]")
@@ -1045,10 +1044,10 @@ TEST_CASE("DECELR: disable locator reporting", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
     mock.writeToScreen("\033[1;2'z"); // enable
     mock.terminal.flushInput();
-    CHECK(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::Continuous);
     mock.writeToScreen("\033[0'z"); // disable
     mock.terminal.flushInput();
-    CHECK_FALSE(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::Off);
 }
 
 TEST_CASE("DECELR: one-shot mode (Ps=2)", "[screen]")
@@ -1056,8 +1055,7 @@ TEST_CASE("DECELR: one-shot mode (Ps=2)", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
     mock.writeToScreen("\033[2;2'z"); // one-shot, character cells
     mock.terminal.flushInput();
-    CHECK(mock.terminal.locatorState().enabled);
-    CHECK(mock.terminal.locatorState().oneShot);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::OneShot);
 }
 
 TEST_CASE("DECELR: pixel coordinates (Pu=1)", "[screen]")
@@ -1079,8 +1077,7 @@ TEST_CASE("DECELR: an undefined parameter ignores the sequence", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
     mock.writeToScreen("\033[2;2'z"); // one-shot, character cells
     mock.writeToScreen(sequence);
-    CHECK(mock.terminal.locatorState().enabled);
-    CHECK(mock.terminal.locatorState().oneShot);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::OneShot);
     CHECK(mock.terminal.locatorState().coordUnit == LocatorCoordUnit::CharacterCells);
 }
 
@@ -1230,7 +1227,7 @@ TEST_CASE("DECLRP: one report in one-shot mode disables the locator", "[screen]"
         CHECK(e(mock.replyData()) == e("\033[2;4;3;4;1&w"));
     }
 
-    CHECK_FALSE(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::Off);
     mock.resetReplyData();
     mock.writeToScreen("\033['|");
     CHECK(e(mock.replyData()) == e("\033[0&w"));
@@ -1273,11 +1270,11 @@ TEST_CASE("DECELR: soft reset disables locator", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
     mock.writeToScreen("\033[1;2'z"); // enable
     mock.terminal.flushInput();
-    CHECK(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::Continuous);
     // Soft reset
     mock.writeToScreen("\033[!p");
     mock.terminal.flushInput();
-    CHECK_FALSE(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().reporting == Terminal::LocatorReporting::Off);
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

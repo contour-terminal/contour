@@ -950,10 +950,17 @@ class Terminal
         DevicePixels,   ///< Coordinates in device pixel units
     };
 
+    /// Whether the locator reports, and for how long: DECELR's Ps.
+    enum class LocatorReporting : uint8_t
+    {
+        Off = 0,    ///< No reports (Ps 0, and the default).
+        Continuous, ///< Reports until DECELR turns them off (Ps 1).
+        OneShot,    ///< One report, after which reporting is off (Ps 2).
+    };
+
     struct LocatorState
     {
-        bool enabled = false;
-        bool oneShot = false;
+        LocatorReporting reporting = LocatorReporting::Off;
         LocatorCoordUnit coordUnit = LocatorCoordUnit::CharacterCells;
         bool reportButtonDown = true;
         bool reportButtonUp = true;

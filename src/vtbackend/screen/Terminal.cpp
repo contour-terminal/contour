@@ -7351,8 +7351,9 @@ void Terminal::setLocatorMode(int ps, int pu) noexcept
     if (!defined(ps) || !defined(pu))
         return;
 
-    _locatorState.enabled = ps != 0;
-    _locatorState.oneShot = ps == 2;
+    static constexpr auto ReportingOf =
+        std::array { LocatorReporting::Off, LocatorReporting::Continuous, LocatorReporting::OneShot };
+    _locatorState.reporting = ReportingOf[static_cast<size_t>(ps)];
     _locatorState.coordUnit = pu == 1 ? LocatorCoordUnit::DevicePixels : LocatorCoordUnit::CharacterCells;
 }
 
@@ -7422,16 +7423,13 @@ void Terminal::sendLocatorReport(int event)
 
     // DEC STD 070 ch. 13 DECLRP: in one shot mode "a single locator report (DECLRP) shall reset locator
     // reporting mode to disabled" -- a request's answer as a button's, and as xterm the unavailable one too.
-    if (_locatorState.oneShot)
-    {
-        _locatorState.enabled = false;
-        _locatorState.oneShot = false;
-    }
+    if (_locatorState.reporting == LocatorReporting::OneShot)
+        _locatorState.reporting = LocatorReporting::Off;
 }
 
 void Terminal::requestLocatorPosition()
 {
-    sendLocatorReport(_locatorState.enabled ? 1 : 0);
+    sendLocatorReport(_locatorState.reporting == LocatorReporting::Off ? 0 : 1);
 }
 
 namespace
@@ -7473,7 +7471,7 @@ Handled Terminal::handleLocatorMouseEvent(LocatorEvent event, MouseButton button
         }
         core::unreachable();
     }();
-    if (!_locatorState.enabled || !selected)
+    if (_locatorState.reporting == LocatorReporting::Off || !selected)
         return Handled { false };
 
     sendLocatorReport(event == LocatorEvent::ButtonDown ? code->down : code->up);
