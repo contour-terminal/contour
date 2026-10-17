@@ -604,7 +604,8 @@ int ContourGuiApp::clientAction()
     auto adopt = std::function<void()> {};
     if (wantsTmux)
     {
-        _tmuxController = std::make_unique<remote::TmuxController>(tmuxSocket);
+        _tmuxController =
+            std::make_unique<remote::TmuxController>(tmuxSocket, _processPlacement, fileSystem());
         if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
         {
             cerr << std::format("contour client --tmux: {}\n", connected.error());

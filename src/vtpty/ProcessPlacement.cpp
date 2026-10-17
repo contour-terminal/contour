@@ -19,6 +19,8 @@
 #endif
 
 #ifdef __linux__
+    #include <sys/syscall.h>
+
     #include <poll.h>
 #endif
 
@@ -130,7 +132,23 @@ std::expected<Gate, std::error_code> makeGate()
     #endif
     return gate;
 }
+
+void awaitGateRelease(int fd) noexcept
+{
+    auto byte = char {};
+    while (::read(fd, &byte, 1) < 0 && errno == EINTR)
+        ;
+}
 #endif
+
+OwnedFd openPidFd([[maybe_unused]] int pid) noexcept
+{
+#if defined(__linux__) && defined(SYS_pidfd_open)
+    return OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, pid, 0)) };
+#else
+    return OwnedFd {};
+#endif
+}
 
 namespace
 {

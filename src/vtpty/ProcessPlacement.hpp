@@ -143,7 +143,16 @@ struct Gate
 /// Creates a gate: a socket pair, both ends close-on-exec, whose parent end never raises SIGPIPE.
 /// @return The gate, or why the socket pair could not be created.
 [[nodiscard]] std::expected<Gate, std::error_code> makeGate();
+
+/// Blocks a child parked on its gate until the parent releases it: a byte, end-of-file, or any error but
+/// EINTR. Async-signal-safe -- read() alone -- for a child between fork() and exec().
+/// @param fd The child's end of the gate.
+void awaitGateRelease(int fd) noexcept;
 #endif
+
+/// @param pid The process.
+/// @return A pidfd for @p pid, or an empty OwnedFd where the kernel has none (before Linux 5.3).
+[[nodiscard]] OwnedFd openPidFd(int pid) noexcept;
 
 /// Moves a freshly forked, still-parked child into its own resource domain before it runs.
 ///

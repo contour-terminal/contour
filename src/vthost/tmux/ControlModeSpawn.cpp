@@ -4,7 +4,6 @@
 #include <vtpty/ProgramLookup.hpp>
 
 #include <core/net/Sockets.hpp>
-#include <core/platform/NativeFileSystem.hpp>
 
 #include <format>
 
@@ -46,15 +45,15 @@ std::vector<std::string> controlModeArguments(std::string_view tmuxSocket)
 
 std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::EventLoop& loop,
                                                                 std::string const& tmuxSocket,
-                                                                std::string_view searchPath)
+                                                                vtpty::ProgramSearch const& search,
+                                                                vtpty::ProcessPlacement& placement)
 {
     // Everything the child uses is made here. Between forkpty() and exec() a child of this multi-threaded
     // process may only call async-signal-safe functions: no allocation, and no PATH walk, which execvp()
     // does.
-    auto const image =
-        vtpty::resolveExecutablePath("tmux", searchPath, core::platform::NativeFileSystem::instance());
-    if (!image.contains('/'))
-        return std::unexpected(std::format("tmux was not found on PATH ({})", searchPath));
+    auto const image = vtpty::findProgram("tmux", search);
+    if (!image)
+        return std::unexpected(std::format("tmux was not found on PATH ({})", search.path));
     auto arguments = controlModeArguments(tmuxSocket);
     auto argv = std::vector<char*> {};
     argv.reserve(arguments.size() + 1);
@@ -62,15 +61,27 @@ std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::Event
         argv.push_back(argument.data());
     argv.push_back(nullptr);
 
+    // Parked on a gate, as a session's shell is, until the placement has moved it into a scope of its own.
+    auto gate = vtpty::makeGate();
+    if (!gate)
+        return std::unexpected(
+            std::format("could not make the tmux client's gate: {}", gate.error().message()));
+
     auto master = -1;
     auto const pid = ::forkpty(&master, nullptr, nullptr, nullptr);
     if (pid < 0)
         return std::unexpected(std::format("forkpty failed: errno {}", errno));
     if (pid == 0)
     {
-        ::execv(image.c_str(), argv.data());
+        ::close(gate->parentEnd.get());
+        vtpty::awaitGateRelease(gate->childEnd.get());
+        ::close(gate->childEnd.get());
+        ::execv(image->c_str(), argv.data());
         ::_exit(127);
     }
+    gate->childEnd.reset();
+    placement.placeThenRelease(vtpty::ParkedChild {
+        pid, vtpty::openPidFd(pid), std::move(gate->parentEnd), vtpty::ProcessRole::TmuxClient });
 
     auto transport = core::net::adoptFd(loop, master);
     if (!transport)
@@ -109,7 +120,8 @@ void reapControlMode(int pid)
 
 std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::EventLoop& /*loop*/,
                                                                 std::string const& /*tmuxSocket*/,
-                                                                std::string_view /*searchPath*/)
+                                                                vtpty::ProgramSearch const& /*search*/,
+                                                                vtpty::ProcessPlacement& /*placement*/)
 {
     return std::unexpected("tmux control-mode spawning is not supported on Windows");
 }

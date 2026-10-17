@@ -50,6 +50,15 @@ inline constexpr char PathListSeparator =
                                                 std::string_view searchPath,
                                                 core::platform::FileSystem const& fileSystem);
 
+/// The PATH an exec of a bare name searches, as the C library's execvp() picks it: the environment's, or
+/// where the environment has none, that library's own default -- confstr(_CS_PATH) on glibc, whose
+/// execvpe() searches CS_PATH ("/bin:/usr/bin" upstream, "/usr/bin" on Fedora); <paths.h>'s _PATH_DEFPATH
+/// on FreeBSD, Darwin and musl, whose execvp() searches it. For a spawn that runs execv() on a path it looked
+/// up before the fork: read in the parent, as confstr() is not async-signal-safe.
+/// @param environmentPath The environment's PATH; std::nullopt where it is unset.
+/// @return The PATH to search; empty where the environment has none and the platform has no default.
+[[nodiscard]] std::string execSearchPath(std::optional<std::string> environmentPath);
+
 /// Where a spawn looks for the program it runs.
 struct ProgramSearch
 {

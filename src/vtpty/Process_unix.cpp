@@ -160,27 +160,7 @@ namespace
         ::close(fd);
     }
 
-    /// Blocks until the parent releases the gate: a byte, end-of-file, or any error but EINTR.
-    ///
-    /// @param fd The child's end of the gate.
-    void awaitGate(int fd) noexcept
-    {
-        auto byte = char {};
-        while (::read(fd, &byte, 1) < 0 && errno == EINTR)
-            ;
-    }
     // }}}
-
-    /// @return A pidfd for @p pid, or an empty OwnedFd where the kernel has none (before Linux 5.3).
-    [[nodiscard]] OwnedFd openPidFd(pid_t pid) noexcept
-    {
-#if defined(__linux__) && defined(SYS_pidfd_open)
-        return OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, pid, 0)) };
-#else
-        core::ignoreUnused(pid);
-        return OwnedFd {};
-#endif
-    }
 
     /// @return The current process environment's entries; none when it has been cleared.
     [[nodiscard]] vector<string_view> inheritedEnvironment()
@@ -451,7 +431,7 @@ StartResult Process::start()
             // async-signal-safe calls, on values prepared before the fork.
             ::close(gate->parentEnd.get());
             writeOwnOomScoreAdjust(oomScoreAdjust);
-            awaitGate(gate->childEnd.get());
+            awaitGateRelease(gate->childEnd.get());
             ::close(gate->childEnd.get());
 
             (void) _d->pty->slave().login();
@@ -823,7 +803,7 @@ std::expected<int, std::error_code> startDetached(DetachedCommand const& command
             // Parked first, as Process::start() parks a session's shell. @see ProcessPlacement.
             ::close(gate->parentEnd.get());
             writeOwnOomScoreAdjust(oomScoreAdjust);
-            awaitGate(gate->childEnd.get());
+            awaitGateRelease(gate->childEnd.get());
             ::close(gate->childEnd.get());
             if (input.isOpen())
                 saveDup2(input.get(), STDIN_FILENO);

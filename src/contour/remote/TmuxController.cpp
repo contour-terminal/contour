@@ -4,6 +4,8 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
+#include <vtpty/ProgramLookup.hpp>
+
 #include <core/Environment.hpp>
 
 #include <algorithm>
@@ -203,8 +205,13 @@ class TmuxController::PaneFeed final: public vthost::tmux::PaneSink
     std::string _buffered;
 };
 
-TmuxController::TmuxController(std::string tmuxSocket):
-    _tmuxSocket(std::move(tmuxSocket)), _model([this](uint64_t pane, int /*columns*/, int /*lines*/) {
+TmuxController::TmuxController(std::string tmuxSocket,
+                               std::shared_ptr<vtpty::ProcessPlacement> placement,
+                               core::platform::FileSystem const& fileSystem):
+    _tmuxSocket(std::move(tmuxSocket)),
+    _placement(std::move(placement)),
+    _fileSystem(fileSystem),
+    _model([this](uint64_t pane, int /*columns*/, int /*lines*/) {
         auto feed = std::make_unique<PaneFeed>(*this, pane);
         {
             auto const lock = std::lock_guard { _mutex };
@@ -226,9 +233,14 @@ TmuxController::~TmuxController()
 
 core::async::Task<void> TmuxController::runClient(core::net::EventLoop* loop)
 {
-    // core::Environment, not getenv: this runs on the reactor's thread, beside the GUI's.
+    // core::Environment, not getenv: this runs on the reactor's thread, beside the GUI's. Without a PATH, the
+    // one execvp() would search.
+    auto const searchPath = vtpty::execSearchPath(core::defaultEnvironment().get("PATH"));
     auto spawned = vthost::tmux::spawnControlMode(
-        *loop, _tmuxSocket, core::defaultEnvironment().get("PATH").value_or(""));
+        *loop,
+        _tmuxSocket,
+        vtpty::ProgramSearch { .path = searchPath, .workingDirectory = {}, .fileSystem = _fileSystem },
+        *_placement);
     if (!spawned)
     {
         {
