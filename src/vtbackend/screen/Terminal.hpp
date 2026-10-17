@@ -959,7 +959,11 @@ class Terminal
         bool reportButtonUp = true;
     };
 
-    /// Enables or disables DEC Locator reporting.
+    /// DECELR: enables or disables DEC Locator reporting, in the unit it selects. An undefined Ps or Pu
+    /// ignores the whole sequence (DEC STD 070 ch. 13: "Undefined values for Ps or Pu causes the entire
+    /// sequence to be ignored").
+    /// @param ps 0 disables the locator, 1 enables it, 2 enables it for one report (one shot).
+    /// @param pu 0 (or omitted) and 2 report in character cells, 1 in device pixels.
     void setLocatorMode(int ps, int pu) noexcept;
 
     /// Selects which locator events generate reports.

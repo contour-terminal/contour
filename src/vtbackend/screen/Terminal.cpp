@@ -7319,31 +7319,17 @@ void Terminal::defineDRCS(int fontNumber,
 
 void Terminal::setLocatorMode(int ps, int pu) noexcept
 {
-    switch (ps)
-    {
-        case 0: // Locator disabled
-            _locatorState.enabled = false;
-            _locatorState.oneShot = false;
-            break;
-        case 1: // Locator enabled — reports on button press/release
-            _locatorState.enabled = true;
-            _locatorState.oneShot = false;
-            break;
-        case 2: // One-shot mode — report once then disable
-            _locatorState.enabled = true;
-            _locatorState.oneShot = true;
-            break;
-        default: break;
-    }
+    // DEC STD 070 ch. 13 DECELR: "Undefined values for Ps or Pu causes the entire sequence to be ignored."
+    // Ps: 0 disabled, 1 enabled, 2 one shot. Pu: 0 (or omitted) and 2 character cells, 1 device pixels.
+    auto const defined = [](int value) {
+        return 0 <= value && value <= 2;
+    };
+    if (!defined(ps) || !defined(pu))
+        return;
 
-    // Pu: coordinate unit
-    switch (pu)
-    {
-        case 1: _locatorState.coordUnit = LocatorCoordUnit::DevicePixels; break;
-        case 0: [[fallthrough]];
-        case 2: [[fallthrough]];
-        default: _locatorState.coordUnit = LocatorCoordUnit::CharacterCells; break;
-    }
+    _locatorState.enabled = ps != 0;
+    _locatorState.oneShot = ps == 2;
+    _locatorState.coordUnit = pu == 1 ? LocatorCoordUnit::DevicePixels : LocatorCoordUnit::CharacterCells;
 }
 
 void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
