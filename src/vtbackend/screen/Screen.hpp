@@ -1261,6 +1261,13 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return _grid.lineAt(position.line).cellWidthAt(position.column);
     }
 
+    /// Whether @p codepoint, written next, would join the grapheme cluster written last rather than start a
+    /// cell of its own -- a combining mark, a variation selector, a joiner and what it joins --, as
+    /// writeText() decides it. Asked ahead of the write, of the codepoint before any charset mapping.
+    /// @param codepoint The codepoint.
+    /// @return true where writeText() would add @p codepoint to the cluster written last.
+    [[nodiscard]] bool joinsLastCluster(char32_t codepoint) const noexcept;
+
     [[nodiscard]] LineCount historyLineCount() const noexcept { return _grid.historyLineCount(); }
 
     /// How many lines this screen's output has scrolled into its history since the screen was made: by the

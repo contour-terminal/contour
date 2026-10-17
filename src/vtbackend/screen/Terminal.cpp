@@ -30,6 +30,7 @@
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
+#include <libunicode/width.h>
 
 #include <gsl/pointers>
 
@@ -2255,9 +2256,22 @@ size_t Terminal::maxBulkTextSequenceWidth() const noexcept
 // We use this for rendering the status line.
 namespace
 {
+    /// Whether the row a status line segment is written into has room for more of it.
+    enum class RowRoom : uint8_t
+    {
+        Left = 0, ///< The next character is written if it fits.
+        Filled,   ///< The screen holds the cursor at the row's end: only what joins the last character goes.
+        Closed,   ///< A character did not fit, or one followed a filled row: nothing more is written.
+    };
+
     struct SimpleSequenceHandler
     {
         Screen& targetScreen;
+
+        /// The indicator status line ends at the page's last column, so a segment is cut there and shows its
+        /// head. Autowrap would carry the overflow onto the next row, which on the one-row line is a scroll
+        /// that leaves the tail; without autowrap the last column would take every character past it.
+        RowRoom rowRoom = RowRoom::Left;
 
         void executeControlCode(char controlCode) { targetScreen.executeControlCode(controlCode); }
 
@@ -2270,7 +2284,50 @@ namespace
 
         void processAPC(std::string_view body) { targetScreen.processAPC(body); }
 
-        void writeText(char32_t codepoint) { targetScreen.writeText(codepoint); }
+        /// Writes @p codepoint where it fits on the row, and nothing once one has not.
+        /// @param codepoint The character.
+        void writeText(char32_t codepoint)
+        {
+            if (rowRoom == RowRoom::Closed)
+                return;
+
+            auto& cursor = targetScreen.cursor();
+            auto const joins = targetScreen.joinsLastCluster(codepoint);
+            if (rowRoom == RowRoom::Filled)
+            {
+                if (!joins)
+                {
+                    rowRoom = RowRoom::Closed;
+                    return;
+                }
+                // The screen takes a pending wrap before it places a codepoint: held back, what joins the
+                // row's last character stays on it.
+                auto const wrapPending = std::exchange(cursor.wrapPending, false);
+                targetScreen.writeText(codepoint);
+                cursor.wrapPending = wrapPending;
+                return;
+            }
+
+            // A wide character with too few columns left would wrap, or, without autowrap, be dropped.
+            auto const width = static_cast<int>(unicode::width(codepoint));
+            auto const lastColumn = boxed_cast<ColumnOffset>(targetScreen.pageSize().columns) - 1;
+            if (!joins && width > 1 && cursor.position.column + ColumnOffset(width - 1) > lastColumn)
+            {
+                rowRoom = RowRoom::Closed;
+                return;
+            }
+
+            auto const column = cursor.position.column;
+            targetScreen.writeText(codepoint);
+
+            // The screen says when the row is full. Autowrap holds the cursor on the last column with a wrap
+            // pending; without autowrap the cursor stays on what was written last -- on the cell a character
+            // started, or inside a cluster a variation selector widened -- and the next character would
+            // overwrite it.
+            if (cursor.wrapPending || (!joins && cursor.position.column == column)
+                || targetScreen.at(cursor.position).isFlagEnabled(CellFlag::WideCharContinuation))
+                rowRoom = RowRoom::Filled;
+        }
 
         void writeText(std::string_view chars, size_t /*cellCount*/)
         {
@@ -2281,7 +2338,7 @@ namespace
             // but write char by char
             // TODO fix targetScreen.writeText(chars, cellCount)
             for (auto c: chars)
-                targetScreen.writeText(c);
+                writeText(c);
         }
 
         void writeTextEnd() { targetScreen.writeTextEnd(); }

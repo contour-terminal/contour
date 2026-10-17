@@ -675,6 +675,12 @@ Screen::ClusterPlacement Screen::placeInRun(char32_t codepoint, GraphemeRun& run
     return placement;
 }
 
+bool Screen::joinsLastCluster(char32_t codepoint) const noexcept
+{
+    auto run = seedGraphemeStateFromLastCell();
+    return placeInRun(codepoint, run) == ClusterPlacement::JoinsLastCluster;
+}
+
 void Screen::appendToLastCluster(char32_t codepoint)
 {
     auto const widthChange = usePreviousCell().appendCharacter(codepoint, clusterWidthPolicy());

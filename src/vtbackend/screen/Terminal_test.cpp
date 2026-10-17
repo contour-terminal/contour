@@ -3672,6 +3672,45 @@ TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorMovesNothingOnTheP
     CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
 }
 
+namespace
+{
+/// Whether the application leaves autowrap (DECAWM) set.
+enum class AutoWrap : uint8_t
+{
+    Reset = 0,
+    Set,
+};
+} // namespace
+
+TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorShowsItsHead", "[terminal]")
+{
+    // The indicator status line ends at the page's last column, and a segment wider than what is left of the
+    // row is cut there, with its head shown. Autowrap carried the overflow onto the next row, which on the
+    // one-row line is a scroll: the tail was shown. Without autowrap the last column took every character
+    // past it, and showed the last one.
+    auto const [definition, head] = GENERATE(table<std::string_view, std::string_view>({
+        { "0123456789", "01234567" },
+        { "0123456界9", "0123456" },                      // a wide character with one column left
+        { "012345\u2764\uFE0Fyz", "012345\u2764\uFE0F" }, // VS16 widens the heart into the last column
+        { "abcdefgh\u0301z", "abcdefgh\u0301" }, // a combining mark joins the character in the last column
+        { "012345\U0001F468\u200D\U0001F469z",
+          "012345\U0001F468\u200D\U0001F469" }, // a joined sequence stays whole
+    }));
+    auto const autoWrap = GENERATE(AutoWrap::Set, AutoWrap::Reset);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto& terminal = mc.terminal;
+    if (autoWrap == AutoWrap::Reset)
+        mc.writeToScreen("\033[?7l"); // DECAWM reset; the indicator status line writes under it too
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(definition, "", ""));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+
+    auto text = terminal.indicatorStatusLineDisplay().renderMainPageText();
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\n'))
+        text.pop_back();
+    CHECK(text == head);
+}
+
 TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[terminal][history-eviction]")
 {
     // What the issue actually asks for, driven end to end through real OSC 133 sequences.
