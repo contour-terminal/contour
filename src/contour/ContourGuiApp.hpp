@@ -189,6 +189,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param fileSystem     Where every session looks up the paths it shows and opens. Borrowed: it must
     ///                       outlive the app. Null (the default) is this machine's; tests pass an in-memory
     ///                       one, so that what a path names does not depend on the machine they run on.
+    /// @param processPlacement Places every process a session starts -- its shell, the programs it starts,
+    ///                       the daemon and the tmux client `contour client` spawns -- in a resource domain
+    ///                       of its own. Null (the default) wires vtpty::makeDefaultProcessPlacement();
+    ///                       tests pass a fake to see what is placed.
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -199,7 +203,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            std::unique_ptr<session::CommandOutputFiles> commandOutputFiles = nullptr,
                            vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
                            std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
-                           core::platform::FileSystem const* fileSystem = nullptr);
+                           core::platform::FileSystem const* fileSystem = nullptr,
+                           std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -337,6 +342,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// This machine, as every session judges what is local by it.
     /// @return The identity read, or handed in, at construction.
     [[nodiscard]] vtbackend::HostIdentity const& hostIdentity() const noexcept { return _hostIdentity; }
+
+    /// What places every process a session starts; the default session factory, the default launcher and
+    /// the daemon and tmux spawns all use it.
+    /// @return The placement handed in at construction, or the default one.
+    [[nodiscard]] vtpty::ProcessPlacement& processPlacement() const noexcept { return *_processPlacement; }
 
     /// Where every session looks up the paths printed on its screen, and the ones it opens.
     /// @return The filesystem handed in at construction; this machine's by default.

@@ -420,16 +420,13 @@ class TestApp
              makeRecordingLauncher(),
              std::move(layoutStore),
              std::move(commandHistoryStore),
-             speech ? std::move(speech) : defaultSpeech(),
+             speechOrDefault(std::move(speech)),
              makeOutputFiles(),
              clocks(),
              std::move(identity),
              fileSystem)
     {
-        char const* argv[] = { "contour", "terminal" };
-        // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default
-        // (profile, dump-state-at-exit, ...) that TerminalSession reads during construction.
-        REQUIRE(_app.parseParametersForTesting(2, argv));
+        parseTerminalVerb();
     }
 
     /// A test app whose sessions run on @p identity: for a test of what counts as this machine.
@@ -439,10 +436,42 @@ class TestApp
     {
     }
 
-    /// A test app whose sessions look up paths on @p fileSystem: for a test of what a path names.
-    /// @param fileSystem Where the app's sessions look up paths. Borrowed: it must outlive the app.
-    explicit TestApp(core::platform::FileSystem const& fileSystem):
-        TestApp(nullptr, nullptr, nullptr, nullptr, testHostIdentity(), &fileSystem)
+    /// A test app whose processes are placed by @p placement, and which opens and starts programs with the
+    /// app's own default launcher rather than a recording one -- so launcher() is not available on it.
+    /// @param placement Places what the app's default session factory and launcher start.
+    explicit TestApp(std::shared_ptr<vtpty::ProcessPlacement> placement):
+        _app(_environment,
+             nullptr,
+             nullptr,
+             nullptr,
+             nullptr,
+             defaultSpeech(),
+             makeOutputFiles(),
+             clocks(),
+             testHostIdentity(),
+             nullptr,
+             std::move(placement))
+    {
+        parseTerminalVerb();
+    }
+
+    /// Where the sessions of a test app look up paths.
+    enum class SessionFiles : uint8_t
+    {
+        ThisMachine = 0, ///< This machine's.
+        Fixture,         ///< The fixture's own in-memory filesystem, fileSystem(), which the test fills.
+    };
+
+    /// A test app whose sessions look up paths where @p files says: for a test of what a path names, the
+    /// fixture's own filesystem, the one its command output files are on too.
+    /// @param files Where the app's sessions look up paths.
+    explicit TestApp(SessionFiles files):
+        TestApp(nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                testHostIdentity(),
+                files == SessionFiles::Fixture ? &_fileSystem : nullptr)
     {
     }
 
@@ -480,7 +509,11 @@ class TestApp
         return _app.sessionsManager();
     }
     /// The recording launcher wired into this app (records URL-open / process-spawn requests).
-    [[nodiscard]] RecordingExternalLauncher& launcher() noexcept { return *_launcher; }
+    [[nodiscard]] RecordingExternalLauncher& launcher() noexcept
+    {
+        REQUIRE(_launcher != nullptr); // not on an app built with the default launcher
+        return *_launcher;
+    }
 
     /// Where OpenCommandOutput's files go in a test app: a directory on the in-memory filesystem.
     static constexpr std::string_view OutputDirectory = "/run/contour-test-output";
@@ -506,6 +539,14 @@ class TestApp
     [[nodiscard]] core::platform::ManualWallClock& wallClock() noexcept { return _wallClock; }
 
   private:
+    /// Parses the "terminal" subcommand, so that parameters() carries every contour.terminal.* default
+    /// (profile, dump-state-at-exit, ...) that TerminalSession reads during construction.
+    void parseTerminalVerb()
+    {
+        char const* argv[] = { "contour", "terminal" };
+        REQUIRE(_app.parseParametersForTesting(2, argv));
+    }
+
     /// The synthesizer a test app gets when the test does not name one.
     ///
     /// The NULL one, never the production synthesizer -- and this is the single place that decides
@@ -516,6 +557,17 @@ class TestApp
     [[nodiscard]] static std::unique_ptr<contour::platform::SpeechSynthesizer> defaultSpeech()
     {
         return std::make_unique<contour::platform::NullSpeechSynthesizer>();
+    }
+
+    /// The synthesizer a test names, or defaultSpeech() when it names none.
+    /// @param speech The test's synthesizer; null for none.
+    /// @return @p speech, or the default one.
+    [[nodiscard]] static std::unique_ptr<contour::platform::SpeechSynthesizer> speechOrDefault(
+        std::unique_ptr<contour::platform::SpeechSynthesizer> speech)
+    {
+        if (speech)
+            return speech;
+        return defaultSpeech();
     }
 
     /// The app's command output files, on the fixture's in-memory filesystem.

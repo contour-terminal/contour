@@ -276,11 +276,12 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<session::CommandOutputFiles> commandOutputFiles,
                              vtbackend::TerminalClocks terminalClocks,
                              std::optional<vtbackend::HostIdentity> hostIdentity,
-                             core::platform::FileSystem const* fileSystem):
+                             core::platform::FileSystem const* fileSystem,
+                             std::shared_ptr<vtpty::ProcessPlacement> processPlacement):
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeStatusLineCommandExecutor()),
-    _processPlacement(vtpty::makeDefaultProcessPlacement()),
+    _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
         sessionFactory ? std::move(sessionFactory)
                        : std::make_unique<session::AppSessionFactory>(*this, _processPlacement))),

@@ -4495,6 +4495,13 @@ TEST_CASE("TerminalSession: a capture asked of a background pane is refused, not
 
 namespace
 {
+/// @param path An absolute path.
+/// @return @p path as a local file URL, '/'-separated on every platform, as QUrl wants it.
+[[nodiscard]] QUrl localFileUrl(std::filesystem::path const& path)
+{
+    return QUrl::fromLocalFile(QString::fromStdU16String(path.generic_u16string()));
+}
+
 /// Writes an OSC-8 hyperlink cell to @p session's screen and hovers the mouse over it, so
 /// terminal().tryGetHoveringHyperlink() resolves — the precondition FollowHyperlink needs to reach
 /// TerminalSession::followHyperlink() without a display. @p uri is the OSC-8 target.
@@ -4656,16 +4663,16 @@ TEST_CASE("TerminalSession: a path under the pointer opens as the app's filesyst
     // The terminal finds the path through the app's filesystem, and opening it asks the same one. Asked of
     // the disk instead, a path only the app's filesystem holds reached the desktop as a relative URL.
     namespace actions = contour::actions;
-    auto const fileSystem = core::platform::testing::InMemoryFileSystem {
-        core::platform::testing::FileEntry { .path = "/work", .isDirectory = true },
-        core::platform::testing::FileEntry { .path = "/work/doc.txt", .content = "x" },
-    };
-    contour::test::TestApp testApp { fileSystem };
+    contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::Fixture };
+    // Absolute on every platform, as the temporary directory is; a name in the in-memory filesystem only.
+    auto const work = std::filesystem::temp_directory_path() / "contour-in-memory-work";
+    testApp.fileSystem().addDirectory(work);
+    testApp.fileSystem().addFile(work / "doc.txt", "x");
     auto session = makeDisplaylessSession(testApp.app());
     auto& terminal = session->terminal();
     auto& launcher = testApp.launcher();
 
-    terminal.setCurrentWorkingDirectory("file:///work");
+    terminal.setCurrentWorkingDirectory(localFileUrl(work).toString().toStdString());
     terminal.writeToScreen("open doc.txt now");
     terminal.sendMouseMoveEvent(
         vtbackend::Modifiers {},
@@ -4676,7 +4683,7 @@ TEST_CASE("TerminalSession: a path under the pointer opens as the app's filesyst
 
     CHECK((*session)(actions::FollowHyperlink {}));
     REQUIRE(launcher.openedUrls.size() == 1);
-    CHECK(launcher.openedUrls.back() == QUrl::fromLocalFile(QStringLiteral("/work/doc.txt")));
+    CHECK(launcher.openedUrls.back() == localFileUrl(work / "doc.txt"));
 }
 
 TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the external launcher",
