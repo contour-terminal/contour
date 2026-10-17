@@ -1606,21 +1606,9 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
 
     verifyState();
 
-    // DEC Locator: intercept mouse press if locator mode is active
-    if (_locatorState.enabled)
-    {
-        auto const btn = [&]() -> int {
-            switch (button)
-            {
-                case MouseButton::Left: return 1;
-                case MouseButton::Middle: return 2;
-                case MouseButton::Right: return 4;
-                default: return 0;
-            }
-        }();
-        if (btn != 0 && handleLocatorMouseEvent(btn, true, _currentMousePosition))
-            return Handled { true };
-    }
+    // A press the DEC locator reports is not the application's.
+    if (handleLocatorMouseEvent(LocatorEvent::ButtonDown, button))
+        return Handled { true };
 
     // Hand the event to the input generator for app tracking or wheel->cursor-key translation;
     // generateMousePress() self-rejects the cases where neither applies.
@@ -1998,12 +1986,9 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
         }
     }
 
-    // DEC Locator: intercept mouse release if locator mode is active
-    if (_locatorState.enabled)
-    {
-        if (handleLocatorMouseEvent(0, false, _currentMousePosition))
-            return Handled { true };
-    }
+    // A release the DEC locator reports is not the application's.
+    if (handleLocatorMouseEvent(LocatorEvent::ButtonUp, button))
+        return Handled { true };
 
     if (allowPassMouseEventToApp(modifiers) && core::locked(_inputMutex, [&] {
             return _inputGenerator.generateMouseRelease(
@@ -7345,49 +7330,68 @@ void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
     }
 }
 
-void Terminal::sendLocatorReport(int event, int button, int row, int col)
+void Terminal::sendLocatorReport(int event)
 {
-    // DECLRP — Locator Report: CSI Pe ; Pb ; Pr ; Pc ; Pp & w. Pp is the page the locator points at through
-    // the window, the page on display; always sent, as it always was.
-    reply("\033[{};{};{};{};{}&w", event, button, row, col, displayedPageNumber());
+    if (event == 0 || _pointerPlacement == PointerPlacement::OffGrid)
+        reply("\033[0&w");
+    else
+        reply("\033[{};{};{};{};{}&w",
+              event,
+              _locatorButtonsHeld,
+              *_currentMousePosition.line + 1,
+              *_currentMousePosition.column + 1,
+              displayedPageNumber()); // Pp: the page seen through the window, always sent
     flushInput();
 }
 
 void Terminal::requestLocatorPosition()
 {
-    if (!_locatorState.enabled)
-    {
-        // If locator is not enabled, report locator unavailable
-        sendLocatorReport(0, 0, 0, 0);
-        return;
-    }
-    // Report last known mouse position (1-based)
-    auto const row = *_currentMousePosition.line + 1;
-    auto const col = *_currentMousePosition.column + 1;
-    sendLocatorReport(1, 0, row, col);
+    sendLocatorReport(_locatorState.enabled ? 1 : 0);
 }
 
-bool Terminal::handleLocatorMouseEvent(int button, bool press, CellLocation pos)
+namespace
 {
-    if (!_locatorState.enabled)
-        return false;
+    /// A button of the DEC locator, as DECLRP encodes it (DEC STD 070 ch. 13).
+    struct LocatorButtonCode
+    {
+        MouseButton button; ///< The button.
+        int down;           ///< Pe when it goes down.
+        int up;             ///< Pe when it goes up.
+        uint8_t held;       ///< Its bit in Pb, which names the buttons held down.
+    };
 
-    if (press && !_locatorState.reportButtonDown)
-        return false;
-    if (!press && !_locatorState.reportButtonUp)
-        return false;
+    /// The buttons the locator reports, a row each, as DEC STD 070 and xterm encode them.
+    constexpr auto LocatorButtonCodes = std::array {
+        LocatorButtonCode { .button = MouseButton::Left, .down = 2, .up = 3, .held = 0b100 },
+        LocatorButtonCode { .button = MouseButton::Middle, .down = 4, .up = 5, .held = 0b010 },
+        LocatorButtonCode { .button = MouseButton::Right, .down = 6, .up = 7, .held = 0b001 },
+    };
+} // namespace
 
-    // Pe: 2 = button down, 3 = button up
-    auto const event = press ? 2 : 3;
+Handled Terminal::handleLocatorMouseEvent(LocatorEvent event, MouseButton button)
+{
+    auto const code = std::ranges::find(LocatorButtonCodes, button, &LocatorButtonCode::button);
+    if (code == LocatorButtonCodes.end())
+        return Handled { false };
 
-    // Pb: button encoding (1=left, 2=middle, 4=right; 0 for up with no button info)
-    auto const pb = press ? button : 0;
+    switch (event)
+    {
+        case LocatorEvent::ButtonDown: _locatorButtonsHeld |= code->held; break;
+        case LocatorEvent::ButtonUp: _locatorButtonsHeld &= static_cast<uint8_t>(~code->held); break;
+    }
 
-    // Row and column are 1-based
-    auto const row = *pos.line + 1;
-    auto const col = *pos.column + 1;
+    auto const selected = [&] {
+        switch (event)
+        {
+            case LocatorEvent::ButtonDown: return _locatorState.reportButtonDown;
+            case LocatorEvent::ButtonUp: return _locatorState.reportButtonUp;
+        }
+        core::unreachable();
+    }();
+    if (!_locatorState.enabled || !selected)
+        return Handled { false };
 
-    sendLocatorReport(event, pb, row, col);
+    sendLocatorReport(event == LocatorEvent::ButtonDown ? code->down : code->up);
 
     if (_locatorState.oneShot)
     {
@@ -7395,7 +7399,7 @@ bool Terminal::handleLocatorMouseEvent(int button, bool press, CellLocation pos)
         _locatorState.oneShot = false;
     }
 
-    return true;
+    return Handled { true };
 }
 
 void Terminal::programUDK(bool clearAll, bool locked, std::string_view data)
