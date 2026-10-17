@@ -49,6 +49,25 @@ double-forks -- the program is not Contour's child, and outlives it -- and parks
 process on a gate exactly as `Process::start()` parks a shell. `ContourGuiApp` hands the sessions'
 factory and the launcher one placement. Windows starts them through `QProcess`, having no placement.
 
+What can still end up in Contour's unit -- a child released unplaced, what a late-placed one
+started before, and the shells the status line's `Command` segments run (`CommandCapture`,
+`posix_spawn`: one short run per refresh, bounded by a timeout and killed as a process group; a
+transient scope per run would churn systemd units every few seconds, per tab) -- no longer takes
+Contour down either: the Linux packages install systemd drop-ins
+setting `OOMPolicy=continue` on the unit a desktop launches Contour as (Contour cannot change its
+own running unit's `OOMPolicy` over the bus, so it is configured instead). Under `<prefix>/lib/systemd/user/`:
+`app-org.contourterminal.Contour@.service.d/` for KDE Plasma's launcher (measured: KIO names it
+`app-org.contourterminal.Contour@<random>.service`) and XDG autostart, and `…-.scope.d/` for the
+launchers that start scopes -- `app-org.contourterminal.Contour-` (KDE's scope launcher),
+`app-gnome-org.contourterminal.Contour-` (GNOME Shell), `app-glib-org.contourterminal.Contour-`
+(GLib). A drop-in applies to the next unit the desktop creates, and to a running one at the next
+`systemctl --user daemon-reload`. Services take `OOMPolicy=` since systemd 243, scopes only since 253:
+an older systemd (Ubuntu 22.04's 249, Debian 12's 252) ignores the three scope drop-ins, with an
+"Unknown key name 'OOMPolicy' in section 'Scope'" warning per launch, and a desktop that launches
+Contour into a scope there leaves it unprotected. An install to a prefix systemd does not search --
+`~/.local`, whose `lib/systemd/user` is not on the user search path -- installs drop-ins that have
+no effect.
+
 ## Invariants worth not breaking
 
 - **Every path releases the child.** Release is `ParkedChild`'s destructor: an exception, a

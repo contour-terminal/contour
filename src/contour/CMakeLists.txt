@@ -1423,6 +1423,29 @@ else()
         install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
         install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
         install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+
+        # A desktop launches Contour as a systemd unit of its own, named after the application ID
+        # (https://systemd.io/DESKTOP_ENVIRONMENTS/), with OOMPolicy=stop: an out-of-memory kill of anything
+        # in it stops Contour. These drop-ins make the unit continue instead -- one per name pattern the
+        # launchers use -- see docs/internals/session-oom-isolation.md. systemd looks for user units under
+        # <prefix>/lib/systemd/user, never lib64, hence not CMAKE_INSTALL_LIBDIR. Not inside Flatpak, whose
+        # sandbox launches its own scope and installs nothing on the host.
+        if(LINUX AND CONTOUR_WITH_SYSTEMD AND NOT EXISTS "/.flatpak-info")
+            set(_systemdUserUnitDir "lib/systemd/user")
+            # KDE Plasma's KIO launcher (app-<id>@<random>.service), and XDG autostart (app-<id>@autostart.service).
+            set(_oomPolicyServices "app-${AppId}@.service")
+            # Launchers that start scopes: KDE's scope launcher (app-<id>-<random>.scope), GNOME Shell
+            # (app-gnome-<id>-<pid>.scope), and GLib's GDesktopAppInfo (app-glib-<id>-<pid>.scope).
+            set(_oomPolicyScopes "app-${AppId}-.scope" "app-gnome-${AppId}-.scope" "app-glib-${AppId}-.scope")
+            foreach(_unit IN LISTS _oomPolicyServices)
+                install(FILES "packaging/systemd/oom-policy-service.conf"
+                        DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
+            endforeach()
+            foreach(_unit IN LISTS _oomPolicyScopes)
+                install(FILES "packaging/systemd/oom-policy-scope.conf"
+                        DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
+            endforeach()
+        endif()
     endif()
 endif()
 
