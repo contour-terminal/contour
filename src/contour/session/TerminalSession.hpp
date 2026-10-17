@@ -1638,6 +1638,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// GUI thread in setDefaultCursor(). Caching it here rather than reading the pointer-shape stack
     /// back is still the point: that stack belongs to the parser thread.
     std::atomic<std::optional<input::MouseCursorShape>> _applicationPointerShape;
+    /// The type of status display the configuration named when it was last applied; nothing before the first
+    /// application. A reload or profile switch selects the type only where it changes this: a Set-Up change
+    /// of the type (DEC STD 070 ch. 14 §3), which an unchanged field is not.
+    std::optional<vtbackend::StatusDisplayType> _configuredStatusDisplayType;
     bool _allowKeyMappings = true;
     std::unique_ptr<platform::Audio> _audio;
     std::vector<int> _musicalNotesBuffer;

@@ -4485,7 +4485,11 @@ bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
     input::inputLog()("{} key mappings.", _allowKeyMappings ? "Enabling" : "Disabling");
 
     // Locked: setStatusDisplay() resizes the page and reflows the grid, exactly as ViNormalMode does, and the
-    // resize may write a report, sent once the lock is released.
+    // resize may write a report, sent once the lock is released. The indicator is a notice the terminal puts
+    // up, as vi mode's is, not a type the user chose: it selects nothing, and DECSASD keeps what was
+    // selected. DEC STD 070 has such a notice of its own, the Error Line (ch. 14 §2.1.1): it "replaces the
+    // currently displayed Status Line (Indicator or Host Writable)" for a while, and "The host may not
+    // directly program or affect the Error Line".
     {
         auto const _ = std::scoped_lock { _terminal };
         if (!_allowKeyMappings)
@@ -5272,7 +5276,15 @@ void TerminalSession::configureTerminal()
         // below.
         _terminal.setMode(vtbackend::DECMode::NoSixelScrolling,
                           configured.sixelScrolling == vtbackend::SixelScrolling::Disabled);
-        _terminal.setStatusDisplay(configured.statusDisplayType);
+        // The configuration is the Set-Up field DEC STD 070 ch. 14 §3 DECSSDT notes ("The type of Status
+        // Line can also be changed through a Set-Up field"), so a type it changes is the user's selection, as
+        // the toggle's is -- one that also exits a host-writable line the host put up (ch. 14 §2.3), where
+        // mintty's term_reconfig() leaves that line alone. A reload or profile switch that leaves the
+        // configured type as it was changes nothing, and leaves what the host selected since alone, as
+        // term_reconfig() acts only where the configured value changed (mintty term.c:506-509).
+        if (_configuredStatusDisplayType != configured.statusDisplayType)
+            _terminal.selectConfiguredStatusDisplay(configured.statusDisplayType);
+        _configuredStatusDisplayType = configured.statusDisplayType;
         sessionLog()("imageCanvasCeiling={}, sixelScrolling={}, goodImageProtocol={}",
                      _terminal.imageCanvasCeiling(),
                      _config.images.value().sixelScrolling,

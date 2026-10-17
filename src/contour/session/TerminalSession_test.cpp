@@ -2471,7 +2471,98 @@ void setSyncToWindowTitle(contour::ContourGuiApp& app, bool sync)
         profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay = sync;
 }
 
+/// Sets every profile's `status_line.display` in @p app's configuration.
+void setStatusLineDisplay(contour::ContourGuiApp& app, vtbackend::StatusDisplayType type)
+{
+    for (auto& [name, profile]: app.config().profiles.value())
+        profile.statusLine.value().initialType = type;
+}
+
+/// Has the application select @p session's host-writable status line (DECSSDT 2), the user allow it, and
+/// the application write to it (DECSASD 1).
+void writeToAllowedStatusLine(contour::session::TerminalSession& session)
+{
+    session.terminal().writeToScreen("\033[2$~");
+    session.executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+    session.terminal().writeToScreen("\033[1$}");
+    REQUIRE(session.terminal().activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+}
+
 } // namespace
+
+TEST_CASE(
+    "TerminalSession: a reload that changes the status line type selects it and leaves a host-writable one",
+    "[contour][session][config]")
+{
+    // DEC STD 070 ch. 14 §3 DECSSDT: "The type of Status Line can also be changed through a Set-Up field",
+    // which the configuration is; §2.3: "If the Status Display Type is chosen to be something other than
+    // "Host Writable", the Status Display will be exited". A reload that changes the configured type is that
+    // change: here from none to the indicator.
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), vtbackend::StatusDisplayType::None);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    writeToAllowedStatusLine(*session);
+
+    reloadSessionWith(*session,
+                      "",
+                      "        status_line:\n"
+                      "            display: indicator\n");
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+
+    terminal.writeToScreen("\033[1$}X"); // DECSASD again, and text
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    CHECK(terminal.primaryScreen().renderMainPageText().contains('X'));
+    CHECK_FALSE(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains('X'));
+}
+
+TEST_CASE("TerminalSession: a reload that keeps the status line type leaves the host's selection alone",
+          "[contour][session][config]")
+{
+    // A reload that leaves `status_line.display` as it was is no Set-Up change of the type (DEC STD 070 ch.
+    // 14 §3): what the host selected since stays, as in mintty's term_reconfig(), which acts only where the
+    // configured value changed.
+    contour::test::ConfiguredTestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    writeToAllowedStatusLine(*session);
+
+    reloadSessionWith(*session,
+                      "",
+                      "        status_line:\n"
+                      "            display: indicator\n");
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+
+    terminal.writeToScreen("X");
+    CHECK(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains('X'));
+    CHECK_FALSE(terminal.primaryScreen().renderMainPageText().contains('X'));
+}
+
+TEST_CASE("TerminalSession: a status line type a reload changes during vi mode outlasts it",
+          "[contour][session][config]")
+{
+    // Vi mode's indicator is a notice put up for a while (pushStatusDisplay), not the user's type. A reload
+    // that changes the configured type meanwhile leaves the notice up, and is what leaving vi mode shows.
+    contour::test::ConfiguredTestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+    reloadSessionWith(*session,
+                      "",
+                      "        status_line:\n"
+                      "            display: none\n");
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Insert);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
 
 TEST_CASE("TerminalSession: a denied status line's text becomes the window title when configured",
           "[contour][session][config]")

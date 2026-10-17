@@ -7588,6 +7588,18 @@ void Terminal::selectStatusDisplayByUser(StatusDisplayType type)
     setStatusDisplay(type);
 }
 
+void Terminal::selectConfiguredStatusDisplay(StatusDisplayType type)
+{
+    if (!_savedStatusDisplayType)
+    {
+        selectStatusDisplayByUser(type);
+        return;
+    }
+    // A type shown for a while stays up; leaving it shows the type the configuration now names.
+    recordStatusDisplaySelection(type);
+    _savedStatusDisplayType = type;
+}
+
 bool Terminal::isHostWritableStatusLineSelected() const noexcept
 {
     return _selectedStatusDisplayType == StatusDisplayType::HostWritable

@@ -3265,6 +3265,13 @@ class Terminal
     /// @param type The type the user selects.
     void selectStatusDisplayByUser(StatusDisplayType type);
 
+    /// The configuration selects the type of status display, where a reload or a profile switch changed the
+    /// configured type: that Set-Up field too, so the user's selection, as selectStatusDisplayByUser() makes
+    /// it. While a type is shown for a while (pushStatusDisplay, vi mode's indicator), that stays up, and
+    /// @p type is what popStatusDisplay() then restores.
+    /// @param type The type the configuration now names.
+    void selectConfiguredStatusDisplay(StatusDisplayType type);
+
     /// Whether DECSASD can select the host-writable status line: the host's last DECSSDT or the user selected
     /// it, or it is the type shown. DEC STD 070 ch. 14 §3 DECSASD: "the Host Writable Status Line must be
     /// selected through DECSSDT for DECSASD to be able to select the Host Writable Status Line"; and DECSSDT:
