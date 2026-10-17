@@ -167,7 +167,9 @@ struct RenderCursor
     CellLocation position;
     CursorShape shape;
     int width = 1;
-    std::optional<CellLocation> animateFrom {};  ///< Grid position cursor is animating from.
+    /// Screen position the cursor is animating from: between two cells where the motion took over part of the
+    /// way along another, as the cursor was drawn there (@see lerpCellLocation for where that holds).
+    std::optional<FractionalCellLocation> animateFrom {};
     float animationProgress = 1.0f;              ///< 0.0 = at animateFrom, 1.0 = at position.
     RGBColor cursorColor {};                     ///< Resolved cursor color at target position.
     std::optional<RGBColor> animateFromColor {}; ///< Cursor color at animation source position.

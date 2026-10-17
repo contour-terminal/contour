@@ -44,6 +44,7 @@ set(_test_files
     GlyphAdvance_test.cpp
     GlyphScaling_test.cpp
     GlyphSlicing_test.cpp
+    GridMetrics_test.cpp
     GutterCells_test.cpp
     ImageRenderer_test.cpp
     ReGISFontRasterizer_test.cpp

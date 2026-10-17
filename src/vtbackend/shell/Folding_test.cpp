@@ -2166,7 +2166,7 @@ TEST_CASE("Folding.cursor.theMotionAnimationOriginGoesThroughTheProjection", "[f
     // projection it is a lookup, so the origin landed on the wrong row -- and on a different wrong row
     // each frame while the viewport moved, which is the jitter.
     auto const expected = terminal.viewport().translateGridToScreenCoordinate(fromGrid.line);
-    CHECK(cursor->animateFrom->line == expected);
+    CHECK(cursor->animateFrom->line == unbox<float>(expected));
 }
 
 // }}}

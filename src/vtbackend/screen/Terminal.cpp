@@ -40,6 +40,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -1051,9 +1052,13 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     // renderCursor() already computed through the very same translation.
     auto const baseLine =
         output.cursor->position.line - _viewport.translateGridToScreenCoordinate(gridCursorPos.line);
-    auto const toScreen = [&](CellLocation gridPosition) {
-        return CellLocation { .line = baseLine + _viewport.translateGridToScreenCoordinate(gridPosition.line),
-                              .column = gridPosition.column };
+    // A position between two lines is translated by the line it starts on, and keeps its fraction past it.
+    auto const toScreen = [&](FractionalCellLocation gridPosition) {
+        auto const line = std::floor(gridPosition.line);
+        auto const screenLine =
+            baseLine + _viewport.translateGridToScreenCoordinate(LineOffset::cast_from(line));
+        return FractionalCellLocation { .line = static_cast<float>(*screenLine) + (gridPosition.line - line),
+                                        .column = gridPosition.column };
     };
 
     if (_cursorMotion.active && !_cursorMotion.isComplete(now))
@@ -1061,7 +1066,11 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
         // Animation in progress — check if target changed (chaining)
         if (gridCursorPos != _cursorMotion.toPosition)
         {
-            // Chain: start new animation from current interpolated position
+            // Chain: start new animation from current interpolated position, where the cursor is drawn -- a
+            // whole cell short of it would snap the drawn cursor back toward where it came from. The two
+            // agree where grid lines map one to one onto screen rows between the ends; a collapsed fold
+            // between them puts the interpolated grid line on a row the screen does not show, as whole cells
+            // did before.
             auto const currentProgress = _cursorMotion.progress(now);
             _cursorMotion.fromPosition =
                 lerpCellLocation(_cursorMotion.fromPosition, _cursorMotion.toPosition, currentProgress);
@@ -1081,8 +1090,8 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
     {
         // Start new animation (store grid positions)
         _cursorMotion.active = true;
-        _cursorMotion.fromPosition = _cursorMotion.toPosition; // previous target
-        _cursorMotion.fromColor = _cursorMotion.toColor;       // previous target's color
+        _cursorMotion.fromPosition = FractionalCellLocation::of(_cursorMotion.toPosition); // previous target
+        _cursorMotion.fromColor = _cursorMotion.toColor; // previous target's color
         _cursorMotion.toPosition = gridCursorPos;
         _cursorMotion.toColor = output.cursor->cursorColor;
         _cursorMotion.startTime = now;

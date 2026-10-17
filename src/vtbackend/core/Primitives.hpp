@@ -228,20 +228,38 @@ constexpr CellLocation operator-(CellLocation c, ColumnOffset x) noexcept
     return CellLocation { .line = c.line, .column = c.column - x };
 }
 
-/// Linearly interpolates between two cell locations.
-/// At t=0 returns @p a, at t=1 returns @p b.
+/// A position that may lie between cells, counted in cells as CellLocation counts them: where a cursor moving
+/// from one cell to another is drawn part of the way along.
+struct FractionalCellLocation
+{
+    float line {};   ///< The line; its fraction is the way to the next line.
+    float column {}; ///< The column; its fraction is the way to the next column.
+
+    /// @param location The cell.
+    /// @return The position of @p location's cell.
+    [[nodiscard]] static constexpr FractionalCellLocation of(CellLocation location) noexcept
+    {
+        return FractionalCellLocation { .line = static_cast<float>(*location.line),
+                                        .column = static_cast<float>(*location.column) };
+    }
+
+    constexpr bool operator==(FractionalCellLocation const&) const noexcept = default;
+};
+
+/// Linearly interpolates from a position to a cell, keeping the fraction: where a cursor moving from @p a to
+/// @p b is drawn, as long as the lines between them are drawn one to one onto screen rows. A collapsed fold
+/// between them breaks that: the interpolation runs over grid lines the screen does not show.
 ///
-/// @param a  start location.
-/// @param b  end location.
+/// @param a  start position.
+/// @param b  end cell.
 /// @param t  interpolation factor in [0, 1].
 ///
-/// @return the component-wise interpolated CellLocation.
-constexpr CellLocation lerpCellLocation(CellLocation a, CellLocation b, float t) noexcept
+/// @return @p a at t=0, @p b's position at t=1, and the component-wise interpolated position between.
+constexpr FractionalCellLocation lerpCellLocation(FractionalCellLocation a, CellLocation b, float t) noexcept
 {
-    return CellLocation {
-        .line = a.line + LineOffset::cast_from(t * static_cast<float>(*b.line - *a.line)),
-        .column = a.column + ColumnOffset::cast_from(t * static_cast<float>(*b.column - *a.column)),
-    };
+    auto const to = FractionalCellLocation::of(b);
+    return FractionalCellLocation { .line = a.line + (t * (to.line - a.line)),
+                                    .column = a.column + (t * (to.column - a.column)) };
 }
 
 // Constructs a top-left and bottom-right coordinate-pair from given input.

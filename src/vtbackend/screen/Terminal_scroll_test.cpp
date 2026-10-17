@@ -985,7 +985,7 @@ TEST_CASE("Terminal.cursorMotionAnimation.chains_midanimation", "[terminal]")
     {
         auto const frame = terminal.renderBuffer();
         REQUIRE(frame.get().cursor.has_value());
-        REQUIRE(frame.get().cursor->animateFrom == CellLocation {});
+        REQUIRE(frame.get().cursor->animateFrom == vtbackend::FractionalCellLocation {});
         REQUIRE(frame.get().cursor->animationProgress < 1.0f);
     } // Release RenderBufferRef lock before next render cycle.
 
@@ -1002,10 +1002,42 @@ TEST_CASE("Terminal.cursorMotionAnimation.chains_midanimation", "[terminal]")
     // The chained motion starts from where the first one had got to, strictly between its ends: not from its
     // start, and not from its end, where a fresh motion would start.
     REQUIRE(cursor.animateFrom.has_value());
-    CHECK(cursor.animateFrom->line == LineOffset(0));
-    CHECK(cursor.animateFrom->column > ColumnOffset(0));
-    CHECK(cursor.animateFrom->column < ColumnOffset(10));
+    CHECK(cursor.animateFrom->line == 0.0f);
+    CHECK(cursor.animateFrom->column > 0.0f);
+    CHECK(cursor.animateFrom->column < 10.0f);
     CHECK(cursor.animationProgress < 1.0f);
+}
+
+TEST_CASE("Terminal.cursorMotionAnimation.aChainStartsWhereTheCursorIsDrawn", "[terminal]")
+{
+    // A moving cursor is drawn part of the way between two cells. A motion chained half-way along starts from
+    // there, not from the whole cell before it, which snapped the drawn cursor back.
+    auto mc = MockTerm { ColumnCount { 20 }, LineCount { 4 } };
+    auto& terminal = mc.terminal;
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    terminal.tick(ClockBase + 100ms);
+    terminal.ensureFreshRenderBuffer();
+    mc.writeToScreen("\033[1;11H");
+    terminal.tick(ClockBase + 200ms);
+    terminal.ensureFreshRenderBuffer(); // starts the motion from (0, 0) to (0, 10)
+
+    // Where the cursor is drawn at 250 ms, as the renderer interpolates: from + progress * (to - from).
+    terminal.tick(ClockBase + 250ms);
+    auto const progress =
+        terminal.cursorAnimationProgress(CellLocation { .line = LineOffset(0), .column = ColumnOffset(10) });
+    REQUIRE(progress > 0.0f);
+    REQUIRE(progress < 1.0f);
+    auto const drawnColumn = progress * 10.0f;
+
+    mc.writeToScreen("\033[3;5H");
+    terminal.ensureFreshRenderBuffer();
+
+    auto const frame = terminal.renderBuffer();
+    REQUIRE(frame.get().cursor.has_value());
+    auto const& cursor = *frame.get().cursor;
+    REQUIRE(cursor.animateFrom.has_value());
+    CHECK(cursor.animateFrom->line == Catch::Approx(0.0f));
+    CHECK(cursor.animateFrom->column == Catch::Approx(drawnColumn));
 }
 
 TEST_CASE("Terminal.screenTransition.activates_on_screen_switch", "[terminal]")
