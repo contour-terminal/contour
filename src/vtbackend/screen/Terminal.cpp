@@ -1335,34 +1335,41 @@ void Terminal::updateIndicatorStatusLine()
     using Styling = StatusLineStyling;
     auto const& definitions = _indicatorStatusLineDefinition;
 
+    // A segment is placed by the columns the screen lays its text out in, not by its bytes.
+    auto const widthOf = [&](StatusLineSegment const& segment) {
+        return columnsOnTheGrid(serializeToVT(*this, segment, Styling::Disabled),
+                                _indicatorStatusScreen.clusterWidthPolicy());
+    };
+    auto const columns = _indicatorStatusScreen.pageSize().columns;
+
+    // The columns, from the first, that the left segment and a middle one shown take.
+    auto taken = ColumnCount(0);
+
     if (!definitions.left.empty())
     {
         auto const leftVT = serializeToVT(*this, definitions.left, Styling::Enabled);
         writeToScreenInternal(_indicatorStatusScreen, leftVT);
+        taken = widthOf(definitions.left);
     }
 
     if (!definitions.middle.empty() || !definitions.right.empty())
     {
-        // A segment is placed by the columns the screen lays its text out in, not by its bytes.
-        auto const widthOf = [&](StatusLineSegment const& segment) {
-            return columnsOnTheGrid(serializeToVT(*this, segment, Styling::Disabled),
-                                    _indicatorStatusScreen.clusterWidthPolicy());
-        };
-        auto const columns = _indicatorStatusScreen.pageSize().columns;
-
         // The middle segment is centred, and not shown if it is too wide.
         auto const middleWidth = widthOf(definitions.middle);
-        if (columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2))
+        if (!definitions.middle.empty()
+            && columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2))
         {
-            _indicatorStatusScreen.moveCursorToColumn(
-                boxed_cast<ColumnOffset>((columns - middleWidth) / ColumnCount(2)));
+            auto const middleStart = (columns - middleWidth) / ColumnCount(2);
+            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(middleStart));
             writeToScreenInternal(_indicatorStatusScreen,
                                   serializeToVT(*this, definitions.middle, Styling::Enabled));
+            taken = std::max(taken, middleStart + middleWidth);
         }
 
-        // The right segment ends in the last column, and is not shown if it is as wide as the line.
+        // The right segment ends in the last column, and is not shown if it is as wide as the line, or
+        // where it would overlap what the segments before it take.
         auto const rightWidth = widthOf(definitions.right);
-        if (rightWidth < columns)
+        if (rightWidth < columns && taken + rightWidth <= columns)
         {
             _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(columns - rightWidth));
             writeToScreenInternal(_indicatorStatusScreen,
