@@ -6824,8 +6824,10 @@ void Terminal::synchronizedOutput(bool enabled)
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
     {
-        // Instrumentation only. This branch drops a repaint that the throttle would have allowed,
-        // and nothing re-arms it -- @see the lost-wakeup entry in docs/internals/performance-backlog.md.
+        // Instrumentation only. This branch drops a repaint that the throttle would have allowed, and
+        // nothing re-arms it: while this state lasts, the batch's screenUpdated() only retries the swap of
+        // the frame built before and tells the display nothing, so the block's end shows only with the next
+        // repaint something else asks for.
         ZoneScopedN("syncOut.dropped.trySwap");
         return;
     }
