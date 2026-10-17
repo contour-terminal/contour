@@ -6724,7 +6724,12 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
     // Clamp target to valid range.
     auto const clamped = PageIndex(std::clamp(target.value, 0, MaxPageCount - 1));
     if (clamped == _cursorPage)
+    {
+        // NP and PP move home on the last and the first page too, as DEC STD 070's algorithms do.
+        if (placement == PageCursorPlacement::Home)
+            _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
         return;
+    }
 
     // Cancel any active cursor motion animation on page change.
     _cursorMotion.active = false;
@@ -6759,6 +6764,8 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
         publishAnimationsEnd();
     }
 
+    // DEC STD 070 keeps one active position and one rendition, so a page movement carries the cursor on.
+    auto const leaving = pageAt(_cursorPage).cursor();
     _cursorPage = clamped;
     _currentScreen = _pages[clamped.value].get();
 
@@ -6783,7 +6790,11 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
     switch (placement)
     {
         case PageCursorPlacement::PagesOwn: break;
-        case PageCursorPlacement::Home: _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0)); break;
+        case PageCursorPlacement::SameLineAndColumn: _currentScreen->adoptCursor(leaving); break;
+        case PageCursorPlacement::Home:
+            _currentScreen->adoptCursor(leaving);
+            _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
+            break;
     }
 
     bufferChanged(_currentScreenType);

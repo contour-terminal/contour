@@ -521,7 +521,8 @@ TEST_CASE("serializeToVT.pointerItemsDescribeTheCellOfThePageOnDisplay", "[statu
     // pointer is over page 3's top-left cell.
     auto mc = MockTerm { PageWithHistory, LineCount(10) };
     mc.writeToScreen(LinkedRows);
-    mc.writeToScreen("\033[3 P\033]8;;https://p.example/\033\\\033[7mP\033[m\033]8;;\033\\"); // PPA 3, then P
+    mc.writeToScreen(
+        "\033[3 P\033[H\033]8;;https://p.example/\033\\\033[7mP\033[m\033]8;;\033\\"); // PPA 3, P at home
     mc.writeToScreen("\033[?64l\033[1 P"); // DECPCCM reset, then the cursor back to page 1
     REQUIRE(mc.terminal.displayedPageIndex() == PageIndex(2));
 
