@@ -1183,6 +1183,38 @@ TEST_CASE("DECLRP: an unavailable locator sends no other parameter", "[screen]")
     }
 }
 
+TEST_CASE("DECLRP: the coordinates are in the unit DECELR selected", "[screen]")
+{
+    // DEC STD 070 ch. 13: "The parameter values Pr, Pc, and Pp, are expressed in the units selected by the
+    // last received Enable Locator Reports (DECELR) command", Pu 1 being "Device physical pixels". xterm's
+    // LocatorCoords reports y + 1 and x + 1 in its pixel mode, and a position outside its window as out of
+    // range, which it answers with CSI 0 & w. Over the window's padding the cell is still the one at the
+    // edge, but the pixel is off the grid. The page stays a page number. The grid is 20 x 10 cells of 10 x 20
+    // pixels.
+    auto const [decelr, line, column, x, y, report] =
+        GENERATE(table<std::string_view, int, int, int, int, std::string_view>({
+            { "\033[1;1'z", 2, 3, 35, 47, "\033[1;0;48;36;1&w" },      // device pixels
+            { "\033[1;1'z", 9, 19, 199, 199, "\033[1;0;200;200;1&w" }, // the grid's last pixel
+            { "\033[1;1'z", 2, 0, -3, 47, "\033[0&w" },                // over the left padding
+            { "\033[1;1'z", 0, 3, 35, -1, "\033[0&w" },                // over the top padding
+            { "\033[1;1'z", 2, 19, 200, 47, "\033[0&w" },              // past the right edge
+            { "\033[1;1'z", 9, 3, 35, 200, "\033[0&w" },               // past the bottom edge
+            { "\033[1;2'z", 2, 3, 35, 47, "\033[1;0;3;4;1&w" },        // character cells
+            { "\033[1;2'z", 2, 0, -3, 47, "\033[1;0;3;1;1&w" }, // cells: the edge cell, whatever the pixel
+            { "\033[1'z", 2, 3, 35, 47, "\033[1;0;3;4;1&w" },   // character cells, the default
+        }));
+    INFO(std::format("{} at pixel ({}, {})", e(decelr), x, y));
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(20) });
+    mock.writeToScreen(decelr);
+    pointAt(
+        mock, line, column, PixelCoordinate { .x = PixelCoordinate::X { x }, .y = PixelCoordinate::Y { y } });
+
+    mock.resetReplyData();
+    mock.writeToScreen("\033['|");
+    CHECK(e(mock.replyData()) == e(report));
+}
+
 TEST_CASE("DECELR: soft reset disables locator", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
