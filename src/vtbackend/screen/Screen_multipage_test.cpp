@@ -227,6 +227,136 @@ TEST_CASE("MultiPage.DECPCCM_reset.outputToAnotherPageLeavesTheWindowWhereItIs",
     CHECK(trimmedTextScreenshot(mock) == "line 16\nline 17\nline 18\nline 19\nline 20");
 }
 
+namespace
+{
+/// Selects the first ten columns of row @p line of the page on display, as a drag would.
+/// @param mock The terminal.
+/// @param line The row.
+void selectOnDisplay(MockTerm<>& mock, int line)
+{
+    mock.terminal.setSelector(std::make_unique<LinearSelection>(
+        mock.terminal.selectionHelper(),
+        CellLocation { .line = LineOffset(line), .column = ColumnOffset(0) },
+        [] {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(line), .column = ColumnOffset(9) });
+}
+
+/// The order in which one batch of output scrolls a screen and moves the cursor between the page on display
+/// and the host-writable status line.
+enum class BatchOrder : uint8_t
+{
+    ScrollsThePageThenLeaves = 0, ///< The page on display scrolls, then the cursor moves to the status line.
+    ScrollsTheStatusLineThenReturns, ///< The status line scrolls, then the cursor moves back to the page.
+};
+} // namespace
+
+TEST_CASE("MultiPage.DECPCCM_reset.outputToAnotherPageLeavesTheViewersStateAlone", "[screen]")
+{
+    // The vi cursor and the selection are on the page on display, as the window is. Line feeds at page 3's
+    // bottom scroll page 3 alone, so neither moves -- with the window at the bottom too, where nothing else
+    // asks which page scrolled.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    printLines(mock, "line", 40);
+    mock.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, then the cursor to page 3
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(0));
+    auto const viCursor = CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) };
+    terminal.moveNormalModeCursorTo(viCursor);
+    selectOnDisplay(mock, 1);
+
+    printLines(mock, "three", 20);
+
+    CHECK(terminal.normalModeCursorPosition() == viCursor);
+    REQUIRE(terminal.selector() != nullptr);
+    CHECK(terminal.selector()->from().line == LineOffset(1));
+    CHECK(terminal.selector()->to().line == LineOffset(1));
+    CHECK(terminal.extractSelectionText() == "line 37");
+}
+
+TEST_CASE("MultiPage.statusLineOutputLeavesThePageOnDisplayAlone", "[screen]")
+{
+    // DECSASD sends output to the host-writable status line, a one-row screen of its own: each line feed
+    // there scrolls it, and nothing on the page on display -- the window, the vi cursor, the selection.
+    // The status line is shown first: it takes a row from the page, which moves what is on it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[2$~"); // DECSSDT host-writable
+    printLines(mock, "line", 40);
+    mock.writeToScreen("\033[1$}"); // DECSASD status line
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+    REQUIRE(terminal.viewport().scrollUp(LineCount(5)));
+    auto const viCursor = CellLocation { .line = LineOffset(-2), .column = ColumnOffset(3) };
+    terminal.moveNormalModeCursorTo(viCursor);
+    selectOnDisplay(mock, -3);
+    REQUIRE(terminal.extractSelectionText() == "line 33");
+    auto const scrollOffset = terminal.viewport().scrollOffset(); // the vi cursor's own margin moved it
+    REQUIRE(scrollOffset > ScrollOffset(0));
+
+    mock.writeToScreen("x\r\nx\r\nx\r\n");
+
+    CHECK(terminal.viewport().scrollOffset() == scrollOffset);
+    CHECK(terminal.normalModeCursorPosition() == viCursor);
+    REQUIRE(terminal.selector() != nullptr);
+    CHECK(terminal.selector()->from().line == LineOffset(-3));
+    CHECK(terminal.extractSelectionText() == "line 33");
+}
+
+TEST_CASE("MultiPage.theViewFollowsABatchThatScrolledThePageOnDisplay", "[screen]")
+{
+    // A view scrolled back follows new output (autoScrollOnUpdate) where the batch scrolled the page on
+    // display, wherever the cursor ends it. DECSASD moves the cursor between the page and the host-writable
+    // status line, a one-row screen of its own, within one batch.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().autoScrollOnUpdate = true;
+    mock.following = OutputFollowing::Follow;
+    mock.writeToScreen("\033[2$~"); // DECSSDT host-writable, before the output: it takes a row from the page
+    printLines(mock, "line", 40);
+
+    switch (GENERATE(BatchOrder::ScrollsThePageThenLeaves, BatchOrder::ScrollsTheStatusLineThenReturns))
+    {
+        case BatchOrder::ScrollsThePageThenLeaves:
+            REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
+            mock.writeToScreen("more 1\r\nmore 2\r\n\033[1$}"); // one batch, ending in DECSASD status line
+            REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+            CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
+            break;
+        case BatchOrder::ScrollsTheStatusLineThenReturns:
+            mock.writeToScreen("\033[1$}"); // DECSASD status line
+            REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
+            mock.writeToScreen("x\r\nx\r\n\033[0$}"); // one batch, ending in DECSASD main display
+            REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::Main);
+            CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+            break;
+    }
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.aPageIsNotFollowedForWhatItScrolledBeforeComingOnDisplay", "[screen]")
+{
+    // Page 1 scrolls while page 3 is on display. Brought on display, taken back into its history, and written
+    // to without scrolling, it stays where the user took it: what it scrolled before it came on display is
+    // no output to follow.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().autoScrollOnUpdate = true;
+    mock.following = OutputFollowing::Follow;
+    printLines(mock, "line", 20);
+    mock.writeToScreen("\033[3 P\033[?64l\033[1 P"); // page 3 on display, DECPCCM reset, the cursor to page 1
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+    REQUIRE(terminal.cursorPageIndex() == PageIndex(0));
+    mock.writeToScreen("\033[5;1H");
+    printLines(mock, "more", 20); // scrolls page 1, not on display
+
+    mock.writeToScreen("\033[?64h"); // DECPCCM set: the cursor's page, page 1, comes on display
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(0));
+    REQUIRE(terminal.viewport().scrollUp(LineCount(10)));
+    mock.writeToScreen("x"); // a batch that scrolls nothing
+
+    CHECK(terminal.viewport().scrollOffset() == ScrollOffset(10));
+}
+
 TEST_CASE("MultiPage.DECPCCM_set.theViewportScrollsAsItDid", "[screen]")
 {
     // Coupled, the page on display is the cursor's, so the window and the cursor are on one page.

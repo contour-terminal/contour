@@ -4326,15 +4326,13 @@ void Terminal::followOutput()
     // followed later, by a batch that added nothing. A shell's line editor that repaints its prompt on a
     // timer (endo, once a second) adds nothing, and used to bring a view taken back to read the history down
     // with every repaint: xterm's scrollTtyOutput follows any byte read, ghostty only a bottom row that
-    // moved.
-    if (std::exchange(_linesScrolledSinceFollow, LineCount(0)) == LineCount(0))
+    // moved. Only what the page on display scrolled counts: output to another page is no output to follow,
+    // wherever the cursor ends the batch.
+    auto const scrolled = displayedPage().linesScrolledIntoHistory();
+    if (std::exchange(_displayedPageLinesFollowed, scrolled) == scrolled)
         return;
 
     if (!_settings.autoScrollOnUpdate || !_viewport.scrolled() || _inputHandler.mode() != ViMode::Insert)
-        return;
-
-    // Output to a page that is not on display, as onBufferScrolled() says, is no output to follow.
-    if (_currentScreen != &displayedPage())
         return;
 
     if (_eventListener.outputFollowing() == OutputFollowing::Follow)
@@ -6696,6 +6694,9 @@ void Terminal::setPage(PageIndex target, bool moveCursorHome)
 
 void Terminal::showPage(PageIndex page)
 {
+    // What a page scrolled before it came on display is no output to follow.
+    if (page != _displayedPage)
+        _displayedPageLinesFollowed = pageAt(page).linesScrolledIntoHistory();
     _displayedPage = page;
     _viewport.clampScrollOffset();
 }
@@ -6851,13 +6852,14 @@ void Terminal::synchronizedOutput(bool enabled)
     }
 }
 
-void Terminal::outputScrolledIntoHistory(LineCount n) noexcept
+void Terminal::onBufferScrolled(Screen const& scrolled, LineCount n) noexcept
 {
-    _linesScrolledSinceFollow += n;
-}
+    // The viewer's state is on the page on display, which the viewport is the window onto. A page the cursor
+    // writes to with DECPCCM reset, the status line DECSASD selected and the indicator status line, which
+    // every frame writes, each scroll under nobody's view: none of it moves.
+    if (&scrolled != &displayedPage())
+        return;
 
-void Terminal::onBufferScrolled(LineCount n) noexcept
-{
     // Adjust Normal-mode's cursor accordingly to make it fixed at the scroll-offset as if nothing has
     // happened.
     _viCommands.cursorPosition.line -= n;
@@ -6867,12 +6869,7 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     // refreshHints() there); remember that so the visible-scope branch below does not re-scan twice.
     auto viewportFollowedContent = false;
     if (viewport().scrolled() || _viewport.pixelOffset() > 0.0f || _inputHandler.mode() == ViMode::Normal)
-    {
-        // Only for output to the page on display, which the viewport is the window onto: a page the cursor
-        // writes to with DECPCCM reset, or the status line DECSASD selected, scrolls under nobody's view.
-        if (_currentScreen == &displayedPage())
-            viewportFollowedContent = viewport().scrollUp(n);
-    }
+        viewportFollowedContent = viewport().scrollUp(n);
 
     // Keep an open hint session consistent with content that just scrolled. Scrollback labels are
     // fixed for the session, so shift each match up to stay on its own text. The visible scope

@@ -2798,10 +2798,11 @@ class Terminal
 
     /// Brings a view scrolled back into the history down to the output just applied, as
     /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
-    /// (@see Events::outputFollowing). Only output that scrolled lines off the page since the last call
-    /// counts (@see outputScrolledIntoHistory): a prompt, a progress bar or a clock repainted in place is not
-    /// new output. Called with the state lock held, where output is applied and before it is published: by
-    /// the parse batch, and by a mirror applying a remote screen's update.
+    /// (@see Events::outputFollowing). Only output that scrolled lines of the page on display into its
+    /// history since the last call counts (@see Screen::linesScrolledIntoHistory): a prompt, a progress bar
+    /// or a clock repainted in place is not new output, and neither is output to a page that is not on
+    /// display. Called with the state lock held, where output is applied and before it is published: by the
+    /// parse batch, and by a mirror applying a remote screen's update.
     void followOutput();
 
     /// Runs @p pause with the parser thread's hold of the state lock released, and takes the lock back as
@@ -3064,13 +3065,14 @@ class Terminal
     /// A no-op unless DEC mode 2048 is set. Sent on every resize, and once when the mode is enabled.
     void reportInBandWindowResize();
 
-    /// Notes that output scrolled @p n lines off the top of the page, which is what followOutput() follows.
-    /// Called for every scroll Screen::scrollUp makes: a top-anchored scroll region's as well as the whole
-    /// page's, which onBufferScrolled() alone is told of.
+    /// Keeps the viewer's state on its rows when output scrolls the whole of @p scrolled up: the Normal-mode
+    /// cursor, the viewport (while scrolled back, part-row offset or in Normal mode), an open hint session
+    /// and the selection move up with the content. Only where @p scrolled is the page on display, which all
+    /// of that state is on: a page the cursor writes to with DECPCCM reset, the status line DECSASD selected
+    /// and the indicator status line scroll under nobody's view.
+    /// @param scrolled The screen whose page scrolled.
     /// @param n The lines scrolled, as the grid reports them.
-    void outputScrolledIntoHistory(LineCount n) noexcept;
-
-    void onBufferScrolled(LineCount n) noexcept;
+    void onBufferScrolled(Screen const& scrolled, LineCount n) noexcept;
 
     /// Pulls the viewport and the Normal-mode cursor back inside the scrollback that still exists.
     ///
@@ -4156,9 +4158,10 @@ class Terminal
     Screen _indicatorStatusScreen;
     gsl::not_null<Screen*> _currentScreen;
     Viewport _viewport;
-    /// Lines output scrolled into the history since followOutput() last ran. Under the state lock.
-    /// @see outputScrolledIntoHistory
-    LineCount _linesScrolledSinceFollow {};
+    /// The page on display's Screen::linesScrolledIntoHistory() as followOutput() last read it, or as the
+    /// page came on display (showPage()): what it scrolled since is the output to follow. Under the state
+    /// lock.
+    uint64_t _displayedPageLinesFollowed = 0;
     StatusLineDefinition _indicatorStatusLineDefinition;
 
     // {{{ tabs info

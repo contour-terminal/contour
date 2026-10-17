@@ -3649,6 +3649,29 @@ TEST_CASE("Terminal.historyEviction.keepsTheViCursorInsideTheAddressableGrid", "
 }
 // }}}
 
+TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorMovesNothingOnThePage", "[terminal]")
+{
+    // The indicator status line is a one-row screen of its own, written anew by every frame. Text wider than
+    // the page is cut at its last column (anOverflowingIndicatorShowsItsHead), but a line feed in the text
+    // still scrolls the one row -- which is no output to the page on display: the vi cursor and the window
+    // onto the page stay where they are, frame after frame.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+    printLines(mc, "line", 10);
+    terminal.setStatusLineDefinition(
+        vtbackend::parseStatusLineDefinition("an indicator\nwider than\nthe page", "", ""));
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal); // shows the indicator status line
+    auto const viCursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) };
+    terminal.moveNormalModeCursorTo(viCursor);
+    REQUIRE(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+
+    for ([[maybe_unused]] auto const frame: std::views::iota(0, 5))
+        terminal.refreshRenderBuffer();
+
+    CHECK(terminal.normalModeCursorPosition() == viCursor);
+    CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+}
+
 TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[terminal][history-eviction]")
 {
     // What the issue actually asks for, driven end to end through real OSC 133 sequences.
