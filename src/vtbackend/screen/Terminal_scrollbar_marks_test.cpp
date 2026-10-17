@@ -120,7 +120,7 @@ TEST_CASE("ScrollbarMarks.userMarks.theAlternateScreenKeepsItsMarksToItself", "[
         REQUIRE(mc.terminal.userMarks().ids().size() == 1);
         auto const marked = *mc.terminal.userMarks().ids().begin();
 
-        mc.writeToScreen("\033[?1049hvim\r\n");
+        mc.writeToScreen("\033[?1049h\033[Hvim\r\n");
         enterNormalModeAtTop(mc);
         REQUIRE(mc.terminal.currentScreen().grid().stableLineIdOf(LineOffset(0)) == marked);
         mc.sendCharSequence("mmmm");

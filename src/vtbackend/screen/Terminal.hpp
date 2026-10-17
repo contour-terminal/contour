@@ -2187,9 +2187,9 @@ class Terminal
 
     /// Enters or leaves the alternate screen buffer for one of the DEC private modes 47, 1047 or 1049,
     /// following the cursor-carry and clear policy that alternateScreenBehavior() describes for @p mode.
-    /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so modes
-    /// 47 and 1047 carry it across the switch (it does not move), while mode 1049 lets each page keep
-    /// its own cursor as an implicit DECSC/DECRC.
+    /// Modelled on xterm's ToAlternate / FromAlternate: the cursor is a terminal-level entity, so all three
+    /// modes carry it into the alternate screen (it does not move), and 47 and 1047 carry it back out, while
+    /// mode 1049 returns to the cursor the page kept, its implicit DECRC.
     ///
     /// The alternate screen is entered from any page, and shown whatever DECPCCM says. Leaving it returns the
     /// cursor to the page it was entered from; with DECPCCM reset the page that was on display before is
