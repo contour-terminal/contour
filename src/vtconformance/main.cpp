@@ -130,13 +130,14 @@ class ConformanceApp: public core::cli::App
         if (auto const value = parameters().str("vtconformance.run.suite-dir"); !value.empty())
             options.suiteDirectory = fs::path(value);
 
-        if (!isSuiteAvailable(suite, options.suiteDirectory))
+        if (!isSuiteAvailable(suite, options, isProgramAvailable))
         {
-            auto const message = suite.entryPoint.empty()
-                                     ? std::format("Test program '{}' is not installed.\n", suite.program)
-                                     : std::format("Suite '{}' was not found. Fetch it first "
-                                                   "(scripts/fetch-esctest.sh), then pass --suite-dir.\n",
-                                                   suite.name);
+            auto const message =
+                suite.entryPoint.empty()
+                    ? std::format("Test program '{}' is not installed.\n", programOf(suite, options))
+                    : std::format("Suite '{}' was not found. Fetch it first "
+                                  "(scripts/fetch-esctest.sh), then pass --suite-dir.\n",
+                                  suite.name);
             if (parameters().boolean("vtconformance.run.skip-if-missing"))
             {
                 // A gate that cannot find its test program has measured nothing. Say so loudly, and

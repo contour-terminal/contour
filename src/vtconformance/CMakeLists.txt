@@ -51,6 +51,7 @@ if(VTCONFORMANCE_TESTING)
         EscTestLog_test.cpp
         MarkerScanner_test.cpp
         Report_test.cpp
+        Runner_test.cpp
         ScreenDump_test.cpp
         TerminalEngine_test.cpp
         TerminalHarness_test.cpp

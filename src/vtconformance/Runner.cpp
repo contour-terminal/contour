@@ -262,16 +262,21 @@ bool isProgramAvailable(std::string const& program)
     return false;
 }
 
-bool isSuiteAvailable(Suite const& suite, fs::path const& suiteDirectory)
+std::string programOf(Suite const& suite, RunOptions const& options)
 {
-    if (!isProgramAvailable(std::string(suite.program)))
+    return options.program.empty() ? std::string(suite.program) : options.program;
+}
+
+bool isSuiteAvailable(Suite const& suite, RunOptions const& options, ProgramProbe const& isAvailable)
+{
+    if (!isAvailable(programOf(suite, options)))
         return false;
 
     if (suite.entryPoint.empty())
         return true;
 
     auto error = std::error_code {};
-    return fs::exists(suiteDirectory / suite.entryPoint, error);
+    return fs::exists(options.suiteDirectory / suite.entryPoint, error);
 }
 
 namespace
@@ -349,7 +354,7 @@ namespace
         harnessOptions.engine.checksumExtension = suite.checksumExtension;
 
         auto exec = vtpty::Process::ExecInfo {
-            .program = options.program.empty() ? std::string(suite.program) : options.program,
+            .program = programOf(suite, options),
             .arguments = arguments,
             // A fetched suite runs from its own directory, so that its entry point and its imports
             // resolve; an installed one runs from the scratch directory.
