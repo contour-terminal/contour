@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/ProcessCgroup.hpp>
 #include <vtpty/SystemdScopePlacement.hpp>
 #include <vtpty/test/GateTesting.hpp>
 
@@ -9,13 +10,16 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <deque>
 #include <expected>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,14 +39,29 @@ namespace
 
 using Outcome = std::expected<void, ScopeError>;
 
-/// What a FakeScopeBus answers, and what it was asked. Shared with the test, because the bus itself
-/// is owned -- and destroyed -- by the placement.
+/// What systemd did about a request whose answer did not arrive in time.
+enum class AfterTimeout : std::uint8_t
+{
+    NothingYet,   ///< The child is where it was.
+    PlacedAnyway, ///< The child is in its scope: the answer came late.
+};
+
+/// Where the kernel says a child runs that no scope took.
+constexpr auto ContoursOwnCgroup =
+    std::string_view { "0::/user.slice/user-1000.slice/user@1000.service/app.slice/"
+                       "app-org.contourterminal.Contour@test.service\n" };
+
+/// What a FakeScopeBus answers, and what it was asked; and what the kernel says about each child.
+/// Shared with the test, because the bus itself is owned -- and destroyed -- by the placement.
 struct BusScript
 {
     std::mutex mutex;
     std::deque<Outcome> connects; ///< One per connect attempt, in order; success once empty.
     std::deque<Outcome> outcomes; ///< One per request, in order; success once empty.
+    AfterTimeout afterTimeout = AfterTimeout::NothingYet;
     std::vector<vtpty::ScopeRequest> requests;
+    std::map<int, std::string> cgroups; ///< By pid: what /proc/<pid>/cgroup reads once a scope took it.
+    std::vector<int> cgroupReads;       ///< The pids the placement asked the kernel about.
     int connectCount = 0;
 
     [[nodiscard]] std::vector<vtpty::ScopeRequest> requestsSoFar()
@@ -56,6 +75,12 @@ struct BusScript
         auto const _ = std::lock_guard { mutex };
         return connectCount;
     }
+
+    [[nodiscard]] std::vector<int> cgroupReadsSoFar()
+    {
+        auto const _ = std::lock_guard { mutex };
+        return cgroupReads;
+    }
 };
 
 class FakeScopeBus final: public vtpty::ScopeBus
@@ -68,16 +93,30 @@ class FakeScopeBus final: public vtpty::ScopeBus
     {
         auto const _ = std::lock_guard { _script->mutex };
         _script->requests.push_back(request);
-        if (_script->outcomes.empty())
-            return {};
-        auto const outcome = _script->outcomes.front();
-        _script->outcomes.pop_front();
+        auto const outcome = _script->outcomes.empty() ? Outcome {} : _script->outcomes.front();
+        if (!_script->outcomes.empty())
+            _script->outcomes.pop_front();
+        if (outcome
+            || (outcome.error() == ScopeError::TimedOut
+                && _script->afterTimeout == AfterTimeout::PlacedAnyway))
+            _script->cgroups[request.pid] = std::format("0::/app.slice/{}\n", request.unitName);
         return outcome;
     }
 
   private:
     std::shared_ptr<BusScript> _script;
 };
+
+/// @return What the kernel says about each child, as @p script has it.
+vtpty::ProcessCgroupReader readCgroupFrom(std::shared_ptr<BusScript> const& script)
+{
+    return [script](int pid) -> std::optional<std::string> {
+        auto const _ = std::lock_guard { script->mutex };
+        script->cgroupReads.push_back(pid);
+        auto const placed = script->cgroups.find(pid);
+        return placed != script->cgroups.end() ? placed->second : std::string { ContoursOwnCgroup };
+    };
+}
 
 /// @return A factory connecting FakeScopeBus instances that follow @p script.
 vtpty::ScopeBusFactory connectFake(std::shared_ptr<BusScript> const& script)
@@ -113,7 +152,7 @@ struct Rig
     /// @return A placement over this rig's script, configuration and clock.
     [[nodiscard]] vtpty::SystemdScopePlacement placement() const
     {
-        return vtpty::SystemdScopePlacement { config, connectFake(script), clock };
+        return vtpty::SystemdScopePlacement { config, connectFake(script), readCgroupFrom(script), clock };
     }
 
     /// Moves the clock past the breaker's cooldown.
@@ -281,6 +320,45 @@ TEST_CASE("SystemdScopePlacement.a wedged bus is skipped until the cooldown", "[
     rig.outwaitCooldown();
     CHECK(released(place(placement, fakeChild(3)))); // the trial request
     CHECK(rig.script->requestsSoFar().size() == 2);
+}
+
+TEST_CASE("SystemdScopePlacement.a late answer is still an answer", "[placement]")
+{
+    // systemd placed the child, but its answer missed the deadline. The kernel says where the child
+    // runs: in its scope, so the bus is fine, and the next child is asked about as usual.
+    auto rig = Rig {};
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    rig.script->afterTimeout = AfterTimeout::PlacedAnyway;
+    auto placement = rig.placement();
+
+    CHECK(released(place(placement, fakeChild(1))));
+    CHECK(released(place(placement, fakeChild(2))));
+    CHECK(rig.script->requestsSoFar().size() == 2);
+}
+
+TEST_CASE("SystemdScopePlacement.a timeout stands while the kernel shows the child where it was",
+          "[placement]")
+{
+    auto rig = Rig {};
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    auto placement = rig.placement();
+
+    CHECK(released(place(placement, fakeChild(1))));
+    CHECK(released(place(placement, fakeChild(2)))); // skipped: the bus fell silent
+    CHECK(rig.script->requestsSoFar().size() == 1);
+}
+
+TEST_CASE("SystemdScopePlacement.asks the kernel only about a child whose answer did not come", "[placement]")
+{
+    auto rig = Rig {};
+    rig.script->outcomes.emplace_back(); // placed
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::Refused));
+    rig.script->outcomes.emplace_back(std::unexpected(ScopeError::TimedOut));
+    auto placement = rig.placement();
+
+    for (auto const pid: { 1, 2, 3 })
+        CHECK(released(place(placement, fakeChild(pid))));
+    CHECK(rig.script->cgroupReadsSoFar() == std::vector { 3 });
 }
 
 TEST_CASE("SystemdScopePlacement.no systemd instance: connects again after the cooldown", "[placement]")

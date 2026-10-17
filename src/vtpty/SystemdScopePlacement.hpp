@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtpty/PlacementBreaker.hpp>
+#include <vtpty/ProcessCgroup.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/ScopeBus.hpp>
 
@@ -57,9 +58,12 @@ class SystemdScopePlacement final: public ProcessPlacement
   public:
     /// @param config     How to place children.
     /// @param connectBus Connects the bus; called on the worker, at first use and after it broke.
+    /// @param readCgroup Tells where the kernel says a child runs; asked on the worker, once a
+    ///                   request's answer did not arrive in time.
     /// @param clock      The clock the breaker reads; must outlive this placement.
     SystemdScopePlacement(SystemdScopeConfig config,
                           ScopeBusFactory connectBus,
+                          ProcessCgroupReader readCgroup,
                           core::platform::IClock const& clock);
 
     /// Stops the worker -- after the request in flight, if any -- and releases every queued child.
@@ -82,10 +86,13 @@ class SystemdScopePlacement final: public ProcessPlacement
     void run();
     void place(ParkedChild const& child);
     [[nodiscard]] std::expected<void, ScopeError> request(ParkedChild const& child, ScopeProtocol protocol);
+    /// @return Whether the kernel says process @p pid runs in @p unit's cgroup.
+    [[nodiscard]] bool runsIn(int pid, std::string_view unit) const;
     void report(ParkedChild const& child, ScopeError error);
 
     SystemdScopeConfig _config;
     ScopeBusFactory _connectBus;
+    ProcessCgroupReader _readCgroup;
     core::platform::IClock const& _clock;
     std::unique_ptr<ScopeBus> _bus;
     /// Current until systemd turns it down, then Legacy for as long as this connection lasts.
