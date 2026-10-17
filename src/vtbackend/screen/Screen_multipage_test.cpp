@@ -621,6 +621,63 @@ TEST_CASE("MultiPage.alternate_screen_compatibility", "[screen]")
     CHECK(terminal.primaryScreen().renderMainPageText() == "Prima\n     \n     \n");
 }
 
+TEST_CASE("MultiPage.DECPCCM_reset.theAlternateScreenIsShownWhileInUse", "[screen]")
+{
+    // DECPCCM governs page movement (NP, PP, PPA, PPR, PPB). The alternate screen is no DEC page, and
+    // switching to it none of those: xterm shows the buffer it switches to, and Windows Terminal keeps its
+    // alternate buffer outside paging. Leaving it, Contour follows Windows Terminal, the one reference with
+    // both pages and an alternate buffer: its cursor restore moves the page on display only while DECPCCM is
+    // set, so with DECPCCM reset the page that was on display before is shown again.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    auto const mode = GENERATE(47, 1047, 1049);
+    INFO(std::format("mode {}", mode));
+    mock.writeToScreen("main");
+    auto shownAfterwards = PageIndex(0);
+    auto textAfterwards = std::string("main");
+    auto beforeLeaving = std::string {};
+
+    SECTION("the primary page on display")
+    {
+        mock.writeToScreen("\033[?64l"); // DECPCCM reset
+    }
+
+    SECTION("another page on display")
+    {
+        mock.writeToScreen("\033[3 Pthree\033[?64l\033[1 P"); // page 3 stays on display, the cursor on page 1
+        REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+        shownAfterwards = PageIndex(2);
+        textAfterwards = "three";
+    }
+
+    SECTION("entered while DECPCCM is set, left while it is reset: the alternate screen goes off display")
+    {
+        beforeLeaving = "\033[?64l";
+    }
+
+    SECTION("another page on display, DECPCCM set before leaving: the display follows the cursor")
+    {
+        mock.writeToScreen("\033[3 Pthree\033[?64l\033[1 P");
+        REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+        beforeLeaving = "\033[?64h";
+    }
+
+    mock.writeToScreen(std::format("\033[?{}h\033[Halt", mode));
+    REQUIRE(terminal.isAlternateScreen());
+    CHECK(terminal.displayedPageIndex() == AlternateScreenPageIndex);
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "alt");
+    CHECK(terminal.renderBuffer().get().cursor.has_value());
+
+    mock.writeToScreen(beforeLeaving);
+    mock.writeToScreen(std::format("\033[?{}l", mode));
+    REQUIRE(terminal.isPrimaryScreen());
+    CHECK(terminal.displayedPageIndex() == shownAfterwards);
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == textAfterwards);
+}
+
 TEST_CASE("MultiPage.hard_reset", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
