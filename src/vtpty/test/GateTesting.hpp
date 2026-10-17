@@ -79,6 +79,40 @@ inline OwnedFd exitedPidFd()
     REQUIRE(pidfd.isOpen());
     return pidfd;
 }
+
+/// A child of this test that has exited and is not yet reaped -- a zombie, as a session's shell is from
+/// its exit until the Process owning it waits for it. Reaped when it goes.
+class Zombie
+{
+  public:
+    Zombie(): _pid { ::fork() }
+    {
+        REQUIRE(_pid >= 0);
+        if (_pid == 0)
+            ::_exit(0);
+        // Waits for the exit, and leaves the child to be waited for.
+        auto info = siginfo_t {};
+        REQUIRE(::waitid(P_PID, static_cast<id_t>(_pid), &info, WEXITED | WNOWAIT) == 0);
+    }
+    ~Zombie() { ::waitpid(_pid, nullptr, 0); }
+    Zombie(Zombie const&) = delete;
+    Zombie& operator=(Zombie const&) = delete;
+    Zombie(Zombie&&) = delete;
+    Zombie& operator=(Zombie&&) = delete;
+
+    [[nodiscard]] int pid() const noexcept { return _pid; }
+
+    /// @return A fresh pidfd for it.
+    [[nodiscard]] OwnedFd pidfd() const
+    {
+        auto pidfd = OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, _pid, 0)) };
+        REQUIRE(pidfd.isOpen());
+        return pidfd;
+    }
+
+  private:
+    int _pid;
+};
 #endif
 
 } // namespace vtpty::testing

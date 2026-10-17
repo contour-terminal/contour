@@ -87,6 +87,10 @@ TEST_CASE("NoPlacement releases at once", "[placement]")
 TEST_CASE("ParkedChild.hasExited", "[placement]")
 {
     CHECK(fakeChild(4242, vtpty::testing::exitedPidFd()).parked.hasExited());
+    // Exited, not yet waited for: as good as gone, though signal 0 still reaches it.
+    auto const zombie = vtpty::testing::Zombie {};
+    CHECK(fakeChild(zombie.pid(), zombie.pidfd()).parked.hasExited());
+    CHECK(vtpty::UnplacedChild { zombie.pid(), zombie.pidfd() }.hasExited());
     // A live process: this one.
     auto const self = vtpty::OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, ::getpid(), 0)) };
     REQUIRE(self.isOpen());

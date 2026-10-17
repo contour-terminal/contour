@@ -26,7 +26,17 @@ act on the unit as a whole:
   systemd before 253 knows neither `PIDFDs` nor `OOMPolicy=` on scopes and refuses a request
   carrying either, so the first such refusal switches the connection to `PIDs=` and no
   `OOMPolicy=`. Its scopes do not react to an out-of-memory kill at all, which is what we want.
+  A child released unplaced because the bus fell silent -- its request timed out, or the breaker
+  held requests off -- is placed **late**: once a request may be sent again, the worker asks for a
+  scope for the running process (by pidfd; by pid only where systemd takes no pidfd). What the
+  child started in the meantime stays in Contour's unit. A refusal is not asked again, and neither
+  is a child released while there is no systemd user instance at all: that is a configuration, not
+  an outage, so its children run unplaced, quietly, with nothing kept to ask again.
 - `NoPlacement` (other platforms, Flatpak, builds without systemd) releases at once.
+
+What became of each child is told through an injected `PlacementReporter`, which Contour logs. Every
+child released unplaced for a fault is logged where a user sees it, with its pid and why -- each one,
+not only the first -- and so is its late placement.
 
 Before parking, the child also sets the `oom_score_adj` its placement supplies -- Contour's own plus 100 -- so in a *global*
 out-of-memory the kernel picks a session's process before Contour.
@@ -49,11 +59,26 @@ out-of-memory the kernel picks a session's process before Contour.
   must not name the unit: sd-bus matches `argN` only up to the first argument that is not a string,
   and `JobRemoved` begins with the job's number, so an `arg2=` match is routed to Contour by the
   broker and then never dispatched -- every request would time out although systemd placed the child.
+- **Nothing thrown on the worker ends it, or Contour.** Each child's placement is caught: the child is
+  let go, the failure is logged, and a deferred child it concerned is not asked about again.
 - **A wedged bus costs one deadline (1 s), not one per tab**: the breaker skips requests for 30 s,
-  then lets one trial request decide.
+  then lets one trial request decide. Late placements run on the worker, a queued child before
+  them, and one of them may be that trial; a tab never waits for more than one deadline per cooldown.
+- **A deferred child is placed late only while its pidfd says it lives.** One that exited is let go
+  -- its pid may name another process by then -- and one without a pidfd is never kept. A pidfd is
+  read as exited once it becomes readable, which a zombie's already is; signal 0 would still reach
+  the zombie. Where systemd takes no pidfd (before 253), the late request names the pid, checked
+  alive just before: a child that exits, is reaped and has its pid reused within that moment would
+  have the unrelated process moved into the scope instead -- harmless, and not guarded further.
 - **A late answer is still an answer.** When a request runs into its deadline, the kernel is asked
   where the child runs (`/proc/<pid>/cgroup`, through an injected reader). A child already in the
-  scope it asked for was placed: no fault, and the breaker stays closed.
+  scope it asked for was placed. The request still waited out its deadline, though, so the breaker
+  counts it as the silence it was, and it is told where a user sees it: answers that go astray for
+  good -- as every one did while the `JobRemoved` match named the unit -- cost one deadline per
+  cooldown, like a wedged bus, and do not go unnoticed. The price is latency: each late trial whose
+  answer goes unheard as well holds requests off again, so deferred children are then placed one per
+  cooldown -- after a restore of ten tabs, the last stays in Contour's unit for some five minutes.
+  Placing them all in one pass would make the next new tab wait one deadline per deferred child.
 
 ## Testing
 

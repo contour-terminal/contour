@@ -11,6 +11,30 @@
 namespace vtpty
 {
 
+/// A child released before it was placed, kept so that it can still be placed while it runs.
+class UnplacedChild
+{
+  public:
+    /// @param pid   The child.
+    /// @param pidfd A pidfd for @p pid, or an empty OwnedFd where there is none.
+    UnplacedChild(int pid, OwnedFd pidfd) noexcept;
+
+    /// @return The child's process id.
+    [[nodiscard]] int pid() const noexcept { return _pid; }
+
+    /// @return A pidfd for the child, or -1 when there is none -- and with it no telling whether the
+    ///         pid still names this child once it may have exited.
+    [[nodiscard]] int pidfd() const noexcept { return _pidfd.get(); }
+
+    /// @return Whether the child has exited, so that its pid may name another process by now. False
+    ///         where there is no pidfd to ask.
+    [[nodiscard]] bool hasExited() const noexcept;
+
+  private:
+    int _pid;
+    OwnedFd _pidfd;
+};
+
 /// A child forked by Process and parked before exec(), waiting on its gate.
 ///
 /// Destroying it releases the child -- on every path, an exception or shutdown included -- so no
@@ -42,6 +66,10 @@ class ParkedChild
     /// Lets the child go on to exec(). Idempotent, and never raises SIGPIPE, even when the child has
     /// already died.
     void release() noexcept;
+
+    /// Lets the child go on to exec() unplaced, and hands over what placing it later takes.
+    /// @return The child, with its pidfd.
+    [[nodiscard]] UnplacedChild releaseUnplaced() noexcept;
 
   private:
     int _pid;

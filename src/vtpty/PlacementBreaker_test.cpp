@@ -83,3 +83,36 @@ TEST_CASE("PlacementBreaker.aSuccessfulTrialResumes", "[placement][breaker]")
     breaker.record(Outcome {}, Start + Cooldown);
     CHECK(breaker.shouldAttempt(Start + Cooldown + 1ms));
 }
+
+TEST_CASE("PlacementBreaker.saysWhatHoldsRequestsOff", "[placement][breaker]")
+{
+    for (auto const& row: outcomeRows)
+    {
+        INFO("outcome " << row.name);
+        auto breaker = PlacementBreaker { Cooldown };
+        breaker.record(row.outcome, Start);
+        auto const heldOffBy = breaker.heldOffBy(Start + 1ms);
+        CHECK(heldOffBy.has_value() == !row.attemptsBeforeCooldown);
+        if (heldOffBy)
+            CHECK(*heldOffBy == row.outcome.error());
+        CHECK_FALSE(breaker.heldOffBy(Start + Cooldown).has_value());
+    }
+}
+
+TEST_CASE("PlacementBreaker.aSilenceAfterAnotherIsToldAsTheLater", "[placement][breaker]")
+{
+    auto breaker = PlacementBreaker { Cooldown };
+    breaker.record(std::unexpected(ScopeError::TimedOut), Start);
+    breaker.record(std::unexpected(ScopeError::Disconnected), Start + Cooldown);
+    CHECK(breaker.heldOffBy(Start + Cooldown + 1ms) == ScopeError::Disconnected);
+}
+
+TEST_CASE("PlacementBreaker.cooldownLeft", "[placement][breaker]")
+{
+    auto breaker = PlacementBreaker { Cooldown };
+    CHECK(breaker.cooldownLeft(Start) == core::platform::SteadyDuration::zero());
+    breaker.record(std::unexpected(ScopeError::TimedOut), Start);
+    CHECK(breaker.cooldownLeft(Start) == Cooldown);
+    CHECK(breaker.cooldownLeft(Start + 10s) == Cooldown - 10s);
+    CHECK(breaker.cooldownLeft(Start + Cooldown + 1s) == core::platform::SteadyDuration::zero());
+}
