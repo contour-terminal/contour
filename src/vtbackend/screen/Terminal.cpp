@@ -6498,8 +6498,9 @@ void Terminal::softReset()
     resetColorPalette();
     resetLocator();
 
-    setStatusDisplay(StatusDisplayType::None);
-    _selectedStatusDisplayType = StatusDisplayType::None;
+    // The status display's type stays, shown and selected, with the host-writable line's text: DECSTR exited
+    // it above, "but not erased" (DEC STD 070 ch. 14 §2.3), and its reset list names no status display type.
+    // RIS is what erases it and returns to the configured type.
 
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
     setMode(DECMode::AutoRepeat, true);         // DECARM

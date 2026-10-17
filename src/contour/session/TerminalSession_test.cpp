@@ -929,10 +929,10 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
             session->terminal().writeToScreen(std::format("line {}\r\n", i));
         REQUIRE(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
 
-        // DECSTR resets the status display (setStatusDisplay(None)), which gives the main page back the
-        // row the profile's status line was using and so pulls exactly one line out of the history. That
-        // is the sequence doing its job -- what matters is that the scrollback SURVIVES.
+        // DECSTR exits the status display "but not erased" (DEC STD 070 ch. 14 §2.3): the profile's status
+        // line stays, and with it the page's height. What matters is that the scrollback SURVIVES.
         CHECK((*session)(contour::actions::SoftReset {}));
+        CHECK(session->terminal().statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
         CHECK(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
         CHECK(
             session->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(-1)).contains("line"));

@@ -4504,9 +4504,10 @@ class Terminal
     /// @param type The type selected.
     void recordStatusDisplaySelection(StatusDisplayType type);
 
-    /// The type of status display the host's last DECSSDT, or the user since, selected; DECSTR and RIS reset
-    /// it. It differs from the type shown, _statusDisplayType, while the host-writable status line waits for
-    /// the frontend's answer or was denied, and while the frontend shows a type it did not select.
+    /// The type of status display the host's last DECSSDT, or the user since, selected; RIS resets it, DECSTR
+    /// keeps it (DEC STD 070 ch. 14 §2.3). It differs from the type shown, _statusDisplayType, while the
+    /// host-writable status line waits for the frontend's answer or was denied, and while the frontend shows
+    /// a type it did not select.
     /// @see isHostWritableStatusLineSelected, selectStatusDisplayByUser
     StatusDisplayType _selectedStatusDisplayType = StatusDisplayType::None;
 

@@ -2041,6 +2041,48 @@ TEST_CASE("Terminal.DECSTR.received_on_the_status_line_resets_the_main_display",
     CHECK_FALSE(cursor.originMode);
 }
 
+TEST_CASE("Terminal.DECSTR.keeps_the_status_display_type", "[terminal][statusline]")
+{
+    // DEC STD 070 ch. 14 §2.3: DECSTR -- "The Status Display will be exited, but not erased" (RIS: "erased
+    // and exited"); ch. 4's DECSTR state table has "Active Display -- Main Display (status display is
+    // exited)" and no status display type. xterm's soft reset only exits (handle_DECSASD), and mintty changes
+    // the type on a full reset only.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+
+    SECTION("the indicator")
+    {
+        mc.writeToScreen("\033[1$~"); // DECSSDT: the indicator
+        REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+        mc.writeToScreen("\033[!p");
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    }
+
+    SECTION("the host-writable status line, exited but not erased")
+    {
+        mc.writeToScreen("\033[2$~"); // DECSSDT: the host-writable status line
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+        mc.writeToScreen("\033[1$}kept");
+        REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+
+        mc.writeToScreen("\033[!p");
+        CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+        CHECK(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains("kept"));
+
+        // Still selected, so DECSASD may enter it again.
+        mc.writeToScreen("\033[1$}");
+        CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+
+        // RIS, by contrast, erases and exits it, and returns to the configured type.
+        mc.writeToScreen("\033c");
+        CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+        CHECK(terminal.statusDisplayType() == terminal.factorySettings().statusDisplayType);
+        CHECK(terminal.statusDisplayType() != vtbackend::StatusDisplayType::HostWritable);
+        CHECK_FALSE(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains("kept"));
+    }
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,
