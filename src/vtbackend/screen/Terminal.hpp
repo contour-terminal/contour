@@ -2319,9 +2319,10 @@ class Terminal
     /// line.
     [[nodiscard]] Screen& restoreCursorPage(Screen& receiving);
 
-    /// Returns the margin for the page where the cursor is currently active.
-    [[nodiscard]] Margin& currentPageMargin() noexcept { return _pageMargins[_cursorPage.value]; }
-    [[nodiscard]] Margin const& currentPageMargin() const noexcept { return _pageMargins[_cursorPage.value]; }
+    /// Returns the margins of the main display, one set that every page and the alternate screen share.
+    [[nodiscard]] Margin& mainDisplayMargin() noexcept { return _mainDisplayMargin; }
+    /// @copydoc mainDisplayMargin()
+    [[nodiscard]] Margin const& mainDisplayMargin() const noexcept { return _mainDisplayMargin; }
 
     /// Creates a default margin for the given page size (full-screen, no restriction).
     [[nodiscard]] static Margin makeDefaultMargin(PageSize pageSize) noexcept
@@ -4425,10 +4426,11 @@ class Terminal
     Modes _modes;
     std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
 
-    /// Per-page screen margins for DEC multi-page support.
-    /// Each page has its own independent margin (DECSTBM/DECSLRM apply per-page).
-    /// This excludes all status lines, title lines, etc.
-    std::array<Margin, MaxPageCount> _pageMargins;
+    /// The margins of the main display (DECSTBM, DECSLRM): one set, which the Screen of every page, the
+    /// alternate screen's included, points at. DEC STD 070 keeps one top, bottom, left and right margin for
+    /// the terminal (ch. 5 §3), and xterm, Windows Terminal, foot, vte and kitty share theirs between the
+    /// main and the alternate screen. The status lines keep their own.
+    Margin _mainDisplayMargin;
     Margin _hostWritableScreenMargin;
     Margin _indicatorScreenMargin;
 

@@ -338,7 +338,7 @@ Terminal::Terminal(Events& eventListener,
     _focused { _settings.focused },
     _terminalId { _settings.terminalId },
     _operatingLevel { _settings.terminalId },
-    _pageMargins {},
+    _mainDisplayMargin { makeDefaultMargin(_settings.pageSize) },
     _hostWritableScreenMargin { .vertical = Margin::Vertical { .from = {}, .to = LineOffset(0) },
                                 .horizontal =
                                     Margin::Horizontal { .from = {},
@@ -368,20 +368,21 @@ Terminal::Terminal(Events& eventListener,
     // VT220, yet still executed DECFRA/DECCRA off the full VT525 table.
     setTerminalId(_settings.terminalId);
 
-    // Initialize all page margins to defaults.
-    _pageMargins.fill(makeDefaultMargin(_settings.pageSize));
-
     // Populate the 16-page array: page 0 (primary) gets scrollback/reflow, pages 1-15 do not.
     _pages.reserve(MaxPageCount);
     _pages.push_back(std::make_unique<Screen>(*this,
-                                              _pageMargins.data(),
+                                              &_mainDisplayMargin,
                                               _settings.pageSize,
                                               _settings.primaryScreen.allowReflowOnResize,
                                               _settings.historyLimits,
                                               "page-1"));
     for (auto const i: std::views::iota(1, MaxPageCount))
-        _pages.push_back(std::make_unique<Screen>(
-            *this, &_pageMargins[i], _settings.pageSize, false, LineCount(0), std::format("page-{}", i + 1)));
+        _pages.push_back(std::make_unique<Screen>(*this,
+                                                  &_mainDisplayMargin,
+                                                  _settings.pageSize,
+                                                  false,
+                                                  LineCount(0),
+                                                  std::format("page-{}", i + 1)));
     _currentScreen = _pages[0].get();
 
     _savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
@@ -2839,8 +2840,8 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
         // that error compounded by roughly a pixel per call.
         setCellPixelSize(pixels.value() / totalPageSize);
 
-    // Reset margins for all pages to defaults on resize.
-    _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
+    // Reset the margins to their defaults on resize.
+    _mainDisplayMargin = makeDefaultMargin(mainDisplayPageSize);
 
     applyPageSizeToCurrentBuffer();
 
@@ -2932,10 +2933,10 @@ void Terminal::verifyState()
     // master fd), so any grid change after the shell exited (DPR settlement, window growth, pane
     // teardown reflows) made the two legitimately diverge and aborted debug builds.
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
-    Require(0 <= *currentPageMargin().horizontal.from
-            && *currentPageMargin().horizontal.to < *mainDisplayPageSize.columns);
-    Require(0 <= *currentPageMargin().vertical.from
-            && *currentPageMargin().vertical.to < *mainDisplayPageSize.lines);
+    Require(0 <= *mainDisplayMargin().horizontal.from
+            && *mainDisplayMargin().horizontal.to < *mainDisplayPageSize.columns);
+    Require(0 <= *mainDisplayMargin().vertical.from
+            && *mainDisplayMargin().vertical.to < *mainDisplayPageSize.lines);
 #endif
 }
 
@@ -6138,7 +6139,7 @@ void Terminal::setMode(DECMode mode, bool enable)
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
             {
-                currentPageMargin().horizontal =
+                mainDisplayMargin().horizontal =
                     Margin::Horizontal { .from = ColumnOffset(0),
                                          .to = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
                 _supportedVTSequences.enableSequence(SCOSC);
@@ -6335,8 +6336,8 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
 
     if (sanitizedTop < sanitizedBottom)
     {
-        currentPageMargin().vertical.from = sanitizedTop;
-        currentPageMargin().vertical.to = sanitizedBottom;
+        mainDisplayMargin().vertical.from = sanitizedTop;
+        mainDisplayMargin().vertical.to = sanitizedBottom;
     }
 }
 
@@ -6348,8 +6349,8 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
     auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
     if (sanitizedLeft < sanitizedRight)
     {
-        currentPageMargin().horizontal.from = sanitizedLeft;
-        currentPageMargin().horizontal.to = sanitizedRight;
+        mainDisplayMargin().horizontal.from = sanitizedLeft;
+        mainDisplayMargin().horizontal.to = sanitizedRight;
     }
 }
 
@@ -6372,9 +6373,8 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
     if (enable && !isAlternateScreenBufferInUse())
     {
         // xterm's ToAlternate: switch in, carrying the cursor across (it is terminal-level, not
-        // per-buffer, so it does not move), then optionally erase the alternate page. The alternate
-        // page inherits the primary's margins, as xterm's alternate screen traditionally does.
-        _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
+        // per-buffer, so it does not move), then optionally erase the alternate page. The margins stay
+        // as they are: the alternate screen shares the main display's.
         auto const carried = pageAt(_cursorPage).cursor();
         _pagesBeforeAlternateScreen = { .cursor = _cursorPage, .displayed = _displayedPage };
         setScreen(ScreenType::Alternate);
@@ -6688,8 +6688,8 @@ void Terminal::hardReset()
 
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
-    // Reset margins for all pages to defaults.
-    _pageMargins.fill(makeDefaultMargin(mainDisplayPageSize));
+    // Reset the margins to their defaults.
+    _mainDisplayMargin = makeDefaultMargin(mainDisplayPageSize);
     primaryScreen().verifyState();
 
     setStatusDisplay(_factorySettings.statusDisplayType);

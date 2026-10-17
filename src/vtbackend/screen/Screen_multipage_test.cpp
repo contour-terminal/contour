@@ -1160,55 +1160,82 @@ TEST_CASE("MultiPage.page_content_isolation", "[screen]")
     CHECK(terminal.pageAt(PageIndex(2)).renderMainPageText() == "Page3\n     \n");
 }
 
-TEST_CASE("MultiPage.PerPageMargins", "[screen]")
+TEST_CASE("MultiPage.theMarginsAreOneSetForEveryPage", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    // DEC STD 070 keeps one top, bottom, left and right margin for the terminal (ch. 5 §3,
+    // char_cell_extern.h), beside the active position that carries the page: DECSTBM on one page is the
+    // region of every page.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(3) } };
     auto& terminal = mock.terminal;
 
-    // Set custom top/bottom margins on page 1.
-    mock.writeToScreen("\033[2;4r"); // DECSTBM(2, 4)
-    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+    SECTION("origin mode on another page")
+    {
+        mock.writeToScreen("\033[3;5r");       // DECSTBM 3;5 on page 1
+        mock.writeToScreen("\033[2 P");        // PPA 2
+        mock.writeToScreen("\033[?6h\033[HX"); // DECOM set, CUP 1;1
+        CHECK(terminal.cursorPageIndex() == PageIndex(1));
+        CHECK(terminal.pageAt(PageIndex(1)).grid().lineText(LineOffset(2)) == "X  ");
+    }
 
-    // Switch to page 2 — it should have default (full-screen) margins.
-    mock.writeToScreen("\033[2 P"); // PPA 2
-    auto& page2 = terminal.pageAt(PageIndex(1));
-    CHECK(page2.margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(4) });
-    CHECK(page2.margin().horizontal == Margin::Horizontal { ColumnOffset(0), ColumnOffset(9) });
-
-    // Set different margins on page 2.
-    mock.writeToScreen("\033[3;5r"); // DECSTBM(3, 5)
-    CHECK(page2.margin().vertical == Margin::Vertical { LineOffset(2), LineOffset(4) });
-
-    // Switch back to page 1 — its custom margins should still be intact.
-    mock.writeToScreen("\033[1 P"); // PPA 1
-    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
-
-    // Page 2 margins should still be independently preserved.
-    CHECK(page2.margin().vertical == Margin::Vertical { LineOffset(2), LineOffset(4) });
+    SECTION("scrolling on another page")
+    {
+        mock.writeToScreen("1\r\n2\r\n3\r\n4\r\n5\r\n6"); // page 1
+        mock.writeToScreen("\033[2 P\033[2;4r");          // PPA 2, DECSTBM 2;4 there
+        mock.writeToScreen("\033[1 P\033[4H\n");          // PPA 1, CUP 4;1, LF at the bottom margin
+        CHECK(terminal.pageAt(PageIndex(0)).renderMainPageText() == "1  \n3  \n4  \n   \n5  \n6  \n");
+    }
 }
 
-TEST_CASE("MultiPage.AltScreenMarginCopy", "[screen]")
+TEST_CASE("MultiPage.theAlternateScreenSharesTheMainDisplaysMargins", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    // DEC STD 070 defines no alternate screen; xterm, Windows Terminal, foot, vte and kitty all keep one set
+    // of margins for both screens and leave it alone on the switch, either way, whichever mode switches.
+    auto const mode = GENERATE(47, 1047, 1049);
+    INFO(std::format("mode {}", mode));
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(3) } };
     auto& terminal = mock.terminal;
+    auto const writeLines = [&] {
+        for (auto const line: std::views::iota(1, 11))
+            mock.writeToScreen(std::format("\033[{};1H{}", line, line)); // CUP, so no LF scrolls
+    };
+    auto const scrolledInLines5To8 = "1  \n2  \n3  \n4  \n6  \n7  \n8  \n   \n9  \n10 \n";
 
-    // Set custom margins on primary screen (page 1).
-    mock.writeToScreen("\033[2;4r"); // DECSTBM(2, 4)
-    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+    SECTION("set on the alternate screen, the main screen scrolls in them")
+    {
+        writeLines();
+        mock.writeToScreen(std::format("\033[?{}h\033[5;8r\033[?{}l", mode, mode)); // DECSTBM 5;8 there
+        mock.writeToScreen("\033[8H\n"); // CUP 8;1, LF at the bottom margin
+        CHECK(terminal.isPrimaryScreen());
+        CHECK(terminal.primaryScreen().renderMainPageText() == scrolledInLines5To8);
+    }
 
-    // Enter alternate screen (DECSET 1049) — alt screen should inherit primary margins.
-    mock.writeToScreen("\033[?1049h");
-    CHECK(terminal.isAlternateScreen());
-    CHECK(terminal.alternateScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+    SECTION("set on the main screen, the alternate screen scrolls in them")
+    {
+        mock.writeToScreen(std::format("\033[5;8r\033[?{}h", mode)); // DECSTBM 5;8, then the alternate screen
+        writeLines();
+        mock.writeToScreen("\033[8H\n"); // CUP 8;1, LF at the bottom margin
+        CHECK(terminal.isAlternateScreen());
+        CHECK(terminal.alternateScreen().renderMainPageText() == scrolledInLines5To8);
+    }
+}
 
-    // Modify margins on the alternate screen.
-    mock.writeToScreen("\033[1;5r"); // DECSTBM(1, 5) — reset to full screen
-    CHECK(terminal.alternateScreen().margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(4) });
-
-    // Leave alternate screen (DECSET 1049 off) — primary margins should be unchanged.
-    mock.writeToScreen("\033[?1049l");
-    CHECK(terminal.isPrimaryScreen());
-    CHECK(terminal.primaryScreen().margin().vertical == Margin::Vertical { LineOffset(1), LineOffset(3) });
+TEST_CASE("MultiPage.RIS_and_DECSTR_resetTheOneSetOfMargins", "[screen]")
+{
+    // DEC STD 070 DECSTR: "Top Margin 1, Bottom Margin number of lines on page", one set for the terminal.
+    auto const reset = GENERATE(std::string_view { "\033c" }, std::string_view { "\033[!p" }); // RIS, DECSTR
+    INFO(e(reset));
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[?69h\033[2;4r\033[3;6s"); // DECLRMM, DECSTBM 2;4, DECSLRM 3;6 on page 1
+    mock.writeToScreen("\033[2 P");                    // PPA 2
+    mock.writeToScreen(reset);
+    for (auto const page: { PageIndex(0), PageIndex(1) })
+    {
+        INFO(std::format("page {}", page.value + 1));
+        CHECK(terminal.pageAt(page).margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(5) });
+        CHECK(terminal.pageAt(page).margin().horizontal
+              == Margin::Horizontal { ColumnOffset(0), ColumnOffset(9) });
+    }
 }
 
 TEST_CASE("MultiPage.ResizeResetsAllPageMargins", "[screen]")
