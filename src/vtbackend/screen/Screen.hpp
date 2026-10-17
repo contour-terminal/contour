@@ -1620,6 +1620,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     Grid _grid;
 
     Cursor _cursor {};
+    /// What DECSC saved here, but the page (Terminal::_savedCursorPage): DECRC reads only the buffer of the
+    /// page its screen buffer's last DECSC was received on, and every other page keeps its own, unread until
+    /// a DECSC there, because a resize reflows a page's saved cursor with its grid. A status line's is its
+    /// own.
     Cursor _savedCursor {};
 
     /// What a row the cursor reaches is handed where it carries nothing yet: the OSC 3008 context and the

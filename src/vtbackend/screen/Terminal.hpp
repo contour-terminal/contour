@@ -2304,9 +2304,15 @@ class Terminal
     /// which keeps a Cursor Save Buffer of its own (DEC STD 070 ch. 14 §2.2).
     void saveCursorPage();
 
-    /// Restores the previously saved cursor page index (called by DECRC). Not while DECSASD selects the
-    /// status line, which keeps a Cursor Save Buffer of its own (DEC STD 070 ch. 14 §2.2).
-    void restoreCursorPage();
+    /// DECRC's page half: returns the cursor to the page DECSC saved. DEC STD 070 keeps one save buffer, the
+    /// page in its position; Contour keeps it on the page DECSC saved (its Screen::_savedCursor, which a
+    /// resize of that page carries along), one per screen buffer as xterm and Windows Terminal do, so the
+    /// rest of the buffer is that page's. Not while DECSASD selects the status line, which keeps a Cursor
+    /// Save Buffer of its own (DEC STD 070 ch. 14 §2.2).
+    /// @param receiving The display DECRC was received on.
+    /// @return The display whose save buffer DECRC restores: the saved page, or @p receiving on the status
+    /// line.
+    [[nodiscard]] Screen& restoreCursorPage(Screen& receiving);
 
     /// Returns the margin for the page where the cursor is currently active.
     [[nodiscard]] Margin& currentPageMargin() noexcept { return _pageMargins[_cursorPage.value]; }
