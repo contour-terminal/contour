@@ -279,12 +279,13 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeStatusLineCommandExecutor()),
+    _processPlacement(vtpty::makeDefaultProcessPlacement()),
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
-        sessionFactory
-            ? std::move(sessionFactory)
-            : std::make_unique<session::AppSessionFactory>(*this, vtpty::makeDefaultProcessPlacement()))),
+        sessionFactory ? std::move(sessionFactory)
+                       : std::make_unique<session::AppSessionFactory>(*this, _processPlacement))),
     _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
-    _externalLauncher(externalLauncher ? std::move(externalLauncher) : platform::makeExternalLauncher()),
+    _externalLauncher(externalLauncher ? std::move(externalLauncher)
+                                       : platform::makeExternalLauncher(_processPlacement)),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),

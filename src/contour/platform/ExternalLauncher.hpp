@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/ProcessPlacement.hpp>
+
 #include <QtCore/QFileInfo>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QString>
@@ -173,7 +175,10 @@ class ExternalLauncher
 /// Note that this does NOT branch on SandboxState the way selectNotificationBackend() does. The
 /// reason is worth reading before "fixing" the asymmetry: @see PortalExternalLauncher.
 ///
+/// @param placement Places every program the launcher starts before it runs: the one the sessions
+///                  use, so that nothing a session starts lives in Contour's own systemd unit.
 /// @return The launcher; never null.
-[[nodiscard]] std::unique_ptr<ExternalLauncher> makeExternalLauncher();
+[[nodiscard]] std::unique_ptr<ExternalLauncher> makeExternalLauncher(
+    std::shared_ptr<vtpty::ProcessPlacement> placement);
 
 } // namespace contour::platform

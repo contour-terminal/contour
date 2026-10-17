@@ -5,11 +5,14 @@
 // every cause has a sentence, and a new enumerator must not silently fall through to "unknown".
 // @see issue #2075.
 //
-// Also the Qt launcher's detached start with a file for input, which needs a real child process to prove
-// the bytes arrive and that the child outlives the launcher.
+// Also the Qt launcher's detached starts, which need a real child process to prove the bytes arrive, that
+// the child outlives the launcher, and that it was placed before it ran.
 
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/QtExternalLauncher.hpp>
+
+#include <vtpty/ProcessPlacement.hpp>
+#include <vtpty/test/ProcessTesting.hpp>
 
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
@@ -20,7 +23,10 @@
 
 #include <filesystem>
 #include <format>
+#include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <QtTest/QTest>
 
@@ -77,6 +83,12 @@ namespace
     return std::format(R"(sh -c 'sleep {}; cat > "$0"' '{}')", delay, target.toStdString());
 #endif
 }
+
+/// @return A launcher that places nothing, for the tests that are not about placement.
+[[nodiscard]] contour::platform::QtExternalLauncher unplacedLauncher()
+{
+    return contour::platform::QtExternalLauncher { std::make_shared<vtpty::NoPlacement>() };
+}
 } // namespace
 
 TEST_CASE("QtExternalLauncher: runDetachedWithInput refuses a program that is not there, at once",
@@ -86,7 +98,7 @@ TEST_CASE("QtExternalLauncher: runDetachedWithInput refuses a program that is no
     REQUIRE(dir.isValid());
     auto const input = writeInput(dir, QStringLiteral("input.txt"), QByteArrayLiteral("x"));
 
-    auto launcher = contour::platform::QtExternalLauncher {};
+    auto launcher = unplacedLauncher();
     auto timer = QElapsedTimer {};
     timer.start();
     auto const result = launcher.runDetachedWithInput("contour-test-no-such-program-4711 --flag", input);
@@ -103,7 +115,7 @@ TEST_CASE("QtExternalLauncher: runDetachedWithInput feeds the file to the progra
     auto const input = writeInput(dir, QStringLiteral("input.txt"), QByteArrayLiteral("built\n"));
     auto const target = dir.filePath(QStringLiteral("piped.txt"));
 
-    auto launcher = contour::platform::QtExternalLauncher {};
+    auto launcher = unplacedLauncher();
     REQUIRE(launcher.runDetachedWithInput(copyingInputInto(target, 0), input).has_value());
 
     CHECK(eventuallyHolds(target, QByteArrayLiteral("built\n")));
@@ -120,9 +132,73 @@ TEST_CASE("QtExternalLauncher: a program started with input outlives the launche
     auto const target = dir.filePath(QStringLiteral("piped.txt"));
 
     {
-        auto launcher = contour::platform::QtExternalLauncher {};
+        auto launcher = unplacedLauncher();
         REQUIRE(launcher.runDetachedWithInput(copyingInputInto(target, 1), input).has_value());
     }
 
     CHECK(eventuallyHolds(target, QByteArrayLiteral("kept\n")));
 }
+
+#ifndef _WIN32
+TEST_CASE("QtExternalLauncher: a program it starts is placed before it runs", "[contour][launcher]")
+{
+    // A link's opener, a second Contour, a pager fed a command's output: started into Contour's own systemd
+    // unit, an out-of-memory kill inside any of them would stop Contour with it. Each goes through the
+    // placement the sessions use instead.
+    QTemporaryDir const dir;
+    REQUIRE(dir.isValid());
+    auto const target = dir.filePath(QStringLiteral("ran.txt"));
+    auto const placement = std::make_shared<vtpty::testing::ReleasingPlacement>();
+    auto launcher = contour::platform::QtExternalLauncher { placement };
+
+    REQUIRE(launcher
+                .runDetached(QStringLiteral("sh"),
+                             { QStringLiteral("-c"), QStringLiteral(R"(echo ran > "$0")"), target })
+                .has_value());
+    CHECK(placement->pids().size() == 1);
+    CHECK(eventuallyHolds(target, QByteArrayLiteral("ran\n")));
+}
+
+TEST_CASE("QtExternalLauncher: a program started with input is placed before it runs", "[contour][launcher]")
+{
+    QTemporaryDir const dir;
+    REQUIRE(dir.isValid());
+    auto const input = writeInput(dir, QStringLiteral("input.txt"), QByteArrayLiteral("placed\n"));
+    auto const target = dir.filePath(QStringLiteral("piped.txt"));
+    auto const placement = std::make_shared<vtpty::testing::ReleasingPlacement>();
+    auto launcher = contour::platform::QtExternalLauncher { placement };
+
+    REQUIRE(launcher.runDetachedWithInput(copyingInputInto(target, 0), input).has_value());
+    CHECK(placement->pids().size() == 1);
+    CHECK(eventuallyHolds(target, QByteArrayLiteral("placed\n")));
+}
+
+TEST_CASE("QtExternalLauncher: a program that is not there is not handed to the placement",
+          "[contour][launcher]")
+{
+    auto const placement = std::make_shared<vtpty::testing::ReleasingPlacement>();
+    auto launcher = contour::platform::QtExternalLauncher { placement };
+    auto const started = launcher.runDetached(QStringLiteral("contour-test-no-such-program-4711"), {});
+    REQUIRE_FALSE(started.has_value());
+    CHECK(started.error() == contour::platform::SpawnError::NotFound);
+    CHECK(placement->pids().empty());
+}
+
+TEST_CASE("makeExternalLauncher: what the launcher it makes starts is placed", "[contour][launcher]")
+{
+    // On Linux the portal launcher hands every start -- its xdg-open fallback included -- to its process
+    // half; the placement must reach that half.
+    QTemporaryDir const dir;
+    REQUIRE(dir.isValid());
+    auto const target = dir.filePath(QStringLiteral("ran.txt"));
+    auto const placement = std::make_shared<vtpty::testing::ReleasingPlacement>();
+    auto const launcher = contour::platform::makeExternalLauncher(placement);
+
+    REQUIRE(launcher
+                ->runDetached(QStringLiteral("sh"),
+                              { QStringLiteral("-c"), QStringLiteral(R"(echo ran > "$0")"), target })
+                .has_value());
+    CHECK(placement->pids().size() == 1);
+    CHECK(eventuallyHolds(target, QByteArrayLiteral("ran\n")));
+}
+#endif

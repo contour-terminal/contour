@@ -162,9 +162,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       an in-memory factory (e.g. MockPty-backed) to run session-creation
     ///                       paths headlessly.
     /// @param externalLauncher Opens URLs / spawns child processes for a session. Null (the default)
-    ///                       wires whatever makeExternalLauncher() offers; tests pass a recording launcher
-    ///                       to assert open-document / follow-hyperlink / spawn routing without
-    ///                       actually launching anything.
+    ///                       wires whatever makeExternalLauncher() offers, placing what it starts as the
+    ///                       sessions are placed; tests pass a recording launcher to assert
+    ///                       open-document / follow-hyperlink / spawn routing without actually
+    ///                       launching anything.
     /// @param layoutStore    Persistence for named layouts (SaveLayout). Null (the default) wires the
     ///                       production FileLayoutStore (an atomically-replaced `layouts.yml`); tests
     ///                       pass an in-memory store to drive SaveLayout without touching the disk.
@@ -442,6 +443,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     core::async::StopSource _commandShutdown;
     vtpty::SystemCommandCapture _commandCapture;
     core::async::ThreadPoolExecutor _commandExecutor;
+    // Moves every process a session starts into a resource domain of its own: its shell, through the
+    // default session factory, and the programs it starts detached, through the default launcher.
+    // Declared before both.
+    std::shared_ptr<vtpty::ProcessPlacement> _processPlacement;
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.

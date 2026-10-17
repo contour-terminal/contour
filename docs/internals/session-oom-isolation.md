@@ -41,6 +41,14 @@ not only the first -- and so is its late placement.
 Before parking, the child also sets the `oom_score_adj` its placement supplies -- Contour's own plus 100 -- so in a *global*
 out-of-memory the kernel picks a session's process before Contour.
 
+The programs a session starts outside its terminal go through the **same placement**: the opener of a
+local file a link names (`xdg-open`), the viewer `OpenCommandOutput` hands a command's output to, the
+second Contour that follows a link to an executable file or opens one in `$EDITOR`, and the one
+`spawn_new_process` starts. `ExternalLauncher` starts each through `vtpty::startDetached()`, which
+double-forks -- the program is not Contour's child, and outlives it -- and parks the program's
+process on a gate exactly as `Process::start()` parks a shell. `ContourGuiApp` hands the sessions'
+factory and the launcher one placement. Windows starts them through `QProcess`, having no placement.
+
 ## Invariants worth not breaking
 
 - **Every path releases the child.** Release is `ParkedChild`'s destructor: an exception, a
