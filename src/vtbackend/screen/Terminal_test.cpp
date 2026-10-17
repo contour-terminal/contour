@@ -2024,6 +2024,23 @@ TEST_CASE("Terminal.DECSASD.margins_received_on_the_status_line_are_ignored", "[
     CHECK(e(mc.replyData()) == e(reply));
 }
 
+TEST_CASE("Terminal.DECSTR.received_on_the_status_line_resets_the_main_display", "[terminal]")
+{
+    // DEC STD 070 ch. 4 DECSTR, soft_terminal_reset(): "active_display = MAIN_DISPLAY;" comes before the
+    // margins, the rendition and the cursor save buffer are reset, so they are the main display's. xterm's
+    // ReallyReset leaves the status line first as well.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033[1m\033[?6h");         // SGR bold, DECOM, on the main display
+    mc.writeToScreen("\033[2$~\033[1$}\033[4m"); // the status line, underlined
+    mc.writeToScreen("\033[!p");                 // DECSTR, received on the status line
+
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    auto const& cursor = terminal.primaryScreen().cursor();
+    CHECK_FALSE(cursor.graphicsRendition.flags.contains(vtbackend::CellFlag::Bold));
+    CHECK_FALSE(cursor.originMode);
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,

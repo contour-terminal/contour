@@ -6429,14 +6429,22 @@ void Terminal::softReset()
 {
     // https://vt100.net/docs/vt510-rm/DECSTR.html
     // NB: the OSC 3008 context ancestry is deliberately left alone here; hardReset() below says why.
+
+    // The status display is exited first (DEC STD 070 ch. 14 §2.3: "The Status Display will be exited, but
+    // not erased"), so what follows resets the main display's state, not the status line's: ch. 4's
+    // soft_terminal_reset() sets "active_display = MAIN_DISPLAY;" before the margins, the rendition and the
+    // cursor save buffer, as xterm's ReallyReset leaves its status line before it resets anything. DEC's
+    // algorithm lists origin mode and the character sets before that switch; they are the main display's
+    // here, as in xterm's ReallyReset. Left as DECSASD 0 leaves it, a denial's owed title included.
+    exitStatusLine();
+
     setMode(DECMode::BatchedRendering, false);
     setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
     _currentScreen->resetSavedCursorState();        // DECSC (Save cursor state)
-    // And the main display's, the page in it too, where DECRC reads the buffer on the page DECSC saved: DEC
-    // STD 070 DECSC, "Execution of Soft Terminal Reset (DECSTR) also causes the Save Buffer to be set to the
-    // default values", position.page = 1 among them. Received on the status line as well, as DEC's
-    // soft_terminal_reset() returns to the main display before it resets the buffer (ch. 4).
+    // And the page in it, where DECRC reads the buffer on the page DECSC saved: DEC STD 070 DECSC, "Execution
+    // of Soft Terminal Reset (DECSTR) also causes the Save Buffer to be set to the default values",
+    // position.page = 1 among them.
     auto const slot = savedCursorPageSlot();
     _savedCursorPage[slot] = NoSavedCursorPages[slot];
     pageAt(_savedCursorPage[slot]).resetSavedCursorState();
@@ -6483,7 +6491,6 @@ void Terminal::softReset()
     resetColorPalette();
     resetLocator();
 
-    setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
     _selectedStatusDisplayType = StatusDisplayType::None;
 
@@ -6508,7 +6515,6 @@ void Terminal::softReset()
 
     // TODO: DECNRCM (National replacement character set)
     // TODO: GL, GR (G0, G1, G2, G3)
-    // TODO: DECSASD (Select active status display)
     // TODO: DECKPM (Keyboard position mode)
     // TODO: DECPCTERM (PCTerm mode)
 }

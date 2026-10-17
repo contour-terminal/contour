@@ -2551,12 +2551,13 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
     }
 
     // Every way out of the status line hands the text over as DECSASD 0 does: DECSSDT selecting another type
-    // exits it (DEC STD 070 ch. 14 §2.3).
+    // exits it (DEC STD 070 ch. 14 §2.3), and so does DECSTR ("The Status Display will be exited, but not
+    // erased").
     SECTION("left by a control other than DECSASD 0")
     {
         using Exit = std::pair<std::string_view, std::string_view>;
-        auto const [name, exit] =
-            GENERATE(Exit { "DECSSDT 0", "\033[0$~" }, Exit { "DECSSDT 1", "\033[1$~" });
+        auto const [name, exit] = GENERATE(
+            Exit { "DECSSDT 0", "\033[0$~" }, Exit { "DECSSDT 1", "\033[1$~" }, Exit { "DECSTR", "\033[!p" });
         INFO("exit: " << name);
         setSyncToWindowTitle(testApp.app(), true);
         auto session = makeDisplaylessSession(testApp.app());
