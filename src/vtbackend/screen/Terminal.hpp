@@ -981,7 +981,8 @@ class Terminal
     /// the page on display. For Pe 0 it is `CSI 0 & w` alone (DEC STD 070 ch. 13: "If Pe is 0 or omitted,
     /// all other parameters shall not be sent"), and so it is while the pointer, or in device pixels its
     /// pixel, is off the grid, as xterm answers a position outside its window; DEC STD 070's DECRQLP would
-    /// answer that with event 1 and the coordinates omitted.
+    /// answer that with event 1 and the coordinates omitted. In one shot mode (DECELR Ps 2) the report, any
+    /// of these, disables the locator.
     /// @param event Pe, the event code: 0 for an unavailable locator, 1 for a request, 2 to 7 for a button.
     void sendLocatorReport(int event);
 

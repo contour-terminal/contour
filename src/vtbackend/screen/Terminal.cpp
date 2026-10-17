@@ -7376,27 +7376,33 @@ void Terminal::sendLocatorReport(int event)
                || y.value >= unbox<int>(extent.height);
     }();
     if (event == 0 || offTheGrid)
-    {
         reply("\033[0&w");
-        flushInput();
-        return;
+    else
+    {
+        // Pr and Pc, from 1, in the unit DECELR selected: device pixels as xterm's LocatorCoords gives them,
+        // or cells.
+        auto const [row, column] = [&]() -> std::pair<int, int> {
+            switch (_locatorState.coordUnit)
+            {
+                case LocatorCoordUnit::CharacterCells:
+                    return { *_currentMousePosition.line + 1, *_currentMousePosition.column + 1 };
+                case LocatorCoordUnit::DevicePixels:
+                    return { _currentMousePixelPosition.y.value + 1, _currentMousePixelPosition.x.value + 1 };
+            }
+            core::unreachable();
+        }();
+        // Pp: the page seen through the window, always sent.
+        reply("\033[{};{};{};{};{}&w", event, _locatorButtonsHeld, row, column, displayedPageNumber());
     }
-
-    // Pr and Pc, from 1, in the unit DECELR selected: device pixels as xterm's LocatorCoords gives them, or
-    // cells.
-    auto const [row, column] = [&]() -> std::pair<int, int> {
-        switch (_locatorState.coordUnit)
-        {
-            case LocatorCoordUnit::CharacterCells:
-                return { *_currentMousePosition.line + 1, *_currentMousePosition.column + 1 };
-            case LocatorCoordUnit::DevicePixels:
-                return { _currentMousePixelPosition.y.value + 1, _currentMousePixelPosition.x.value + 1 };
-        }
-        core::unreachable();
-    }();
-    // Pp: the page seen through the window, always sent.
-    reply("\033[{};{};{};{};{}&w", event, _locatorButtonsHeld, row, column, displayedPageNumber());
     flushInput();
+
+    // DEC STD 070 ch. 13 DECLRP: in one shot mode "a single locator report (DECLRP) shall reset locator
+    // reporting mode to disabled" -- a request's answer as a button's, and as xterm the unavailable one too.
+    if (_locatorState.oneShot)
+    {
+        _locatorState.enabled = false;
+        _locatorState.oneShot = false;
+    }
 }
 
 void Terminal::requestLocatorPosition()
@@ -7447,13 +7453,6 @@ Handled Terminal::handleLocatorMouseEvent(LocatorEvent event, MouseButton button
         return Handled { false };
 
     sendLocatorReport(event == LocatorEvent::ButtonDown ? code->down : code->up);
-
-    if (_locatorState.oneShot)
-    {
-        _locatorState.enabled = false;
-        _locatorState.oneShot = false;
-    }
-
     return Handled { true };
 }
 
