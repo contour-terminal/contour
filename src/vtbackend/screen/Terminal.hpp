@@ -973,9 +973,11 @@ class Terminal
     };
 
     /// Sends a DEC locator report (DECLRP) of the pointer to the PTY: `CSI Pe ; Pb ; Pr ; Pc ; Pp & w`, Pb
-    /// the buttons held down and Pp the page on display; or `CSI 0 & w`, and no other parameter, while the
-    /// pointer is off the grid (DEC STD 070 ch. 13: "If Pe is 0 or omitted, all other parameters shall not be
-    /// sent").
+    /// the buttons held down, Pr and Pc in the unit DECELR selected (cells or device pixels, from 1) and Pp
+    /// the page on display. For Pe 0 it is `CSI 0 & w` alone (DEC STD 070 ch. 13: "If Pe is 0 or omitted,
+    /// all other parameters shall not be sent"), and so it is while the pointer, or in device pixels its
+    /// pixel, is off the grid, as xterm answers a position outside its window; DEC STD 070's DECRQLP would
+    /// answer that with event 1 and the coordinates omitted.
     /// @param event Pe, the event code: 0 for an unavailable locator, 1 for a request, 2 to 7 for a button.
     void sendLocatorReport(int event);
 
@@ -3951,6 +3953,10 @@ class Terminal
     // {{{ mouse related state (helpers for detecting double/triple clicks)
     ClickCounter _clickCounter; ///< Multi-click sequences (drag, word, extended word, line).
     vtbackend::CellLocation _currentMousePosition {}; // current mouse position
+    /// Where the pointer is in device pixels, from the grid's top left, as of the last move or press: what a
+    /// DEC locator report gives while DECELR selects device pixels. xterm's pixel origin is its VT window,
+    /// internal border included; the grid's is the sounder one, as the cells count from it too.
+    PixelCoordinate _currentMousePixelPosition {};
     /// Whether _currentMousePosition is where the pointer stands, or only where it last was on the grid. Off
     /// until a pointer event names a cell: until then the position is only its default, not the pointer's.
     PointerPlacement _pointerPlacement = PointerPlacement::OffGrid;

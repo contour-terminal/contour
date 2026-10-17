@@ -1562,6 +1562,8 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                                       bool uiHandledHint,
                                       MousePressClaimant const& claimant)
 {
+    _currentMousePixelPosition = pixelPosition;
+
     // A press is not necessarily preceded by a MouseMove landing exactly here: the windowing system
     // usually delivers one, which is why a slow, deliberate drag never showed this, but a fast click
     // can arrive as a bare press while _currentMousePosition is still wherever the pointer last idled
@@ -1887,6 +1889,8 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     // avoid applying event for sctatus line or indicator status line
     if (!(isPrimaryScreen() || isAlternateScreen()))
         return;
+
+    _currentMousePixelPosition = pixelPosition;
 
     // Back from off the grid is a move too, even onto the cell it left from.
     if (newPosition != _currentMousePosition || _pointerPlacement == PointerPlacement::OffGrid)
@@ -7332,15 +7336,41 @@ void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
 
 void Terminal::sendLocatorReport(int event)
 {
-    if (event == 0 || _pointerPlacement == PointerPlacement::OffGrid)
+    // Off the grid the locator is unavailable, as xterm answers a position outside its window (LocatorCoords'
+    // out-of-range flag). In device pixels that also takes a pixel outside the grid -- over the window's
+    // padding, where the cell is still the one at the edge -- and every pixel while the cell's size is not
+    // known.
+    auto const offTheGrid = [&] {
+        if (_pointerPlacement == PointerPlacement::OffGrid)
+            return true;
+        if (_locatorState.coordUnit != LocatorCoordUnit::DevicePixels)
+            return false;
+        auto const extent = cellPixelSize() * pageSize();
+        auto const [x, y] = _currentMousePixelPosition;
+        return x.value < 0 || y.value < 0 || x.value >= unbox<int>(extent.width)
+               || y.value >= unbox<int>(extent.height);
+    }();
+    if (event == 0 || offTheGrid)
+    {
         reply("\033[0&w");
-    else
-        reply("\033[{};{};{};{};{}&w",
-              event,
-              _locatorButtonsHeld,
-              *_currentMousePosition.line + 1,
-              *_currentMousePosition.column + 1,
-              displayedPageNumber()); // Pp: the page seen through the window, always sent
+        flushInput();
+        return;
+    }
+
+    // Pr and Pc, from 1, in the unit DECELR selected: device pixels as xterm's LocatorCoords gives them, or
+    // cells.
+    auto const [row, column] = [&]() -> std::pair<int, int> {
+        switch (_locatorState.coordUnit)
+        {
+            case LocatorCoordUnit::CharacterCells:
+                return { *_currentMousePosition.line + 1, *_currentMousePosition.column + 1 };
+            case LocatorCoordUnit::DevicePixels:
+                return { _currentMousePixelPosition.y.value + 1, _currentMousePixelPosition.x.value + 1 };
+        }
+        core::unreachable();
+    }();
+    // Pp: the page seen through the window, always sent.
+    reply("\033[{};{};{};{};{}&w", event, _locatorButtonsHeld, row, column, displayedPageNumber());
     flushInput();
 }
 
