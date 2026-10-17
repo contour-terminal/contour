@@ -6349,7 +6349,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         // per-buffer, so it does not move), then optionally erase the alternate page. The alternate
         // page inherits the primary's margins, as xterm's alternate screen traditionally does.
         _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
-        auto const carried = _currentScreen->cursor();
+        auto const carried = pageAt(_cursorPage).cursor();
         _pagesBeforeAlternateScreen = { .cursor = _cursorPage, .displayed = _displayedPage };
         setScreen(ScreenType::Alternate);
         // A switch of screen buffer is no page movement, which is all DECPCCM governs: the alternate screen
@@ -6358,7 +6358,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         if (_displayedPage != _cursorPage)
             showPage(_cursorPage);
         if (behavior->carriesCursorIn)
-            _currentScreen->adoptCursor(carried);
+            pageAt(_cursorPage).adoptCursor(carried);
         if (behavior->clearsOnEntry)
             clearScreen();
     }
@@ -6371,7 +6371,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         // screen, and its DECSC, which saves the page with the active position, is the rule extended here.
         if (behavior->clearsOnExit)
             clearScreen();
-        auto const carried = _currentScreen->cursor();
+        auto const carried = pageAt(_cursorPage).cursor();
         setPage(_pagesBeforeAlternateScreen.cursor, PageCursorPlacement::PagesOwn);
         // Coupled, the page on display followed the cursor. Reset, the page on display before the alternate
         // screen came up is shown again, as Windows Terminal's cursor restore moves its visible page only
@@ -6379,7 +6379,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         if (!isModeEnabled(DECMode::PageCursorCoupling))
             showPage(_pagesBeforeAlternateScreen.displayed);
         if (behavior->carriesCursorOut)
-            _currentScreen->adoptCursor(carried);
+            pageAt(_cursorPage).adoptCursor(carried);
     }
 
     // Modes 47, 1047 and 1049 are three views of one piece of state -- whether the alternate screen
@@ -6708,6 +6708,8 @@ void Terminal::publishAnimationsEnd() noexcept
 
 void Terminal::movePage(int page, PageCursorPlacement placement)
 {
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
+        return;
     // The alternate screen is a display of one page, so page movement stays on it: NP and PP move home there,
     // and PPA, PPR and PPB leave the cursor where it is.
     if (isAlternateScreenBufferInUse())
@@ -6727,7 +6729,7 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
     {
         // NP and PP move home on the last and the first page too, as DEC STD 070's algorithms do.
         if (placement == PageCursorPlacement::Home)
-            _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
+            pageAt(clamped).moveCursorTo(LineOffset(0), ColumnOffset(0));
         return;
     }
 
@@ -6767,7 +6769,10 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
     // DEC STD 070 keeps one active position and one rendition, so a page movement carries the cursor on.
     auto const leaving = pageAt(_cursorPage).cursor();
     _cursorPage = clamped;
-    _currentScreen = _pages[clamped.value].get();
+    // While DECSASD selects the status line, it stays the screen the terminal acts on; the page takes over
+    // when DECSASD returns to the main display (setActiveStatusDisplay).
+    if (_activeStatusDisplay == ActiveStatusDisplay::Main)
+        _currentScreen = _pages[clamped.value].get();
 
     // Update mouse wheel mode based on whether this is the primary page.
     if (clamped == PageIndex(0))
@@ -6790,10 +6795,10 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
     switch (placement)
     {
         case PageCursorPlacement::PagesOwn: break;
-        case PageCursorPlacement::SameLineAndColumn: _currentScreen->adoptCursor(leaving); break;
+        case PageCursorPlacement::SameLineAndColumn: pageAt(clamped).adoptCursor(leaving); break;
         case PageCursorPlacement::Home:
-            _currentScreen->adoptCursor(leaving);
-            _currentScreen->moveCursorTo(LineOffset(0), ColumnOffset(0));
+            pageAt(clamped).adoptCursor(leaving);
+            pageAt(clamped).moveCursorTo(LineOffset(0), ColumnOffset(0));
             break;
     }
 
@@ -6818,11 +6823,15 @@ void Terminal::saveCursorPage()
     // DECSC/DECRC's. xterm likewise keeps saved-cursor state separate per screen. The slot is keyed on
     // the page identity (is this THE alternate page?), not _currentScreenType, so a primary VT420 page
     // reached via PPA/NP/PP still uses the primary slot.
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
+        return;
     _savedCursorPage[savedCursorPageSlot()] = _cursorPage;
 }
 
 void Terminal::restoreCursorPage()
 {
+    if (_activeStatusDisplay != ActiveStatusDisplay::Main)
+        return;
     auto const saved = _savedCursorPage[savedCursorPageSlot()];
     if (saved != _cursorPage)
         setPage(saved, PageCursorPlacement::PagesOwn);

@@ -2269,7 +2269,8 @@ class Terminal
     /// defines no alternate screen. Windows Terminal, the one terminal with both pages and an alternate
     /// buffer, keeps page movement on it, a display of one page: NP and PP move the cursor home there
     /// (NextPage/PrecedingPage), and PPA, PPR and PPB leave it (PageManager::MoveTo returns outside the main
-    /// buffer).
+    /// buffer). Ignored while DECSASD selects the status line, a one-line
+    /// display of its own on which vertical cursor positioning is ignored (DEC STD 070 ch. 14 §2.3).
     /// @param page      The zero-based index of the page to move to.
     /// @param placement Where the cursor stands on that page.
     void movePage(int page, PageCursorPlacement placement);
@@ -2282,10 +2283,12 @@ class Terminal
         return _cursorPage == AlternateScreenPageIndex;
     }
 
-    /// Saves the current cursor page index (called by DECSC).
+    /// Saves the current cursor page index (called by DECSC). Not while DECSASD selects the status line,
+    /// which keeps a Cursor Save Buffer of its own (DEC STD 070 ch. 14 §2.2).
     void saveCursorPage();
 
-    /// Restores the previously saved cursor page index (called by DECRC).
+    /// Restores the previously saved cursor page index (called by DECRC). Not while DECSASD selects the
+    /// status line, which keeps a Cursor Save Buffer of its own (DEC STD 070 ch. 14 §2.2).
     void restoreCursorPage();
 
     /// Returns the margin for the page where the cursor is currently active.

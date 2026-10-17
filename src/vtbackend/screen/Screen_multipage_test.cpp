@@ -654,6 +654,73 @@ TEST_CASE("MultiPage.thePointerIsOnThePageOnDisplayWhileTheStatusLineIsWritten",
           == CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
 }
 
+TEST_CASE("MultiPage.pageMovementOnTheStatusLineLeavesTheMainDisplayAlone", "[screen]")
+{
+    // DEC STD 070 ch. 14 §2.3: with the host-writable status line selected, "most ANSI control functions
+    // received will affect only the Status Display", a one-line display of its own on which vertical cursor
+    // positioning is ignored. A page movement there is not the main display's.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    auto const movement = GENERATE(std::string_view { "\033[U" },   // NP
+                                   std::string_view { "\033[V" },   // PP
+                                   std::string_view { "\033[3 P" }, // PPA 3
+                                   std::string_view { "\033[ Q" },  // PPR
+                                   std::string_view { "\033[ R" }); // PPB
+    INFO(e(movement));
+    mock.writeToScreen("\033[2 Pmain\033[2$~\033[1$}"); // page 2; DECSSDT host-writable, DECSASD status line
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+
+    mock.writeToScreen(movement);
+    CHECK(terminal.cursorPageIndex() == PageIndex(1));
+    CHECK(terminal.displayedPageIndex() == PageIndex(1));
+    CHECK(&terminal.currentScreen() == &terminal.hostWritableStatusLineDisplay());
+    mock.writeToScreen("status\033[0$}!"); // DECSASD main display
+    CHECK(terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset(0)).starts_with("status"));
+    CHECK(terminal.pageAt(PageIndex(1)).grid().lineText(LineOffset(0)).starts_with("main!"));
+}
+
+TEST_CASE("MultiPage.DECSC_DECRC_onTheStatusLineLeaveTheMainDisplaysPageAlone", "[screen]")
+{
+    // DEC STD 070 ch. 14 §2.2: the host-writable status line keeps its own Cursor Save Buffer (DECSC and
+    // DECRC). The page the main display's cursor saved is not the status line's to save or restore.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+
+    SECTION("DECRC on the status line does not move the main display's cursor to the page it saved")
+    {
+        mock.writeToScreen("\0337\033[3 P");                 // DECSC on page 1, then to page 3
+        mock.writeToScreen("\033[2$~\033[1$}\0338\033[0$}"); // DECRC on the status line
+        CHECK(terminal.cursorPageIndex() == PageIndex(2));
+    }
+
+    SECTION("DECSC on the status line does not save the main display's page")
+    {
+        mock.writeToScreen("\033[3 P");                      // to page 3, nothing saved: DECRC means page 1
+        mock.writeToScreen("\033[2$~\033[1$}\0337\033[0$}"); // DECSC on the status line
+        mock.writeToScreen("\0338");                         // DECRC on the main display
+        CHECK(terminal.cursorPageIndex() == PageIndex(0));
+    }
+}
+
+TEST_CASE("MultiPage.theAlternateScreenSwitchedOnTheStatusLineCarriesTheMainCursor", "[screen]")
+{
+    // xterm switches the main display's buffer under an active status line and leaves the status line active
+    // (SwitchBufPtrs copies the status row across); its cursor is the main display's. The status line keeps
+    // its own active position (DEC STD 070 ch. 14 §2.2), so it is not that cursor which goes along.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    auto const mode = GENERATE(47, 1047, 1049);
+    INFO(std::format("mode {}", mode));
+    mock.writeToScreen("\033[2;3H\033[2$~\033[1$}status"); // the main cursor at 2;3, the status line's at 1;7
+
+    mock.writeToScreen(std::format("\033[?{}h", mode));
+    CHECK(terminal.isAlternateScreenBufferInUse());
+    CHECK(&terminal.currentScreen() == &terminal.hostWritableStatusLineDisplay());
+    mock.writeToScreen("!\033[0$}");
+    CHECK(terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset(0)).starts_with("status!"));
+    CHECK(terminal.currentScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
+}
+
 TEST_CASE("MultiPage.DECRQDE_response", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
