@@ -20,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace vtbackend
@@ -270,11 +271,46 @@ struct RenderBufferRef
     /// @param lock The buffer's reader lock.
     RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): _buffer { buf }, _lock { lock } {}
 
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    /// Takes @p lock, which the reference holds until it goes, and calls @p onRelease once it has let go.
+    /// @param buf The buffer to read.
+    /// @param lock The buffer's reader lock.
+    /// @param onRelease Called on the thread letting go, after the unlock; an empty one is not called.
+    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock, std::function<void()> const& onRelease):
+        _buffer { buf }, _lock { lock }, _onRelease { &onRelease }
+    {
+    }
+#endif
+
+    // The same in every build, though only a passive build's destructor does more than unlock.
+    RenderBufferRef(RenderBufferRef&&) noexcept = default;
+    RenderBufferRef(RenderBufferRef const&) = delete;
+    /// Not assigned: a passive build's reference calls back as it lets go, which assigning over it would
+    /// skip.
+    RenderBufferRef& operator=(RenderBufferRef&&) = delete;
+    RenderBufferRef& operator=(RenderBufferRef const&) = delete;
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    ~RenderBufferRef()
+    {
+        if (!_lock.owns_lock())
+            return;
+        _lock.unlock();
+        if (_onRelease != nullptr && *_onRelease)
+            (*_onRelease)();
+    }
+#else
+    ~RenderBufferRef() = default;
+#endif
+
     [[nodiscard]] RenderBuffer const& get() const noexcept { return _buffer.get(); }
 
   private:
     std::reference_wrapper<RenderBuffer const> _buffer;
     std::unique_lock<std::mutex> _lock;
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    std::function<void()> const* _onRelease = nullptr; ///< What to call once the lock is let go; may be null.
+#endif
 };
 
 /// Reflects the current state of a RenderDoubleBuffer object.
@@ -299,6 +335,18 @@ constexpr std::string_view toString(RenderBufferState state) noexcept
 
 struct RenderDoubleBuffer
 {
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    RenderDoubleBuffer() = default;
+
+    /// @param onFrontBufferReleased Called on a reader's thread each time it lets go of the front buffer
+    ///        (@see RenderBufferRef), without any lock held: a frame filled while the reader held the front
+    ///        buffer can be swapped in now.
+    explicit RenderDoubleBuffer(std::function<void()> onFrontBufferReleased):
+        _onFrontBufferReleased { std::move(onFrontBufferReleased) }
+    {
+    }
+#endif
+
     std::mutex mutable readerLock;
     std::atomic<size_t> currentBackBufferIndex = 0;
 
@@ -321,13 +369,22 @@ struct RenderDoubleBuffer
         // if (state == RenderBufferState::TrySwapBuffers)
         //     const_cast<RenderDoubleBuffer*>(this)->swapBuffers(lastUpdate);
         RenderBuffer const& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+        return { frontBuffer, readerLock, _onFrontBufferReleased };
+#else
         return { frontBuffer, readerLock };
+#endif
     }
 
     void clear() { backBuffer().clear(); }
 
     // Swaps front with back buffer. May only be invoked by the writer thread.
     bool swapBuffers(std::chrono::steady_clock::time_point now) noexcept;
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+  private:
+    std::function<void()> _onFrontBufferReleased; ///< @see RenderDoubleBuffer(std::function<void()>)
+#endif
 };
 
 } // namespace vtbackend

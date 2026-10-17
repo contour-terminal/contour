@@ -3674,6 +3674,13 @@ class Terminal
     /// the frame is built at, as synchronizedOutput(false) sets it for the frame it builds on the parser
     /// thread.
     void refreshPassively();
+
+    /// Wakes the reader where the frame it filled last waits for the front buffer the display held: the swap
+    /// is retried then, rather than polled for. Called on the display's thread as it lets go of the front
+    /// buffer, without the state lock: the state is atomic, and Pty::wakeupReader() is the cross-thread
+    /// wake-up. A wake-up lost to a race costs one refresh interval, after which the read times out and the
+    /// reader retries.
+    void onFrontBufferReleased();
 #endif
 
     /// Reads on while another thread holds the terminal's state, rather than waiting for it idle.
@@ -4199,7 +4206,12 @@ class Terminal
     /// the render thread as it asks when the next frame is due and by the parser thread as it refreshes the
     /// render buffer, none under the state lock. @see RelaxedAtomic
     RelaxedAtomic<RefreshInterval> _refreshInterval;
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    /// Wakes the reader to swap in a frame the display held up, as it lets go (@see onFrontBufferReleased).
+    RenderDoubleBuffer _renderBuffer { [this] { onFrontBufferReleased(); } };
+#else
     RenderDoubleBuffer _renderBuffer {};
+#endif
     std::atomic<uint64_t> _lastFrameID = 0;
     /// What the last frame built found on screen. Atomic: written by the fill on whichever thread builds the
     /// frame, and read by nextRender() on the render thread without the state lock.

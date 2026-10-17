@@ -3920,8 +3920,15 @@ class DrainedPty final: public vtpty::MockPty
         return _lastTimeout.value_or(std::chrono::milliseconds::max());
     }
 
+    /// Counts the wake-up, which ends the wait of a read in progress, or of the next one.
+    void wakeupReader() override { _wakeups.fetch_add(1, std::memory_order_relaxed); }
+
+    /// @return How often another thread woke the reader.
+    [[nodiscard]] int wakeups() const noexcept { return _wakeups.load(std::memory_order_relaxed); }
+
   private:
     std::optional<std::chrono::milliseconds> _lastTimeout;
+    std::atomic<int> _wakeups = 0;
 };
 
 /// Whether the display paints a frame -- which sets the terminal's frame clock (Terminal::tick()) -- each
@@ -3973,6 +3980,47 @@ TEST_CASE("Terminal.processInputOnce.passive.aThrottledFillRunsOnceItIsDue", "[t
     // With nothing left to fill, the reader waits a whole interval, and fills nothing.
     REQUIRE(terminal.processInputOnce());
     CHECK(mock.mockPty().lastTimeout() == Interval);
+}
+
+TEST_CASE("Terminal.processInputOnce.passive.aHeldFrontBufferIsRetriedWhenTheDisplayLetsGo",
+          "[terminal][threading]")
+{
+    // A frame filled while the display holds the front buffer waits to be swapped in. The reader does not
+    // poll to retry the swap: it waits a whole interval, which new output or the display letting go -- a
+    // wake-up -- ends, and swaps then.
+    auto mock = MockTerm<DrainedPty> { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10), 1024 };
+    auto& terminal = mock.terminal;
+    terminal.setRefreshRate(vtbackend::RefreshRate { 50.0 });
+    constexpr auto Interval = std::chrono::milliseconds(20);
+    mock.steadyClock.advance(Interval); // the first fill is due at once
+
+    // The display holds the front buffer on a thread of its own: a thread may not try a lock it owns.
+    auto held = std::promise<void> {};
+    auto letGo = std::promise<void> {};
+    auto display = std::thread([&terminal, &held, released = letGo.get_future()] {
+        auto const frame = terminal.renderBuffer();
+        held.set_value();
+        released.wait();
+    });
+    held.get_future().wait();
+
+    mock.mockPty().appendStdOutBuffer("first");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(terminal.renderBufferState() == vtbackend::RenderBufferState::TrySwapBuffers);
+
+    // Nothing more to read: a whole interval's wait, not none.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+    CHECK(mock.mockPty().wakeups() == 0);
+
+    letGo.set_value();
+    display.join();
+    CHECK(mock.mockPty().wakeups() == 1);
+
+    // Woken, the reader finds nothing to read, and swaps the frame in.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(terminal.renderBufferState() == vtbackend::RenderBufferState::WaitingForRefresh);
+    CHECK(trimmedTextScreenshot(mock) == "first");
 }
 #endif
 
