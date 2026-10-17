@@ -33,6 +33,11 @@ namespace
         return state.hasLastCommand;
     }
 
+    bool hasLastCommandLine(ContextMenuState const& state) noexcept
+    {
+        return state.hasLastCommand && state.lastCommandLine == CommandLinePresence::Present;
+    }
+
     bool hasHyperlinkUnderCursor(ContextMenuState const& state) noexcept
     {
         return !state.hyperlinkUnderCursor.empty();
@@ -193,6 +198,10 @@ namespace
             // (OSC 133;C cmdline_url, which the bundled bash, zsh, fish and PowerShell integrations do)
             // or the terminal reads it back from the grid -- and these rows copy lines, not records. A
             // row named "Copy Last Command" that hands back a prompt is a row that lies.
+            //
+            // Hence its own row for the bare command, from the block's record rather than its lines, and
+            // only where that record holds one: a shell that reports none would copy nothing.
+            Table::command(CopyCommandLine {}, "Copy Last Command").shownWhen(hasLastCommandLine),
             Table::command(CopyLastCommandPrompt {}, "Copy Last Prompt").shownWhen(hasLastCommand),
             Table::command(CopyLastCommandOutput {}, "Copy Last Command Output").shownWhen(hasLastCommand),
             Table::command(CopyLastCommandBlock {}, "Copy Last Prompt and Output").shownWhen(hasLastCommand),
