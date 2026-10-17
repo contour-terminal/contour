@@ -836,6 +836,26 @@ TEST_CASE("MultiPage.DECRC_without_DECSC_defaults_to_page1", "[screen]")
     CHECK(terminal.cursorPageNumber() == 1);
 }
 
+TEST_CASE("MultiPage.DECRC_restoresWhatDECSCSavedOnItsPage", "[screen]")
+{
+    // DEC STD 070 keeps one cursor save buffer, the page in its position: DECRC returns to the page DECSC
+    // saved and restores there what DECSC saved -- the position, the rendition, the character sets. Windows
+    // Terminal restores the page and then the rest onto it (CursorRestoreState); xterm keeps one buffer per
+    // screen buffer.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[3 P\033[2;3H\033[1m\033(0\0337");    // page 3, at 2;3, bold, line drawing: DECSC
+    mock.writeToScreen("\033[4;4H\033[m\033(B\033[1 P\033[5;5H"); // elsewhere, plain, ASCII, on page 1
+
+    mock.writeToScreen("\0338"); // DECRC
+    REQUIRE(terminal.cursorPageIndex() == PageIndex(2));
+    CHECK(terminal.currentScreen().cursor().position
+          == CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
+    CHECK(terminal.currentScreen().cursor().graphicsRendition.flags.contains(CellFlag::Bold));
+    mock.writeToScreen("q");
+    CHECK(terminal.pageAt(PageIndex(2)).grid().lineText(LineOffset(1)) == "  \u2500       ");
+}
+
 TEST_CASE("MultiPage.DECCRA_cross_page_copy", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };

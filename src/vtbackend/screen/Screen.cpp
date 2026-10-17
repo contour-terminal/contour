@@ -4888,8 +4888,9 @@ void Screen::saveCursor()
 void Screen::restoreCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECRC.html
-    _terminal->restoreCursorPage();
-    restoreCursor(_savedCursor);
+    // Back to the page DECSC saved, then what DECSC saved there, restored on that page.
+    auto& saved = _terminal->restoreCursorPage(*this);
+    saved.restoreCursor(saved.savedCursorState());
 }
 
 void Screen::restoreCursor(Cursor const& savedCursor)

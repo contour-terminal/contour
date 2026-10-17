@@ -6847,13 +6847,14 @@ void Terminal::saveCursorPage()
     _savedCursorPage[savedCursorPageSlot()] = _cursorPage;
 }
 
-void Terminal::restoreCursorPage()
+Screen& Terminal::restoreCursorPage(Screen& receiving)
 {
     if (_activeStatusDisplay != ActiveStatusDisplay::Main)
-        return;
+        return receiving;
     auto const saved = _savedCursorPage[savedCursorPageSlot()];
     if (saved != _cursorPage)
         setPage(saved, PageCursorPlacement::PagesOwn);
+    return pageAt(saved);
 }
 
 void Terminal::setScreen(ScreenType type)
