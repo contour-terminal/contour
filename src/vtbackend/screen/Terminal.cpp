@@ -465,9 +465,7 @@ std::optional<Terminal::PtyReadResult> Terminal::readFromPty()
     ZoneScoped;
     auto timeout =
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
-        (_renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty)
-            ? std::optional { _refreshInterval.get().value }
-            : std::chrono::milliseconds(0);
+        std::optional { passiveReadTimeout() };
 #else
         std::optional<std::chrono::milliseconds> { std::nullopt };
 #endif
@@ -655,7 +653,14 @@ bool Terminal::processInputOnce()
     {
         terminalLog()("PTY read failed. {}", std::generic_category().message(errno));
         if (errno == EINTR || errno == EAGAIN)
+        {
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+            // Nothing arrived within the wait, which ends when the refresh interval lets a pending fill run.
+            if (isPassiveFillPending())
+                refreshPassively();
+#endif
             return true;
+        }
 
         _pty->close();
         return false;
@@ -701,11 +706,42 @@ bool Terminal::processInputOnce()
     });
 
 #ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
-    ensureFreshRenderBuffer();
+    refreshPassively();
 #endif
 
     return true;
 }
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+bool Terminal::isPassiveFillPending() const noexcept
+{
+    return _renderBuffer.state != RenderBufferState::WaitingForRefresh || _screenDirty;
+}
+
+std::chrono::milliseconds Terminal::passiveReadTimeout() const noexcept
+{
+    auto const interval = _refreshInterval.get().value;
+    if (!isPassiveFillPending())
+        return interval;
+
+    // Measured at the time refreshPassively() measures the throttle at, and rounded up: a wait that ended
+    // short of the interval would find the fill still held back.
+    auto const now = std::max(currentTime(), _clocks.steady.now());
+    auto const elapsed = now - _renderBuffer.lastUpdate.load(std::memory_order_relaxed);
+    return std::max(chrono::milliseconds(0), chrono::ceil<chrono::milliseconds>(interval - elapsed));
+}
+
+void Terminal::refreshPassively()
+{
+    // Forward only: the display's tick() may have set it later meanwhile.
+    auto const now = _clocks.steady.now();
+    auto clock = _currentTime.load(std::memory_order_relaxed);
+    while (clock < now && !_currentTime.compare_exchange_weak(clock, now, std::memory_order_relaxed))
+    {
+    }
+    ensureFreshRenderBuffer();
+}
+#endif
 
 // {{{ RenderBuffer synchronization
 void Terminal::breakLoopAndRefreshRenderBuffer()
