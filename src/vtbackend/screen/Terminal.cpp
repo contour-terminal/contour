@@ -6476,6 +6476,7 @@ void Terminal::softReset()
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
+    _selectedStatusDisplayType = StatusDisplayType::None;
 
     setMode(DECMode::ApplicationKeypad, false); // DECNKM
     setMode(DECMode::AutoRepeat, true);         // DECARM
@@ -6685,6 +6686,7 @@ void Terminal::hardReset()
     primaryScreen().verifyState();
 
     setStatusDisplay(_factorySettings.statusDisplayType);
+    _selectedStatusDisplayType = StatusDisplayType::None;
 
     // NB: _inputGenerator.reset() deliberately runs near the top of this function, before the mode
     // register is replayed. @see the comment there.
@@ -7537,6 +7539,34 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
         resizeScreen(_settings.pageSize, nullopt);
+}
+
+void Terminal::selectStatusDisplayByHost(StatusDisplayType type)
+{
+    _selectedStatusDisplayType = type;
+    switch (type)
+    {
+        case StatusDisplayType::None:
+        case StatusDisplayType::Indicator: setStatusDisplay(type); break;
+        case StatusDisplayType::HostWritable:
+            if (_statusDisplayType != StatusDisplayType::HostWritable)
+                requestShowHostWritableStatusLine();
+            break;
+    }
+}
+
+void Terminal::selectStatusDisplayByUser(StatusDisplayType type)
+{
+    _selectedStatusDisplayType = type;
+    if (type != StatusDisplayType::HostWritable && _activeStatusDisplay == ActiveStatusDisplay::StatusLine)
+        setActiveStatusDisplay(ActiveStatusDisplay::Main);
+    setStatusDisplay(type);
+}
+
+bool Terminal::isHostWritableStatusLineSelected() const noexcept
+{
+    return _selectedStatusDisplayType == StatusDisplayType::HostWritable
+           || _statusDisplayType == StatusDisplayType::HostWritable;
 }
 
 void Terminal::answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer answer)

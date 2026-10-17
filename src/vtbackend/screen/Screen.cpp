@@ -8076,12 +8076,9 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // Changes the status line display type.
             switch (seq.paramOr(0, 0))
             {
-                case 0: _terminal->setStatusDisplay(StatusDisplayType::None); break;
-                case 1: _terminal->setStatusDisplay(StatusDisplayType::Indicator); break;
-                case 2:
-                    if (_terminal->statusDisplayType() != StatusDisplayType::HostWritable)
-                        _terminal->requestShowHostWritableStatusLine();
-                    break;
+                case 0: _terminal->selectStatusDisplayByHost(StatusDisplayType::None); break;
+                case 1: _terminal->selectStatusDisplayByHost(StatusDisplayType::Indicator); break;
+                case 2: _terminal->selectStatusDisplayByHost(StatusDisplayType::HostWritable); break;
                 default: return ApplyResult::Invalid;
             }
             break;
@@ -8095,7 +8092,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
                     _terminal->setActiveStatusDisplay(ActiveStatusDisplay::Main);
                     break;
 
-                case 1: _terminal->setActiveStatusDisplay(ActiveStatusDisplay::StatusLine); break;
+                case 1:
+                    // Only a host-writable status line DECSSDT selected (DEC STD 070 ch. 14 §3 DECSASD).
+                    if (_terminal->isHostWritableStatusLineSelected())
+                        _terminal->setActiveStatusDisplay(ActiveStatusDisplay::StatusLine);
+                    break;
                 default: return ApplyResult::Invalid;
             }
             break;

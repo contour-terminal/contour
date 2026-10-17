@@ -4533,13 +4533,14 @@ bool TerminalSession::operator()(actions::ToggleInputProtection)
 
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
-    // Locked: the status line resizes the page. See ViNormalMode.
+    // Locked: the status line resizes the page. See ViNormalMode. The user's choice is a selection, which a
+    // host-writable status line DECSASD had selected gives way to.
     {
         auto const _ = std::scoped_lock { _terminal };
         if (terminal().statusDisplayType() != StatusDisplayType::Indicator)
-            terminal().setStatusDisplay(StatusDisplayType::Indicator);
+            terminal().selectStatusDisplayByUser(StatusDisplayType::Indicator);
         else
-            terminal().setStatusDisplay(StatusDisplayType::None);
+            terminal().selectStatusDisplayByUser(StatusDisplayType::None);
 
         // `savedStatusDisplayType` holds only a value if the application has been overriding
         // the status display type. But the user now actively requests a given type,

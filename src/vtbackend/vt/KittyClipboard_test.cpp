@@ -243,7 +243,7 @@ TEST_CASE("KittyClipboard.a_write_survives_a_status_line_switch", "[kittyclipboa
     mock.writeToScreen("\033]5522;type=write\033\\"sv);
     mock.writeToScreen(
         std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", core::base64::encode("one "sv)));
-    mock.writeToScreen("\033[1$}"sv); // DECSASD: to the status line
+    mock.writeToScreen("\033[2$~\033[1$}"sv); // DECSSDT: host-writable; DECSASD: to the status line
     mock.writeToScreen(
         std::format("\033]5522;type=wdata:mime=dGV4dC9wbGFpbg==;{}\033\\", core::base64::encode("two"sv)));
     mock.writeToScreen("\033[0$}"sv); // back to the main display
