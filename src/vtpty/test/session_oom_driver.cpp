@@ -4,6 +4,10 @@
 ///
 ///   session_oom_driver --placement=systemd|none   spawns `--hog` through vtpty::Process, and
 ///                                                 reports how it ended
+///   session_oom_driver --detached-placement=systemd|none
+///                                                 starts `--hog` through vtpty::startDetached(), as
+///                                                 Contour starts a link's opener, and reports how it
+///                                                 ended
 ///   session_oom_driver --hog                      prints its cgroup, then allocates until killed
 ///   session_oom_driver --report-placements=<unit prefix>
 ///                                                 places `--idle` children through fresh
@@ -11,6 +15,7 @@
 ///                                                 each request reached the placement
 ///   session_oom_driver --idle                     prints its cgroup, then waits to be killed
 
+#include <vtpty/DetachedProcess.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessCgroup.hpp>
 #include <vtpty/ProcessPlacement.hpp>
@@ -21,6 +26,10 @@
 
 #include <core/platform/Clock.hpp>
 
+#include <sys/prctl.h>
+#include <sys/wait.h>
+
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
@@ -29,6 +38,8 @@
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <print>
@@ -156,6 +167,74 @@ int drive(std::string_view placementName)
     // Stay alive long enough for systemd to have stopped this unit, were it going to.
     std::this_thread::sleep_for(GracePeriod);
     std::println("survived the hog's out-of-memory kill");
+    return 0;
+}
+
+/// @return The cgroup of process @p pid once it runs @p mode -- released by its placement, it execs this
+///         binary with that argument -- or nothing after ~30 s.
+std::string cgroupOnceRunning(int pid, std::string_view mode)
+{
+    auto const deadline = std::chrono::steady_clock::now() + 30s;
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        auto in = std::ifstream { std::format("/proc/{}/cmdline", pid) };
+        auto const commandLine = std::string { std::istreambuf_iterator<char> { in }, {} };
+        if (commandLine.contains(mode))
+            return vtpty::readProcessCgroup(pid).value_or("");
+        std::this_thread::sleep_for(1ms);
+    }
+    return {};
+}
+
+/// Starts the hog detached under @p placementName -- as a link's opener or a command's pager is started
+/// -- and checks how it ended.
+/// @return 0 when the hog was killed and, with systemd placement, ran in a session scope.
+int driveDetached(std::string_view placementName)
+{
+    auto placement = placementNamed(placementName);
+    if (!placement)
+        return ExitUsage;
+    // A detached program is nobody's child here; as a subreaper, this process inherits the hog once its
+    // intermediate parent exits, and so learns how it ended.
+    if (::prctl(PR_SET_CHILD_SUBREAPER, 1) != 0)
+        return ExitFailed;
+
+    auto const self = std::filesystem::read_symlink("/proc/self/exe").string();
+    auto const pid =
+        vtpty::startDetached(vtpty::DetachedCommand { .image = self,
+                                                      .argv = { self, "--hog" },
+                                                      .standardInput = {},
+                                                      .output = vtpty::DetachedOutput::Inherited },
+                             *placement);
+    if (!pid)
+    {
+        std::println(stderr, "cannot start the hog: {}", pid.error().message());
+        return ExitFailed;
+    }
+
+    auto const cgroup = cgroupOnceRunning(*pid, "--hog");
+    std::println("hog cgroup: {}", cgroup);
+    auto status = 0;
+    while (::waitpid(*pid, &status, 0) < 0 && errno == EINTR)
+        ;
+    if (WIFEXITED(status))
+    {
+        std::println(stderr, "the hog exited with {} instead of being killed", WEXITSTATUS(status));
+        return WEXITSTATUS(status) == ExitLimitNotEnforced ? ExitLimitNotEnforced : ExitFailed;
+    }
+    if (!WIFSIGNALED(status) || WTERMSIG(status) != SIGKILL)
+    {
+        std::println(stderr, "the hog did not die by SIGKILL");
+        return ExitFailed;
+    }
+    if (placementName == "systemd" && !cgroup.contains("/contour-session-"))
+    {
+        std::println(stderr, "the hog did not run in a session scope");
+        return ExitFailed;
+    }
+
+    std::this_thread::sleep_for(GracePeriod);
+    std::println("survived the detached hog's out-of-memory kill");
     return 0;
 }
 
@@ -301,6 +380,8 @@ int main(int argc, char const* argv[])
         return idle();
     if (argument.starts_with("--placement="))
         return drive(argument.substr(std::string_view { "--placement=" }.size()));
+    if (argument.starts_with("--detached-placement="))
+        return driveDetached(argument.substr(std::string_view { "--detached-placement=" }.size()));
     if (argument.starts_with("--report-placements="))
         return reportPlacements(argument.substr(std::string_view { "--report-placements=" }.size()));
     return ExitUsage;

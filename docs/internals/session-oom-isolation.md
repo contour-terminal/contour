@@ -93,7 +93,8 @@ factory and the launcher one placement. Windows starts them through `QProcess`, 
 `vtpty_test "[placement]"` covers the gate, the breaker and the worker through a fake `ScopeBus`.
 `vtpty_session_oom_isolation` (CTest label `systemd`) proves the requirement under a real user
 manager: a driver running as a unit with `OOMPolicy=stop` must end in `oom-kill` without placement
-and in `success` with it. It also places a first and a later child through fresh placements and
+and in `success` with it -- for a hog on a terminal, and for one started detached, as the launcher
+starts programs. It also places a first and a later child through fresh placements and
 requires systemd's answer to each to be heard -- systemd moves the child whether or not Contour hears
 it, so the hog's cgroup alone cannot tell. CI runs it under a lingering user session and fails if it
 skipped.

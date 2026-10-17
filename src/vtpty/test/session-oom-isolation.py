@@ -3,12 +3,15 @@
 """Proves that an out-of-memory kill inside a session cannot stop the process hosting it.
 
 Runs session_oom_driver as a transient systemd user unit with OOMPolicy=stop -- the policy desktops
-give the unit Contour runs in -- three times:
+give the unit Contour runs in -- five times:
 
   --placement=none     the hog shares the driver's unit, so the unit must end in Result=oom-kill.
                        This proves the test sees the very failure it guards against.
   --placement=systemd  the hog runs in a contour-session-*.scope of its own, so the unit must end
                        in Result=success.
+  --detached-placement=none|systemd
+                       the same two, with the hog started detached -- as Contour starts a link's
+                       opener, a command's pager or a second Contour -- rather than on a terminal.
   --report-placements  checks the answer, not only the outcome: systemd moves a child into its scope
                        whether or not its answer reaches Contour, and a placement that does not hear it
                        reports a timeout and holds off placing the sessions after it. It places a first
@@ -43,6 +46,8 @@ def cases(scope_prefix: str) -> tuple[tuple[str, str], ...]:
     return (
         ("--placement=none", "oom-kill"),
         ("--placement=systemd", "success"),
+        ("--detached-placement=none", "oom-kill"),
+        ("--detached-placement=systemd", "success"),
         (f"--report-placements={scope_prefix}", "success"),
     )
 
