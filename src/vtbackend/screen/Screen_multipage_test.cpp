@@ -665,6 +665,27 @@ TEST_CASE("MultiPage.DECCIR_page_number", "[screen]")
     }
 }
 
+TEST_CASE("MultiPage.theAlternateScreenReportsPageOne", "[screen]")
+{
+    // The alternate screen is no DEC page, and the page-number reports name it page 1: xterm's DECXCPR
+    // "assumes the default page", Windows Terminal's PageManager::Get answers for its alternate buffer with
+    // "a fixed page number of 1", and mlterm regards its alternate edit as page 1. Entered from page 3 here,
+    // so that page 1 is not merely where the cursor came from.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[3 P\033[?1049h\033[2;4H");
+    REQUIRE(terminal.isAlternateScreenBufferInUse());
+    auto const replyTo = [&](std::string_view request) {
+        mock.discardPendingReplies();
+        mock.writeToScreen(request);
+        return terminal.peekInput();
+    };
+
+    CHECK(e(replyTo("\033[?6n")) == e("\033[?2;4;1R"));       // DECXCPR
+    CHECK(e(replyTo("\033[\"v")) == e("\033[5;10;1;1;1\"w")); // DECRQDE
+    CHECK(replyTo("\033[1$w").starts_with("\033P1$u2;4;1;")); // DECCIR
+}
+
 TEST_CASE("MultiPage.DECSC_DECRC_saves_restores_page", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };

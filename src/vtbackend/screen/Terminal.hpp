@@ -2237,10 +2237,20 @@ class Terminal
     }
 
     /// Returns the 1-based page number where the cursor is active (for VT replies).
-    [[nodiscard]] int cursorPageNumber() const noexcept { return _cursorPage.value + 1; }
+    [[nodiscard]] int cursorPageNumber() const noexcept { return pageNumberOf(_cursorPage); }
 
     /// Returns the 1-based page number of the displayed page (for VT replies).
-    [[nodiscard]] int displayedPageNumber() const noexcept { return _displayedPage.value + 1; }
+    [[nodiscard]] int displayedPageNumber() const noexcept { return pageNumberOf(_displayedPage); }
+
+    /// The number a VT report gives a page: its index plus one, and 1 for the alternate screen, which is no
+    /// DEC page. xterm's DECXCPR "assumes the default page", Windows Terminal's PageManager::Get answers for
+    /// its alternate buffer with "a fixed page number of 1", and mlterm regards its alternate edit as page 1.
+    /// @param page The page.
+    /// @return Its 1-based page number.
+    [[nodiscard]] static constexpr int pageNumberOf(PageIndex page) noexcept
+    {
+        return page == AlternateScreenPageIndex ? 1 : page.value + 1;
+    }
 
     /// Switches the cursor to another page; the page on display follows while DECPCCM is set.
     /// @param target    The page to switch to; clamped to the pages there are.
