@@ -364,8 +364,15 @@ enum class PointerPlacement : uint8_t
 /// Where the cursor stands on the page a change of page takes it to.
 enum class PageCursorPlacement : uint8_t
 {
-    PagesOwn = 0, ///< Where the page's own cursor was left.
-    Home,         ///< At the home position of the page, obeying origin mode (NP, PP).
+    /// The page's own cursor, where it was left: a cursor restore (DECRC, leaving the alternate screen on
+    /// 1049) brings it back.
+    PagesOwn = 0,
+    /// The cursor moves on, with its rendition and character sets, to the same line and column (PPA, PPR,
+    /// PPB).
+    SameLineAndColumn,
+    /// The cursor moves on, with its rendition and character sets, to the home position obeying origin mode
+    /// (NP, PP).
+    Home,
 };
 
 /// Asked, with a press's click count (1..ClickCounter::MaxClickCount), whether a binding takes the press.

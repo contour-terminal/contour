@@ -2202,17 +2202,17 @@ void Screen::previousPage(int count)
 
 void Screen::pagePositionAbsolute(int pageNumber)
 {
-    _terminal->movePage(pageNumber - 1, PageCursorPlacement::PagesOwn);
+    _terminal->movePage(pageNumber - 1, PageCursorPlacement::SameLineAndColumn);
 }
 
 void Screen::pagePositionRelative(int count)
 {
-    _terminal->movePage(_terminal->cursorPageIndex().value + count, PageCursorPlacement::PagesOwn);
+    _terminal->movePage(_terminal->cursorPageIndex().value + count, PageCursorPlacement::SameLineAndColumn);
 }
 
 void Screen::pagePositionBackward(int count)
 {
-    _terminal->movePage(_terminal->cursorPageIndex().value - count, PageCursorPlacement::PagesOwn);
+    _terminal->movePage(_terminal->cursorPageIndex().value - count, PageCursorPlacement::SameLineAndColumn);
 }
 
 void Screen::requestDisplayedExtent()

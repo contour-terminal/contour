@@ -99,16 +99,10 @@ TEST_CASE("MultiPage.PPA_PPR_PPB_navigation", "[screen]")
     CHECK(terminal.currentScreen().cursor().position.line == LineOffset(1));
     CHECK(terminal.currentScreen().cursor().position.column == ColumnOffset(2));
 
-    // PPA: CSI 5 SP P — move to page 5, preserve cursor position.
+    // PPA: CSI 5 SP P — move to page 5, to the corresponding line and column (DEC STD 070 §4.7).
     mock.writeToScreen("\033[5 P");                    // PPA to page 5
     CHECK(terminal.cursorPageIndex() == PageIndex(4)); // 0-based index
-    // Cursor position should be preserved (still at the same logical position).
-    // Note: cursor is on a NEW page, position within that page starts at home (0,0)
-    // unless explicitly preserved by the terminal. Actually, PPA preserves position.
-    // The cursor position is local to the Screen, so it was at home (0,0) on the new page.
-    // Wait - setPage with moveCursorHome=false means we DON'T move cursor home,
-    // but the cursor state is local to each Screen. When switching pages, the cursor
-    // position that matters is the one stored in the _new_ screen's cursor state.
+    CHECK(terminal.currentScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     // PPR: CSI 2 SP Q — move forward 2 pages from page 5 to page 7.
     mock.writeToScreen("\033[2 Q");                    // PPR 2
@@ -122,6 +116,74 @@ TEST_CASE("MultiPage.PPA_PPR_PPB_navigation", "[screen]")
     mock.writeToScreen("\033[1 P"); // PPA 1
     CHECK(terminal.cursorPageIndex() == PageIndex(0));
     CHECK(terminal.isPrimaryScreen());
+}
+
+TEST_CASE("MultiPage.PPA_PPR_PPB.moveTheCursorToTheSameLineAndColumn", "[screen]")
+{
+    // DEC STD 070 §4.7: PPA, PPR and PPB move "the Active Position to the corresponding line and column" on
+    // the other page, and affect nothing but the active position: the rendition and the character sets are
+    // the terminal's. Windows Terminal's PageManager::MoveTo carries the attributes and the cursor to the new
+    // page.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    auto const [movement, target, number] = GENERATE(table<std::string_view, PageIndex, int>({
+        { "\033[3 P", PageIndex(2), 3 }, // PPA 3
+        { "\033[2 Q", PageIndex(6), 7 }, // PPR 2
+        { "\033[2 R", PageIndex(2), 3 }, // PPB 2
+    }));
+    INFO(e(movement));
+    mock.writeToScreen("\033[5 P\033[3;5H\033[1m\033(0"); // page 5, at 3;5, bold, G0 the DEC line drawing set
+
+    mock.writeToScreen(movement);
+    REQUIRE(terminal.cursorPageIndex() == target);
+    mock.discardPendingReplies();
+    mock.writeToScreen("\033[?6n"); // DECXCPR
+    CHECK(e(terminal.peekInput()) == e(std::format("\033[?3;5;{}R", number)));
+    mock.writeToScreen("q");
+    CHECK(terminal.pageAt(target).grid().lineText(LineOffset(2)) == "    ─     ");
+    CHECK(terminal.currentScreen().cursor().graphicsRendition.flags.contains(CellFlag::Bold));
+}
+
+TEST_CASE("MultiPage.NP_PP.moveTheCursorHomeObeyingOriginMode", "[screen]")
+{
+    // DEC STD 070 §4.7: "NP moves the Active Position to the home position in the new page obeying Origin
+    // Mode", PP likewise, and the rendition goes along. Windows Terminal's NextPage and PrecedingPage are a
+    // page movement followed by CursorPosition(1, 1), which obeys origin mode; mlterm's NP and PP move home
+    // after vt_screen_goto_page.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    auto const [movement, target] = GENERATE(table<std::string_view, PageIndex>({
+        { "\033[U", PageIndex(2) }, // NP
+        { "\033[V", PageIndex(0) }, // PP
+    }));
+    INFO(e(movement));
+    // Pages 1 and 3 scroll from line 2 to line 4. The cursor ends up on page 2, with origin mode set and
+    // bold.
+    mock.writeToScreen("\033[2;4r\033[3 P\033[2;4r\033[2 P\033[?6h\033[1m\033[3;5H");
+
+    mock.writeToScreen(movement);
+    REQUIRE(terminal.cursorPageIndex() == target);
+    CHECK(terminal.currentScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(0) });
+    CHECK(terminal.currentScreen().cursor().originMode);
+    CHECK(terminal.currentScreen().cursor().graphicsRendition.flags.contains(CellFlag::Bold));
+}
+
+TEST_CASE("MultiPage.NP_PP.moveHomeOnTheLastAndTheFirstPage", "[screen]")
+{
+    // DEC STD 070's NP algorithm takes the highest page for one beyond it and then moves home; PP the first
+    // page. Windows Terminal and mlterm move home after the page movement whatever page it reached.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    auto const [setup, movement, page] = GENERATE(table<std::string_view, std::string_view, PageIndex>({
+        { "\033[15 P", "\033[U", PageIndex(14) }, // NP on page 15, the last
+        { "", "\033[V", PageIndex(0) },           // PP on page 1
+    }));
+    INFO(e(movement));
+    mock.writeToScreen(setup);
+    mock.writeToScreen("\033[3;4H");
+    mock.writeToScreen(movement);
+    CHECK(terminal.cursorPageIndex() == page);
+    CHECK(terminal.currentScreen().cursor().position == CellLocation {});
 }
 
 TEST_CASE("MultiPage.DECPCCM_coupling", "[screen]")
@@ -373,7 +435,7 @@ TEST_CASE("MultiPage.DECPCCM_set.theViewportScrollsAsItDid", "[screen]")
 
     SECTION("a page with no history comes on display: the window comes back inside it")
     {
-        mock.writeToScreen("\033[3 Ppage three");
+        mock.writeToScreen("\033[3 P\033[Hpage three");
         REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
         CHECK(terminal.viewport().scrollingDisabled());
         CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
@@ -433,7 +495,7 @@ void showOnePageOfTwo(MockTerm<>& mock, std::string_view primary, std::string_vi
 {
     mock.terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
     mock.writeToScreen(primary);
-    mock.writeToScreen("\033[3 P"); // PPA 3, coupled: page 3 on display, the cursor home on it
+    mock.writeToScreen("\033[3 P\033[H"); // PPA 3, coupled: page 3 on display; the cursor home on it
     mock.writeToScreen(other);
     switch (shown)
     {
@@ -857,7 +919,7 @@ TEST_CASE("MultiPage.DECPCCM_reset.leavingTheAlternateScreenResumesPaging", "[sc
     terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
     auto const mode = GENERATE(47, 1047, 1049);
     INFO(std::format("mode {}", mode));
-    mock.writeToScreen("\033[3 Pthree\033[?64l\033[2 Ptwo");
+    mock.writeToScreen("\033[3 Pthree\033[?64l\033[2 P\033[Htwo");
     REQUIRE(terminal.cursorPageIndex() == PageIndex(1));
     REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
 
@@ -910,7 +972,8 @@ TEST_CASE("MultiPage.DECPCCM_reset.theAlternateScreenIsShownWhileInUse", "[scree
 
     SECTION("another page on display")
     {
-        mock.writeToScreen("\033[3 Pthree\033[?64l\033[1 P"); // page 3 stays on display, the cursor on page 1
+        mock.writeToScreen(
+            "\033[3 P\033[Hthree\033[?64l\033[1 P"); // page 3 stays on display, the cursor on page 1
         REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
         shownAfterwards = PageIndex(2);
         textAfterwards = "three";
@@ -923,7 +986,7 @@ TEST_CASE("MultiPage.DECPCCM_reset.theAlternateScreenIsShownWhileInUse", "[scree
 
     SECTION("another page on display, DECPCCM set before leaving: the display follows the cursor")
     {
-        mock.writeToScreen("\033[3 Pthree\033[?64l\033[1 P");
+        mock.writeToScreen("\033[3 P\033[Hthree\033[?64l\033[1 P");
         REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
         beforeLeaving = "\033[?64h";
     }
