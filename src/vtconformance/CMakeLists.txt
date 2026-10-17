@@ -75,7 +75,8 @@ if(VTCONFORMANCE_TESTING)
     # this honest rather than merely noisy is the ratchet in known-gaps.txt -- see Report.hpp.
     #
     # vttest is not a build dependency, so a machine without it skips rather than fails. A skip says
-    # so loudly on stderr; it never masquerades as a pass.
+    # so loudly on stderr, and exits 77, which SKIP_RETURN_CODE has ctest report as skipped: it never
+    # masquerades as a pass.
     if(NOT WIN32)
         add_test(NAME vtconformance_vttest
             COMMAND $<TARGET_FILE:vtconformance-run> run
@@ -93,6 +94,7 @@ if(VTCONFORMANCE_TESTING)
             TIMEOUT 1800
             RUN_SERIAL TRUE
             LABELS conformance
+            SKIP_RETURN_CODE 77
         )
 
         # The esctest gate.
@@ -122,6 +124,7 @@ if(VTCONFORMANCE_TESTING)
             TIMEOUT 1800
             RUN_SERIAL TRUE
             LABELS conformance
+            SKIP_RETURN_CODE 77
         )
     endif()
 endif()
