@@ -4492,14 +4492,19 @@ bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
     // directly program or affect the Error Line".
     {
         auto const _ = std::scoped_lock { _terminal };
+        // Put up and taken down as vi mode's is (push/pop), so that re-enabling shows again what it replaced.
         if (!_allowKeyMappings)
         {
             terminal().setStatusLineDefinition(parseStatusLineDefinition(
                 "{}", "{Text:text=key bindings disabled,Left= « ,Right= » }", "{}"));
-            terminal().setStatusDisplay(StatusDisplayType::Indicator);
+            terminal().pushStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled,
+                                         StatusDisplayType::Indicator);
         }
         else
+        {
             terminal().resetStatusLineDefinition();
+            terminal().popStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled);
+        }
     }
     return true;
 }

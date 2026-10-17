@@ -2564,6 +2564,73 @@ TEST_CASE("TerminalSession: a status line type a reload changes during vi mode o
     CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
 }
 
+TEST_CASE("TerminalSession: re-enabling key bindings brings back the status line type shown before",
+          "[contour][session][config]")
+{
+    // The "key bindings disabled" indicator is a notice put up for a while, as vi mode's is (and as DEC STD
+    // 070's Error Line, ch. 14 §2.1.1, "replaces the currently displayed Status Line" until a key restores
+    // it): taking it down shows again what it replaced.
+    auto const shownBefore =
+        GENERATE(vtbackend::StatusDisplayType::None, vtbackend::StatusDisplayType::Indicator);
+    INFO("shown before: " << static_cast<int>(shownBefore));
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), shownBefore);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    REQUIRE(terminal.statusDisplayType() == shownBefore);
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.indicatorStatusLineDisplay().renderMainPageText().contains("key bindings disabled"));
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == shownBefore);
+}
+
+TEST_CASE("TerminalSession: the key bindings notice outlasts a host's keyboard unlock",
+          "[contour][session][config]")
+{
+    // KAM reset -- DECSTR, or CSI 2 l -- takes down the notice of a locked keyboard, which it never put up
+    // here: the key bindings stay disabled, and so does their notice. "The host may not directly program or
+    // affect the Error Line" (DEC STD 070 ch. 14 §2.1.1), the notice DEC has.
+    auto const unlock = GENERATE(std::string_view { "\033[!p" }, std::string_view { "\033[2l" });
+    INFO("unlock: " << core::escape(unlock));
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), vtbackend::StatusDisplayType::None);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    terminal.writeToScreen(unlock);
+
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.indicatorStatusLineDisplay().renderMainPageText().contains("key bindings disabled"));
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
+
+TEST_CASE("TerminalSession: vi mode's notice outlasts the key bindings notice", "[contour][session][config]")
+{
+    // Two notices up at once: each comes down alone, and the type shown before the first comes back with the
+    // last.
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), vtbackend::StatusDisplayType::None);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Insert);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
+
 TEST_CASE("TerminalSession: a denied status line's text becomes the window title when configured",
           "[contour][session][config]")
 {

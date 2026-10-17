@@ -6104,9 +6104,9 @@ void Terminal::setMode(AnsiMode mode, bool enable)
     if (mode == AnsiMode::KeyboardAction)
     {
         if (enable)
-            pushStatusDisplay(StatusDisplayType::Indicator);
+            pushStatusDisplay(StatusNotice::KeyboardLocked, StatusDisplayType::Indicator);
         else
-            popStatusDisplay();
+            popStatusDisplay(StatusNotice::KeyboardLocked);
     }
 
     // LNM has two halves. The output half (LF also returns the carriage) reads the mode bit in
@@ -6594,6 +6594,11 @@ void Terminal::hardReset()
     // nothing can ever resync the two halves again.
     core::locked(_inputMutex, [&] { _inputGenerator.reset(); });
 
+    // KAM is reset with the rest of the register, not through setMode(), so its notice is dropped here; the
+    // type RIS shows is set below.
+    _statusNotices.disable(StatusNotice::KeyboardLocked);
+    if (_statusNotices.none())
+        _savedStatusDisplayType.reset();
     _modes.reset();
 
     // The register is cleared whole, not through setMode(), so the state a mode keeps outside it
@@ -7591,7 +7596,7 @@ void Terminal::selectStatusDisplayByUser(StatusDisplayType type)
 
 void Terminal::selectConfiguredStatusDisplay(StatusDisplayType type)
 {
-    if (!_savedStatusDisplayType)
+    if (_statusNotices.none())
     {
         selectStatusDisplayByUser(type);
         return;
@@ -7662,18 +7667,23 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
     // clang-format on
 }
 
-void Terminal::pushStatusDisplay(StatusDisplayType type)
+void Terminal::pushStatusDisplay(StatusNotice owner, StatusDisplayType type)
 {
-    // Only remember the outermost saved status display type.
-    if (!_savedStatusDisplayType)
+    // The type shown before the first notice is what the last one down shows again.
+    if (_statusNotices.none())
         _savedStatusDisplayType = _statusDisplayType.get();
+    _statusNotices.enable(owner);
 
     setStatusDisplay(type);
 }
 
-void Terminal::popStatusDisplay()
+void Terminal::popStatusDisplay(StatusNotice owner)
 {
-    if (!_savedStatusDisplayType)
+    // Only the owner's own: a KAM reset never takes down a notice KAM did not put up.
+    if (!_statusNotices.test(owner))
+        return;
+    _statusNotices.disable(owner);
+    if (_statusNotices.any() || !_savedStatusDisplayType)
         return;
 
     setStatusDisplay(_savedStatusDisplayType.value());

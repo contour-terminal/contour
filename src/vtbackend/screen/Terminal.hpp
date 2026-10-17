@@ -3282,8 +3282,16 @@ class Terminal
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
     constexpr ActiveStatusDisplay activeStatusDisplay() const noexcept { return _activeStatusDisplay; }
 
-    void pushStatusDisplay(StatusDisplayType statusDisplayType);
-    void popStatusDisplay();
+    /// Puts @p statusDisplayType up for a while as @p owner's notice, over the type shown, which comes back
+    /// when every notice is down again.
+    /// @param owner Who puts the notice up; it alone takes it down.
+    /// @param statusDisplayType The type shown while the notice is up.
+    void pushStatusDisplay(StatusNotice owner, StatusDisplayType statusDisplayType);
+
+    /// Takes @p owner's notice down, if it has one up; the last one down shows again the type shown before
+    /// the first.
+    /// @param owner Whose notice comes down.
+    void popStatusDisplay(StatusNotice owner);
 
     /// Whether the keyboard is unlocked (KAM reset). Needs no lock: the ANSI modes are atomic, as a key reads
     /// this on the GUI thread while the parser thread may set them.
@@ -4511,7 +4519,10 @@ class Terminal
     /// @see isHostWritableStatusLineSelected, selectStatusDisplayByUser
     StatusDisplayType _selectedStatusDisplayType = StatusDisplayType::None;
 
+    /// The type shown before the first of the notices up (_statusNotices); nothing while none is up.
     std::optional<StatusDisplayType> _savedStatusDisplayType = std::nullopt;
+    /// The owners of the notices up. @see pushStatusDisplay
+    StatusNotices _statusNotices {};
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search _search;

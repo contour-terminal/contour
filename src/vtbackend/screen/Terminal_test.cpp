@@ -2083,6 +2083,24 @@ TEST_CASE("Terminal.DECSTR.keeps_the_status_display_type", "[terminal][statuslin
     }
 }
 
+TEST_CASE("Terminal.statusNotices.RIS_drops_the_notice_of_a_locked_keyboard", "[terminal][statusline]")
+{
+    // RIS resets KAM with every other mode, so the locked keyboard's notice goes too: a notice put up later,
+    // vi mode's, is then the only one, and taking it down shows the type RIS left.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+    mc.writeToScreen("\033[2h"); // KAM: the keyboard locked, its notice up
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    mc.writeToScreen("\033c");
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,

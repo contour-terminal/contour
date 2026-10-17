@@ -725,6 +725,20 @@ enum class StatusDisplayType : uint8_t
     HostWritable,
 };
 
+/// Who has put a status display up for a while (Terminal::pushStatusDisplay): a notice over the type shown,
+/// as DEC STD 070's Error Line (ch. 14 §2.1.1) is one. Several can be up at once; each owner takes down its
+/// own, and the type shown before the first comes back when none is left.
+enum class StatusNotice : uint8_t
+{
+    None = 0,
+    KeyboardLocked = 0b001,      ///< KAM locked the keyboard.
+    KeyBindingsDisabled = 0b010, ///< The user disabled the key bindings.
+    ViMode = 0b100,              ///< Vi mode, in any of its modes but Insert.
+};
+
+/// The owners of the notices up. @see StatusNotice
+using StatusNotices = core::Flags<StatusNotice>;
+
 // Mandates the position to show the statusline at.
 enum class StatusDisplayPosition : uint8_t
 {

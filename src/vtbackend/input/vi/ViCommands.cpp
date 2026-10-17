@@ -242,7 +242,7 @@ void ViCommands::modeChanged(ViMode mode)
             _terminal->setCursorShape(_lastCursorShape);
             _terminal->viewport().forceScrollToBottom();
             _terminal->clearSearch();
-            _terminal->popStatusDisplay();
+            _terminal->popStatusDisplay(StatusNotice::ViMode);
             break;
         case ViMode::Normal:
             _lastCursorShape = _terminal->cursorShape();
@@ -253,29 +253,29 @@ void ViCommands::modeChanged(ViMode mode)
                 cursorPosition = _terminal->currentScreen().cursor().position;
             if (_terminal->selectionAvailable())
                 _terminal->clearSelection();
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::Visual:
             _terminal->setSelector(make_unique<LinearSelection>(
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::VisualLine:
             _terminal->setSelector(make_unique<FullLineSelection>(
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::VisualBlock:
             _terminal->setSelector(make_unique<RectangularSelection>(
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::Hint:
             // Keep cursor visible and status indicator, similar to Normal mode.
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
     }
 
