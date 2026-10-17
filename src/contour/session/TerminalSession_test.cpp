@@ -4358,7 +4358,7 @@ TEST_CASE("TerminalSession: a file:// link in a pane replicating another machine
         CHECK((*session)(actions::FollowHyperlink {}));
         CHECK((*session)(actions::FollowHyperlink { .uri = uri }));
         CHECK(launcher.openedUrls.empty());
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
 
         // A link of another scheme is no path, and still opens.
         CHECK((*session)(actions::FollowHyperlink { .uri = "https://example.com/page" }));
@@ -4476,8 +4476,8 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
           "[contour][session][hyperlink]")
 {
     // followHyperlink() branches on the hovered link's URI: a remote link and a local non-file both
-    // open via openUrl; a local link to an existing executable file runs `contour config ...` via the
-    // launcher's execute(). Driving them headlessly (hover + FollowHyperlink) exercises all the
+    // open via openUrl; a local link to an existing executable file starts `contour config ...` via the
+    // launcher's runDetached(). Driving them headlessly (hover + FollowHyperlink) exercises all the
     // launcher-routing arms without opening a browser or spawning a process.
     namespace actions = contour::actions;
 
@@ -4492,10 +4492,10 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK((*session)(actions::FollowHyperlink {}));
         REQUIRE(launcher.openedUrls.size() == 1);
         CHECK(launcher.openedUrls.back().toString().toStdString() == "https://example.com/page");
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
     }
 
-    SECTION("a local file:// link to a non-existent path opens via openUrl (not executed)")
+    SECTION("a local file:// link to a non-existent path opens via openUrl (not run)")
     {
         contour::test::TestApp testApp;
         auto session = makeDisplaylessSession(testApp.app());
@@ -4505,7 +4505,7 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
         CHECK((*session)(actions::FollowHyperlink {}));
         CHECK(launcher.openedUrls.size() == 1);
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
     }
 
     SECTION("a local file:// link opens the file its tooltip names")
@@ -4586,14 +4586,14 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK((*session)(actions::FollowHyperlink {}));
         REQUIRE(launcher.openedUrls.size() == 1);
         CHECK(launcher.openedUrls.back().host() == QStringLiteral("some-other-host.invalid"));
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
     }
 
 #ifndef _WIN32
     // The "is this an executable file" branch of followHyperlink() keys off POSIX owner-execute
     // permission; Windows determines executability by extension, not filesystem perms, so this Unix
     // semantics section does not apply there.
-    SECTION("a local file:// link to an executable file runs `contour config` via execute()")
+    SECTION("a local file:// link to an executable file starts `contour config` without waiting for it")
     {
         // The authority-free form reaches the executable branch too: it used to be classified as remote
         // (its host is ""), so a file:///path link to a script fell through to openUrl() instead.
@@ -4620,10 +4620,13 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         seedHoveredHyperlink(*session, uri);
         REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
         CHECK((*session)(actions::FollowHyperlink {}));
-        REQUIRE(launcher.executed.size() == 1);
-        CHECK(launcher.executed.back().arguments.contains(QStringLiteral("config")));
+        // Detached: the second Contour runs until its window is closed, and waiting for it would hold up
+        // the GUI thread -- every window of this Contour -- all that time. The launcher has nothing that
+        // waits for a program any more.
+        REQUIRE(launcher.detached.size() == 1);
+        CHECK(launcher.detached.back().arguments.contains(QStringLiteral("config")));
         // The path reaches `contour config` as the filesystem spells it, not as a URL.
-        CHECK(launcher.executed.back().arguments.back() == QString::fromStdString(exePath.generic_string()));
+        CHECK(launcher.detached.back().arguments.back() == QString::fromStdString(exePath.generic_string()));
     }
 #endif
 }

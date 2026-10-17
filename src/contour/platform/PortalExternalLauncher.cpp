@@ -97,12 +97,6 @@ std::expected<void, SpawnError> PortalExternalLauncher::runDetached(QString cons
     return _processes->runDetached(program, arguments);
 }
 
-std::expected<int, SpawnError> PortalExternalLauncher::execute(QString const& program,
-                                                               QStringList const& arguments)
-{
-    return _processes->execute(program, arguments);
-}
-
 std::expected<void, SpawnError> PortalExternalLauncher::runDetachedWithInput(
     std::string const& commandLine, std::filesystem::path const& inputFile)
 {

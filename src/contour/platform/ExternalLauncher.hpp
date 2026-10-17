@@ -41,17 +41,16 @@ enum class LaunchError : std::uint8_t
     return "unknown error";
 }
 
-/// Why a child process could not be started, or did not finish.
+/// Why a child process could not be started.
 ///
 /// Separate from LaunchError because the two ask different questions: opening a URL asks the desktop
 /// to CHOOSE a handler, while this names a program outright and can say which part of running it
-/// went wrong. Qt reports one FailedToStart for both of the first two, which are different things to
-/// tell a user, so the launcher determines the first itself rather than guessing.
+/// went wrong. Qt reports one FailedToStart for both, which are different things to tell a user, so
+/// the launcher determines the first itself rather than guessing.
 enum class SpawnError : std::uint8_t
 {
     NotFound = 0, ///< No such program: not on the search path, or the named path is not executable.
     StartFailed,  ///< The program is there, but the platform would not start it.
-    Crashed,      ///< It ran and died on a signal. Only execute() waits long enough to observe this.
 };
 
 /// A human-readable explanation of @p error, for logs and user-facing notices.
@@ -63,7 +62,6 @@ enum class SpawnError : std::uint8_t
     {
         case SpawnError::NotFound: return "no such program on the search path";
         case SpawnError::StartFailed: return "it could not be started";
-        case SpawnError::Crashed: return "it crashed";
     }
     return "unknown error";
 }
@@ -101,13 +99,13 @@ enum class SpawnError : std::uint8_t
 }
 
 /// Launches external resources on behalf of a terminal session: opening URLs/documents in the
-/// desktop's default handler and running detached or blocking child processes.
+/// desktop's default handler and starting detached child processes.
 ///
 /// This is the part of a session that reaches OUT of the process — into the desktop environment
 /// (a browser, a file manager, an editor) — and it is an interface per the project's
 /// dependency-injection principle: spawning a browser or a child `contour` is process I/O, so it
 /// must be reached through an abstraction rather than the concrete static Qt calls
-/// (`QDesktopServices::openUrl`, `QProcess::execute`/`startDetached`). Production wires
+/// (`QDesktopServices::openUrl`, `QProcess::startDetached`). Production wires
 /// QtExternalLauncher; tests inject a recording launcher and assert the routing/validation of the
 /// open-document, follow-hyperlink, and spawn-terminal actions without actually launching anything.
 class ExternalLauncher
@@ -135,25 +133,15 @@ class ExternalLauncher
     /// Starts @p program with @p arguments as a detached background process (fire-and-forget).
     ///
     /// Fire-and-forget names the CHILD's lifetime, not the report: whether it started is knowable
-    /// here and now, and a caller that cannot say why nothing happened has nothing to log.
+    /// here and now, and a caller that cannot say why nothing happened has nothing to log. Nothing
+    /// here waits for a child to finish: the callers run on the GUI thread, which every window of
+    /// this Contour would wait with.
     ///
     /// @param program The executable path.
     /// @param arguments The argument list.
     /// @return Nothing once started, or why it was not.
     [[nodiscard]] virtual std::expected<void, SpawnError> runDetached(QString const& program,
                                                                       QStringList const& arguments) = 0;
-
-    /// Runs @p program with @p arguments and blocks until it exits (used where the caller wants the
-    /// child — e.g. an `$EDITOR` — to run to completion).
-    ///
-    /// The exit code and the reasons it has none are separate channels: a program that exited 1 and
-    /// a program that is not installed used to be told apart by the SIGN of one integer.
-    ///
-    /// @param program The executable path.
-    /// @param arguments The argument list.
-    /// @return The process exit code, or why there is none.
-    [[nodiscard]] virtual std::expected<int, SpawnError> execute(QString const& program,
-                                                                 QStringList const& arguments) = 0;
 
     /// Starts the program @p commandLine names as a detached process reading @p inputFile as its
     /// standard input -- for a program that consumes text rather than a file (`wl-copy`, a notes

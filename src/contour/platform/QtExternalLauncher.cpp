@@ -46,24 +46,6 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetached(QString const& p
     return {};
 }
 
-std::expected<int, SpawnError> QtExternalLauncher::execute(QString const& program,
-                                                           QStringList const& arguments)
-{
-    if (!isReachableProgram(program))
-        return std::unexpected(SpawnError::NotFound);
-
-    // QProcess::execute() answers with two sentinels below zero and an exit code at or above it:
-    // -2 could not be started, -1 started and crashed. Both are the absence of an exit code, not
-    // an exit code, which is what separating the channels is for.
-    auto const exitCode = QProcess::execute(program, arguments);
-    if (exitCode == -2)
-        return std::unexpected(SpawnError::StartFailed);
-    if (exitCode == -1)
-        return std::unexpected(SpawnError::Crashed);
-
-    return exitCode;
-}
-
 std::expected<void, SpawnError> QtExternalLauncher::runDetachedWithInput(
     std::string const& commandLine, std::filesystem::path const& inputFile)
 {

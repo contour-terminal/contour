@@ -5528,17 +5528,18 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
     // An executable file is run through `contour config <path>`; any other file is handed to $EDITOR the
     // same way. Anything else -- a directory, a missing path -- goes to the desktop, as a plain local file
     // URL: an authority that survived would be read as a network location, file://host/tmp as //host/tmp.
+    // Detached: the second Contour runs until its window is closed, and this is the GUI thread.
     if (fileInfo.isFile() && (fileInfo.isExecutable() || !editorEnv.isEmpty()))
     {
         auto args = QStringList { "config", platform::toQString(_config.configFile) };
         if (!fileInfo.isExecutable())
             args << editorEnv;
         args << path;
-        if (auto const ran =
-                _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
-            !ran)
+        if (auto const started =
+                _app.externalLauncher().runDetached(QString::fromStdString(_app.programPath()), args);
+            !started)
             errorLog()(
-                "Could not open \"{}\" in an editor: {}.", *localPath, platform::describe(ran.error()));
+                "Could not open \"{}\" in an editor: {}.", *localPath, platform::describe(started.error()));
         return;
     }
 
