@@ -8,6 +8,7 @@
 #include <vtpty/Pty.hpp>
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/UnixPty.hpp>
+#include <vtpty/UnixUtils.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
@@ -193,41 +194,41 @@ namespace
         return entries;
     }
 
-    void saveDup2(int a, int b)
+    /// Makes @p b refer to what @p a does, and survive an exec, retrying dup2() on EBUSY and EINTR.
+    ///
+    /// Where @p a already is @p b -- this process's standard input closed, a descriptor opened
+    /// close-on-exec lands on 0 -- dup2() returns without changing anything (POSIX), the close-on-exec
+    /// flag included, and the exec would close it. The flag is cleared instead, with fcntl(), which is
+    /// async-signal-safe.
+    /// @param a The descriptor to hand over.
+    /// @param b The descriptor the exec keeps.
+    void saveDup2(int a, int b) noexcept
     {
+        if (a == b)
+        {
+            if (auto const flags = ::fcntl(a, F_GETFD); flags != -1)
+                (void) ::fcntl(a, F_SETFD, flags & ~FD_CLOEXEC);
+            return;
+        }
         while (dup2(a, b) == -1 && (errno == EBUSY || errno == EINTR))
             ;
     }
 
-    void closeAllFileDescriptorsAbove(int keepFd)
+    /// Hands the fast pipe's writer to the program as StdoutFastPipeFd, and closes the pipe's own
+    /// descriptors: the reader first, as it may sit on StdoutFastPipeFd itself, which the writer then takes;
+    /// the writer only where it is not StdoutFastPipeFd already. Async-signal-safe.
+    /// @param pipe The fast pipe; nothing is done where it has no writer.
+    void handOverFastPipe(UnixPipe& pipe) noexcept
     {
-#ifdef HAVE_CLOSE_RANGE
-        if (close_range(keepFd + 1, ~0U, 0) == 0)
+        auto const writer = pipe.writer();
+        if (writer == -1)
             return;
-#endif
-
-#ifdef __linux__
-        try
-        {
-            for (auto const& entry: fs::directory_iterator("/proc/self/fd"))
-            {
-                int const fd = std::stoi(entry.path().filename().string());
-                if (fd > keepFd)
-                    ::close(fd);
-            }
-            return;
-        }
-        catch (...) // NOLINT(bugprone-empty-catch)
-        {
-            // ignore
-        }
-#endif
-
-        // Fallback: close up to sysconf(_SC_OPEN_MAX)
-        int const maxFd = static_cast<int>(sysconf(_SC_OPEN_MAX));
-        for (int i = keepFd + 1; i < maxFd; ++i)
-            ::close(i);
+        pipe.closeReader();
+        saveDup2(writer, StdoutFastPipeFd);
+        if (writer != StdoutFastPipeFd)
+            pipe.closeWriter();
     }
+
 } // anonymous namespace
 
 struct Process::Private
@@ -419,10 +420,14 @@ StartResult Process::start()
     if (!gate)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = gate.error().message() });
-    // Formatted before the fork: the child may not allocate.
+    // Formatted before the fork: the child may not allocate. Nor may it ask sysconf(), which POSIX.1-2008
+    // took off the async-signal-safe list.
     auto const oomScoreAdjust = _d->placement->childOomScoreAdjust()
                                     .transform([](int value) { return std::to_string(value); })
                                     .value_or(string {});
+    auto const descriptorLimit = util::openDescriptorLimit();
+    // Built here too: generic_string() builds a new string, on the heap for most working directories.
+    auto const cwd = _d->cwd.generic_string();
 
     auto const forked = fork();
 
@@ -451,10 +456,9 @@ StartResult Process::start()
 
             (void) _d->pty->slave().login();
 
-            auto const& cwd = _d->cwd.generic_string();
             if (passesOwnEnvironment)
             {
-                if (!_d->cwd.empty() && chdir(cwd.c_str()) != 0)
+                if (!cwd.empty() && chdir(cwd.c_str()) != 0)
                 {
                     auto errorTextBuffer = array<char, 256> {};
                     writeAll(STDOUT_FILENO, "Failed to chdir to \"");
@@ -469,19 +473,17 @@ StartResult Process::start()
             }
 
             if (auto* pty = dynamic_cast<UnixPty*>(_d->pty.get()))
-            {
-                if (pty->stdoutFastPipe().writer() != -1)
-                {
-                    saveDup2(pty->stdoutFastPipe().writer(), StdoutFastPipeFd);
-                    pty->stdoutFastPipe().close();
-                }
-            }
+                handOverFastPipe(pty->stdoutFastPipe());
 
-            closeAllFileDescriptorsAbove(StdoutFastPipeFd);
+            util::closeDescriptorsAbove(StdoutFastPipeFd, descriptorLimit);
 
             // reset signal(s) to default that may have been changed in the parent process.
             signal(SIGPIPE, SIG_DFL);
 
+            // execvp() is not on POSIX's async-signal-safe list, and is tolerated here: glibc, musl and the
+            // BSDs search PATH in buffers on the stack; invocationToRun() has usually resolved the program to
+            // a path with a slash already, which execvp() runs without a search; and its fallback of running
+            // a file the kernel cannot execute (ENOEXEC) with sh is behaviour users rely on.
             ::execvp(childArgv[0], childArgv.data());
 
             // Fallback: Try login shell. Everything this needs was computed before the fork.
@@ -491,7 +493,7 @@ StartResult Process::start()
             writeAll(STDOUT_FILENO, loginShellText);
             writeAll(STDOUT_FILENO, "\n");
             if (!loginShellArgv.empty())
-                ::execvp(loginShellArgv[0], loginShellArgv.data());
+                ::execvp(loginShellArgv[0], loginShellArgv.data()); // tolerated as the execvp() above is
 
             // Bad luck.
             auto errorTextBuffer = array<char, 256> {};
@@ -802,6 +804,7 @@ std::expected<int, std::error_code> startDetached(DetachedCommand const& command
     auto const oomScoreAdjust = placement.childOomScoreAdjust()
                                     .transform([](int value) { return std::to_string(value); })
                                     .value_or(string {});
+    auto const descriptorLimit = util::openDescriptorLimit();
     auto gate = makeGate();
     if (!gate)
         return std::unexpected(gate.error());
@@ -829,7 +832,7 @@ std::expected<int, std::error_code> startDetached(DetachedCommand const& command
                 saveDup2(discard.get(), STDOUT_FILENO);
                 saveDup2(discard.get(), STDERR_FILENO);
             }
-            closeAllFileDescriptorsAbove(STDERR_FILENO);
+            util::closeDescriptorsAbove(STDERR_FILENO, descriptorLimit);
             // Neither what the caller ignores nor what its thread blocks -- the daemon blocks SIGINT and
             // SIGTERM -- carries over into the program, as exec() would carry both.
             signal(SIGPIPE, SIG_DFL);

@@ -475,19 +475,35 @@ TEST_CASE("Process.fallsBackFromAProgramThatIsNotThere", "[process]")
 namespace
 {
 
-/// @return Whether @p file comes to read @p expected within ten seconds.
-bool eventuallyReads(std::filesystem::path const& file, std::string_view expected)
+/// @return What @p path holds; std::nullopt where there is no such file.
+std::optional<std::string> fileContent(std::filesystem::path const& path)
+{
+    auto in = std::ifstream { path };
+    if (!in)
+        return std::nullopt;
+    return std::string { std::istreambuf_iterator<char> { in }, {} };
+}
+
+/// Waits up to ten seconds for @p file to read @p expected.
+/// @return @p expected once @p file reads it. Else what it read last ("<missing>" where it never existed),
+///         followed by what "<file>.part" and "<file>.err" hold -- where a script writes its work in progress
+///         and the status of each step -- so that a failed comparison says how far the script got.
+std::string eventuallyReads(std::filesystem::path const& file, std::string_view expected)
 {
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+    auto last = std::optional<std::string> {};
     while (std::chrono::steady_clock::now() < deadline)
     {
-        auto in = std::ifstream { file };
-        auto const text = std::string { std::istreambuf_iterator<char> { in }, {} };
-        if (text == expected)
-            return true;
+        last = fileContent(file);
+        if (last == expected)
+            return std::string { expected };
         std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
     }
-    return false;
+    auto const beside = [&](std::string_view suffix) {
+        auto const path = std::filesystem::path { file.string() + std::string { suffix } };
+        return std::format("\n[{}: {}]", path.filename().string(), fileContent(path).value_or("<missing>"));
+    };
+    return last.value_or("<missing>") + beside(".part") + beside(".err");
 }
 
 /// @return What runs `/bin/sh -c SCRIPT TARGET`: the script reads @p target as "$0".
@@ -519,7 +535,7 @@ TEST_CASE("startDetached.placed before it runs", "[process][placement]")
     #endif
 
     placement.release(*pid);
-    CHECK(eventuallyReads(target, "ran\n"));
+    CHECK(eventuallyReads(target, "ran\n") == "ran\n");
 }
 
 TEST_CASE("startDetached.detached from this process", "[process][placement]")
@@ -548,15 +564,67 @@ TEST_CASE("startDetached.reads the given file and discards its output", "[proces
     auto const input = directory.path() / "input.txt";
     std::ofstream { input } << "piped\n";
     auto const target = directory.path() / "copied.txt";
-    // What the shell's own standard output is, as /proc names it, written after what it read.
+    // What the shell's own standard output and error are, as /proc names them, written after what it read.
+    // Both are read before any redirection: dash (Ubuntu's /bin/sh) applies a simple command's redirections
+    // in the shell process itself, so /proc/$$ under a redirect names the redirect, not the program's
+    // descriptor.
     auto command =
-        shellScript(R"(cat > "$0.part"; readlink /proc/$$/fd/1 >> "$0.part"; mv "$0.part" "$0")", target);
+        shellScript(R"(out=$(readlink /proc/$$/fd/1); err=$(readlink /proc/$$/fd/2); cat > "$0.part"; )"
+                    R"(printf '%s\n%s\n' "$out" "$err" >> "$0.part"; mv "$0.part" "$0")",
+                    target);
     command.standardInput = input;
     command.output = vtpty::DetachedOutput::Discarded;
     auto placement = vtpty::NoPlacement {};
 
     REQUIRE(vtpty::startDetached(command, placement).has_value());
-    CHECK(eventuallyReads(target, "piped\n/dev/null\n"));
+    CHECK(eventuallyReads(target, "piped\n/dev/null\n/dev/null\n") == "piped\n/dev/null\n/dev/null\n");
+}
+
+namespace
+{
+/// Closes this process's standard input for as long as it lives, as a CI runner may start the suite with
+/// it closed, and restores it after, a failed check included.
+class StandardInputClosed
+{
+  public:
+    StandardInputClosed(): _saved { ::dup(STDIN_FILENO) } { ::close(STDIN_FILENO); }
+    StandardInputClosed(StandardInputClosed const&) = delete;
+    StandardInputClosed& operator=(StandardInputClosed const&) = delete;
+    StandardInputClosed(StandardInputClosed&&) = delete;
+    StandardInputClosed& operator=(StandardInputClosed&&) = delete;
+
+    ~StandardInputClosed()
+    {
+        if (_saved < 0)
+            return;
+        ::dup2(_saved, STDIN_FILENO);
+        ::close(_saved);
+    }
+
+  private:
+    int _saved; ///< Standard input, kept above it while closed; -1 where it was closed already.
+};
+} // namespace
+
+TEST_CASE("startDetached.reads the given file with this process's standard input closed",
+          "[process][placement]")
+{
+    // Descriptor 0 is free, so the input, opened close-on-exec, lands on it: handing it to the program as its
+    // standard input is then a dup2() of 0 onto itself, which changes nothing -- the flag included.
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto const input = directory.path() / "input.txt";
+    std::ofstream { input } << "piped\n";
+    auto const target = directory.path() / "copied.txt";
+    auto command = shellScript(R"(cat > "$0.part"; mv "$0.part" "$0")", target);
+    command.standardInput = input;
+    command.output = vtpty::DetachedOutput::Discarded;
+    auto placement = vtpty::NoPlacement {};
+
+    {
+        auto const closed = StandardInputClosed {};
+        REQUIRE(vtpty::startDetached(command, placement).has_value());
+    }
+    CHECK(eventuallyReads(target, "piped\n") == "piped\n");
 }
     #endif
 
@@ -592,7 +660,7 @@ TEST_CASE("startDetached.starts the program with no signal blocked", "[process][
     pthread_sigmask(SIG_SETMASK, &previous, nullptr);
 
     REQUIRE(pid.has_value());
-    CHECK(eventuallyReads(target, "SigBlk:\t0000000000000000\n"));
+    CHECK(eventuallyReads(target, "SigBlk:\t0000000000000000\n") == "SigBlk:\t0000000000000000\n");
 }
 
 TEST_CASE("startDetached.sets the oom_score_adj its placement supplies", "[process][placement]")
@@ -608,7 +676,7 @@ TEST_CASE("startDetached.sets the oom_score_adj its placement supplies", "[proce
         vtpty::startDetached(shellScript(R"(echo ready > "$0"; exec sleep 30)", target), placement);
     REQUIRE(pid.has_value());
     placement.release(*pid);
-    REQUIRE(eventuallyReads(target, "ready\n"));
+    REQUIRE(eventuallyReads(target, "ready\n") == "ready\n");
     CHECK(oomScoreAdjustOf(*pid) == wanted);
     ::kill(*pid, SIGKILL); // started by this test, and nobody's child here: nothing else ends it
 }

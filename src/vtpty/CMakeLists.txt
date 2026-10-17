@@ -178,7 +178,7 @@ if(VTPTY_TESTING)
         target_compile_definitions(vtpty_test PRIVATE
             VTPTY_CONPTY_OSC133_PROBE="$<TARGET_FILE:conpty_osc133_probe>")
     else()
-        target_sources(vtpty_test PRIVATE ProcessCgroup_test.cpp ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp)
+        target_sources(vtpty_test PRIVATE ProcessCgroup_test.cpp ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp UnixUtils_test.cpp)
     endif()
     if(_include_SshSession_module)
         target_sources(vtpty_test PRIVATE SshKnownHosts_test.cpp SshSession_test.cpp)
