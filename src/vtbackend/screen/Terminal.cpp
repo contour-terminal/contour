@@ -6341,14 +6341,16 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
     auto const behavior = alternateScreenBehavior(mode);
     Require(behavior.has_value());
 
-    if (enable && !isAlternateScreen())
+    // The guards ask which buffer is in use, as xterm's whichBuf and mlterm's edit identity do: the alternate
+    // screen is entered from whichever page the cursor is on.
+    if (enable && !isAlternateScreenBufferInUse())
     {
         // xterm's ToAlternate: switch in, carrying the cursor across (it is terminal-level, not
         // per-buffer, so it does not move), then optionally erase the alternate page. The alternate
         // page inherits the primary's margins, as xterm's alternate screen traditionally does.
         _pageMargins[AlternateScreenPageIndex.value] = currentPageMargin();
         auto const carried = _currentScreen->cursor();
-        _pageShownBeforeAlternate = _displayedPage;
+        _pagesBeforeAlternateScreen = { .cursor = _cursorPage, .displayed = _displayedPage };
         setScreen(ScreenType::Alternate);
         // A switch of screen buffer is no page movement, which is all DECPCCM governs: the alternate screen
         // is shown whatever DECPCCM says, as xterm shows the buffer it switches to, and as Windows Terminal
@@ -6360,19 +6362,20 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
         if (behavior->clearOnEnter)
             clearScreen();
     }
-    else if (!enable && isAlternateScreen())
+    else if (!enable && isAlternateScreenBufferInUse())
     {
         // xterm's FromAlternate: optionally erase the alternate page first (ED 2 leaves the cursor put),
-        // then switch back, carrying the cursor across.
+        // then switch back, carrying the cursor across. Back to the page the cursor came from: DEC STD
+        // 070's DECSC saves the page with the active position, and Windows Terminal's ?1049 restores it.
         if (behavior->clearOnExit)
             clearScreen();
         auto const carried = _currentScreen->cursor();
-        setScreen(ScreenType::Primary);
+        setPage(_pagesBeforeAlternateScreen.cursor, PageCursorPlacement::PagesOwn);
         // Coupled, the page on display followed the cursor. Reset, the page on display before the alternate
         // screen came up is shown again, as Windows Terminal's cursor restore moves its visible page only
         // while DECPCCM is set.
         if (!isModeEnabled(DECMode::PageCursorCoupling))
-            showPage(_pageShownBeforeAlternate);
+            showPage(_pagesBeforeAlternateScreen.displayed);
         if (behavior->carryCursor)
             _currentScreen->cursor() = carried;
     }
@@ -6381,7 +6384,7 @@ void Terminal::setAlternateScreen(DECMode mode, bool enable)
     // buffer is in use -- so DECRQM must report all three consistently, no matter which one switched
     // (xterm keys every one off screen->whichBuf). Mirror the resulting buffer state onto all three
     // bits; the trailing _modes.set(mode, enable) in setMode() then agrees with it.
-    auto const onAlternate = isAlternateScreen();
+    auto const onAlternate = isAlternateScreenBufferInUse();
     for (auto const altMode:
          { DECMode::UseAlternateScreen, DECMode::OptionalAltScreen, DECMode::ExtendedAltScreen })
         _modes.set(altMode, onAlternate);
@@ -6584,7 +6587,7 @@ void Terminal::hardReset()
         page->hardReset();
     _cursorPage = PageIndex(0);
     showPage(PageIndex(0));
-    _pageShownBeforeAlternate = PageIndex(0);
+    _pagesBeforeAlternateScreen = {};
     _hostWritableStatusLineScreen.hardReset();
     _indicatorStatusScreen.hardReset();
 

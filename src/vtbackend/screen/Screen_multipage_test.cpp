@@ -786,6 +786,85 @@ TEST_CASE("MultiPage.pageMovementStaysOnTheAlternateScreen", "[screen]")
     CHECK(trimmedTextScreenshot(mock) == "main");
 }
 
+TEST_CASE("MultiPage.theAlternateScreenIsEnteredFromAnyPage", "[screen]")
+{
+    // The alternate screen is one buffer beside the pages, entered from wherever the cursor is: xterm and
+    // mlterm guard the switch on the buffer in use, not on the page. Leaving it, the cursor returns to the
+    // page it came from, as Windows Terminal's ?1049 restores the page it saved with the cursor. DEC STD 070
+    // defines no alternate screen; its DECSC, which saves the page with the active position, is the page rule
+    // that ?1049 applies to the switch.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    auto const mode = GENERATE(47, 1047, 1049);
+    INFO(std::format("mode {}", mode));
+    auto const modeState = [&] {
+        mock.discardPendingReplies();
+        mock.writeToScreen(std::format("\033[?{}$p", mode)); // DECRQM
+        return terminal.peekInput();
+    };
+    mock.writeToScreen("one\033[2 P\033[2;3Htwo");
+    REQUIRE(terminal.cursorPageIndex() == PageIndex(1));
+    auto const cursorOnPageTwo = terminal.currentScreen().cursor().position;
+
+    mock.writeToScreen(std::format("\033[?{}h", mode));
+    CHECK(terminal.cursorPageIndex() == AlternateScreenPageIndex);
+    CHECK(terminal.displayedPageIndex() == AlternateScreenPageIndex);
+    CHECK(e(modeState()) == e(std::format("\033[?{};1$y", mode)));
+    mock.writeToScreen("\033[3;5Halt");
+    auto const cursorOnTheAlternateScreen = terminal.currentScreen().cursor().position;
+
+    mock.writeToScreen(std::format("\033[?{}l", mode));
+    CHECK(terminal.cursorPageIndex() == PageIndex(1));
+    CHECK(terminal.displayedPageIndex() == PageIndex(1));
+    CHECK(e(modeState()) == e(std::format("\033[?{};2$y", mode)));
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "\n  two");
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset(0)) == "one       ");
+    // 47 and 1047 carry the cursor across; 1049 leaves the page's own cursor where it was, its implicit
+    // DECRC.
+    CHECK(terminal.currentScreen().cursor().position
+          == (mode == 1049 ? cursorOnPageTwo : cursorOnTheAlternateScreen));
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.leavingTheAlternateScreenResumesPaging", "[screen]")
+{
+    // Page 3 on display, the cursor on page 2. Leaving the alternate screen returns both where they were:
+    // Windows Terminal restores the cursor's page, and moves the page on display only while DECPCCM is set.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    auto const mode = GENERATE(47, 1047, 1049);
+    INFO(std::format("mode {}", mode));
+    mock.writeToScreen("\033[3 Pthree\033[?64l\033[2 Ptwo");
+    REQUIRE(terminal.cursorPageIndex() == PageIndex(1));
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+
+    mock.writeToScreen(std::format("\033[?{}h", mode));
+    REQUIRE(terminal.displayedPageIndex() == AlternateScreenPageIndex);
+    mock.writeToScreen(std::format("\033[?{}l", mode));
+    CHECK(terminal.cursorPageIndex() == PageIndex(1));
+    CHECK(terminal.displayedPageIndex() == PageIndex(2));
+    CHECK(terminal.pageAt(PageIndex(1)).grid().lineText(LineOffset(0)) == "two       ");
+    terminal.refreshRenderBuffer();
+    CHECK(trimmedTextScreenshot(mock) == "three");
+}
+
+TEST_CASE("MultiPage.risLeavesTheAlternateScreenForPageOne", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[2 P\033[?1049h");
+    REQUIRE(terminal.isAlternateScreenBufferInUse());
+
+    mock.writeToScreen("\033c"); // RIS
+    CHECK(terminal.cursorPageIndex() == PageIndex(0));
+    CHECK(terminal.displayedPageIndex() == PageIndex(0));
+    mock.writeToScreen("\033[?1049l"); // nothing to leave
+    CHECK(terminal.cursorPageIndex() == PageIndex(0));
+    CHECK(terminal.displayedPageIndex() == PageIndex(0));
+}
+
 TEST_CASE("MultiPage.DECPCCM_reset.theAlternateScreenIsShownWhileInUse", "[screen]")
 {
     // DECPCCM governs page movement (NP, PP, PPA, PPR, PPB). The alternate screen is no DEC page, and
