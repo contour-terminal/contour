@@ -88,6 +88,8 @@ struct ContextMenuState
     std::optional<PointedBlock> blockUnderCursor {};
     /// Whether the shell waits at its prompt, where a command it is handed would run.
     PromptPresence livePrompt = PromptPresence::Absent;
+    /// Whether the last finished block's command line is known, which is what "Copy Last Command" copies.
+    CommandLinePresence lastCommandLine = CommandLinePresence::Absent;
 
     std::string activeProfile;             ///< The profile this session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.
