@@ -18,9 +18,13 @@
 
 #include <charconv>
 #include <cstddef>
+#include <format>
+#include <memory>
 #include <ranges>
 #include <set>
+#include <string>
 #include <string_view>
+#include <utility>
 using namespace vtbackend;
 using namespace vtbackend::test;
 using namespace std;
@@ -639,6 +643,179 @@ TEST_CASE("MultiPage.thePointerIsOnThePageOnDisplayWhileTheStatusLineIsWritten",
     pointAt(mock, 2, 3);
     CHECK(terminal.currentMouseGridPosition()
           == CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
+}
+
+// What the viewer selects, copies and searches is on the page on display too, whichever page the cursor
+// writes to.
+
+namespace
+{
+/// Double-clicks the cell at @p column of row @p line, a second after any click before it.
+/// @param mock The terminal.
+/// @param line The screen row.
+/// @param column The column.
+void doubleClickAt(MockTerm<>& mock, int line, int column)
+{
+    mock.terminal.tick(1s);
+    pressAt(mock, MouseButton::Left, line, column);
+    release(mock, MouseButton::Left);
+    pressAt(mock, MouseButton::Left, line, column);
+    release(mock, MouseButton::Left);
+}
+
+/// What showOnePageOfTwo() writes on page 1 and on page 3 so that the page @p shown holds @p onDisplay and
+/// the other page holds @p elsewhere.
+/// @param shown The page on display.
+/// @param onDisplay What the page on display holds.
+/// @param elsewhere What the cursor's page holds.
+/// @return Page 1's text and page 3's text.
+[[nodiscard]] std::pair<std::string_view, std::string_view> pagesHolding(OnDisplay shown,
+                                                                         std::string_view onDisplay,
+                                                                         std::string_view elsewhere)
+{
+    return shown == OnDisplay::Primary ? std::pair { onDisplay, elsewhere }
+                                       : std::pair { elsewhere, onDisplay };
+}
+} // namespace
+
+TEST_CASE("MultiPage.DECPCCM_reset.aWordIsSelectedOnThePageOnDisplay", "[screen]")
+{
+    // The other page holds spaces in the same cells, so a word walk over it would stop after one letter.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto const shown = GENERATE(OnDisplay::Primary, OnDisplay::Other);
+    auto const [primary, other] = pagesHolding(shown, "abcdefgh", "a b c d e");
+    showOnePageOfTwo(mock, primary, other, shown);
+
+    doubleClickAt(mock, 0, 2);
+
+    CHECK(mock.terminal.extractSelectionText() == "abcdefgh");
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.viStarSearchesTheWordOnThePageOnDisplay", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto const shown = GENERATE(OnDisplay::Primary, OnDisplay::Other);
+    auto const [primary, other] = pagesHolding(shown, "alpha beta alpha", "gamma");
+    showOnePageOfTwo(mock, primary, other, shown);
+    mock.terminal.inputHandler().setMode(ViMode::Normal);
+    mock.terminal.moveNormalModeCursorTo(CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
+
+    mock.sendCharSequence("*");
+
+    CHECK(mock.terminal.search().pattern == U"alpha");
+    CHECK(mock.terminal.normalModeCursorPosition()
+          == CellLocation { .line = LineOffset(0), .column = ColumnOffset(11) });
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.aCopyJoinsTheRowsOfAWrappedLineOnThePageOnDisplay", "[screen]")
+{
+    // Page 1 holds one line of 30 letters, wrapped at the margin of a 20-column page; page 3 holds two lines
+    // in the same rows. A copy of both rows joins them only where they are one line.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto const wrapped = std::string(30, 'a');
+    auto const twoLines = std::format("{}\r\n{}", std::string(20, 'b'), std::string(10, 'b'));
+    auto const [shown, expected] = GENERATE_COPY(table<OnDisplay, std::string>({
+        { OnDisplay::Primary, wrapped },
+        { OnDisplay::Other, std::format("{}\n{}", std::string(20, 'b'), std::string(10, 'b')) },
+    }));
+    showOnePageOfTwo(mock, wrapped, twoLines, shown);
+
+    mock.terminal.setSelector(
+        std::make_unique<LinearSelection>(mock.terminal.selectionHelper(),
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                                          [] {}));
+    (void) mock.terminal.selector()->extend(
+        CellLocation { .line = LineOffset(1), .column = ColumnOffset(19) });
+
+    CHECK(mock.terminal.extractSelectionText() == expected);
+}
+
+TEST_CASE("MultiPage.selectAllTakesTheHistoryOfThePageOnDisplay", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    printLines(mock, "line", 40);
+    REQUIRE(terminal.primaryScreen().historyLineCount() > LineCount(0));
+
+    SECTION("page 1 on display, the cursor on page 3")
+    {
+        mock.writeToScreen("\033[?64l\033[3 P");
+        terminal.selectAll();
+        REQUIRE(terminal.selector() != nullptr);
+        CHECK(terminal.selector()->from().line
+              == -boxed_cast<LineOffset>(terminal.primaryScreen().historyLineCount()));
+    }
+
+    SECTION("page 1 on display, the cursor on the status line")
+    {
+        mock.writeToScreen("\033[2$~\033[1$}"); // DECSSDT host-writable, DECSASD status line
+        terminal.selectAll();
+        REQUIRE(terminal.selector() != nullptr);
+        CHECK(terminal.selector()->from().line
+              == -boxed_cast<LineOffset>(terminal.primaryScreen().historyLineCount()));
+    }
+
+    SECTION("page 3 on display, the cursor on page 1")
+    {
+        mock.writeToScreen("\033[3 P\033[?64l\033[1 P");
+        terminal.selectAll();
+        REQUIRE(terminal.selector() != nullptr);
+        CHECK(terminal.selector()->from().line == LineOffset(0));
+    }
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.aDragAlongSizedTextStaysOnItsLineOnThePageOnDisplay", "[screen]")
+{
+    // A scale-2 block is two rows tall but one line of text, so a drag that strays into its lower row stays
+    // a one-line selection -- where the block is on the page on display. The other page has none.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(20) } };
+    auto const shown = GENERATE(OnDisplay::Primary, OnDisplay::Other);
+    auto const [primary, other] = pagesHolding(shown, "\033]66;s=2;ab\a  cap", "plain text only");
+    showOnePageOfTwo(mock, primary, other, shown);
+    auto const& page = mock.terminal.displayedPage();
+
+    mock.terminal.tick(1s);
+    pointAt(mock, 0, 0);
+    pressAt(mock, MouseButton::Left, 0, 0);
+    pointAt(mock, 1, 3);
+
+    CHECK(mock.terminal.isSelected(page, CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) }));
+    CHECK_FALSE(
+        mock.terminal.isSelected(page, CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) }));
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.theSearchFindsWhatIsOnThePageOnDisplay", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    auto const shown = GENERATE(OnDisplay::Primary, OnDisplay::Other);
+    auto const [primary, other] = pagesHolding(shown, "hay needle", "hay only");
+    showOnePageOfTwo(mock, primary, other, shown);
+    (void) terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    auto const match = CellLocation { .line = LineOffset(0), .column = ColumnOffset(4) };
+    auto const bottomRight = CellLocation { .line = LineOffset(2), .column = ColumnOffset(19) };
+
+    CHECK(terminal.search(CellLocation {}) == match);
+    CHECK(terminal.searchReverse(bottomRight) == match);
+    CHECK(terminal.searchPrevMatch(bottomRight) == match);
+    CHECK(terminal.tallySearchMatches(match, 10).total == 1);
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.aSearchBackwardsReachesTheHistoryOfThePageOnDisplay", "[screen]")
+{
+    // The only match is in page 1's history; from the top row of the page, the previous match is above it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    mock.writeToScreen("needle\r\n");
+    printLines(mock, "hay", 20);
+    mock.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, then the cursor to page 3
+    auto const history = boxed_cast<LineOffset>(terminal.primaryScreen().historyLineCount());
+    (void) terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+
+    CHECK(terminal.searchPrevMatch(CellLocation {})
+          == CellLocation { .line = -history, .column = ColumnOffset(0) });
 }
 
 TEST_CASE("MultiPage.pageMovementOnTheStatusLineLeavesTheMainDisplayAlone", "[screen]")

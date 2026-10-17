@@ -2396,9 +2396,13 @@ class Terminal
     [[nodiscard]] Screen const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
 
+    /// Whether a row of the page on display continues the row above it, as a line wrapped at the margin does.
+    /// Only the primary page records its wrapped rows.
+    /// @param lineNumber The row.
+    /// @return true if the row continues the one above it.
     [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
     {
-        return isPrimaryScreen() && primaryScreen().isLineWrapped(lineNumber);
+        return displayedScreenType() == ScreenType::Primary && primaryScreen().isLineWrapped(lineNumber);
     }
 
     [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
@@ -2478,20 +2482,6 @@ class Terminal
 
     void updateSelectionMatches();
 
-    template <typename RenderTarget>
-    void renderSelection(RenderTarget renderTarget) const
-    {
-        if (!_selection)
-            return;
-
-        if (isPrimaryScreen())
-            vtbackend::renderSelection(*_selection,
-                                       [&](CellLocation pos) { renderTarget(pos, primaryScreen().at(pos)); });
-        else
-            vtbackend::renderSelection(
-                *_selection, [&](CellLocation pos) { renderTarget(pos, alternateScreen().at(pos)); });
-    }
-
     void clearSelection();
 
     /// Tests whether some area has been selected.
@@ -2558,7 +2548,7 @@ class Terminal
     /// Tests whether or not some grid cells are selected.
     bool selectionAvailable() const noexcept { return !!_selection; }
 
-    /// Selects everything the terminal holds: the whole scrollback and the whole screen.
+    /// Selects everything the page on display holds: its whole scrollback and the whole page.
     void selectAll();
 
     /// Whether the left mouse button is currently held down, i.e. a selection drag may be in progress.
@@ -3317,6 +3307,7 @@ class Terminal
     // Sets the current search term to the given text and
     // moves the viewport accordingly to make sure the given text is visible,
     // or it will not move at all if the input text was not found.
+    // Every search reads the page on display, the one the viewport shows.
     [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string text, CellLocation searchPosition);
     [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
@@ -3337,8 +3328,8 @@ class Terminal
     /// @return false if @p mode was already in effect.
     bool setSearchCaseSensitivity(SearchCaseSensitivity mode);
 
-    /// Counts the active pattern's matches across the whole grid, scrollback included, and locates
-    /// @p position among them.
+    /// Counts the active pattern's matches across the whole page on display, scrollback included, and
+    /// locates @p position among them.
     ///
     /// One traversal answers both halves of a "3 of 27" label. It is O(grid), so it is meant to be
     /// called when the pattern or the grid changes -- not per rendered frame.
@@ -3354,11 +3345,14 @@ class Terminal
 
     void clearSearch();
 
-    // Tests if the grid cell at the given location does contain a word delimiter.
+    // Tests if the grid cell at the given location of the page on display does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
     [[nodiscard]] bool wordDelimited(CellLocation position,
                                      std::u32string_view wordDelimiters) const noexcept;
 
+    /// The word at @p position of the page on display, as vi's `*` and `#` search for it.
+    /// @param position A cell of the word.
+    /// @return The word's text and the cells it spans.
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
 

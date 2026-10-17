@@ -4111,6 +4111,40 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
     }
 }
 
+TEST_CASE("TerminalSession: the find bar wraps to the top of the page on display",
+          "[contour][session][search]")
+{
+    // DECPCCM reset: page 1 stays on display, its history holding the only two matches, while the cursor
+    // writes to page 3, which holds none. Stepping on from the last match wraps to the first, at the top of
+    // page 1's history.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen("needle one\r\n");
+    for (auto const i: std::views::iota(0, 10))
+        terminal.writeToScreen(std::format("hay {}\r\n", i));
+    terminal.writeToScreen("needle two\r\n");
+    for (auto const i: std::views::iota(0, 40))
+        terminal.writeToScreen(std::format("more hay {}\r\n", i));
+    terminal.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, then the cursor to page 3
+    REQUIRE(terminal.displayedPageIndex() == vtbackend::PageIndex(0));
+    auto const top = -boxed_cast<vtbackend::LineOffset>(terminal.primaryScreen().historyLineCount());
+    auto const first = vtbackend::CellLocation { .line = top, .column = vtbackend::ColumnOffset(0) };
+    auto const last = vtbackend::CellLocation { .line = top + vtbackend::LineOffset(11),
+                                                .column = vtbackend::ColumnOffset(0) };
+
+    session->searchBarOpened();
+    session->setSearchPattern(QStringLiteral("needle"));
+    {
+        auto const _ = std::scoped_lock { terminal };
+        terminal.moveNormalModeCursorTo(last);
+    }
+    session->searchNext();
+
+    auto const _ = std::scoped_lock { terminal };
+    CHECK(terminal.normalModeCursorPosition() == first);
+}
+
 TEST_CASE("TerminalSession: SearchReverse asks for the find bar without switching Vi mode",
           "[contour][session][search]")
 {

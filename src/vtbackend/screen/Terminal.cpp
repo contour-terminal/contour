@@ -862,8 +862,10 @@ PageSize Terminal::TheSelectionHelper::pageSize() const noexcept
 
 bool Terminal::TheSelectionHelper::wrappedLine(LineOffset line) const noexcept
 {
-    // Asked by the word walks before they step into the row above, which must therefore still exist.
-    return terminal->isPrimaryScreen() && terminal->primaryScreen().grid().continuesRowAbove(line);
+    // Asked by the word walks before they step into the row above, which must therefore still exist. Of the
+    // page on display, which the walks read: only the primary page records its wrapped rows.
+    return terminal->displayedScreenType() == ScreenType::Primary
+           && terminal->primaryScreen().grid().continuesRowAbove(line);
 }
 
 bool Terminal::TheSelectionHelper::cellEmpty(CellLocation pos) const noexcept
@@ -871,7 +873,7 @@ bool Terminal::TheSelectionHelper::cellEmpty(CellLocation pos) const noexcept
     // Word selection may be off by one
     pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    return terminal->currentScreen().isCellEmpty(pos);
+    return terminal->displayedPage().isCellEmpty(pos);
 }
 
 int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
@@ -879,7 +881,7 @@ int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
     // Word selection may be off by one
     pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    return terminal->currentScreen().cellWidthAt(pos);
+    return terminal->displayedPage().cellWidthAt(pos);
 }
 
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
@@ -3060,7 +3062,7 @@ string Terminal::extractSelectionText() const
     if (!_selection || _selection->state() == Selection::State::Waiting)
         return "";
 
-    auto const& screen = pageAt(_displayedPage);
+    auto const& screen = displayedPage();
     auto se = SelectionRenderer { *this, pageSize().columns.as<ColumnOffset>() - 1 };
     vtbackend::renderSelection(*_selection, [&](CellLocation pos) { se(pos, screen.at(pos)); });
     return se.finish();
@@ -3068,7 +3070,7 @@ string Terminal::extractSelectionText() const
 
 void Terminal::selectAll()
 {
-    selectLines(-boxed_cast<LineOffset>(_currentScreen->grid().historyLineCount()),
+    selectLines(-boxed_cast<LineOffset>(displayedPage().grid().historyLineCount()),
                 boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1));
 }
 
@@ -7740,7 +7742,7 @@ bool Terminal::setSearchCaseSensitivity(SearchCaseSensitivity mode)
 
 SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limit)
 {
-    return currentScreen().tallyMatches(
+    return displayedPage().tallyMatches(
         u32string_view(_search.pattern), position, _search.caseSensitivity, limit);
 }
 
@@ -7758,7 +7760,7 @@ optional<CellLocation> Terminal::search(CellLocation searchPosition)
     // Through the cached comparison rather than the policy: Search::comparison is kept in step with
     // the pattern by this class's own setters, and re-deriving it here would put a UCD lookup per
     // codepoint of the needle on every keystroke of an incremental search. @see Search::comparison.
-    auto const matchLocation = currentScreen().searchFrom(searchText, searchPosition, _search.comparison);
+    auto const matchLocation = displayedPage().searchFrom(searchText, searchPosition, _search.comparison);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
@@ -7786,7 +7788,7 @@ std::optional<CellLocation> Terminal::searchPrevMatch(CellLocation cursorPositio
     auto startPosition = cursorPosition;
     if (startPosition.column != ColumnOffset(0))
         startPosition.column--;
-    else if (cursorPosition.line > -boxed_cast<LineOffset>(currentScreen().historyLineCount()))
+    else if (cursorPosition.line > -boxed_cast<LineOffset>(displayedPage().historyLineCount()))
     {
         startPosition.line--;
         startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
@@ -7821,13 +7823,13 @@ bool Terminal::wordDelimited(CellLocation position, std::u32string_view wordDeli
     // Word selection may be off by one
     position.column = std::min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
-    return pageAt(_cursorPage).grid().cellEmptyOrContainsOneOf(position, wordDelimiters);
+    return displayedPage().grid().cellEmptyOrContainsOneOf(position, wordDelimiters);
 }
 
 std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
     CellLocation position) const noexcept
 {
-    auto const& screen = pageAt(_cursorPage);
+    auto const& screen = displayedPage();
     auto const range = screen.grid().wordRangeUnderCursor(position, u32string_view(_settings.wordDelimiters));
     return { screen.grid().extractText(range), range };
 }
@@ -7837,7 +7839,7 @@ optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
     auto const searchText = u32string_view(_search.pattern);
     // The cached comparison, for the reason Terminal::search() states.
     auto const matchLocation =
-        currentScreen().searchReverseFrom(searchText, searchPosition, _search.comparison);
+        displayedPage().searchReverseFrom(searchText, searchPosition, _search.comparison);
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
@@ -7861,11 +7863,11 @@ CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLo
     if (anchor.line == pointer.line)
         return pointer;
 
-    auto const anchorBlock = currentScreen().multicellBlockAt(anchor);
+    auto const anchorBlock = displayedPage().multicellBlockAt(anchor);
     if (!anchorBlock || anchorBlock->rows < 2)
         return pointer;
 
-    auto const pointerBlock = currentScreen().multicellBlockAt(pointer);
+    auto const pointerBlock = displayedPage().multicellBlockAt(pointer);
     if (!pointerBlock || pointerBlock->rows != anchorBlock->rows
         || pointerBlock->origin.line != anchorBlock->origin.line)
         return pointer;

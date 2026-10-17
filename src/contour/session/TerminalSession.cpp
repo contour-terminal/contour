@@ -2244,7 +2244,8 @@ void TerminalSession::wrapSearchTo(SearchWrapEdge edge)
         if (_terminal.search().pattern.empty())
             return;
 
-        auto const& screen = _terminal.currentScreen();
+        // The page on display, the one Terminal::search() reads.
+        auto const& screen = _terminal.displayedPage();
         auto const from =
             edge == SearchWrapEdge::Top
                 ? CellLocation { .line = -boxed_cast<vtbackend::LineOffset>(screen.historyLineCount()),
