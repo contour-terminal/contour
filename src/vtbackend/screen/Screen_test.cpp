@@ -2526,6 +2526,25 @@ TEST_CASE("AlternateScreen.DECSET_47_1047_1049", "[screen]")
           == (altErasedOnExit ? "     " : "def  "));
 }
 
+TEST_CASE("AlternateScreen.textAfterTheSwitchLandsWhereTheCarriedCursorIs", "[screen]")
+{
+    // 47 and 1047 carry the cursor across the switch both ways, so the next character is written where the
+    // cursor was -- on its row, not on the row the other screen's own cursor was left on.
+    auto const mode = GENERATE(47, 1047);
+    CAPTURE(mode);
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("ab\r\nab"); // the cursor at line 1, column 2
+
+    mock.writeToScreen(std::format("\033[?{}hX", mode));
+    CHECK(terminal.alternateScreen().grid().lineText(LineOffset(0)) == "     ");
+    CHECK(terminal.alternateScreen().grid().lineText(LineOffset(1)) == "  X  ");
+
+    mock.writeToScreen(std::format("\033[3;2H\033[?{}lY", mode)); // leave from line 2, column 1
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset(1)) == "ab   ");
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset(2)) == " Y   ");
+}
+
 TEST_CASE("DCH.worksOutsideTopBottomMargin", "[screen]")
 {
     // DCH deletes characters even when the cursor sits outside the top/bottom scrolling margin (xterm
