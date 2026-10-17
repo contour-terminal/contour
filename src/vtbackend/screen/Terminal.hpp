@@ -3994,7 +3994,7 @@ class Terminal
     /// Holds state for an ongoing cursor motion animation between grid cells.
     struct CursorMotionState: crispy::AnimationState<crispy::EaseOutCubic>
     {
-        CellLocation fromPosition {};
+        FractionalCellLocation fromPosition {}; ///< Between cells where the motion took over from another.
         CellLocation toPosition {};
         RGBColor fromColor {}; ///< Cursor color at the animation source position.
         RGBColor toColor {};   ///< Cursor color at the animation target position.
