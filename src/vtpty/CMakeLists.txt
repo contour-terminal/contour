@@ -44,6 +44,7 @@ set(vtpty_HEADERS
     ChannelPty.hpp
     CommandCapture.hpp
     CommandLine.hpp
+    DetachedProcess.hpp # POSIX only; defined in Process_unix.cpp
     EnvironmentBlock.hpp
     ImageSize.hpp
     MockPty.hpp

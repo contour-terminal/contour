@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/CommandLine.hpp>
+#include <vtpty/DetachedProcess.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -31,6 +33,7 @@
 #include <system_error>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 #ifndef __FreeBSD__
     #include <utmp.h>
@@ -47,12 +50,14 @@
     #include <pty.h>
 #endif
 
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
 #include <csignal>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 
 // POSIX requires no header to declare `environ`; each platform is left to differ, and all three we
@@ -91,6 +96,10 @@ namespace
 
     /// How often a HangupGrace looks whether the child has ended, and whether the grace has passed.
     constexpr auto HangupGraceStep = std::chrono::milliseconds { 10 };
+
+    /// How long startDetached() waits, in milliseconds, for its intermediate process to name the program's:
+    /// no time at all once it has reaped that process, which sent the name before it exited.
+    constexpr auto DetachedHandoverTimeout = 5000;
 
     /// @return The signal that asks a child to end as @p hint says.
     [[nodiscard]] constexpr int signalFor(Process::TerminationHint hint) noexcept
@@ -786,5 +795,105 @@ string Process::workingDirectory() const
     return "."s;
 #endif
 }
+
+// {{{ startDetached
+std::expected<int, std::error_code> startDetached(DetachedCommand const& command, ProcessPlacement& placement)
+{
+    auto const lastError = [] {
+        return std::unexpected(std::error_code { errno, std::generic_category() });
+    };
+
+    // Everything the two forked processes use is prepared here: between fork() and exec() they may not
+    // allocate. The files their standard streams are to use are opened here too, so that an input that
+    // cannot be read is reported to the caller, not found by a child nobody hears from.
+    auto arguments = command.argv.empty() ? vector<string> { command.image } : command.argv;
+    auto argv = vector<char*> {};
+    argv.reserve(arguments.size() + 1);
+    for (auto& argument: arguments)
+        argv.push_back(argument.data());
+    argv.push_back(nullptr);
+
+    auto const input = command.standardInput.empty()
+                           ? OwnedFd {}
+                           : OwnedFd { ::open(command.standardInput.c_str(), O_RDONLY | O_CLOEXEC) };
+    if (!command.standardInput.empty() && !input.isOpen())
+        return lastError();
+    auto const discard = command.output == DetachedOutput::Discarded
+                             ? OwnedFd { ::open("/dev/null", O_WRONLY | O_CLOEXEC) }
+                             : OwnedFd {};
+    if (command.output == DetachedOutput::Discarded && !discard.isOpen())
+        return lastError();
+
+    auto const oomScoreAdjust = placement.childOomScoreAdjust()
+                                    .transform([](int value) { return std::to_string(value); })
+                                    .value_or(string {});
+    auto gate = makeGate();
+    if (!gate)
+        return std::unexpected(gate.error());
+
+    auto const intermediate = ::fork();
+    if (intermediate < 0)
+        return lastError();
+    if (intermediate == 0)
+    {
+        // A session of its own, the program's process, and gone: the program is left to init, or to the
+        // nearest subreaper, to wait for -- not to this process. Async-signal-safe calls only.
+        ::setsid();
+        auto const program = ::fork();
+        if (program == 0)
+        {
+            // Parked first, as Process::start() parks a session's shell. @see ProcessPlacement.
+            ::close(gate->parentEnd.get());
+            writeOwnOomScoreAdjust(oomScoreAdjust);
+            awaitGate(gate->childEnd.get());
+            ::close(gate->childEnd.get());
+            if (input.isOpen())
+                saveDup2(input.get(), STDIN_FILENO);
+            if (discard.isOpen())
+            {
+                saveDup2(discard.get(), STDOUT_FILENO);
+                saveDup2(discard.get(), STDERR_FILENO);
+            }
+            closeAllFileDescriptorsAbove(STDERR_FILENO);
+            // Neither what the caller ignores nor what its thread blocks -- the daemon blocks SIGINT and
+            // SIGTERM -- carries over into the program, as exec() would carry both.
+            signal(SIGPIPE, SIG_DFL);
+            auto noSignals = sigset_t {};
+            sigemptyset(&noSignals);
+            pthread_sigmask(SIG_SETMASK, &noSignals, nullptr);
+            ::execve(command.image.c_str(), argv.data(), environ);
+            ::_exit(127);
+        }
+        // Which process to place travels over the gate: written into the end the program waits on, it
+        // arrives at the end the parent holds. A failed fork sends its errno, negated.
+        auto const placed = std::bit_cast<std::array<char, sizeof(pid_t)>>(program > 0 ? program : -errno);
+        writeAll(gate->childEnd.get(), string_view { placed.data(), placed.size() });
+        ::_exit(program > 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+    }
+
+    gate->childEnd.reset();
+    auto status = 0;
+    while (::waitpid(intermediate, &status, 0) < 0 && errno == EINTR)
+        ;
+    // Once the intermediate is reaped, what it sent is there to read, or never comes. Waited for all the
+    // same, briefly, should a SIGCHLD handler have reaped it first; a program left waiting on the gate
+    // then runs unplaced, as the gate's end closes on the way out.
+    auto ready = pollfd { .fd = gate->parentEnd.get(), .events = POLLIN, .revents = 0 };
+    while (::poll(&ready, 1, DetachedHandoverTimeout) < 0 && errno == EINTR)
+        ;
+    auto received = std::array<char, sizeof(pid_t)> {};
+    auto const length = ::recv(gate->parentEnd.get(), received.data(), received.size(), MSG_DONTWAIT);
+    auto const pid = std::bit_cast<pid_t>(received);
+    if (std::cmp_not_equal(length, received.size()) || pid == 0)
+        return std::unexpected(std::make_error_code(std::errc::no_child_process));
+    if (pid < 0)
+        return std::unexpected(std::error_code { -pid, std::generic_category() });
+
+    // Not this process's child, yet its pid still names it: it waits on the gate, and only a signal from
+    // elsewhere could end it before the pidfd is opened.
+    placement.placeThenRelease(ParkedChild { pid, openPidFd(pid), std::move(gate->parentEnd) });
+    return pid;
+}
+// }}}
 
 } // namespace vtpty
