@@ -1114,6 +1114,75 @@ TEST_CASE("DECLRP: the page is the page on display", "[screen]")
     CHECK(e(mock.replyData()) == e(std::format("\033[1;0;3;4;{}&w", page)));
 }
 
+TEST_CASE("DECLRP: each button reports its own events and its bit", "[screen]")
+{
+    // DEC STD 070 ch. 13: Pe is 2/3 for the left button going down/up, 4/5 for the middle one, 6/7 for the
+    // right one; Pb names the buttons held down, right 1, middle 2, left 4. xterm's SendLocatorPosition sends
+    // 2 + (button << 1) and 3 + (button << 1), and the mask after the event.
+    auto const [button, down, up, bit] = GENERATE(table<MouseButton, int, int, int>({
+        { MouseButton::Left, 2, 3, 4 },
+        { MouseButton::Middle, 4, 5, 2 },
+        { MouseButton::Right, 6, 7, 1 },
+    }));
+    CAPTURE(down);
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z\033[1;3'{"); // DECELR on; DECSLE: report presses and releases
+
+    mock.resetReplyData();
+    pressAt(mock, button, 2, 3);
+    CHECK(e(mock.replyData()) == e(std::format("\033[{};{};3;4;1&w", down, bit)));
+    mock.resetReplyData();
+    release(mock, button);
+    CHECK(e(mock.replyData()) == e(std::format("\033[{};0;3;4;1&w", up)));
+}
+
+TEST_CASE("DECLRP: the button mask names every button held down", "[screen]")
+{
+    // Pb is the state of all the buttons after the event, not the one that moved: DEC STD 070 ch. 13
+    // ("indicating which, if any, of up to 4 buttons are down"), and xterm's "mask should be the state after
+    // the button press/release". A request (Pe 1) names them too.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[1;2'z\033[1;3'{");
+    auto const reportOf = [&](auto const& event) {
+        mock.resetReplyData();
+        event();
+        return e(mock.replyData());
+    };
+    CHECK(reportOf([&] { pressAt(mock, MouseButton::Left, 0, 0); }) == e("\033[2;4;1;1;1&w"));
+    CHECK(reportOf([&] { pressAt(mock, MouseButton::Right, 0, 0); }) == e("\033[6;5;1;1;1&w"));
+    CHECK(reportOf([&] { mock.writeToScreen("\033['|"); }) == e("\033[1;5;1;1;1&w"));
+    CHECK(reportOf([&] { release(mock, MouseButton::Left); }) == e("\033[3;1;1;1;1&w"));
+    CHECK(reportOf([&] { release(mock, MouseButton::Right); }) == e("\033[7;0;1;1;1&w"));
+}
+
+TEST_CASE("DECLRP: an unavailable locator sends no other parameter", "[screen]")
+{
+    // DEC STD 070 ch. 13: "If Pe is 0 or omitted, all other parameters shall not be sent because the locator
+    // is unavailable". xterm answers CSI 0 & w both while the locator is off and while the pointer is outside
+    // its window (GetLocatorPosition, SendLocatorPosition).
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+
+    SECTION("the locator is off")
+    {
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+    }
+
+    SECTION("the pointer is off the grid")
+    {
+        mock.writeToScreen("\033[1;2'z\033[1;3'{");
+        pressAt(mock, MouseButton::Left, 2, 3);
+        mock.terminal.sendMouseLeaveEvent();
+        mock.resetReplyData();
+        mock.writeToScreen("\033['|");
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+        mock.resetReplyData();
+        release(mock, MouseButton::Left);
+        CHECK(e(mock.replyData()) == e("\033[0&w"));
+    }
+}
+
 TEST_CASE("DECELR: soft reset disables locator", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };

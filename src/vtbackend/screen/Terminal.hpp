@@ -965,8 +965,19 @@ class Terminal
     /// Selects which locator events generate reports.
     void selectLocatorEvents(std::span<int const> params) noexcept;
 
-    /// Sends a DEC Locator report (DECLRP) to the PTY.
-    void sendLocatorReport(int event, int button, int row, int col);
+    /// A button going down or up, as the DEC locator reports it.
+    enum class LocatorEvent : uint8_t
+    {
+        ButtonDown = 0, ///< DECLRP's event 2, 4 or 6, by the button.
+        ButtonUp,       ///< DECLRP's event 3, 5 or 7, by the button.
+    };
+
+    /// Sends a DEC locator report (DECLRP) of the pointer to the PTY: `CSI Pe ; Pb ; Pr ; Pc ; Pp & w`, Pb
+    /// the buttons held down and Pp the page on display; or `CSI 0 & w`, and no other parameter, while the
+    /// pointer is off the grid (DEC STD 070 ch. 13: "If Pe is 0 or omitted, all other parameters shall not be
+    /// sent").
+    /// @param event Pe, the event code: 0 for an unavailable locator, 1 for a request, 2 to 7 for a button.
+    void sendLocatorReport(int event);
 
     /// Requests the current locator position.
     void requestLocatorPosition();
@@ -977,8 +988,12 @@ class Terminal
     /// Resets locator state (called by soft reset).
     void resetLocator() noexcept { _locatorState = {}; }
 
-    /// Called from sendMousePressEvent/sendMouseReleaseEvent when locator mode is active.
-    bool handleLocatorMouseEvent(int button, bool press, CellLocation pos);
+    /// Reports a button going down or up to the host, as DECLRP, while the locator is on and DECSLE selects
+    /// the event. Keeps the buttons held down, which every report names, also while the locator is off.
+    /// @param event  Whether the button went down or up.
+    /// @param button The button; one the locator has no code for is not reported.
+    /// @return Whether the event was reported, and is therefore not the application's.
+    [[nodiscard]] Handled handleLocatorMouseEvent(LocatorEvent event, MouseButton button);
     // }}}
 
     // {{{ Image canvas size
@@ -4358,6 +4373,9 @@ class Terminal
     bool _udkLocked = false;
 
     LocatorState _locatorState;
+    /// The locator's buttons held down, as DECLRP's Pb names them (right 1, middle 2, left 4): what a report
+    /// says of them after its event. Kept on every press and release, the locator on or off.
+    uint8_t _locatorButtonsHeld = 0;
     std::unordered_map<int, DRCSCharset> _drcsCharsets;
     std::unordered_map<std::string, int> _drcsDesignatorMap; ///< Dscs designator → font number
 
