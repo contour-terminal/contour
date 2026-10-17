@@ -361,6 +361,13 @@ enum class PointerPlacement : uint8_t
     OnGrid, ///< On the grid cell the last move or press named.
 };
 
+/// Where the cursor stands on the page a change of page takes it to.
+enum class PageCursorPlacement : uint8_t
+{
+    PagesOwn = 0, ///< Where the page's own cursor was left.
+    Home,         ///< At the home position of the page, obeying origin mode (NP, PP).
+};
+
 /// Asked, with a press's click count (1..ClickCounter::MaxClickCount), whether a binding takes the press.
 /// @see Terminal::sendMousePressEvent
 using MousePressClaimant = std::function<MousePressClaim(uint8_t clickCount)>;
@@ -2235,8 +2242,28 @@ class Terminal
     /// Returns the 1-based page number of the displayed page (for VT replies).
     [[nodiscard]] int displayedPageNumber() const noexcept { return _displayedPage.value + 1; }
 
-    /// Switches the active cursor page. See Phase 2 for full implementation.
-    void setPage(PageIndex target, bool moveCursorHome);
+    /// Switches the cursor to another page; the page on display follows while DECPCCM is set.
+    /// @param target    The page to switch to; clamped to the pages there are.
+    /// @param placement Where the cursor stands on @p target.
+    void setPage(PageIndex target, PageCursorPlacement placement);
+
+    /// Page movement (NP, PP, PPA, PPR, PPB): moves the cursor to another DEC page. A page beyond the last
+    /// one is the last one, and one before the first is the first, as DEC STD 070 §4.7 says. DEC STD 070
+    /// defines no alternate screen. Windows Terminal, the one terminal with both pages and an alternate
+    /// buffer, keeps page movement on it, a display of one page: NP and PP move the cursor home there
+    /// (NextPage/PrecedingPage), and PPA, PPR and PPB leave it (PageManager::MoveTo returns outside the main
+    /// buffer).
+    /// @param page      The zero-based index of the page to move to.
+    /// @param placement Where the cursor stands on that page.
+    void movePage(int page, PageCursorPlacement placement);
+
+    /// Whether the cursor is on the alternate screen buffer, as xterm's whichBuf says. Not
+    /// isAlternateScreen(), which answers for every page but page 1.
+    /// @return Whether the cursor is on the alternate screen's page.
+    [[nodiscard]] bool isAlternateScreenBufferInUse() const noexcept
+    {
+        return _cursorPage == AlternateScreenPageIndex;
+    }
 
     /// Saves the current cursor page index (called by DECSC).
     void saveCursorPage();
@@ -4154,7 +4181,7 @@ class Terminal
     /// via PPA/NP/PP still resolves to the primary slot.
     [[nodiscard]] size_t savedCursorPageSlot() const noexcept
     {
-        return _cursorPage == AlternateScreenPageIndex ? 1 : 0;
+        return isAlternateScreenBufferInUse() ? 1 : 0;
     }
 
     /// DECSC-saved cursor page, kept separately per screen (index 0 = primary, 1 = alternate) so the

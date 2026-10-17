@@ -241,7 +241,7 @@ template <typename T = vtpty::MockPty>
 void moveCursorOffTheDisplayedPage(MockTerm<T>& mt)
 {
     mt.writeToScreen("\033[?64l");
-    mt.terminal.setPage(PageIndex(3), /*moveCursorHome*/ true);
+    mt.terminal.setPage(PageIndex(3), PageCursorPlacement::Home);
     REQUIRE(mt.terminal.isAlternateScreen());
     REQUIRE(mt.terminal.foldingAppliesToDisplayedPage());
 }
@@ -254,9 +254,9 @@ template <typename T = vtpty::MockPty>
 void moveDisplayOffTheCursorsPage(MockTerm<T>& mt)
 {
     mt.writeToScreen("\033[?64h");
-    mt.terminal.setPage(PageIndex(3), /*moveCursorHome*/ true);
+    mt.terminal.setPage(PageIndex(3), PageCursorPlacement::Home);
     mt.writeToScreen("\033[?64l");
-    mt.terminal.setPage(PageIndex(0), /*moveCursorHome*/ false);
+    mt.terminal.setPage(PageIndex(0), PageCursorPlacement::PagesOwn);
     REQUIRE(mt.terminal.isPrimaryScreen());
     REQUIRE_FALSE(mt.terminal.foldingAppliesToDisplayedPage());
 }
