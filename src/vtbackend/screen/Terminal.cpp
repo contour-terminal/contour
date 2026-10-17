@@ -7347,9 +7347,9 @@ void Terminal::selectLocatorEvents(std::span<int const> params) noexcept
 
 void Terminal::sendLocatorReport(int event, int button, int row, int col)
 {
-    // DECLRP — Locator Report: CSI Pe ; Pb ; Pr ; Pc ; Pp & w
-    // Pp = page number (always 1)
-    reply("\033[{};{};{};{};1&w", event, button, row, col);
+    // DECLRP — Locator Report: CSI Pe ; Pb ; Pr ; Pc ; Pp & w. Pp is the page the locator points at through
+    // the window, the page on display; always sent, as it always was.
+    reply("\033[{};{};{};{};{}&w", event, button, row, col, displayedPageNumber());
     flushInput();
 }
 
