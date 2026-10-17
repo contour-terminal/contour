@@ -4,6 +4,8 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
+#include <core/Environment.hpp>
+
 #include <algorithm>
 #include <format>
 #include <optional>
@@ -224,7 +226,9 @@ TmuxController::~TmuxController()
 
 core::async::Task<void> TmuxController::runClient(core::net::EventLoop* loop)
 {
-    auto spawned = vthost::tmux::spawnControlMode(*loop, _tmuxSocket);
+    // core::Environment, not getenv: this runs on the reactor's thread, beside the GUI's.
+    auto spawned = vthost::tmux::spawnControlMode(
+        *loop, _tmuxSocket, core::defaultEnvironment().get("PATH").value_or(""));
     if (!spawned)
     {
         {

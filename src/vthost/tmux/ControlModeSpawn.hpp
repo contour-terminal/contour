@@ -13,6 +13,8 @@
 #include <expected>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace vthost::tmux
 {
@@ -24,14 +26,22 @@ struct SpawnedControlMode
     std::unique_ptr<core::net::ISocket> transport;
 };
 
+/// @param tmuxSocket Optional tmux server socket path (-S).
+/// @return The argument vector of a control-mode client: `tmux -C [-S <socket>] attach-session`.
+[[nodiscard]] std::vector<std::string> controlModeArguments(std::string_view tmuxSocket);
+
 /// Forks `tmux -C attach-session` (against @p tmuxSocket via -S when
-/// non-empty) on a fresh PTY.
+/// non-empty) on a fresh PTY. tmux is looked up on @p searchPath and its
+/// argument vector built before the fork, so the child calls only
+/// async-signal-safe functions until it execs.
 /// @param loop The reactor that will drive the transport.
 /// @param tmuxSocket Optional tmux server socket path (-S).
-/// @return The child and its adopted transport, or a reason on failure
-///         (POSIX only; unsupported on Windows).
-[[nodiscard]] std::expected<SpawnedControlMode, std::string> spawnControlMode(
-    core::net::EventLoop& loop, std::string const& tmuxSocket = {});
+/// @param searchPath The PATH tmux is looked for on.
+/// @return The child and its adopted transport, or a reason on failure -- tmux not
+///         found among them (POSIX only; unsupported on Windows).
+[[nodiscard]] std::expected<SpawnedControlMode, std::string> spawnControlMode(core::net::EventLoop& loop,
+                                                                              std::string const& tmuxSocket,
+                                                                              std::string_view searchPath);
 
 /// Reaps the spawned client: bounded wait, then SIGKILL. No-op for pid < 0.
 void reapControlMode(int pid);
