@@ -3829,6 +3829,91 @@ TEST_CASE("Terminal.processInputOnce.aReadFailingWithoutErrnoClosesThePty", "[te
     CHECK(mock.mockPty().isClosed());
 }
 
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+namespace
+{
+/// A PTY that, its output read, has nothing more: a read then fails with EAGAIN, as a real PTY's does when
+/// its wait times out. Records the wait each read was given.
+class DrainedPty final: public vtpty::MockPty
+{
+  public:
+    using vtpty::MockPty::MockPty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override
+    {
+        _lastTimeout = timeout;
+        if (!isStdoutDataAvailable())
+        {
+            errno = EAGAIN;
+            return std::nullopt;
+        }
+        return MockPty::read(storage, timeout, size);
+    }
+
+    /// @return The wait the last read was given; milliseconds::max() for none, a wait without end.
+    [[nodiscard]] std::chrono::milliseconds lastTimeout() const noexcept
+    {
+        return _lastTimeout.value_or(std::chrono::milliseconds::max());
+    }
+
+  private:
+    std::optional<std::chrono::milliseconds> _lastTimeout;
+};
+
+/// Whether the display paints a frame -- which sets the terminal's frame clock (Terminal::tick()) -- each
+/// time a test lets time pass. A passive build's display paints only when told to, and nothing tells it while
+/// a fill waits.
+enum class DisplayPaints : uint8_t
+{
+    No = 0,
+    Yes,
+};
+} // namespace
+
+TEST_CASE("Terminal.processInputOnce.passive.aThrottledFillRunsOnceItIsDue", "[terminal]")
+{
+    // A passive build fills the render buffer on the reader thread after each batch, at most once per refresh
+    // interval. A batch that lands inside the interval leaves its fill for later: the reader waits for no
+    // more than the rest of the interval, and runs the fill when that wait finds nothing to read.
+    auto mock = MockTerm<DrainedPty> { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10), 1024 };
+    auto& terminal = mock.terminal;
+    terminal.setRefreshRate(vtbackend::RefreshRate { 50.0 });
+    constexpr auto Interval = std::chrono::milliseconds(20);
+    auto const paints = GENERATE(DisplayPaints::No, DisplayPaints::Yes);
+    auto const letTimePass = [&](std::chrono::milliseconds duration) {
+        mock.steadyClock.advance(duration);
+        if (paints == DisplayPaints::Yes)
+            terminal.tick(mock.steadyClock.now());
+    };
+    letTimePass(Interval); // the first fill is due at once
+
+    mock.mockPty().appendStdOutBuffer("first");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(trimmedTextScreenshot(mock) == "first");
+
+    mock.mockPty().appendStdOutBuffer("\r\nsecond");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(trimmedTextScreenshot(mock) == "first"); // the fill waits for the interval
+
+    // Nothing more to read, at the same instant: the reader waits for the rest of the interval, not for none.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+    CHECK(trimmedTextScreenshot(mock) == "first");
+
+    // The interval has passed: the read finds nothing again, and the fill runs.
+    letTimePass(Interval);
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == std::chrono::milliseconds(0));
+    CHECK(trimmedTextScreenshot(mock) == "first\nsecond");
+
+    // With nothing left to fill, the reader waits a whole interval, and fills nothing.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+}
+#endif
+
 TEST_CASE("Terminal.processInputOnce.readsAheadWhileTheStateIsTaken", "[terminal][threading]")
 {
     // While another thread -- the render thread, building a frame -- holds the terminal's state, the

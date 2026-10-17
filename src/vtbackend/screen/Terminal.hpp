@@ -3646,6 +3646,25 @@ class Terminal
     };
     [[nodiscard]] std::optional<PtyReadResult> readFromPty();
 
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    /// Whether a passive build has a fill to run: the screen changed since the last one, or the frame last
+    /// filled still waits to be swapped in.
+    [[nodiscard]] bool isPassiveFillPending() const noexcept;
+
+    /// How long a passive build's reader waits for output: until the refresh interval lets a pending fill
+    /// run, or a whole interval while none is pending.
+    /// @return The wait, never negative.
+    [[nodiscard]] std::chrono::milliseconds passiveReadTimeout() const noexcept;
+
+    /// Runs a passive build's fill on the reader thread, measured against the steady clock.
+    ///
+    /// The throttle measures the terminal's clock (currentTime()), which the display moves only as it paints
+    /// -- and nothing makes it paint while a fill waits. So the clock is first brought forward to the time
+    /// the frame is built at, as synchronizedOutput(false) sets it for the frame it builds on the parser
+    /// thread.
+    void refreshPassively();
+#endif
+
     /// Reads on while another thread holds the terminal's state, rather than waiting for it idle.
     ///
     /// The render thread holds the state for as long as it takes to build a frame. Reading meanwhile
