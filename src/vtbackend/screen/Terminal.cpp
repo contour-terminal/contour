@@ -2297,7 +2297,7 @@ void Terminal::updateCursorVisibilityState() const noexcept
 HyperlinkId Terminal::hyperlinkIdUnderPointer() const
 {
     auto const position = currentMouseGridPosition();
-    return position ? _currentScreen->hyperlinkIdAt(*position) : HyperlinkId {};
+    return position ? displayedPage().hyperlinkIdAt(*position) : HyperlinkId {};
 }
 
 void Terminal::updateHoveringHyperlinkState()
@@ -4454,7 +4454,7 @@ std::optional<std::string> Terminal::pathTextAtMousePosition() const
     if (!mousePosition)
         return std::nullopt;
 
-    auto const row = rowTextWithColumns(currentScreen().grid().lineAt(mousePosition->line));
+    auto const row = rowTextWithColumns(displayedPage().grid().lineAt(mousePosition->line));
     auto const& lineText = row.text;
     auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
 
@@ -4497,8 +4497,8 @@ std::expected<PathBases, PathRefusal> Terminal::localPathBaseAt(LineOffset row) 
 
 CommandBlockRecord const* Terminal::pathBlockAt(LineOffset row) const
 {
-    // Blocks live on the primary screen; a row of an alternate screen belongs to none.
-    return isPrimaryScreen() ? commandBlockAt(row) : nullptr;
+    // Blocks live on the primary screen; a row of any other page on display belongs to none.
+    return displayedScreenType() == ScreenType::Primary ? commandBlockAt(row) : nullptr;
 }
 
 std::expected<TerminalDirectory, PathRefusal> Terminal::terminalDirectory() const
@@ -4546,7 +4546,8 @@ std::expected<std::optional<std::string>, PathRefusal> Terminal::localPathAtMous
 
 HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollbackLimit) const
 {
-    auto const& screen = currentScreen();
+    // The page on display, which the labels are drawn over.
+    auto const& screen = displayedPage();
     auto const gridBottom = pageSize().lines.as<LineOffset>() - LineOffset(1);
     auto const historyTop = -screen.historyLineCount().as<LineOffset>();
 
@@ -5573,8 +5574,8 @@ std::optional<LineOffset> Terminal::commandBlockAnchor(CommandBlockTarget target
     switch (target)
     {
         case CommandBlockTarget::Pointer:
-            // Over an alternate screen, the pointer is over no block.
-            if (!isPrimaryScreen())
+            // Over any page on display but the primary one, the pointer is over no block.
+            if (displayedScreenType() != ScreenType::Primary)
                 return std::nullopt;
             return currentMouseGridPosition().transform([](CellLocation position) { return position.line; });
         case CommandBlockTarget::Cursor:

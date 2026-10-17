@@ -2212,6 +2212,14 @@ class Terminal
     [[nodiscard]] Screen& displayedPage() noexcept { return pageAt(_displayedPage); }
     [[nodiscard]] Screen const& displayedPage() const noexcept { return pageAt(_displayedPage); }
 
+    /// Whether the page on display is the primary screen or another one. Not screenType(), which is the
+    /// cursor's page: with DECPCCM reset the two differ.
+    /// @return The screen type of the page on display.
+    [[nodiscard]] ScreenType displayedScreenType() const noexcept
+    {
+        return screenTypeFromPage(_displayedPage);
+    }
+
     /// Returns the 1-based page number where the cursor is active (for VT replies).
     [[nodiscard]] int cursorPageNumber() const noexcept { return _cursorPage.value + 1; }
 
@@ -2302,12 +2310,15 @@ class Terminal
 
     [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
 
+    /// The cell under the pointer, a cell of the page on display (displayedPage()) -- not of the page the
+    /// cursor writes to, which DECPCCM reset or a status line DECSASD selected makes another one.
+    ///
     /// Not noexcept: the coordinate translation goes through the fold projection, which allocates.
     /// @return The grid cell under the pointer; nullopt while the pointer is on none (@see
     /// sendMouseLeaveEvent).
     [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const
     {
-        if (_pointerPlacement == PointerPlacement::OnGrid && _currentScreen->contains(_currentMousePosition))
+        if (_pointerPlacement == PointerPlacement::OnGrid && displayedPage().contains(_currentMousePosition))
             return _viewport.translateScreenToGridCoordinate(_currentMousePosition);
         return std::nullopt;
     }
@@ -2705,8 +2716,8 @@ class Terminal
     /// hyperlinkIdUnderPointer() instead.
     [[nodiscard]] HyperlinkId hoveringHyperlinkId() const noexcept { return _hoveringHyperlinkId.load(); }
 
-    /// The OSC 8 hyperlink in the cell the pointer is over right now, read from the screen; none when the
-    /// pointer is on no cell or the cell links nowhere. A pure query: nothing is stored or notified.
+    /// The OSC 8 hyperlink in the cell the pointer is over right now, read from the page on display; none
+    /// when the pointer is on no cell or the cell links nowhere. A pure query: nothing is stored or notified.
     ///
     /// The caller holds the lock: the cell is read from the grid, which the parser thread changes. Not
     /// noexcept, for the reason currentMouseGridPosition() gives.
@@ -2714,11 +2725,11 @@ class Terminal
     [[nodiscard]] HyperlinkId hyperlinkIdUnderPointer() const;
 
     /// Retrieves the HyperlinkInfo that is currently being hovered by the mouse, if so,
-    /// or a nothing otherwise.
+    /// or a nothing otherwise. Read from the page on display, as hyperlinkIdUnderPointer() is.
     [[nodiscard]] std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
     {
         if (auto const gridPosition = currentMouseGridPosition())
-            return _currentScreen->hyperlinkAt(*gridPosition);
+            return displayedPage().hyperlinkAt(*gridPosition);
         return {};
     }
 
@@ -3557,18 +3568,19 @@ class Terminal
     /// The directories a relative path printed on @p row resolves against: those of the command that printed
     /// it (localPathBaseFor()), and outside any block the working directory for opening locally.
     ///
-    /// The block is commandBlockAt()'s, as for every other action on a row, so the row an output tail shares
-    /// with the next prompt resolves against that prompt's command. Does NOT take the lock, for the reason
-    /// commandBlocks() gives.
-    /// @param row A grid row of the current screen; a row of an alternate screen belongs to no block.
+    /// The block is pathBlockAt()'s -- commandBlockAt()'s while the primary page is on display, as for every
+    /// other action on a row --, so the row an output tail shares with the next prompt resolves against that
+    /// prompt's command. Does NOT take the lock, for the reason commandBlocks() gives.
+    /// @param row A grid row of the page on display; a row of any other page than the primary one belongs to
+    ///            no block.
     /// @return Where to look, first to last; none when there is nowhere. Why, when no path printed there
     ///         names a file on this machine: its command ran on another one, or this terminal replicates
     ///         another machine's.
     [[nodiscard]] std::expected<PathBases, PathRefusal> localPathBaseAt(LineOffset row) const;
 
-    /// The block whose command printed what a path on @p row names: commandBlockAt()'s, and none on an
-    /// alternate screen, whose rows belong to no block. Does NOT take the lock.
-    /// @param row A grid row of the current screen.
+    /// The block whose command printed what a path on @p row names: commandBlockAt()'s while the primary page
+    /// is on display, and none on any other page, whose rows belong to no block. Does NOT take the lock.
+    /// @param row A grid row of the page on display.
     /// @return The block's record, or nullptr.
     [[nodiscard]] CommandBlockRecord const* pathBlockAt(LineOffset row) const;
 

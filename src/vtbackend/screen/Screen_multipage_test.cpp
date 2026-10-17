@@ -14,6 +14,7 @@
 #include <libunicode/convert.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <charconv>
 #include <cstddef>
@@ -277,6 +278,188 @@ TEST_CASE("MultiPage.theViewportScrollsThePageOnDisplayWhileTheStatusLineIsWritt
 
     CHECK(terminal.viewport().scrollUp(LineCount(5)));
     CHECK(terminal.viewport().scrollOffset() == ScrollOffset(5));
+}
+
+// What is under the pointer is on the page on display: the pointer is a position on the page seen through the
+// window -- DEC STD 070's locator reports it with that page's number (DECLRP's Pp) -- whichever page the
+// cursor writes to.
+
+namespace
+{
+/// Which of the two pages showOnePageOfTwo() leaves on display. The cursor is on the other one.
+enum class OnDisplay : uint8_t
+{
+    Primary = 0, ///< Page 1 on display, the cursor on page 3.
+    Other,       ///< Page 3 on display, the cursor on page 1.
+};
+
+/// Writes @p primary on page 1 and @p other on page 3, each from the page's home position, then resets
+/// DECPCCM and leaves the page @p shown names on display while the cursor writes to the other one.
+/// @param mock The terminal, its cursor home on page 1.
+/// @param primary What page 1 holds.
+/// @param other What page 3 holds.
+/// @param shown Which page stays on display.
+void showOnePageOfTwo(MockTerm<>& mock, std::string_view primary, std::string_view other, OnDisplay shown)
+{
+    mock.terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    mock.writeToScreen(primary);
+    mock.writeToScreen("\033[3 P"); // PPA 3, coupled: page 3 on display, the cursor home on it
+    mock.writeToScreen(other);
+    switch (shown)
+    {
+        case OnDisplay::Primary: mock.writeToScreen("\033[1 P\033[?64l\033[3 P"); break;
+        case OnDisplay::Other: mock.writeToScreen("\033[?64l\033[1 P"); break;
+    }
+    auto const expected = shown == OnDisplay::Primary ? PageIndex(0) : PageIndex(2);
+    REQUIRE(mock.terminal.displayedPageIndex() == expected);
+    REQUIRE(mock.terminal.cursorPageIndex() != expected);
+}
+
+/// Moves the pointer over @p column of row @p line, as hovering would.
+/// @param mock The terminal.
+/// @param line The screen row.
+/// @param column The column.
+void pointAt(MockTerm<>& mock, int line, int column)
+{
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None,
+        CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) },
+        PixelCoordinate {},
+        /*uiHandledHint=*/false);
+}
+
+/// Records a finished block that ran on another machine, and stamps row 0 of page 1 with it, as a daemon
+/// snapshot hands a mirror its blocks.
+/// @param mock The terminal.
+void stampForeignBlockOnRow0(MockTerm<>& mock)
+{
+    auto record = CommandBlockRecord {};
+    record.id = CommandBlockId(7);
+    record.state = CommandBlockState::Finished;
+    record.workingDirectory =
+        WorkingDirectorySnapshot { .path = "/elsewhere", .locality = ContextLocality::Foreign };
+    mock.terminal.adoptCommandBlock(std::move(record), AdoptMode::Snapshot);
+    mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).adoptBlock(CommandBlockId(7));
+}
+
+/// The URI of the OSC 8 link under the pointer, as hyperlinkIdUnderPointer() names it.
+/// @param terminal The terminal.
+/// @return The link's URI; empty while the pointer is over none.
+[[nodiscard]] std::string uriUnderPointer(Terminal const& terminal)
+{
+    auto const link = terminal.hyperlinks().hyperlinkById(terminal.hyperlinkIdUnderPointer());
+    return link ? link->uri : std::string {};
+}
+} // namespace
+
+TEST_CASE("MultiPage.DECPCCM_reset.theLinkUnderThePointerIsOnThePageOnDisplay", "[screen]")
+{
+    // Both pages carry a link in the same cells; the pointer, the hover tooltip and the frame's hover
+    // decoration all name the one on display.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    constexpr auto PageOne = "\033]8;;https://one.example/\033\\link\033]8;;\033\\"sv;
+    constexpr auto PageThree = "\033]8;;https://three.example/\033\\link\033]8;;\033\\"sv;
+
+    auto const [shown, uri] = GENERATE(table<OnDisplay, std::string_view>({
+        { OnDisplay::Primary, "https://one.example/" },
+        { OnDisplay::Other, "https://three.example/" },
+    }));
+    showOnePageOfTwo(mock, PageOne, PageThree, shown);
+    pointAt(mock, 0, 1);
+
+    CHECK(uriUnderPointer(terminal) == uri);
+    auto const hovering = terminal.tryGetHoveringHyperlink();
+    REQUIRE(hovering != nullptr);
+    CHECK(hovering->uri == uri);
+    auto const cells = renderedRow(mock, LineOffset(0));
+    CHECK(cells.at(0).linkRole == LinkDecorationRole::Hover);
+    CHECK(cells.at(3).linkRole == LinkDecorationRole::Hover);
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.thePathUnderThePointerIsOnThePageOnDisplay", "[screen]")
+{
+    // Row 0 of page 1 belongs to a block that ran on another machine, which refuses its paths; row 0 of page
+    // 3 belongs to no block.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+
+    SECTION("page 1 on display")
+    {
+        showOnePageOfTwo(mock, "see notes.txt", "see other.txt", OnDisplay::Primary);
+        stampForeignBlockOnRow0(mock);
+        pointAt(mock, 0, 6);
+
+        CHECK(terminal.pathTextAtMousePosition() == "notes.txt");
+        CHECK(terminal.localPathAtMousePosition() == std::unexpected(PathRefusal::RanElsewhere));
+    }
+
+    SECTION("page 3 on display")
+    {
+        showOnePageOfTwo(mock, "see notes.txt", "see other.txt", OnDisplay::Other);
+        stampForeignBlockOnRow0(mock);
+        pointAt(mock, 0, 6);
+
+        CHECK(terminal.pathTextAtMousePosition() == "other.txt");
+        CHECK(terminal.localPathAtMousePosition().has_value());
+    }
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.theBlockUnderThePointerIsOnThePageOnDisplay", "[screen]")
+{
+    // `ls` runs on page 1; page 3 holds no block.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    runCommand(mock, "ls", { "a", "b" });
+
+    SECTION("page 1 on display")
+    {
+        mock.writeToScreen("\033[?64l\033[3 P");
+        pointAt(mock, 1, 0);
+        CHECK(textOf(mock, CommandBlockTarget::Pointer, CommandBlockPart::Output) == "a\nb");
+    }
+
+    SECTION("page 3 on display")
+    {
+        mock.writeToScreen("\033[3 P\033[?64l\033[1 P");
+        pointAt(mock, 1, 0);
+        CHECK(terminal.commandBlockText(
+                  CommandBlockTarget::Pointer, CommandBlockPart::Output, CaptureRendition::PlainText)
+              == std::unexpected(CommandBlockActionError::NoBlock));
+    }
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.hintModeLabelsThePageOnDisplay", "[screen]")
+{
+    // The labels are drawn over the page on display, so that is the page hint mode scans.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    auto& terminal = mock.terminal;
+
+    auto const [shown, url] = GENERATE(table<OnDisplay, std::string_view>({
+        { OnDisplay::Primary, "https://one.example/" },
+        { OnDisplay::Other, "https://three.example/" },
+    }));
+    showOnePageOfTwo(mock, "visit https://one.example/ now", "visit https://three.example/ now", shown);
+
+    terminal.activateHintMode(
+        HintModeRequest { .patterns = HintModeHandler::builtinPatterns(), .action = HintAction::Copy });
+    REQUIRE(terminal.hintMatches().size() == 1);
+    CHECK(terminal.hintMatches().at(0).matchedText == url);
+}
+
+TEST_CASE("MultiPage.thePointerIsOnThePageOnDisplayWhileTheStatusLineIsWritten", "[screen]")
+{
+    // DECSASD sends output to the one-row host-writable status line; the pointer is still over the page on
+    // display, and a cell below that row is a cell of it.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[2$~\033[1$}"); // DECSSDT host-writable, DECSASD status line
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+
+    pointAt(mock, 2, 3);
+    CHECK(terminal.currentMouseGridPosition()
+          == CellLocation { .line = LineOffset(2), .column = ColumnOffset(3) });
 }
 
 TEST_CASE("MultiPage.DECRQDE_response", "[screen]")
