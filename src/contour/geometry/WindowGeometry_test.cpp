@@ -780,6 +780,77 @@ TEST_CASE("WindowGeometry.sizeHintsFor", "[contour][geometry]")
     }
 }
 
+TEST_CASE("WindowGeometry.snapHeightToRows", "[contour][geometry][row-resize]")
+{
+    auto const grid = RowResizeGrid { .cellHeight = 21, .baseHeight = 38, .minimumHeight = 100 };
+    CHECK(snapHeightToRows(668, grid) == 668); // 30 complete rows plus chrome and margins
+    CHECK(snapHeightToRows(673, grid) == 668);
+    CHECK(snapHeightToRows(682, grid) == 689);
+    CHECK(snapHeightToRows(90, grid) == 101);              // minimum rounded UP to a complete row
+    CHECK(snapHeightToRows(673, RowResizeGrid {}) == 673); // font metrics not ready
+
+    auto const physical =
+        rowResizeGridFor(23, Margins { .horizontal = 2, .vertical = 3 }, 1.25, Chrome { .height = 33 }, 100);
+    CHECK(physical.cellHeight == 23);
+    CHECK(physical.baseHeight == 47);
+    CHECK(physical.minimumHeight == 125);
+
+    // Device-pixel metrics remain exact at fractional DPI; do not round the cell to logical pixels.
+    auto const fractional = RowResizeGrid { .cellHeight = 23, .baseHeight = 47, .minimumHeight = 116 };
+    for (auto const height: std::views::iota(116, 139))
+    {
+        auto const snapped = snapHeightToRows(height, fractional);
+        CHECK(snapped >= fractional.minimumHeight);
+        CHECK((snapped - fractional.baseHeight) % fractional.cellHeight == 0);
+        CHECK(snapHeightToRows(snapped, fractional) == snapped);
+    }
+}
+
+TEST_CASE("WindowGeometry.snapLogicalHeightToRows", "[contour][geometry][row-resize]")
+{
+    auto const grid = RowResizeGrid { .cellHeight = 21, .baseHeight = 38, .minimumHeight = 100 };
+    CHECK(snapLogicalHeightToRows(673, 1.0, grid) == 668);
+    CHECK(snapLogicalHeightToRows(668, 1.0, grid) == 668);
+    CHECK(snapLogicalHeightToRows(90, 1.0, grid) == 101);
+    CHECK(snapLogicalHeightToRows(673, 1.0, RowResizeGrid {}) == 673);
+    CHECK(snapLogicalHeightToRows(673, 0.0, grid) == 673);
+
+    // Qt sizes are integral logical pixels. At fractional DPR choose the smallest representable
+    // height that fits the selected rows, and never grow the window again on a repeated application.
+    auto const fractional = RowResizeGrid { .cellHeight = 23, .baseHeight = 47, .minimumHeight = 125 };
+    CHECK(snapLogicalHeightToRows(593, 1.25, fractional) == 590);
+    CHECK(snapLogicalHeightToRows(590, 1.25, fractional) == 590);
+    CHECK(snapLogicalHeightToRows(100, 1.25, fractional) == 112);
+    CHECK(snapLogicalHeightToRows(112, 1.25, fractional) == 112);
+}
+
+TEST_CASE("WindowGeometry.rowSnappingPreservesRenderedRows", "[contour][geometry][row-resize]")
+{
+    auto const cell = vtbackend::ImageSize { vtbackend::Width(11), vtbackend::Height(23) };
+    auto const chrome = Chrome { .height = 33 };
+    for (auto const scale: { 1.0, 1.25, 1.5, 1.75, 2.0 })
+        for (auto const verticalMargin: { 0, 3 })
+            for (auto const rows: { 5, 28, 29, 40 })
+            {
+                CAPTURE(scale, verticalMargin, rows);
+                auto const margins = Margins { .vertical = verticalMargin };
+                auto const deviceMargins = scaled(margins, scale);
+                auto const grid = rowResizeGridFor(23, margins, scale, chrome, 0);
+                auto const page =
+                    vtbackend::PageSize { vtbackend::LineCount(rows), vtbackend::ColumnCount(80) };
+                auto const initial = windowSizeForPage(page, cell, deviceMargins, scale, chrome);
+                auto const snapped = snapLogicalHeightToRows(initial.height, scale, grid);
+                CHECK(snapped == initial.height);
+                auto const nativeHeight = static_cast<int>(std::round(initial.height * scale));
+                auto const nativeSnapped = snapHeightToRows(nativeHeight, grid);
+                auto const logicalSnapped = static_cast<int>(std::round(nativeSnapped / scale));
+                auto const available = availableDevicePixels(
+                    initial.width - chrome.width, logicalSnapped - chrome.height, scale);
+                CHECK(pageSizeForPixels(available, cell, deviceMargins).lines == page.lines);
+                CHECK(snapHeightToRows(nativeSnapped, grid) == nativeSnapped);
+            }
+}
+
 TEST_CASE("WindowGeometry.sizeHintPolicyFor", "[contour][geometry]")
 {
     // Minimum size is always safe to apply — it never resizes a mapped window, only floors it.
@@ -792,7 +863,7 @@ TEST_CASE("WindowGeometry.sizeHintPolicyFor", "[contour][geometry]")
         CHECK(policy == SizeHintPolicy { .applyMinimum = true, .applyBase = false, .applyIncrement = false });
     }
 
-    SECTION("Windows applies all three (native character-grid resize snapping)")
+    SECTION("Windows retains all three hints; native snapping is handled separately")
     {
         auto const policy = sizeHintPolicyFor(SizeHintPlatform::Windows);
         CHECK(policy == SizeHintPolicy { .applyMinimum = true, .applyBase = true, .applyIncrement = true });

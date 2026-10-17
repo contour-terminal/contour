@@ -28,7 +28,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <fstream>
 #include <memory>
+#include <string_view>
 
 #include <QtTest/QSignalSpy>
 #include <vtworkspace/SessionModel.hpp>
@@ -79,6 +81,68 @@ TEST_CASE("bindWindow(nullptr) and displayless showInitial are safe no-ops", "[c
     REQUIRE_FALSE(window.isVisible());
     controller->showInitial();
     CHECK(window.isVisible());
+}
+
+TEST_CASE("startup row snapping respects an off-grid minimum before focus", "[contour][sizing][row-resize]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& appConfig = app.app().config();
+    appConfig.profiles.value().at("main").margins =
+        contour::config::WindowMargins { .horizontal = contour::config::HorizontalMargin { 0 },
+                                         .vertical = contour::config::VerticalMargin { 0 } };
+    appConfig.snapToRows = true;
+
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    controller->bindWindow(&window);
+    controller->setChromeHeight(38);
+    auto* session = app.manager().createSession(controller->windowId());
+    REQUIRE(session != nullptr);
+    contour::test::FakeDisplaySurface surface;
+    surface.cellSizeValue = { vtbackend::Width(11), vtbackend::Height(21) };
+    surface.attachedSession = session;
+    session->attachDisplay(surface);
+
+    // A size constraint can override the otherwise row-aligned profile size. No focusDisplay()
+    // call: startup must resolve the session's display before the first native focus-in event.
+    window.setMinimumHeight(673);
+    controller->showInitial();
+    CHECK(window.height() == 689); // 31 rows of 21 px, plus 38 px of chrome
+    session->detachDisplay(surface);
+    surface.attachedSession = nullptr;
+}
+
+TEST_CASE("changing row snapping refreshes live size hints", "[contour][sizing][row-resize]")
+{
+    contour::test::ConfiguredTestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto const writeConfig = [&](std::string_view value) {
+        std::ofstream(app.configFile()) << "default_profile: main\nsnap_to_rows: " << value << '\n';
+    };
+    writeConfig("false");
+    REQUIRE(app.manager().reloadAllSessions().has_value());
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    controller->bindWindow(&window);
+    window.resize(800, 600);
+    auto* session = app.manager().createSession(controller->windowId());
+    REQUIRE(session != nullptr);
+    contour::test::FakeDisplaySurface surface;
+    surface.attachedSession = session;
+    session->attachDisplay(surface);
+    auto const size = window.size();
+
+    // No font or margin change: toggling this global option must still refresh the hints, including
+    // on disable so X11's physical override is replaced with Qt's ordinary hints.
+    for (auto const value: { "true", "false" })
+    {
+        window.setMinimumSize(QSize(1, 1));
+        writeConfig(value);
+        CHECK(app.manager().reloadAllSessions().has_value());
+        CHECK(window.minimumHeight() > 1);
+        CHECK(window.size() == size);
+    }
+    session->detachDisplay(surface);
+    surface.attachedSession = nullptr;
 }
 
 TEST_CASE("fullscreen and maximize zero the WM size increment", "[contour][sizing]")

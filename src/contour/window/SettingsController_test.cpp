@@ -636,6 +636,11 @@ TEST_CASE("SettingsController: global overrides write settings.yml, apply, and r
 
     REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false));
     CHECK(fx.cfg.reflowOnResize.value() == false);
+    CHECK_FALSE(fx.cfg.snapToRows.value());
+    REQUIRE(fx.controller->setGlobalField("snap_to_rows", true));
+    CHECK(fx.cfg.snapToRows.value());
+    REQUIRE(fx.controller->resetGlobalField("snap_to_rows"));
+    CHECK_FALSE(fx.cfg.snapToRows.value());
     REQUIRE(fx.controller->setGlobalField("read_buffer_size", 32768));
     CHECK(fx.cfg.ptyReadBufferSize.value() == 32768);
     REQUIRE(fx.controller->setGlobalField("word_delimiters", "abc"));

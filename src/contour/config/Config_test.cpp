@@ -2301,6 +2301,20 @@ profiles:
     CHECK(alt->terminalSize.value().lines == vtbackend::LineCount(30));
 }
 
+TEST_CASE("Config: row snapping is opt in and round trips", "[config][row-resize]")
+{
+    QTemporaryDir dir;
+    auto const defaults = loadFromYaml(dir, "default_profile: main\n");
+    CHECK_FALSE(defaults.snapToRows.value());
+    auto const enabled = loadFromYaml(dir, "default_profile: main\nsnap_to_rows: true\n");
+    CHECK(enabled.snapToRows.value());
+    auto const reloaded =
+        loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(enabled));
+    CHECK(reloaded.snapToRows.value());
+    auto const generated = YAML::Load(contour::config::defaultConfigString());
+    CHECK_FALSE(generated["snap_to_rows"].as<bool>());
+}
+
 TEST_CASE("Config: generated default config round-trips through the loader", "[config]")
 {
     // defaultConfigString() renders the full default config document (the `contour generate

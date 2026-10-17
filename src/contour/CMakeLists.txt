@@ -186,6 +186,9 @@ endif()
 # input/ and platform/ are GUI-only: one translates Qt events, the other adapts to Qt and the OS.
 # Both sit below display/ and session/, which is why they are added before them.
 if(CONTOUR_FRONTEND_GUI)
+    if(APPLE)
+        enable_language(OBJCXX)
+    endif()
     add_subdirectory(input)
     add_subdirectory(platform)
     add_subdirectory(display)
@@ -751,8 +754,15 @@ if(CONTOUR_FRONTEND_GUI)
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
             window/WindowSizing_test.cpp
+            platform/WindowResizeGrid_test.cpp
         )
         set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
+        if(APPLE)
+            target_sources(contour_gui_test PRIVATE platform/CocoaWindowResizeGrid_test.mm)
+            set_target_properties(contour_gui_test PROPERTIES
+                OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
+                OBJCXX_STANDARD_REQUIRED ON)
+        endif()
         if(CONTOUR_WITH_GPU_SELECTION)
             target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
         endif()

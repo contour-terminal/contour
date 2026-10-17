@@ -1434,6 +1434,7 @@ struct Config
     };
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
+    ConfigEntry<bool, documentation::SnapToRows> snapToRows { false };
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
     ConfigEntry<bool, documentation::HyperlinkHoverTooltip> hyperlinkHoverTooltip { true };
 

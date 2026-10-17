@@ -689,6 +689,7 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
     // The master config first, so the app — the next new tab, and the settings page that reads it — sees
     // the new file and side files immediately. Then each live session applies it under its own profile,
     // updating the terminals.
+    auto const rowSnappingChanged = _app.config().snapToRows.value() != loaded->snapToRows.value();
     _app.config() = *std::move(loaded);
     for (auto& [id, session]: _sessionsById)
         if (session != nullptr)
@@ -709,6 +710,11 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
             // nothing until restart. A reload is the one moment the configured value must win.
             controller->applyTabBarFromConfig(_app.config().tabBarPosition.value(),
                                               _app.config().tabBarVisibility.value());
+            if (rowSnappingChanged)
+                if (auto* session = controller->activeSession(); session != nullptr)
+                    if (auto* display = session->display(); display != nullptr)
+                        controller->updateSizeHintsFor(
+                            *display, window::WindowController::HintApplyMode::RespectWindowState);
         }
     return {};
 }

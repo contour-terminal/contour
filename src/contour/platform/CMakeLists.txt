@@ -52,6 +52,7 @@ add_library(contour_platform STATIC
     WaylandWindowShadow.cpp WaylandWindowShadow.hpp
     Win32WindowFrame.cpp Win32WindowFrame.hpp
     WindowDecoration.hpp
+    WindowResizeGrid.cpp WindowResizeGrid.hpp
     WindowShadow.cpp WindowShadow.hpp
     WindowShadowController.hpp
     WindowShadowGeometry.hpp
@@ -61,14 +62,20 @@ add_library(contour_platform STATIC
 )
 set_target_properties(contour_platform PROPERTIES AUTOMOC ON)
 
-# The Cocoa frame adapter is the tree's only Objective-C++ translation unit, so the language is
-# enabled here and nowhere else -- and INSIDE the APPLE guard, because enabling OBJCXX on a host
-# with no Objective-C compiler fails the configure step outright. The .mm is added the same way,
-# rather than listed unconditionally like the platform .cpp files above: CMake would try to compile
-# it as C++ elsewhere rather than preprocess it away.
+if(WIN32)
+    target_link_libraries(contour_platform PUBLIC comctl32)
+endif()
+
+# The Cocoa adapters use Objective-C++; the parent enables the language for these and the native tests
+# inside the APPLE guard. Enabling it on a host
+# with no Objective-C compiler fails the configure step outright. The .mm sources are added the same
+# way, rather than listed unconditionally like the platform .cpp files above: CMake would try to
+# compile them as C++ elsewhere rather than preprocess them away.
 if(APPLE)
-    enable_language(OBJCXX)
-    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm)
+    set_target_properties(contour_platform PROPERTIES
+        OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
+        OBJCXX_STANDARD_REQUIRED ON)
+    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm CocoaWindowResizeGrid.mm)
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
 endif()
 
