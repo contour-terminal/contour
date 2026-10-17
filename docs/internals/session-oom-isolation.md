@@ -22,7 +22,9 @@ act on the unit as a whole:
 - `SystemdScopePlacement` (Linux, `CONTOUR_WITH_SYSTEMD=ON`) asks the user's systemd, over
   sd-bus, for a transient `contour-session-<contour pid>-<child pid>-<n>.scope` in `app.slice` with
   `OOMPolicy=continue`, waits for the job, and releases the child. Everything the child forks from
-  then on is born in that scope.
+  then on is born in that scope. Every placed process's scope is named so, and described -- as the
+  log names it -- by what the process is to Contour (`ProcessRole`): a session's shell, a program a
+  session started, the daemon, or the tmux client.
   systemd before 253 knows neither `PIDFDs` nor `OOMPolicy=` on scopes and refuses a request
   carrying either, so the first such refusal switches the connection to `PIDs=` and no
   `OOMPolicy=`. Its scopes do not react to an out-of-memory kill at all, which is what we want.

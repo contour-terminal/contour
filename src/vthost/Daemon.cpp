@@ -324,7 +324,8 @@ namespace
         return vtpty::startDetached(vtpty::DetachedCommand { .image = std::move(image),
                                                              .argv = args,
                                                              .standardInput = "/dev/null",
-                                                             .output = vtpty::DetachedOutput::Discarded },
+                                                             .output = vtpty::DetachedOutput::Discarded,
+                                                             .role = vtpty::ProcessRole::Daemon },
                                     placement)
             .has_value();
 #else

@@ -94,7 +94,8 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetached(QString const& p
     return startPlaced(vtpty::DetachedCommand { .image = executableFor(program).toStdString(),
                                                 .argv = std::move(argv),
                                                 .standardInput = {},
-                                                .output = vtpty::DetachedOutput::Inherited },
+                                                .output = vtpty::DetachedOutput::Inherited,
+                                                .role = vtpty::ProcessRole::Program },
                        *_placement);
 #endif
 }
@@ -138,7 +139,8 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetachedWithInput(
     return startPlaced(vtpty::DetachedCommand { .image = executableFor(program).toStdString(),
                                                 .argv = std::move(argv),
                                                 .standardInput = inputFile,
-                                                .output = vtpty::DetachedOutput::Discarded },
+                                                .output = vtpty::DetachedOutput::Discarded,
+                                                .role = vtpty::ProcessRole::Program },
                        *_placement);
 #endif
 }

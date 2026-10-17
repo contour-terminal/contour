@@ -42,45 +42,48 @@ PlacementLogLine describe(PlacementReport const& report)
     // session an out-of-memory kill can take Contour down with -- and so is its late placement.
     auto const severity = report.reason ? traitsOf(*report.reason).severity : ScopeErrorSeverity::Expected;
     auto const why = report.reason ? traitsOf(*report.reason).description : std::string_view {};
+    auto const process = traitsOf(report.role).noun;
     // A switch rather than a table: switch exhaustiveness names this spot when a status is added.
     switch (report.status)
     {
         case PlacementStatus::Placed:
             return { .severity = ScopeErrorSeverity::Expected,
-                     .text =
-                         std::format("Session process {} runs in a systemd scope of its own.", report.pid) };
+                     .text = std::format("{} {} runs in a systemd scope of its own.", process, report.pid) };
         case PlacementStatus::PlacedUnheard:
             return { .severity = severity,
-                     .text = std::format("Session process {} runs in a systemd scope of its own, but {}: its "
+                     .text = std::format("{} {} runs in a systemd scope of its own, but {}: its "
                                          "answers are going astray. Until one arrives in time, new sessions "
                                          "start unplaced and move into scopes of their own later.",
+                                         process,
                                          report.pid,
                                          why) };
         case PlacementStatus::Deferred:
             return { .severity = severity,
-                     .text =
-                         std::format("Session process {} runs unplaced for now: {}. It moves into a systemd "
-                                     "scope of its own once systemd answers again; until then, an "
-                                     "out-of-memory kill inside it can stop Contour with it.",
-                                     report.pid,
-                                     why) };
+                     .text = std::format("{} {} runs unplaced for now: {}. It moves into a systemd "
+                                         "scope of its own once systemd answers again; until then, an "
+                                         "out-of-memory kill inside it can stop Contour with it.",
+                                         process,
+                                         report.pid,
+                                         why) };
         case PlacementStatus::PlacedLate:
             return { .severity = severity,
-                     .text =
-                         std::format("Session process {} moved into a systemd scope of its own after all. "
-                                     "What it started before then stays in Contour's own unit.",
-                                     report.pid) };
+                     .text = std::format("{} {} moved into a systemd scope of its own after all. "
+                                         "What it started before then stays in Contour's own unit.",
+                                         process,
+                                         report.pid) };
         case PlacementStatus::Unplaced:
             return { .severity = severity,
-                     .text = std::format("Session process {} could not be moved into a systemd scope of its "
+                     .text = std::format("{} {} could not be moved into a systemd scope of its "
                                          "own: {}. An out-of-memory kill inside it can stop Contour with it.",
+                                         process,
                                          report.pid,
                                          why) };
         case PlacementStatus::Ended:
             return { .severity = ScopeErrorSeverity::Expected,
-                     .text = std::format(
-                         "Session process {} ended before it could be moved into a systemd scope of its own.",
-                         report.pid) };
+                     .text =
+                         std::format("{} {} ended before it could be moved into a systemd scope of its own.",
+                                     process,
+                                     report.pid) };
     }
     std::unreachable();
 }
@@ -207,21 +210,25 @@ void SystemdScopePlacement::letGoAfterFailure(std::optional<ParkedChild>& child,
     // is not asked about again: a failure that repeats would keep the worker spinning. A failure before
     // the late pass asked about any -- telling of the children that ended -- drops none still running.
     auto pid = 0;
+    auto role = ProcessRole::Session;
     if (child)
     {
         pid = child->pid();
+        role = child->role();
         child->release();
     }
     else if (_askingLate && !_deferred.empty() && _deferred.front().child.pid() == *_askingLate)
     {
         pid = *_askingLate;
+        role = _deferred.front().child.role();
         _deferred.pop_front();
     }
     _askingLate.reset();
     try
     {
-        errorLog()("Placing session process {} failed with {}. It may run unplaced, where an out-of-memory "
-                   "kill inside it can stop Contour with it.",
+        errorLog()("Placing {} {} failed with {}. It may run unplaced, where an out-of-memory kill inside it "
+                   "can stop Contour with it.",
+                   traitsOf(role).noun,
                    pid,
                    what);
     }
@@ -264,15 +271,16 @@ void SystemdScopePlacement::place(ParkedChild& child)
         return;
     }
 
-    auto const outcome = attempt(ScopeTarget { .pid = child.pid(), .pidfd = child.pidfd() });
+    auto const outcome =
+        attempt(ScopeTarget { .pid = child.pid(), .pidfd = child.pidfd(), .role = child.role() });
     if (outcome == Answer::InTime)
-        report(child.pid(), PlacementStatus::Placed, std::nullopt);
+        report(child.pid(), child.role(), PlacementStatus::Placed, std::nullopt);
     else if (outcome) // placed, yet heard of too late: told, as the breaker now holds requests off for it
-        report(child.pid(), PlacementStatus::PlacedUnheard, ScopeError::TimedOut);
+        report(child.pid(), child.role(), PlacementStatus::PlacedUnheard, ScopeError::TimedOut);
     else if (traitsOf(outcome.error()).health == BusHealth::Unresponsive)
         defer(child, outcome.error()); // asked again once the breaker lets a request through
     else
-        report(child.pid(), PlacementStatus::Unplaced, outcome.error()); // systemd said no
+        report(child.pid(), child.role(), PlacementStatus::Unplaced, outcome.error()); // systemd said no
 }
 
 void SystemdScopePlacement::defer(ParkedChild& child, ScopeError reason)
@@ -283,10 +291,10 @@ void SystemdScopePlacement::defer(ParkedChild& child, ScopeError reason)
     // still names this child.
     if (!isWorthPlacingLate(reason) || unplaced.pidfd() < 0)
     {
-        report(unplaced.pid(), PlacementStatus::Unplaced, reason);
+        report(unplaced.pid(), unplaced.role(), PlacementStatus::Unplaced, reason);
         return;
     }
-    report(unplaced.pid(), PlacementStatus::Deferred, reason);
+    report(unplaced.pid(), unplaced.role(), PlacementStatus::Deferred, reason);
     _deferred.push_back(DeferredChild { .child = std::move(unplaced), .reason = reason });
 }
 
@@ -301,7 +309,7 @@ void SystemdScopePlacement::placeLate()
     {
         auto const gone = std::move(_deferred[firstEnded]);
         _deferred.erase(_deferred.begin() + static_cast<std::ptrdiff_t>(firstEnded));
-        report(gone.child.pid(), PlacementStatus::Ended, std::nullopt);
+        report(gone.child.pid(), gone.child.role(), PlacementStatus::Ended, std::nullopt);
     }
     if (_deferred.empty())
         return;
@@ -311,16 +319,17 @@ void SystemdScopePlacement::placeLate()
     // otherwise, checked alive just above -- but not what it has started meanwhile.
     auto const& oldest = _deferred.front();
     _askingLate = oldest.child.pid();
-    auto const outcome = attempt(ScopeTarget { .pid = oldest.child.pid(), .pidfd = oldest.child.pidfd() });
+    auto const outcome = attempt(ScopeTarget {
+        .pid = oldest.child.pid(), .pidfd = oldest.child.pidfd(), .role = oldest.child.role() });
     if (!outcome && traitsOf(outcome.error()).health == BusHealth::Unresponsive)
     {
         _askingLate.reset();
         return; // still silent: it waits for the next trial, and was told about already
     }
     if (outcome)
-        report(oldest.child.pid(), PlacementStatus::PlacedLate, oldest.reason);
+        report(oldest.child.pid(), oldest.child.role(), PlacementStatus::PlacedLate, oldest.reason);
     else
-        report(oldest.child.pid(), PlacementStatus::Unplaced, outcome.error());
+        report(oldest.child.pid(), oldest.child.role(), PlacementStatus::Unplaced, outcome.error());
     _deferred.pop_front();
     _askingLate.reset();
 }
@@ -366,7 +375,7 @@ std::expected<SystemdScopePlacement::Answer, ScopeError> SystemdScopePlacement::
     auto const scope = ScopeRequest {
         .unitName = std::format("{}-{}-{}-{}.scope", _config.unitPrefix, ownPid, target.pid, ++_sequence),
         .slice = _config.slice,
-        .description = std::format("Contour session (contour pid {})", ownPid),
+        .description = std::format("{} (contour pid {})", traitsOf(target.role).description, ownPid),
         .protocol = protocol,
         .pid = target.pid,
         .pidfd = target.pidfd,
@@ -391,9 +400,12 @@ bool SystemdScopePlacement::runsIn(int pid, std::string_view unit) const
     return cgroup && isInUnit(*cgroup, unit);
 }
 
-void SystemdScopePlacement::report(int pid, PlacementStatus status, std::optional<ScopeError> reason) const
+void SystemdScopePlacement::report(int pid,
+                                   ProcessRole role,
+                                   PlacementStatus status,
+                                   std::optional<ScopeError> reason) const
 {
-    _report(PlacementReport { .pid = pid, .status = status, .reason = reason });
+    _report(PlacementReport { .pid = pid, .status = status, .reason = reason, .role = role });
 }
 
 } // namespace vtpty

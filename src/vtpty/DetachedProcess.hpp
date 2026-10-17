@@ -36,6 +36,9 @@ struct DetachedCommand
 
     /// Where its standard output and standard error go.
     DetachedOutput output = DetachedOutput::Inherited;
+
+    /// What the program is to Contour, as the placement's log and its scope tell.
+    ProcessRole role = ProcessRole::Program;
 };
 
 /// Starts @p command detached, placed by @p placement before it runs -- as a session's shell is, so

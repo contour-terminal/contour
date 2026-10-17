@@ -3,13 +3,58 @@
 
 #include <vtpty/OwnedFd.hpp>
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <system_error>
 
 namespace vtpty
 {
+
+/// What a process placed in a resource domain of its own is to Contour, as the log and its scope tell.
+enum class ProcessRole : std::uint8_t
+{
+    Session,    ///< A session's shell.
+    Program,    ///< A program a session started outside its terminal: a link's opener, a pager, a second
+                ///< Contour.
+    Daemon,     ///< The daemon `contour client` or `contour daemon --background` started.
+    TmuxClient, ///< The `tmux -C` client `contour client --tmux` talks to.
+};
+
+/// How a ProcessRole reads: one row per enumerator, in enumerator order.
+struct ProcessRoleTraits
+{
+    ProcessRole role;
+    std::string_view noun;        ///< In a log line, before the process id: "Session process 4242".
+    std::string_view description; ///< Its scope's description, before "(contour pid N)".
+};
+
+inline constexpr auto ProcessRoleTable = std::array {
+    ProcessRoleTraits { ProcessRole::Session, "Session process", "Contour session" },
+    ProcessRoleTraits { ProcessRole::Program, "Program", "Program a Contour session started" },
+    ProcessRoleTraits { ProcessRole::Daemon, "Daemon", "Contour daemon" },
+    ProcessRoleTraits { ProcessRole::TmuxClient, "tmux client", "tmux client of a Contour session" },
+};
+
+static_assert(
+    [] {
+        auto index = std::size_t { 0 };
+        for (auto const& row: ProcessRoleTable)
+            if (static_cast<std::size_t>(row.role) != index++ || row.noun.empty() || row.description.empty())
+                return false;
+        return index == static_cast<std::size_t>(ProcessRole::TmuxClient) + 1;
+    }(),
+    "ProcessRoleTable holds one described row per ProcessRole, in enumerator order");
+
+/// @return The row of ProcessRoleTable describing @p role.
+[[nodiscard]] constexpr ProcessRoleTraits const& traitsOf(ProcessRole role) noexcept
+{
+    return ProcessRoleTable[static_cast<std::size_t>(role)];
+}
 
 /// A child released before it was placed, kept so that it can still be placed while it runs.
 class UnplacedChild
@@ -17,10 +62,14 @@ class UnplacedChild
   public:
     /// @param pid   The child.
     /// @param pidfd A pidfd for @p pid, or an empty OwnedFd where there is none.
-    UnplacedChild(int pid, OwnedFd pidfd) noexcept;
+    /// @param role  What the child is to Contour.
+    UnplacedChild(int pid, OwnedFd pidfd, ProcessRole role) noexcept;
 
     /// @return The child's process id.
     [[nodiscard]] int pid() const noexcept { return _pid; }
+
+    /// @return What the child is to Contour.
+    [[nodiscard]] ProcessRole role() const noexcept { return _role; }
 
     /// @return A pidfd for the child, or -1 when there is none -- and with it no telling whether the
     ///         pid still names this child once it may have exited.
@@ -33,6 +82,7 @@ class UnplacedChild
   private:
     int _pid;
     OwnedFd _pidfd;
+    ProcessRole _role;
 };
 
 /// A child forked by Process and parked before exec(), waiting on its gate.
@@ -46,7 +96,8 @@ class ParkedChild
     /// @param pid   The parked child.
     /// @param pidfd A pidfd for @p pid, or an empty OwnedFd where the kernel offers none.
     /// @param gate  The parent's end of the child's gate.
-    ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate) noexcept;
+    /// @param role  What the child is to Contour.
+    ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate, ProcessRole role = ProcessRole::Session) noexcept;
     ParkedChild(ParkedChild&& other) noexcept = default;
     ParkedChild& operator=(ParkedChild&&) = delete;
     ParkedChild(ParkedChild const&) = delete;
@@ -55,6 +106,9 @@ class ParkedChild
 
     /// @return The child's process id.
     [[nodiscard]] int pid() const noexcept { return _pid; }
+
+    /// @return What the child is to Contour.
+    [[nodiscard]] ProcessRole role() const noexcept { return _role; }
 
     /// @return A pidfd for the child, or -1 when there is none.
     [[nodiscard]] int pidfd() const noexcept { return _pidfd.get(); }
@@ -75,6 +129,7 @@ class ParkedChild
     int _pid;
     OwnedFd _pidfd;
     OwnedFd _gate;
+    ProcessRole _role;
 };
 
 #ifndef _WIN32

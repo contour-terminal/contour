@@ -65,7 +65,8 @@ namespace
     }
 } // namespace
 
-UnplacedChild::UnplacedChild(int pid, OwnedFd pidfd) noexcept: _pid { pid }, _pidfd { std::move(pidfd) }
+UnplacedChild::UnplacedChild(int pid, OwnedFd pidfd, ProcessRole role) noexcept:
+    _pid { pid }, _pidfd { std::move(pidfd) }, _role { role }
 {
 }
 
@@ -74,8 +75,8 @@ bool UnplacedChild::hasExited() const noexcept
     return hasProcessExited(_pidfd);
 }
 
-ParkedChild::ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate) noexcept:
-    _pid { pid }, _pidfd { std::move(pidfd) }, _gate { std::move(gate) }
+ParkedChild::ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate, ProcessRole role) noexcept:
+    _pid { pid }, _pidfd { std::move(pidfd) }, _gate { std::move(gate) }, _role { role }
 {
 }
 
@@ -91,7 +92,7 @@ bool ParkedChild::hasExited() const noexcept
 
 UnplacedChild ParkedChild::releaseUnplaced() noexcept
 {
-    auto unplaced = UnplacedChild { _pid, std::move(_pidfd) };
+    auto unplaced = UnplacedChild { _pid, std::move(_pidfd), _role };
     release();
     return unplaced;
 }

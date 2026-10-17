@@ -200,12 +200,12 @@ int driveDetached(std::string_view placementName)
         return ExitFailed;
 
     auto const self = std::filesystem::read_symlink("/proc/self/exe").string();
-    auto const pid =
-        vtpty::startDetached(vtpty::DetachedCommand { .image = self,
-                                                      .argv = { self, "--hog" },
-                                                      .standardInput = {},
-                                                      .output = vtpty::DetachedOutput::Inherited },
-                             *placement);
+    auto const pid = vtpty::startDetached(vtpty::DetachedCommand { .image = self,
+                                                                   .argv = { self, "--hog" },
+                                                                   .standardInput = {},
+                                                                   .output = vtpty::DetachedOutput::Inherited,
+                                                                   .role = vtpty::ProcessRole::Program },
+                                          *placement);
     if (!pid)
     {
         std::println(stderr, "cannot start the hog: {}", pid.error().message());

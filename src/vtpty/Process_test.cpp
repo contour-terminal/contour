@@ -512,7 +512,8 @@ vtpty::DetachedCommand shellScript(std::string_view script, std::filesystem::pat
     return vtpty::DetachedCommand { .image = "/bin/sh",
                                     .argv = { "sh", "-c", std::string { script }, target.string() },
                                     .standardInput = {},
-                                    .output = vtpty::DetachedOutput::Inherited };
+                                    .output = vtpty::DetachedOutput::Inherited,
+                                    .role = vtpty::ProcessRole::Program };
 }
 
 } // namespace
@@ -543,10 +544,12 @@ TEST_CASE("startDetached.detached from this process", "[process][placement]")
     // Nothing here waits for it or reaps it, and a hangup of this process's session does not reach it.
     auto placement = RecordingPlacement {};
     auto const dropOnExit = DropOnExit { placement };
-    auto const pid = vtpty::startDetached(
-        vtpty::DetachedCommand {
-            .image = "/bin/sh", .argv = { "sh", "-c", "exit 0" }, .standardInput = {}, .output = {} },
-        placement);
+    auto const pid = vtpty::startDetached(vtpty::DetachedCommand { .image = "/bin/sh",
+                                                                   .argv = { "sh", "-c", "exit 0" },
+                                                                   .standardInput = {},
+                                                                   .output = {},
+                                                                   .role = vtpty::ProcessRole::Program },
+                                          placement);
     REQUIRE(pid.has_value());
 
     auto status = 0;

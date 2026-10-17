@@ -440,7 +440,7 @@ StartResult Process::start()
             if (stdoutFastPipe)
                 stdoutFastPipe->closeWriter();
             _d->placement->placeThenRelease(
-                ParkedChild { forked, openPidFd(forked), std::move(gate->parentEnd) });
+                ParkedChild { forked, openPidFd(forked), std::move(gate->parentEnd), ProcessRole::Session });
             break;
         case -1: // fork error: there is no child, and pid keeps saying so
             return std::unexpected(
@@ -869,7 +869,7 @@ std::expected<int, std::error_code> startDetached(DetachedCommand const& command
 
     // Not this process's child, yet its pid still names it: it waits on the gate, and only a signal from
     // elsewhere could end it before the pidfd is opened.
-    placement.placeThenRelease(ParkedChild { pid, openPidFd(pid), std::move(gate->parentEnd) });
+    placement.placeThenRelease(ParkedChild { pid, openPidFd(pid), std::move(gate->parentEnd), command.role });
     return pid;
 }
 // }}}

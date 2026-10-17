@@ -60,10 +60,10 @@ enum class PlacementStatus : std::uint8_t
     Ended,         ///< Exited while it waited to be placed late.
 };
 
-/// One thing SystemdScopePlacement tells about a session process.
+/// One thing SystemdScopePlacement tells about a process it places.
 struct PlacementReport
 {
-    /// The session process.
+    /// The process.
     int pid = 0;
 
     /// What became of it.
@@ -71,6 +71,9 @@ struct PlacementReport
 
     /// Why it was released unplaced, or why systemd's answer went unheard; nothing for Placed and Ended.
     std::optional<ScopeError> reason = std::nullopt;
+
+    /// What the process is to Contour: a session's shell, a program a session started, the daemon.
+    ProcessRole role = ProcessRole::Session;
 
     [[nodiscard]] bool operator==(PlacementReport const&) const = default;
 };
@@ -140,8 +143,9 @@ class SystemdScopePlacement final: public ProcessPlacement
     /// The process a request asks systemd to move.
     struct ScopeTarget
     {
-        int pid;   ///< The process.
-        int pidfd; ///< A pidfd for it, or -1.
+        int pid;          ///< The process.
+        int pidfd;        ///< A pidfd for it, or -1.
+        ProcessRole role; ///< What it is to Contour, which its scope's description says.
     };
 
     /// A child released unplaced, waiting for the breaker to let a late placement through.
@@ -181,7 +185,7 @@ class SystemdScopePlacement final: public ProcessPlacement
     [[nodiscard]] std::expected<Answer, ScopeError> request(ScopeTarget target, ScopeProtocol protocol);
     /// @return Whether the kernel says process @p pid runs in @p unit's cgroup.
     [[nodiscard]] bool runsIn(int pid, std::string_view unit) const;
-    void report(int pid, PlacementStatus status, std::optional<ScopeError> reason) const;
+    void report(int pid, ProcessRole role, PlacementStatus status, std::optional<ScopeError> reason) const;
 
     SystemdScopeConfig _config;
     ScopeBusFactory _connectBus;

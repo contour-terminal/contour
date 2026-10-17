@@ -6,6 +6,7 @@
 #include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -240,7 +241,9 @@ vtpty::PlacementReport told(int pid,
                             vtpty::PlacementStatus status,
                             std::optional<ScopeError> reason = std::nullopt)
 {
-    return vtpty::PlacementReport { .pid = pid, .status = status, .reason = reason };
+    return vtpty::PlacementReport {
+        .pid = pid, .status = status, .reason = reason, .role = vtpty::ProcessRole::Session
+    };
 }
 
 #ifdef __linux__
@@ -333,6 +336,35 @@ TEST_CASE("SystemdScopePlacement.request", "[placement]")
     CHECK(request.pidfd >= 0);
     REQUIRE(request.memoryLimit.has_value());
     CHECK(request.memoryLimit->maxBytes == 64 << 20);
+}
+
+TEST_CASE("SystemdScopePlacement.a process is described as what it is to Contour", "[placement]")
+{
+    // A link's opener or the daemon in a scope described as a "Contour session" would mislead whoever
+    // looks into the scope, and so would a log line about "Session process 4242".
+    using enum vtpty::PlacementStatus;
+    auto const role = GENERATE(vtpty::ProcessRole::Session,
+                               vtpty::ProcessRole::Program,
+                               vtpty::ProcessRole::Daemon,
+                               vtpty::ProcessRole::TmuxClient);
+    INFO("role: " << vtpty::traitsOf(role).noun);
+    auto const rig = Rig {};
+    {
+        auto placement = rig.placement();
+        auto gate = vtpty::makeGate();
+        REQUIRE(gate.has_value());
+        placement.placeThenRelease(
+            vtpty::ParkedChild { 4242, somePidFd(), std::move(gate->parentEnd), role });
+        CHECK(released(gate->childEnd));
+    }
+    auto const requests = rig.script->requestsSoFar();
+    REQUIRE(requests.size() == 1);
+    CHECK(requests.front().description.starts_with(vtpty::traitsOf(role).description));
+    CHECK(requests.front().unitName.starts_with("contour-session-")); // as the documentation names them
+    auto const expected =
+        vtpty::PlacementReport { .pid = 4242, .status = Placed, .reason = {}, .role = role };
+    CHECK(rig.reports->soFar() == std::vector { expected });
+    CHECK(vtpty::describe(expected).text.starts_with(std::format("{} 4242 ", vtpty::traitsOf(role).noun)));
 }
 
 TEST_CASE("SystemdScopePlacement.unitNamesAreUnique", "[placement]")
