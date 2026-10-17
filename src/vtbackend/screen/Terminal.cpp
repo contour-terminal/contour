@@ -723,7 +723,11 @@ bool Terminal::isPassiveFillPending() const noexcept
 std::chrono::milliseconds Terminal::passiveReadTimeout() const noexcept
 {
     auto const interval = _refreshInterval.get().value;
-    if (!isPassiveFillPending())
+
+    // A frame that waits for the display to let go of the front buffer is swapped in when the display wakes
+    // the reader (@see onFrontBufferReleased); new output ends the wait too. Polling meanwhile would only
+    // fail the swap again, for as long as a paint lasts.
+    if (!isPassiveFillPending() || _renderBuffer.state == RenderBufferState::TrySwapBuffers)
         return interval;
 
     // Measured at the time refreshPassively() measures the throttle at, and rounded up: a wait that ended
@@ -742,6 +746,12 @@ void Terminal::refreshPassively()
     {
     }
     ensureFreshRenderBuffer();
+}
+
+void Terminal::onFrontBufferReleased()
+{
+    if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
+        _pty->wakeupReader();
 }
 #endif
 

@@ -168,6 +168,7 @@ TEST_CASE("RenderBufferRef.isMovedNotCopied", "[renderbuffer]")
     // unlock it twice; a moved-from one lets go of nothing.
     static_assert(!std::is_copy_constructible_v<RenderBufferRef>);
     static_assert(!std::is_copy_assignable_v<RenderBufferRef>);
+    static_assert(!std::is_move_assignable_v<RenderBufferRef>);
     static_assert(std::is_nothrow_move_constructible_v<RenderBufferRef>);
 
     auto buffers = RenderDoubleBuffer {};
