@@ -1069,6 +1069,21 @@ TEST_CASE("DECELR: pixel coordinates (Pu=1)", "[screen]")
     CHECK(mock.terminal.locatorState().coordUnit == LocatorCoordUnit::DevicePixels);
 }
 
+TEST_CASE("DECELR: an undefined parameter ignores the sequence", "[screen]")
+{
+    // DEC STD 070 ch. 13 DECELR: "Undefined values for Ps or Pu causes the entire sequence to be ignored."
+    using LocatorCoordUnit = Terminal::LocatorCoordUnit;
+    auto const sequence = GENERATE(std::string_view { "\033[5;1'z" },  // Ps undefined
+                                   std::string_view { "\033[1;7'z" }); // Pu undefined
+    INFO(e(sequence));
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
+    mock.writeToScreen("\033[2;2'z"); // one-shot, character cells
+    mock.writeToScreen(sequence);
+    CHECK(mock.terminal.locatorState().enabled);
+    CHECK(mock.terminal.locatorState().oneShot);
+    CHECK(mock.terminal.locatorState().coordUnit == LocatorCoordUnit::CharacterCells);
+}
+
 TEST_CASE("DECSLE: select locator events", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) } };
