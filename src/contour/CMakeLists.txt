@@ -1103,10 +1103,22 @@ if(NOT(WIN32) AND CONTOUR_PACKAGE_TERMINFO)
     else()
         message(STATUS "Executable tic found (${TIC}).")
     endif()
+    set(terminfo_generate contour generate terminfo to ${terminfo_file})
+    if(CONTOUR_CODE_COVERAGE_ENABLED)
+        # This step runs the instrumented contour, which on exit merges its counters into the build tree's .gcda
+        # files. Once a source has changed they are stale, and the coverage runtime, which trusts a stale file's
+        # layout, may read past its end: the step died of SIGSEGV and failed the build. Its counters go to a
+        # directory of their own instead, emptied first; this run is no coverage anyone measures.
+        set(terminfo_counters "${CMAKE_CURRENT_BINARY_DIR}/terminfo-gcov")
+        set(terminfo_generate
+            ${CMAKE_COMMAND} -E rm -rf "${terminfo_counters}" &&
+            ${CMAKE_COMMAND} -E env "GCOV_PREFIX=${terminfo_counters}"
+                $<TARGET_FILE:contour> generate terminfo to ${terminfo_file})
+    endif()
     add_custom_command(
         TARGET contour POST_BUILD
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMAND contour generate terminfo to ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
+        COMMAND ${terminfo_generate} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
         COMMENT "Compiling ${terminfo_file}"
         BYPRODUCTS "${terminfo_file}"
         VERBATIM
