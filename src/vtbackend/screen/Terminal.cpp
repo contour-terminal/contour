@@ -1252,7 +1252,8 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
         case StatusDisplayType::HostWritable: {
             // While DECSASD selects it, the status line's own active position is the cursor, drawn on its
             // row: DEC STD 070 ch. 14 gives the status display an active position and a cursor of its own,
-            // and xterm and mlterm draw it there. DECTCEM enables it, as the main display's.
+            // and xterm and mlterm draw it there. The one DECTCEM enables it, the main display's too: see the
+            // DECTCEM case of setMode() for why there is one.
             auto const statusLineCursor =
                 _activeStatusDisplay == ActiveStatusDisplay::StatusLine
                         && inputHandler().mode() == ViMode::Insert && isModeEnabled(DECMode::VisibleCursor)
@@ -6306,7 +6307,16 @@ void Terminal::setMode(DECMode mode, bool enable)
             break;
         case DECMode::FocusTracking: setGenerateFocusEvents(enable); break;
         case DECMode::UsePrivateColorRegisters: _usePrivateColorRegisters = enable; break;
-        case DECMode::VisibleCursor: setCursorVisibility(enable); break;
+        case DECMode::VisibleCursor:
+            // One enable for the main and the status display. DEC STD 070 ch. 14 §2.3 item 14 has "Each of
+            // the Main and Status Display cursors may be individually enabled or disabled", but the terminals
+            // that have a host-writable status line keep one: xterm its screen->cursor_set (charproc.c),
+            // which its switch to the status line neither saves nor restores, and mlterm its parser's
+            // is_visible_cursor. Contour follows them: an application written against xterm hides the cursor
+            // with ?25l and then writes the status line through DECSASD, and a cursor of the status line's
+            // own would show there.
+            setCursorVisibility(enable);
+            break;
         case DECMode::MouseProtocolX10: setMouseProtocol(MouseProtocol::X10, enable); break;
         case DECMode::MouseProtocolNormalTracking:
             setMouseProtocol(MouseProtocol::NormalTracking, enable);

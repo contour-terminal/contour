@@ -1176,6 +1176,29 @@ TEST_CASE("MultiPage.theStatusLinesCursorFollowsDECTCEM", "[screen]")
     CHECK(frame.cursor->display == RenderedDisplay::StatusLine);
 }
 
+TEST_CASE("MultiPage.oneDECTCEMEnablesTheMainAndTheStatusDisplaysCursor", "[screen]")
+{
+    // One cursor enable for both displays, as xterm and mlterm keep it (DEC STD 070 ch. 14 would allow one
+    // each): an application hides the cursor with ?25l and then writes the status line through DECSASD.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    showHostWritableStatusLine(mock);
+
+    SECTION("hidden on the main display, then the status line selected")
+    {
+        mock.writeToScreen(
+            "\033[?25l\033[1$}\033[1;5H"); // DECTCEM reset, DECSASD, the status line's column 4
+        REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+    }
+    SECTION("hidden on the status line, then the main display selected")
+    {
+        mock.writeToScreen("\033[1$}\033[?25l\033[0$}"); // DECSASD, DECTCEM reset, DECSASD main display
+        REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::Main);
+    }
+
+    CHECK_FALSE(renderOf(terminal).cursor.has_value());
+}
+
 TEST_CASE("MultiPage.theCursorIsBackOnTheMainDisplayAfterDECSASD0", "[screen]")
 {
     // DECSASD 0 selects the main display again: its own active position is the cursor once more.
