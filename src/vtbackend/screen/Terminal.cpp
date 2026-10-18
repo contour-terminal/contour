@@ -5746,13 +5746,15 @@ std::optional<LineOffset> Terminal::commandBlockAnchor(CommandBlockTarget target
                 return std::nullopt;
             return currentMouseGridPosition().transform([](CellLocation position) { return position.line; });
         case CommandBlockTarget::Cursor: {
-            // In Insert mode the cursor is the terminal's, on the cursor's page; in the others it is the vi
-            // cursor, on the page on display. While that page is another than the primary one, the shell's
-            // cursor is the primary screen's own.
-            auto const onPrimary = inputHandler().mode() == ViMode::Insert
-                                       ? isPrimaryScreen()
-                                       : displayedScreenType() == ScreenType::Primary;
-            return onPrimary ? gridCursorPosition().line : primaryScreen().realCursorPosition().line;
+            // In Insert mode the cursor is the terminal's, on the cursor's page -- the main display's, not
+            // the status line's that DECSASD may have selected; in the others it is the vi cursor, on the
+            // page on display. While that page is another than the primary one, the shell's cursor is the
+            // primary screen's own.
+            if (inputHandler().mode() == ViMode::Insert)
+                return isPrimaryScreen() ? pageAt(_cursorPage).cursor().position.line
+                                         : primaryScreen().realCursorPosition().line;
+            return displayedScreenType() == ScreenType::Primary ? _viCommands.cursorPosition.line
+                                                                : primaryScreen().realCursorPosition().line;
         }
         case CommandBlockTarget::Last: break; // named by its record above
     }

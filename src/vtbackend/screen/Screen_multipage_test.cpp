@@ -1028,6 +1028,28 @@ TEST_CASE("MultiPage.DECPCCM_reset.theBlockAtTheViCursorIsOnThePageOnDisplay", "
     CHECK(textOf(mock, CommandBlockTarget::Cursor, CommandBlockPart::Output) == "a\nb");
 }
 
+TEST_CASE("MultiPage.DECSASD.theBlockAtTheCursorIsTheMainDisplays", "[screen]")
+{
+    // `ls` ran and `pwd` runs on page 1: the shell's cursor is on `pwd`'s output. DECSASD then sends output
+    // to the host-writable status line, whose own cursor is at its row 0. In Insert mode the block at the
+    // cursor is still `pwd`'s: the main display's cursor names it, not the status line's coordinates.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(20) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    runCommand(mock, "ls", { "a", "b" });
+    startCommand(mock, "pwd");
+    mock.writeToScreen("/x\r\n");
+    auto const promptAtTheCursor = [&] {
+        return textOf(mock, CommandBlockTarget::Cursor, CommandBlockPart::Prompt);
+    };
+    REQUIRE(promptAtTheCursor().contains("pwd"));
+
+    mock.writeToScreen("\033[2$~\033[1$}"); // DECSSDT host-writable, DECSASD
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+    REQUIRE(terminal.inputHandler().mode() == ViMode::Insert);
+
+    CHECK(promptAtTheCursor().contains("pwd"));
+}
+
 // The caret is the active position on the cursor's page: in view only while that page is on display and the
 // main display is selected (DEC STD 070: with DECPCCM reset, "The cursor is not shown in this case").
 
