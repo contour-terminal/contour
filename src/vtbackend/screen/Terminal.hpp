@@ -3502,6 +3502,13 @@ class Terminal
     /// @param output Whether the displayed text changed.
     void onStatusLineCommandCompleted(StatusLineCommandOutput output);
 
+    /// Shows @p type, which a host's control chose (RIS, DECSSDT, or the frontend's grant of the
+    /// host-writable status line DECSSDT asked for) -- unless a notice is up (pushStatusDisplay), which the
+    /// host may not take down: then @p type is what comes back once the last notice is down. DEC STD 070
+    /// ch. 14 §2.1.1: "The host may not directly program or affect the Error Line".
+    /// @param type The type the host chose.
+    void showStatusDisplayOfHost(StatusDisplayType type);
+
     /// Puts @p page on display, and brings the viewport, the window onto it, back inside its history.
     ///
     /// The one place the page on display changes. The page coming on display may have less history than the

@@ -2101,6 +2101,54 @@ TEST_CASE("Terminal.statusNotices.RIS_drops_the_notice_of_a_locked_keyboard", "[
     CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
 }
 
+TEST_CASE("Terminal.statusNotices.the_host_may_not_take_a_notice_down", "[terminal][statusline]")
+{
+    // DEC STD 070 ch. 14 §2.1.1: "The host may not directly program or affect the Error Line", DEC's own
+    // notice. RIS, DECSSDT and the frontend's grant of the host-writable status line leave a notice up; the
+    // type the host chose is what comes back once the last notice is down.
+    // Wide enough for the whole "key bindings disabled" notice: the indicator line is clipped to the page.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 40 } } };
+    auto& terminal = mc.terminal;
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    SECTION("RIS during vi mode")
+    {
+        terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+        mc.writeToScreen("\033c");
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+        terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+        CHECK(terminal.statusDisplayType() == terminal.factorySettings().statusDisplayType);
+    }
+
+    SECTION("DECSSDT while the key bindings are disabled")
+    {
+        terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(
+            "{}", "{Text:text=key bindings disabled,Left= « ,Right= » }", "{}"));
+        terminal.pushStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled,
+                                   vtbackend::StatusDisplayType::Indicator);
+        mc.writeToScreen("\033[1$~\033[0$~"); // DECSSDT indicator, then none
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+        terminal.refreshRenderBuffer(); // the frame writes the indicator status line
+        CHECK(terminal.indicatorStatusLineDisplay().renderMainPageText().contains("key bindings disabled"));
+
+        terminal.popStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+    }
+
+    SECTION("the host-writable status line granted during vi mode")
+    {
+        terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        mc.writeToScreen("\033[2$~"); // DECSSDT host-writable: asked of the frontend
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+        terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+    }
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,

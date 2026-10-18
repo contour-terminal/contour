@@ -6713,7 +6713,7 @@ void Terminal::hardReset()
     _mainDisplayMargin = makeDefaultMargin(mainDisplayPageSize);
     primaryScreen().verifyState();
 
-    setStatusDisplay(_factorySettings.statusDisplayType);
+    showStatusDisplayOfHost(_factorySettings.statusDisplayType);
     _selectedStatusDisplayType = StatusDisplayType::None;
 
     // NB: _inputGenerator.reset() deliberately runs near the top of this function, before the mode
@@ -7580,12 +7580,24 @@ void Terminal::selectStatusDisplayByHost(StatusDisplayType type)
     switch (type)
     {
         case StatusDisplayType::None:
-        case StatusDisplayType::Indicator: setStatusDisplay(type); break;
+        case StatusDisplayType::Indicator: showStatusDisplayOfHost(type); break;
         case StatusDisplayType::HostWritable:
-            if (_statusDisplayType != StatusDisplayType::HostWritable)
+            // Shown already, or to be shown once a notice is down: nothing to ask the frontend.
+            if (_statusDisplayType != StatusDisplayType::HostWritable
+                && _savedStatusDisplayType != StatusDisplayType::HostWritable)
                 requestShowHostWritableStatusLine();
             break;
     }
+}
+
+void Terminal::showStatusDisplayOfHost(StatusDisplayType type)
+{
+    if (_statusNotices.any())
+    {
+        _savedStatusDisplayType = type;
+        return;
+    }
+    setStatusDisplay(type);
 }
 
 void Terminal::selectStatusDisplayByUser(StatusDisplayType type)
@@ -7621,7 +7633,7 @@ void Terminal::answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer 
             _deniedStatusLineTitle = DeniedStatusLineTitle::Owed;
             break;
         case HostWritableStatusLineAnswer::Shown:
-            setStatusDisplay(StatusDisplayType::HostWritable);
+            showStatusDisplayOfHost(StatusDisplayType::HostWritable);
             _deniedStatusLineTitle = DeniedStatusLineTitle::Settled;
             break;
     }
