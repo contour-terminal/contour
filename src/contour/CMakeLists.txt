@@ -488,6 +488,16 @@ target_link_libraries(contour_block_tooltip PUBLIC vtbackend)
 target_include_directories(contour_block_tooltip PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
+# {{{ contour_local_file: what following a hyperlink to a file on this machine does with it
+# Qt-free, and tested in contour_test, for the reason contour_block_tooltip is.
+add_library(contour_local_file STATIC
+    session/LocalFileAction.cpp
+    session/LocalFileAction.hpp
+)
+target_link_libraries(contour_local_file PUBLIC core::base core::platform)
+target_include_directories(contour_local_file PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
 target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
@@ -620,6 +630,7 @@ target_link_libraries(contour_core
     contour_command
     contour_command_output
     contour_cli
+    contour_local_file
     vtworkspace
     # remote/ runs the daemon client on core-cpp's event loop, session/ writes command output through
     # core::platform's filesystem, and main.cpp suppresses the Windows error dialogs through
@@ -984,6 +995,7 @@ if(CONTOUR_TESTING)
         session/ScreenshotFile_test.cpp
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp
+        session/LocalFileAction_test.cpp
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
         platform/SessionVisibility_test.cpp
@@ -997,6 +1009,7 @@ if(CONTOUR_TESTING)
         contour_command
         contour_command_output
         contour_cli
+        contour_local_file
         vtbackend
         core::testing
         Catch2::Catch2)

@@ -42,6 +42,7 @@
 #include <fstream>
 #include <functional>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -387,6 +388,31 @@ class ConfigurableStartPty final: public vtpty::ChannelPty
     StartBehavior _behavior;
 };
 
+/// The process's own environment, but for the names a test sets, which read as the test set them.
+class TestEnvironment final: public core::Environment
+{
+  public:
+    /// The names a test sets, and their values.
+    using Overrides = std::map<std::string, std::string, std::less<>>;
+
+    /// @param overrides The names a test sets; every other name reads as the process's own environment has
+    /// it.
+    explicit TestEnvironment(Overrides overrides = {}): _overrides { std::move(overrides) } {}
+
+    /// @param name Name of the variable to look up.
+    /// @return What the test set it to; else what the process's own environment holds.
+    [[nodiscard]] std::optional<std::string> get(std::string_view name) const override
+    {
+        if (auto const i = _overrides.find(name); i != _overrides.end())
+            return i->second;
+        return _live.get(name);
+    }
+
+  private:
+    core::LiveEnvironment _live;
+    Overrides _overrides;
+};
+
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves
 /// to the default "main" profile) without running the GUI. The default-constructed config already
 /// seeds a "main" profile and a "default" colorscheme, so no config file is needed. The app's real
@@ -409,12 +435,15 @@ class TestApp
     ///                for what a test app gets without one.
     /// @param identity The machine the app's sessions run on. @see testHostIdentity() for the default.
     /// @param fileSystem Where the app's sessions look up paths; null for this machine's. Borrowed.
+    /// @param environment The environment variables the app reads as the test sets them.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
                      vtbackend::HostIdentity identity = testHostIdentity(),
-                     core::platform::FileSystem const* fileSystem = nullptr):
+                     core::platform::FileSystem const* fileSystem = nullptr,
+                     TestEnvironment::Overrides environment = {}):
+        _environment { std::move(environment) },
         _app(_environment,
              withTestNotifier(std::move(factory)),
              makeRecordingLauncher(),
@@ -465,13 +494,15 @@ class TestApp
     /// A test app whose sessions look up paths where @p files says: for a test of what a path names, the
     /// fixture's own filesystem, the one its command output files are on too.
     /// @param files Where the app's sessions look up paths.
-    explicit TestApp(SessionFiles files):
+    /// @param environment The environment variables the app reads as the test sets them.
+    explicit TestApp(SessionFiles files, TestEnvironment::Overrides environment = {}):
         TestApp(nullptr,
                 nullptr,
                 nullptr,
                 nullptr,
                 testHostIdentity(),
-                files == SessionFiles::Fixture ? &_fileSystem : nullptr)
+                files == SessionFiles::Fixture ? &_fileSystem : nullptr,
+                std::move(environment))
     {
     }
 
@@ -599,8 +630,9 @@ class TestApp
 
     RecordingExternalLauncher* _launcher = nullptr;
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
-    /// reads as. A test that cares injects a core::testing::FakeEnvironment instead.
-    core::LiveEnvironment _environment;
+    /// reads as. A test that cares sets the names it needs (TestApp(SessionFiles,
+    /// TestEnvironment::Overrides)).
+    TestEnvironment _environment;
     /// Declared before _app, whose sessions borrow them. They start at the time the app is made, so that
     /// times read from them look like times the suite runs at.
     core::platform::ManualClock _steadyClock { core::platform::defaultSteadyClock().now() };

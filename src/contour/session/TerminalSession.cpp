@@ -16,6 +16,7 @@
 #include <contour/session/CommandBlockTooltip.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/HostedOperation.hpp>
+#include <contour/session/LocalFileAction.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/ScreenshotFile.hpp>
 #include <contour/session/SpawnCommand.hpp>
@@ -43,7 +44,6 @@
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
-#include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 #include <QtCore/QMimeData>
 #include <QtCore/QPointer>
@@ -5539,31 +5539,38 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
     }
 
     auto const path = QString::fromStdString(*localPath);
-    // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and render
-    // threads are live, and getenv() is not thread safe.
-    auto const editorEnv = qEnvironmentVariable("EDITOR");
-    auto const fileInfo = QFileInfo(path);
+    // Through the app's environment, as every variable is read, not getenv(): this runs on the GUI thread
+    // while the PTY and render threads are live.
+    auto const editor = _app.processEnvironment().get("EDITOR").value_or(std::string {});
+    // Asked of the app's filesystem, where the terminal finds the paths it shows, not of the disk.
+    auto const action = core::pathFromUtf8(*localPath)
+                            .transform([&](std::filesystem::path const& file) {
+                                return localFileAction(file, _app.fileSystem(), NativeExecutableRule, editor);
+                            })
+                            .value_or(LocalFileAction::OpenOnDesktop);
 
-    // An executable file is run through `contour config <path>`; any other file is handed to $EDITOR the
-    // same way. Anything else -- a directory, a missing path -- goes to the desktop, as a plain local file
-    // URL: an authority that survived would be read as a network location, file://host/tmp as //host/tmp.
+    // A program is run through `contour config <path>`; any other file is handed to $EDITOR the same way.
+    // Anything else -- a directory, a missing path -- goes to the desktop, as a plain local file URL: an
+    // authority that survived would be read as a network location, file://host/tmp as //host/tmp.
     // Detached: the second Contour runs until its window is closed, and this is the GUI thread.
-    if (fileInfo.isFile() && (fileInfo.isExecutable() || !editorEnv.isEmpty()))
+    if (action == LocalFileAction::OpenOnDesktop)
     {
-        auto args = QStringList { "config", platform::toQString(_config.configFile) };
-        if (!fileInfo.isExecutable())
-            args << editorEnv;
-        args << path;
-        if (auto const started =
-                _app.externalLauncher().runDetached(QString::fromStdString(_app.programPath()), args);
-            !started)
-            errorLog()(
-                "Could not open \"{}\" in an editor: {}.", *localPath, platform::describe(started.error()));
+        auto const url = QUrl::fromLocalFile(path);
+        openExternally(url, "hyperlink", url.toString().toStdString());
         return;
     }
 
-    auto const url = QUrl::fromLocalFile(path);
-    openExternally(url, "hyperlink", url.toString().toStdString());
+    auto args = QStringList { "config", platform::toQString(_config.configFile) };
+    if (action == LocalFileAction::Edit)
+        args << QString::fromStdString(editor);
+    args << path;
+    if (auto const started =
+            _app.externalLauncher().runDetached(QString::fromStdString(_app.programPath()), args);
+        !started)
+        errorLog()("Could not {} \"{}\": {}.",
+                   describeAction(action),
+                   *localPath,
+                   platform::describe(started.error()));
 }
 
 // }}}

@@ -4686,6 +4686,58 @@ TEST_CASE("TerminalSession: a path under the pointer opens as the app's filesyst
     CHECK(launcher.openedUrls.back() == localFileUrl(work / "doc.txt"));
 }
 
+TEST_CASE("TerminalSession: a file:// hyperlink is followed as the app's filesystem names it",
+          "[contour][session][hyperlink]")
+{
+    // Asked of the app's filesystem, where the terminal finds the paths it shows: a program only it holds is
+    // run, through `contour config`. Asked of the disk, it was no file, and went to the desktop.
+    namespace actions = contour::actions;
+    contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::Fixture };
+    // A program by either platform's rule: an execute bit, and a name ending in ".exe". Absolute on every
+    // platform, as the temporary directory is; a name in the in-memory filesystem only.
+    auto const tool = std::filesystem::temp_directory_path() / "contour-in-memory-bin" / "tool.exe";
+    testApp.fileSystem().addExecutable(tool);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& launcher = testApp.launcher();
+
+    seedHoveredHyperlink(*session, localFileUrl(tool).toString().toStdString());
+    REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
+    CHECK((*session)(actions::FollowHyperlink {}));
+
+    CHECK(launcher.openedUrls.empty());
+    REQUIRE(launcher.detached.size() == 1);
+    CHECK(launcher.detached.back().arguments.front() == QStringLiteral("config"));
+    CHECK(launcher.detached.back().arguments.back() == localFileUrl(tool).toLocalFile());
+}
+
+TEST_CASE(
+    "TerminalSession: a file:// hyperlink to a text file opens in the editor the app's environment names",
+    "[contour][session][hyperlink]")
+{
+    // $EDITOR is read through the app's environment, as every other variable is: a text file only the app's
+    // filesystem holds opens in the editor that environment names, through `contour config`.
+    namespace actions = contour::actions;
+    contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::Fixture,
+                                     { { "EDITOR", "contour-test-editor" } } };
+    // Absolute on every platform, as the temporary directory is; a name in the in-memory filesystem only.
+    auto const notes = std::filesystem::temp_directory_path() / "contour-in-memory-doc" / "notes.txt";
+    testApp.fileSystem().addFile(notes, "x");
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& launcher = testApp.launcher();
+
+    seedHoveredHyperlink(*session, localFileUrl(notes).toString().toStdString());
+    REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
+    CHECK((*session)(actions::FollowHyperlink {}));
+
+    CHECK(launcher.openedUrls.empty());
+    REQUIRE(launcher.detached.size() == 1);
+    auto const& arguments = launcher.detached.back().arguments;
+    REQUIRE(arguments.size() == 4);
+    CHECK(arguments.at(0) == QStringLiteral("config"));
+    CHECK(arguments.at(2) == QStringLiteral("contour-test-editor"));
+    CHECK(arguments.at(3) == localFileUrl(notes).toLocalFile());
+}
+
 TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the external launcher",
           "[contour][session][hyperlink]")
 {
