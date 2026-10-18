@@ -574,17 +574,41 @@ inline void pauseAfter(size_t rounds)
     return steps;
 }
 
+// Whether this translation unit is built with ThreadSanitizer: GCC says so with __SANITIZE_THREAD__,
+// clang with __has_feature(thread_sanitizer). Local to this header; undefined right below.
+#ifdef __SANITIZE_THREAD__
+    #define VTBACKEND_TEST_HELPERS_TSAN
+#endif
+#ifdef __has_feature
+    #if __has_feature(thread_sanitizer)
+        #define VTBACKEND_TEST_HELPERS_TSAN
+    #endif
+#endif
+
+/// How many times longer a budget for work that must finish is in this build than in an unsanitized one.
+/// ThreadSanitizer runs code 5 to 15 times slower (its documentation), so a budget sized for an unsanitized
+/// run can run out while the work is merely slow: the upper end of that range. AddressSanitizer's slowdown,
+/// about 2x, fits the budgets as they are. A real deadlock still fails, only later.
+#ifdef VTBACKEND_TEST_HELPERS_TSAN
+inline constexpr auto SanitizerSlowdown = 15;
+#else
+inline constexpr auto SanitizerSlowdown = 1;
+#endif
+#undef VTBACKEND_TEST_HELPERS_TSAN
+
 /// Runs @p body, and ends the test run with a message should it not return within @p budget: a thread that
 /// deadlocked on the terminal lock holds it for good, so the case could neither fail nor unwind.
-/// @param budget How long @p body may take.
+/// @param budget How long @p body may take in an unsanitized build; a sanitized one stretches it by
+///               SanitizerSlowdown.
 /// @param body What might deadlock.
 inline void failOnDeadlock(std::chrono::milliseconds budget, std::function<void()> const& body)
 {
-    auto const watchdog = std::jthread { [budget](std::stop_token const& returned) {
+    auto const allowed = budget * SanitizerSlowdown;
+    auto const watchdog = std::jthread { [allowed](std::stop_token const& returned) {
         auto mutex = std::mutex {};
         auto lock = std::unique_lock { mutex };
         auto wake = std::condition_variable_any {};
-        if (wake.wait_for(lock, returned, budget, [&returned] { return returned.stop_requested(); }))
+        if (wake.wait_for(lock, returned, allowed, [&returned] { return returned.stop_requested(); }))
             return;
         std::fputs("Deadlocked: the thread holding the terminal lock took it again.\n", stderr);
         std::_Exit(EXIT_FAILURE);
