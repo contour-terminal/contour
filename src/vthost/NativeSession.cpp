@@ -896,10 +896,16 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
         // displayed, the fat GUI hides the cursor (it belongs to a page the user is
         // not looking at). Mirror that by withholding VisibleCursor (DECTCEM/mode
         // 25) from the mode set, exactly as if the app had hidden it.
-        auto const cursorOnDisplayedPage = terminal->cursorPageIndex() == displayedPage;
+        //
+        // The same while DECSASD selects the host-writable status line, whose cursor the fat GUI then shows
+        // on the status line's row: its position does not travel -- the cursor sent above is the page on
+        // display's -- so the mirror could draw it only at its own status line's column 0.
+        auto const cursorShownWhereKnown =
+            terminal->cursorPageIndex() == displayedPage
+            && terminal->activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main;
         for (auto const mode: MirroredModes)
         {
-            if (mode == vtbackend::DECMode::VisibleCursor && !cursorOnDisplayedPage)
+            if (mode == vtbackend::DECMode::VisibleCursor && !cursorShownWhereKnown)
                 continue;
             if (terminal->isModeEnabled(mode))
                 delta.setModes.push_back(vtbackend::toDECModeNum(mode));
