@@ -2177,6 +2177,72 @@ TEST_CASE("Terminal.statusNotices.the_host_may_not_take_a_notice_down", "[termin
     }
 }
 
+TEST_CASE("Terminal.userInputLock.noHostResetUnlocksIt", "[terminal][statusline]")
+{
+    // KAM is the host's, which DECSTR, RM and RIS reset (DEC STD 070 ch. 6 §6.2); the user's lock is not KAM.
+    // It, and its notice, outlast them, and only the user lifts it.
+    auto const reset = GENERATE(
+        std::string_view { "\033[!p" }, std::string_view { "\033[2l" }, std::string_view { "\033c" });
+    INFO("reset: " << core::escape(reset));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 40 } } };
+    auto& terminal = mc.terminal;
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    mc.writeToScreen(reset);
+
+    CHECK(terminal.userInputLock() == vtbackend::UserInputLock::Locked);
+    CHECK_FALSE(terminal.allowInput());
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    mc.resetReplyData();
+    mc.sendCharSequence("x");
+    CHECK(mc.replyData().empty());
+
+    terminal.setUserInputLock(vtbackend::UserInputLock::Unlocked);
+    CHECK(terminal.allowInput());
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+    mc.sendCharSequence("x");
+    CHECK(mc.replyData() == "x");
+}
+
+TEST_CASE("Terminal.userInputLock.andTheHostsKAMAreIndependent", "[terminal]")
+{
+    // Either lock holds the keyboard; neither lifts the other.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 40 } } };
+    auto& terminal = mc.terminal;
+
+    SECTION("the host locks, the user locks and unlocks")
+    {
+        mc.writeToScreen("\033[2h"); // KAM set
+        terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+        terminal.setUserInputLock(vtbackend::UserInputLock::Unlocked);
+        CHECK(terminal.isModeEnabled(vtbackend::AnsiMode::KeyboardAction));
+        CHECK_FALSE(terminal.allowInput());
+        mc.writeToScreen("\033[2l"); // KAM reset
+        CHECK(terminal.allowInput());
+    }
+
+    SECTION("the user locks, the host locks and unlocks")
+    {
+        terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+        mc.writeToScreen("\033[2h\033[2l"); // KAM set, then reset
+        CHECK_FALSE(terminal.allowInput());
+        terminal.setUserInputLock(vtbackend::UserInputLock::Unlocked);
+        CHECK(terminal.allowInput());
+    }
+
+    SECTION("the host's KAM is reported as the host set it")
+    {
+        // DECRQM answers for KAM alone: the user's lock is no mode of the host's.
+        terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+        mc.discardPendingReplies();
+        mc.writeToScreen("\033[2$p"); // DECRQM KAM
+        terminal.flushInput();
+        CHECK(mc.replyData() == "\033[2;2$y"); // reset
+    }
+}
+
 TEST_CASE("Terminal.CancelSelection_no_selection", "[terminal]")
 {
     // Reproducer for #1839: On a fresh terminal with no selection,

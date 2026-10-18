@@ -3509,7 +3509,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // Left for the window to fill in: whether this tab holds more than one pane is not something
             // a session knows about itself.
             .hasSplits = false,
-            .inputProtected = !terminal().allowInput(),
+            .inputProtected = terminal().userInputLock() == vtbackend::UserInputLock::Locked,
             // A property of the build and the machine, asked once here so the menu itself stays a pure
             // function of this snapshot.
             .canSpeak = _app.speechSynthesizer().available(),
@@ -4527,18 +4527,30 @@ bool TerminalSession::operator()(actions::ToggleInputMethodHandling)
 
 bool TerminalSession::operator()(actions::ToggleInputProtection)
 {
-    // Locked around the terminal calls only; announce() below is Qt accessibility and must not run
-    // with the terminal lock held. Through runUnderStateLock(): locking the keyboard (KAM) puts the indicator
-    // status line up, which resizes. See ViNormalMode for the rationale.
-    auto const allowInput = _terminal.runUnderStateLock([&]() {
-        terminal().setAllowInput(!terminal().allowInput());
-        return terminal().allowInput();
+    // The user's own lock, not KAM: KAM is the host's, which DECSTR, CSI 2 l and RIS reset, and no host
+    // sequence may undo what the user locked. Locked around the terminal calls only; announce() below is Qt
+    // accessibility and must not run with the terminal lock held. Through runUnderStateLock(): the lock puts
+    // the indicator status line up, which resizes. See ViNormalMode for the rationale.
+    auto const userLock = _terminal.runUnderStateLock([&]() {
+        auto const toggled = terminal().userInputLock() == vtbackend::UserInputLock::Locked
+                                 ? vtbackend::UserInputLock::Unlocked
+                                 : vtbackend::UserInputLock::Locked;
+        terminal().setUserInputLock(toggled);
+        return toggled;
     });
+    // What typing does now, and which lock holds it: the user who unlocked while the application's KAM still
+    // holds the keyboard hears why typing still does nothing, rather than the "Read-only" they just lifted.
+    auto const announcement = [&] {
+        if (userLock == vtbackend::UserInputLock::Locked)
+            return QObject::tr("Read-only");
+        if (_terminal.isModeEnabled(vtbackend::AnsiMode::KeyboardAction))
+            return QObject::tr("Read-only: the application locked the keyboard");
+        return QObject::tr("Editable");
+    }();
 
     // Assertive: this changes what typing does, so a client mid-sentence should be interrupted rather
     // than tell the user about it after they have already typed into a terminal that ignored them.
-    announce(allowInput ? QObject::tr("Editable") : QObject::tr("Read-only"),
-             QAccessible::AnnouncementPoliteness::Assertive);
+    announce(announcement, QAccessible::AnnouncementPoliteness::Assertive);
     return true;
 }
 

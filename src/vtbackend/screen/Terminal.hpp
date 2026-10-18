@@ -3293,11 +3293,26 @@ class Terminal
     /// @param owner Whose notice comes down.
     void popStatusDisplay(StatusNotice owner);
 
-    /// Whether the keyboard is unlocked (KAM reset). Needs no lock: the ANSI modes are atomic, as a key reads
-    /// this on the GUI thread while the parser thread may set them.
-    bool allowInput() const noexcept { return !isModeEnabled(AnsiMode::KeyboardAction); }
+    /// Whether input reaches the application. Needs no lock: both locks are atomic, as a key reads this on
+    /// the GUI thread while the parser thread may set KAM.
+    /// @return true while neither the host (KAM) nor the user (setUserInputLock) locked the keyboard.
+    [[nodiscard]] bool allowInput() const noexcept
+    {
+        return !isModeEnabled(AnsiMode::KeyboardAction)
+               && _userInputLock.load(std::memory_order_relaxed) == UserInputLock::Unlocked;
+    }
 
-    void setAllowInput(bool enabled);
+    /// Locks or unlocks the keyboard as the user does, making the terminal read-only or not, and puts the
+    /// indicator up as the lock's notice. The user's own lock, apart from KAM: KAM is the host's, which
+    /// DECSTR and RIS reset (DEC STD 070 ch. 6 §6.2), and no host sequence sets or resets this one.
+    /// @param lock The user's lock.
+    void setUserInputLock(UserInputLock lock);
+
+    /// @return The user's own lock of the keyboard. @see setUserInputLock
+    [[nodiscard]] UserInputLock userInputLock() const noexcept
+    {
+        return _userInputLock.load(std::memory_order_relaxed);
+    }
 
     // Sets the current search term to the given text and
     // moves the viewport accordingly to make sure the given text is visible,
@@ -4530,6 +4545,8 @@ class Terminal
     std::optional<StatusDisplayType> _savedStatusDisplayType = std::nullopt;
     /// The owners of the notices up. @see pushStatusDisplay
     StatusNotices _statusNotices {};
+    /// The user's own lock of the keyboard (setUserInputLock); atomic, as allowInput() is read lock-free.
+    std::atomic<UserInputLock> _userInputLock { UserInputLock::Unlocked };
     ActiveStatusDisplay _activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search _search;

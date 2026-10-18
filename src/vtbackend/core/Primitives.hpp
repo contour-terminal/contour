@@ -731,13 +731,21 @@ enum class StatusDisplayType : uint8_t
 enum class StatusNotice : uint8_t
 {
     None = 0,
-    KeyboardLocked = 0b001,      ///< KAM locked the keyboard.
-    KeyBindingsDisabled = 0b010, ///< The user disabled the key bindings.
-    ViMode = 0b100,              ///< Vi mode, in any of its modes but Insert.
+    KeyboardLocked = 0b0001,      ///< KAM locked the keyboard.
+    KeyBindingsDisabled = 0b0010, ///< The user disabled the key bindings.
+    ViMode = 0b0100,              ///< Vi mode, in any of its modes but Insert.
+    UserInputLocked = 0b1000,     ///< The user locked the keyboard (read-only).
 };
 
 /// The owners of the notices up. @see StatusNotice
 using StatusNotices = core::Flags<StatusNotice>;
+
+/// The user's own lock of the keyboard: what makes a terminal read-only, apart from the host's KAM.
+enum class UserInputLock : uint8_t
+{
+    Unlocked = 0, ///< Input reaches the application, unless the host locked the keyboard (KAM).
+    Locked,       ///< No input reaches the application.
+};
 
 // Mandates the position to show the statusline at.
 enum class StatusDisplayPosition : uint8_t

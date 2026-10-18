@@ -1560,7 +1560,7 @@ Handled Terminal::sendCharEvent(char32_t ch,
 {
     restartCursorBlink(now);
 
-    // Early exit if KAM is enabled.
+    // Early exit while the host's KAM or the user's lock holds the keyboard.
     if (!allowInput())
         return Handled { true };
 
@@ -7702,9 +7702,17 @@ void Terminal::popStatusDisplay(StatusNotice owner)
     _savedStatusDisplayType.reset();
 }
 
-void Terminal::setAllowInput(bool enabled)
+void Terminal::setUserInputLock(UserInputLock lock)
 {
-    setMode(AnsiMode::KeyboardAction, !enabled);
+    if (_userInputLock.exchange(lock, std::memory_order_relaxed) == lock)
+        return;
+    switch (lock)
+    {
+        case UserInputLock::Locked:
+            pushStatusDisplay(StatusNotice::UserInputLocked, StatusDisplayType::Indicator);
+            break;
+        case UserInputLock::Unlocked: popStatusDisplay(StatusNotice::UserInputLocked); break;
+    }
 }
 
 bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)

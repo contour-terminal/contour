@@ -5330,6 +5330,58 @@ TEST_CASE("TerminalSession: things with no place in the accessibility tree are a
     }
 }
 
+TEST_CASE("TerminalSession: the read-only lock is the user's, which no host reset undoes",
+          "[contour][session][input]")
+{
+    // DECSTR, KAM's reset and RIS reset the host's keyboard lock, KAM (DEC STD 070 ch. 6 §6.2); the user's
+    // read-only lock is not KAM, and outlasts them.
+    auto const reset = GENERATE(
+        std::string_view { "\033[!p" }, std::string_view { "\033[2l" }, std::string_view { "\033c" });
+    INFO("reset: " << core::escape(reset));
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {}));
+    REQUIRE_FALSE(terminal.allowInput());
+    terminal.writeToScreen(reset);
+    CHECK_FALSE(terminal.allowInput());
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {}));
+    CHECK(terminal.allowInput());
+}
+
+TEST_CASE("TerminalSession: the read-only toggle leaves the host's keyboard lock alone",
+          "[contour][session][input]")
+{
+    // KAM is the host's: the user locking and unlocking their own lock over it neither lifts nor sets it. The
+    // menu's check mark shows the user's lock, and what is announced says which lock holds the keyboard.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    auto announcer = std::make_unique<RecordingAnnouncer>();
+    auto* recorder = announcer.get();
+    session->setAnnouncer(std::move(announcer));
+    terminal.writeToScreen("\033[2h"); // KAM: the host locks the keyboard
+    REQUIRE_FALSE(terminal.allowInput());
+    CHECK_FALSE(session->contextMenuState().inputProtected);
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {})); // the user locks too
+    CHECK_FALSE(terminal.allowInput());
+    CHECK(session->contextMenuState().inputProtected);
+    REQUIRE(recorder->said.size() == 1);
+    CHECK(recorder->said.back().message == QStringLiteral("Read-only"));
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {})); // and unlocks
+    CHECK_FALSE(terminal.allowInput());
+    CHECK_FALSE(session->contextMenuState().inputProtected);
+    REQUIRE(recorder->said.size() == 2);
+    CHECK(recorder->said.back().message == QStringLiteral("Read-only: the application locked the keyboard"));
+
+    terminal.writeToScreen("\033[2l"); // the host unlocks
+    CHECK(terminal.allowInput());
+}
+
 // {{{ What a session asks of its VIEW
 //
 // Every case above runs display-less, because until session::DisplaySurface existed the only view was a
@@ -9253,7 +9305,7 @@ TEST_CASE("TerminalSession: key bindings toggled off with resize reports echoed 
 TEST_CASE("TerminalSession: input protection toggled on with resize reports echoed locally does not deadlock",
           "[contour][session][input]")
 {
-    // Protecting the input locks the keyboard (KAM), which puts the indicator status line up.
+    // Protecting the input locks the keyboard with the user's lock, which puts the indicator status line up.
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     session->terminal().setStatusDisplay(vtbackend::StatusDisplayType::None);
