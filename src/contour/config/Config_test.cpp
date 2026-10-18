@@ -5683,9 +5683,9 @@ TEST_CASE("Config: the gutter colors the generated config quotes are what the de
         std::format("#     failure: {}\n", palette.blockStatusColor(CommandBlockOutcome::Failure))));
     CHECK(generated.contains(
         std::format("#     running: {}\n", palette.blockStatusColor(CommandBlockOutcome::Running))));
-    for (auto const [key, outcome]: { std::pair { "success"sv, CommandBlockOutcome::Success },
-                                      std::pair { "failure"sv, CommandBlockOutcome::Failure },
-                                      std::pair { "running"sv, CommandBlockOutcome::Running } })
+    for (auto const& [key, outcome]: { std::pair { "success"sv, CommandBlockOutcome::Success },
+                                       std::pair { "failure"sv, CommandBlockOutcome::Failure },
+                                       std::pair { "running"sv, CommandBlockOutcome::Running } })
     {
         INFO("block_status_hover." << key);
         CHECK(generated.contains(std::format("#     {}: {}\n", key, palette.blockStatusHoverColor(outcome))));
