@@ -2,6 +2,7 @@
 #include <vtpty/CommandLine.hpp>
 #include <vtpty/DetachedProcess.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
+#include <vtpty/ErrnoText.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
@@ -27,12 +28,10 @@
 #include <format>
 #include <mutex>
 #include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
-#include <type_traits>
 #include <utility>
 
 #ifndef __FreeBSD__
@@ -120,35 +119,11 @@ namespace
 
     // {{{ async-signal-safe helpers, for use between fork() and exec()
     //
-    // Everything in this block is called from the forked child before it has called exec(). Only
-    // async-signal-safe operations are permitted there: the child shares the parent's memory
-    // image, and any lock (notably the malloc arena) that another parent thread happened to hold
-    // at the moment of fork() is held forever in the child. So no printf, no strerror, no
-    // setenv, and no allocation.
-
-    /// Normalizes the two incompatible strerror_r() flavours to one shape.
-    ///
-    /// @param result What strerror_r() answered: a message pointer (GNU) or a status code (XSI).
-    /// @param buffer The buffer strerror_r() was given.
-    /// @return The message.
-    template <typename Result>
-    char const* strerrorResult(Result result, char* buffer) noexcept
-    {
-        if constexpr (std::is_pointer_v<Result>)
-            return result; // GNU: answers a pointer, which may or may not be `buffer`.
-        else
-            return result == 0 ? buffer : "unknown error"; // XSI: fills `buffer`.
-    }
-
-    /// Describes an errno value without allocating, unlike strerror() and std::generic_category().
-    ///
-    /// @param errorCode errno value to describe.
-    /// @param buffer Scratch space for the message; must outlive the returned pointer.
-    /// @return Human-readable description of @p errorCode.
-    [[nodiscard]] char const* errnoText(int errorCode, std::span<char> buffer) noexcept
-    {
-        return strerrorResult(::strerror_r(errorCode, buffer.data(), buffer.size()), buffer.data());
-    }
+    // Everything in this block is called from the forked child before it has called exec(). The child of
+    // a multi-threaded process may call only async-signal-safe functions until it execs (fork(2) NOTES;
+    // POSIX XSH fork()): it shares the parent's memory image, and a lock another thread held at the fork
+    // may be held in the child. So no printf, no strerror (errnoText() instead), no setenv, and no
+    // allocation.
 
     /// Writes @p text to @p fd in full, retrying on short writes and EINTR.
     ///
