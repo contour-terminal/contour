@@ -258,7 +258,7 @@ namespace detail
 {
     return { .cellHeight = cellHeight,
              .baseHeight =
-                 2 * scaled(margins, scale).vertical + static_cast<int>(std::round(chrome.height * scale)),
+                 (2 * scaled(margins, scale).vertical) + static_cast<int>(std::round(chrome.height * scale)),
              .minimumHeight = detail::ceilScaled(minimumHeight, scale),
              .chromeHeight = chrome.height,
              .scale = scale };
@@ -279,9 +279,9 @@ namespace detail
     auto const available = detail::floorScaled(std::max(0, height - grid.chromeHeight), scale);
     auto const minimumContent = std::max(0, grid.minimumHeight - chromeDevice - margins);
     auto const minimumRows = (minimumContent + grid.cellHeight - 1) / grid.cellHeight;
-    auto const nearestRows = std::max(0, available - margins + grid.cellHeight / 2) / grid.cellHeight;
+    auto const nearestRows = std::max(0, available - margins + (grid.cellHeight / 2)) / grid.cellHeight;
     return grid.chromeHeight
-           + detail::ceilUnscaled(margins + std::max(minimumRows, nearestRows) * grid.cellHeight, scale);
+           + detail::ceilUnscaled(margins + (std::max(minimumRows, nearestRows) * grid.cellHeight), scale);
 }
 
 inline int snapHeightToRows(int height, RowResizeGrid grid) noexcept
