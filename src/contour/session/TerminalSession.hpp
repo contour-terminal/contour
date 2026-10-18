@@ -438,7 +438,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         if (profile().scrollbar.value().position == config::ScrollBarPosition::Hidden)
             return false;
 
-        if ((_currentScreenType == vtbackend::ScreenType::Alternate)
+        // The page on display: with DECPCCM reset the cursor may write to another page, under nobody's view.
+        if ((_terminal.displayedScreenType() == vtbackend::ScreenType::Alternate)
             && profile().scrollbar.value().hideScrollbarInAltScreen)
             return false;
 
@@ -676,7 +677,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtpty::Pty& pty() noexcept { return _terminal.device(); }
     vtbackend::Terminal& terminal() noexcept { return _terminal; }
     vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
-    vtbackend::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
 
     /// The session's current working directory, for inheritance when spawning a new tab, window or
     /// split pane from this one. On non-Windows this reads the local Process's working directory (when
@@ -1569,7 +1569,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     // state vars
     //
-    vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
 
     /// The cell the mouse cursor's shape was last decided for, in main-page rows.
     ///

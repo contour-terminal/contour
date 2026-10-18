@@ -362,6 +362,12 @@ class MockTerm: public Terminal::NullEvents
 
     void contextChanged(ContextId activeContext) override { contextChanges.push_back(activeContext); }
 
+    /// The screen type of every page the terminal announced as coming on display, in order.
+    /// @see Terminal::Events::bufferChanged
+    std::vector<ScreenType> bufferChanges;
+
+    void bufferChanged(ScreenType type) override { bufferChanges.push_back(type); }
+
     static vtbackend::Settings createSettings(PageSize pageSize,
                                               HistoryLimits historyLimits,
                                               size_t ptyReadBufferSize)

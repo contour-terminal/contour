@@ -5569,6 +5569,55 @@ TEST_CASE("TerminalSession tells the surface which screen buffer is live", "[con
     CHECK(surface.bufferChanges.back() == vtbackend::ScreenType::Primary);
 }
 
+TEST_CASE("TerminalSession tells the surface of the page on display and not of the cursor's page",
+          "[contour][session][view]")
+{
+    // DECPCCM reset: the application writes to page 3 while page 1 stays on display. The scrollbar and the
+    // pointer shape belong to the page on display, so nothing changes until page 3 comes on display.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+    REQUIRE(held->getIsScrollbarVisible());
+    surface.bufferChanges.clear();
+
+    held->terminal().writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, the cursor to page 3
+    CHECK(surface.bufferChanges.empty());
+    CHECK(held->getIsScrollbarVisible());
+    surface.cursorShapes.clear();
+    held->sendFocusInEvent();
+    REQUIRE_FALSE(surface.cursorShapes.empty());
+    CHECK(surface.cursorShapes.back() == contour::input::MouseCursorShape::IBeam);
+
+    surface.bufferChanges.clear();
+    held->terminal().writeToScreen("\033[?64h"); // DECPCCM set: page 3 comes on display
+    CHECK(surface.bufferChanges == std::vector { vtbackend::ScreenType::Alternate });
+    CHECK_FALSE(held->getIsScrollbarVisible());
+    surface.cursorShapes.clear();
+    held->sendFocusInEvent();
+    REQUIRE_FALSE(surface.cursorShapes.empty());
+    CHECK(surface.cursorShapes.back() == contour::input::MouseCursorShape::Arrow);
+}
+
+TEST_CASE("TerminalSession: the wheel glides over the page on display while the cursor writes to another",
+          "[contour][session][input]")
+{
+    // Page 1 is on display with its history while the application writes to page 3 (DECPCCM reset): a wheel
+    // notch takes the smooth-scrolling path over page 1, as it does with the cursor there.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    REQUIRE(pane->terminal().settings().smoothScrolling);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 40))
+        pane->terminal().writeToScreen("line\r\n");
+    pane->terminal().writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, the cursor to page 3
+    REQUIRE(pane->terminal().displayedPageIndex() == vtbackend::PageIndex(0));
+
+    auto wheel = QWheelEvent { QPointF(10, 10), QPointF(10, 10), QPoint(0, 0),      QPoint(0, 120),
+                               Qt::NoButton,    Qt::NoModifier,  Qt::NoScrollPhase, false };
+    contour::session::sendWheelEvent(&wheel, *pane);
+
+    CHECK(pane->terminal().isMomentumScrollActive());
+}
+
 TEST_CASE("TerminalSession::attachDisplay releases a surface it is taking the session from",
           "[contour][session][view]")
 {

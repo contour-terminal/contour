@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
+#include <vtbackend/input/MatchModes.hpp>
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/ScreenTestFixtures.hpp>
 #include <vtbackend/screen/Viewport.hpp>
@@ -308,12 +309,15 @@ void selectOnDisplay(MockTerm<>& mock, int line)
         CellLocation { .line = LineOffset(line), .column = ColumnOffset(9) });
 }
 
-/// The order in which one batch of output scrolls a screen and moves the cursor between the page on display
-/// and the host-writable status line.
+/// The order in which one batch of output scrolls a screen and moves the cursor off the page on display or
+/// back to it: to the host-writable status line (DECSASD), or, with DECPCCM reset, to another page (PPA).
 enum class BatchOrder : uint8_t
 {
     ScrollsThePageThenLeaves = 0, ///< The page on display scrolls, then the cursor moves to the status line.
-    ScrollsTheStatusLineThenReturns, ///< The status line scrolls, then the cursor moves back to the page.
+    ScrollsTheStatusLineThenReturns,  ///< The status line scrolls, then the cursor moves back to the page.
+    ScrollsThePageThenMovesToAnother, ///< Page 1, on display, scrolls, then the cursor moves to page 3.
+    MovesToAnotherPageThenScrollsIt,  ///< The cursor moves to page 3, then scrolls it.
+    ScrollsAnotherPageThenReturns,    ///< Page 3 scrolls, then the cursor moves back to page 1.
 };
 } // namespace
 
@@ -373,7 +377,8 @@ TEST_CASE("MultiPage.theViewFollowsABatchThatScrolledThePageOnDisplay", "[screen
 {
     // A view scrolled back follows new output (autoScrollOnUpdate) where the batch scrolled the page on
     // display, wherever the cursor ends it. DECSASD moves the cursor between the page and the host-writable
-    // status line, a one-row screen of its own, within one batch.
+    // status line, a one-row screen of its own, within one batch; with DECPCCM reset, PPA moves it between
+    // page 1, on display, and page 3. Neither movement changes what is on display, so neither moves the view.
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
     auto& terminal = mock.terminal;
     terminal.settings().autoScrollOnUpdate = true;
@@ -381,7 +386,11 @@ TEST_CASE("MultiPage.theViewFollowsABatchThatScrolledThePageOnDisplay", "[screen
     mock.writeToScreen("\033[2$~"); // DECSSDT host-writable, before the output: it takes a row from the page
     printLines(mock, "line", 40);
 
-    switch (GENERATE(BatchOrder::ScrollsThePageThenLeaves, BatchOrder::ScrollsTheStatusLineThenReturns))
+    switch (GENERATE(BatchOrder::ScrollsThePageThenLeaves,
+                     BatchOrder::ScrollsTheStatusLineThenReturns,
+                     BatchOrder::ScrollsThePageThenMovesToAnother,
+                     BatchOrder::MovesToAnotherPageThenScrollsIt,
+                     BatchOrder::ScrollsAnotherPageThenReturns))
     {
         case BatchOrder::ScrollsThePageThenLeaves:
             REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
@@ -396,6 +405,101 @@ TEST_CASE("MultiPage.theViewFollowsABatchThatScrolledThePageOnDisplay", "[screen
             REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::Main);
             CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
             break;
+        case BatchOrder::ScrollsThePageThenMovesToAnother:
+            mock.writeToScreen("\033[?64l"); // DECPCCM reset
+            REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
+            mock.writeToScreen("more 1\r\nmore 2\r\n\033[3 P"); // one batch, ending in PPA 3
+            REQUIRE(terminal.cursorPageIndex() == PageIndex(2));
+            CHECK(terminal.viewport().scrollOffset() == ScrollOffset(0));
+            break;
+        case BatchOrder::MovesToAnotherPageThenScrollsIt:
+            mock.writeToScreen("\033[?64l"); // DECPCCM reset
+            REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
+            mock.writeToScreen("\033[3 Px\r\nx\r\n"); // one batch: PPA 3, then line feeds at its bottom
+            REQUIRE(terminal.cursorPageIndex() == PageIndex(2));
+            CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+            break;
+        case BatchOrder::ScrollsAnotherPageThenReturns:
+            mock.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, the cursor to page 3
+            REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
+            mock.writeToScreen("x\r\nx\r\n\033[1 P"); // one batch: line feeds at page 3's bottom, then PPA 1
+            REQUIRE(terminal.cursorPageIndex() == PageIndex(0));
+            CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+            break;
+    }
+    CHECK(terminal.displayedPageIndex() == PageIndex(0));
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.aPageMovementLeavesThePageOnDisplayAlone", "[screen]")
+{
+    // An application moves the cursor to page 3 and back while page 1 stays on display. Nothing changed on
+    // display: the user's selection stays, the view stays where the user scrolled it (autoScrollOnUpdate
+    // notwithstanding), a wheel glide goes on with its sub-line offset, and the frontend hears of nothing.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    terminal.settings().autoScrollOnUpdate = true;
+    terminal.settings().smoothScrolling = true;
+    terminal.setCellPixelSize(ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    printLines(mock, "line", 40);
+    mock.writeToScreen("\033[?64l"); // DECPCCM reset
+    REQUIRE(terminal.viewport().scrollUp(LineCount(20)));
+    REQUIRE(terminal.applySmoothScrollPixelDelta(10.0f) == SmoothScrollResult::Applied);
+    REQUIRE(terminal.injectWheelMomentum(180.0f, std::chrono::steady_clock::time_point {})
+            == SmoothScrollResult::Applied);
+    auto const pixelOffset = terminal.smoothScrollPixelOffset();
+    REQUIRE(pixelOffset != 0.0f);
+    selectOnDisplay(mock, -10);
+    auto const selected = terminal.extractSelectionText();
+    REQUIRE(selected == "line 26");
+    mock.bufferChanges.clear();
+
+    for (auto const* const movement: { "\033[3 P", "\033[1 P" })
+    {
+        INFO(core::escape(movement));
+        mock.writeToScreen(movement);
+        CHECK(terminal.displayedPageIndex() == PageIndex(0));
+        CHECK(terminal.selectionAvailable());
+        CHECK(terminal.extractSelectionText() == selected);
+        CHECK(terminal.viewport().scrollOffset() == ScrollOffset(20));
+        CHECK(terminal.isMomentumScrollActive());
+        CHECK(terminal.smoothScrollPixelOffset() == pixelOffset);
+        CHECK(mock.bufferChanges.empty());
+    }
+}
+
+TEST_CASE("MultiPage.anotherPageOnDisplayIsAnnounced", "[screen]")
+{
+    // The frontend keys its scrollbar and its pointer shape to the page on display, so the terminal tells it
+    // when another page comes on display -- whatever brought it there -- and only then.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    struct Step
+    {
+        std::string_view sent;
+        PageIndex shown;
+        std::vector<ScreenType> announced;
+    };
+    auto const steps = std::array {
+        Step { .sent = "\033[?64l\033[3 P", .shown = PageIndex(0), .announced = {} }, // the cursor to page 3
+        Step { .sent = "\033[?64h", .shown = PageIndex(2), .announced = { ScreenType::Alternate } },
+        Step { .sent = "\033[?64l\033[1 P", .shown = PageIndex(2), .announced = {} }, // the cursor to page 1
+        Step { .sent = "\033[?1049h",
+               .shown = AlternateScreenPageIndex,
+               .announced = { ScreenType::Alternate } },
+        Step { .sent = "\033[?1049l", .shown = PageIndex(2), .announced = { ScreenType::Alternate } },
+        Step { .sent = "\033[?64h", .shown = PageIndex(0), .announced = { ScreenType::Primary } },
+        Step { .sent = "\033[3 P", .shown = PageIndex(2), .announced = { ScreenType::Alternate } }, // coupled
+        Step { .sent = "\033c", .shown = PageIndex(0), .announced = { ScreenType::Primary } },      // RIS
+    };
+    for (auto const& step: steps)
+    {
+        INFO(core::escape(step.sent));
+        mock.bufferChanges.clear();
+        mock.writeToScreen(step.sent);
+        CHECK(terminal.displayedPageIndex() == step.shown);
+        CHECK(mock.bufferChanges == step.announced);
     }
 }
 
@@ -1684,6 +1788,38 @@ TEST_CASE("VT525 keyboard/national modes are settable toggles", "[screen]")
     {
         togglesCleanly(106);
     }
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.theAlternateScreenBindingModeIsThePageOnDisplays", "[screen]")
+{
+    // The bindings gated on the AlternateScreen mode -- ScrollMarkUp/Down, the command-block rows -- act on
+    // the page on display, so the mode is the page on display's.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto const shown = GENERATE(OnDisplay::Primary, OnDisplay::Other);
+    showOnePageOfTwo(mock, "one", "three", shown);
+
+    auto const alternateScreenMode =
+        (mock.terminal.bindingModes() & static_cast<uint8_t>(MatchModes::Flag::AlternateScreen)) != 0;
+    CHECK(alternateScreenMode == (shown == OnDisplay::Other));
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.theWheelGlidesOverThePageOnDisplay", "[screen]")
+{
+    // Smooth scrolling moves the window onto the page on display: over page 1's history while the cursor
+    // writes to page 3, and not at all while page 3, which has none, is on display.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().smoothScrolling = true;
+    terminal.setCellPixelSize(ImageSize { vtpty::Width(10), vtpty::Height(20) });
+    printLines(mock, "line", 20);
+    mock.writeToScreen("\033[H");
+    auto const shown = GENERATE(OnDisplay::Primary, OnDisplay::Other);
+    showOnePageOfTwo(mock, "", "three", shown);
+    auto const expected =
+        shown == OnDisplay::Primary ? SmoothScrollResult::Applied : SmoothScrollResult::Disabled;
+
+    CHECK(terminal.applySmoothScrollPixelDelta(40.0f) == expected);
+    CHECK(terminal.injectWheelMomentum(40.0f, std::chrono::steady_clock::time_point {}) == expected);
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)

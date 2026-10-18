@@ -262,10 +262,12 @@ namespace
         if (scrollPhase == vtbackend::ScrollPhase::Momentum && terminal.isMomentumScrollActive())
             return;
 
-        // Smooth scrolling path: bypass line quantization for the primary screen.
-        // Skip smooth scrolling when modifiers are held so that modifier+wheel bindings
-        // (e.g. Alt+Wheel for opacity, Ctrl+Wheel for font size) are handled by the binding system.
-        if (terminal.settings().smoothScrolling && !terminal.isAlternateScreen() && modifiers.none())
+        // Smooth scrolling path: bypass line quantization while page 1 -- the primary screen -- is on
+        // display, wherever the cursor writes. Skip smooth scrolling when modifiers are held so that
+        // modifier+wheel bindings (e.g. Alt+Wheel for opacity, Ctrl+Wheel for font size) are handled by the
+        // binding system.
+        if (terminal.settings().smoothScrolling
+            && terminal.displayedScreenType() == vtbackend::ScreenType::Primary && modifiers.none())
         {
             auto const now = steady_clock::now();
             auto effectivePixelDelta = 0.0f;

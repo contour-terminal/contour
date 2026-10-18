@@ -706,7 +706,6 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
     if (!_display)
         return;
 
-    _currentScreenType = type;
     emit isScrollbarVisibleChanged();
     requestScrollbarMarksRefresh(); // the alternate screen shows no ticks
     // Re-check _display at dispatch: a tab switch or split collapse may have detached it (via
@@ -4952,8 +4951,9 @@ void TerminalSession::setDefaultCursor()
         return;
     }
 
+    // The page on display, which the pointer is over -- not the cursor's, with DECPCCM reset.
     using Type = vtbackend::ScreenType;
-    switch (_terminal.screenType())
+    switch (_terminal.displayedScreenType())
     {
         case Type::Primary: _display->setMouseCursorShape(input::MouseCursorShape::IBeam); break;
         case Type::Alternate: _display->setMouseCursorShape(input::MouseCursorShape::Arrow); break;

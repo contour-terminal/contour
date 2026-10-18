@@ -375,7 +375,7 @@ LineCount Viewport::screenLineCount() const noexcept
 bool Viewport::scrollingDisabled() const noexcept
 {
     // TODO: make configurable
-    return screenTypeFromPage(_terminal->displayedPageIndex()) == ScreenType::Alternate;
+    return _terminal->displayedScreenType() == ScreenType::Alternate;
 }
 
 } // namespace vtbackend

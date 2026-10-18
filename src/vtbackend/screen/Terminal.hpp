@@ -92,7 +92,7 @@ class Screen;
 enum class SmoothScrollResult : uint8_t
 {
     Applied,         ///< Pixel delta was applied to the viewport.
-    Disabled,        ///< Smooth scrolling is disabled or not applicable (alternate screen).
+    Disabled,        ///< Smooth scrolling is disabled, or the page on display has no history to scroll.
     InvalidCellSize, ///< Cell pixel size is zero or negative; cannot compute scroll.
 };
 
@@ -468,7 +468,9 @@ class Terminal
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
-        virtual void bufferChanged(ScreenType) {}
+        /// Another page came on display -- not the cursor's page, which with DECPCCM reset may be another.
+        /// @param type The screen type of the page now on display.
+        virtual void bufferChanged(ScreenType /*type*/) {}
         /// The render buffer is stale, or the next wakeup (@see Terminal::nextRender) changed.
         /// May be called from ANY thread, including a core::async executor thread with the
         /// status-line command cache's mutex held. Implementations must not take the terminal's state
@@ -2272,12 +2274,9 @@ class Terminal
     [[nodiscard]] Screen const& displayedPage() const noexcept { return pageAt(_displayedPage); }
 
     /// Whether the page on display is the primary screen or another one. Not screenType(), which is the
-    /// cursor's page: with DECPCCM reset the two differ.
+    /// cursor's page: with DECPCCM reset the two differ. Safe to read without the state lock.
     /// @return The screen type of the page on display.
-    [[nodiscard]] ScreenType displayedScreenType() const noexcept
-    {
-        return screenTypeFromPage(_displayedPage);
-    }
+    [[nodiscard]] ScreenType displayedScreenType() const noexcept { return _displayedScreenType; }
 
     /// Returns the 1-based page number where the cursor is active (for VT replies).
     [[nodiscard]] int cursorPageNumber() const noexcept { return pageNumberOf(_cursorPage); }
@@ -2863,7 +2862,10 @@ class Terminal
     void requestCaptureBuffer(LineCount lines, bool logical);
     void requestShowHostWritableStatusLine();
     void bell();
-    void bufferChanged(ScreenType);
+    /// Tells the frontend that another page came on display. Drops the selection, which was on the page shown
+    /// before, and brings the view to the bottom where autoScrollOnUpdate asks for it. Raised by showPage().
+    /// @param type The screen type of the page now on display.
+    void bufferChanged(ScreenType type);
     void scrollbackBufferCleared();
 
     /// Brings everything that names a primary-screen row along after rows above the page's top left the
@@ -3526,7 +3528,9 @@ class Terminal
 
     /// Puts @p page on display, and brings the viewport, the window onto it, back inside its history.
     ///
-    /// The one place the page on display changes. The page coming on display may have less history than the
+    /// The one place the page on display changes, and the one that announces it (bufferChanged()), with what
+    /// follows the page on display: the wheel mode and the key bindings' AlternateScreen mode. Showing the
+    /// page already on display announces nothing. The page coming on display may have less history than the
     /// one it replaces -- every page but the primary has none -- and the frame draws it with the viewport's
     /// offset.
     /// @param page The page to display.
@@ -4532,6 +4536,9 @@ class Terminal
     /// Switched by the parser thread under the state lock, and read without it by the renderer each frame.
     /// @see RelaxedAtomic
     RelaxedAtomic<ScreenType> _currentScreenType = ScreenType::Primary;
+    /// The screen type of the page on display, published by showPage() under the state lock, and read without
+    /// it by the frontend: its wheel path, its scrollbar and its pointer shape. @see RelaxedAtomic
+    RelaxedAtomic<ScreenType> _displayedScreenType = ScreenType::Primary;
     /// Set by DECSSDT and the frontend under the state lock, and read without it by the render thread as it
     /// asks when the indicator's clock is due next. @see RelaxedAtomic
     RelaxedAtomic<StatusDisplayType> _statusDisplayType = StatusDisplayType::None;

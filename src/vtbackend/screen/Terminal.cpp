@@ -581,9 +581,9 @@ void Terminal::publishBindingModes() noexcept
         return holds ? static_cast<uint8_t>(flag) : uint8_t { 0 };
     };
     auto const flags = static_cast<uint8_t>(
-        flagIf(isAlternateScreen(), Flag::AlternateScreen) | flagIf(applicationCursorKeys(), Flag::AppCursor)
-        | flagIf(applicationKeypad(), Flag::AppKeypad) | flagIf(selectionAvailable(), Flag::Select)
-        | flagIf(!_search.pattern.empty(), Flag::Search));
+        flagIf(displayedScreenType() == ScreenType::Alternate, Flag::AlternateScreen)
+        | flagIf(applicationCursorKeys(), Flag::AppCursor) | flagIf(applicationKeypad(), Flag::AppKeypad)
+        | flagIf(selectionAvailable(), Flag::Select) | flagIf(!_search.pattern.empty(), Flag::Search));
     _publishedBindingModes.store(flags, std::memory_order_relaxed);
 }
 
@@ -2689,8 +2689,8 @@ SmoothScrollResult Terminal::injectWheelMomentum(float pixelDelta,
                                                  chrono::steady_clock::time_point now) noexcept
 {
     // Gated on smoothScrolling only (independent of momentumScrolling, which governs touchpad
-    // inertia). Alt screen keeps the legacy line-based wheel path.
-    if (!_settings.smoothScrolling || isAlternateScreen())
+    // inertia). A page on display without history keeps the legacy line-based wheel path.
+    if (!_settings.smoothScrolling || _viewport.scrollingDisabled())
         return SmoothScrollResult::Disabled;
 
     // The cell height is not needed by the seed math below (pixelDelta already arrives in pixels),
@@ -2746,7 +2746,7 @@ void Terminal::armMomentum(float velocity,
 
 SmoothScrollResult Terminal::applySmoothScrollPixelDelta(float pixelDelta)
 {
-    if (!_settings.smoothScrolling || isAlternateScreen())
+    if (!_settings.smoothScrolling || _viewport.scrollingDisabled())
         return SmoothScrollResult::Disabled;
 
     auto const cellHeight = static_cast<float>(_cellPixelSize.height.as<int>());
@@ -6807,8 +6807,11 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
     _cursorMotion.active = false;
     publishAnimationsEnd();
 
-    // Reset smooth scroll state on page change.
-    resetSmoothScroll();
+    // Coupled, the page on display changes with the cursor's, so the outgoing page's glide and sub-line
+    // offset end here, before its snapshot is taken. Reset, the page on display stays, and so does the user's
+    // scroll.
+    if (isModeEnabled(DECMode::PageCursorCoupling))
+        resetSmoothScroll();
 
     // Capture snapshot of the outgoing screen for crossfade transition.
     if (isModeEnabled(DECMode::PageCursorCoupling)
@@ -6849,7 +6852,6 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
         showPage(clamped);
 
     _currentScreenType = screenTypeFromPage(clamped);
-    publishBindingModes();
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
     applyPageSizeToCurrentBuffer();
@@ -6863,21 +6865,29 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
             pageAt(clamped).moveCursorTo(LineOffset(0), ColumnOffset(0));
             break;
     }
-
-    bufferChanged(_currentScreenType);
 }
 
 void Terminal::showPage(PageIndex page)
 {
-    if (page != _displayedPage)
+    auto const isAnotherPage = page != _displayedPage;
+    if (isAnotherPage)
     {
         // What a page scrolled before it came on display is no output to follow.
         _displayedPageLinesFollowed = pageAt(page).linesScrolledIntoHistory();
         _displayedPage = page;
-        // The wheel acts on what the user looks at.
-        updateWheelMode();
+        _displayedScreenType = screenTypeFromPage(page);
+        // The glide and the sub-line offset were the page shown before's.
+        resetSmoothScroll();
     }
     _viewport.clampScrollOffset();
+    if (!isAnotherPage)
+        return;
+
+    // What acts on what the user looks at follows it: the wheel, the key bindings, and the frontend -- its
+    // scrollbar and its pointer shape.
+    updateWheelMode();
+    publishBindingModes();
+    bufferChanged(_displayedScreenType);
 }
 
 InputGenerator::MouseWheelMode Terminal::wheelModeForDisplayedPage() const noexcept
