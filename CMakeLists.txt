@@ -174,7 +174,7 @@ endif()
 # code coverage
 
 if(CONTOUR_COVERAGE AND NOT MSVC)
-    add_compile_options(-g --coverage)
+    # Linked into every executable, compiled into the first-party code only: src/CMakeLists.txt instruments it.
     set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
     set(CONTOUR_CODE_COVERAGE_ENABLED ON)
 else()
