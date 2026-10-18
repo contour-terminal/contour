@@ -1769,15 +1769,15 @@ class Terminal
     /// @return The reconciled index.
     [[nodiscard]] UserMarkIndex const& userMarks() const;
 
-    /// Places the user mark (vi `mm`) on the logical line the current screen's row @p line belongs to, or
-    /// takes it off where the line carries one.
+    /// Places the user mark (vi `mm`) on the logical line the row @p line of the page on display -- the page
+    /// the vi cursor walks -- belongs to, or takes it off where the line carries one.
     ///
     /// A replica's marks are its host's (bindReplica): on the primary screen it asks for the change
     /// (Events::userMarkRequested) and leaves its line alone, which takes the mark when the host's row comes
     /// back -- so a mark is the session's, the same for every client of it, and it follows the host's reflow.
     ///
     /// Caller holds the terminal lock.
-    /// @param line The row, on the current screen.
+    /// @param line The row, on the page on display.
     void toggleUserMark(LineOffset line);
 
     /// Places or takes off the user mark on the logical line of the primary screen's row @p request names: a
@@ -4777,18 +4777,20 @@ class Terminal
 
     void ensureFoldProjection() const;
 
-    /// The stable id of grid line 0 on the grid the CALLER's cursor is on.
+    /// The stable id of grid line 0 on the page on display, the grid the vi cursor and the viewport move
+    /// over.
     ///
-    /// The caller's own grid, not the primary one: Vi normal mode runs on the alternate screen too,
+    /// That page's own grid, not the primary one: Vi normal mode runs on the alternate screen too,
     /// where the primary's addressableTop() is negative by its whole scrollback while the alternate has
     /// none -- clamping a `k` against that bound walks the cursor off the top of a grid with no rows
-    /// there. hiddenIntervals() is empty on the alternate screen (nothing there folds), so every walk
+    /// there. Nor the cursor's page: hiddenIntervals() name the rows of the page on display, in its ids.
+    /// hiddenIntervals() is empty on every page but the primary one (nothing there folds), so every walk
     /// written against this base correctly degenerates to the plain arithmetic.
     ///
     /// @return The base to add a LineOffset to when working in id space.
     [[nodiscard]] int64_t currentStableBase() const noexcept
     {
-        return currentScreen().grid().stableLineIdOf(LineOffset(0));
+        return displayedPage().grid().stableLineIdOf(LineOffset(0));
     }
 
     /// Which part of @p range's column the row @p id carries.

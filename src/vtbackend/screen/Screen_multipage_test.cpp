@@ -818,6 +818,112 @@ TEST_CASE("MultiPage.DECPCCM_reset.aSearchBackwardsReachesTheHistoryOfThePageOnD
           == CellLocation { .line = -history, .column = ColumnOffset(0) });
 }
 
+// The vi cursor is on the page on display too, as the frame draws it there; only its starting point is the
+// terminal cursor's, a position on the cursor's page.
+
+TEST_CASE("MultiPage.DECPCCM_reset.viModeWalksThePageOnDisplay", "[screen]")
+{
+    // Page 1 on display holds history and "one two three"; page 3, the cursor's, holds "ab cd" and none.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(40) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    terminal.setStatusDisplay(StatusDisplayType::Indicator); // vi mode's, up before anything is written
+    printLines(mock, "line", 20);
+    mock.writeToScreen("\033[Hone two three");
+    mock.writeToScreen("\033[?64l\033[3 P\033[Hab cd"); // DECPCCM reset, the cursor to page 3
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(0));
+    terminal.inputHandler().setMode(ViMode::Normal);
+    terminal.moveNormalModeCursorTo(CellLocation {});
+
+    mock.sendCharSequence("w");
+    CHECK(terminal.normalModeCursorPosition()
+          == CellLocation { .line = LineOffset(0), .column = ColumnOffset(4) });
+
+    mock.sendCharSequence("0k");
+    CHECK(terminal.normalModeCursorPosition().line == LineOffset(-1));
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.foldedRowsAreWalkedInTheIdsOfThePageOnDisplay", "[screen]")
+{
+    // A collapsed fold exists only on page 1, and its rows are named in page 1's stable ids; page 3, the
+    // cursor's, never scrolled, so its ids start elsewhere.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    printLines(mock, "line", 20);
+    mock.writeToScreen("\033[H\033[2J");
+    runCommand(mock, "a", { "1", "2", "3" }); // head on row 0, output on rows 1-3
+    collapseOnlyFold(mock);
+    moveCursorOffTheDisplayedPage(mock);
+
+    CHECK(terminal.isLineHiddenByFold(LineOffset(2)));
+    CHECK(terminal.advanceVisibleLines(LineOffset(0), 1, VerticalDirection::Down) == LineOffset(4));
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.theViCursorIsDrawnOnThePageOnDisplay", "[screen]")
+{
+    // The terminal cursor is on another page and is not drawn; the vi cursor is on the page on display.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    showOnePageOfTwo(mock, "one", "three", OnDisplay::Primary);
+    terminal.inputHandler().setMode(ViMode::Normal);
+    terminal.moveNormalModeCursorTo(CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) });
+
+    auto const frame = renderOf(terminal);
+    REQUIRE(frame.cursor.has_value());
+    CHECK(frame.cursor->position == CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) });
+}
+
+TEST_CASE("MultiPage.viModeStartsWhereTheMainDisplaysCursorIs", "[screen]")
+{
+    // DECSASD sends output to the host-writable status line; the vi cursor still starts at the main display's
+    // cursor, on the page the vi cursor walks, not at the status line's.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[3;5H"); // the main display's cursor at row 2, column 4
+    mock.writeToScreen(
+        "\033[2$~\033[1$}\033[1;8H"); // DECSSDT host-writable, DECSASD, the status line's column 7
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+
+    terminal.inputHandler().setMode(ViMode::Normal);
+
+    CHECK(terminal.normalModeCursorPosition()
+          == CellLocation { .line = LineOffset(2), .column = ColumnOffset(4) });
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.viMarksTheLineOfThePageOnDisplay", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    showOnePageOfTwo(mock, "one", "three", OnDisplay::Primary);
+    terminal.inputHandler().setMode(ViMode::Normal);
+    terminal.moveNormalModeCursorTo(CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) });
+
+    mock.sendCharSequence("mm");
+
+    CHECK(terminal.primaryScreen().isLineFlagEnabledAt(LineOffset(1), LineFlag::UserMark));
+    CHECK_FALSE(terminal.pageAt(PageIndex(2)).isLineFlagEnabledAt(LineOffset(1), LineFlag::UserMark));
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.theBlockAtTheViCursorIsOnThePageOnDisplay", "[screen]")
+{
+    // `ls`, then `pwd`, run on page 1, on display; the cursor writes to page 3. The vi cursor on the output
+    // of `ls` names it, not the block the shell's cursor on page 1 is at.
+    auto mock = MockTerm { PageSize { LineCount(8), ColumnCount(20) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    runCommand(mock, "ls", { "a", "b" });
+    runCommand(mock, "pwd", { "/x" });
+    mock.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, the cursor to page 3
+    terminal.inputHandler().setMode(ViMode::Normal);
+    terminal.moveNormalModeCursorTo(CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) });
+
+    CHECK(textOf(mock, CommandBlockTarget::Cursor, CommandBlockPart::Output) == "a\nb");
+}
+
 TEST_CASE("MultiPage.pageMovementOnTheStatusLineLeavesTheMainDisplayAlone", "[screen]")
 {
     // DEC STD 070 ch. 14 §2.3: with the host-writable status line selected, "most ANSI control functions

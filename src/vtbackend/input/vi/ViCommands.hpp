@@ -14,6 +14,7 @@
 namespace vtbackend
 {
 
+class Screen;
 class Terminal;
 
 enum class JumpOver : uint8_t
@@ -128,6 +129,11 @@ class ViCommands: public ViInputHandler::Executor
     void updateSearchTerm(std::u32string const& text);
 
   private:
+    /// The page the vi cursor walks: the page on display, which the frame draws it on -- not the cursor's
+    /// page, nor the status line DECSASD may have selected. Only its starting point is the terminal cursor's.
+    /// @return The page on display.
+    [[nodiscard]] Screen const& viewedPage() const noexcept;
+
     gsl::not_null<Terminal*> _terminal;
     ViMode _lastMode = ViMode::Insert;
     CursorShape _lastCursorShape = CursorShape::Block;

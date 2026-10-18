@@ -2072,8 +2072,9 @@ void TerminalSession::searchBarOpened()
         auto const restingOnAVisibleMatch =
             !_terminal.search().pattern.empty()
             && _terminal.viewport().isLineVisible(_terminal.normalModeCursorPosition().line);
+        // Where the terminal cursor is on its page, not on the status line DECSASD may have selected.
         if (!restingOnAVisibleMatch && _terminal.inputHandler().mode() == vtbackend::ViMode::Insert)
-            _terminal.moveNormalModeCursorTo(_terminal.currentScreen().cursor().position);
+            _terminal.moveNormalModeCursorTo(_terminal.pageAt(_terminal.cursorPageIndex()).cursor().position);
     }
 
     refreshSearchStatus();

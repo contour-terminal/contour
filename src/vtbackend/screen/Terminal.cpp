@@ -969,9 +969,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // render one extra line at the bottom to fill the gap caused by the sub-cell shift.
     auto const smoothScrollExtra = smoothScrollExtraLines();
 
-    // When DECPCCM is reset and cursor/display pages differ, hide the cursor from rendering.
+    // When DECPCCM is reset and the cursor's page is not on display, its cursor is not drawn (DEC STD 070:
+    // "The cursor is not shown in this case"). The vi cursor is on the page on display, and always is.
     auto const effectiveCursorPosition =
-        (_cursorPage != _displayedPage) ? std::optional<CellLocation> {} : theCursorPosition;
+        inputHandler().mode() == ViMode::Insert && _cursorPage != _displayedPage
+            ? std::optional<CellLocation> {}
+            : theCursorPosition;
 
     auto& displayedScreen = pageAt(_displayedPage);
 
@@ -4099,9 +4102,9 @@ int Terminal::visibleDistance(LineOffset from, LineOffset to) const
 
 LineOffset Terminal::advanceVisibleLines(LineOffset line, int count, VerticalDirection direction) const
 {
-    // The grid the caller's cursor is ON, not the primary one -- @see currentStableBase(), which the
-    // walk below uses and which states why.
-    auto const& grid = currentScreen().grid();
+    // The page on display, the grid the vi cursor and the viewport move over -- @see currentStableBase(),
+    // which the walk below uses and which states why.
+    auto const& grid = displayedPage().grid();
     auto const step = direction == VerticalDirection::Down ? count : -count;
     auto const top = grid.addressableTop();
     auto const bottom = boxed_cast<LineOffset>(pageSize().lines) - LineOffset(1);
@@ -4125,8 +4128,8 @@ LineOffset Terminal::advanceVisibleLines(LineOffset line, int count, VerticalDir
 
 LineOffset Terminal::snapToVisibleLine(LineOffset line, VerticalDirection direction) const
 {
-    // The caller's own grid, for the reason currentStableBase() gives.
-    auto const& grid = currentScreen().grid();
+    // The page on display, for the reason currentStableBase() gives.
+    auto const& grid = displayedPage().grid();
 
     // Clamped on BOTH paths, so the documented contract ("a line the caller can put a cursor on")
     // does not quietly depend on whether anything happens to be collapsed right now.
@@ -4255,7 +4258,7 @@ UserMarkIndex const& Terminal::userMarks() const
 
 void Terminal::toggleUserMark(LineOffset line)
 {
-    auto& screen = currentScreen();
+    auto& screen = displayedPage();
     auto const change = screen.isLogicalLineFlagEnabled(line, LineFlag::UserMark) ? UserMarkChange::Removed
                                                                                   : UserMarkChange::Added;
     // Only the primary screen's marks are held anywhere (the index, the scrollbar, the host): an alternate
@@ -5719,10 +5722,15 @@ std::optional<LineOffset> Terminal::commandBlockAnchor(CommandBlockTarget target
             if (displayedScreenType() != ScreenType::Primary)
                 return std::nullopt;
             return currentMouseGridPosition().transform([](CellLocation position) { return position.line; });
-        case CommandBlockTarget::Cursor:
-            // The vi cursor moves over the screen on display; while that is an alternate one, the shell's
+        case CommandBlockTarget::Cursor: {
+            // In Insert mode the cursor is the terminal's, on the cursor's page; in the others it is the vi
+            // cursor, on the page on display. While that page is another than the primary one, the shell's
             // cursor is the primary screen's own.
-            return isPrimaryScreen() ? gridCursorPosition().line : primaryScreen().realCursorPosition().line;
+            auto const onPrimary = inputHandler().mode() == ViMode::Insert
+                                       ? isPrimaryScreen()
+                                       : displayedScreenType() == ScreenType::Primary;
+            return onPrimary ? gridCursorPosition().line : primaryScreen().realCursorPosition().line;
+        }
         case CommandBlockTarget::Last: break; // named by its record above
     }
     return std::nullopt;
