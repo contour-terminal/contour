@@ -4209,8 +4209,8 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
     auto l = lock_guard { terminal() };
     // A file, replayed on its own: standaloneScreenshot() puts the replaying terminal in the state to draw
     // it.
-    auto const screenshot = standaloneScreenshot(terminal().isPrimaryScreen() ? terminal().primaryScreen()
-                                                                              : terminal().alternateScreen());
+    // Of what is shown: the page on display -- not page 15 for every page but the primary one.
+    auto const screenshot = standaloneScreenshot(terminal().displayedPage());
     ofstream ofs { "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
     return true;

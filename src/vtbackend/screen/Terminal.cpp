@@ -958,7 +958,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     auto const theCursorPosition = [&]() -> std::optional<CellLocation> {
         if (inputHandler().mode() == ViMode::Insert)
         {
-            if (isModeEnabled(DECMode::VisibleCursor))
+            // Not while DECSASD selects the status line: its cursor is none of the main display's cells.
+            if (isModeEnabled(DECMode::VisibleCursor) && _activeStatusDisplay == ActiveStatusDisplay::Main)
                 return optional<CellLocation> { currentScreen().cursor().position };
             return std::nullopt;
         }
@@ -5767,8 +5768,8 @@ std::expected<void, CommandBlockActionError> Terminal::selectCommandBlock(Comman
                                                                           CommandBlockPart part,
                                                                           CommandBlockId pinned)
 {
-    // A selection lands on the screen on display, and only the primary screen holds blocks.
-    if (!isPrimaryScreen())
+    // A selection lands on the page on display, and only the primary screen holds blocks.
+    if (displayedScreenType() != ScreenType::Primary)
         return std::unexpected(CommandBlockActionError::NoBlock);
     return commandBlockRows(target, part, pinned).transform([this](CommandBlockRows rows) {
         if (rows.firstColumn == ColumnOffset(0) && !rows.endColumn)
@@ -5842,8 +5843,8 @@ CommandBlockRecord const* Terminal::targetedCommandBlock(CommandBlockTarget targ
 
 std::expected<void, CommandBlockActionError> Terminal::clearToPrompt()
 {
-    // Rows the user cannot see would go: the alternate screen is on display, not the history.
-    if (!isPrimaryScreen())
+    // Rows the user cannot see would go: another page is on display, not the primary screen's history.
+    if (displayedScreenType() != ScreenType::Primary)
         return std::unexpected(CommandBlockActionError::NoBlock);
 
     auto& screen = primaryScreen();

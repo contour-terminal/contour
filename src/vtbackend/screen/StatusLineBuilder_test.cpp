@@ -12,6 +12,7 @@
 #include <concepts>
 #include <cstddef>
 #include <format>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -529,6 +530,22 @@ TEST_CASE("serializeToVT.pointerItemsDescribeTheCellOfThePageOnDisplay", "[statu
     mc.terminal.sendMouseMoveEvent(Modifier::None, shownCell(0), PixelCoordinate {}, false);
     CHECK(pointerItemTexts(mc.terminal)
           == describing(CellFlags { CellFlag::Inverse }, "P", "U+0050", "https://p.example/"));
+}
+
+TEST_CASE("serializeToVT.historyItemCountsThePageOnDisplay", "[statusline]")
+{
+    // DECPCCM reset: page 1 is on display, with history, while the cursor writes to page 3, which has none.
+    // The item counts what the viewport onto the page on display can scroll.
+    auto mc = MockTerm { PageWithHistory, LineCount(100) };
+    for (auto const i: std::views::iota(0, 20))
+        mc.writeToScreen(std::format("line {}\r\n", i));
+    mc.writeToScreen("\033[?64l\033[3 P");
+    REQUIRE(mc.terminal.displayedPageIndex() == PageIndex(0));
+    auto const scrollable = mc.terminal.viewport().scrollableLineCount();
+    REQUIRE(scrollable > LineCount(0));
+    auto const history = StatusLineSegment { StatusLineDefinitions::HistoryLineCount {} };
+
+    CHECK(serializeToVT(mc.terminal, history, StatusLineStyling::Disabled) == std::format("{}", scrollable));
 }
 
 TEST_CASE("serializeToVT.clockReadsTheTerminalsWallClockInItsTimeZone", "[statusline]")

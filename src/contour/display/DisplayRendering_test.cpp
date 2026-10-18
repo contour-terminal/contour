@@ -1207,6 +1207,30 @@ TEST_CASE("display: every event a caret report emits is one Qt will deliver", "[
     CHECK(AccessibleEventProbe::Undeliverable == 0);
 }
 
+TEST_CASE("display: the accessible text is the page on display", "[display][a11y]")
+{
+    // DECPCCM reset: page 1 stays on display while the cursor writes to page 3. An assistive client reads
+    // what is shown, and the caret, on another page, is not in view.
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    contour::display::TerminalAccessible::installFactory();
+    auto* accessible = dynamic_cast<contour::display::TerminalAccessible*>(
+        QAccessible::queryAccessibleInterface(h.display.get()));
+    REQUIRE(accessible != nullptr);
+
+    h.feedAndSettle("\033[2J\033[Hpage one"sv);
+    REQUIRE(accessible->text(QAccessible::Value).trimmed() == QStringLiteral("page one")); // the caret's line
+    // PPA 3, coupled, two rows of text there; then back to page 1.
+    h.feedAndSettle("\033[3 P\033[Hpage three\033[3;1Hrow three\033[1 P"sv);
+    h.feedAndSettle("\033[?64l\033[3 P\033[3;4H"sv); // DECPCCM reset, the cursor to page 3
+    REQUIRE(h.session->terminal().displayedPageIndex() == vtbackend::PageIndex(0));
+
+    CHECK(accessible->text(0, 8) == QStringLiteral("page one"));
+    CHECK(accessible->cursorPosition() == 0);
+    CHECK(accessible->text(QAccessible::Value).isEmpty()); // the caret's line is on no page in view
+}
+
 TEST_CASE("display: the prompt interface leaves Qt's accessibility cache with its display", "[display][a11y]")
 {
     // Issue #2015, end to end: a real session whose OSC 133 marks make the prompt genuinely appear, so

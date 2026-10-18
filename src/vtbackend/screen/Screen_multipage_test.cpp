@@ -924,6 +924,75 @@ TEST_CASE("MultiPage.DECPCCM_reset.theBlockAtTheViCursorIsOnThePageOnDisplay", "
     CHECK(textOf(mock, CommandBlockTarget::Cursor, CommandBlockPart::Output) == "a\nb");
 }
 
+// The caret is the active position on the cursor's page: in view only while that page is on display and the
+// main display is selected (DEC STD 070: with DECPCCM reset, "The cursor is not shown in this case").
+
+TEST_CASE("MultiPage.theCaretIsInViewOnlyOnThePageOnDisplay", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    REQUIRE(terminal.isCursorInViewport());
+
+    SECTION("DECPCCM reset, the cursor on another page")
+    {
+        mock.writeToScreen("\033[?64l\033[3 P");
+        REQUIRE(terminal.displayedPageIndex() == PageIndex(0));
+        CHECK_FALSE(terminal.isCursorInViewport());
+    }
+
+    SECTION("DECSASD selects the host-writable status line")
+    {
+        mock.writeToScreen("\033[2$~\033[1$}");
+        REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+        CHECK_FALSE(terminal.isCursorInViewport());
+    }
+}
+
+TEST_CASE("MultiPage.theStatusLinesCursorIsNotDrawnOnTheMainDisplay", "[screen]")
+{
+    // While DECSASD sends output to the host-writable status line, its cursor is not one of the main
+    // display's cells: drawing it at its coordinates there would put a caret on the page's row 0.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[3;3H"); // the main display's cursor at row 2, column 2
+    mock.writeToScreen(
+        "\033[2$~\033[1$}\033[1;5H"); // DECSSDT host-writable, DECSASD, the status line's column 4
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+
+    CHECK_FALSE(renderOf(terminal).cursor.has_value());
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.aBlockIsSelectedOnThePageOnDisplay", "[screen]")
+{
+    // `ls` runs on page 1, on display, while the cursor writes to page 3: its output is selected there.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    runCommand(mock, "ls", { "a", "b" });
+    mock.writeToScreen("\033[?64l\033[3 P");
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(0));
+
+    REQUIRE(terminal.selectCommandBlock(CommandBlockTarget::Last, CommandBlockPart::Output).has_value());
+    CHECK(terminal.extractSelectionText()
+          == "a\nb\n"); // whole lines, as Terminal_block_actions_test has them
+}
+
+TEST_CASE("MultiPage.DECPCCM_reset.clearToPromptLeavesAPageNotOnDisplayAlone", "[screen]")
+{
+    // Page 3 is on display while the cursor writes to page 1: clearing page 1's rows above its prompt would
+    // take rows the user does not see.
+    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(10) };
+    auto& terminal = mock.terminal;
+    terminal.settings().screenTransitionStyle = ScreenTransitionStyle::Classic;
+    runCommand(mock, "ls", { "a", "b" });
+    mock.writeToScreen("\033[3 P\033[?64l\033[1 P"); // page 3 on display, the cursor back to page 1
+    REQUIRE(terminal.displayedPageIndex() == PageIndex(2));
+
+    CHECK(terminal.clearToPrompt() == std::unexpected(CommandBlockActionError::NoBlock));
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset(1)).starts_with("a"));
+}
+
 TEST_CASE("MultiPage.pageMovementOnTheStatusLineLeavesTheMainDisplayAlone", "[screen]")
 {
     // DEC STD 070 ch. 14 §2.3: with the host-writable status line selected, "most ANSI control functions

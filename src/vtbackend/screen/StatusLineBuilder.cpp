@@ -363,7 +363,9 @@ namespace
 
         std::string visit(StatusLineDefinitions::HistoryLineCount const&)
         {
-            if (!vt.isPrimaryScreen())
+            // The viewport onto the page on display, as the numbers below are: nothing while it cannot
+            // scroll.
+            if (vt.viewport().scrollingDisabled())
                 return {};
 
             // The SCROLLABLE count, not the raw history depth: the scroll offset is bounded by that

@@ -1143,10 +1143,16 @@ class Terminal
                && coord.column < boxed_cast<ColumnOffset>(_settings.pageSize.columns);
     }
 
+    /// Whether the caret -- the terminal cursor, the active position on the cursor's page -- is in view: its
+    /// page is the page on display, the main display is selected (not the status line DECSASD selects), and
+    /// its line is visible in the viewport. With DECPCCM reset, DEC STD 070 has "The cursor is not shown".
+    ///
     /// Not noexcept: the fold projection this goes through is built lazily, and building it allocates.
+    /// @return true while the caret is in view.
     [[nodiscard]] bool isCursorInViewport() const
     {
-        return viewport().isLineVisible(currentScreen().cursor().position.line);
+        return _cursorPage == _displayedPage && _activeStatusDisplay == ActiveStatusDisplay::Main
+               && viewport().isLineVisible(currentScreen().cursor().position.line);
     }
     // }}}
 
