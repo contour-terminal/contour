@@ -457,11 +457,12 @@ RGBColorPair RenderBufferBuilder::makeColorsForCell(CellLocation gridPosition,
     // clang-format on
 
     auto const selected =
-        _includeSelection
+        takesTheMainPagesMarks() && _includeSelection
         && _terminal->isSelected(*_screen,
                                  CellLocation { .line = gridPosition.line, .column = gridPosition.column });
-    auto const highlighted =
-        _terminal->isHighlighted(CellLocation { .line = gridPosition.line, .column = gridPosition.column });
+    auto const highlighted = takesTheMainPagesMarks()
+                             && _terminal->isHighlighted(
+                                 CellLocation { .line = gridPosition.line, .column = gridPosition.column });
 
     return makeColors(_terminal->colorPalette(),
                       _colorLookupTable,
@@ -593,9 +594,11 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
 
     // A line one link covers takes the per-cell path as well: a RenderLine carries no per-cell decoration.
     auto const linkRole = osc8RoleOf(lineBuffer.hyperlink);
+    auto const isMarked =
+        takesTheMainPagesMarks()
+        && ((_includeSelection && _terminal->isSelected(gridLine)) || _terminal->isHighlighted(gridLine));
     bool const canRenderViaSimpleLine =
-        (!_terminal->isSelected(gridLine) || !_includeSelection) && !gridLineContainsCursor(lineOffset)
-        && !_terminal->isHighlighted(gridLine) && linkRole == LinkDecorationRole::None;
+        !isMarked && !gridLineContainsCursor(lineOffset) && linkRole == LinkDecorationRole::None;
 
     if (canRenderViaSimpleLine)
     {

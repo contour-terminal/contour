@@ -1597,6 +1597,81 @@ TEST_CASE("Terminal.DECATC.doesNotRecolorTheStatusLine", "[terminal]")
     CHECK(sample(statusLine) == statusBefore);
 }
 
+TEST_CASE("Terminal.statusLine.takesNoHighlightOfTheMainPage", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+
+    // A selection, a yank highlight and a search match belong to the page they were made on, the main
+    // display's. The status line is a screen of its own -- DEC STD 070 ch. 14's status display -- and none
+    // of them may colour its cells, whatever rows they cover: not row 0, whose coordinates the status line's
+    // own row shares, nor the main page's last row, which it sits beside.
+    auto mc = MockTerm { PageSize { .lines = LineCount(4), .columns = ColumnCount(20) }, LineCount(0) };
+    auto& vt = mc.terminal;
+    vt.tick(chrono::steady_clock::time_point());
+
+    auto const type = GENERATE(StatusDisplayType::Indicator, StatusDisplayType::HostWritable);
+    INFO("status line: " << (type == StatusDisplayType::Indicator ? "indicator" : "host-writable"));
+    switch (type)
+    {
+        case StatusDisplayType::Indicator: vt.setStatusDisplay(StatusDisplayType::Indicator); break;
+        case StatusDisplayType::HostWritable:
+            mc.writeToScreen("\033[2$~"); // DECSSDT host-writable
+            vt.answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer::Shown);
+            mc.writeToScreen("\033[1$}match on the status line\033[0$}"); // DECSASD there and back
+            break;
+        default: FAIL("not a status line type the test covers");
+    }
+    REQUIRE(vt.statusDisplayType() == type);
+    mc.writeToScreen("\033[Hmatch on row 0\033[4;1Hmatch on the last row");
+
+    // Every rendered (foreground, background) pair on the status line, of the per-cell and the batched paths.
+    auto const statusLine = LineOffset::cast_from(unbox(vt.pageSize().lines));
+    auto sample = [&] {
+        vt.refreshRenderBuffer();
+        auto const buf = vt.renderBuffer();
+        auto colors = std::vector<std::pair<RGBColor, RGBColor>> {};
+        for (auto const& cell: buf.get().cells)
+            if (cell.position.line == statusLine)
+                colors.emplace_back(cell.attributes.foregroundColor, cell.attributes.backgroundColor);
+        for (auto const& renderLine: buf.get().lines)
+            if (renderLine.lineOffset == statusLine)
+            {
+                colors.emplace_back(renderLine.textAttributes.foregroundColor,
+                                    renderLine.textAttributes.backgroundColor);
+                colors.emplace_back(renderLine.fillAttributes.foregroundColor,
+                                    renderLine.fillAttributes.backgroundColor);
+            }
+        return colors;
+    };
+    auto const unmarked = sample();
+    REQUIRE_FALSE(unmarked.empty()); // the status line must actually be rendered, or this proves nothing
+
+    auto const row = GENERATE(LineOffset(0), LineOffset(3));
+    INFO("the main page's row " << row.value);
+    auto const from = CellLocation { .line = row, .column = ColumnOffset(0) };
+    auto const to = CellLocation { .line = row, .column = ColumnOffset(19) };
+
+    auto const mark = GENERATE(std::string_view { "a selection" },
+                               std::string_view { "a yank highlight" },
+                               std::string_view { "a search match" });
+    INFO(mark);
+    if (mark == "a selection")
+    {
+        vt.setSelector(std::make_unique<LinearSelection>(vt.selectionHelper(), from, [] {}));
+        (void) vt.selector()->extend(to);
+        REQUIRE(vt.isSelected(vt.primaryScreen(), from));
+    }
+    else if (mark == "a yank highlight")
+    {
+        vt.setHighlightRange(LinearHighlight { .from = from, .to = to });
+        REQUIRE(vt.isHighlighted(from));
+    }
+    else
+        (void) vt.setNewSearchTerm(U"match", SearchOrigin::Typed);
+
+    CHECK(sample() == unmarked);
+}
+
 TEST_CASE("Terminal.UnderlineStyleClearing", "[terminal]")
 {
     // Each subsequent underline style should clear the former if present.

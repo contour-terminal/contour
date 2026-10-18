@@ -130,6 +130,12 @@ class RenderBufferBuilder
     /// @return true if the line is drawn.
     [[nodiscard]] bool isGridLineDrawn(LineOffset line) const;
 
+    /// Whether the main page's marks -- its selection and its yank highlight -- apply to the screen drawn:
+    /// on the main display only. A status line is a display of its own (DEC STD 070 ch. 14), which neither
+    /// covers, whatever coordinates its rows share with the page's.
+    /// @return true on the main display.
+    [[nodiscard]] bool takesTheMainPagesMarks() const noexcept { return _display == RenderedDisplay::Main; }
+
     /// The tint for @p id, resolved once per LINE -- not per cell, and only when @ref
     /// _contextTintingPossible said a tint could apply at all, which is what keeps the ordinary
     /// session (no scheme sets a tint) at one bool test per line.
