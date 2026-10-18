@@ -3532,6 +3532,24 @@ class Terminal
     /// @param page The page to display.
     void showPage(PageIndex page);
 
+    /// What the mouse wheel does over the page on display while no binding claims it: Default -- reported to
+    /// an application that enabled mouse tracking, else page 1's history scrolls -- or the cursor keys it
+    /// becomes over a page without history (alternate scroll):
+    ///
+    /// | Mouse protocol | Page on display | ?1007 | Wheel                          |
+    /// |----------------|-----------------|-------|--------------------------------|
+    /// | enabled        | any             | any   | Default: tracking wins         |
+    /// | off            | page 1          | any   | Default: its history scrolls   |
+    /// | off            | any other       | reset | Default: alternate scroll off  |
+    /// | off            | any other       | set   | cursor keys, in DECCKM's form  |
+    ///
+    /// @return The wheel mode for the input generator.
+    [[nodiscard]] InputGenerator::MouseWheelMode wheelModeForDisplayedPage() const noexcept;
+
+    /// Hands wheelModeForDisplayedPage() to the input generator. Called by each writer of what it derives
+    /// from: showPage(), the mouse protocol modes, ?1007 and DECCKM.
+    void updateWheelMode();
+
     /// One batch's birth stamp, in force on the primary screen for exactly as long as this lives.
     ///
     /// Rows the cursor first reaches meanwhile are born with it. When it ends the stamp is withdrawn, so a

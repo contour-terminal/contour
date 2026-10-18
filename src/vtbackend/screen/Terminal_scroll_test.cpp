@@ -1322,22 +1322,22 @@ TEST_CASE("Terminal.Wheel.AltScreen.AppCursorKeys.emits_SS3", "[terminal]")
 
 TEST_CASE("Terminal.Wheel.AltScreen.DECSET1007.emits_cursor_keys", "[terminal]")
 {
-    // DECSET ?1007 (alternate-scroll) was previously a no-op because of the mouse-protocol
-    // gate; it must now produce cursor keys on the alternate screen.
+    // DECSET ?1007 (alternate scroll) on the alternate screen: the wheel sends cursor keys, in DECCKM's form.
+    // It was once a no-op because of the mouse-protocol gate.
     using namespace vtbackend;
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
     auto constexpr NoPixel = PixelCoordinate {};
     mock.terminal.tick(1s);
 
     mock.writeToScreen("\033[?1049h"); // alt screen
-    mock.writeToScreen("\033[?1007h"); // alternate-scroll -> application cursor keys
+    mock.writeToScreen("\033[?1007h"); // alternate scroll on (as it already is from power-on)
     mock.terminal.tick(1s);
 
     mock.resetReplyData();
     CHECK(mock.terminal.sendMousePressEvent(
               Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { true });
-    CHECK(e(mock.replyData()) == e("\033OB"));
+    CHECK(e(mock.replyData()) == e("\033[B"));
 }
 
 TEST_CASE("Terminal.Wheel.AltScreen.AppTracking.passes_through_as_SGR", "[terminal]")
@@ -1438,6 +1438,116 @@ TEST_CASE("Terminal.Wheel.AltScreen.ScrollMultiplier.repeats_cursor_keys", "[ter
               Modifier::None, MouseButton::WheelDown, mock.terminal.currentMousePosition(), NoPixel, false)
           == Handled { true });
     CHECK(e(mock.replyData()) == e("\033[B\033[B\033[B"));
+}
+
+TEST_CASE("Terminal.Wheel.followsThePageOnDisplayAndTheMouseProtocol", "[terminal]")
+{
+    // What a wheel notch does, by what the application sent before it. An application that enabled mouse
+    // tracking has the wheel reported, as Windows Terminal asks for tracking before alternate scroll. Else
+    // page 1's history scrolls -- the frontend scrolls it for a notch left unhandled -- whatever ?1007 says,
+    // as xterm's alternate scroll applies to its alternate buffer only. Over a page without history the wheel
+    // becomes cursor keys while ?1007 is set, as it is from power-on, in DECCKM's form at the notch, as
+    // xterm, Windows Terminal and foot send them. With DECPCCM reset, that is the page on display, not the
+    // cursor's.
+    using namespace vtbackend;
+    struct Row
+    {
+        std::string_view name;
+        std::string_view sent;
+        Handled handled;
+        std::string_view reply;
+    };
+    auto const rows = std::array {
+        Row { .name = "page 1", .sent = "", .handled = Handled { false }, .reply = "" },
+        Row { .name = "page 1, ?1007 set", .sent = "\033[?1007h", .handled = Handled { false }, .reply = "" },
+        Row {
+            .name = "page 1, ?1007 reset", .sent = "\033[?1007l", .handled = Handled { false }, .reply = "" },
+        Row { .name = "the alternate screen",
+              .sent = "\033[?1049h",
+              .handled = Handled { true },
+              .reply = "\033[B" },
+        Row { .name = "the alternate screen, then DECCKM",
+              .sent = "\033[?1049h\033[?1h",
+              .handled = Handled { true },
+              .reply = "\033OB" },
+        Row { .name = "tracking, then the alternate screen",
+              .sent = "\033[?1000h\033[?1006h\033[?1049h",
+              .handled = Handled { true },
+              .reply = "\033[<65;1;1M" },
+        Row { .name = "the alternate screen, tracking, then DECCKM",
+              .sent = "\033[?1049h\033[?1000h\033[?1006h\033[?1h",
+              .handled = Handled { true },
+              .reply = "\033[<65;1;1M" },
+        Row { .name = "the alternate screen, tracking turned on and off again",
+              .sent = "\033[?1049h\033[?1000h\033[?1000l",
+              .handled = Handled { true },
+              .reply = "\033[B" },
+        Row { .name = "DECCKM, then the alternate screen",
+              .sent = "\033[?1h\033[?1049h",
+              .handled = Handled { true },
+              .reply = "\033OB" },
+        Row { .name = "the alternate screen, DECCKM, then a mouse protocol reset",
+              .sent = "\033[?1049h\033[?1h\033[?1000l",
+              .handled = Handled { true },
+              .reply = "\033OB" },
+        Row { .name = "the alternate screen, DECCKM, then tracking turned on and off again",
+              .sent = "\033[?1049h\033[?1h\033[?1000h\033[?1000l",
+              .handled = Handled { true },
+              .reply = "\033OB" },
+        Row { .name = "the alternate screen, ?1007 reset",
+              .sent = "\033[?1049h\033[?1007l",
+              .handled = Handled { false },
+              .reply = "" },
+        Row { .name = "the alternate screen, ?1007 reset, then set",
+              .sent = "\033[?1049h\033[?1007l\033[?1007h",
+              .handled = Handled { true },
+              .reply = "\033[B" },
+        Row { .name = "DECPCCM reset, page 1 on display, the cursor on page 3",
+              .sent = "\033[?64l\033[3 P",
+              .handled = Handled { false },
+              .reply = "" },
+        Row { .name = "DECPCCM reset, page 3 on display, the cursor on page 1",
+              .sent = "\033[3 P\033[?64l\033[1 P",
+              .handled = Handled { true },
+              .reply = "\033[B" },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
+        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+        mock.terminal.tick(1s);
+        mock.writeToScreen(row.sent);
+        mock.terminal.tick(1s);
+
+        mock.resetReplyData();
+        auto const handled = mock.terminal.sendMousePressEvent(Modifier::None,
+                                                               MouseButton::WheelDown,
+                                                               mock.terminal.currentMousePosition(),
+                                                               PixelCoordinate {},
+                                                               false);
+        CHECK(handled == row.handled);
+        CHECK(e(mock.replyData()) == e(row.reply));
+    }
+}
+
+TEST_CASE("Terminal.Wheel.alternateScrollIsOnFromPowerOnAndAfterRIS", "[terminal]")
+{
+    // ?1007, alternate scroll's gate, is set at power-on and by RIS, as Windows Terminal and foot start with
+    // it on: DECRQM reports it set.
+    using namespace vtbackend;
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(10) };
+    auto const reportedState = [&] {
+        mock.resetReplyData();
+        mock.writeToScreen("\033[?1007$p"); // DECRQM
+        mock.terminal.flushInput();
+        return mock.replyData();
+    };
+
+    CHECK(e(reportedState()) == e("\033[?1007;1$y"));
+    mock.writeToScreen("\033[?1007l");
+    CHECK(e(reportedState()) == e("\033[?1007;2$y"));
+    mock.writeToScreen("\033c"); // RIS
+    CHECK(e(reportedState()) == e("\033[?1007;1$y"));
 }
 
 TEST_CASE("Terminal.followOutput.brings_the_view_down_as_the_listener_and_the_settings_ask", "[terminal]")

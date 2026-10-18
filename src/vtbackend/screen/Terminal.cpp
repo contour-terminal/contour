@@ -408,6 +408,8 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::PageCursorCoupling, true);
     setMode(DECMode::LeftRightMargin, false);
+    // Alternate scroll on, as Windows Terminal and foot power up.
+    setMode(DECMode::MouseAlternateScroll, true);
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
@@ -5181,6 +5183,8 @@ void Terminal::setGenerateFocusEvents(bool enabled)
 void Terminal::setMouseProtocol(MouseProtocol protocol, bool enabled)
 {
     changeInputEncoding([&](InputGenerator& input) { input.setMouseProtocol(protocol, enabled); });
+    // Turned on, tracking takes the wheel; turned off, the wheel acts on the page on display again.
+    updateWheelMode();
 }
 
 void Terminal::setMouseTransport(MouseTransport transport)
@@ -6255,13 +6259,8 @@ void Terminal::setMode(DECMode mode, bool enable)
             break;
         case DECMode::UseApplicationCursorKeys:
             useApplicationCursorKeys(enable);
-            if (isAlternateScreen())
-            {
-                if (enable)
-                    setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-                else
-                    setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-            }
+            // The wheel's cursor keys take DECCKM's form, as the keyboard's do.
+            updateWheelMode();
             break;
         case DECMode::BracketedPaste: setBracketedPaste(enable); break;
         // The four coordinate encodings are one mutually-exclusive setting; @see
@@ -6278,10 +6277,12 @@ void Terminal::setMode(DECMode mode, bool enable)
             setMode(DECMode::MouseProtocolButtonTracking, enable); // ButtonTracking is default
             break;
         case DECMode::MouseAlternateScroll:
-            if (enable)
-                setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-            else
-                setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+            // Alternate scroll's on/off gate -- whether the wheel becomes cursor keys over a page without
+            // history -- as xterm's alternateScroll resource and mode are, and on from power-on, as Windows
+            // Terminal's and foot's are. It picks no key form: DECCKM does. Into the register first: the
+            // wheel mode is derived from it.
+            _modes.set(mode, enable);
+            updateWheelMode();
             break;
         case DECMode::FocusTracking: setGenerateFocusEvents(enable); break;
         case DECMode::UsePrivateColorRegisters: _usePrivateColorRegisters = enable; break;
@@ -6632,6 +6633,7 @@ void Terminal::hardReset()
     setMode(DECMode::Unicode, _settings.graphemeClustering);
     setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::PageCursorCoupling, true);
+    setMode(DECMode::MouseAlternateScroll, true); // alternate scroll on, as at power-on
 
     for (auto const& [mode, frozen]: _settings.frozenModes)
         freezeMode(mode, frozen);
@@ -6842,14 +6844,6 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
     if (_activeStatusDisplay == ActiveStatusDisplay::Main)
         _currentScreen = _pages[clamped.value].get();
 
-    // Update mouse wheel mode based on whether this is the primary page.
-    if (clamped == PageIndex(0))
-        setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
-    else if (isModeEnabled(DECMode::MouseAlternateScroll))
-        setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-    else
-        setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-
     // When DECPCCM is set, the displayed page follows the cursor page.
     if (isModeEnabled(DECMode::PageCursorCoupling))
         showPage(clamped);
@@ -6875,11 +6869,33 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
 
 void Terminal::showPage(PageIndex page)
 {
-    // What a page scrolled before it came on display is no output to follow.
     if (page != _displayedPage)
+    {
+        // What a page scrolled before it came on display is no output to follow.
         _displayedPageLinesFollowed = pageAt(page).linesScrolledIntoHistory();
-    _displayedPage = page;
+        _displayedPage = page;
+        // The wheel acts on what the user looks at.
+        updateWheelMode();
+    }
     _viewport.clampScrollOffset();
+}
+
+InputGenerator::MouseWheelMode Terminal::wheelModeForDisplayedPage() const noexcept
+{
+    using Mode = InputGenerator::MouseWheelMode;
+    // Tracking wins, as in Windows Terminal (mouseInput.cpp asks for tracking before alternate scroll);
+    // page 1 has a history to scroll, as xterm's alternate scroll applies to its alternate buffer only; and
+    // ?1007 reset turns alternate scroll off, as in xterm, Windows Terminal and foot.
+    if (mouseProtocol().has_value() || displayedScreenType() == ScreenType::Primary
+        || !isModeEnabled(DECMode::MouseAlternateScroll))
+        return Mode::Default;
+    // Cursor keys, in DECCKM's form at the moment, as xterm, Windows Terminal and foot send them.
+    return applicationCursorKeys() ? Mode::ApplicationCursorKeys : Mode::NormalCursorKeys;
+}
+
+void Terminal::updateWheelMode()
+{
+    setMouseWheelMode(wheelModeForDisplayedPage());
 }
 
 void Terminal::saveCursorPage()
