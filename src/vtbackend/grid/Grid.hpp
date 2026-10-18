@@ -822,7 +822,8 @@ class Grid
     /// Self-finalizing. On a generation mismatch the cursor is re-anchored to the
     /// current state and ResyncRequired is returned WITHOUT reporting lines — the caller
     /// snapshots via forEachValidLine() instead. (A resync must never be "changes since
-    /// seqno 0": post-rebuild rows legitimately keep revision 0 forever.)
+    /// seqno 0": the scan covers only the page and the rows scrolled out since the cursor's
+    /// base, so after a rebuild it cannot describe the history.)
     /// @param cursor The consumer's stream position (updated).
     /// @param callback Invoked as callback(LineOffset, Line const&) per changed line.
     template <typename F>
@@ -1156,18 +1157,30 @@ class Grid
         if (identity == RowIdentity::Destroyed)
             ++_stableIdGeneration;
         syncStableFloor();
-        // Row identity is gone, so an id-keyed history watermark means nothing now. Consumers
-        // resync on the generation mismatch anyway.
-        _dirtyHistoryFloor = NoHistoryFloor;
-        // Same reason, and the only invalidation the eviction scan needs: its ids name rows, so a
-        // rebuild that renames every row leaves them naming nothing. Everything else -- scrolling
-        // either way, a line-count resize, an eviction -- keeps row identity and therefore keeps them
-        // meaningful, which is what lets the scan carry no other invalidation hooks.
+        // The only invalidation the eviction scan needs: its ids name rows, so a rebuild that renames
+        // every row leaves them naming nothing. Everything else -- scrolling either way, a line-count
+        // resize, an eviction -- keeps row identity and therefore keeps them meaningful, which is what
+        // lets the scan carry no other invalidation hooks.
         _evictionScan.reset();
+        // Consumers resync on the generation mismatch, so the watermark of what they have seen goes.
         _changedHistoryFloor = NoHistoryFloor;
         _changedHistorySeqno = 0;
-        // Re-anchor the finalize scan: the pre-rebuild base delta is meaningless now.
-        _stableBaseAtLastFinalize = _stableBase;
+        // What the next finalize has to reach is a different matter: a row still waiting for its stamp
+        // must get it, or it stays dirty and unstamped for good -- the scan reaches the history only
+        // through these two bounds.
+        switch (identity)
+        {
+            case RowIdentity::Preserved:
+                // Every row keeps its id, so the rows written and scrolled out since the last finalize,
+                // and those the shrinking page pushed up after them, are where the bounds already say.
+                break;
+            case RowIdentity::Destroyed:
+                // No id names what it did, and a rebuilt row may be fresh, and so dirty: the next
+                // finalize scans the whole valid history, once.
+                _stableBaseAtLastFinalize = _stableBase;
+                _dirtyHistoryFloor = _stableFloor;
+                break;
+        }
     }
 
     /// Resets the topmost @p count lines of the main page to blank.

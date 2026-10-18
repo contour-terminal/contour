@@ -2083,6 +2083,34 @@ TEST_CASE("Terminal.DECSTR.keeps_the_status_display_type", "[terminal][statuslin
     }
 }
 
+TEST_CASE("Terminal.revisions.rowsThatScrolledOutBeforeTheStatusLineAppearsAreStamped",
+          "[terminal][statusline]")
+{
+    // Vi mode shows the indicator status line, which takes a row from the page: a page resize. The rows the
+    // output scrolled into the history before it, with no finalize in between, are stamped by the next one
+    // as the page's rows are.
+    auto mc = MockTerm { PageSize { LineCount(7), ColumnCount(40) }, LineCount(30) };
+    auto& terminal = mc.terminal;
+    for (auto const i: std::views::iota(0, 18))
+        mc.writeToScreen(std::format("line {}\r\n", i));
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    auto& grid = terminal.displayedPage().grid();
+    REQUIRE(grid.pageSize().lines == LineCount(6));
+    grid.finalizeRevisions();
+
+    auto const history = unbox<int>(grid.historyLineCount());
+    REQUIRE(history > 0);
+    for (auto const offset: std::views::iota(-history, unbox<int>(grid.pageSize().lines)))
+    {
+        INFO("row " << offset);
+        auto const& line = std::as_const(grid).lineAt(vtbackend::LineOffset(offset));
+        CHECK_FALSE(line.isDirty());
+        CHECK(line.revision() != 0);
+    }
+}
+
 TEST_CASE("Terminal.statusNotices.RIS_drops_the_notice_of_a_locked_keyboard", "[terminal][statusline]")
 {
     // RIS resets KAM with every other mode, so the locked keyboard's notice goes too: a notice put up later,
