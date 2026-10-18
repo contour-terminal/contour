@@ -696,35 +696,22 @@ if(CONTOUR_FRONTEND_GUI)
         # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
-            remote/NativeController_test.cpp
             remote/RemoteController_test.cpp
-            remote/TmuxController_test.cpp
             platform/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
-            window/CommandPaletteModel_test.cpp
-            config/Config_test.cpp
             config/GpuSelector_test.cpp
-            window/SettingsController_test.cpp
-            test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
             platform/SpeechSynthesizer_test.cpp
-            test/ContourGuiApp_test.cpp
-            display/DisplayRendering_test.cpp
             display/ContentScale_test.cpp
             session/ExitCode_test.cpp
             display/CaretReportGate_test.cpp
-            display/TerminalAccessible_test.cpp
-            session/SessionInput_test.cpp
             session/HyperlinkTooltip_test.cpp
-            session/FontControl_test.cpp
             input/HorizontalWheelGesture_test.cpp
             display/ImeQueryRect_test.cpp
             display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
             test/MainWindowControllerMock.hpp
-            session/FocusRouting_test.cpp
-            window/MultiWindow_test.cpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/Notifier_test.cpp
@@ -749,36 +736,73 @@ if(CONTOUR_FRONTEND_GUI)
             display/RhiVertexLayout_test.cpp
             display/ScreenshotReadback_test.cpp
             display/ScreenshotRhiReadback_test.cpp
-            session/TabSizeInheritance_test.cpp
-            session/TerminalSessionManager_test.cpp
-            session/TerminalSession_test.cpp
-            test/QmlComponents_test.cpp
             window/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
-            window/UiStyleProvider_test.cpp
             window/WindowControlStyleProvider_test.cpp
-            window/TabListModel_test.cpp
             window/TabLabel_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
-            window/WindowSizing_test.cpp
         )
-        set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
         if(CONTOUR_WITH_GPU_SELECTION)
             target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
         endif()
-        target_link_libraries(contour_gui_test
-            PRIVATE
-            contour_core
-            core::net_tls # remote/NativeController_test serves TLS
-            Qt6::Test
-            Qt6::GuiPrivate # rhi/qrhi.h + qrhigles2_p.h for the end-to-end screenshot readback test
-            Catch2::Catch2
+
+        # The suite's heavyweight sources: every one whose compile peaks at 2 GB or more with GCC at -O2 -g, the
+        # flags of CI's RelWithDebInfo builds. Measured in October 2026 with GCC 16.2, as the compiler's peak
+        # resident set compiling each of the suite's sources alone: Config_test 7.96 GB, TerminalSession_test
+        # 4.15 GB, QmlComponents_test 3.32 GB, the others listed here 2.13 to 2.99 GB -- what the frontend's
+        # headers cost every source that includes them -- and every source not listed 1.73 GB or less. One at a
+        # time, beside three of the light ones, a 4-job build stays under 16 GB. To re-measure, compile each
+        # source alone with the flags compile_commands.json gives it, -O2 -g in place of the optimisation
+        # flags, and read the compiler's peak (wait4's ru_maxrss).
+        #
+        # They compile in an object library of their own, in contour_heavy_compile_pool (see the top-level
+        # CMakeLists.txt), as a pool is a target property before CMake 4.2 and CI has 3.31. A source listed
+        # here is not listed in the suite's own sources.
+        set(contour_gui_test_heavy_sources
+            config/Config_test.cpp
+            display/DisplayRendering_test.cpp
+            display/TerminalAccessible_test.cpp
+            remote/NativeController_test.cpp
+            remote/TmuxController_test.cpp
+            session/FocusRouting_test.cpp
+            session/FontControl_test.cpp
+            session/SessionInput_test.cpp
+            session/TabSizeInheritance_test.cpp
+            session/TerminalSessionManager_test.cpp
+            session/TerminalSession_test.cpp
+            test/ContourGuiApp_test.cpp
+            test/QmlComponents_test.cpp
+            test/SettingsPageQml_test.cpp
+            window/CommandPaletteModel_test.cpp
+            window/MultiWindow_test.cpp
+            window/SettingsController_test.cpp
+            window/TabListModel_test.cpp
+            window/UiStyleProvider_test.cpp
+            window/WindowSizing_test.cpp
         )
-        target_include_directories(contour_gui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
-        if(NOT WIN32)
-            target_compile_options(contour_gui_test PRIVATE -Wno-c2y-extensions)
+        add_library(contour_gui_test_heavy OBJECT ${contour_gui_test_heavy_sources})
+        if(CMAKE_GENERATOR MATCHES "Ninja")
+            set_target_properties(contour_gui_test_heavy PROPERTIES JOB_POOL_COMPILE contour_heavy_compile_pool)
         endif()
+
+        # Both are built alike: the same usage requirements, include path, options and moc.
+        foreach(target IN ITEMS contour_gui_test contour_gui_test_heavy)
+            set_target_properties(${target} PROPERTIES AUTOMOC ON)
+            target_link_libraries(${target}
+                PRIVATE
+                contour_core
+                core::net_tls # remote/NativeController_test serves TLS
+                Qt6::Test
+                Qt6::GuiPrivate # rhi/qrhi.h + qrhigles2_p.h for the end-to-end screenshot readback test
+                Catch2::Catch2
+            )
+            target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+            if(NOT WIN32)
+                target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
+            endif()
+        endforeach()
+        target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy)
 
         # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
         if(TARGET contour_tsan_thread_join)

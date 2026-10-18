@@ -45,6 +45,17 @@ if(CMAKE_GENERATOR MATCHES "Ninja")
     set(CMAKE_JOB_POOL_LINK contour_link_pool)
 endif()
 
+# The same for a handful of COMPILE steps: the test sources a recent GCC needs gigabytes for at -O2 -g,
+# Config_test.cpp about 8 GB alone. Two of them compiling at once, beside the other jobs, ran the 16 GB
+# arm64 GCC runner out of memory. They compile in a pool of their own, one at a time by default, while every
+# other source still uses every core; src/contour/CMakeLists.txt names them, and how they were chosen.
+# CONTOUR_HEAVY_COMPILE_JOBS raises or lowers the pool's depth for a machine that wants something else.
+set(CONTOUR_HEAVY_COMPILE_JOBS "1"
+    CACHE STRING "Maximum number of concurrent compiles of the heaviest test sources (Ninja generators)")
+if(CMAKE_GENERATOR MATCHES "Ninja")
+    set_property(GLOBAL APPEND PROPERTY JOB_POOLS contour_heavy_compile_pool=${CONTOUR_HEAVY_COMPILE_JOBS})
+endif()
+
 if((CMAKE_CXX_COMPILER_ID STREQUAL "Clang") OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
     set(CMAKE_CXX_FLAGS_DEBUG "-Og -g")
 endif()
