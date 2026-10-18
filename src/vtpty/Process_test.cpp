@@ -462,6 +462,18 @@ TEST_CASE("Process.runsARelativeProgramFromItsWorkingDirectory", "[process]")
     (void) hangUp(process);
 }
 
+TEST_CASE("Process.saysWhyItCannotEnterItsWorkingDirectory", "[process]")
+{
+    // The child says why chdir() failed, as chdir() reported it, and exits.
+    auto const directory = core::testing::ScopedTempDir { "contour-process" };
+    auto exec = execInfo("/bin/sh", { "-c", "exit 0" });
+    exec.workingDirectory = directory.path() / "no-such-directory";
+    auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+    REQUIRE(process.start().has_value());
+    CHECK(printed(process, "no-such-directory\". No such file or directory"));
+    (void) hangUp(process);
+}
+
 TEST_CASE("Process.fallsBackFromAProgramThatIsNotThere", "[process]")
 {
     // A single word that names no program has no command line to read: the child says so, and runs the

@@ -440,11 +440,13 @@ StartResult Process::start()
             {
                 if (!cwd.empty() && chdir(cwd.c_str()) != 0)
                 {
+                    // Read before the writes that report it, any of which may set errno.
+                    auto const failure = errno;
                     auto errorTextBuffer = array<char, 256> {};
                     writeAll(STDOUT_FILENO, "Failed to chdir to \"");
                     writeAll(STDOUT_FILENO, cwd);
                     writeAll(STDOUT_FILENO, "\". ");
-                    writeAll(STDOUT_FILENO, errnoText(errno, errorTextBuffer));
+                    writeAll(STDOUT_FILENO, errnoText(failure, errorTextBuffer));
                     writeAll(STDOUT_FILENO, "\n");
                     ::_exit(EXIT_FAILURE);
                 }
@@ -465,6 +467,8 @@ StartResult Process::start()
             // a path with a slash already, which execvp() runs without a search; and its fallback of running
             // a file the kernel cannot execute (ENOEXEC) with sh is behaviour users rely on.
             ::execvp(childArgv[0], childArgv.data());
+            // Read before the writes below, any of which may set errno; replaced by the login shell's.
+            auto failure = errno;
 
             // Fallback: Try login shell. Everything this needs was computed before the fork.
             writeAll(STDOUT_FILENO, "\r\033[31;1mFailed to spawn ");
@@ -473,12 +477,15 @@ StartResult Process::start()
             writeAll(STDOUT_FILENO, loginShellText);
             writeAll(STDOUT_FILENO, "\n");
             if (!loginShellArgv.empty())
+            {
                 ::execvp(loginShellArgv[0], loginShellArgv.data()); // tolerated as the execvp() above is
+                failure = errno;
+            }
 
             // Bad luck.
             auto errorTextBuffer = array<char, 256> {};
             writeAll(STDOUT_FILENO, "\r\nOut of luck. ");
-            writeAll(STDOUT_FILENO, errnoText(errno, errorTextBuffer));
+            writeAll(STDOUT_FILENO, errnoText(failure, errorTextBuffer));
             writeAll(STDOUT_FILENO, "\r\n\n");
             ::_exit(EXIT_FAILURE);
             break;
