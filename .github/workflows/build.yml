@@ -1173,7 +1173,7 @@ jobs:
         build_type: ["RelWithDebInfo"]
         compiler:
           [
-            "GCC 14",
+            "GCC 15",
             "Clang 22",
           ]
         qt_version: [6]
@@ -1284,9 +1284,14 @@ jobs:
         with:
           version: "6.11.1"
           modules: qtmultimedia qt5compat qtshadertools qtspeech
+      # Ubuntu 24.04 packages GCC up to 14; newer releases come from the toolchain PPA, which
+      # builds them for noble on amd64 and arm64.
       - name: Install GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
-        run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
+        run: |
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update -q
+          sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
         env:
@@ -1338,7 +1343,7 @@ jobs:
       - name: "build"
         # -j$(nproc) rather than a hardcoded -j3: a quarter of a 4-vCPU runner was sitting idle.
         #
-        # The memory sampling is temporary. ubuntu-24.04-arm (GCC 14) is killed by a runner
+        # The memory sampling is temporary. ubuntu-24.04-arm (GCC) is killed by a runner
         # shutdown signal during the final GUI links, and an OOM-killed runner agent leaves
         # nothing in the build log by construction -- so the absence of an OOM message proves
         # nothing either way. free(1) alongside the build is what settles it.
@@ -1430,7 +1435,7 @@ jobs:
         continue-on-error: true
         run: ./scripts/run-display-tests.sh out/gcc-debug/src/contour/contour_gui_test
       - name: "Upload unit tests"
-        if: ${{ matrix.compiler == 'GCC 14' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04'}}
+        if: ${{ matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04'}}
         uses: actions/upload-artifact@v4
         with:
           name: contour-ubuntu2404-tests
@@ -1600,6 +1605,8 @@ jobs:
           find . -name 'bench-headless' -exec chmod 0755 {} \;
       - name: "install dependencies"
         run: ./scripts/ci-install-run-deps.sh valgrind
+      - name: "install the C++ runtime the test binaries were built against"
+        run: ./scripts/ci-install-gcc-runtime.sh
       - name: "test: crispy (via valgrind)"
         run: valgrind --error-exitcode=64 ./out/gcc-debug/src/crispy/crispy_test
       - name: "test: vtparser (via valgrind)"
@@ -1639,6 +1646,8 @@ jobs:
         run: find . -name 'vtconformance-run' -exec chmod 0755 {} \;
       - name: "install dependencies"
         run: ./scripts/ci-install-run-deps.sh python3
+      - name: "install the C++ runtime the test binaries were built against"
+        run: ./scripts/ci-install-gcc-runtime.sh
       - name: "install vttest"
         run: ./scripts/ci/vttest-install.sh
       - name: "fetch esctest"
@@ -1706,6 +1715,8 @@ jobs:
           find . -name 'bench-headless' -exec chmod 0755 {} \;
       - name: "install dependencies"
         run: ./scripts/ci-install-run-deps.sh valgrind
+      - name: "install the C++ runtime the test binaries were built against"
+        run: ./scripts/ci-install-gcc-runtime.sh
       - name: "bench-headless: ${{ matrix.test_case }}"
         run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
   # }}}
