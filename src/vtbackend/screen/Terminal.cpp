@@ -992,7 +992,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             inputMethodData(),
                                                                             effectiveCursorPosition,
                                                                             includeSelection,
-                                                                            hoveredHyperlink },
+                                                                            hoveredHyperlink,
+                                                                            RenderedDisplay::Main },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell,
                                                       smoothScrollExtra,
@@ -1008,7 +1009,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                             inputMethodData(),
                                                                             effectiveCursorPosition,
                                                                             includeSelection,
-                                                                            hoveredHyperlink },
+                                                                            hoveredHyperlink,
+                                                                            RenderedDisplay::Main },
                                                       _viewport.scrollOffset(),
                                                       renderLinesPerCell);
 
@@ -1050,6 +1052,11 @@ void Terminal::updateCursorMotionAnimation(RenderBuffer& output)
         _cursorMotion.active = false;
 
     if (!output.cursor.has_value())
+        return;
+
+    // The status line's cursor is not animated: its rows are none of the viewport's, and a motion between the
+    // two displays would sweep across the page.
+    if (output.cursor->display == RenderedDisplay::StatusLine)
         return;
 
     // Effective animation duration: at least 3 frames at the current refresh rate
@@ -1229,7 +1236,8 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 InputMethodData {},
                                                                 nullopt,
                                                                 includeSelection,
-                                                                HyperlinkId {} },
+                                                                HyperlinkId {},
+                                                                RenderedDisplay::StatusLine },
                                           ScrollOffset(0));
             // The terminal's own furniture, so its bar may span the window's whole width (#2139), and its
             // text the gutter's columns as well as the page's.
@@ -1241,7 +1249,15 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                 .leadingColumns = _indicatorStatusScreen.pageSize().columns - _settings.pageSize.columns,
             };
             return _indicatorStatusScreen.pageSize().lines;
-        case StatusDisplayType::HostWritable:
+        case StatusDisplayType::HostWritable: {
+            // While DECSASD selects it, the status line's own active position is the cursor, drawn on its
+            // row: DEC STD 070 ch. 14 gives the status display an active position and a cursor of its own,
+            // and xterm and mlterm draw it there. DECTCEM enables it, as the main display's.
+            auto const statusLineCursor =
+                _activeStatusDisplay == ActiveStatusDisplay::StatusLine
+                        && inputHandler().mode() == ViMode::Insert && isModeEnabled(DECMode::VisibleCursor)
+                    ? optional<CellLocation> { _hostWritableStatusLineScreen.cursor().position }
+                    : nullopt;
             _hostWritableStatusLineScreen.render(RenderBufferBuilder { *this,
                                                                        _hostWritableStatusLineScreen,
                                                                        output,
@@ -1250,11 +1266,13 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                        StatusLineColorLookupTable,
                                                                        HighlightSearchMatches::No,
                                                                        InputMethodData {},
-                                                                       nullopt,
+                                                                       statusLineCursor,
                                                                        includeSelection,
-                                                                       HyperlinkId {} },
+                                                                       HyperlinkId {},
+                                                                       RenderedDisplay::StatusLine },
                                                  ScrollOffset(0));
             return _hostWritableStatusLineScreen.pageSize().lines;
+        }
     }
     core::unreachable();
 }

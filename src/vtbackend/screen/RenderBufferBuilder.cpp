@@ -161,7 +161,8 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
                                          InputMethodData inputMethodData,
                                          optional<CellLocation> theCursorPosition,
                                          bool includeSelection,
-                                         HyperlinkId hoveredHyperlink):
+                                         HyperlinkId hoveredHyperlink,
+                                         RenderedDisplay display):
     _output { &output },
     _terminal { &terminal },
     _screen { &screen },
@@ -173,6 +174,7 @@ RenderBufferBuilder::RenderBufferBuilder(Terminal const& terminal,
     _inputMethodData { std::move(inputMethodData) },
     _includeSelection { includeSelection },
     _hoveredHyperlink { hoveredHyperlink },
+    _display { display },
     // Once per pass, not once per line: three facts that cannot change while a buffer is being built.
     _contextTintingPossible { terminal.settings().contextTintScope != ContextTintScope::Off
                               && terminal.colorPalette().hasContextTints()
@@ -266,7 +268,7 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
     // When IME composition is active, the cursor must be rendered regardless of blink phase:
     // the IME preedit text is displayed AT the cursor position, so the cursor is its anchor.
     auto const cursorVisible = _terminal->cursorCurrentlyVisible() || !_inputMethodData.preeditString.empty();
-    if (!_cursorPosition || !cursorVisible || !_terminal->viewport().isLineVisible(_cursorPosition->line))
+    if (!_cursorPosition || !cursorVisible || !isGridLineDrawn(_cursorPosition->line))
         return nullopt;
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
@@ -276,11 +278,9 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
 
     // Through the viewport rather than by adding the scroll offset: with folds collapsed the row a grid
     // line is drawn on is not its line plus an offset, and a cursor placed by the old arithmetic would
-    // be drawn somewhere other than the cell it is in.
-    auto const cursorScreenPosition =
-        CellLocation { .line = _baseLine
-                               + _terminal->viewport().translateGridToScreenCoordinate(_cursorPosition->line),
-                       .column = _cursorPosition->column };
+    // be drawn somewhere other than the cell it is in. A status line's cursor is on the status line's row.
+    auto const cursorScreenPosition = CellLocation { .line = _baseLine + screenLineOf(_cursorPosition->line),
+                                                     .column = _cursorPosition->column };
 
     auto const cellWidth = _screen->cellWidthAt(*_cursorPosition);
 
@@ -313,13 +313,37 @@ optional<RenderCursor> RenderBufferBuilder::renderCursor() const
     // during cell rendering. Without this, animationProgress defaults to 1.0f and the
     // Block cursor cell inversion fires at the destination while the CursorRenderer also
     // draws an animated cursor at the interpolated position — producing a double/stretched cursor.
-    auto const animProgress = _terminal->cursorAnimationProgress(*_cursorPosition);
+    // A status line's cursor is never animated (Terminal::updateCursorMotionAnimation), so it is at rest: a
+    // block cursor there is painted by inverting its cell at once.
+    auto const animProgress =
+        _display == RenderedDisplay::Main ? _terminal->cursorAnimationProgress(*_cursorPosition) : 1.0f;
 
     return RenderCursor { .position = cursorScreenPosition,
                           .shape = shape,
                           .width = cellWidth,
                           .animationProgress = animProgress,
-                          .cursorColor = resolvedCursorColor };
+                          .cursorColor = resolvedCursorColor,
+                          .display = _display };
+}
+
+CellLocation RenderBufferBuilder::gridPositionOf(CellLocation screenPosition) const
+{
+    return _display == RenderedDisplay::Main
+               ? _terminal->viewport().translateScreenToGridCoordinate(screenPosition)
+               : screenPosition;
+}
+
+LineOffset RenderBufferBuilder::screenLineOf(LineOffset line) const
+{
+    return _display == RenderedDisplay::Main ? _terminal->viewport().translateGridToScreenCoordinate(line)
+                                             : line;
+}
+
+bool RenderBufferBuilder::isGridLineDrawn(LineOffset line) const
+{
+    if (_display == RenderedDisplay::Main)
+        return _terminal->viewport().isLineVisible(line);
+    return line >= LineOffset(0) && line < _screen->pageSize().lines.as<LineOffset>();
 }
 
 RenderCell RenderBufferBuilder::makeRenderCellExplicit(ColorPalette const& colorPalette,
@@ -476,7 +500,7 @@ RenderLine RenderBufferBuilder::createRenderLine(TrivialLineBuffer const& lineBu
                                                  std::u32string_view textOverride) const
 {
     auto const pos = CellLocation { .line = lineOffset, .column = ColumnOffset(0) };
-    auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(pos);
+    auto const gridPosition = gridPositionOf(pos);
     auto renderLine = RenderLine {};
     renderLine.lineOffset = lineOffset;
     renderLine.usedColumns = lineBuffer.usedColumns;
@@ -491,13 +515,9 @@ RenderLine RenderBufferBuilder::createRenderLine(TrivialLineBuffer const& lineBu
 
 bool RenderBufferBuilder::gridLineContainsCursor(LineOffset screenRow) const
 {
-    // The status-line screens render through this same builder and are handed no cursor position at
-    // all. They have nothing to mark, and the viewport translation below -- which speaks for the main
-    // page -- does not speak for them.
+    // A screen handed no cursor position -- a status line the cursor is not on -- has nothing to mark.
     if (!_cursorPosition)
         return false;
-
-    auto const& viewport = _terminal->viewport();
 
     // BOTH sides in SCREEN rows. A cursor position is a GRID line, and the row it is drawn on is not
     // that line: scrolling shifts it, and with folds collapsed the rows on screen are a non-contiguous
@@ -509,12 +529,12 @@ bool RenderBufferBuilder::gridLineContainsCursor(LineOffset screenRow) const
     //
     // The cursor of the screen being RENDERED, not the terminal's current one: asking the latter
     // reports the main cursor's line while a non-displayed page is being built.
-    if (viewport.translateGridToScreenCoordinate(_screen->cursor().position.line) == screenRow)
+    if (screenLineOf(_screen->cursor().position.line) == screenRow)
         return true;
 
     // In Vi mode the cursor drawn is the Vi one, which sits at its own line.
     return _terminal->inputHandler().mode() != ViMode::Insert
-           && viewport.translateGridToScreenCoordinate(_cursorPosition->line) == screenRow;
+           && screenLineOf(_cursorPosition->line) == screenRow;
 }
 
 void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
@@ -569,10 +589,7 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     // selection test asked about the wrong line whenever the viewport was scrolled back, which sent
     // selected trivial lines down the fast path and left them unhighlighted -- while the per-cell
     // test right beside it (makeColorsForCell) had the coordinates right all along.
-    auto const gridLine =
-        _terminal->viewport()
-            .translateScreenToGridCoordinate(CellLocation { .line = lineOffset, .column = ColumnOffset(0) })
-            .line;
+    auto const gridLine = gridPositionOf(CellLocation { .line = lineOffset, .column = ColumnOffset(0) }).line;
 
     // A line one link covers takes the per-cell path as well: a RenderLine carries no per-cell decoration.
     auto const linkRole = osc8RoleOf(lineBuffer.hyperlink);
@@ -606,7 +623,7 @@ void RenderBufferBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer,
     for (auto columnOffset = textMargin; columnOffset < pageColumnsEnd; ++columnOffset)
     {
         auto const pos = CellLocation { .line = lineOffset, .column = columnOffset };
-        auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(pos);
+        auto const gridPosition = gridPositionOf(pos);
         auto renderAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
 
         _output->cells.emplace_back(makeRenderCellExplicit(_terminal->colorPalette(),
@@ -748,20 +765,13 @@ void RenderBufferBuilder::startLine(LineOffset line, LineFlags flags, ContextId 
     _useCursorlineColoring = isCursorLine(line);
     _currentContextTint = tintFor(contextId);
 
-    prepareSearchHighlights(
-        _terminal->viewport()
-            .translateScreenToGridCoordinate(CellLocation { .line = line, .column = ColumnOffset(0) })
-            .line);
+    prepareSearchHighlights(gridPositionOf(CellLocation { .line = line, .column = ColumnOffset(0) }).line);
 }
 
 bool RenderBufferBuilder::isCursorLine(LineOffset line) const
 {
     return _terminal->inputHandler().mode() != ViMode::Insert && _cursorPosition
-           && line
-                  == _terminal->viewport()
-                         .translateGridToScreenCoordinate(
-                             CellLocation { .line = _cursorPosition->line, .column = {} })
-                         .line;
+           && line == screenLineOf(_cursorPosition->line);
 }
 
 void RenderBufferBuilder::endLine() noexcept
@@ -787,8 +797,8 @@ void RenderBufferBuilder::renderGridText(CellLocation screenPosition,
     // into one cluster the grid never formed and pull the rest of the line leftwards.
     for (auto column = screenPosition.column; auto const codepoint: text)
     {
-        auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(
-            CellLocation { .line = screenPosition.line, .column = column });
+        auto const gridPosition =
+            gridPositionOf(CellLocation { .line = screenPosition.line, .column = column });
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
                                                 textAttributes.foregroundColor,
@@ -846,8 +856,8 @@ ColumnCount RenderBufferBuilder::renderUtf8Text(CellLocation screenPosition,
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
-        auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(
-            screenPosition + ColumnOffset::cast_from(columnCountRendered));
+        auto const gridPosition =
+            gridPositionOf(screenPosition + ColumnOffset::cast_from(columnCountRendered));
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
                                                 textAttributes.foregroundColor,
@@ -932,7 +942,7 @@ bool RenderBufferBuilder::tryRenderInputMethodEditor(CellLocation screenPosition
 void RenderBufferBuilder::renderCell(ConstCellProxy screenCell, LineOffset line, ColumnOffset column)
 {
     auto const screenPosition = CellLocation { .line = line, .column = column };
-    auto const gridPosition = _terminal->viewport().translateScreenToGridCoordinate(screenPosition);
+    auto const gridPosition = gridPositionOf(screenPosition);
 
     if (tryRenderInputMethodEditor(screenPosition, gridPosition))
         return;

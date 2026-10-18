@@ -162,6 +162,14 @@ ColumnOffset layoutRenderText(std::vector<RenderCell>& output,
 /// @param cells The cells, left to right; none is marked when it is empty.
 void markShapingGroup(std::span<RenderCell> cells) noexcept;
 
+/// Which display a part of the frame belongs to: the main display, seen through the viewport -- which
+/// scrolls, smoothly too, and folds -- or a status line, drawn row for row, which does neither.
+enum class RenderedDisplay : uint8_t
+{
+    Main = 0,   ///< The main display: the page on display, through the viewport.
+    StatusLine, ///< A status line: its own rows, without a viewport.
+};
+
 struct RenderCursor
 {
     CellLocation position;
@@ -173,6 +181,9 @@ struct RenderCursor
     float animationProgress = 1.0f;              ///< 0.0 = at animateFrom, 1.0 = at position.
     RGBColor cursorColor {};                     ///< Resolved cursor color at target position.
     std::optional<RGBColor> animateFromColor {}; ///< Cursor color at animation source position.
+    /// The display the cursor is on. A status line's cursor does not scroll with the page, nor is it clipped
+    /// to it.
+    RenderedDisplay display = RenderedDisplay::Main;
 };
 
 /// A status line whose bar spans the window's whole width: the gutter and the page margins beside it, too.

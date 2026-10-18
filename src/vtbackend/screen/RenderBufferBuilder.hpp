@@ -31,6 +31,8 @@ class RenderBufferBuilder
     /// @param hoveredHyperlink The OSC 8 link the pointer is over in this frame, which the builder draws
     ///                         in the hover role (Terminal::hyperlinkIdUnderPointer()); none for a screen
     ///                         the pointer is not over.
+    /// @param display Which display @p screen is drawn on: the main display maps its rows through the
+    ///                viewport, a status line draws its rows as they are.
     RenderBufferBuilder(Terminal const& terminal,
                         Screen const& screen,
                         RenderBuffer& output,
@@ -41,7 +43,8 @@ class RenderBufferBuilder
                         InputMethodData inputMethodData,
                         std::optional<CellLocation> theCursorPosition,
                         bool includeSelection,
-                        HyperlinkId hoveredHyperlink);
+                        HyperlinkId hoveredHyperlink,
+                        RenderedDisplay display);
 
     /// Renders grid row @p line as host chrome copying it: its own colours, SGR and hyperlinks, but no
     /// cursor, selection, search match or yank highlight -- those describe the row where it really is.
@@ -103,6 +106,29 @@ class RenderBufferBuilder
     [[nodiscard]] bool isCursorLine(LineOffset line) const;
 
     [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
+
+    /// The grid position of the cell drawn at @p screenPosition: through the viewport on the main display,
+    /// the same position on a status line, which has no viewport.
+    ///
+    /// Not noexcept, for the reason startLine() gives.
+    /// @param screenPosition Where the cell is drawn, relative to the screen's first row.
+    /// @return Where the cell is in the screen's grid.
+    [[nodiscard]] CellLocation gridPositionOf(CellLocation screenPosition) const;
+
+    /// The row grid line @p line is drawn on: the inverse of gridPositionOf().
+    ///
+    /// Not noexcept, for the reason startLine() gives.
+    /// @param line A line of the screen's grid.
+    /// @return The row it is drawn on, relative to the screen's first row.
+    [[nodiscard]] LineOffset screenLineOf(LineOffset line) const;
+
+    /// Whether grid line @p line is drawn at all: inside the viewport on the main display, inside the
+    /// screen's own rows on a status line.
+    ///
+    /// Not noexcept, for the reason startLine() gives.
+    /// @param line A line of the screen's grid.
+    /// @return true if the line is drawn.
+    [[nodiscard]] bool isGridLineDrawn(LineOffset line) const;
 
     /// The tint for @p id, resolved once per LINE -- not per cell, and only when @ref
     /// _contextTintingPossible said a tint could apply at all, which is what keeps the ordinary
@@ -247,6 +273,7 @@ class RenderBufferBuilder
     InputMethodData _inputMethodData;
     bool _includeSelection;
     HyperlinkId _hoveredHyperlink; ///< The OSC 8 link under the pointer, as the frame was asked to draw it.
+    RenderedDisplay _display;      ///< The display the screen is drawn on.
     mutable HyperlinkId _lastRoleLink {};                            ///< The link osc8RoleOf() answered last.
     mutable LinkDecorationRole _lastRole = LinkDecorationRole::None; ///< The role it answered for it.
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);

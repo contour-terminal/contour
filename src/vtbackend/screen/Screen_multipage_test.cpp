@@ -1053,6 +1053,18 @@ TEST_CASE("MultiPage.theCaretIsInViewOnlyOnThePageOnDisplay", "[screen]")
     }
 }
 
+namespace
+{
+/// Shows the host-writable status line, as DECSSDT asks and a frontend grants it.
+/// @param mock The terminal.
+void showHostWritableStatusLine(MockTerm<>& mock)
+{
+    mock.writeToScreen("\033[2$~"); // DECSSDT host-writable
+    mock.terminal.answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer::Shown);
+    REQUIRE(mock.terminal.statusDisplayType() == StatusDisplayType::HostWritable);
+}
+} // namespace
+
 TEST_CASE("MultiPage.theStatusLinesCursorIsNotDrawnOnTheMainDisplay", "[screen]")
 {
     // While DECSASD sends output to the host-writable status line, its cursor is not one of the main
@@ -1060,11 +1072,103 @@ TEST_CASE("MultiPage.theStatusLinesCursorIsNotDrawnOnTheMainDisplay", "[screen]"
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
     auto& terminal = mock.terminal;
     mock.writeToScreen("\033[3;3H"); // the main display's cursor at row 2, column 2
-    mock.writeToScreen(
-        "\033[2$~\033[1$}\033[1;5H"); // DECSSDT host-writable, DECSASD, the status line's column 4
+    showHostWritableStatusLine(mock);
+    mock.writeToScreen("\033[1$}\033[1;5H"); // DECSASD, the status line's column 4
     REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
 
+    auto const frame = renderOf(terminal);
+    CHECK_FALSE((frame.cursor.has_value() && frame.cursor->display == RenderedDisplay::Main));
+}
+
+// DEC STD 070 ch. 14 gives the status display an active position (2.2) and a cursor enable (2.3) of its own;
+// xterm and mlterm draw the cursor on the status line's row while it is active.
+
+TEST_CASE("MultiPage.theStatusLinesCursorIsDrawnOnItsRow", "[screen]")
+{
+    // The host-writable status line's own active position, below the page, at its column -- also with the
+    // page scrolled back, which moves the main display's rows and not the status line's.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) }, LineCount(100) };
+    auto& terminal = mock.terminal;
+    printLines(mock, "line", 20);
+    showHostWritableStatusLine(mock);
+    mock.writeToScreen("\033[1$}\033[1;5H"); // DECSASD, the status line's column 4
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::StatusLine);
+
+    SECTION("with the page at its bottom")
+    {
+    }
+    SECTION("with the page scrolled back")
+    {
+        REQUIRE(terminal.viewport().scrollUp(LineCount(5)));
+    }
+
+    auto const frame = renderOf(terminal);
+    REQUIRE(frame.cursor.has_value());
+    CHECK(frame.cursor->display == RenderedDisplay::StatusLine);
+    CHECK(frame.cursor->position
+          == CellLocation { .line = terminal.pageSize().lines.as<LineOffset>(), .column = ColumnOffset(4) });
+}
+
+TEST_CASE("MultiPage.theStatusLinesBlockCursorIsPainted", "[screen]")
+{
+    // A block cursor is drawn by inverting its cell, which waits for the cursor motion animation to finish.
+    // The status line's cursor is never animated, so it is at rest from the start -- with the animation on,
+    // as by default.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    terminal.settings().cursorMotionAnimationDuration = std::chrono::milliseconds(80);
+    showHostWritableStatusLine(mock);
+    mock.writeToScreen("\033[2 q\033[1$}\033[1;5H"); // a steady block, DECSASD, the status line's column 4
+
+    auto const frame = renderOf(terminal);
+    REQUIRE(frame.cursor.has_value());
+    REQUIRE(frame.cursor->shape == CursorShape::Block);
+    CHECK(frame.cursor->animationProgress == 1.0f);
+
+    // The cursor's cell is painted otherwise than the blank cell beside it.
+    auto const statusRow = terminal.pageSize().lines.as<LineOffset>();
+    auto const cellAt = [&](int column) {
+        auto const found = std::ranges::find_if(frame.cells, [&](RenderCell const& cell) {
+            return cell.position == CellLocation { .line = statusRow, .column = ColumnOffset(column) };
+        });
+        REQUIRE(found != frame.cells.end());
+        return found->attributes;
+    };
+    CHECK(cellAt(4).backgroundColor != cellAt(5).backgroundColor);
+}
+
+TEST_CASE("MultiPage.theStatusLinesCursorFollowsDECTCEM", "[screen]")
+{
+    // DECTCEM enables the cursor on the status line as on the main display.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    showHostWritableStatusLine(mock);
+    mock.writeToScreen("\033[1$}\033[1;5H"); // DECSASD, the status line's column 4
+
+    mock.writeToScreen("\033[?25l"); // DECTCEM reset
     CHECK_FALSE(renderOf(terminal).cursor.has_value());
+
+    mock.writeToScreen("\033[?25h"); // DECTCEM set
+    auto const frame = renderOf(terminal);
+    REQUIRE(frame.cursor.has_value());
+    CHECK(frame.cursor->display == RenderedDisplay::StatusLine);
+}
+
+TEST_CASE("MultiPage.theCursorIsBackOnTheMainDisplayAfterDECSASD0", "[screen]")
+{
+    // DECSASD 0 selects the main display again: its own active position is the cursor once more.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[3;3H"); // the main display's cursor at row 2, column 2
+    showHostWritableStatusLine(mock);
+    mock.writeToScreen("\033[1$}\033[1;5H"); // DECSASD, the status line's column 4
+    mock.writeToScreen("\033[0$}");          // DECSASD: the main display
+    REQUIRE(terminal.activeStatusDisplay() == ActiveStatusDisplay::Main);
+
+    auto const frame = renderOf(terminal);
+    REQUIRE(frame.cursor.has_value());
+    CHECK(frame.cursor->display == RenderedDisplay::Main);
+    CHECK(frame.cursor->position == CellLocation { .line = LineOffset(2), .column = ColumnOffset(2) });
 }
 
 TEST_CASE("MultiPage.DECPCCM_reset.aBlockIsSelectedOnThePageOnDisplay", "[screen]")
