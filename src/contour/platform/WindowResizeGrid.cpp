@@ -52,8 +52,7 @@ namespace
                 _window->removeEventFilter(this);
         }
 
-      private:
-        bool eventFilter(QObject* watched, QEvent* event) override
+        bool eventFilter(QObject* watched, QEvent* event) override // Qt's signature, public as in QObject
         {
             if (watched != _window)
                 return false;
@@ -70,6 +69,7 @@ namespace
             return false;
         }
 
+      private:
         void attach()
         {
             if (_nativeWindow != nullptr || _window == nullptr || _window->handle() == nullptr)
@@ -145,14 +145,14 @@ namespace
 
 std::unique_ptr<QObject> makeWindowResizeGrid(
     [[maybe_unused]] QWindow& window,
-    [[maybe_unused]] std::function<std::optional<geometry::RowResizeGrid>()> grid)
+    [[maybe_unused]] std::function<std::optional<geometry::RowResizeGrid>()> const& grid)
 {
 #ifdef _WIN32
     if (QGuiApplication::platformName() != QStringLiteral("windows"))
         return nullptr;
-    return std::make_unique<WindowResizeGrid>(window, std::move(grid));
-#elif defined(__APPLE__)
-    return makeCocoaWindowResizeGrid(window, std::move(grid));
+    return std::make_unique<WindowResizeGrid>(window, grid);
+#elifdef __APPLE__
+    return makeCocoaWindowResizeGrid(window, grid);
 #else
     return nullptr;
 #endif
@@ -184,9 +184,9 @@ void applyRowResizeHints([[maybe_unused]] QWindow& window,
         || xcb_get_property_value_length(reply.get()) != static_cast<int>(sizeof(hints)))
         return;
     std::memcpy(hints.data(), xcb_get_property_value(reply.get()), sizeof(hints));
-    constexpr uint32_t resizeIncrement = 0b0100'0000;
-    constexpr uint32_t baseSize = 0b0001'0000'0000;
-    hints[0] |= resizeIncrement | baseSize;
+    constexpr uint32_t ResizeIncrement = 0b0100'0000;
+    constexpr uint32_t BaseSize = 0b0001'0000'0000;
+    hints[0] |= ResizeIncrement | BaseSize;
     // Qt does not republish unchanged cached setters after our native override. Restore the
     // current Qt values explicitly when row snapping is disabled (including after a DPI change).
     auto const scale = window.devicePixelRatio();
