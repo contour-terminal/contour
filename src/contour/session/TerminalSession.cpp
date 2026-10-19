@@ -226,15 +226,6 @@ namespace
         return appDefault;
     }
 
-    /// Whether @p actions turns key mappings back on: the one binding executeAllActions() still runs
-    /// while they are toggled off.
-    [[nodiscard]] bool togglesKeyMappings(std::vector<actions::Action> const& actions)
-    {
-        return std::ranges::any_of(actions, [](actions::Action const& action) {
-            return holds_alternative<actions::ToggleAllKeyMaps>(action);
-        });
-    }
-
     class ExitWatcherThread: public QThread
     {
       public:
@@ -2684,20 +2675,27 @@ config::ActionList const* TerminalSession::mouseBinding(MouseButton button, Modi
 
 config::ActionList const* TerminalSession::linkFollowBinding(MouseButton button, Modifiers modifiers) const
 {
-    // The link the pointer shape shows, not a scan of the cell: only a press the user sees land on a link is
-    // taken from the selection, and the check is two atomic loads under the lock.
-    if (!_terminal.isPointerOverLink())
+    // The follow gesture is a left click (config::followHyperlinkModifiers). The binding first: it is cheap,
+    // and most presses are no follow gesture at all.
+    if (button != MouseButton::Left)
+        return nullptr;
+    auto const* binding = mouseBinding(button, modifiers);
+    if (binding == nullptr || !config::containsAction<actions::FollowHyperlink>(*binding)
+        || !willRun(*binding))
         return nullptr;
 
-    auto const* actions = mouseBinding(button, modifiers);
-    if (actions == nullptr || !config::followsHyperlink(*actions))
+    // Then the cell as it is now, as the follow itself will look it up -- not the hover state of the last
+    // pointer event, which output or a scroll under a still pointer leaves stale, and which knows nothing of
+    // a row detection has not scanned yet. Only a link that opens at once is claimed: an OSC 8 one, or a
+    // target known now. A path still to be probed opens later, if it exists at all, so a Ctrl+drag starting
+    // on one that does not still block-selects.
+    auto const position = _terminal.currentMouseGridPosition();
+    if (!position)
         return nullptr;
-
-    // As for a `clicks:` binding: one that will not run must not claim. FollowHyperlink is no toggle, so
-    // while key mappings are off the press stays the selection's.
-    if (!_allowKeyMappings && !togglesKeyMappings(*actions))
+    auto const lookup = _terminal.lookUpLinkAt(*position);
+    if (lookup.hyperlink == nullptr && !lookup.target)
         return nullptr;
-    return actions;
+    return binding;
 }
 
 config::ActionList const* TerminalSession::clickCountBinding(MouseButton button,
@@ -2715,11 +2713,15 @@ config::ActionList const* TerminalSession::clickCountBinding(MouseButton button,
         actions = config::applyBuiltinFallback(_config, button, modifiers, flags, clickCount);
 
     // A binding that will not run must not claim: the press would skip the terminal's own selection and
-    // then do nothing at all. While key mappings are toggled off, executeAllActions() runs only the
-    // binding that turns them back on.
-    if (actions != nullptr && !_allowKeyMappings && !togglesKeyMappings(*actions))
+    // then do nothing at all.
+    if (actions != nullptr && !willRun(*actions))
         return nullptr;
     return actions;
+}
+
+bool TerminalSession::willRun(config::ActionList const& actions) const
+{
+    return _allowKeyMappings || config::containsAction<actions::ToggleAllKeyMaps>(actions);
 }
 
 void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
@@ -5234,7 +5236,7 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& actio
         return executionCount;
     }
 
-    if (togglesKeyMappings(actions))
+    if (config::containsAction<actions::ToggleAllKeyMaps>(actions))
     {
         bool const ex = executeAction(actions::ToggleAllKeyMaps {});
         scheduleRedraw();

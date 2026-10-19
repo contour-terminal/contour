@@ -920,7 +920,7 @@ TEST_CASE("Terminal.a_binding_is_offered_the_click_count_before_the_selection", 
 }
 
 TEST_CASE("Terminal.a_claimed_press_whose_release_never_arrives_does_not_select_on_moves",
-          "[terminal][semanticblocks]")
+          "[terminal][selection]")
 {
     // A claimed press may hand focus elsewhere (following a link opens the browser), so its release can be
     // lost. The pointer moving afterwards must neither start nor extend a selection, even with the
@@ -929,6 +929,7 @@ TEST_CASE("Terminal.a_claimed_press_whose_release_never_arrives_does_not_select_
     mock.writeToScreen("hello world\r\nhello world");
 
     using namespace vtbackend;
+    auto constexpr UiHandledHint = false;
     auto const claimAll = [](uint8_t) {
         return MousePressClaim::Claimed;
     };
@@ -936,16 +937,16 @@ TEST_CASE("Terminal.a_claimed_press_whose_release_never_arrives_does_not_select_
                                       MouseButton::Left,
                                       0_lineOffset + 1_columnOffset,
                                       vtbackend::PixelCoordinate {},
-                                      false,
+                                      UiHandledHint,
                                       claimAll);
     mock.terminal.sendMouseMoveEvent(Modifier::None,
                                      1_lineOffset + 8_columnOffset,
                                      vtbackend::PixelCoordinate { .x = { 80 }, .y = { 20 } },
-                                     false);
+                                     UiHandledHint);
     mock.terminal.sendMouseMoveEvent(Modifier::Control,
                                      1_lineOffset + 9_columnOffset,
                                      vtbackend::PixelCoordinate { .x = { 90 }, .y = { 20 } },
-                                     false);
+                                     UiHandledHint);
 
     CHECK_FALSE(mock.terminal.selectionAvailable());
     CHECK_FALSE(mock.terminal.leftMouseButtonPressed());

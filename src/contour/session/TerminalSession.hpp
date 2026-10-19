@@ -1521,8 +1521,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                                                               vtbackend::Modifiers modifiers,
                                                               uint8_t clickCount) const;
 
-    /// The actions of the follow gesture for this press: the ordinary binding of @p button, when it follows
-    /// links and the pointer is over one (vtbackend::Terminal::isPointerOverLink). Such a press is claimed,
+    /// The actions of the follow gesture for this press: the ordinary binding of the left @p button, when it
+    /// follows links and the cell under the pointer holds one that opens at once -- an OSC 8 link or a target
+    /// known now (vtbackend::Terminal::lookUpLinkAt), not a path still to be probed. Such a press is claimed,
     /// so it starts no selection: following the link takes the focus, and with it the press's release. Only
     /// looks: it runs under the terminal lock, inside the claimant.
     /// @param button The pressed button.
@@ -1530,6 +1531,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The bound actions, or nullptr -- also for a binding executeAllActions() would refuse.
     [[nodiscard]] config::ActionList const* linkFollowBinding(vtbackend::MouseButton button,
                                                               vtbackend::Modifiers modifiers) const;
+
+    /// Whether executeAllActions() would run @p actions: key mappings are on, or the binding turns them back
+    /// on, the one binding still run while they are toggled off.
+    /// @param actions A binding's actions.
+    /// @return True when they would run.
+    [[nodiscard]] bool willRun(config::ActionList const& actions) const;
 
     /// The actions an ordinary press of @p button is bound to: the user's mappings first, then the built-in
     /// fallbacks, as for a press the grid declined.

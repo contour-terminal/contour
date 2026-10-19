@@ -4585,43 +4585,117 @@ TEST_CASE("TerminalSession: Ctrl+click on a link follows it and starts no block 
     contour::test::TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto& launcher = testApp.launcher();
+    auto& terminal = session->terminal();
     auto const ctrl = Modifiers { vtbackend::Modifier::Control };
     auto const origin =
         vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(0) };
+    auto const onPath =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(3) };
     auto const elsewhere =
         vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(6) };
     auto const pixelsElsewhere = vtbackend::PixelCoordinate { .x = { 60 }, .y = { 40 } };
 
+    // What the claim decides from: the cell as it is now, an OSC 8 link or a target known at once.
+    auto const opensAt = [&](vtbackend::CellLocation at) {
+        auto const lookup = core::locked(terminal, [&] { return terminal.lookUpLinkAt(at); });
+        return lookup.hyperlink != nullptr || lookup.target.has_value();
+    };
+    auto const restPointerAt = [&](vtbackend::CellLocation at) {
+        session->sendMouseMoveEvent(Modifiers {}, at, vtbackend::PixelCoordinate {});
+    };
+    auto const ctrlPressAt = [&](vtbackend::CellLocation at) {
+        session->sendMousePressEvent(ctrl, vtbackend::MouseButton::Left, at, vtbackend::PixelCoordinate {});
+    };
+    auto const checkFollowedWithoutSelecting = [&](std::string_view url) {
+        // No release: the browser took focus.
+        session->sendMouseMoveEvent(Modifiers {}, elsewhere, pixelsElsewhere);
+        REQUIRE(launcher.openedUrls.size() == 1);
+        CHECK(launcher.openedUrls.back().toString().toStdString() == url);
+        CHECK_FALSE(terminal.selectionAvailable());
+        CHECK_FALSE(terminal.leftMouseButtonPressed());
+    };
+    auto const checkBlockSelecting = [&]() {
+        session->sendMouseMoveEvent(ctrl, elsewhere, pixelsElsewhere);
+        CHECK(launcher.openedUrls.empty());
+        REQUIRE(terminal.selectionAvailable());
+        CHECK(dynamic_cast<vtbackend::RectangularSelection const*>(terminal.selector()) != nullptr);
+        CHECK(terminal.leftMouseButtonPressed());
+    };
+
     SECTION("on a link: followed, and no release leaves the pointer selecting")
     {
         seedHoveredHyperlink(*session, "https://contour-terminal.org/");
-        REQUIRE(session->terminal().isMouseHoveringHyperlink());
+        REQUIRE(opensAt(origin));
 
-        session->sendMousePressEvent(
-            ctrl, vtbackend::MouseButton::Left, origin, vtbackend::PixelCoordinate {});
-        // No release: the browser took focus.
-        session->sendMouseMoveEvent(Modifiers {}, elsewhere, pixelsElsewhere);
-
-        REQUIRE(launcher.openedUrls.size() == 1);
-        CHECK(launcher.openedUrls.back().toString().toStdString() == "https://contour-terminal.org/");
-        CHECK_FALSE(session->terminal().selectionAvailable());
-        CHECK_FALSE(session->terminal().leftMouseButtonPressed());
+        ctrlPressAt(origin);
+        checkFollowedWithoutSelecting("https://contour-terminal.org/");
     }
 
     SECTION("off a link: the block selection is unchanged")
     {
-        session->terminal().writeToScreen("plain text, no link here\r\nmore text on line two\r\nand three");
-        REQUIRE_FALSE(session->terminal().isMouseHoveringHyperlink());
+        terminal.writeToScreen("plain text, no link here\r\nmore text on line two\r\nand three");
+        REQUIRE_FALSE(opensAt(origin));
 
-        session->sendMousePressEvent(
-            ctrl, vtbackend::MouseButton::Left, origin, vtbackend::PixelCoordinate {});
-        session->sendMouseMoveEvent(ctrl, elsewhere, pixelsElsewhere);
+        ctrlPressAt(origin);
+        checkBlockSelecting();
+    }
 
+    SECTION("a link printed under the resting pointer: claimed, though no pointer event saw it")
+    {
+        terminal.writeToScreen("plain text");
+        restPointerAt(origin);
+        terminal.writeToScreen("\033[H\033]8;;https://late.example/\033\\LINK\033]8;;\033\\");
+        REQUIRE_FALSE(terminal.isPointerOverLink()); // the hover state is stale
+        REQUIRE(opensAt(origin));
+
+        ctrlPressAt(origin);
+        checkFollowedWithoutSelecting("https://late.example/");
+    }
+
+    SECTION("plain text moved under a pointer resting on a link: not claimed, the drag block-selects")
+    {
+        seedHoveredHyperlink(*session, "https://contour-terminal.org/");
+        terminal.writeToScreen("\033[H\033[Lplain text"); // the link moves down a line
+        REQUIRE(terminal.isPointerOverLink());            // the hover state is stale
+        REQUIRE_FALSE(opensAt(origin));
+
+        ctrlPressAt(origin);
+        checkBlockSelecting();
+    }
+
+    SECTION("a URL in plain text, its row not scanned yet: claimed")
+    {
+        terminal.writeToScreen("https://example.com/page");
+        restPointerAt(onPath);
+        REQUIRE_FALSE(terminal.isPointerOverLink()); // detection has not run
+        REQUIRE(opensAt(onPath));
+
+        ctrlPressAt(onPath);
+        checkFollowedWithoutSelecting("https://example.com/page");
+    }
+
+    SECTION("a path still to be probed: not claimed, the drag block-selects")
+    {
+        // It opens only once the probe finds it, if it exists at all; this one does not.
+        terminal.writeToScreen(inWorkDirectory("gone.txt"));
+        restPointerAt(onPath);
+        REQUIRE_FALSE(opensAt(onPath));
+
+        ctrlPressAt(onPath);
+        checkBlockSelecting();
+        testApp.drainLinkProbes();
+        QCoreApplication::processEvents();
         CHECK(launcher.openedUrls.empty());
-        REQUIRE(session->terminal().selectionAvailable());
-        CHECK(dynamic_cast<vtbackend::RectangularSelection const*>(session->terminal().selector())
-              != nullptr);
-        CHECK(session->terminal().leftMouseButtonPressed());
+    }
+
+    SECTION("key mappings toggled off: not claimed, the drag block-selects")
+    {
+        seedHoveredHyperlink(*session, "https://contour-terminal.org/");
+        REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+        REQUIRE(opensAt(origin));
+
+        ctrlPressAt(origin);
+        checkBlockSelecting();
     }
 }
 

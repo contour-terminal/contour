@@ -1696,8 +1696,6 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                    modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
            });
 
-    // TODO: Ctrl+(Left)Click's should still be caught by the terminal iff there's a hyperlink
-    // under the current position
     flushInput();
     return Handled { eventHandledByApp && !isModeEnabled(DECMode::MousePassiveTracking) };
 }

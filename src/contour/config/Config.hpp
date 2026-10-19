@@ -61,6 +61,7 @@
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -2821,10 +2822,17 @@ struct ResolvedSessionConfig
 /// @return The table; never null.
 [[nodiscard]] std::shared_ptr<vtbackend::LinkPatterns const> linkPatternsFor(TerminalProfile const& profile);
 
-/// Whether @p actions include a FollowHyperlink: the binding is the follow gesture.
+/// Whether @p actions include an action of type @p A: FollowHyperlink makes a binding the follow gesture,
+/// ToggleAllKeyMaps one that still runs while key mappings are off.
+/// @tparam A The action type looked for, one of actions::Action's alternatives.
 /// @param actions A binding's actions.
-/// @return True when one of them follows the link under the pointer.
-[[nodiscard]] bool followsHyperlink(ActionList const& actions);
+/// @return True when one of them is an @p A.
+template <typename A>
+[[nodiscard]] bool containsAction(ActionList const& actions)
+{
+    return std::ranges::any_of(
+        actions, [](actions::Action const& action) { return std::holds_alternative<A>(action); });
+}
 
 /// The modifiers of the left-button mouse binding that runs FollowHyperlink.
 ///

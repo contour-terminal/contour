@@ -1456,7 +1456,9 @@ class Terminal
     [[nodiscard]] LinkPointer hoverPointer() const noexcept;
 
     /// Whether the pointer is over a link, an OSC 8 one or a detected one, as of the last pointer event
-    /// (hoveringHyperlinkId(), hoveringLinkId()): the link the pointer shape is decided for.
+    /// (hoveringHyperlinkId(), hoveringLinkId()): what linkPointerShape() decides for. Stale as they are
+    /// once output or a scroll moves the page under a still pointer, so a follow gesture asks
+    /// lookUpLinkAt() instead.
     /// @return True when there is one.
     [[nodiscard]] bool isPointerOverLink() const noexcept
     {
