@@ -317,7 +317,11 @@ TEST_CASE("Ctrl+U reaches the application as Ctrl+U under the Kitty keyboard pro
                         /*count=*/1);
     pty.stdinBuffer().clear();
     contour::session::sendKeyEvent(&ev, vtbackend::KeyboardEventType::Press, *session, macUsAnsiLayout());
-    CHECK(pty.stdinBuffer() == "\033[117;5u");
+    // The Windows boundary adds the real lock toggles even for a synthetic Cocoa event.
+    // Pin the key and Ctrl chord while accounting for the same lock state as the Win32 test below.
+    auto const locks =
+        makeModifiers(Qt::NoModifier, contour::input::nativeModifiersWithLockState(0)).locks.value();
+    CHECK(pty.stdinBuffer() == std::format("\033[117;{}u", 5u + locks));
 }
 
 #ifdef _WIN32
@@ -388,7 +392,10 @@ input_mapping:
     SECTION("kitty keyboard protocol")
     {
         session->terminal().writeToScreen("\033[>1u");
-        CHECK(pressWithCtrlAlt(*session, Qt::Key_A, 0x41, QString {}) == "\033[97;7u");
+        auto const locks =
+            makeModifiers(Qt::NoModifier, contour::input::nativeModifiersWithLockState(0)).locks.value();
+        CHECK(pressWithCtrlAlt(*session, Qt::Key_A, 0x41, QString {})
+              == std::format("\033[97;{}u", 7u + locks));
         CHECK(pressWithCtrlAlt(*session, Qt::Key_BracketLeft, 0x38, QStringLiteral("[")) == "[");
     }
 

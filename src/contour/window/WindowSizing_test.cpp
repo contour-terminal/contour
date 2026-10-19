@@ -24,9 +24,12 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QScreen>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
 #include <fstream>
 #include <memory>
@@ -82,6 +85,184 @@ TEST_CASE("bindWindow(nullptr) and displayless showInitial are safe no-ops", "[c
     controller->showInitial();
     CHECK(window.isVisible());
 }
+
+TEST_CASE("first window restores its location and saves normal moves", "[contour][sizing][window-position]")
+{
+    TestApp app;
+    app.app().config().rememberWindowPosition = true;
+    app.app().config().configFile = "test-config/contour.yml";
+    auto& store = static_cast<contour::test::InMemoryWindowPositionStore&>(app.app().windowPositionStore());
+    auto const available = QGuiApplication::primaryScreen()->availableGeometry();
+    auto const initial = available.topLeft() + QPoint(20, 20);
+    store.value = contour::window::WindowPosition {
+        .position = { 20, 20 },
+        .monitor = static_cast<int>(QGuiApplication::screens().indexOf(QGuiApplication::primaryScreen()))
+    };
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    window.resize(200, 100);
+    controller->bindWindow(&window);
+    controller->showInitial();
+    CHECK(window.position() == initial);
+    CHECK(store.loads == 1);
+    ScopedController additionalWindow { app.manager() };
+    CHECK(store.loads == 1);
+
+    auto const moved = initial + QPoint(20, 30);
+    window.setPosition(moved);
+    QCoreApplication::processEvents();
+    window.showMaximized();
+    QCoreApplication::processEvents();
+    SECTION("enabled at close")
+    {
+        controller->closeWindow();
+        REQUIRE(store.value);
+        CHECK(store.value->position == moved - available.topLeft());
+        CHECK(store.saves == 1);
+    }
+    SECTION("disabled after startup leaves existing state alone")
+    {
+        app.app().config().rememberWindowPosition = false;
+        controller->closeWindow();
+        REQUIRE(store.value);
+        CHECK(store.value->position == QPoint(20, 20));
+        CHECK(store.saves == 0);
+    }
+}
+
+TEST_CASE("unavailable saved monitor falls back to an available monitor", "[contour][window-position]")
+{
+    TestApp app;
+    app.app().config().configFile = "test-config/contour.yml";
+    app.app().config().rememberWindowPosition = true;
+    auto& store = static_cast<contour::test::InMemoryWindowPositionStore&>(app.app().windowPositionStore());
+    store.value =
+        contour::window::WindowPosition { .position = { 20, 20 },
+                                          .monitor = static_cast<int>(QGuiApplication::screens().size()) };
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    window.resize(200, 100);
+    controller->bindWindow(&window);
+    controller->showInitial();
+    REQUIRE(window.screen());
+    CHECK(window.position() == window.screen()->availableGeometry().topLeft() + QPoint(20, 20));
+    controller->closeWindow();
+    REQUIRE(store.value);
+    CHECK(store.value->monitor == QGuiApplication::screens().indexOf(window.screen()));
+}
+
+TEST_CASE("disabled window position persistence neither loads nor saves", "[contour][window-position]")
+{
+    TestApp app;
+    app.app().config().configFile = "test-config/contour.yml";
+    app.app().config().rememberWindowPosition = false;
+    auto& store = static_cast<contour::test::InMemoryWindowPositionStore&>(app.app().windowPositionStore());
+    store.value = contour::window::WindowPosition { .position = { 25, 30 }, .monitor = 0 };
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    window.resize(200, 100);
+    controller->bindWindow(&window);
+    controller->showInitial();
+    window.setPosition(80, 90);
+    controller->closeWindow();
+    CHECK(store.loads == 0);
+    CHECK(store.saves == 0);
+    REQUIRE(store.value);
+    CHECK(store.value->position == QPoint(25, 30));
+}
+
+TEST_CASE("first startup in every presentation mode saves a normal placement without prior state",
+          "[contour][sizing][window-position][native]")
+{
+    auto const initialState = GENERATE(Qt::WindowNoState, Qt::WindowMaximized, Qt::WindowFullScreen);
+    CAPTURE(initialState);
+
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().rememberWindowPosition = true;
+    app.app().config().configFile = "test-config/contour.yml";
+    auto& profile = app.app().config().profiles.value().at("main");
+    profile.showTitleBar = true;
+    profile.terminalSize = vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(30) };
+    profile.maximized = initialState == Qt::WindowMaximized;
+    profile.fullscreen = initialState == Qt::WindowFullScreen;
+    auto& store = static_cast<contour::test::InMemoryWindowPositionStore&>(app.app().windowPositionStore());
+    REQUIRE_FALSE(store.value);
+
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    controller->bindWindow(&window);
+    controller->seedTitleBarVisible(true);
+    REQUIRE(window.screen());
+    window.setPosition(window.screen()->availableGeometry().topLeft() + QPoint(80, 80));
+    auto* session = app.manager().createSession(controller->windowId());
+    REQUIRE(session);
+    contour::test::FakeDisplaySurface surface;
+    surface.attachedSession = session;
+    session->attachDisplay(surface);
+    controller->showInitial();
+    REQUIRE(window.screen());
+    CHECK(window.windowState() == initialState);
+
+    // Stop borrowing the stack display before closeWindow terminates the backing session.
+    session->detachDisplay(surface);
+    surface.attachedSession = nullptr;
+    controller->closeWindow();
+    REQUIRE(store.value);
+    CHECK(store.loads == 1);
+    CHECK(store.saves == 1);
+    CHECK(store.value->position == QPoint(80, 80));
+    CHECK(store.value->monitor == QGuiApplication::screens().indexOf(window.screen()));
+    auto const available = window.screen()->availableGeometry();
+    CHECK(store.value->position.x() >= 0);
+    CHECK(store.value->position.y() >= 0);
+    CHECK(store.value->position.x() < available.width());
+    CHECK(store.value->position.y() < available.height());
+}
+
+#ifdef _WIN32
+TEST_CASE("native startup clamps the decorated window inside its monitor",
+          "[contour][sizing][window-position][native]")
+{
+    if (QGuiApplication::platformName() != QStringLiteral("windows"))
+        SKIP("Requires the native Windows platform.");
+
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().rememberWindowPosition = true;
+    app.app().config().configFile = "test-config/contour.yml";
+    auto& profile = app.app().config().profiles.value().at("main");
+    profile.showTitleBar = true;
+    profile.terminalSize = vtbackend::PageSize { vtbackend::LineCount(10), vtbackend::ColumnCount(30) };
+    auto& store = static_cast<contour::test::InMemoryWindowPositionStore&>(app.app().windowPositionStore());
+    auto const monitor =
+        GENERATE(Catch::Generators::range(0, static_cast<int>(QGuiApplication::screens().size())));
+    auto const savedPosition = GENERATE(QPoint(-100000, 100000), QPoint(100000, -100000));
+    CAPTURE(monitor, savedPosition);
+    store.value = contour::window::WindowPosition { .position = savedPosition, .monitor = monitor };
+
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    controller->bindWindow(&window);
+    controller->seedTitleBarVisible(true);
+    auto* session = app.manager().createSession(controller->windowId());
+    REQUIRE(session);
+    contour::test::FakeDisplaySurface surface;
+    surface.attachedSession = session;
+    session->attachDisplay(surface);
+    controller->showInitial();
+    QCoreApplication::processEvents();
+    REQUIRE(window.screen());
+    CHECK(window.screen() == QGuiApplication::screens()[monitor]);
+    CHECK(window.frameMargins().top() > 0);
+    CHECK(window.screen()->availableGeometry().contains(window.frameGeometry()));
+    auto const expectedPosition = window.position() - window.screen()->availableGeometry().topLeft();
+    session->detachDisplay(surface);
+    surface.attachedSession = nullptr;
+    controller->closeWindow();
+    REQUIRE(store.value);
+    CHECK(store.value->position == expectedPosition);
+    CHECK(store.saves == 1);
+}
+#endif
 
 TEST_CASE("startup row snapping respects an off-grid minimum before focus", "[contour][sizing][row-resize]")
 {

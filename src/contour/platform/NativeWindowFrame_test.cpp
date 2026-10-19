@@ -5,6 +5,16 @@
 
 #include <array>
 
+#ifdef _WIN32
+    #include <contour/platform/Win32WindowFrame.hpp>
+
+    #include <QtCore/QCoreApplication>
+    #include <QtGui/QGuiApplication>
+    #include <QtGui/QWindow>
+
+    #include <Windows.h>
+#endif
+
 using namespace contour::platform;
 
 namespace
@@ -13,6 +23,51 @@ constexpr auto AllPlatforms =
     std::array { FramePlatform::Other, FramePlatform::Windows, FramePlatform::MacOS };
 constexpr auto AllDecorations = std::array { WindowDecoration::Client, WindowDecoration::Server };
 } // namespace
+
+#ifdef _WIN32
+TEST_CASE("Win32 custom frame fills the maximized work area", "[contour][frame][native]")
+{
+    if (QGuiApplication::platformName() != QStringLiteral("windows"))
+        SKIP("Requires the native Windows platform.");
+    auto frame = makeWin32WindowFrame([] { return Qt::ColorScheme::Dark; });
+    REQUIRE(frame);
+    QWindow window;
+    window.setFlags(Qt::Window | Qt::FramelessWindowHint);
+    window.create();
+    frame->apply(window, WindowDecoration::Client);
+    window.showMaximized();
+    QCoreApplication::processEvents();
+    auto* hwnd = reinterpret_cast<HWND>(window.winId());
+    REQUIRE(IsZoomed(hwnd));
+    auto monitor = MONITORINFO {};
+    monitor.cbSize = sizeof(monitor);
+    REQUIRE(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor));
+    auto client = RECT {};
+    REQUIRE(GetClientRect(hwnd, &client));
+    auto origin = POINT {};
+    REQUIRE(ClientToScreen(hwnd, &origin));
+    CHECK(origin.x == monitor.rcWork.left);
+    CHECK(origin.y == monitor.rcWork.top);
+    CHECK(client.right == monitor.rcWork.right - monitor.rcWork.left);
+    CHECK(client.bottom == monitor.rcWork.bottom - monitor.rcWork.top);
+    window.showNormal();
+    QCoreApplication::processEvents();
+    window.resize(640, 480);
+    QCoreApplication::processEvents();
+    auto const normalSize = window.size();
+    for (auto const iteration: { 0, 1, 2 })
+    {
+        CAPTURE(iteration);
+        window.showMaximized();
+        QCoreApplication::processEvents();
+        REQUIRE(IsZoomed(hwnd));
+        window.showNormal();
+        QCoreApplication::processEvents();
+        CHECK(window.size() == normalSize);
+    }
+    window.hide();
+}
+#endif
 
 TEST_CASE("framePolicyFor keeps a native frame wherever one carries a shadow", "[contour][frame]")
 {

@@ -41,9 +41,12 @@
 namespace contour::window
 {
 
-WindowController::WindowController(session::TerminalSessionManager& manager, vtworkspace::WindowId windowId):
+WindowController::WindowController(session::TerminalSessionManager& manager,
+                                   vtworkspace::WindowId windowId,
+                                   std::optional<WindowPosition> initialPosition):
     _manager { manager },
     _windowId { windowId },
+    _initialPosition { std::move(initialPosition) },
     // The palette's sources. They hold references into the app's Config, which outlives every window
     // and survives a config reload in place (the loaded values are assigned into it, the object is not
     // replaced), so these references stay valid for this controller's whole life.
@@ -647,6 +650,15 @@ void WindowController::closeWindow()
         return;
     _closing = true;
 
+    rememberWindowPosition();
+    if (_manager.app().config().rememberWindowPosition.value() && _lastWindowPosition
+        && !_manager.app().config().configFile.empty())
+        if (auto const saved = _manager.app().windowPositionStore().save(
+                _manager.app().config().configFile.parent_path() / WindowPositionFileName,
+                *_lastWindowPosition);
+            !saved)
+            errorLog()("Failed to save window position: {}", saved.error());
+
     // Tear down THIS OS window on real per-window identity (no _displayStates / QQuickWindow grouping).
     // Ordering matters: gather this window's sessions BEFORE removing the model window, remove the model
     // window (which fires tabClosed -> onTabClosed row removal), explicitly prune our own PaneProxy tree
@@ -943,14 +955,22 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
     _manager.app().applyGraphicsDevice(*osWindow);
 
     // Assign the pre-show target screen — the DPR predictor for the headless cell metrics. Order:
-    // the spawning window's screen (staged by ContourGuiApp::newWindow), else the screen under the
-    // cursor (where WMs place new windows; not globally meaningful on Wayland), else Qt's default
-    // (the primary screen).
+    // the spawning window's screen (staged by ContourGuiApp::newWindow), else the remembered monitor,
+    // else the screen under the cursor (not globally meaningful on Wayland), else Qt's default.
     auto* target = _manager.app().takePendingSpawnScreen();
+    auto const monitors = QGuiApplication::screens();
+    if (target == nullptr && _initialPosition && _initialPosition->monitor >= 0
+        && _initialPosition->monitor < monitors.size())
+        target = monitors[_initialPosition->monitor];
     if (target == nullptr && QGuiApplication::platformName() != QStringLiteral("wayland"))
         target = QGuiApplication::screenAt(QCursor::pos());
     if (target != nullptr)
         osWindow->setScreen(target);
+
+    connect(
+        osWindow, &QWindow::xChanged, this, &WindowController::rememberWindowPosition, Qt::UniqueConnection);
+    connect(
+        osWindow, &QWindow::yChanged, this, &WindowController::rememberWindowPosition, Qt::UniqueConnection);
 
     // Scale-settlement hooks: QEvent::DevicePixelRatioChange is the only reliable per-window DPR
     // signal (it is how a late Wayland fractional scale or a KDE integer->fractional correction
@@ -1035,6 +1055,60 @@ void WindowController::onOSWindowActiveChanged()
         _manager.clearFocusedWindow(_windowId);
 }
 
+void WindowController::rememberWindowPosition()
+{
+    if (!_manager.app().config().rememberWindowPosition.value() || _osWindow == nullptr
+        || !_osWindow->isVisible() || _osWindow->windowState() != Qt::WindowNoState
+        || QGuiApplication::platformName() == QStringLiteral("wayland"))
+        return;
+    if (auto* screen = _osWindow->screen())
+    {
+        auto const monitor = QGuiApplication::screens().indexOf(screen);
+        if (monitor >= 0)
+            _lastWindowPosition =
+                WindowPosition { .position = _osWindow->position() - screen->availableGeometry().topLeft(),
+                                 .monitor = static_cast<int>(monitor) };
+    }
+}
+
+void WindowController::restoreWindowPosition()
+{
+    if (!_manager.app().config().rememberWindowPosition.value() || _osWindow == nullptr
+        || QGuiApplication::platformName() == QStringLiteral("wayland"))
+        return;
+
+    // The configured client size and target screen are settled before this call. Realize the
+    // still-hidden window now, so its actual native frame participates in the clamp, without
+    // mapping a normal window before a maximized/fullscreen startup.
+    if (_initialPosition)
+        if (auto const* screen = _osWindow->screen())
+            // setScreen() alone does not move a window within a virtual desktop. Establish the
+            // saved monitor's desktop position before native creation chooses a monitor/DPI.
+            _osWindow->setPosition(reachableWindowPosition(
+                _initialPosition->position, _osWindow->size(), screen->availableGeometry()));
+    _osWindow->create();
+    _nativeFrame->apply(*_osWindow, decoration());
+    if (auto* screen = _osWindow->screen())
+    {
+        auto const available = screen->availableGeometry();
+        auto const requested =
+            _initialPosition ? _initialPosition->position : _osWindow->position() - available.topLeft();
+        auto const position =
+            reachableWindowPosition(requested, _osWindow->size(), available, _osWindow->frameMargins());
+        _osWindow->setPosition(position);
+        _lastWindowPosition =
+            WindowPosition { .position = position - available.topLeft(),
+                             .monitor = static_cast<int>(QGuiApplication::screens().indexOf(screen)) };
+
+        // Seed persistence even when the first map is maximized/fullscreen. Keep the normal
+        // placement until its first expose, since an X11 window manager may add its frame only
+        // after mapping; re-clamp then with the settled margins.
+        _initialPosition = _lastWindowPosition;
+        if (_osWindow->isVisible() && _osWindow->windowState() == Qt::WindowNoState)
+            _initialPosition.reset();
+    }
+}
+
 void WindowController::showInitial()
 {
     if (_osWindow == nullptr)
@@ -1047,7 +1121,9 @@ void WindowController::showInitial()
     {
         // Never leave the user windowless: map at whatever size the window has.
         display::displayLog()("showInitial: no display metrics available; showing at default size.");
+        restoreWindowPosition();
         _osWindow->show();
+        rememberWindowPosition();
         return;
     }
 
@@ -1076,6 +1152,7 @@ void WindowController::showInitial()
                           scale,
                           _chromeHeight);
     _osWindow->resize(size.width, size.height);
+    restoreWindowPosition();
     _lastAppliedScale = scale;
 
     // First map lands directly in the profile's window state (no post-map normal->maximized jump).
@@ -1085,6 +1162,7 @@ void WindowController::showInitial()
         setWindowMaximized(*display);
     else
         setWindowNormal(*display);
+    rememberWindowPosition();
 }
 
 bool WindowController::eventFilter(QObject* watched, QEvent* event)
@@ -1112,7 +1190,16 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // attachment has to be rebuilt whenever the platform window was recreated.
                 _nativeFrame->apply(*_osWindow, decoration());
                 if (_osWindow->windowState() == Qt::WindowNoState)
+                {
+                    if (_initialPosition)
+                    {
+                        // Re-clamp the current normal geometry: a move before the first expose
+                        // must not be undone by replaying the saved startup coordinates.
+                        _initialPosition.reset();
+                        restoreWindowPosition();
+                    }
                     platform::applyRowResizeHints(*_osWindow, rowResizeGrid());
+                }
                 refreshWindowShadow();
                 // The OS's own window controls exist only once the window is realized, so the inset
                 // measured from them is only answerable now -- long after titleBarVisibleChanged,

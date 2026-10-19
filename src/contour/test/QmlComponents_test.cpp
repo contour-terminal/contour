@@ -4578,6 +4578,25 @@ TEST_CASE("The resize border is exactly as thick as the gutter's lead-in clears"
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("Resize handles are inactive outside the normal window state", "[contour][gui][qml][resize]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTabItemUnderResizeBorderHost(engine, controller);
+    auto const zones = resizeZonesOf(*host);
+    REQUIRE(zones.size() == 8);
+    for (auto const visibility:
+         { QWindow::Windowed, QWindow::Maximized, QWindow::FullScreen, QWindow::Windowed })
+    {
+        host->setProperty("visibility", visibility);
+        QCoreApplication::processEvents();
+        for (auto const* zone: zones)
+            CHECK(zone->isEnabled() == (visibility == QWindow::Windowed));
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("A right-button drag over a tab does not start a tab drag (offscreen)",
           "[contour][gui][qml][resize]")
 {

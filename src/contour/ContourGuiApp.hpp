@@ -14,6 +14,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
+#include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
@@ -198,6 +199,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       executors); its filesystem must be the app's, @p fileSystem or this machine's,
     ///                       which the constructor requires. Absent (the default), the app's own pool,
     ///                       probe thread and fileSystem(). Borrowed: it must outlive the app.
+    /// @param windowPositionStore Last-window location persistence; null uses the atomic file adapter.
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -210,8 +212,15 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
                            core::platform::FileSystem const* fileSystem = nullptr,
                            std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr,
-                           std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt);
+                           std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt,
+                           std::unique_ptr<window::WindowPositionStore> windowPositionStore = nullptr);
     ~ContourGuiApp() override;
+
+    /// The shared persistence service for normal-window locations.
+    [[nodiscard]] window::WindowPositionStore& windowPositionStore() noexcept
+    {
+        return *_windowPositionStore;
+    }
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
 
@@ -492,6 +501,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<config::LayoutStore> _layoutStore;
     // Likewise: the manager holds a reference to the command-history store.
     std::unique_ptr<command::CommandHistoryStore> _commandHistoryStore;
+    std::unique_ptr<window::WindowPositionStore> _windowPositionStore;
     // Shared by every session, reached via _app; @see speechSynthesizer().
     std::unique_ptr<platform::SpeechSynthesizer> _speechSynthesizer;
     // Declared before _commandOutputFiles, whose production instance borrows it to tell whose leftover

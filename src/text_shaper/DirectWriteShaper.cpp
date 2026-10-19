@@ -216,30 +216,32 @@ struct DirectWriteShaper::Private
         if (FAILED(fontFace.As(&fontFace3)))
             return nullopt;
 
-        auto dwMetrics = DWRITE_FONT_METRICS {};
-        fontFace3->GetMetrics(&dwMetrics);
-
-        auto const dipScalar = ptToEm(size.pt) / dwMetrics.designUnitsPerEm * pixelPerDip();
-        auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
-
         DxFontInfo fontInfo {};
         fontInfo.description = description;
         fontInfo.source = sourcePath;
         fontInfo.size = size;
-        fontInfo.metrics.lineHeight = int(ceil(lineHeight * dipScalar));
-        fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
-        fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
-        fontInfo.metrics.underlinePosition = int(ceil(dwMetrics.underlinePosition * dipScalar));
-        fontInfo.metrics.underlineThickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
-        fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace.Get()) * dipScalar));
-
         if (FAILED(fontFace.As(&fontInfo.fontFace)))
             return nullopt;
+        updateMetrics(fontInfo);
 
         auto key = createFontKey();
         fonts.emplace(pair { key, std::move(fontInfo) });
         fontsHasColor.emplace(pair { key, false });
         return key;
+    }
+
+    void updateMetrics(DxFontInfo& fontInfo)
+    {
+        auto metrics = DWRITE_FONT_METRICS {};
+        fontInfo.fontFace->GetMetrics(&metrics);
+        auto const scalar = ptToEm(fontInfo.size.pt) / metrics.designUnitsPerEm * pixelPerDip();
+        fontInfo.metrics.lineHeight =
+            int(ceil((metrics.ascent + metrics.descent + metrics.lineGap) * scalar));
+        fontInfo.metrics.ascender = int(ceil(metrics.ascent * scalar));
+        fontInfo.metrics.descender = int(ceil(metrics.descent * scalar));
+        fontInfo.metrics.underlinePosition = int(ceil(metrics.underlinePosition * scalar));
+        fontInfo.metrics.underlineThickness = int(ceil(metrics.underlineThickness * scalar));
+        fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontInfo.fontFace.Get()) * scalar));
     }
 
     int computeAverageAdvance(IDWriteFontFace* fontFace)
@@ -761,8 +763,12 @@ std::optional<RasterizedGlyph> DirectWriteShaper::rasterize(GlyphKey glyph,
 
 void DirectWriteShaper::setDPI(DPI dpi)
 {
+    if (!dpi || _d->dpi == dpi)
+        return;
     _d->dpi = dpi;
-    clearCache();
+    // Keep issued keys valid while bringing their pixel metrics into agreement with rasterization.
+    for (auto& [key, fontInfo]: _d->fonts)
+        _d->updateMetrics(fontInfo);
 }
 
 void DirectWriteShaper::setLocator(FontLocator& locator)

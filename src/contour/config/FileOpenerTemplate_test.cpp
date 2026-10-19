@@ -92,8 +92,9 @@ TEST_CASE("FileOpenerTemplate.readsTheCommandAsAConfiguredProgramIsRead", "[conf
 
 TEST_CASE("FileOpenerTemplate.splitsWindowsArgumentsKeepingBackslashes", "[config][links]")
 {
-    CHECK(contour::config::detail::splitWrittenArguments(R"(--goto "C:\My Docs\{path}" -n)")
-          == Args { "--goto", R"(C:\My Docs\{path})", "-n" });
+    auto const written = R"(--goto "C:\My Docs\{path}" -n)";
+    auto const expected = Args { "--goto", R"(C:\My Docs\{path})", "-n" };
+    CHECK(contour::config::detail::splitWrittenArguments(written) == expected);
     CHECK(contour::config::detail::splitWrittenArguments("  a\t\"\"  b ") == Args { "a", "", "b" });
     CHECK(contour::config::detail::splitWrittenArguments("").empty());
 }

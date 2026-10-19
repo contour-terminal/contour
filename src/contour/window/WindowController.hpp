@@ -10,6 +10,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -129,7 +130,10 @@ class WindowController:
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
     /// @param windowId The backing vtworkspace::Window this controller adapts.
-    WindowController(session::TerminalSessionManager& manager, vtworkspace::WindowId windowId);
+    /// @param initialPosition The first window's remembered location, absent for additional windows.
+    WindowController(session::TerminalSessionManager& manager,
+                     vtworkspace::WindowId windowId,
+                     std::optional<WindowPosition> initialPosition = std::nullopt);
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -753,6 +757,14 @@ class WindowController:
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
+    // Retained until the first normal expose so late native frame margins can be clamped too.
+    std::optional<WindowPosition> _initialPosition;
+    std::optional<WindowPosition> _lastWindowPosition;
+
+    /// Records normal-window moves without persisting maximize/fullscreen coordinates.
+    void rememberWindowPosition();
+    /// Clamps and records the initial normal placement after the configured size has been calculated.
+    void restoreWindowPosition();
 
     // Wheel state for the tab strip. Separate from the grid's (which lives on TerminalSession) so a
     // gesture over the strip is judged on its own, and so the accumulator does not jump when the
