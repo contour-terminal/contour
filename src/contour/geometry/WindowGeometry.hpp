@@ -79,7 +79,7 @@ struct LogicalSize
 
 /// WM size hints in logical pixels, mapped 1:1 onto QWindow::setMinimumSize / setBaseSize /
 /// setSizeIncrement. The @c minimum is honored everywhere; the @c base / @c increment pair drives the
-/// character-cell resize grid on X11 (WM_NORMAL_HINTS) and its Windows analogue, is silently ignored on
+/// character-cell resize grid on X11 (WM_NORMAL_HINTS), is ignored by Qt's Windows backend and on
 /// Wayland (xdg-shell has no increment concept), and is actively harmful on macOS — see @ref
 /// SizeHintPolicy and @ref sizeHintPolicyFor.
 struct SizeHints
@@ -91,11 +91,27 @@ struct SizeHints
     [[nodiscard]] constexpr bool operator==(SizeHints const&) const noexcept = default;
 };
 
+/// Device-pixel height constraints for a window with a single visible terminal pane.
+struct RowResizeGrid
+{
+    int cellHeight = 0;    ///< Device pixels in one terminal row, including line spacing.
+    int baseHeight = 0;    ///< Chrome and vertical margins, outside the rows.
+    int minimumHeight = 0; ///< Minimum client height allowed by the window.
+    int chromeHeight = 0;  ///< Declared chrome in logical pixels, before device conversion.
+    double scale = 1.0;    ///< Window device-pixel ratio.
+};
+
+/// Snaps a proposed client height to the nearest whole row without going below the window minimum.
+/// @param height Proposed client height in device pixels.
+/// @param grid Current row metrics and fixed insets, in device pixels.
+/// @return The snapped client height, or the original height if metrics are not ready.
+[[nodiscard]] inline int snapHeightToRows(int height, RowResizeGrid grid) noexcept;
+
 /// Windowing platform, as far as WM size-hint applicability is concerned. Data (not a scattered
 /// `#if defined`) so @ref sizeHintPolicyFor is a pure, per-OS-testable function on any host.
 enum class SizeHintPlatform : std::uint8_t
 {
-    Windows, ///< Win32: base/increment honored for interactive resize.
+    Windows, ///< Qt stores the hints; optional native row snapping uses device-pixel metrics instead.
     MacOS,   ///< Cocoa: base/increment must NOT be set (Qt writes base into the NSWindow frame).
     Other,   ///< X11 honors them; Wayland silently ignores them. Either way, safe to set.
 };
@@ -116,8 +132,8 @@ struct SizeHintPolicy
 /// Qt's Cocoa plugin implements @c QWindow::setBaseSize by writing the base straight into
 /// `-[NSWindow setFrame:]`, so a small base (2*margins + chrome) HARD-RESIZES the freshly-mapped window
 /// to that tiny frame — the window then shows title-bar-only (effectively invisible) and drives the
-/// terminal grid to a degenerate size. macOS therefore gets @c minimum only; there is no character-grid
-/// resize-snapping protocol on Cocoa to preserve.
+/// terminal grid to a degenerate size. macOS therefore gets @c minimum only; optional row snapping
+/// is handled separately after a native live resize.
 /// @param platform The windowing platform.
 /// @return The per-component apply policy.
 [[nodiscard]] constexpr SizeHintPolicy sizeHintPolicyFor(SizeHintPlatform platform) noexcept
@@ -228,6 +244,53 @@ namespace detail
 {
     return { .horizontal = static_cast<int>(logical.horizontal * scale),
              .vertical = static_cast<int>(logical.vertical * scale) };
+}
+
+/// Builds the physical row grid from the same declared margins and chrome used for window sizing.
+/// @param cellHeight Cell height in device pixels, without rounding it to logical pixels.
+/// @param margins Vertical padding in logical pixels.
+/// @param scale Window device-pixel ratio.
+/// @param chrome Declared window chrome in logical pixels.
+/// @param minimumHeight Minimum client height in logical pixels.
+/// @return Row metrics and fixed insets in device pixels.
+[[nodiscard]] inline RowResizeGrid rowResizeGridFor(
+    int cellHeight, Margins margins, double scale, Chrome chrome, int minimumHeight) noexcept
+{
+    return { .cellHeight = cellHeight,
+             .baseHeight =
+                 (2 * scaled(margins, scale).vertical) + static_cast<int>(std::round(chrome.height * scale)),
+             .minimumHeight = detail::ceilScaled(minimumHeight, scale),
+             .chromeHeight = chrome.height,
+             .scale = scale };
+}
+
+/// Aligns a logical client height to the physical row grid, rounding up to a representable Qt size.
+/// At fractional scale the nearest logical size can leave less than one logical pixel of slack.
+/// @param height Proposed client height in logical pixels.
+/// @param scale Device pixels per logical pixel.
+/// @param grid Current physical row metrics, including chrome and margins.
+/// @return The aligned logical height, or the proposal if metrics are unavailable.
+[[nodiscard]] inline int snapLogicalHeightToRows(int height, double scale, RowResizeGrid grid) noexcept
+{
+    if (grid.cellHeight <= 0 || scale <= 0.0)
+        return height;
+    auto const chromeDevice = static_cast<int>(std::round(grid.chromeHeight * scale));
+    auto const margins = grid.baseHeight - chromeDevice;
+    auto const available = detail::floorScaled(std::max(0, height - grid.chromeHeight), scale);
+    auto const minimumContent = std::max(0, grid.minimumHeight - chromeDevice - margins);
+    auto const minimumRows = (minimumContent + grid.cellHeight - 1) / grid.cellHeight;
+    auto const nearestRows = std::max(0, available - margins + (grid.cellHeight / 2)) / grid.cellHeight;
+    return grid.chromeHeight
+           + detail::ceilUnscaled(margins + (std::max(minimumRows, nearestRows) * grid.cellHeight), scale);
+}
+
+inline int snapHeightToRows(int height, RowResizeGrid grid) noexcept
+{
+    if (grid.cellHeight <= 0 || grid.scale <= 0.0)
+        return height;
+    auto const logicalHeight = static_cast<int>(std::round(height / grid.scale));
+    return static_cast<int>(
+        std::round(snapLogicalHeightToRows(logicalHeight, grid.scale, grid) * grid.scale));
 }
 
 /// The blank lead-in a reserved gutter keeps at its left edge, in device pixels: room enough for a

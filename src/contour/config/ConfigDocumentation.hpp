@@ -1021,6 +1021,15 @@ constexpr StringLiteral ReflowOnResizeConfig {
     "reflow_on_resize: {}\n"
 };
 
+constexpr StringLiteral SnapToRowsConfig {
+    "\n"
+    "{comment} Align startup and manually resized window heights to complete terminal rows.\n"
+    "{comment} Applies to a single visible pane, including a zoomed split pane.\n"
+    "{comment} Windows snaps during resizing; macOS snaps when resizing ends; X11 uses WM hints.\n"
+    "{comment} Wayland supports startup sizing only. Maximized/fullscreen sizes are unrestricted.\n"
+    "snap_to_rows: {}\n"
+};
+
 constexpr StringLiteral TabSwitchOnHorizontalWheelConfig {
     "\n"
     "{comment} Whether a horizontal mouse wheel tilt (or a horizontal trackpad swipe) over the tab\n"
@@ -1879,6 +1888,16 @@ constexpr StringLiteral TextScalingMethodWeb {
 constexpr StringLiteral ReflowOnResizeWeb {
     "option controls whether or not the lines in the terminal should be reflowed when a resize event occurs. "
     "The default value is `true`. A change applies to sessions opened afterwards."
+};
+
+constexpr StringLiteral SnapToRowsWeb {
+    "option aligns startup and manually resized window heights to complete terminal rows. "
+    "The default is `false`. Applies to a single visible pane, including a zoomed split pane. "
+    "Font metrics, window chrome and configured margins are taken into account. Windows snaps during "
+    "resizing; macOS snaps when manual resizing ends; X11 uses window-manager size hints. Wayland has "
+    "no resize-increment hint, so only startup sizing is supported there. Maximized and fullscreen "
+    "sizes are unrestricted. Fractional scaling can leave less than one logical pixel of rounding slack. "
+    "A change applies at the next startup or manual resize."
 };
 
 constexpr StringLiteral TabSwitchOnHorizontalWheelWeb {
@@ -3216,6 +3235,7 @@ using CommandPaletteRecentCount =
 using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBufferSizeWeb>;
 using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
 using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
+using SnapToRows = DocumentationEntry<SnapToRowsConfig, SnapToRowsWeb>;
 using TabSwitchOnHorizontalWheel =
     DocumentationEntry<TabSwitchOnHorizontalWheelConfig, TabSwitchOnHorizontalWheelWeb>;
 using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;

@@ -9,6 +9,7 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/platform/QtInvoke.hpp>
+#include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -936,6 +937,8 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
 
     _osWindow = osWindow;
 
+    _resizeGrid = platform::makeWindowResizeGrid(*osWindow, [this] { return rowResizeGrid(); });
+
     // Still unexposed, so the scene graph has not chosen a graphics device yet.
     _manager.app().applyGraphicsDevice(*osWindow);
 
@@ -1054,13 +1057,16 @@ void WindowController::showInitial()
     auto const marginsDevice =
         geometry::scaled(session::toGeometryMargins(session->profile().margins.value()), scale);
     auto const totalPage = session->terminal().totalPageSize();
-    auto const size = geometry::windowSizeForPage(
+    auto size = geometry::windowSizeForPage(
         totalPage,
         display->cellSize(),
         marginsDevice,
         scale,
         chrome(),
         session::configuredGutterWidth(session->config(), display->cellSize(), scale));
+
+    if (auto const grid = rowResizeGrid())
+        size.height = geometry::snapLogicalHeightToRows(size.height, scale, *grid);
 
     display::displayLog()("Initial window size {}x{} (page {}, cell {}, scale {}, chrome {}).",
                           size.width,
@@ -1105,6 +1111,8 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // that has no handle yet (it must not disturb the pre-show sizing), and the shadow
                 // attachment has to be rebuilt whenever the platform window was recreated.
                 _nativeFrame->apply(*_osWindow, decoration());
+                if (_osWindow->windowState() == Qt::WindowNoState)
+                    platform::applyRowResizeHints(*_osWindow, rowResizeGrid());
                 refreshWindowShadow();
                 // The OS's own window controls exist only once the window is realized, so the inset
                 // measured from them is only answerable now -- long after titleBarVisibleChanged,
@@ -1208,6 +1216,8 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
         osWindow->setBaseSize(QSize(hints.base.width, hints.base.height));
     if (policy.applyIncrement && applyResizeGrid)
         osWindow->setSizeIncrement(QSize(hints.increment.width, hints.increment.height));
+    if (applyResizeGrid)
+        platform::applyRowResizeHints(*osWindow, rowResizeGrid());
 
     display::displayLog()(
         "Size hints: min={}x{}, base={}x{}, increment={}x{} (cellSize={}, scale={}, chrome={})",
@@ -1220,6 +1230,27 @@ void WindowController::updateSizeHintsFor(session::DisplaySurface& requester, Hi
         cellSize,
         scale,
         _chromeHeight);
+}
+
+std::optional<geometry::RowResizeGrid> WindowController::rowResizeGrid() const
+{
+    if (!_manager.app().config().snapToRows.value() || _osWindow == nullptr)
+        return std::nullopt;
+    // Startup sizing runs before the first focus-in. Resolve the active model session rather than
+    // requiring the focused display pointer, which is not populated until the window is shown.
+    auto const* session = activeSession();
+    auto const* display = session != nullptr ? session->display() : nullptr;
+    if (display == nullptr || !display->hasSession())
+        return std::nullopt;
+    auto const* tab = activeModelTab();
+    if (tab == nullptr || tab->layoutRoot() == nullptr || !tab->layoutRoot()->isLeaf())
+        return std::nullopt;
+
+    return geometry::rowResizeGridFor(unbox<int>(display->cellSize().height),
+                                      session::toGeometryMargins(session->profile().margins.value()),
+                                      _osWindow->devicePixelRatio(),
+                                      chrome(),
+                                      _osWindow->minimumHeight());
 }
 
 namespace

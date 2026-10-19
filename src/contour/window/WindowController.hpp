@@ -698,6 +698,9 @@ class WindowController:
     /// The declared chrome as the geometry module's type (width is structurally 0 in this layout).
     [[nodiscard]] geometry::Chrome chrome() const noexcept { return { .width = 0, .height = _chromeHeight }; }
 
+    /// Current physical row grid, absent when disabled or more than one pane is visible.
+    [[nodiscard]] std::optional<geometry::RowResizeGrid> rowResizeGrid() const;
+
     /// Shared tail of the choke-point entries: guards the window state, solves the pane tree for
     /// @p requester's leaf, adds the declared chrome and issues the single window resize.
     /// @param requester          The display whose pane the request targets.
@@ -829,6 +832,9 @@ class WindowController:
     // The OS-frame adapter. Never null: platforms with nothing to offer get a NullWindowFrame, so
     // every call site can apply the policy unconditionally rather than guarding on the platform.
     std::unique_ptr<platform::NativeWindowFrame> _nativeFrame;
+
+    // Window-scoped native subscription; its geometry provider reads the live configuration.
+    std::unique_ptr<QObject> _resizeGrid;
 
     // Window-scoped title-bar visibility (see the decoration block above). Seeded once from the
     // profile's show_title_bar (first display attach), flipped by ToggleTitleBar.
