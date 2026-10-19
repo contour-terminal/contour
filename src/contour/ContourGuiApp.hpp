@@ -16,6 +16,7 @@
 #include <contour/window/WindowControlStyleProvider.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 
@@ -193,6 +194,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       the daemon and the tmux client `contour client` spawns -- in a resource domain
     ///                       of its own. Null (the default) wires vtpty::makeDefaultProcessPlacement();
     ///                       tests pass a fake to see what is placed.
+    /// @param linkServices   What every session's link detection runs on. Injected by tests (manual
+    ///                       executors); its filesystem must be the app's, @p fileSystem or this machine's,
+    ///                       which the constructor requires. Absent (the default), the app's own pool,
+    ///                       probe thread and fileSystem(). Borrowed: it must outlive the app.
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -204,7 +209,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
                            std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
                            core::platform::FileSystem const* fileSystem = nullptr,
-                           std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr);
+                           std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr,
+                           std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -311,6 +317,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         return { .capture = _commandCapture, .executor = _commandExecutor };
     }
 
+    /// What every session's link detection runs on: the status-line pool for matching, a thread of its own
+    /// for existence checks (a hung mount stalls it alone), fileSystem(), and the steady clock of
+    /// terminalClocks().
+    /// @return References valid for the app's lifetime.
+    [[nodiscard]] vtbackend::LinkDetectionServices linkDetectionServices() noexcept;
+
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
     /// The path the process was launched as (argv[0]), used to re-spawn contour for a new
@@ -348,7 +360,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The placement handed in at construction, or the default one.
     [[nodiscard]] vtpty::ProcessPlacement& processPlacement() const noexcept { return *_processPlacement; }
 
-    /// Where every session looks up the paths printed on its screen, and the ones it opens.
+    /// Where every session looks up the paths printed on its screen, and the ones it opens; link detection's
+    /// probes too.
     /// @return The filesystem handed in at construction; this machine's by default.
     [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept { return _fileSystem; }
 
@@ -461,6 +474,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // default session factory, and the programs it starts detached, through the default launcher.
     // Declared before both.
     std::shared_ptr<vtpty::ProcessPlacement> _processPlacement;
+    /// The one thread every session's path probes run on. Its jobs reach only the filesystem, the clock and a
+    /// terminal's redraw request (atomics, and a session's mutex-guarded notify target), which is why it may
+    /// be drained and joined while sessions, never destroyed in production, live on. A probe blocked on a
+    /// hung mount delays that join.
+    core::async::ThreadPoolExecutor _linkProbeExecutor;
+    /// The link detection services a test handed in; absent, linkDetectionServices() assembles the app's own.
+    std::optional<vtbackend::LinkDetectionServices> _injectedLinkServices;
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.

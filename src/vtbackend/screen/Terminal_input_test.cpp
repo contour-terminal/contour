@@ -566,8 +566,8 @@ TEST_CASE("Terminal.a hint pasted with local echo on does not deadlock the key p
     mock.writeToScreen("\033[12lgo https://example.com now");
     mock.terminal.flushInput();
     mock.resetReplyData();
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Paste });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Paste });
     REQUIRE(mock.terminal.hintMatches().size() == 1);
 
     failOnDeadlock(std::chrono::seconds(10), [&] { mock.sendCharEvent(U'a'); });
@@ -611,10 +611,17 @@ TEST_CASE(
         void openDocument(std::string_view fileOrUrl) override
         {
             atOpen.probe(terminal);
-            openedDocument = fileOrUrl;
+            opened = fileOrUrl;
+        }
+
+        void openLink(vtbackend::LinkTarget const& link) override
+        {
+            atOpen.probe(terminal);
+            opened = link.target;
         }
 
         LockProbe atOpen;
+        std::string opened; ///< The document or the link's target, whichever was opened.
     };
 
     auto mock = OpeningTerm { PageSize { LineCount(3), ColumnCount(40) } };
@@ -630,14 +637,13 @@ TEST_CASE(
     SECTION("a hint picked to be opened")
     {
         mock.terminal.activateHintMode(
-            vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                         .action = vtbackend::HintAction::Open });
+            vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Open });
         REQUIRE(mock.terminal.hintMatches().size() == 1);
         mock.sendCharEvent(U'a');
     }
 
     CHECK(mock.atOpen.lockWasFree());
-    CHECK(mock.openedDocument.starts_with("https://example.com"));
+    CHECK(mock.opened.starts_with("https://example.com"));
 }
 
 TEST_CASE("Terminal.typing reads the keyboard action and local echo modes without racing the parser thread",

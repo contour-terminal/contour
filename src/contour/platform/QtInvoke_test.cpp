@@ -35,3 +35,19 @@ TEST_CASE("postToObject hands the functor's captures to the receiving thread", "
 
     CHECK(delivered == "made by the poster");
 }
+
+TEST_CASE("PostTarget posts until it is withdrawn, then drops", "[contour][qt][threading]")
+{
+    auto receiver = QObject {};
+    auto target = contour::platform::PostTarget { receiver };
+    auto runs = 0;
+
+    std::thread { [&] { target.post([&runs] { ++runs; }); } }.join();
+    QCoreApplication::sendPostedEvents(&receiver);
+    CHECK(runs == 1);
+
+    target.withdraw();
+    std::thread { [&] { target.post([&runs] { ++runs; }); } }.join();
+    QCoreApplication::sendPostedEvents(&receiver);
+    CHECK(runs == 1);
+}

@@ -18,9 +18,12 @@
 #include <vtbackend/input/vi/Selector.hpp>
 #include <vtbackend/input/vi/ViCommands.hpp>
 #include <vtbackend/input/vi/ViInputHandler.hpp>
+#include <vtbackend/links/ScanText.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Cursor.hpp>
 #include <vtbackend/screen/Gutter.hpp>
+#include <vtbackend/screen/LinkDetector.hpp>
+#include <vtbackend/screen/LinkPresentation.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -375,6 +378,20 @@ enum class PageCursorPlacement : uint8_t
     Home,
 };
 
+/// Which way a vi link motion goes.
+enum class LinkDirection : uint8_t
+{
+    Forward = 0, ///< `]x`
+    Backward,    ///< `[x`
+};
+
+/// What one key press of a vi link motion may still scan on the spot, whatever its count: pages that held a
+/// row not scanned yet. Pages scanned already cost nothing, so that each press gets further.
+struct LinkScanBudget
+{
+    int pages = 0; ///< Pages left; LinkDetectorTuning::motionSearchPages at the start of a press.
+};
+
 /// Asked, with a press's click count (1..ClickCounter::MaxClickCount), whether a binding takes the press.
 /// @see Terminal::sendMousePressEvent
 using MousePressClaimant = std::function<MousePressClaim(uint8_t clickCount)>;
@@ -451,6 +468,28 @@ struct TabsInfo
     size_t activeTabPosition = 1;
 };
 
+/// What lies at a cell for the follow gesture, found without touching the filesystem
+/// (Terminal::lookUpLinkAt()).
+struct LinkLookup
+{
+    /// An OSC 8 link: the application's own, followed as the application wrote it, a `file://` one to a
+    /// program run as such. Never a link found in printed text, which is not trusted so (§7.6).
+    std::shared_ptr<HyperlinkInfo const> hyperlink;
+    /// Known now: an indexed link, a URL found on demand, or a path the probe cache knows.
+    std::optional<LinkTarget> target;
+    /// A path the probe has not answered yet: the caller has it probed, off the terminal lock.
+    std::optional<PathQuery> pathToProbe;
+    /// The path found at the cell, its target as printed (kind Path), whether or not it is opened: what an
+    /// answer to @ref pathToProbe completes (resolvedPathTarget()), and what a refusal names. None where the
+    /// cell holds no path, or a link answered from the index.
+    std::optional<LinkTarget> printedPath;
+    /// PathCandidates::directories of @ref pathToProbe, one per candidate: the base each joined, empty for an
+    /// absolute or `~/` path. An answer's candidateIndex names its entry.
+    std::vector<std::string> pathDirectories {};
+    /// Why the path at the cell is not opened: it names a file on another machine.
+    std::optional<PathRefusal> refusal;
+};
+
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
 ///
 /// With a terminal being attached to a Process, the terminal's screen
@@ -502,6 +541,13 @@ class Terminal
         /// are additionally gated by Settings::allowClipboardRead. @see Terminal::requestClipboardRead.
         virtual std::string getClipboard() { return {}; }
         virtual void openDocument(std::string_view /*fileOrUrl*/) = 0;
+        /// Opens a resolved link: a path the filesystem confirmed, at its location, or a URL. The default
+        /// hands its target to openDocument(), dropping the location.
+        /// @param link The link; a path only once confirmed.
+        virtual void openLink(LinkTarget const& link) { openDocument(link.target); }
+        /// Opens what lies at a cell, as the follow gesture would there (vi's `gx`).
+        /// @param gridPosition A cell of the page on display, in grid coordinates.
+        virtual void followLinkAt(CellLocation /*gridPosition*/) {}
         virtual void inspect() {}
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
         /// An application raised an OSC 99 notification, whatever its occasion (`o=`): whether to show it
@@ -732,6 +778,12 @@ class Terminal
     ///                        Production passes TerminalClocks::system().
     /// @param sessionTokens   Where the token of each DEC mode 2034 reader session comes from.
     ///                        Production passes randomSemanticBlockTokens().
+    /// @param linkServices    Passive link detection's executors, filesystem and tuning; absent, nothing is
+    ///                        detected, as on the daemon side. Its filesystem must be @p fileSystem: a path
+    ///                        detection decorates and the path under the pointer are looked up in one place.
+    ///                        The lifetime rules are LinkDetectionServices'. A ThreadPoolExecutor that was
+    ///                        stopped runs what is submitted to it inline, so a scan or a probe started at
+    ///                        shutdown may run on the render thread, under the terminal lock.
     Terminal(Events& eventListener,
              core::Environment const& env,
              core::platform::FileSystem const& fileSystem,
@@ -739,7 +791,8 @@ class Terminal
              Settings factorySettings,
              std::optional<StatusLineCommandServices> commandServices,
              TerminalClocks clocks,
-             SemanticBlockTokenSource sessionTokens);
+             SemanticBlockTokenSource sessionTokens,
+             std::optional<LinkDetectionServices> linkServices = std::nullopt);
     ~Terminal() = default;
 
     void start();
@@ -1316,6 +1369,95 @@ class Terminal
 
     void setMouseProtocolBypassModifiers(Modifiers value) { _settings.mouseProtocolBypassModifiers = value; }
     void setMouseBlockSelectionModifiers(Modifiers value) { _settings.mouseBlockSelectionModifiers = value; }
+
+    /// Applies a profile's link pattern table to a running terminal. The caller holds the terminal lock.
+    ///
+    /// A post-construction setter on purpose: live reconfiguration is the feature. A profile switch or a
+    /// config reload re-applies the profile to live sessions, so the table cannot be fixed at construction.
+    ///
+    /// A new table replaces the link detector rather than changing it, and the links found so far go with it
+    /// until the next quiet time. The table already in use changes nothing, which matters: a profile without
+    /// patterns of its own applies the same built-in table on every reload and profile switch.
+    /// @param patterns The compiled table; never null.
+    void setLinkPatterns(std::shared_ptr<LinkPatterns const> patterns);
+
+    /// The links detected on the page on display. Does NOT take the lock; callers hold it.
+    /// @return The index; nullptr without detection, and while the index still describes another page, or
+    ///         the rows of this one before a reflow or a reset renamed them: until the next frame after a
+    ///         switch, a link there would open what is not on screen.
+    [[nodiscard]] LinkIndex const* detectedLinks() const noexcept;
+
+    /// The link detector, for the frontend's lookups. Does NOT take the lock; callers hold it.
+    /// @return The detector; nullptr without detection services, or with no clickable pattern.
+    [[nodiscard]] LinkDetector* linkDetector() noexcept { return _linkDetector.get(); }
+
+    /// The detected link covering a cell of the page on display. The caller holds the lock.
+    ///
+    /// A row written since its scan holds other text at the columns its links were found at, so it answers
+    /// none until it is scanned again.
+    /// @param gridPosition A cell of the page on display, in grid coordinates.
+    /// @return The link, valid until the next frame; nullptr where none is, or none is known yet.
+    [[nodiscard]] DetectedLink const* detectedLinkAt(CellLocation gridPosition) const;
+
+    /// What one key press of a vi link motion may scan on the spot.
+    /// @return LinkDetectorTuning::motionSearchPages pages; none without detection.
+    [[nodiscard]] LinkScanBudget linkScanBudget() const noexcept;
+
+    /// The start of the next (or previous) detected link from @p from, in reading order (§7.5). The index
+    /// answers for the rows it holds as they are now; a row between @p from and its answer that it does not
+    /// (never scanned, or written since its scan) is scanned on the spot first, a page at a time from the
+    /// first such row, publishing what it holds. A path counts once its probe has confirmed it. The caller
+    /// holds the lock.
+    /// @param from A cell of the page on display, in grid coordinates.
+    /// @param direction Which way to look.
+    /// @param budget What this key press may still scan; spent by the pages that held rows to read.
+    /// @return The link's first cell; nullopt when there is none within reach, or no detection.
+    [[nodiscard]] std::optional<CellLocation> linkStartFrom(CellLocation from,
+                                                            LinkDirection direction,
+                                                            LinkScanBudget& budget);
+
+    /// Opens the link at @p gridPosition through the frontend (vi's `gx`), once the lock is released.
+    /// @param gridPosition A cell of the page on display, in grid coordinates.
+    void followLinkAt(CellLocation gridPosition);
+
+    /// The detected link under the pointer as of the last pointer event, or the last frame that changed the
+    /// index; none when there was none. Safe from any thread, without the lock. A scroll or new output moves
+    /// the link under a still pointer without an event, so this can be stale, as hoveringHyperlinkId() can: a
+    /// frame looks up the pointer's cell itself, and a follow gesture uses the live
+    /// detectedLinkAt(currentMouseGridPosition()).
+    /// @return The link's id.
+    [[nodiscard]] LinkId hoveringLinkId() const noexcept { return _hoveringLinkId.load(); }
+
+    /// Applies a profile's hyperlink_decoration.mode to a running terminal.
+    ///
+    /// A post-construction setter on purpose: live reconfiguration is the feature. A config reload or the
+    /// settings page changes the mode of live sessions; the initial value arrives through Settings.
+    /// @param mode When links are decorated.
+    void setLinkDecorationMode(LinkDecorationMode mode);
+
+    /// Applies the modifiers of the FollowHyperlink mouse binding to a running terminal.
+    ///
+    /// A post-construction setter on purpose: live reconfiguration is the feature. A config reload can rebind
+    /// the gesture; the initial value arrives through Settings.
+    /// @param modifiers The binding's modifiers; none when no binding follows links.
+    void setLinkFollowModifiers(std::optional<Modifiers> modifiers);
+
+    /// Records which chord modifiers are held. Called by the frontend for modifier-only key presses and
+    /// releases, by mouse events, and with none on focus loss.
+    /// @param held The chord now held.
+    /// @return Whether that changes how links are presented; the frontend then re-decides the pointer shape.
+    [[nodiscard]] LinkRevealChange updateHeldModifiers(Modifiers held);
+
+    /// Whether the follow gesture's modifiers are held (Settings::linkFollowModifiers).
+    [[nodiscard]] FollowModifiers followModifiers() const noexcept;
+
+    /// Where the pointer counts as being when it is over a link: Elsewhere while an application takes clicks
+    /// (mouse tracking on, the bypass modifier not held), so that the link stays at rest.
+    [[nodiscard]] LinkPointer hoverPointer() const noexcept;
+
+    /// The pointer shape the link under the pointer asks for, an OSC 8 link or a detected one, as of the last
+    /// pointer event (hoveringHyperlinkId(), hoveringLinkId()); Default when there is none.
+    [[nodiscard]] LinkPointerShape linkPointerShape() const noexcept;
 
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
@@ -1903,6 +2045,10 @@ class Terminal
     // }}}
 
     // {{{ Screen Render Proxy
+    /// When the display should draw next though nothing asks for a frame: a blink, an animation, a status
+    /// line command, or link detection's next scan, as the last frame left it. Takes no lock, and is asked
+    /// after every frame.
+    /// @return The wait, or nullopt when nothing is due.
     std::optional<std::chrono::milliseconds> nextRender() const;
 
     /// Sets the terminal's clock to @p now, and advances what runs on it between frames: the cursor's blink
@@ -2821,24 +2967,23 @@ class Terminal
         return {};
     }
 
-    /// The word under the mouse cursor that reads as a filesystem path, as the screen shows it, whether
-    /// or not it names a file anywhere.
-    /// @see localPathAtMousePosition
-    [[nodiscard]] std::optional<std::string> pathTextAtMousePosition() const;
-
-    /// The existing local file or directory the path under the mouse cursor names, resolved against the
-    /// directory of the command that printed its row (localPathBaseAt()) and the home directory, if any.
+    /// What the follow gesture, or the context menu, opens at @p gridPosition, without touching the
+    /// filesystem. In order: an OSC 8 link; the detected link indexed there, while its row is unchanged
+    /// since its scan; nothing, where the index holds the row as it is (isScannedAsItIs()); else the cell's
+    /// logical line, scanned and matched now -- a URL is known at once, a path from the probe cache, or
+    /// else handed back to be probed.
     ///
-    /// Refused on a replica of another machine's terminal (ReplicaRole::OtherMachine), as for the `file://`
-    /// URLs its application writes (fileUrlLocalHost()): its paths name files on the daemon's machine, and
-    /// one that exists here too is another file. Refused likewise where the command that printed the row
-    /// ran on another machine.
+    /// A path resolves against the directory of the command that printed its row (localPathBaseAt()) and
+    /// the home directory. It is refused on a replica of another machine's terminal (ReplicaRole::
+    /// OtherMachine), as the `file://` URLs its application writes are (fileUrlLocalHost()): its paths name
+    /// files on the daemon's machine, and one that exists here too is another file. It is refused likewise
+    /// where the command that printed the row ran on another machine.
     ///
-    /// The caller holds the lock: the row's block is read from the block store and the fold cache, which
-    /// the parser thread changes as output arrives.
-    /// @return The file's path; nullopt where the pointer rests on no path, or on one that names no existing
-    ///         file; why, where a path is there but names a file on another machine.
-    [[nodiscard]] std::expected<std::optional<std::string>, PathRefusal> localPathAtMousePosition() const;
+    /// The caller holds the lock: the grid, the block store and the fold cache are read, which the parser
+    /// thread changes as output arrives. One logical line is scanned at most, bounded by the scan budget.
+    /// @param gridPosition A cell of the page on display, in grid coordinates.
+    /// @return What is there; an empty lookup where nothing is.
+    [[nodiscard]] LinkLookup lookUpLinkAt(CellLocation gridPosition) const;
 
     [[nodiscard]] ExecutionMode executionMode() const noexcept { return _executionMode; }
     void setExecutionMode(ExecutionMode mode);
@@ -2947,6 +3092,9 @@ class Terminal
     [[nodiscard]] bool& kittyClipboardWriteOpen() noexcept { return _kittyClipboardWriteOpen; }
 
     void openDocument(std::string_view data);
+    /// Has the frontend open a resolved link (Events::openLink()), once the terminal lock is released.
+    /// @param link The link; a path only once confirmed.
+    void openLink(LinkTarget const& link);
     void inspect();
     void notify(std::string_view title, std::string_view body);
     void showDesktopNotification(DesktopNotification const& notification);
@@ -3697,7 +3845,35 @@ class Terminal
     void scrollToBottomOnInput();
 
     void mainLoop();
+
+    /// Builds a frame of the display's, with the lock held: tells link detection whether the screen changed
+    /// since the last one, then builds the render buffer (fillRenderBufferInternal()). Only the display's
+    /// frames come here (ensureFreshRenderBuffer(), fillRenderBuffer()); a fill on the parser thread builds
+    /// alone, so that detection's work never lands on the parser's path.
+    ///
+    /// A build with LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE fills on the parser thread only, so it consumes
+    /// the screen-changed signal here and detects nothing.
+    /// @param output The buffer to build.
+    /// @param includeSelection Whether the selection is drawn.
+    void fillRenderFrame(RenderBuffer& output, bool includeSelection);
+
+    /// Builds the render buffer, with the lock held. Neither feeds link detection nor consumes the
+    /// screen-changed signal. Called on its own where the fill is no frame the display builds: setPage()'s
+    /// crossfade snapshot, and the frame synchronized output ends with, which the parser thread builds.
+    /// @param output The buffer to build.
+    /// @param includeSelection Whether the selection is drawn.
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
+
+    /// The refresh ensureFreshRenderBuffer() runs, with @p fill building the back buffer when a fill is due.
+    /// @param fill Builds the frame into the buffer it is handed.
+    /// @return Whether rendering is not suppressed.
+    template <std::invocable<RenderBuffer&> Fill>
+    bool refreshRenderBufferWith(Fill const& fill);
+
+    /// Hands link detection the frame and publishes its next scan for nextRender(). Under the state lock,
+    /// on the display's frames only (fillRenderFrame()).
+    /// @param change Whether the screen changed since the previous frame.
+    void detectLinks(FrameChange change);
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
 
@@ -3714,6 +3890,26 @@ class Terminal
                            std::memory_order_relaxed);
     }
     void updateHoveringHyperlinkState();
+
+    /// hyperlinkIdUnderPointer() for a pointer cell already looked up, so that one pointer event or one frame
+    /// translates the pointer once for both kinds of link.
+    /// @param pointer The grid cell under the pointer (currentMouseGridPosition()).
+    /// @return The OSC 8 link in that cell; none without a cell.
+    [[nodiscard]] HyperlinkId hyperlinkIdUnderPointer(std::optional<CellLocation> pointer) const;
+
+    /// The detected link in the cell the pointer is over; none when the pointer is on no cell, or the cell is
+    /// in none. An OSC 8 link's cell is in none: the scan does not read it. A pure query, the sibling of
+    /// hyperlinkIdUnderPointer(): nothing is stored or notified. The caller holds the lock.
+    /// @param pointer The grid cell under the pointer (currentMouseGridPosition()).
+    /// @return The link's id.
+    [[nodiscard]] LinkId detectedLinkIdUnderPointer(std::optional<CellLocation> pointer) const;
+
+    /// Looks up again which detected link the pointer is over, for the tooltip and the pointer shape
+    /// (hoveringLinkId()). Called on a pointer event, and by a frame whose detection changed the index: a
+    /// link may have appeared under a pointer that has not moved. Notifies nobody; the caller decides whether
+    /// a frame is due. The caller holds the lock.
+    /// @param pointer The grid cell under the pointer (currentMouseGridPosition()).
+    void refreshHoveredLink(std::optional<CellLocation> pointer);
 
     /// Changes what the input generator encodes keys with: a mode, the mouse protocol, the Kitty flags. Under
     /// the input lock as well as the state lock the caller holds, because a key is encoded under the input
@@ -3767,6 +3963,13 @@ class Terminal
     /// @return The block's record, or nullptr.
     [[nodiscard]] CommandBlockRecord const* pathBlockAt(LineOffset row) const;
 
+    /// The filesystem the terminal looks printed paths up in: the one it was constructed with.
+    [[nodiscard]] core::platform::FileSystem const& pathFileSystem() const noexcept;
+
+    /// This machine as printed links name it: the home directory, and the host name (localIdentity()) a
+    /// `file://` URL of it gives.
+    [[nodiscard]] LinkMachine linkMachine() const;
+
     /// The terminal's own working directory as a path base weighs it (localPathBaseFor()). Does NOT take the
     /// lock.
     /// @return The directory; ReplicaOfAnotherMachine on a replica of another machine's terminal, whose
@@ -3777,6 +3980,53 @@ class Terminal
     /// (CommandBlockStore::foreignDirectoryReported()). A replica's records carry its host's verdict, so it
     /// tells nothing.
     void recordForeignDirectory();
+
+    /// The terminal as its link detector reads it: the page on display, during the display's frames, with
+    /// the state lock held.
+    class TerminalLinkSource final: public LinkSource
+    {
+      public:
+        /// @param terminal The terminal read; it owns this source.
+        explicit TerminalLinkSource(Terminal& terminal): _terminal { terminal } {}
+
+        /// Starts a frame: what the previous one remembered of the working directories is forgotten, as a
+        /// command may have changed them since.
+        void beginFrame() noexcept { ++_frame; }
+
+        /// @return The grid of the page on display, which is what the fill draws.
+        [[nodiscard]] Grid& linkGrid() override { return _terminal.displayedPage().grid(); }
+        /// @return The page on display.
+        [[nodiscard]] PageIndex linkPage() const override { return _terminal.displayedPageIndex(); }
+        /// @return The grid line at the top of the viewport.
+        [[nodiscard]] LineOffset viewportTop() const override { return _terminal._viewport.topLine(); }
+        /// Where relative paths printed on @p row resolve, as localPathBaseAt() says, for a row of the page
+        /// on display. Each frame resolves the terminal's directory once and each block's bases once, rather
+        /// than once per line read.
+        /// @param row A grid row of the page on display.
+        /// @return The directories, first to last, or why there are none.
+        [[nodiscard]] std::expected<PathBases, PathRefusal> pathBasesAt(LineOffset row) const override;
+        /// @return The home directory, for `~/`, and the host name, for `file://` URLs; empty where unknown.
+        [[nodiscard]] LinkMachine localMachine() const override { return _terminal.linkMachine(); }
+
+      private:
+        Terminal& _terminal;
+        uint64_t _frame = 0; ///< Bumped by beginFrame().
+
+        /// What pathBasesAt() resolved in one frame, forgotten when the next one asks. Mutable: pathBasesAt()
+        /// is a query, and this only spares it work.
+        struct Memo
+        {
+            uint64_t frame = 0; ///< The frame it holds answers for.
+            std::optional<std::expected<TerminalDirectory, PathRefusal>> directory; ///< terminalDirectory().
+            /// localPathBaseFor() per block, nullptr for the rows of none.
+            std::vector<std::pair<CommandBlockRecord const*, std::expected<PathBases, PathRefusal>>> bases;
+        };
+        mutable Memo _memo;
+    };
+
+    /// A detector for the current pattern table. Not const: its redraw request reaches this terminal.
+    /// @return The detector; nullptr without detection services, or with no clickable pattern to detect.
+    [[nodiscard]] std::unique_ptr<LinkDetector> makeLinkDetector();
 
     /// Selects from where @p selector starts through @p to, completed in Insert mode.
     /// @param selector The selection to install, started where it begins.
@@ -3896,6 +4146,12 @@ class Terminal
 
     /// Where the paths this terminal recognizes on screen are looked up. @see Terminal()
     core::platform::FileSystem const& _fileSystem;
+
+    /// What passive link detection runs on; nullopt detects nothing. Fixed at construction.
+    std::optional<LinkDetectionServices> _linkServices;
+
+    /// The terminal as _linkDetector reads it.
+    TerminalLinkSource _linkSource { *this };
 
     /// Whether a reply the parser raises is flushed to the PTY as soon as the parse lets go of the state
     /// lock, before the parse returns, rather than with the next flush (`$CONTOUR_SYNC_PTY_OUTPUT`). A
@@ -4220,6 +4476,12 @@ class Terminal
     void publishAnimationsEnd() noexcept;
     // }}}
 
+    /// When link detection's next scan is due, as the last frame of the display's left it; max() while none
+    /// is. Atomic, for nextRender() to read on the render thread without the state lock, under which a reload
+    /// replaces the detector.
+    std::atomic<std::chrono::steady_clock::time_point> _linkScanDue =
+        std::chrono::steady_clock::time_point::max();
+
     // {{{ Momentum scrolling state
     /// Tracks velocity during a touchpad scroll gesture for momentum estimation.
     struct VelocityTracker
@@ -4387,7 +4649,8 @@ class Terminal
     mutable std::atomic<uint64_t> _changes { 0 };
     // Atomic because both threads touch it without a common lock: the parser thread sets it from
     // screenUpdated(), which runs OUTSIDE _stateMutex on purpose (it calls back into the GUI), while
-    // the GUI/render thread reads and clears it in readFromPty()/fillRenderBuffer().
+    // the GUI/render thread reads and clears it in readFromPty()/fillRenderFrame(), the latter for link
+    // detection.
     std::atomic<bool> _screenDirty = false; // TODO: just inc _changes and delete this instead.
     /// The time between two frames. Set by the frontend as the display's refresh rate is known, and read by
     /// the render thread as it asks when the next frame is due and by the parser thread as it refreshes the
@@ -4414,6 +4677,11 @@ class Terminal
     /// @return A copy of the composition, taken under _inputMethodMutex.
     [[nodiscard]] InputMethodData inputMethodData() const;
     std::atomic<HyperlinkId> _hoveringHyperlinkId = HyperlinkId {};
+    /// The detected link under the pointer as of the last pointer event, or the last frame that changed the
+    /// index (@see hoveringLinkId, refreshHoveredLink).
+    std::atomic<LinkId> _hoveringLinkId = LinkId {};
+    Modifiers
+        _heldModifiers {}; ///< The chord the frontend last reported held. Read and written under the lock.
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
     SupportedSequences _supportedVTSequences;
@@ -4657,10 +4925,7 @@ class Terminal
         std::optional<ViMode> previousViMode;
 
         explicit HintModeExecutor(Terminal& t): terminal { t } {}
-        void onHintSelected(std::string const& matchedText,
-                            HintAction action,
-                            CellLocation start,
-                            CellLocation end) override;
+        void onHintSelected(HintMatch const& match, HintAction action) override;
         void onHintModeEntered() override;
         void onHintModeExited() override;
         void requestRedraw() override;
@@ -4674,6 +4939,19 @@ class Terminal
     /// Gathers the rows hint mode scans under @p scope, extended past the labelable range to whole
     /// logical lines so a pattern wrapped across the boundary is still matched in full.
     [[nodiscard]] HintScanArea collectHintScanArea(HintScope scope, LineCount scrollbackLimit) const;
+
+    /// One logical line read for the link scanner, and where a given cell is in it.
+    struct LogicalLineScan
+    {
+        ScanText text;         ///< The logical line, as the patterns see it.
+        ScanPosition position; ///< The requested cell in @ref text.
+    };
+
+    /// Reads the logical line holding @p gridPosition on the page on display, at most one scan budget around
+    /// it. The caller holds the lock.
+    /// @param gridPosition A cell of the page on display.
+    /// @return The ScanText that holds the cell, and the cell in it; nullopt off the grid.
+    [[nodiscard]] std::optional<LogicalLineScan> scanLogicalLineAt(CellLocation gridPosition) const;
 
     SemanticBlockTracker _semanticBlockTracker;
 
@@ -4991,11 +5269,18 @@ class Terminal
 
     DesktopNotificationManager _desktopNotificationManager;
 
-    /// Runs the indicator's `{Command}` items off thread; null without command services. Keep this the
-    /// LAST data member: its refresh callback touches _eventListener, _pty, _changes and _renderBuffer,
-    /// and being destroyed first guarantees no callback fires once the members declared before it are gone
-    /// (runs still in flight keep their own state alive and merely find nobody to notify).
+    /// Runs the indicator's `{Command}` items off thread; null without command services. Keep this the last
+    /// data member but _linkDetector: its refresh callback touches _eventListener, _pty, _changes and
+    /// _renderBuffer, and being destroyed before them guarantees no callback fires once the members declared
+    /// before it are gone (runs still in flight keep their own state alive and merely find nobody to notify).
     std::unique_ptr<StatusLineCommandCache> _statusLineCommands;
+
+    /// Finds links in output once it goes quiet; null without detection services, or with no clickable
+    /// pattern. Replaced, never changed, by setLinkPatterns(), under the state lock. Keep this the LAST data
+    /// member, so that it is destroyed first: its redraw request reaches _eventListener, _pty, _changes and
+    /// _renderBuffer, and ~LinkDetector cuts that request off before any of them goes (jobs still in flight
+    /// keep their own state alive and merely find nobody to notify).
+    std::unique_ptr<LinkDetector> _linkDetector;
 };
 
 } // namespace vtbackend

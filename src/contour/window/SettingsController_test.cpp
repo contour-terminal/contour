@@ -16,6 +16,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/CommandBlockOutcome.hpp>
+#include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/shell/ScrollbarMarks.hpp>
@@ -36,6 +37,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1716,3 +1718,434 @@ TEST_CASE("SettingsController: plain enum rows label each option with its value"
     auto const row = rowWithKey(fx.controller->globalFields(), "theme");
     CHECK(row.value("optionLabels").toStringList() == row.value("options").toStringList());
 }
+
+TEST_CASE("SettingsController: Show links edits hyperlink_decoration.mode", "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    fx.controller->setProfileField("hyperlink_decoration_mode", "never");
+    auto const fields = fx.controller->profileFields();
+    auto const row = rowWithKey(fields, "hyperlink_decoration_mode");
+    CHECK(row.value("value").toString() == "never");
+    CHECK(row.value("group").toString() == "Links");
+    CHECK(row.value("options").toStringList() == QStringList { "always", "hover", "modifier", "never" });
+}
+
+TEST_CASE("SettingsController: Open files with validates its placeholders inline", "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const field = [&](QString const& key) {
+        return rowWithKey(fx.controller->profileFields(), key);
+    };
+
+    REQUIRE_FALSE(field("file_opener_command").isEmpty());
+    CHECK(field("file_opener_command").value("group").toString() == "Links");
+    CHECK(field("file_opener_command").value("problem").toString().isEmpty()); // empty: the system default
+
+    fx.controller->setProfileField("file_opener_command", "code {file}");
+    CHECK(field("file_opener_command").value("value").toString() == "code {file}");
+    CHECK(field("file_opener_command").value("problem").toString().contains("placeholder"));
+
+    fx.controller->setProfileField("file_opener_command", "code {path");
+    CHECK(field("file_opener_command").value("problem").toString().contains("'{'"));
+
+    fx.controller->setProfileField("file_opener_command", "code --goto {path}:{line}:{column}");
+    CHECK(field("file_opener_command").value("problem").toString().isEmpty());
+
+    // Every row says whether it has a problem, so the page binds one property for all of them.
+    for (auto const& row: fx.controller->profileFields())
+        CHECK(row.toMap().contains("problem"));
+}
+
+TEST_CASE("SettingsController: an invalid file_opener is saved as written, and its row says what is wrong",
+          "[settings][links]")
+{
+    // The reader keeps such a command and the click opens with the system's default application instead: a
+    // refusal to save would guard nothing, and would block every other edit of the profile until the
+    // command is mended.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    fx.controller->setProfileField("file_opener_command", "code {file}");
+    REQUIRE(fx.controller->saveProfileAs("work"));
+    REQUIRE(fx.cfg.findProfile("work") != nullptr);
+    CHECK(fx.cfg.findProfile("work")->fileOpener.value().command == "code {file}");
+
+    // An unrelated edit, saved under the profile's own name, writes the command back unchanged.
+    fx.controller->editProfile("work");
+    CHECK(rowWithKey(fx.controller->profileFields(), "file_opener_command")
+              .value("problem")
+              .toString()
+              .contains("placeholder"));
+    fx.controller->setProfileField("file_opener_placement", "tab");
+    REQUIRE(fx.controller->saveProfile());
+    CHECK(fx.cfg.findProfile("work")->fileOpener.value().command == "code {file}");
+    CHECK(fx.cfg.findProfile("work")->fileOpener.value().placement == contour::actions::OutputPlacement::Tab);
+}
+
+TEST_CASE("SettingsController: Open in edits file_opener.placement", "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const row = [&] {
+        return rowWithKey(fx.controller->profileFields(), "file_opener_placement");
+    };
+    CHECK(row().value("value").toString() == "detached");
+    CHECK(row().value("options").toStringList() == QStringList { "split", "tab", "detached" });
+    fx.controller->setProfileField("file_opener_placement", "tab");
+    CHECK(row().value("value").toString() == "tab");
+}
+
+// {{{ Link patterns
+
+namespace
+{
+
+/// Link pattern row @p index of @p controller.
+[[nodiscard]] QVariantMap linkRow(SettingsController const& controller, int index)
+{
+    return controller.linkPatterns().at(index).toMap();
+}
+
+/// How many rows the built-in patterns take, ahead of the profile's own.
+[[nodiscard]] int builtinRowCount()
+{
+    return static_cast<int>(vtbackend::builtinLinkPatternNames().size());
+}
+
+/// The row of the built-in pattern @p name.
+[[nodiscard]] int builtinRow(std::string_view name)
+{
+    auto const names = vtbackend::builtinLinkPatternNames();
+    return static_cast<int>(std::ranges::find(names, name) - names.begin());
+}
+
+constexpr auto JiraRegex = std::string_view { R"(\b[A-Z]+-\d+\b)" };
+
+} // namespace
+
+TEST_CASE("SettingsController: link patterns list the built-ins first, then the profile's",
+          "[settings][links]")
+{
+    auto fx =
+        Fixture("default_profile: main\n"
+                "profiles:\n"
+                "  main:\n"
+                "    hint_patterns:\n"
+                "      - { name: jira, regex: '[A-Z]+-[0-9]+', clickable: true, url: 'https://j/{0}' }\n"
+                "      - { name: githash, clickable: true }\n");
+    fx.controller->editProfile("main");
+    auto const& c = *fx.controller;
+    auto const builtins = builtinRowCount();
+    // The githash override shows on its built-in's row, not as a row of its own.
+    REQUIRE(c.linkPatterns().size() == builtins + 1);
+    auto const names = vtbackend::builtinLinkPatternNames();
+    for (auto const index: std::views::iota(0, builtins))
+    {
+        auto const row = linkRow(c, index);
+        auto const name = names[static_cast<std::size_t>(index)];
+        CAPTURE(name);
+        CHECK(row.value("name").toString().toStdString() == name);
+        CHECK(row.value("builtin").toBool());
+        CHECK(row.value("regex").toString().toStdString()
+              == vtbackend::LinkPatterns::builtins()->find(name)->source);
+        // A clickable githash makes no link: a bare hash names no scheme (§7.6). Said on its row.
+        if (name == "githash")
+            CHECK(row.value("problem").toString().contains("scheme"));
+        else
+            CHECK(row.value("problem").toString().isEmpty());
+    }
+    CHECK(linkRow(c, builtinRow("url")).value("kind").toString() == "url");
+    CHECK(linkRow(c, builtinRow("filepath")).value("kind").toString() == "path");
+    CHECK(linkRow(c, builtinRow("filepath")).value("clickable").toBool()); // the built-in's default
+    CHECK(linkRow(c, builtinRow("githash")).value("clickable").toBool());  // the profile's override
+    CHECK_FALSE(linkRow(c, builtinRow("ipv4")).value("clickable").toBool());
+
+    auto const jira = linkRow(c, builtins);
+    CHECK(jira.value("name").toString() == "jira");
+    CHECK(jira.value("regex").toString() == "[A-Z]+-[0-9]+");
+    CHECK(jira.value("clickable").toBool());
+    CHECK(jira.value("url").toString() == "https://j/{0}");
+    CHECK_FALSE(jira.value("builtin").toBool());
+    CHECK(jira.value("kind").toString() == "custom");
+    CHECK(jira.value("problem").toString().isEmpty());
+}
+
+TEST_CASE("SettingsController: toggling a built-in writes a name-only override, and back removes it",
+          "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const filepath = builtinRow("filepath");
+    auto edited = linkRow(*fx.controller, filepath);
+    edited["clickable"] = false;
+    fx.controller->setLinkPattern(filepath, edited);
+    CHECK_FALSE(linkRow(*fx.controller, filepath).value("clickable").toBool());
+    CHECK(linkRow(*fx.controller, filepath).value("problem").toString().isEmpty()); // a name-only override
+    CHECK(fx.controller->linkPatterns().size() == builtinRowCount());               // and no row of its own
+
+    REQUIRE(fx.controller->saveProfileAs("work"));
+    REQUIRE(fx.cfg.findProfile("work") != nullptr);
+    CHECK(fx.cfg.findProfile("work")->hintPatterns.value()
+          == std::vector {
+              config::HintPatternConfig { .name = "filepath", .regex = {}, .clickable = false, .url = {} } });
+
+    // Back to the built-in's own default: nothing is left in the override, so it goes.
+    edited["clickable"] = true;
+    fx.controller->setLinkPattern(filepath, edited);
+    CHECK(linkRow(*fx.controller, filepath).value("clickable").toBool());
+    REQUIRE(fx.controller->saveProfile());
+    CHECK(fx.cfg.findProfile("work")->hintPatterns.value().empty());
+}
+
+TEST_CASE("SettingsController: user link patterns are added, edited, checked and removed",
+          "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const index = builtinRowCount();
+    fx.controller->addLinkPattern();
+    REQUIRE(fx.controller->linkPatterns().size() == index + 1);
+    auto edited = linkRow(*fx.controller, index);
+    CHECK_FALSE(edited.value("builtin").toBool());
+    CHECK(edited.value("clickable").toBool());
+    CHECK(edited.value("regex").toString().isEmpty());
+    CHECK(edited.value("problem").toString().contains("needs a regex")); // until it has one
+
+    edited["name"] = "jira";
+    edited["regex"] = "([a-";
+    fx.controller->setLinkPattern(index, edited);
+    CHECK(linkRow(*fx.controller, index).value("name").toString() == "jira");
+    CHECK(linkRow(*fx.controller, index).value("problem").toString().contains("invalid regex"));
+
+    edited["regex"] = QString::fromUtf8(JiraRegex.data(), static_cast<qsizetype>(JiraRegex.size()));
+    edited["url"] = "https://j/{1}";
+    fx.controller->setLinkPattern(index, edited);
+    CHECK(linkRow(*fx.controller, index).value("problem").toString().contains("capture group"));
+
+    edited["url"] = "https://j/{0}";
+    fx.controller->setLinkPattern(index, edited);
+    CHECK(linkRow(*fx.controller, index).value("problem").toString().isEmpty());
+    CHECK(linkRow(*fx.controller, index).value("url").toString() == "https://j/{0}");
+
+    // Each pattern added gets a name of its own.
+    fx.controller->addLinkPattern();
+    fx.controller->addLinkPattern();
+    REQUIRE(fx.controller->linkPatterns().size() == index + 3);
+    CHECK(linkRow(*fx.controller, index + 1).value("name")
+          != linkRow(*fx.controller, index + 2).value("name"));
+
+    fx.controller->removeLinkPattern(index + 1);
+    fx.controller->removeLinkPattern(index + 1);
+    fx.controller->removeLinkPattern(index);
+    CHECK(fx.controller->linkPatterns().size() == index);
+}
+
+TEST_CASE("SettingsController: a user link pattern cannot take another pattern's name", "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const index = builtinRowCount();
+    fx.controller->addLinkPattern();
+    fx.controller->addLinkPattern();
+    auto const before = linkRow(*fx.controller, index).value("name");
+    for (auto const& taken:
+         { QStringLiteral("url"), linkRow(*fx.controller, index + 1).value("name").toString() })
+    {
+        CAPTURE(taken.toStdString());
+        auto edited = linkRow(*fx.controller, index);
+        edited["name"] = taken;
+        fx.errors.clear();
+        fx.controller->setLinkPattern(index, edited);
+        CHECK(linkRow(*fx.controller, index).value("name") == before);
+        REQUIRE(fx.errors.size() == qsizetype { 1 });
+        CHECK(fx.errors.back().contains(taken));
+    }
+    CHECK(fx.controller->linkPatterns().size() == index + 2);
+}
+
+TEST_CASE("SettingsController: a profile with a link pattern in error is not saved, and says which",
+          "[settings][links]")
+{
+    // The reader would skip a pattern without a regex: refused, as a field in error is.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const index = builtinRowCount();
+    fx.controller->addLinkPattern();
+    auto edited = linkRow(*fx.controller, index);
+    edited["name"] = "jira";
+    fx.controller->setLinkPattern(index, edited);
+    CHECK_FALSE(fx.controller->saveProfileAs("work"));
+    CHECK(fx.cfg.findProfile("work") == nullptr);
+    REQUIRE_FALSE(fx.errors.isEmpty());
+    CHECK(fx.errors.back().contains("jira"));
+
+    edited["regex"] = QString::fromUtf8(JiraRegex.data(), static_cast<qsizetype>(JiraRegex.size()));
+    edited["url"] = "https://j/{0}";
+    fx.controller->setLinkPattern(index, edited);
+    REQUIRE(fx.controller->saveProfileAs("work"));
+    REQUIRE(fx.cfg.findProfile("work") != nullptr);
+    CHECK(fx.cfg.findProfile("work")->hintPatterns.value()
+          == std::vector { config::HintPatternConfig { .name = "jira",
+                                                       .regex = std::string { JiraRegex },
+                                                       .clickable = true,
+                                                       .url = "https://j/{0}" } });
+}
+
+TEST_CASE("SettingsController: a built-in's broken override shows its problem and does not block a save",
+          "[settings][links]")
+{
+    // The page cannot change a built-in's regex, and the loader keeps the entry and reports it at every load:
+    // refusing the save would leave a profile based on this one unsavable for an unrelated change.
+    auto fx = Fixture("default_profile: main\n"
+                      "profiles:\n"
+                      "  main:\n"
+                      "    hint_patterns:\n"
+                      "      - { name: filepath, regex: '\\S+\\.cpp' }\n");
+    fx.controller->newProfile("main");
+    CHECK(linkRow(*fx.controller, builtinRow("filepath")).value("problem").toString().contains("group 1"));
+
+    fx.controller->setProfileField("show_title_bar", false);
+    REQUIRE(fx.controller->saveProfileAs("work"));
+    CHECK(fx.errors.isEmpty());
+    REQUIRE(fx.cfg.findProfile("work") != nullptr);
+    CHECK(fx.cfg.findProfile("work")->hintPatterns.value()
+          == std::vector { config::HintPatternConfig {
+              .name = "filepath", .regex = R"(\S+\.cpp)", .clickable = {}, .url = {} } });
+    CHECK(linkRow(*fx.controller, builtinRow("filepath")).value("problem").toString().contains("group 1"));
+}
+
+TEST_CASE("SettingsController: a built-in row's Clickable is the one the terminal uses", "[settings][links]")
+{
+    // Two entries for one built-in: the later one wins in the terminal, so on the page too.
+    auto fx = Fixture("default_profile: main\n"
+                      "profiles:\n"
+                      "  main:\n"
+                      "    hint_patterns:\n"
+                      "      - { name: githash, clickable: true }\n"
+                      "      - { name: githash, clickable: false }\n");
+    fx.controller->editProfile("main");
+    CHECK_FALSE(linkRow(*fx.controller, builtinRow("githash")).value("clickable").toBool());
+}
+
+TEST_CASE("SettingsController: a built-in's Clickable switch holds over hand-written duplicate entries",
+          "[settings][links]")
+{
+    // The terminal merges the entries by name, an earlier entry's clickable standing where a later one gives
+    // none: switching it off must clear it wherever it is set, or the row snaps back.
+    auto fx = Fixture("default_profile: main\n"
+                      "profiles:\n"
+                      "  main:\n"
+                      "    hint_patterns:\n"
+                      "      - { name: githash, clickable: true }\n"
+                      "      - { name: githash, regex: '\\b[0-9a-f]{8}\\b' }\n");
+    fx.controller->newProfile("main");
+    auto const githash = builtinRow("githash");
+    REQUIRE(linkRow(*fx.controller, githash).value("clickable").toBool());
+
+    auto edited = linkRow(*fx.controller, githash);
+    edited["clickable"] = false;
+    fx.controller->setLinkPattern(githash, edited);
+    CHECK_FALSE(linkRow(*fx.controller, githash).value("clickable").toBool());
+    CHECK(linkRow(*fx.controller, githash).value("regex").toString() == R"(\b[0-9a-f]{8}\b)");
+
+    edited["clickable"] = true;
+    fx.controller->setLinkPattern(githash, edited);
+    CHECK(linkRow(*fx.controller, githash).value("clickable").toBool());
+}
+
+TEST_CASE("SettingsController: the link pattern preview matches as the terminal does", "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const preview = fx.controller->previewLinkPattern(
+        QVariantMap {
+            { "name", "jira" },
+            { "regex", QString::fromUtf8(JiraRegex.data(), static_cast<qsizetype>(JiraRegex.size())) },
+            { "clickable", true },
+            { "url", "https://j/{0}" },
+            { "builtin", false } },
+        QStringLiteral("ä ABC-1, XY-22."));
+    CHECK(preview.value("problem").toString().isEmpty());
+    CHECK(preview.value("note").toString().isEmpty());
+    auto const spans = preview.value("spans").toList();
+    REQUIRE(spans.size() == 2);
+    CHECK(spans[0].toMap().value("start").toInt() == 2); // UTF-16 offsets: after "ä "
+    CHECK(spans[0].toMap().value("end").toInt() == 7);
+    CHECK(spans[0].toMap().value("target").toString() == "https://j/ABC-1");
+    CHECK(spans[1].toMap().value("start").toInt() == 9);
+    CHECK(spans[1].toMap().value("end").toInt() == 14);
+    CHECK(spans[1].toMap().value("target").toString() == "https://j/XY-22");
+}
+
+TEST_CASE("SettingsController: the link pattern preview marks a match the printed text cannot make a link",
+          "[settings][links]")
+{
+    // §7.6, §9: a clickable pattern without a scheme of its own is a link only where the printed text names
+    // one Contour opens. The terminal underlines nothing elsewhere, and the preview says so.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const preview =
+        fx.controller->previewLinkPattern(QVariantMap { { "name", "doc" },
+                                                        { "regex", R"(\S+\.pdf)" },
+                                                        { "clickable", true },
+                                                        { "url", "" },
+                                                        { "builtin", false } },
+                                          QStringLiteral("https://ok.example/x.pdf smb://evil/y.pdf"));
+    CHECK(preview.value("problem").toString().contains("scheme")); // the load's warning
+    CHECK(preview.value("note").toString().contains("no link"));
+    auto const spans = preview.value("spans").toList();
+    REQUIRE(spans.size() == 2);
+    CHECK_FALSE(spans[0].toMap().value("refused").toBool());
+    CHECK(spans[1].toMap().value("refused").toBool());
+}
+
+TEST_CASE("SettingsController: the link pattern preview says what is wrong, and when a path is shown",
+          "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+
+    auto const broken = fx.controller->previewLinkPattern(
+        QVariantMap { { "name", "bad" }, { "regex", "([a-" }, { "clickable", true }, { "builtin", false } },
+        QStringLiteral("abc"));
+    CHECK(broken.value("problem").toString().contains("invalid regex"));
+    CHECK(broken.value("spans").toList().isEmpty());
+
+    auto const path = fx.controller->previewLinkPattern(linkRow(*fx.controller, builtinRow("filepath")),
+                                                        QStringLiteral("see src/main.cpp:12 now"));
+    CHECK(path.value("problem").toString().isEmpty());
+    CHECK(path.value("note").toString().contains("once they are found to exist"));
+    // Without the disk, every word that could name a file is shown, the bare ones too; the path is the
+    // target, its location left out.
+    auto const spans = path.value("spans").toList();
+    REQUIRE(spans.size() == 3);
+    CHECK(spans[1].toMap().value("start").toInt() == 4);
+    CHECK(spans[1].toMap().value("target").toString() == "src/main.cpp");
+}
+
+TEST_CASE("SettingsController: link patterns of a read-only profile cannot change", "[settings][links]")
+{
+    auto fx = Fixture("default_profile: main\n"
+                      "profiles:\n"
+                      "  main:\n"
+                      "    hint_patterns:\n"
+                      "      - { name: jira, regex: '[A-Z]+-[0-9]+' }\n");
+    fx.controller->editProfile("main"); // from contour.yml: read-only
+    REQUIRE(fx.controller->editingReadOnly());
+    auto const before = fx.controller->linkPatterns();
+    auto const index = builtinRowCount();
+    REQUIRE(before.size() == index + 1);
+
+    fx.controller->addLinkPattern();
+    auto edited = linkRow(*fx.controller, index);
+    edited["regex"] = "x";
+    fx.controller->setLinkPattern(index, edited);
+    auto toggled = linkRow(*fx.controller, builtinRow("filepath"));
+    toggled["clickable"] = false;
+    fx.controller->setLinkPattern(builtinRow("filepath"), toggled);
+    fx.controller->removeLinkPattern(index);
+    CHECK(fx.controller->linkPatterns() == before);
+}
+
+// }}}

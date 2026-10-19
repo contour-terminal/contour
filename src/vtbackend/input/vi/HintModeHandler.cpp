@@ -20,77 +20,6 @@ namespace
     constexpr auto Alphabet = string_view { "abcdefghijklmnopqrstuvwxyz" };
 } // namespace
 
-auto Utf8CodepointCursor::codepointIndexAt(size_t byteOffset) noexcept -> size_t
-{
-    auto const limit = min(byteOffset, _text.size());
-    // Count bytes that are NOT continuation bytes (10xxxxxx), resuming where the last call stopped.
-    for (; _byteOffset < limit; ++_byteOffset)
-        if ((static_cast<char8_t>(_text[_byteOffset]) & 0xC0) != 0x80)
-            ++_codepointIndex;
-    return _codepointIndex;
-}
-
-auto utf8ByteOffsetToCodepointIndex(string_view text, size_t byteOffset) noexcept -> size_t
-{
-    return Utf8CodepointCursor { text }.codepointIndexAt(byteOffset);
-}
-
-auto buildLogicalLines(vector<HintScanRow> const& rows) -> vector<HintLogicalLine>
-{
-    auto result = vector<HintLogicalLine>();
-
-    for (auto const& row: rows)
-    {
-        auto const codepoints = utf8ByteOffsetToCodepointIndex(row.text, row.text.size());
-
-        // A continuation row extends the logical line above it. Two cases start a new one anyway:
-        // there is no row above (the head scrolled out of the scanned range, so this row is all we
-        // can see of its logical line), and a gap in the row offsets (which would break the
-        // firstLine + rowIndex arithmetic gridPositionOf() relies on).
-        auto const continuesPrevious =
-            row.continuation == LineContinuation::Yes && !result.empty()
-            && row.line
-                   == result.back().firstLine + LineOffset::cast_from(result.back().rowCodepointEnds.size());
-
-        if (continuesPrevious)
-        {
-            auto& logical = result.back();
-            logical.text += row.text;
-            logical.rowCodepointEnds.push_back(logical.rowCodepointEnds.back() + codepoints);
-            continue;
-        }
-
-        result.push_back(HintLogicalLine {
-            .text = row.text,
-            .firstLine = row.line,
-            .rowCodepointEnds = { codepoints },
-        });
-    }
-
-    return result;
-}
-
-auto gridPositionOf(HintLogicalLine const& logical, size_t codepointIndex) noexcept -> CellLocation
-{
-    auto const& ends = logical.rowCodepointEnds;
-
-    // The first row whose exclusive end is past the index is the row the index falls on.
-    auto const it = ranges::upper_bound(ends, codepointIndex);
-    if (it != ends.end())
-    {
-        auto const rowIndex = static_cast<size_t>(std::distance(ends.begin(), it));
-        auto const rowStart = rowIndex == 0 ? size_t { 0 } : ends[rowIndex - 1];
-        return CellLocation { .line = logical.firstLine + LineOffset::cast_from(rowIndex),
-                              .column = ColumnOffset::cast_from(codepointIndex - rowStart) };
-    }
-
-    // Past the end: clamp to the last cell that exists. Asking for the final codepoint takes the
-    // branch above, so this recurses exactly once.
-    if (ends.empty() || ends.back() == 0)
-        return CellLocation { .line = logical.firstLine, .column = ColumnOffset(0) };
-    return gridPositionOf(logical, ends.back() - 1);
-}
-
 HintModeHandler::HintModeHandler(Executor& executor): _executor { executor }
 {
 }
@@ -101,54 +30,48 @@ void HintModeHandler::rescanLines(HintScanArea const& area)
     _allMatches.clear();
     _filteredMatches.clear();
 
-    // Match against logical lines, not physical rows: a URL broken across a wrap is one match.
-    //
-    // A row that wrapped mid-wide-character left a pad space in its last cell, and joining the rows
-    // therefore inserts that space inside such a match. Every terminal that pads this way has the
-    // same limitation; the alternative is to guess which trailing blanks are padding.
-    for (auto const& logical: buildLogicalLines(area.rows))
+    // Match against logical lines, not physical rows: a URL broken across a wrap is one match. The scan text
+    // maps every match back to its cells, wide characters and clusters included.
+    auto const& table = *_patterns.table;
+    auto const taking = [&](LinkCandidate const& candidate) {
+        return _patterns.names.empty()
+               || std::ranges::find(_patterns.names, table.patterns()[candidate.patternIndex].name)
+                      != _patterns.names.end();
+    };
+    for (auto const& logical: joinLogicalLines(area.rows, area.continuesBelow, MaxScanCells))
     {
-        for (auto const& pattern: _patterns)
+        for (auto const& candidate: findLinks(logical, table, PatternSelection::All, LinkOverlap::Keep))
         {
-            auto matchIter = sregex_iterator(logical.text.begin(), logical.text.end(), pattern.regex);
-            auto const matchEnd = sregex_iterator();
+            if (!taking(candidate))
+                continue;
+            auto const start = CellLocation { .line = logical.lineOf(candidate.first.row),
+                                              .column = candidate.first.column };
 
-            // One forward pass per pattern: sregex_iterator yields non-overlapping matches in
-            // increasing position order, so every offset this converts is non-decreasing.
-            auto codepointIndexOf = Utf8CodepointCursor { logical.text };
+            // The label is drawn at the match start, so a match starting on a row that cannot carry one could
+            // never be selected: do not offer it. Tested before resolving, which may go to the filesystem.
+            if (!area.labelableRows.contains(start.line))
+                continue;
 
-            for (; matchIter != matchEnd; ++matchIter)
-            {
-                auto const& match = *matchIter;
-                if (match.empty())
-                    continue;
+            // A match whose printed text chose a scheme no link may open is offered to copy all the same, as
+            // printed; only a match that may be opened is resolved.
+            auto target = candidate.opening == LinkOpening::Refused || !_patterns.resolve
+                              ? std::optional { printedLinkTarget(candidate) }
+                              : _patterns.resolve(candidate, start.line);
+            if (!target)
+                continue;
 
-                auto const startIndex =
-                    codepointIndexOf.codepointIndexAt(static_cast<size_t>(match.position()));
-                auto const start = gridPositionOf(logical, startIndex);
-
-                // The label is drawn at the match start, so a match starting on a row that cannot
-                // carry one could never be selected: do not offer it. Tested before the pattern
-                // resolves the match, which may go to the filesystem.
-                if (!area.labelableRows.contains(start.line))
-                    continue;
-
-                // What the match stands for, by the pattern's own rule (e.g. a path that must exist).
-                auto matchedText = pattern.resolve ? pattern.resolve(match.str(), start.line)
-                                                   : std::optional { match.str() };
-                if (!matchedText)
-                    continue;
-
-                auto const endIndex =
-                    codepointIndexOf.codepointIndexAt(static_cast<size_t>(match.position() + match.length()));
-
-                _allMatches.push_back(HintMatch {
-                    .label = {},
-                    .matchedText = std::move(*matchedText),
-                    .start = start,
-                    .end = gridPositionOf(logical, endIndex - 1),
-                });
-            }
+            // Copy, Paste and Select take the text as printed, a path the absolute form it resolved to; only
+            // Open takes a template's expansion.
+            auto matchedText = candidate.kind == LinkKind::Path ? target->target : candidate.text;
+            _allMatches.push_back(HintMatch {
+                .label = {},
+                .matchedText = std::move(matchedText),
+                .target = std::move(*target),
+                .opening = candidate.opening,
+                .start = start,
+                .end = CellLocation { .line = logical.lineOf(candidate.last.row),
+                                      .column = candidate.last.column },
+            });
         }
     }
 
@@ -184,7 +107,7 @@ void HintModeHandler::rescanLines(HintScanArea const& area)
     _filteredMatches = _allMatches;
 }
 
-void HintModeHandler::activate(HintScanArea const& area, vector<HintPattern> patterns, HintAction action)
+void HintModeHandler::activate(HintScanArea const& area, HintPatternSet patterns, HintAction action)
 {
     _action = action;
     _patterns = std::move(patterns);
@@ -285,7 +208,7 @@ bool HintModeHandler::processInput(char32_t ch)
         auto match = std::move(_filteredMatches[0]);
         auto const action = _action;
         deactivate();
-        _executor.onHintSelected(match.matchedText, action, match.start, match.end);
+        _executor.onHintSelected(match, action);
         return true;
     }
 
@@ -334,40 +257,6 @@ void HintModeHandler::updateFilteredMatches()
     std::ranges::copy_if(_allMatches, std::back_inserter(_filteredMatches), [this](auto const& m) {
         return m.label.starts_with(_filter);
     });
-}
-
-vector<HintPattern> HintModeHandler::builtinPatterns()
-{
-    static auto const cached = vector<HintPattern> {
-        HintPattern { .name = "url",
-                      .regex = regex(R"(https?://[^\s<>\"'\])\}]+)",
-                                     regex_constants::ECMAScript | regex_constants::optimize),
-                      .resolve = {} },
-        HintPattern { .name = "filepath",
-                      .regex = regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w][\w.-]*/[\w./-]+))",
-                                     regex_constants::ECMAScript | regex_constants::optimize),
-                      .resolve = {} },
-        HintPattern {
-            .name = "githash",
-            .regex = regex(R"(\b[0-9a-f]{7,40}\b)", regex_constants::ECMAScript | regex_constants::optimize),
-            .resolve = {} },
-        HintPattern { .name = "ipv4",
-                      .regex = regex(R"(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?\b)",
-                                     regex_constants::ECMAScript | regex_constants::optimize),
-                      .resolve = {} },
-        HintPattern {
-            .name = "ipv6",
-            .regex =
-                regex(R"((?:)"
-                      R"(\b[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){7}\b)"
-                      R"(|\b(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}\b)"
-                      R"(|::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}\b)"
-                      R"(|\b(?:[0-9a-fA-F]{1,4}:)+:(?![0-9a-fA-F:]))"
-                      R"())",
-                      regex_constants::ECMAScript | regex_constants::optimize),
-            .resolve = {} },
-    };
-    return cached;
 }
 
 } // namespace vtbackend

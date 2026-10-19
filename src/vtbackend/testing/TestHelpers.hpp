@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/links/LinkTypes.hpp>
+#include <vtbackend/links/PathResolution.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
 #include <core/Escape.hpp>
+#include <core/platform/FileSystem.hpp>
 #include <core/platform/FileUri.hpp>
 #include <core/platform/PathUtils.hpp>
 
@@ -21,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <functional>
@@ -507,6 +511,47 @@ template <typename T = vtpty::MockPty>
 [[nodiscard]] inline std::string fileUrlOf(std::filesystem::path const& directory)
 {
     return core::platform::fileUri(core::platform::normalizePath(directory), "");
+}
+
+/// What the follow gesture finds under the pointer (Terminal::lookUpLinkAt()). Takes the terminal's lock.
+/// @param terminal The terminal; the pointer is on its grid.
+/// @return The lookup; an empty one when the pointer is on no cell.
+[[nodiscard]] inline LinkLookup lookUpLinkUnderPointer(Terminal& terminal)
+{
+    auto const _ = std::scoped_lock { terminal };
+    auto const position = terminal.currentMouseGridPosition();
+    return position ? terminal.lookUpLinkAt(*position) : LinkLookup {};
+}
+
+/// The path the follow gesture finds under the pointer, as printed, whether or not it names a file anywhere.
+/// @param terminal The terminal; the pointer is on its grid.
+/// @return The path; nullopt where no path is under the pointer.
+[[nodiscard]] inline std::optional<std::string> printedPathUnderPointer(Terminal& terminal)
+{
+    return lookUpLinkUnderPointer(terminal).printedPath.transform(
+        [](LinkTarget const& printed) { return printed.target; });
+}
+
+/// The local path the follow gesture opens under the pointer: what it knows already, or what @p fileSystem
+/// answers for the path it hands the probe, as the probe thread would look it up.
+/// @param terminal The terminal; the pointer is on its grid.
+/// @param fileSystem Where the probe looks.
+/// @return The path; nullopt where no path is under the pointer or it names no file; the refusal where it
+///         names a file on another machine.
+[[nodiscard]] inline std::expected<std::optional<std::string>, PathRefusal> followedPathUnderPointer(
+    Terminal& terminal, core::platform::FileSystem const& fileSystem)
+{
+    auto const lookup = lookUpLinkUnderPointer(terminal);
+    if (lookup.refusal)
+        return std::unexpected(*lookup.refusal);
+    if (lookup.target)
+        return lookup.target->kind == LinkKind::Path ? std::optional { lookup.target->target } : std::nullopt;
+    if (!lookup.pathToProbe || !lookup.printedPath)
+        return std::nullopt;
+    auto const found = resolveLocalPath(fileSystem, lookup.pathToProbe->candidates);
+    if (!found)
+        return std::nullopt;
+    return resolvedPathTarget(*lookup.printedPath, *found, lookup.pathDirectories).target;
 }
 
 inline void logScreenText(vtbackend::Terminal const& terminal, std::string const& headline = "")

@@ -80,7 +80,8 @@ color_schemes:
             opacity: 0.5
             blur: true
         hyperlink_decoration:
-            normal: dotted
+            mode: always
+            normal: dotted-underline
             hover: underline
         cursor:
             default: '#B0B0B0'

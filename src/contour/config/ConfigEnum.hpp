@@ -3,6 +3,7 @@
 
 #include <contour/config/ConfigEnumInfo.hpp>
 
+#include <vtbackend/core/LinkDecoration.hpp> // LinkDecorationMode
 #include <vtbackend/core/Search.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/screen/GutterSettings.hpp> // LineNumberMode
@@ -80,6 +81,18 @@ namespace detail
             vtbackend::StickyHeaderMode::Always, "always", "Also while following output" },
     };
 
+    /// When links are decorated: hyperlink_decoration.mode.
+    inline constexpr auto LinkDecorationModeTable = std::array {
+        ConfigEnumInfo<vtbackend::LinkDecorationMode> {
+            vtbackend::LinkDecorationMode::Always, "always", "Always" },
+        ConfigEnumInfo<vtbackend::LinkDecorationMode> {
+            vtbackend::LinkDecorationMode::Hover, "hover", "Only under the pointer" },
+        ConfigEnumInfo<vtbackend::LinkDecorationMode> {
+            vtbackend::LinkDecorationMode::Modifier, "modifier", "While the follow modifier is held" },
+        ConfigEnumInfo<vtbackend::LinkDecorationMode> {
+            vtbackend::LinkDecorationMode::Never, "never", "Never" },
+    };
+
     /// The groups of marks the scrollbar can show (`scrollbar.marks`), one token of its list each.
     ///
     /// Owned by vtbackend, so the table hangs off the type from here, as FoldJumpBehavior's does: the
@@ -128,6 +141,12 @@ template <>
 constexpr std::span<ConfigEnumInfo<vtbackend::StickyHeaderMode> const> configEnumValues() noexcept
 {
     return detail::StickyHeaderModeTable;
+}
+
+template <>
+constexpr std::span<ConfigEnumInfo<vtbackend::LinkDecorationMode> const> configEnumValues() noexcept
+{
+    return detail::LinkDecorationModeTable;
 }
 
 template <>

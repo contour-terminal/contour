@@ -563,9 +563,9 @@ command's mark to the end of the buffer, the opposite end (`sources/VT100Screen/
 
 ### 7.4 Paths relative to the command's directory
 
-`Terminal::localPathAtMousePosition` and the hint-mode `filepath` resolution resolve relative paths
-against the **clicked row's block** working directory, through `resolveWorkingDirectory`, instead of
-today's OSC 7 value. A record whose locality is `Foreign` (ssh, container, VM) refuses local opening
+The follow gesture (`Terminal::lookUpLinkAt`) and the hint-mode `filepath` resolution resolve relative
+paths against the **clicked row's block** working directory, through `resolveWorkingDirectory`, instead
+of today's OSC 7 value. A record whose locality is `Foreign` (ssh, container, VM) refuses local opening
 exactly as OSC 3008 already does. No record for the row → today's behaviour.
 
 ---

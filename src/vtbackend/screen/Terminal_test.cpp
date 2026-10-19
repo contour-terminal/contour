@@ -4,6 +4,7 @@
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalTestFixtures.hpp>
+#include <vtbackend/testing/DetectingTerm.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -247,17 +248,19 @@ TEST_CASE("Terminal.firstPointerEventOntoTheTopLeftCellHoversItsLink", "[termina
     CHECK(terminal.currentMouseGridPosition() == topLeft);
 }
 
-TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
+TEST_CASE("Terminal.pathUnderThePointer", "[terminal]")
 {
     namespace fs = std::filesystem;
 
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-local-path" };
-    auto const& tmpRoot = tmpDir.path();
-    fs::create_directories(tmpRoot / "nested");
-    {
-        auto file = std::ofstream(tmpRoot / "nested" / "file.txt");
-        file << "test";
-    }
+    // The follow gesture finds the path without looking (Terminal::lookUpLinkAt()); the probe thread then
+    // looks in a filesystem, an in-memory one here, which the lookup itself never reads.
+    auto files = core::platform::testing::InMemoryFileSystem {};
+#ifdef _WIN32
+    auto const tmpRoot = fs::path { "C:/contour-local-path" };
+#else
+    auto const tmpRoot = fs::path { "/contour-local-path" };
+#endif
+    files.addFile(tmpRoot / "nested" / "file.txt", "test");
 
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
     auto constexpr UiHandledHint = false;
@@ -280,7 +283,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        auto const path = terminal.localPathAtMousePosition();
+        auto const path = followedPathUnderPointer(terminal, files);
         REQUIRE(path.has_value());
         CHECK(*path == expectedFile);
     }
@@ -297,7 +300,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        auto const path = terminal.localPathAtMousePosition();
+        auto const path = followedPathUnderPointer(terminal, files);
         REQUIRE(path.has_value());
         CHECK(*path == expectedFile);
     }
@@ -309,11 +312,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         // intact instead of truncating the match at the tilde. A directory literally
         // named "short~1" reproduces the same shape on every platform.
         auto const shortDir = tmpRoot / "short~1";
-        fs::create_directories(shortDir);
-        {
-            auto file = std::ofstream(shortDir / "file.txt");
-            file << "test";
-        }
+        files.addFile(shortDir / "file.txt", "test");
         auto const tildePath = (shortDir / "file.txt").generic_string();
         auto const expectedTildeFile = (shortDir / "file.txt").lexically_normal().string();
 
@@ -326,7 +325,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        auto const path = terminal.localPathAtMousePosition();
+        auto const path = followedPathUnderPointer(terminal, files);
         REQUIRE(path.has_value());
         CHECK(*path == expectedTildeFile);
     }
@@ -336,8 +335,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
         // OSC 7 reports the directory in UTF-8. Read as a narrow path, Windows took it in the ANSI code page
         // and found no file in it.
         auto const directory = tmpRoot / vtpty::testing::NonAsciiName;
-        fs::create_directories(directory / "nested");
-        std::ofstream(directory / "nested" / "file.txt") << "test";
+        files.addFile(directory / "nested" / "file.txt", "test");
 
         auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
         auto& terminal = mc.terminal;
@@ -349,7 +347,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        auto const path = terminal.localPathAtMousePosition().value_or(std::nullopt);
+        auto const path = followedPathUnderPointer(terminal, files).value_or(std::nullopt);
         REQUIRE(path.has_value());
         CHECK(core::pathFromUtf8(*path) == (directory / "nested" / "file.txt").lexically_normal());
     }
@@ -366,7 +364,7 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        CHECK(terminal.localPathAtMousePosition() == std::nullopt);
+        CHECK(followedPathUnderPointer(terminal, files) == std::nullopt);
     }
 
     SECTION("a working directory on another host resolves no relative path here")
@@ -384,8 +382,8 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        CHECK(terminal.pathTextAtMousePosition() == "nested/file.txt");
-        CHECK(terminal.localPathAtMousePosition() == std::nullopt);
+        CHECK(printedPathUnderPointer(terminal) == "nested/file.txt");
+        CHECK(followedPathUnderPointer(terminal, files) == std::nullopt);
     }
 
     SECTION("a replica resolves a path here only when its daemon runs on this machine")
@@ -403,12 +401,12 @@ TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
                                     PixelCoordinate,
                                     UiHandledHint);
 
-        CHECK(terminal.pathTextAtMousePosition() == "nested/file.txt");
+        CHECK(printedPathUnderPointer(terminal) == "nested/file.txt");
         if (role == vtbackend::ReplicaRole::OtherMachine)
-            CHECK(terminal.localPathAtMousePosition()
+            CHECK(followedPathUnderPointer(terminal, files)
                   == std::unexpected(vtbackend::PathRefusal::ReplicaOfAnotherMachine));
         else
-            CHECK(terminal.localPathAtMousePosition() == expectedFile);
+            CHECK(followedPathUnderPointer(terminal, files) == expectedFile);
     }
 }
 
@@ -2962,8 +2960,7 @@ TEST_CASE("Terminal.hint_mode_accepts_labels_while_lock_keys_are_latched", "[ter
         mock.writeToScreen("visit https://example.com now");
 
         mock.terminal.activateHintMode(
-            vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                         .action = vtbackend::HintAction::Copy });
+            vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
         REQUIRE(mock.terminal.isHintModeActive());
         REQUIRE(mock.terminal.hintMatches().size() == 1);
 
@@ -3159,14 +3156,145 @@ TEST_CASE("Terminal.hint_mode_matches_a_url_wrapped_across_rows", "[terminal][hi
 
     REQUIRE(mock.terminal.currentScreen().isLineWrapped(LineOffset(1)));
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
 
     REQUIRE(mock.terminal.hintMatches().size() == 1);
     auto const& match = mock.terminal.hintMatches().at(0);
     CHECK(match.matchedText == "https://example.com/wrapped");
     CHECK(match.start == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
     CHECK(match.end == CellLocation { .line = LineOffset(1), .column = ColumnOffset(6) });
+}
+
+TEST_CASE("Terminal.hint_mode_clips_a_logical_line_beyond_the_scan_budget", "[terminal][hintmode][links]")
+{
+    // A crash and budget test, not the freeze guard (that is HintModeHandler.FilepathIsLinearOnALongWordRun).
+    // 64 KB is more than one scan budget: the logical line is cut into two scan texts, and the one word run
+    // in each touches a clipped edge, so no match is offered rather than a truncated one.
+    auto mock = MockTerm { PageSize { LineCount(50), ColumnCount(200) }, LineCount(400) };
+    mock.terminal.setMode(vtbackend::DECMode::AutoWrap,
+                          true); // one 64 KB logical line, as bench-headless sets up
+    mock.writeToScreen(std::string(std::size_t { 64 } * 1024, 'a'));
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
+    CHECK(mock.terminal.hintMatches().empty()); // each match touches a clipped edge and is dropped
+}
+
+TEST_CASE("Terminal.hint_mode_matches_a_cjk_url_whole_at_its_columns", "[terminal][hintmode][links]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(60) } };
+    mock.writeToScreen("東京 https://例え.jp/パス。次へ");
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = { .table = vtbackend::LinkPatterns::builtins(), .names = { "url" }, .resolve = {} },
+        .action = vtbackend::HintAction::Copy });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().front();
+    CHECK(match.matchedText == "https://例え.jp/パス");
+    CHECK(match.start == CellLocation { .line = LineOffset(0), .column = ColumnOffset(5) });
+    CHECK(match.end
+          == CellLocation { .line = LineOffset(0), .column = ColumnOffset(24) }); // ス's second column
+}
+
+TEST_CASE("Terminal.hint_mode_counts_a_cluster_as_one_column", "[terminal][hintmode][links]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    mock.writeToScreen("e\xCC\x81 https://x.y/z");
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = { .table = vtbackend::LinkPatterns::builtins(), .names = { "url" }, .resolve = {} },
+        .action = vtbackend::HintAction::Copy });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    CHECK(mock.terminal.hintMatches().front().start.column == ColumnOffset(2));
+}
+
+TEST_CASE("Terminal.hint_mode_counts_two_clusters_as_two_columns_at_both_ends", "[terminal][hintmode][links]")
+{
+    // Two `e` + U+0301 clusters take one column each, so the path begins at column 3 and ends at column 11;
+    // the old scanner counted codepoints and put them at 5 and 13.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    mock.writeToScreen("e\xcc\x81"
+                       "e\xcc\x81 src/a.txt");
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = { .table = vtbackend::LinkPatterns::builtins(), .names = { "filepath" }, .resolve = {} },
+        .action = vtbackend::HintAction::Copy });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    auto const& match = mock.terminal.hintMatches().front();
+    CHECK(match.matchedText == "src/a.txt");
+    CHECK(match.start == CellLocation { .line = LineOffset(0), .column = ColumnOffset(3) });
+    CHECK(match.end == CellLocation { .line = LineOffset(0), .column = ColumnOffset(11) });
+}
+
+TEST_CASE("Terminal.hint_mode_keeps_a_parenthesised_url_whole", "[terminal][hintmode][links]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(60) } };
+    mock.writeToScreen("see https://en.wikipedia.org/wiki/Foo_(bar).");
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = { .table = vtbackend::LinkPatterns::builtins(), .names = { "url" }, .resolve = {} },
+        .action = vtbackend::HintAction::Copy });
+    REQUIRE(mock.terminal.hintMatches().size() == 1);
+    CHECK(mock.terminal.hintMatches().front().matchedText == "https://en.wikipedia.org/wiki/Foo_(bar)");
+}
+
+TEST_CASE("Terminal.hint_mode_offers_no_slashless_tilde_word_as_a_path", "[terminal][hintmode][links]")
+{
+    // Only a leading `~/` names the home directory: `~10` is prose, like any other bare word.
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    mock.writeToScreen("approx ~10 ms");
+    mock.terminal.flushInput();
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = { .table = vtbackend::LinkPatterns::builtins(), .names = { "filepath" }, .resolve = {} },
+        .action = vtbackend::HintAction::Copy });
+    CHECK(mock.terminal.hintMatches().empty());
+}
+
+TEST_CASE("Terminal.hint_mode_resolves_absolute_and_home_paths_with_no_directory_known",
+          "[terminal][hintmode][links]")
+{
+    // No OSC 7, no block: no base directory to resolve a relative path against. An absolute path and a `~/`
+    // path do not need one, so they resolve through the injected filesystem all the same (§4.4); a path that
+    // names nothing is offered as written, and a bare word is no path.
+    auto const root = std::filesystem::temp_directory_path() / "contour-in-memory-only";
+    auto const home = root / "home";
+    auto const absolute = root / "proj" / "doc.txt";
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    REQUIRE(files.createDirectories(home).has_value());
+    REQUIRE(files.createDirectories(absolute.parent_path()).has_value());
+    files.addFile(home / "notes.txt", "x");
+    files.addFile(absolute, "x");
+
+    auto events = vtbackend::Terminal::NullEvents {};
+    auto const pageSize = PageSize { LineCount(3), ColumnCount(120) };
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = pageSize;
+    auto const environment = core::testing::FakeEnvironment { { { "HOME", core::pathToUtf8(home) } } };
+    auto terminal = vtbackend::Terminal { events,
+                                          environment,
+                                          files,
+                                          std::make_unique<vtpty::MockPty>(pageSize),
+                                          settings,
+                                          std::nullopt,
+                                          vtbackend::TerminalClocks::system(),
+                                          vtbackend::randomSemanticBlockTokens() };
+
+    terminal.writeToScreen(std::format(
+        "see {} and ~/notes.txt and {}/gone.txt", core::pathToUtf8(absolute), core::pathToUtf8(root)));
+    terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = { .table = vtbackend::LinkPatterns::builtins(), .names = { "filepath" }, .resolve = {} },
+        .action = vtbackend::HintAction::Copy });
+
+    auto const& matches = terminal.hintMatches();
+    REQUIRE(matches.size() == 3); // "see" and "and" are bare words: dropped
+    CHECK(matches[0].target.target == core::pathToUtf8(absolute.lexically_normal()));
+    CHECK(matches[0].target.pathKind == vtbackend::PathKind::File);
+    CHECK(matches[1].target.target == core::pathToUtf8((home / "notes.txt").lexically_normal()));
+    CHECK(matches[1].target.pathKind == vtbackend::PathKind::File);
+    CHECK(matches[1].matchedText == matches[1].target.target);
+    CHECK(matches[2].target.target == core::pathToUtf8(root) + "/gone.txt"); // nothing resolves: as printed
+    CHECK(matches[2].target.pathKind == vtbackend::PathKind::Missing);
 }
 
 TEST_CASE("Terminal.hint_mode_visible_scope_ignores_scrollback", "[terminal][hintmode]")
@@ -3178,10 +3306,8 @@ TEST_CASE("Terminal.hint_mode_visible_scope_ignores_scrollback", "[terminal][hin
     // The URL is now above the page: it must not be offered under the default scope.
     REQUIRE(mock.terminal.currentScreen().historyLineCount() > LineCount(0));
 
-    mock.terminal.activateHintMode(
-        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                     .action = vtbackend::HintAction::Copy,
-                                     .scope = vtbackend::HintScope::Visible });
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = {}, .action = vtbackend::HintAction::Copy, .scope = vtbackend::HintScope::Visible });
 
     CHECK(mock.terminal.hintMatches().empty());
 }
@@ -3192,11 +3318,10 @@ TEST_CASE("Terminal.hint_mode_scrollback_scope_finds_history", "[terminal][hintm
     mock.writeToScreen("https://scrolled-away.example\r\n\r\n\r\n\r\n\r\n");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(
-        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                     .action = vtbackend::HintAction::Copy,
-                                     .scope = vtbackend::HintScope::Scrollback,
-                                     .scrollbackLimit = LineCount(1000) });
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest { .patterns = {},
+                                                                .action = vtbackend::HintAction::Copy,
+                                                                .scope = vtbackend::HintScope::Scrollback,
+                                                                .scrollbackLimit = LineCount(1000) });
 
     REQUIRE(mock.terminal.hintMatches().size() == 1);
     auto const& match = mock.terminal.hintMatches().at(0);
@@ -3215,11 +3340,10 @@ TEST_CASE("Terminal.hint_mode_scrollback_labels_survive_scrolling", "[terminal][
     mock.writeToScreen("https://two.example\r\n\r\n\r\n\r\n\r\n");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(
-        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                     .action = vtbackend::HintAction::Copy,
-                                     .scope = vtbackend::HintScope::Scrollback,
-                                     .scrollbackLimit = LineCount(1000) });
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest { .patterns = {},
+                                                                .action = vtbackend::HintAction::Copy,
+                                                                .scope = vtbackend::HintScope::Scrollback,
+                                                                .scrollbackLimit = LineCount(1000) });
 
     auto const before = mock.terminal.hintMatches();
     REQUIRE(before.size() == 2);
@@ -3244,10 +3368,8 @@ TEST_CASE("Terminal.hint_mode_visible_scope_scans_again_on_scroll", "[terminal][
     mock.writeToScreen("https://scrolled-away.example\r\n\r\n\r\n\r\n\r\n");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(
-        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                     .action = vtbackend::HintAction::Copy,
-                                     .scope = vtbackend::HintScope::Visible });
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = {}, .action = vtbackend::HintAction::Copy, .scope = vtbackend::HintScope::Visible });
     REQUIRE(mock.terminal.hintMatches().empty());
 
     // The visible scope's scan region *is* the viewport, so scrolling the URL back into view must
@@ -3265,8 +3387,8 @@ TEST_CASE("Terminal.hint_mode_overlay_draws_labels_into_the_render_buffer", "[te
     mock.writeToScreen("visit https://example.com now");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
     REQUIRE(mock.terminal.hintMatches().size() == 1);
     auto const& match = mock.terminal.hintMatches().at(0);
     REQUIRE(match.label == "a");
@@ -3291,8 +3413,8 @@ TEST_CASE("Terminal.hint_mode_overlay_reaches_a_line_without_the_cursor", "[term
     mock.writeToScreen("second line holds the cursor");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
     REQUIRE(mock.terminal.hintMatches().size() == 1);
     auto const& match = mock.terminal.hintMatches().at(0);
     REQUIRE(match.start.line == LineOffset(0));
@@ -3314,8 +3436,8 @@ TEST_CASE("Terminal.hint_mode_overlay_highlights_a_wrapped_match_on_both_rows", 
     mock.writeToScreen("https://example.com/wrapped");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
     REQUIRE(mock.terminal.hintMatches().size() == 1);
     auto const& match = mock.terminal.hintMatches().at(0);
     REQUIRE(match.start.line == LineOffset(0));
@@ -3347,13 +3469,84 @@ TEST_CASE("Terminal.hint_mode_overlay_highlights_a_wrapped_match_on_both_rows", 
     CHECK(*firstOutside != *firstInside); // and the highlight stops where the match does
 }
 
+TEST_CASE("Terminal.hint_mode_acts_on_the_printed_text_and_on_a_paths_resolved_form", "[terminal][hintmode]")
+{
+    // Copy, Paste and Select take a URL and a custom match as printed: a template's expansion is what Open
+    // opens, never what is copied. A path takes the absolute form it resolved to, as it always has.
+#ifdef _WIN32
+    auto const file = std::filesystem::path { "C:/hint-copy/a.cpp" };
+#else
+    auto const file = std::filesystem::path { "/hint-copy/a.cpp" };
+#endif
+    auto term = vtbackend::test::DetectingTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    term.files.addFile(file, "x");
+    auto& mock = term.mock;
+    mock.writeToScreen(std::format("J-1 https://x.y/z {}", file.generic_string()));
+    mock.terminal.flushInput();
+    auto const specs =
+        std::array { vtbackend::LinkPatternSpec { .name = "jira",
+                                                  .regex = R"(\bJ-\d+\b)",
+                                                  .activation = vtbackend::LinkActivation::Clickable,
+                                                  .urlTemplate = "https://jira.example/{0}" } };
+    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+        .patterns = vtbackend::HintPatternSet { .table = std::make_shared<vtbackend::LinkPatterns const>(
+                                                    vtbackend::LinkPatterns::compile(specs)),
+                                                .names = {},
+                                                .resolve = {} },
+        .action = vtbackend::HintAction::Copy });
+    auto const& matches = mock.terminal.hintMatches();
+    auto const at = [&](int column) -> vtbackend::HintMatch const& {
+        auto const found =
+            std::ranges::find(matches, ColumnOffset(column), [](vtbackend::HintMatch const& match) {
+                return match.start.column;
+            });
+        REQUIRE(found != matches.end());
+        return *found;
+    };
+
+    CHECK(at(0).matchedText == "J-1");
+    CHECK(at(0).target.target == "https://jira.example/J-1");
+    CHECK(at(4).matchedText == "https://x.y/z");
+    CHECK(core::pathFromUtf8(at(18).matchedText) == file.lexically_normal());
+    CHECK(at(18).target.kind == vtbackend::LinkKind::Path);
+}
+
+TEST_CASE("Terminal.hint_mode_copies_but_never_opens_a_scheme_the_printed_text_chose", "[terminal][hintmode]")
+{
+    // §7.6: printed text whose scheme no link may open opens nothing through hint mode either; it can still
+    // be copied, as printed.
+    auto const specs =
+        std::array { vtbackend::LinkPatternSpec { .name = "doc",
+                                                  .regex = R"(\S+\.pdf)",
+                                                  .activation = vtbackend::LinkActivation::Clickable,
+                                                  .urlTemplate = std::nullopt } };
+    auto const table =
+        std::make_shared<vtbackend::LinkPatterns const>(vtbackend::LinkPatterns::compile(specs));
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(40) } };
+    mock.writeToScreen("smb://evil/x.pdf");
+    mock.terminal.flushInput();
+    auto const pick = [&](vtbackend::HintAction action) {
+        mock.terminal.activateHintMode(vtbackend::HintModeRequest {
+            .patterns = vtbackend::HintPatternSet { .table = table, .names = { "doc" }, .resolve = {} },
+            .action = action });
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        mock.sendCharEvent(U'a');
+    };
+
+    pick(vtbackend::HintAction::Open);
+    CHECK_FALSE(mock.openedLink.has_value());
+    CHECK(mock.openedDocument.empty());
+
+    pick(vtbackend::HintAction::Copy);
+    CHECK(mock.clipboardData == "smb://evil/x.pdf");
+}
+
 TEST_CASE("Terminal.hint_mode_dispatches_each_action", "[terminal][hintmode]")
 {
     // Every HintAction routed through HintModeExecutor::onHintSelected, so a new one cannot be
     // added without a home here.
     auto const activate = [](auto& mock, vtbackend::HintAction action) {
-        mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-            .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = action });
+        mock.terminal.activateHintMode(vtbackend::HintModeRequest { .patterns = {}, .action = action });
         REQUIRE(mock.terminal.hintMatches().size() == 1);
         mock.sendCharEvent(U'a');
     };
@@ -3373,7 +3566,36 @@ TEST_CASE("Terminal.hint_mode_dispatches_each_action", "[terminal][hintmode]")
         mock.writeToScreen("go https://example.com now");
         mock.terminal.flushInput();
         activate(mock, vtbackend::HintAction::Open);
-        CHECK(mock.openedDocument == "https://example.com");
+        // As Ctrl+click opens it: through openLink(), whose frontend applies the follow gesture's refusals.
+        REQUIRE(mock.openedLink.has_value());
+        CHECK(mock.openedLink->kind == vtbackend::LinkKind::Url);
+        CHECK(mock.openedLink->target == "https://example.com");
+        CHECK(mock.openedDocument.empty());
+    }
+
+    SECTION("Open, a path that names a file: as Ctrl+click opens it, at its location")
+    {
+        // In the filesystem the terminal was given, which hint mode looks paths up in: an in-memory one.
+#ifdef _WIN32
+        auto const file = std::filesystem::path { "C:/hint-open/a.cpp" };
+#else
+        auto const file = std::filesystem::path { "/hint-open/a.cpp" };
+#endif
+        auto term = vtbackend::test::DetectingTerm { PageSize { LineCount(3), ColumnCount(80) } };
+        term.files.addFile(file, "x");
+        auto& mock = term.mock;
+        mock.writeToScreen(std::format("see {}:12:5 now", file.generic_string()));
+        mock.terminal.flushInput();
+        mock.terminal.activateHintMode(
+            vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Open });
+        REQUIRE(mock.terminal.hintMatches().size() == 1);
+        mock.sendCharEvent(U'a');
+        REQUIRE(mock.openedLink.has_value());
+        CHECK(mock.openedLink->kind == vtbackend::LinkKind::Path);
+        CHECK(core::pathFromUtf8(mock.openedLink->target) == file.lexically_normal());
+        CHECK(mock.openedLink->pathKind == vtbackend::PathKind::File);
+        CHECK(mock.openedLink->location == vtbackend::LinkLocation { .line = 12, .column = 5 });
+        CHECK(mock.openedDocument.empty());
     }
 
     SECTION("Paste")
@@ -3472,8 +3694,8 @@ TEST_CASE("Terminal.hint_mode_validates_and_resolves_paths_against_the_working_d
     mock.writeToScreen("but Nonexistent is absent");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
 
     auto const& matches = mock.terminal.hintMatches();
     auto const expected = (tmpRoot / "Makefile").lexically_normal().string(); // as the mouse spells it
@@ -3503,11 +3725,12 @@ TEST_CASE("Terminal.hint_mode_resolves_a_path_as_the_mouse_does", "[terminal][hi
                                      CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) },
                                      vtbackend::PixelCoordinate {},
                                      false);
-    auto const byMouse = mock.terminal.localPathAtMousePosition();
+    auto const byMouse = followedPathUnderPointer(mock.terminal, core::platform::NativeFileSystem::instance())
+                             .value_or(std::nullopt);
     REQUIRE(byMouse == (tmpRoot / "Makefile").lexically_normal().string());
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
     auto const& matches = mock.terminal.hintMatches();
     REQUIRE(matches.size() == 1);
     CHECK(matches[0].matchedText == *byMouse);
@@ -3531,8 +3754,8 @@ TEST_CASE("Terminal.hint_mode_resolves_no_path_in_another_hosts_working_director
     mock.writeToScreen("edit Makefile please");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
 
     CHECK(mock.terminal.hintMatches().empty());
 }
@@ -3554,8 +3777,8 @@ TEST_CASE("Terminal.hint_mode_resolves_paths_in_a_working_directory_beyond_ascii
     mock.writeToScreen("edit Makefile please");
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
 
     auto const& matches = mock.terminal.hintMatches();
     REQUIRE(matches.size() == 1);
@@ -3591,8 +3814,7 @@ TEST_CASE("Terminal.hint_mode_types_no_path_a_shell_would_read_as_keys", "[termi
         mock.writeToScreen("see notes.txt");
         mock.terminal.flushInput();
         mock.resetReplyData();
-        mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-            .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = action });
+        mock.terminal.activateHintMode(vtbackend::HintModeRequest { .patterns = {}, .action = action });
         REQUIRE(mock.terminal.hintMatches().size() == 1);
         mock.sendCharEvent(U'a');
         return Typed { .input = mock.replyData(), .clipboard = mock.clipboardData };
@@ -3655,8 +3877,7 @@ TEST_CASE("Terminal.hint_mode_extends_the_scan_past_the_viewport_to_finish_a_wra
     auto const activateAt = [&](int scrollOffset) {
         mock.terminal.viewport().scrollTo(vtbackend::ScrollOffset(scrollOffset));
         mock.terminal.activateHintMode(
-            vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                         .action = vtbackend::HintAction::Copy });
+            vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
     };
 
     SECTION("the head is visible: the scan reaches down for the tail and yields the whole URL")
@@ -3692,8 +3913,8 @@ TEST_CASE("Terminal.hint_mode_maps_columns_past_a_wide_character", "[terminal][h
                 CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) })
             == 2);
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
 
     REQUIRE(mock.terminal.hintMatches().size() == 1);
     auto const& match = mock.terminal.hintMatches().at(0);
@@ -3712,7 +3933,7 @@ TEST_CASE("Terminal.hint_mode_survives_a_negative_scrollback_limit", "[terminal]
     mock.terminal.flushInput();
 
     mock.terminal.activateHintMode(
-        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+        vtbackend::HintModeRequest { .patterns = {},
                                      .action = vtbackend::HintAction::Copy,
                                      .scope = vtbackend::HintScope::Scrollback,
                                      .scrollbackLimit = vtbackend::LineCount(-100) });
@@ -3733,7 +3954,7 @@ TEST_CASE("Terminal.hint_mode_matches_track_content_scrolling", "[terminal][hint
     mock.terminal.flushInput();
 
     mock.terminal.activateHintMode(
-        vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
+        vtbackend::HintModeRequest { .patterns = {},
                                      .action = vtbackend::HintAction::Copy,
                                      .scope = vtbackend::HintScope::Scrollback,
                                      .scrollbackLimit = vtbackend::LineCount(1000) });
@@ -3760,10 +3981,9 @@ TEST_CASE("Terminal.hint_mode_overlay_wraps_a_label_past_the_row_edge", "[termin
     // 27 matches force two-character labels. One URL starts at the very last column, so its label
     // cannot fit on that row: the second character must appear on the wrapped continuation row
     // rather than being silently dropped.
-    auto urlPatterns = std::vector<vtbackend::HintPattern>();
-    for (auto& pattern: vtbackend::HintModeHandler::builtinPatterns())
-        if (pattern.name == "url")
-            urlPatterns.push_back(std::move(pattern));
+    auto urlPatterns = vtbackend::HintPatternSet { .table = vtbackend::LinkPatterns::builtins(),
+                                                   .names = { "url" },
+                                                   .resolve = {} };
 
     auto mock = MockTerm { PageSize { LineCount(30), ColumnCount(20) }, LineCount(50) };
     for (auto const i: std::views::iota(0, 26))
@@ -5385,11 +5605,11 @@ TEST_CASE("Terminal looks a printed path up in the filesystem it was given", "[t
 
     terminal.setCurrentWorkingDirectory(fileUrlOf(directory));
     terminal.writeToScreen("open doc.txt now");
-    terminal.sendMouseMoveEvent(Modifier::None,
-                                CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) },
-                                vtbackend::PixelCoordinate {},
-                                /*uiHandledHint=*/false);
 
-    REQUIRE(terminal.pathTextAtMousePosition() == "doc.txt");
-    CHECK(terminal.localPathAtMousePosition() == core::pathToUtf8(file.lexically_normal()));
+    // Hint mode looks paths up while it labels them, so it asks the filesystem itself.
+    terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
+    auto const& matches = terminal.hintMatches();
+    REQUIRE(matches.size() == 1);
+    CHECK(matches[0].matchedText == core::pathToUtf8(file.lexically_normal()));
 }

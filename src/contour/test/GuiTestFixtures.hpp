@@ -9,12 +9,14 @@
 #include <contour/platform/Notifier.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/LauncherFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 
 #include <vtpty/ChannelPty.hpp>
@@ -23,7 +25,9 @@
 #include <vtpty/Pty.hpp>
 
 #include <core/Environment.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/platform/Clock.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <QtCore/QCoreApplication>
@@ -434,7 +438,8 @@ class TestApp
     ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
     ///                for what a test app gets without one.
     /// @param identity The machine the app's sessions run on. @see testHostIdentity() for the default.
-    /// @param fileSystem Where the app's sessions look up paths; null for this machine's. Borrowed.
+    /// @param fileSystem Where the app's sessions look up paths, link detection's probes too; null for the
+    ///                fixture's own in-memory one, fileSystem(). Borrowed.
     /// @param environment The environment variables the app reads as the test sets them.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
@@ -444,6 +449,7 @@ class TestApp
                      core::platform::FileSystem const* fileSystem = nullptr,
                      TestEnvironment::Overrides environment = {}):
         _environment { std::move(environment) },
+        _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(_environment,
              withTestNotifier(std::move(factory)),
              makeRecordingLauncher(),
@@ -453,7 +459,9 @@ class TestApp
              makeOutputFiles(),
              clocks(),
              std::move(identity),
-             fileSystem)
+             _sessionFiles,
+             nullptr,
+             linkServices())
     {
         parseTerminalVerb();
     }
@@ -469,6 +477,7 @@ class TestApp
     /// app's own default launcher rather than a recording one -- so launcher() is not available on it.
     /// @param placement Places what the app's default session factory and launcher start.
     explicit TestApp(std::shared_ptr<vtpty::ProcessPlacement> placement):
+        _sessionFiles { &_fileSystem },
         _app(_environment,
              nullptr,
              nullptr,
@@ -478,21 +487,23 @@ class TestApp
              makeOutputFiles(),
              clocks(),
              testHostIdentity(),
-             nullptr,
-             std::move(placement))
+             _sessionFiles,
+             std::move(placement),
+             linkServices())
     {
         parseTerminalVerb();
     }
 
-    /// Where the sessions of a test app look up paths.
+    /// Where the sessions of a test app look up paths, link detection's probes included.
     enum class SessionFiles : uint8_t
     {
-        ThisMachine = 0, ///< This machine's.
-        Fixture,         ///< The fixture's own in-memory filesystem, fileSystem(), which the test fills.
+        /// The fixture's own in-memory filesystem, fileSystem(), which the test fills: the default.
+        Fixture = 0,
+        ThisMachine, ///< This machine's: for a test of what the disk holds.
     };
 
-    /// A test app whose sessions look up paths where @p files says: for a test of what a path names, the
-    /// fixture's own filesystem, the one its command output files are on too.
+    /// A test app whose sessions look up paths where @p files says: by default the fixture's own filesystem,
+    /// the one its command output files are on too.
     /// @param files Where the app's sessions look up paths.
     /// @param environment The environment variables the app reads as the test sets them.
     explicit TestApp(SessionFiles files, TestEnvironment::Overrides environment = {}):
@@ -501,7 +512,7 @@ class TestApp
                 nullptr,
                 nullptr,
                 testHostIdentity(),
-                files == SessionFiles::Fixture ? &_fileSystem : nullptr,
+                files == SessionFiles::ThisMachine ? &core::platform::NativeFileSystem::instance() : nullptr,
                 std::move(environment))
     {
     }
@@ -511,6 +522,7 @@ class TestApp
     /// @param args The command tokens after the program name (e.g. {"font-locator"}).
     explicit TestApp(std::initializer_list<char const*> args,
                      std::unique_ptr<contour::session::SessionFactory> factory = nullptr):
+        _sessionFiles { &_fileSystem },
         _app(_environment,
              withTestNotifier(std::move(factory)),
              makeRecordingLauncher(),
@@ -519,7 +531,10 @@ class TestApp
              defaultSpeech(),
              makeOutputFiles(),
              clocks(),
-             testHostIdentity())
+             testHostIdentity(),
+             _sessionFiles,
+             nullptr,
+             linkServices())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -560,8 +575,27 @@ class TestApp
                                          .hostname = std::string { HostName } };
     }
 
-    /// The in-memory filesystem the app's command output files are written to.
+    /// The in-memory filesystem the app's command output files are written to, and, unless the test chose
+    /// this machine's (SessionFiles::ThisMachine), the one every session looks paths up in.
     [[nodiscard]] core::platform::testing::InMemoryFileSystem& fileSystem() noexcept { return _fileSystem; }
+
+    /// Runs a whole link detection cycle on @p session's terminal, as a display would over the quiet time
+    /// after output: a frame, the match job, a frame, the probes, a frame.
+    /// @param session A session of this app.
+    void detectLinks(contour::session::TerminalSession& session)
+    {
+        auto& terminal = session.terminal();
+        terminal.refreshRenderBuffer();
+        terminal.tick(terminal.currentTime() + vtbackend::LinkDetectorTuning {}.debounce);
+        terminal.refreshRenderBuffer();
+        _linkMatch.drain();
+        terminal.refreshRenderBuffer();
+        _linkProbe.drain();
+        terminal.refreshRenderBuffer();
+    }
+
+    /// Runs the path probes the app's sessions have handed the probe thread, a follow gesture's included.
+    void drainLinkProbes() { _linkProbe.drain(); }
 
     /// The steady clock every session's terminal reads: it moves only when a test advances it.
     [[nodiscard]] core::platform::ManualClock& steadyClock() noexcept { return _steadyClock; }
@@ -608,6 +642,17 @@ class TestApp
             _fileSystem, _processLiveness, std::filesystem::path(OutputDirectory));
     }
 
+    /// What the app's sessions detect links with: the fixture's manual executors, which detectLinks() drains,
+    /// the filesystem the app gets and a manual clock.
+    [[nodiscard]] vtbackend::LinkDetectionServices linkServices() noexcept
+    {
+        return vtbackend::LinkDetectionServices { .matchExecutor = _linkMatch,
+                                                  .probeExecutor = _linkProbe,
+                                                  .fileSystem = *_sessionFiles,
+                                                  .clock = _linkClock,
+                                                  .tuning = {} };
+    }
+
     /// The clocks the app's sessions read: the fixture's manual ones, in this process's time zone.
     [[nodiscard]] vtbackend::TerminalClocks clocks() noexcept
     {
@@ -637,12 +682,20 @@ class TestApp
     /// times read from them look like times the suite runs at.
     core::platform::ManualClock _steadyClock { core::platform::defaultSteadyClock().now() };
     core::platform::ManualWallClock _wallClock { core::platform::defaultSystemWallClock().now() };
-    /// Declared before _app, which borrows it for its command output files.
+    /// Declared before _app, which borrows it for its command output files and its sessions' link detection.
     core::platform::testing::InMemoryFileSystem _fileSystem { core::platform::testing::FileEntry {
         .path = "/run", .isDirectory = true } };
     /// What the app's command output files are told about other processes: nothing, so they keep
     /// whatever they find.
     UnknownProcessLiveness _processLiveness;
+    /// Declared before _app, whose sessions' link detection borrows them, and after _fileSystem: the jobs
+    /// still queued are dropped, never run, when the executors go, so nothing reads the filesystem then.
+    core::platform::ManualClock _linkClock;
+    core::async::testing::ManualExecutor _linkMatch; ///< Link matching; detectLinks() drains it.
+    core::async::testing::ManualExecutor _linkProbe; ///< Path probes; detectLinks() drains it.
+    /// Where the app's sessions look up paths, its link detection too: _fileSystem unless the test chose
+    /// another. Declared before _app, which borrows it.
+    core::platform::FileSystem const* _sessionFiles = nullptr;
     contour::ContourGuiApp _app;
 };
 

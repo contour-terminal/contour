@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/config/ModifierNames.hpp>
 
@@ -784,6 +785,52 @@ vtbackend::ColorPalette const* preferredColorPalette(ColorConfig const& colorCon
     return nullptr;
 }
 
+std::optional<std::string> skippedHintPatternReason(HintPatternConfig const& pattern)
+{
+    if (pattern.name.empty())
+        return "a pattern needs a name";
+    if (pattern.regex.empty() && !vtbackend::isBuiltinLinkPatternName(pattern.name))
+        return std::format("pattern '{}' needs a regex, as it names no built-in pattern ({})",
+                           pattern.name,
+                           core::joinHumanReadable(vtbackend::builtinLinkPatternNames()));
+    return std::nullopt;
+}
+
+std::vector<vtbackend::LinkPatternSpec> linkPatternSpecs(TerminalProfile const& profile)
+{
+    auto specs = std::vector<vtbackend::LinkPatternSpec> {};
+    auto const activationOf = [](bool clickable) {
+        return clickable ? vtbackend::LinkActivation::Clickable : vtbackend::LinkActivation::HintOnly;
+    };
+    for (auto const& pattern: profile.hintPatterns.value())
+        specs.push_back(vtbackend::LinkPatternSpec {
+            .name = pattern.name,
+            .regex = pattern.regex.empty() ? std::nullopt : std::optional { pattern.regex },
+            .activation = pattern.clickable.transform(activationOf),
+            .urlTemplate = pattern.url,
+        });
+    return specs;
+}
+
+std::shared_ptr<vtbackend::LinkPatterns const> linkPatternsFor(TerminalProfile const& profile)
+{
+    if (profile.hintPatterns.value().empty())
+        return vtbackend::LinkPatterns::builtins();
+    return std::make_shared<vtbackend::LinkPatterns const>(
+        vtbackend::LinkPatterns::compile(linkPatternSpecs(profile)));
+}
+
+std::optional<vtbackend::Modifiers> followHyperlinkModifiers(Config const& config)
+{
+    for (auto const& mapping: config.inputMappings.value().mouseMappings)
+        if (mapping.input == vtbackend::MouseButton::Left
+            && std::ranges::any_of(mapping.binding, [](actions::Action const& action) {
+                   return std::holds_alternative<actions::FollowHyperlink>(action);
+               }))
+            return mapping.modifiers;
+    return std::nullopt;
+}
+
 vtbackend::Settings sessionSettings(Config const& config,
                                     TerminalProfile const& profile,
                                     vtbackend::ColorPreference colorPreference,
@@ -825,6 +872,9 @@ vtbackend::Settings sessionSettings(Config const& config,
     settings.smoothScrolling = profile.smoothScrolling.value();
     settings.momentumScrolling = profile.momentumScrolling.value();
     settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
+    settings.linkPatterns = linkPatternsFor(profile);
+    settings.linkDecorationMode = profile.hyperlinkDecoration.value().mode;
+    settings.linkFollowModifiers = followHyperlinkModifiers(config);
     settings.statusDisplayType = profile.statusLine.value().initialType;
     settings.statusDisplayPosition = profile.statusLine.value().position;
     settings.indicatorStatusLine.left = profile.statusLine.value().indicator.left;
@@ -1070,7 +1120,7 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
             auto profile = base; // inherit the default profile's values, then overlay the file's keys
             // The file's root is the profile's body, so a malformed entry is reported as `<file>: <key>`;
             // the key alone would name neither the file nor the profile.
-            reader.readSideFile(path, *root, [&]() { reader.loadProfileBody(*root, profile); });
+            reader.readSideFile(path, *root, [&]() { reader.loadProfileBody(*root, profile, name); });
             config.profiles.value()[name] = std::move(profile);
             config.profileOrigins[name] = SettingsOrigin::SideFile;
         }
@@ -1404,6 +1454,22 @@ void YAMLConfigReader::load(Config& c)
 
         // loadFromEntry("color_schemes", c.colorschemes); // NB: This is always loaded lazily
         loadFromEntry("input_mapping", c.inputMappings);
+
+        // Said once, at the end: the mouse bindings are global and the modes are the profiles', so one
+        // missing binding is one mistake however many profiles (inheriting ones included) ask for the reveal.
+        if (!followHyperlinkModifiers(c))
+        {
+            auto revealing = std::vector<std::string> {};
+            for (auto const& [name, profile]: c.profiles.value())
+                if (profile.hyperlinkDecoration.value().mode == vtbackend::LinkDecorationMode::Modifier)
+                    revealing.push_back(name);
+            std::ranges::sort(revealing);
+            if (!revealing.empty())
+                errorLog()("hyperlink_decoration.mode is modifier in {} {} but no FollowHyperlink mouse "
+                           "binding exists; links will never be revealed.",
+                           revealing.size() == 1 ? "profile" : "profiles",
+                           core::joinHumanReadable(revealing, ", "));
+        }
     }
     catch (std::exception const& e)
     {
@@ -1478,10 +1544,12 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, TerminalProfile& where)
 {
     logger()("loading profile {}\n", entry);
-    loadProfileBody(node[entry], where);
+    loadProfileBody(node[entry], where, entry);
 }
 
-void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile& where)
+void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
+                                       TerminalProfile& where,
+                                       std::string_view profileName)
 {
     if (child)
     {
@@ -1567,7 +1635,15 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child, TerminalProfile&
         }
 
         loadFromEntry(child, "hyperlink_decoration", where.hyperlinkDecoration);
+        loadFromEntry(child, "file_opener", where.fileOpener);
         loadFromEntry(child, "hint_patterns", where.hintPatterns);
+        // Reported here, once, where the profile's own hint_patterns are read: a profile that merely inherits
+        // another's patterns does not repeat that profile's report, and the table itself is compiled again,
+        // silently, whenever the profile is applied.
+        if (child["hint_patterns"])
+            for (auto const& diagnostic:
+                 vtbackend::LinkPatterns::compile(linkPatternSpecs(where)).diagnostics())
+                errorLog()("Profile '{}': {}", profileName, diagnostic.message());
         loadFromEntry(child, "hint_scrollback_lines", where.hintScrollbackLines);
     }
 }
@@ -2735,9 +2811,37 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     loadFromEntry(child, "show_evicted", where.showEvicted);
 }
 
+namespace
+{
+    /// One `hint_patterns` entry as written.
+    /// @param item The entry's mapping.
+    /// @return The entry; or, where a key holds what it cannot take, what is wrong, naming the entry.
+    [[nodiscard]] std::expected<HintPatternConfig, std::string> readHintPattern(YAML::Node const& item)
+    {
+        auto pattern = HintPatternConfig {};
+        try
+        {
+            if (auto const nameNode = item["name"])
+                pattern.name = nameNode.as<std::string>();
+            if (auto const regexNode = item["regex"])
+                pattern.regex = regexNode.as<std::string>();
+            if (auto const clickableNode = item["clickable"])
+                pattern.clickable = clickableNode.as<bool>();
+            if (auto const urlNode = item["url"])
+                pattern.url = urlNode.as<std::string>();
+        }
+        catch (std::exception const& e)
+        {
+            return std::unexpected { std::format(
+                "pattern '{}': {}", pattern.name.empty() ? "<unnamed>" : pattern.name, e.what()) };
+        }
+        return pattern;
+    }
+} // namespace
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
-                                     std::vector<HintPatternConfig>& where)
+                                     std::vector<HintPatternConfig>& where) const
 {
     auto const child = node[entry];
     if (child && child.IsSequence())
@@ -2745,17 +2849,15 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         where.clear();
         for (auto const& item: child)
         {
-            auto patternConfig = HintPatternConfig {};
-            if (auto const nameNode = item["name"])
-                patternConfig.name = nameNode.as<std::string>();
-            if (auto const regexNode = item["regex"])
-                patternConfig.regex = regexNode.as<std::string>();
-            if (!patternConfig.name.empty() && !patternConfig.regex.empty())
-                where.push_back(std::move(patternConfig));
+            // A malformed key costs its own entry, not the list. A name-only entry changes a built-in's keys
+            // and keeps its regex; any other needs one.
+            auto pattern = readHintPattern(item);
+            auto const reason =
+                pattern ? skippedHintPatternReason(*pattern) : std::optional { pattern.error() };
+            if (reason)
+                errorLog()("Skipping an entry of {}: {}.", keyPathTo(node, entry), *reason);
             else
-                logger()("Skipping hint pattern with missing name or regex: name='{}', regex='{}'",
-                         patternConfig.name.empty() ? "<unnamed>" : patternConfig.name,
-                         patternConfig.regex);
+                where.push_back(std::move(*pattern));
         }
     }
 }
@@ -2807,9 +2909,40 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     auto const child = node[entry];
     if (child)
     {
+        loadFromEntry(child, "mode", where.mode);
         loadFromEntry(child, "normal", where.normal);
         loadFromEntry(child, "hover", where.hover);
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     FileOpenerConfig& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    // The string form names the command alone, which then runs detached -- also where the profile started as
+    // a copy of one whose opener ran in a pane.
+    if (child.IsScalar())
+    {
+        loadFromEntry(node, entry, where.command);
+        where.placement = actions::OutputPlacement::Detached;
+    }
+    else
+    {
+        loadGuarded(child, "command", where.command);
+        loadGuarded(child, "placement", where.placement);
+    }
+
+    // Validated once, here, so that the problem is reported when the file is read rather than at each click.
+    // Kept as written: the opener disables it, and a save of the profile writes back what the user wrote.
+    if (where.command.empty())
+        return;
+    if (auto const parsed = FileOpenerTemplate::parse(where.command); !parsed)
+        errorLog()("file_opener '{}': {}; files open with the system's default application.",
+                   where.command,
+                   describe(parsed.error()));
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -4489,7 +4622,7 @@ static void emitColorPaletteBody(Writer& writer, std::string& doc, vtbackend::Co
                    entry.defaultForegroundBright,
                    entry.defaultForegroundDimmed);
 
-    processWithDoc(documentation::HyperlinkDecoration {},
+    processWithDoc(documentation::HyperlinkDecorationColors {},
                    entry.hyperlinkDecoration.normal,
                    entry.hyperlinkDecoration.hover);
 

@@ -111,6 +111,8 @@ enum class ViMotion : uint8_t
     JumpToMarkBackward,    // <C-O>
     JumpToMarkForward,     // <C-I>
     CenterCursor,          // zz
+    LinkForward,           // ]x
+    LinkBackward,          // [x
 };
 
 enum class ViOperator : uint8_t
@@ -202,6 +204,9 @@ class ViInputHandler: public InputHandler
 
         /// Runs one of vim's `z` fold commands on the block under the Vi cursor, or on all of them.
         virtual void fold(ViFoldCommand command) = 0;
+
+        /// Opens the link under the vi cursor, as Ctrl+click would there (`gx`).
+        virtual void followLinkAtCursor() = 0;
     };
 
     ViInputHandler(Executor& theExecutor, ViMode initialMode);
@@ -385,6 +390,8 @@ struct std::formatter<vtbackend::ViMotion>: formatter<std::string_view>
             case ViMotion::LineMarkUp: name = "LineMarkUp"; break;
             case ViMotion::LineMarkDown: name = "LineMarkDown"; break;
             case ViMotion::CenterCursor: name = "CenterCursor"; break;
+            case ViMotion::LinkForward: name = "LinkForward"; break;
+            case ViMotion::LinkBackward: name = "LinkBackward"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

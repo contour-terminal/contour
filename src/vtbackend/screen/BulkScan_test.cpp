@@ -570,7 +570,7 @@ constexpr auto RandomTextSetups = std::array {
 /// A choice in [0, @p n), drawn from the engine directly so that a seed reproduces on every platform.
 size_t below(std::mt19937& rng, size_t n)
 {
-    return static_cast<size_t>(test::detail::drawBetween(rng, 0, static_cast<int>(n) - 1));
+    return static_cast<size_t>(test::drawBetween(rng, 0, static_cast<int>(n) - 1));
 }
 
 /// Random text: up to ten pieces, half of them ASCII words of up to 30 letters (some followed by a

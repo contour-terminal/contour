@@ -35,7 +35,6 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
-#include <regex>
 #include <set>
 #include <string>
 #include <string_view>
@@ -479,11 +478,16 @@ TEST_CASE("a server-side clear takes what named the mirror's dropped rows with t
     REQUIRE(bare.historyLines() == 3);
 
     auto& terminal = *bare.terminal;
-    terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = { vtbackend::HintPattern { .name = "ab", .regex = std::regex("ab"), .resolve = {} } },
-        .action = vtbackend::HintAction::Copy,
-        .scope = vtbackend::HintScope::Scrollback,
-        .scrollbackLimit = vtbackend::LineCount(100) });
+    auto const specs =
+        std::array { vtbackend::LinkPatternSpec { .name = "ab", .regex = "ab", .activation = {} } };
+    terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = { .table = std::make_shared<vtbackend::LinkPatterns const>(
+                                                       vtbackend::LinkPatterns::compile(specs)),
+                                                   .names = { "ab" },
+                                                   .resolve = {} },
+                                     .action = vtbackend::HintAction::Copy,
+                                     .scope = vtbackend::HintScope::Scrollback,
+                                     .scrollbackLimit = vtbackend::LineCount(100) });
     REQUIRE(std::ranges::any_of(terminal.hintMatches(), [](vtbackend::HintMatch const& match) {
         return match.start.line < vtbackend::LineOffset(0);
     }));

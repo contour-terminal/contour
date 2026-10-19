@@ -1,9 +1,11 @@
 #pragma once
 
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputGenerator.hpp> // Modifier
+#include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/shell/CommandBlock.hpp> // CommandBlockStoreLimits
 #include <vtbackend/shell/Folding.hpp>      // FoldJumpBehavior, FoldingAvailability
@@ -18,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <map>
+#include <memory>
 
 namespace vtbackend
 {
@@ -297,6 +300,12 @@ struct Settings
     std::u32string extendedWordDelimiters = U" "; ///< What ends a word a triple click selects.
     Modifiers mouseProtocolBypassModifiers = Modifier::Shift;
     Modifiers mouseBlockSelectionModifiers = Modifier::Control;
+    /// The link pattern table hint mode and link detection scan with: the built-ins merged with the profile's
+    /// hint_patterns, compiled once when the profile is applied.
+    std::shared_ptr<LinkPatterns const> linkPatterns = LinkPatterns::builtins();
+    LinkDecorationMode linkDecorationMode = LinkDecorationMode::Always; ///< hyperlink_decoration.mode.
+    /// The modifiers of the FollowHyperlink mouse binding; none when there is no such binding.
+    std::optional<Modifiers> linkFollowModifiers = Modifiers { Modifier::Control };
     LineOffset copyLastMarkRangeOffset = LineOffset(0);
     /// Whether a double-clicked word's other occurrences are highlighted too, by making the word the
     /// search pattern (the profile's `highlight_word_and_matches_on_double_click`).

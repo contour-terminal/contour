@@ -1407,7 +1407,41 @@ constexpr StringLiteral DefaultColorsConfig {
 
 constexpr StringLiteral HyperlinkDecorationConfig {
     "\n"
-    "{comment} color to pick for hyperlinks decoration, when hovering\n"
+    "{comment} How links are decorated: OSC 8 hyperlinks and the URLs, paths and patterns found in output.\n"
+    "{comment} mode: when they are decorated\n"
+    "{comment}   always   - always\n"
+    "{comment}   hover    - only the one under the pointer\n"
+    "{comment}   modifier - all of them while the follow modifier (Ctrl of Ctrl+click) is held\n"
+    "{comment}   never    - never; Ctrl+click still opens them\n"
+    "{comment} normal, hover: the decorator for a link at rest and under the pointer: underline,\n"
+    "{comment} dotted-underline, double-underline, curly-underline, dashed-underline, overline,\n"
+    "{comment} crossed-out, framed, encircle.\n"
+    "hyperlink_decoration:\n"
+    "    mode: {}\n"
+    "    normal: {}\n"
+    "    hover: {}\n"
+};
+
+constexpr StringLiteral FileOpenerConfig {
+    "\n"
+    "{comment} How a detected file path opens on Ctrl+click and with hint mode's Open.\n"
+    "{comment} command: a command line with {{path}}, {{line}} and {{column}}, split into arguments once\n"
+    "{comment}   (no shell); each placeholder is filled inside its own argument, line and column being 1\n"
+    "{comment}   where the path was printed without them. The program itself is written out, without a\n"
+    "{comment}   placeholder. Empty: the system's default application.\n"
+    "{comment}   A directory always opens in the file manager.\n"
+    "{comment} placement: detached (a program of its own), or split or tab (a Contour pane running it)\n"
+    "{comment} Example: command: 'code --goto {{path}}:{{line}}:{{column}}'\n"
+    "file_opener:\n"
+    "    command: {}\n"
+    "    placement: {}\n"
+};
+
+/// The colour scheme's `hyperlink_decoration` section: colours only, the decorators and the mode being the
+/// profile's.
+constexpr StringLiteral HyperlinkDecorationColorsConfig {
+    "\n"
+    "{comment} The colours of a link's decoration, at rest and under the pointer.\n"
     "hyperlink_decoration:\n"
     "    normal: {}\n"
     "    hover: {}\n"
@@ -1547,15 +1581,29 @@ constexpr StringLiteral HintMatchConfig {
 
 constexpr StringLiteral HintPatternsConfig {
     "\n"
-    "{comment} Custom hint patterns for hint mode.\n"
-    "{comment} Each entry defines a named regex pattern that hint mode will scan for.\n"
-    "{comment} User-defined patterns with the same name as a builtin pattern override the builtin.\n"
-    "{comment} Built-in patterns: url, filepath, githash, ipv4, ipv6.\n"
+    "{comment} Patterns for hint mode and for the links detected in output.\n"
+    "{comment} Built-in patterns: url and filepath (clickable), githash, ipv4 and ipv6 (hint mode only).\n"
+    "{comment} An entry named like a built-in overrides only the keys it gives, and may leave out\n"
+    "{comment} its regex: `- {{ name: filepath, clickable: false }}` stops underlining paths.\n"
+    "{comment}   regex:     ECMAScript regular expression; back-references (\\1 to \\9) are not supported.\n"
+    "{comment}   clickable: true to detect it in output, decorate it and open it with Ctrl+click\n"
+    "{comment}              (default: false; the built-ins keep their own).\n"
+    "{comment}   url:       for your own patterns, what Ctrl+click opens: {{0}} is the match,\n"
+    "{comment}              {{1}} to {{9}} its capture groups (default: the match as printed).\n"
+    "{comment}              A group is percent-encoded only where a URL cannot hold a character\n"
+    "{comment}              (`/?&=+@:%` pass through): write the scheme and host out, groups after.\n"
+    "{comment} A regex overriding filepath names the path with capture group 1, and its location\n"
+    "{comment} with groups 2 and 3 (`:line[:column]`) and 4 and 5 (`(line[,column])`);\n"
+    "{comment} any other pattern's link is its whole match.\n"
     "{comment} Example:\n"
     "{comment} hint_patterns:\n"
     "{comment}     - name: uuid\n"
     "{comment}       regex: "
     "'\\b[0-9a-fA-F]{{8}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{4}}-[0-9a-fA-F]{{12}}\\b'\n"
+    "{comment}     - name: jira\n"
+    "{comment}       regex: '\\b[A-Z][A-Z0-9]+-\\d+\\b'\n"
+    "{comment}       clickable: true\n"
+    "{comment}       url: 'https://jira.example.com/browse/{{0}}'\n"
 };
 
 constexpr StringLiteral HintScrollbackLinesConfig {
@@ -2885,11 +2933,33 @@ constexpr StringLiteral HyperlinkDecorationWeb {
     "profiles:\n"
     "  profile_name:\n"
     "    hyperlink_decoration:\n"
+    "      mode: always\n"
     "      normal: dotted-underline\n"
     "      hover: underline\n"
     "```\n"
     "\n"
+    ":octicons-horizontal-rule-16: ==mode== when links are decorated: `always`, `hover` (only the one under "
+    "the pointer), `modifier` (all of them while the follow modifier is held), `never`. <br/>\n"
 
+};
+
+// Read through std::format like the configuration text, so a literal brace is doubled.
+constexpr StringLiteral FileOpenerWeb {
+    "opens detected file paths on Ctrl+click and with hint mode's Open.\n"
+    "`command` is a command line with `{{path}}`, `{{line}}` and `{{column}}`, split into arguments\n"
+    "once, with no shell involved; its program is written out, without a placeholder.\n"
+    "`placement` is `detached` (default), `split` or `tab`.\n"
+    "Without a command, a file opens with the system's default application; a directory always opens in the\n"
+    "file manager.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    file_opener:\n"
+    "      command: 'code --goto {{path}}:{{line}}:{{column}}'\n"
+    "      placement: detached\n"
+    "```\n"
+    "\n"
 };
 
 constexpr StringLiteral OptionKeyAsAltConfig {
@@ -3261,6 +3331,8 @@ using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
 using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;
 using DefaultColors = DocumentationEntry<DefaultColorsConfig, Dummy>;
 using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, HyperlinkDecorationWeb>;
+using FileOpener = DocumentationEntry<FileOpenerConfig, FileOpenerWeb>;
+using HyperlinkDecorationColors = DocumentationEntry<HyperlinkDecorationColorsConfig, Dummy>;
 using YankHighlight = DocumentationEntry<YankHighlightConfig, Dummy>;
 using NormalModeCursorline = DocumentationEntry<NormalModeCursorlineConfig, Dummy>;
 using Selection = DocumentationEntry<SelectionConfig, Dummy>;

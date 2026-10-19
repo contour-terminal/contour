@@ -371,6 +371,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SettingsSection.qml
         qml/ColorSchemeEditor.qml
         qml/StatusLineIndicatorEditor.qml
+        qml/LinkPatternList.qml
         qml/StatusLineSegmentRow.qml
         qml/StatusLineChip.qml
         qml/StatusLineItemDialog.qml
@@ -1008,6 +1009,7 @@ if(CONTOUR_TESTING)
     add_executable(contour_test
         test/core_test_main.cpp
         config/Actions_test.cpp
+        config/FileOpenerTemplate_test.cpp
         config/GlobalOverrides_test.cpp
         config/LayoutBuilder_test.cpp
         config/PtyReadBufferSize_test.cpp

@@ -6,21 +6,27 @@
 
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/LinkDecoration.hpp>
+#include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/screen/RenderBufferBuilder.hpp>
+#include <vtbackend/testing/DetectingTerm.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <string_view>
 #include <tuple>
 #include <vector>
 
 using namespace vtbackend;
+using vtbackend::test::renderedRow;
 using namespace std::chrono_literals;
 
 namespace
@@ -32,7 +38,7 @@ namespace
                                              ColumnCount columns)
 {
     auto cells = std::vector<RenderCell> {};
-    RenderBufferBuilder::renderDetachedLine(cells, terminal, row, screenRow, columns);
+    RenderBufferBuilder::renderDetachedLine(cells, terminal, row, {}, screenRow, columns);
     return cells;
 }
 
@@ -60,18 +66,6 @@ namespace
     auto const cell = drawnCellAt(mc, now, column);
     return RGBColorPair { .foreground = cell.attributes.foregroundColor,
                           .background = cell.attributes.backgroundColor };
-}
-
-/// The cells the terminal renders on screen row @p row, by column.
-[[nodiscard]] std::map<int, RenderCell> renderedRow(MockTerm<>& mock, LineOffset row)
-{
-    mock.terminal.refreshRenderBuffer();
-    auto const buffer = mock.terminal.renderBuffer();
-    auto cells = std::map<int, RenderCell> {};
-    for (auto const& cell: buffer.get().cells)
-        if (cell.position.line == row)
-            cells.emplace(unbox<int>(cell.position.column), cell);
-    return cells;
 }
 
 /// Replaces screen row @p row with a batched line of @p text that one link, new to the terminal, covers
@@ -124,6 +118,28 @@ TEST_CASE("RenderBufferBuilder.osc8LinkCarriesARoleNotAHardcodedUnderline", "[re
     CHECK(cells.at(3).linkRole == LinkDecorationRole::Hover);
     CHECK(cells.at(3).attributes.decorationColor == palette.hyperlinkDecoration.hover);
     CHECK(cells.at(5).linkRole == LinkDecorationRole::None);
+}
+
+TEST_CASE("RenderBufferBuilder.decorationModes", "[renderbuffer][links]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    mock.writeToScreen(
+        "\033]8;;https://a.b/\033\\link\033]8;;\033\\ \033]8;;https://c.d/\033\\more\033]8;;\033\\");
+    mock.terminal.sendMouseMoveEvent(Modifier::None,
+                                     CellLocation { .line = LineOffset(0), .column = ColumnOffset(1) },
+                                     PixelCoordinate {},
+                                     false);
+
+    mock.terminal.setLinkDecorationMode(LinkDecorationMode::Never);
+    CHECK(renderedRow(mock, LineOffset(0)).at(1).linkRole == LinkDecorationRole::None);
+
+    mock.terminal.setLinkDecorationMode(LinkDecorationMode::Hover);
+    auto const cells = renderedRow(mock, LineOffset(0));
+    CHECK(cells.at(1).linkRole == LinkDecorationRole::Hover);
+    CHECK(cells.at(6).linkRole == LinkDecorationRole::None);
+
+    mock.terminal.setLinkDecorationMode(LinkDecorationMode::Modifier); // nothing held
+    CHECK(renderedRow(mock, LineOffset(0)).at(6).linkRole == LinkDecorationRole::None);
 }
 
 TEST_CASE("RenderBufferBuilder.aLinkInTheTopLeftCellIsAtRestBeforeAnyPointerEvent", "[renderbuffer][links]")
@@ -301,6 +317,34 @@ TEST_CASE("RenderBufferBuilder.detachedLine.aLinkKeepsItsRole", "[renderbuffer][
     CHECK(cells[2].linkRole == LinkDecorationRole::None);
 }
 
+TEST_CASE("RenderBufferBuilder.detachedLine.aLinkFollowsTheDecorationMode",
+          "[renderbuffer][links][stickyheader]")
+{
+    // The header's copy is decorated by the same table as the grid, with the pointer never over it.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.writeToScreen("\033]8;;https://a.b/\033\\ab\033]8;;\033\\c");
+    auto const& row = mc.terminal.primaryScreen().grid().lineAt(LineOffset(0));
+    auto const roleOfLink = [&] {
+        auto const cells = copyOf(mc.terminal, row, LineOffset(0), ColumnCount(20));
+        REQUIRE(cells.size() == 3);
+        return cells[0].linkRole;
+    };
+
+    mc.terminal.setLinkDecorationMode(LinkDecorationMode::Always);
+    CHECK(roleOfLink() == LinkDecorationRole::Normal);
+
+    mc.terminal.setLinkDecorationMode(LinkDecorationMode::Hover);
+    CHECK(roleOfLink() == LinkDecorationRole::None);
+
+    mc.terminal.setLinkDecorationMode(LinkDecorationMode::Never);
+    CHECK(roleOfLink() == LinkDecorationRole::None);
+
+    mc.terminal.setLinkDecorationMode(LinkDecorationMode::Modifier);
+    CHECK(roleOfLink() == LinkDecorationRole::None);
+    CHECK(mc.terminal.updateHeldModifiers(Modifier::Control) == LinkRevealChange::Changed);
+    CHECK(roleOfLink() == LinkDecorationRole::Normal);
+}
+
 TEST_CASE("RenderBufferBuilder.blinkingTextIsDrawnInTheBlinkPhaseOfTheFramesClock", "[renderbuffer]")
 {
     // SGR 5 follows the slow blinker, whose period is a second, and SGR 6 the rapid one, at 600 ms. Each
@@ -340,7 +384,7 @@ TEST_CASE("RenderBufferBuilder.detachedLine.appendsAfterWhatIsThere", "[renderbu
     auto const& row = mc.terminal.primaryScreen().grid().lineAt(LineOffset(0));
 
     auto cells = copyOf(mc.terminal, row, LineOffset(0), ColumnCount(20));
-    RenderBufferBuilder::renderDetachedLine(cells, mc.terminal, row, LineOffset(1), ColumnCount(20));
+    RenderBufferBuilder::renderDetachedLine(cells, mc.terminal, row, {}, LineOffset(1), ColumnCount(20));
     REQUIRE(cells.size() == 4);
     // Each copy its own shaping group.
     CHECK(cells[1].groupEnd);
@@ -417,3 +461,112 @@ TEST_CASE("RenderBufferBuilder.detachedLine.aBlankRowCopiesToNothing", "[renderb
     REQUIRE(row.isBlank());
     CHECK(copyOf(mc.terminal, row, LineOffset(0), ColumnCount(20)).empty());
 }
+
+TEST_CASE("RenderBufferBuilder.detachedLine.aDetectedLinkTakesTheHeaderRole",
+          "[renderbuffer][links][stickyheader]")
+{
+    // The header copies the spans it is handed with the role its OSC 8 links get: at rest, as the mode says.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.writeToScreen("see x.y/z more");
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    auto const spans = std::array { LinkRowSpan { .row = grid.stableLineIdOf(LineOffset(0)),
+                                                  .first = ColumnOffset(4),
+                                                  .last = ColumnOffset(8),
+                                                  .link = LinkId(1) } };
+    auto const roleAt = [&](size_t column) {
+        auto cells = std::vector<RenderCell> {};
+        RenderBufferBuilder::renderDetachedLine(
+            cells, mc.terminal, grid.lineAt(LineOffset(0)), spans, LineOffset(0), ColumnCount(20));
+        REQUIRE(cells.size() == 14);
+        return cells[column].linkRole;
+    };
+    CHECK(roleAt(3) == LinkDecorationRole::None);
+    CHECK(roleAt(4) == LinkDecorationRole::Normal);
+    CHECK(roleAt(8) == LinkDecorationRole::Normal);
+    CHECK(roleAt(9) == LinkDecorationRole::None);
+
+    mc.terminal.setLinkDecorationMode(LinkDecorationMode::Hover);
+    CHECK(roleAt(4) == LinkDecorationRole::None);
+}
+
+TEST_CASE("RenderBufferBuilder.detachedLine.aSpanPastTheCopiedColumnsIsClipped",
+          "[renderbuffer][links][stickyheader]")
+{
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(20) } };
+    mc.writeToScreen("see x.y/z more");
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    auto const spans = std::array { LinkRowSpan { .row = grid.stableLineIdOf(LineOffset(0)),
+                                                  .first = ColumnOffset(4),
+                                                  .last = ColumnOffset(19),
+                                                  .link = LinkId(1) } };
+    auto cells = std::vector<RenderCell> {};
+    RenderBufferBuilder::renderDetachedLine(
+        cells, mc.terminal, grid.lineAt(LineOffset(0)), spans, LineOffset(0), ColumnCount(6));
+    REQUIRE(cells.size() == 6);
+    CHECK(cells[5].linkRole == LinkDecorationRole::Normal);
+}
+
+#ifndef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+// A passive build detects no links (Terminal::fillRenderFrame); these draw what detection found.
+
+using vtbackend::test::DetectingTerm;
+
+TEST_CASE("RenderBufferBuilder.bothColumnsOfAWideCharacterInADetectedLinkAreDecorated",
+          "[renderbuffer][links]")
+{
+    auto term = DetectingTerm { PageSize { LineCount(3), ColumnCount(60) } };
+    term.print("東京 https://例え.jp/パス");
+    auto const cells = renderedRow(term.mock, LineOffset(0));
+    CHECK(cells.at(3).linkRole == LinkDecorationRole::None);    // 京's second column
+    CHECK(cells.at(13).linkRole == LinkDecorationRole::Normal); // 例, two columns wide
+    CHECK(cells.at(13).width == 2);
+    CHECK(cells.at(14).linkRole == LinkDecorationRole::Normal); // its second column
+}
+
+TEST_CASE("RenderBufferBuilder.aDetectedLinkOnADoubleWidthRowIsDecoratedWhereItIsDrawn",
+          "[renderbuffer][links]")
+{
+    // DECDWL draws grid column N at display column 2N: the link's grid columns 4-16 are drawn at 8-32. The
+    // cursor is on the row below, so the row takes the batched path's per-cell fallback.
+    auto term = DetectingTerm {};
+    term.print("\033#6see https://x.y/z\r\n");
+    REQUIRE(term.mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).isTrivialBuffer());
+    auto const cells = renderedRow(term.mock, LineOffset(0));
+    CHECK(cells.at(6).linkRole == LinkDecorationRole::None);    // the blank, grid column 3
+    CHECK(cells.at(8).linkRole == LinkDecorationRole::Normal);  // 'h', grid column 4
+    CHECK(cells.at(32).linkRole == LinkDecorationRole::Normal); // 'z', grid column 16
+    CHECK(cells.at(34).linkRole == LinkDecorationRole::None);   // grid column 17
+}
+
+TEST_CASE("RenderBufferBuilder.aStatusLineIsNoPartOfThePagesDetectedLinks", "[renderbuffer][links]")
+{
+    // The status line's grid numbers its rows from the same stable ids as the page's: handed the page's
+    // index, its row 0 would be decorated at the columns of the page's row 0's link.
+    auto term = DetectingTerm {};
+    auto& terminal = term.mock.terminal;
+    terminal.setStatusDisplay(StatusDisplayType::HostWritable);
+    term.mock.writeToScreen("\033[1$}"
+                            "plain status text here"
+                            "\033[0$}");
+    term.print("https://x.y/z/and/more");
+    auto& statusGrid = terminal.hostWritableStatusLineDisplay().grid();
+    statusGrid.finalizeRevisions();
+    {
+        auto const _ = std::scoped_lock { terminal };
+        auto const* index = terminal.detectedLinks();
+        REQUIRE(index != nullptr);
+        auto const& pageGrid = terminal.primaryScreen().grid();
+        // The conditions under which the page's index would answer for the status line's row.
+        REQUIRE(statusGrid.stableLineIdOf(LineOffset(0)) == pageGrid.stableLineIdOf(LineOffset(0)));
+        REQUIRE(index->scannedRevision(pageGrid.stableLineIdOf(LineOffset(0)))
+                == statusGrid.lineAt(LineOffset(0)).revision());
+        REQUIRE_FALSE(statusGrid.lineAt(LineOffset(0)).isDirty());
+    }
+    REQUIRE(renderedRow(term.mock, LineOffset(0)).at(3).linkRole == LinkDecorationRole::Normal);
+
+    auto const statusRow = boxed_cast<LineOffset>(terminal.pageSize().lines);
+    auto const cells = renderedRow(term.mock, statusRow);
+    CHECK(std::ranges::none_of(
+        cells, [](auto const& entry) { return entry.second.linkRole != LinkDecorationRole::None; }));
+}
+#endif

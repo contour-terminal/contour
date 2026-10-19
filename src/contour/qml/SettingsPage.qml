@@ -197,7 +197,7 @@ Rectangle {
     // }}}
 
     // Delete is confirmed through a modal dialog; the row that asked stashes its target here first.
-    property string pendingDeleteKind: "" // "profile" | "scheme"
+    property string pendingDeleteKind: "" // "profile" | "scheme" | "linkPattern:<row>"
     property string pendingDeleteName: ""
 
     function requestDelete(kind, name) {
@@ -208,15 +208,21 @@ Rectangle {
 
     ConfirmDialog {
         id: deleteDialog
+        objectName: "deleteDialog"
+        readonly property bool isLinkPattern: root.pendingDeleteKind.startsWith("linkPattern:")
         heading: qsTr("Delete “%1”").arg(root.pendingDeleteName)
         confirmText: qsTr("Delete")
         message: root.pendingDeleteKind === "profile"
                  ? qsTr("Delete the profile “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
-                 : qsTr("Delete the color scheme “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
+                 : isLinkPattern
+                   ? qsTr("Remove the link pattern “%1” from this profile?").arg(root.pendingDeleteName)
+                   : qsTr("Delete the color scheme “%1”? This removes its GUI side file and cannot be undone.").arg(root.pendingDeleteName)
         onConfirmed: {
             if (!root.controller) return
             if (root.pendingDeleteKind === "profile")
                 root.controller.deleteProfile(root.pendingDeleteName)
+            else if (isLinkPattern)
+                root.controller.removeLinkPattern(parseInt(root.pendingDeleteKind.split(":")[1]))
             else
                 root.controller.deleteColorScheme(root.pendingDeleteName)
         }
@@ -621,6 +627,7 @@ Rectangle {
                                                 type: modelData.type
                                                 value: modelData.value
                                                 options: modelData.options
+                                                problem: modelData.problem || ""
                                                 editable: root.controller && !root.controller.editingReadOnly
                                                 onEdited: (key, value) => root.controller.setProfileField(key, value)
                                             }
@@ -638,6 +645,33 @@ Rectangle {
                                     wrapMode: Text.WordWrap
                                     color: root.subtleText
                                     text: qsTr("No setting matches “%1”.").arg(root.filterText.trim())
+                                }
+
+                                // How links are opened, and the patterns that find them. Hand-built: a
+                                // profile-field descriptor reads the profile only, the gesture comes from
+                                // input_mapping, and a pattern is a row of a table, not a scalar field.
+                                SettingsSection {
+                                    objectName: "linksSection"
+                                    Layout.fillWidth: true
+                                    title: qsTr("Links: opening and patterns")
+                                    glyph: "⧉"
+                                    visible: !root.filtering || root.textMatches(title)
+                                    expanded: root.groupExpanded(title)
+                                    onToggleRequested: root.toggleGroup(title)
+
+                                    Label {
+                                        objectName: "linkGestureLabel"
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
+                                        text: root.controller ? root.controller.linkGesture : ""
+                                    }
+
+                                    LinkPatternList {
+                                        Layout.fillWidth: true
+                                        controller: root.controller
+                                        editable: root.controller && !root.controller.editingReadOnly
+                                        onDeleteRequested: (index, name) => root.requestDelete("linkPattern:" + index, name)
+                                    }
                                 }
 
                                 // Color-scheme selection group (with dark/light distinction). A section

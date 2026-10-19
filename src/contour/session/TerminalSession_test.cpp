@@ -536,6 +536,28 @@ struct SessionWithSurface
     return { std::move(session), std::move(surface) };
 }
 
+/// A directory of the in-memory filesystem a test app's sessions look paths up in. Absolute here: on Windows
+/// a root directory without a drive is relative to the current drive.
+#ifdef _WIN32
+constexpr auto WorkDirectory = std::string_view { "C:/work" };
+#else
+constexpr auto WorkDirectory = std::string_view { "/work" };
+#endif
+
+/// @return The file @p name in WorkDirectory, as a program prints it.
+[[nodiscard]] std::string inWorkDirectory(std::string_view name)
+{
+    return std::format("{}/{}", WorkDirectory, name);
+}
+
+/// @return The file @p name in WorkDirectory, as a path resolves to it: normalised, in this platform's
+///         separators.
+[[nodiscard]] std::string resolvedInWorkDirectory(std::string_view name)
+{
+    return core::pathToUtf8(
+        core::pathFromUtf8(inWorkDirectory(name)).value_or(std::filesystem::path {}).lexically_normal());
+}
+
 } // namespace
 
 TEST_CASE("TerminalSession: key and char events write their encoding into the PTY",
@@ -4267,7 +4289,8 @@ TEST_CASE("TerminalSession: a deliberate sideways swipe does produce column step
 TEST_CASE("TerminalSession: openDocument routes through the injected external launcher",
           "[contour][session][launcher]")
 {
-    contour::test::TestApp testApp;
+    // This machine's filesystem: the document is a real file, in a temporary directory.
+    contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::ThisMachine };
     auto session = makeDisplaylessSession(testApp.app());
     auto& launcher = testApp.launcher();
 
@@ -4602,27 +4625,30 @@ TEST_CASE(
 {
     // A path the application of another machine's daemon prints names a file on that machine: one that
     // exists here too is another file. Ctrl+click on it opens nothing, as for a file:// link
-    // (vtbackend::Terminal::localPathAtMousePosition).
+    // (vtbackend::Terminal::lookUpLinkAt).
     namespace actions = contour::actions;
     contour::test::TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto& launcher = testApp.launcher();
 
     // A file that exists on this machine, named relative to the working directory the application reports.
-    QTemporaryDir const dir;
-    auto const directory = std::filesystem::path(dir.path().toStdU16String());
-    {
-        std::ofstream(directory / "doc.txt") << "x";
-    }
+    testApp.fileSystem().addFile(inWorkDirectory("doc.txt"), "x");
     auto const pointAtPath = [&] {
-        session->terminal().setCurrentWorkingDirectory("file://" + directory.generic_string());
+        session->terminal().setCurrentWorkingDirectory("file://" + std::string { WorkDirectory });
         session->terminal().writeToScreen("open doc.txt now");
         session->terminal().sendMouseMoveEvent(
             vtbackend::Modifiers {},
             vtbackend::CellLocation { vtbackend::LineOffset(0), vtbackend::ColumnOffset(6) },
             vtbackend::PixelCoordinate {},
             /*uiHandledHint=*/false);
-        REQUIRE(session->terminal().pathTextAtMousePosition() == "doc.txt");
+        REQUIRE(vtbackend::test::printedPathUnderPointer(session->terminal()) == "doc.txt");
+    };
+    // Ctrl+click, and the probe's answer, which opens the file back on this thread.
+    auto const follow = [&] {
+        auto const followed = (*session)(actions::FollowHyperlink {});
+        testApp.drainLinkProbes();
+        QCoreApplication::processEvents();
+        return followed;
     };
 
     SECTION("on another machine: not opened, and said")
@@ -4630,8 +4656,9 @@ TEST_CASE(
         auto capture = core::log::ScopedCapture { "error" };
         session->terminal().bindReplica(vtbackend::ReplicaRole::OtherMachine, vtbackend::HostIdentity {});
         pointAtPath();
-        CHECK_FALSE(session->terminal().localPathAtMousePosition().has_value());
-        CHECK_FALSE((*session)(actions::FollowHyperlink {}));
+        CHECK(vtbackend::test::lookUpLinkUnderPointer(session->terminal()).refusal
+              == vtbackend::PathRefusal::ReplicaOfAnotherMachine);
+        CHECK_FALSE(follow());
         CHECK(launcher.openedUrls.empty());
         CHECK(capture.contains(
             "Not opening \"doc.txt\": it names a file on the machine the session runs on, not this one."));
@@ -4641,7 +4668,7 @@ TEST_CASE(
     {
         session->terminal().bindReplica(vtbackend::ReplicaRole::SameMachine, vtbackend::HostIdentity {});
         pointAtPath();
-        CHECK((*session)(actions::FollowHyperlink {}));
+        CHECK(follow());
         REQUIRE(launcher.openedUrls.size() == 1);
         CHECK(launcher.openedUrls.back().isLocalFile());
     }
@@ -4649,7 +4676,7 @@ TEST_CASE(
     SECTION("in a pane of its own: opened")
     {
         pointAtPath();
-        CHECK((*session)(actions::FollowHyperlink {}));
+        CHECK(follow());
         REQUIRE(launcher.openedUrls.size() == 1);
         CHECK(launcher.openedUrls.back().isLocalFile());
     }
@@ -4665,12 +4692,8 @@ TEST_CASE("TerminalSession: a path a command printed on another machine opens no
     auto session = makeDisplaylessSession(testApp.app());
     auto& launcher = testApp.launcher();
 
-    QTemporaryDir const dir;
-    auto const directory = std::filesystem::path(dir.path().toStdU16String());
-    {
-        std::ofstream(directory / "doc.txt") << "x";
-    }
-    auto const generic = directory.generic_string();
+    testApp.fileSystem().addFile(inWorkDirectory("doc.txt"), "x");
+    auto const generic = std::string { WorkDirectory };
     auto const remote =
         "file://otherhost.invalid" + std::string(generic.starts_with('/') ? "" : "/") + generic;
 
@@ -4683,7 +4706,7 @@ TEST_CASE("TerminalSession: a path a command printed on another machine opens no
         vtbackend::CellLocation { .line = vtbackend::LineOffset(1), .column = vtbackend::ColumnOffset(6) },
         vtbackend::PixelCoordinate {},
         /*uiHandledHint=*/false);
-    REQUIRE(session->terminal().pathTextAtMousePosition() == "doc.txt");
+    REQUIRE(vtbackend::test::printedPathUnderPointer(session->terminal()) == "doc.txt");
 
     auto capture = core::log::ScopedCapture { "error" };
     CHECK_FALSE((*session)(actions::FollowHyperlink {}));
@@ -4713,9 +4736,12 @@ TEST_CASE("TerminalSession: a path under the pointer opens as the app's filesyst
         vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(6) },
         vtbackend::PixelCoordinate {},
         /*uiHandledHint=*/false);
-    REQUIRE(terminal.pathTextAtMousePosition() == "doc.txt");
+    REQUIRE(vtbackend::test::printedPathUnderPointer(terminal) == "doc.txt");
 
     CHECK((*session)(actions::FollowHyperlink {}));
+    // Opened once the probe has answered, back on this thread.
+    testApp.drainLinkProbes();
+    QCoreApplication::processEvents();
     REQUIRE(launcher.openedUrls.size() == 1);
     CHECK(launcher.openedUrls.back() == localFileUrl(work / "doc.txt"));
 }
@@ -4901,7 +4927,8 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
             GENERATE(std::string {}, std::string { contour::test::TestApp::HostName } + ".example.invalid");
 
         INFO("authority: " << authority);
-        contour::test::TestApp testApp;
+        // This machine's filesystem: the executable is a real file, whose execute bit the app reads.
+        contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::ThisMachine };
         auto session = makeDisplaylessSession(testApp.app());
         auto& launcher = testApp.launcher();
 
@@ -6939,17 +6966,37 @@ TEST_CASE("TerminalSession: a scroll on the parser thread leaves the hyperlink t
     CHECK(session->hyperlinkTooltipText().isEmpty());
 }
 
-TEST_CASE("TerminalSession: Ctrl over a path that opens shows the pointing hand",
-          "[contour][session][hyperlink]")
+TEST_CASE("TerminalSession: a path that names no file shows no hand, Ctrl or not",
+          "[contour][session][hyperlink][links]")
 {
-    // Ctrl+click opens the file a path names; the pointer says beforehand whether there is one.
+    // The move asks the index, which holds only what a probe confirmed, never the filesystem itself.
     TestApp testApp;
     auto session = makeSessionWithSurface(testApp.app());
-    QTemporaryDir const dir;
-    auto const directory = std::filesystem::path(dir.path().toStdU16String());
-    std::ofstream(directory / "doc.txt") << "x";
-    session->terminal().setCurrentWorkingDirectory("file://" + directory.generic_string());
-    session->terminal().writeToScreen("open doc.txt now");
+    session->terminal().writeToScreen(std::format("open {} now", inWorkDirectory("notes.txt")));
+    testApp.detectLinks(*session);
+    testApp.fileSystem().addFile(inWorkDirectory("notes.txt"), "");
+
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers { vtbackend::Modifier::Control },
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(7) },
+        vtbackend::PixelCoordinate {});
+    REQUIRE_FALSE(session.surface->cursorShapes.empty());
+    CHECK(session.surface->cursorShapes.back() == contour::input::MouseCursorShape::IBeam);
+}
+
+#ifndef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+// A passive build fills on the parser thread, where detection is compiled out (Terminal::fillRenderFrame);
+// these tests need a link detected.
+
+TEST_CASE("TerminalSession: a detected path shows the pointing hand, Ctrl or not",
+          "[contour][session][hyperlink][links]")
+{
+    // Detection confirmed the file before the pointer came; the move only looks the cell up.
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("notes.txt"), "");
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen(std::format("open {} now", inWorkDirectory("notes.txt")));
+    testApp.detectLinks(*session);
 
     auto const shapeAt = [&](vtbackend::Modifiers modifiers, int column) {
         session->sendMouseMoveEvent(modifiers,
@@ -6959,22 +7006,787 @@ TEST_CASE("TerminalSession: Ctrl over a path that opens shows the pointing hand"
         REQUIRE_FALSE(session.surface->cursorShapes.empty());
         return session.surface->cursorShapes.back();
     };
-    auto const ctrl = vtbackend::Modifiers { vtbackend::Modifier::Control };
     using contour::input::MouseCursorShape;
 
-    CHECK(shapeAt(vtbackend::Modifiers {}, 6) == MouseCursorShape::IBeam);
-    CHECK(shapeAt(ctrl, 7) == MouseCursorShape::PointingHand);
-    CHECK(shapeAt(ctrl, 1) == MouseCursorShape::IBeam); // "open" names no file here
+    CHECK(shapeAt(vtbackend::Modifiers {}, 7) == MouseCursorShape::PointingHand);
+    CHECK(shapeAt(vtbackend::Modifiers { vtbackend::Modifier::Control }, 8)
+          == MouseCursorShape::PointingHand);
+    CHECK(shapeAt(vtbackend::Modifiers {}, 1) == MouseCursorShape::IBeam); // "open" names no file here
 }
 
-TEST_CASE("TerminalSession: Ctrl over output the parser thread is writing reads the block under the lock",
+TEST_CASE("TerminalSession: hovering a detected path shows where it resolved", "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("notes.txt"), "");
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen(inWorkDirectory("notes.txt") + ":3");
+    testApp.detectLinks(*session);
+    session->sendMouseMoveEvent(
+        {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(2) },
+        {});
+    CHECK(session->hyperlinkTooltipText().toStdString() == resolvedInWorkDirectory("notes.txt") + ":3:1");
+}
+
+TEST_CASE("TerminalSession: each detected link under the pointer shows its own tooltip",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("one.txt"), "");
+    testApp.fileSystem().addFile(inWorkDirectory("two.txt"), "");
+    auto session = makeSessionWithSurface(testApp.app());
+    auto const first = inWorkDirectory("one.txt") + ":3";
+    session->terminal().writeToScreen(std::format("{} {}:4", first, inWorkDirectory("two.txt")));
+    testApp.detectLinks(*session);
+    auto const tooltipAt = [&](int column) {
+        session->sendMouseMoveEvent({},
+                                    vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                                              .column = vtbackend::ColumnOffset(column) },
+                                    {});
+        return session->hyperlinkTooltipText().toStdString();
+    };
+    auto const second = static_cast<int>(first.size()) + 2;
+
+    CHECK(tooltipAt(1) == resolvedInWorkDirectory("one.txt") + ":3:1");
+    CHECK(tooltipAt(2) == resolvedInWorkDirectory("one.txt") + ":3:1"); // along the same link
+    CHECK(tooltipAt(second) == resolvedInWorkDirectory("two.txt") + ":4:1");
+    CHECK(tooltipAt(1) == resolvedInWorkDirectory("one.txt") + ":3:1"); // and back
+}
+
+TEST_CASE("TerminalSession: hovering a detected link printed as it opens shows no tooltip",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen("see https://example.com/page now");
+    testApp.detectLinks(*session);
+    session->sendMouseMoveEvent(
+        {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(8) },
+        {});
+    REQUIRE(session.surface->cursorShapes.back() == contour::input::MouseCursorShape::PointingHand);
+    CHECK(session->hyperlinkTooltipText().isEmpty());
+}
+
+TEST_CASE("TerminalSession: the context menu pins a detected path once it is confirmed",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("notes.txt"), "");
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen(std::format("open {} now", inWorkDirectory("notes.txt")));
+    session->terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(7) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    CHECK_FALSE(session->contextMenuState().linkUnderCursor.has_value()); // not yet looked at
+
+    testApp.detectLinks(*session);
+    auto const state = session->contextMenuState();
+    REQUIRE(state.linkUnderCursor.has_value());
+    CHECK(state.linkUnderCursor->kind == vtbackend::LinkKind::Path);
+    CHECK(state.linkUnderCursor->target == resolvedInWorkDirectory("notes.txt"));
+    CHECK(state.linkUnderCursor->pathKind == vtbackend::PathKind::File);
+    CHECK(state.hyperlinkUnderCursor.empty());
+}
+
+TEST_CASE("TerminalSession: Ctrl+click on a path detection confirmed opens at once",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("notes.txt"), "");
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen(inWorkDirectory("notes.txt"));
+    testApp.detectLinks(*session);
+    session->terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(3) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    // Neither the probe thread nor a posted open: the index knows it.
+    CHECK((*session)(contour::actions::FollowHyperlink {}));
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().isLocalFile());
+}
+
+TEST_CASE("TerminalSession: CopyHyperlink copies a confirmed path's absolute form under the pointer",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("notes.txt"), "");
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().setCurrentWorkingDirectory("file://" + std::string { WorkDirectory });
+    session->terminal().writeToScreen("see notes.txt:7");
+    testApp.detectLinks(*session);
+    session->terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(6) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    auto* clipboard = QGuiApplication::clipboard();
+    REQUIRE(clipboard != nullptr);
+    clipboard->clear();
+    CHECK((*session)(contour::actions::CopyHyperlink {}));
+    CHECK(clipboard->text().toStdString() == resolvedInWorkDirectory("notes.txt"));
+}
+#endif
+
+TEST_CASE("TerminalSession: Ctrl+click opens a detected URL, and a changed row what it holds now",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen("https://old.example/");
+    testApp.detectLinks(*session);
+    session->terminal().writeToScreen("\rhttps://new.example/");
+    session->terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(3) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    CHECK((*session)(contour::actions::FollowHyperlink {}));
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().toString().toStdString() == "https://new.example/");
+}
+
+TEST_CASE("TerminalSession: a path printed a moment ago is probed, then opened", "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("fresh.txt"), "");
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen(inWorkDirectory("fresh.txt"));
+    session->terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(3) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    CHECK((*session)(contour::actions::FollowHyperlink {}));
+    CHECK(testApp.launcher().openedUrls.empty()); // not before the probe has answered
+
+    testApp.drainLinkProbes();
+    CHECK(testApp.launcher().openedUrls.empty()); // the answer is opened back on the GUI thread
+    QCoreApplication::processEvents();
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().isLocalFile());
+    CHECK(testApp.launcher().openedUrls.back().toLocalFile().toStdString() == inWorkDirectory("fresh.txt"));
+}
+
+TEST_CASE("TerminalSession: a path that names no file opens nothing once the probe answers",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen(inWorkDirectory("gone.txt"));
+    session->terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(3) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    CHECK((*session)(contour::actions::FollowHyperlink {})); // asked of the probe
+    testApp.drainLinkProbes();
+    QCoreApplication::processEvents();
+    CHECK(testApp.launcher().openedUrls.empty());
+}
+
+TEST_CASE("TerminalSession: a follow the probe answers after the session is gone opens nothing",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("fresh.txt"), "");
+    {
+        auto session = makeDisplaylessSession(testApp.app());
+        session->terminal().writeToScreen(inWorkDirectory("fresh.txt"));
+        session->terminal().sendMouseMoveEvent(
+            vtbackend::Modifiers {},
+            vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                      .column = vtbackend::ColumnOffset(3) },
+            vtbackend::PixelCoordinate {},
+            /*uiHandledHint=*/false);
+        REQUIRE((*session)(contour::actions::FollowHyperlink {}));
+    }
+    testApp.drainLinkProbes();
+    QCoreApplication::processEvents();
+    CHECK(testApp.launcher().openedUrls.empty());
+}
+
+TEST_CASE("TerminalSession: a detected file:// URL to a program opens as the path it names, never runs",
+          "[contour][session][links]")
+{
+    // §7.6: an OSC 8 file:// link to a program is run through `contour config`; printed text is not trusted
+    // so. A detected one is the path it names, opened as a path is (here with the system's default
+    // application), whichever gesture follows it.
+    TestApp testApp;
+    auto const tool = inWorkDirectory("bin/tool");
+    testApp.fileSystem().addExecutable(core::pathFromUtf8(tool).value_or(std::filesystem::path {}));
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen(
+        "run "
+        + localFileUrl(core::pathFromUtf8(tool).value_or(std::filesystem::path {})).toString().toStdString());
+    testApp.detectLinks(*session);
+    auto const cell =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(6) };
+    session->terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {}, cell, vtbackend::PixelCoordinate {}, /*uiHandledHint=*/false);
+
+    SECTION("Ctrl+click")
+    {
+        CHECK((*session)(contour::actions::FollowHyperlink {}));
+    }
+
+    SECTION("vi gx")
+    {
+        session->followLinkAt(cell);
+    }
+
+    SECTION("the context menu's Open Link")
+    {
+        auto const state = session->contextMenuState();
+        REQUIRE(state.linkUnderCursor.has_value());
+        CHECK(state.linkUnderCursor->kind == vtbackend::LinkKind::Path);
+        CHECK((*session)(contour::actions::FollowHyperlink { .uri = {}, .link = state.linkUnderCursor }));
+    }
+
+    testApp.drainLinkProbes();
+    QCoreApplication::processEvents();
+    CHECK(testApp.launcher().detached.empty()); // no `contour config`
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().toLocalFile().toStdString() == tool);
+}
+
+TEST_CASE("TerminalSession: a pinned detected link opens as pinned", "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+
+    SECTION("a URL")
+    {
+        auto const link = vtbackend::LinkTarget { .kind = vtbackend::LinkKind::Url,
+                                                  .target = "https://pinned.example/",
+                                                  .location = std::nullopt,
+                                                  .pathKind = vtbackend::PathKind::Missing,
+                                                  .directory = {} };
+        CHECK((*session)(contour::actions::FollowHyperlink { .uri = {}, .link = link }));
+        REQUIRE(testApp.launcher().openedUrls.size() == 1);
+        CHECK(testApp.launcher().openedUrls.back().toString().toStdString() == "https://pinned.example/");
+    }
+
+    SECTION("a confirmed path, as a local file, without looking again")
+    {
+        auto const link =
+            vtbackend::LinkTarget { .kind = vtbackend::LinkKind::Path,
+                                    .target = inWorkDirectory("a.cpp"),
+                                    .location = vtbackend::LinkLocation { .line = 3, .column = 1 },
+                                    .pathKind = vtbackend::PathKind::File,
+                                    .directory = std::string { WorkDirectory } };
+        CHECK((*session)(contour::actions::FollowHyperlink { .uri = {}, .link = link }));
+        REQUIRE(testApp.launcher().openedUrls.size() == 1);
+        CHECK(testApp.launcher().openedUrls.back().isLocalFile());
+        CHECK(testApp.launcher().openedUrls.back().toLocalFile().toStdString() == inWorkDirectory("a.cpp"));
+    }
+}
+
+TEST_CASE("TerminalSession: vi gx opens the link under the vi cursor", "[contour][session][links][vi]")
+{
+    // Not detected yet: gx looks the cell up as Ctrl+click does, scanning its logical line on the spot.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen("go https://vi.example/ now");
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(session->terminal().inputHandler().mode() == vtbackend::ViMode::Normal);
+
+    for (auto const ch: std::u32string_view { U"gg03lgx" })
+        session->sendCharEvent(ch,
+                               vtbackend::KeyIdentity { .unshiftedKey = ch },
+                               vtbackend::Modifiers {},
+                               vtbackend::KeyboardEventType::Press,
+                               std::chrono::steady_clock::now());
+    QCoreApplication::processEvents();
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().toString().toStdString() == "https://vi.example/");
+}
+
+TEST_CASE("TerminalSession: vi gx where no link is opens nothing", "[contour][session][links][vi]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen("go https://vi.example/ now");
+    (*session)(contour::actions::ViNormalMode {});
+    mockPtyOf(*session).stdinBuffer().clear();
+
+    for (auto const ch: std::u32string_view { U"gg0gx" })
+        session->sendCharEvent(ch,
+                               vtbackend::KeyIdentity { .unshiftedKey = ch },
+                               vtbackend::Modifiers {},
+                               vtbackend::KeyboardEventType::Press,
+                               std::chrono::steady_clock::now());
+    QCoreApplication::processEvents();
+    CHECK(testApp.launcher().openedUrls.empty());
+    CHECK(mockPtyOf(*session).stdinBuffer().empty()); // and the keys stay with vi
+}
+
+TEST_CASE("TerminalSession: CopyHyperlink copies a detected link's target", "[contour][session][links]")
+{
+    TestApp testApp;
+    // With a display, which the clipboard is written through.
+    auto session = makeSessionWithSurface(testApp.app());
+    auto* clipboard = QGuiApplication::clipboard();
+    REQUIRE(clipboard != nullptr);
+    clipboard->clear();
+
+    SECTION("pinned: a path's resolved form")
+    {
+        auto const link = vtbackend::LinkTarget { .kind = vtbackend::LinkKind::Path,
+                                                  .target = inWorkDirectory("a.cpp"),
+                                                  .location = std::nullopt,
+                                                  .pathKind = vtbackend::PathKind::File,
+                                                  .directory = {} };
+        CHECK((*session)(contour::actions::CopyHyperlink { .uri = {}, .link = link }));
+        CHECK(clipboard->text().toStdString() == inWorkDirectory("a.cpp"));
+    }
+
+    SECTION("under the pointer: a URL, but no path the probe has not confirmed")
+    {
+        session->terminal().writeToScreen(
+            std::format("see https://x.example/ and {}", inWorkDirectory("new.txt")));
+        auto const pointAt = [&](int column) {
+            session->terminal().sendMouseMoveEvent(
+                vtbackend::Modifiers {},
+                vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                          .column = vtbackend::ColumnOffset(column) },
+                vtbackend::PixelCoordinate {},
+                /*uiHandledHint=*/false);
+        };
+        pointAt(8);
+        CHECK((*session)(contour::actions::CopyHyperlink {}));
+        CHECK(clipboard->text().toStdString() == "https://x.example/");
+        pointAt(30);
+        CHECK_FALSE((*session)(contour::actions::CopyHyperlink {}));
+        CHECK(clipboard->text().toStdString() == "https://x.example/");
+    }
+}
+
+TEST_CASE("TerminalSession: the context menu pins the detected URL under the pointer",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen(
+        std::format("see https://x.example/ and {}", inWorkDirectory("new.txt")));
+    auto const stateAt = [&](int column) {
+        session->terminal().sendMouseMoveEvent(
+            vtbackend::Modifiers {},
+            vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                      .column = vtbackend::ColumnOffset(column) },
+            vtbackend::PixelCoordinate {},
+            /*uiHandledHint=*/false);
+        return session->contextMenuState();
+    };
+
+    auto const overUrl = stateAt(8);
+    REQUIRE(overUrl.linkUnderCursor.has_value());
+    CHECK(overUrl.linkUnderCursor->target == "https://x.example/");
+    CHECK(overUrl.hyperlinkUnderCursor.empty());
+
+    CHECK_FALSE(stateAt(30).linkUnderCursor.has_value()); // a path, not confirmed yet
+    // "see", a bare word, with no directory to resolve it in.
+    CHECK_FALSE(stateAt(1).linkUnderCursor.has_value());
+}
+
+namespace
+{
+/// The row file_opener tests print: a file with a location, and a directory.
+[[nodiscard]] std::string fileAndDirectoryRow()
+{
+    return std::format("{}:12:5 {}", inWorkDirectory("a.cpp"), inWorkDirectory("src"));
+}
+
+/// The column of the directory in fileAndDirectoryRow(), past its first characters.
+[[nodiscard]] int directoryColumn()
+{
+    return static_cast<int>(std::format("{}:12:5 ", inWorkDirectory("a.cpp")).size()) + 2;
+}
+
+/// A session whose profile opens files with @p command, detached, over fileAndDirectoryRow(), its links
+/// detected. One session per file_opener value: a profile is fixed for the session's life.
+[[nodiscard]] std::unique_ptr<contour::session::TerminalSession> sessionOverDetectedFile(TestApp& testApp,
+                                                                                         std::string command)
+{
+    testApp.fileSystem().addFile(inWorkDirectory("a.cpp"), "");
+    testApp.fileSystem().addDirectory(inWorkDirectory("src"));
+    auto const name = std::string { "file-opener" };
+    registerProfile(testApp.app(), name, [&](contour::config::TerminalProfile& p) {
+        p.fileOpener =
+            contour::config::FileOpenerConfig { .command = std::move(command),
+                                                .placement = contour::actions::OutputPlacement::Detached };
+    });
+    auto session = makeSessionWithProfile(testApp.app(), name);
+    session->terminal().writeToScreen(fileAndDirectoryRow());
+    testApp.detectLinks(*session);
+    return session;
+}
+
+/// Ctrl+click at @p column of the first row, and its probe's answer, opened back on this thread.
+bool followAt(TestApp& testApp, contour::session::TerminalSession& session, int column)
+{
+    session.terminal().sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
+                                  .column = vtbackend::ColumnOffset(column) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    auto const followed = session(contour::actions::FollowHyperlink {});
+    testApp.drainLinkProbes();
+    QCoreApplication::processEvents();
+    return followed;
+}
+
+/// @return @p arguments, as the launcher received them.
+[[nodiscard]] QStringList qArguments(std::initializer_list<std::string> arguments)
+{
+    auto list = QStringList {};
+    for (auto const& argument: arguments)
+        list.append(QString::fromStdString(argument));
+    return list;
+}
+} // namespace
+
+TEST_CASE("TerminalSession: file_opener opens a detected file at its location, detached",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = sessionOverDetectedFile(testApp, "editor --goto {path}:{line}:{column}");
+    CHECK(followAt(testApp, *session, 3));
+    REQUIRE(testApp.launcher().detached.size() == 1);
+    CHECK(testApp.launcher().detached.back().program == "editor");
+    CHECK(testApp.launcher().detached.back().arguments
+          == qArguments({ "--goto", resolvedInWorkDirectory("a.cpp") + ":12:5" }));
+    CHECK(testApp.launcher().openedUrls.empty());
+}
+
+TEST_CASE("TerminalSession: a directory opens with the system default, file_opener or not",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = sessionOverDetectedFile(testApp, "editor {path}");
+    CHECK(followAt(testApp, *session, directoryColumn()));
+    CHECK(testApp.launcher().detached.empty());
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().toLocalFile().toStdString() == inWorkDirectory("src"));
+}
+
+TEST_CASE("TerminalSession: without file_opener a file opens with the system default",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = sessionOverDetectedFile(testApp, "");
+    CHECK(followAt(testApp, *session, 3));
+    CHECK(testApp.launcher().detached.empty());
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().toLocalFile().toStdString() == inWorkDirectory("a.cpp"));
+}
+
+TEST_CASE("TerminalSession: an invalid file_opener opens files with the system default",
+          "[contour][session][links]")
+{
+    // Reported when the configuration was read, and kept as written for the settings page: disabled here.
+    TestApp testApp;
+    auto session = sessionOverDetectedFile(testApp, "editor {file}");
+    CHECK(followAt(testApp, *session, 3));
+    CHECK(testApp.launcher().detached.empty());
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.back().toLocalFile().toStdString() == inWorkDirectory("a.cpp"));
+}
+
+TEST_CASE("TerminalSession: a file_opener that does not start says so", "[contour][session][links]")
+{
+    TestApp testApp;
+    testApp.launcher().detachedError = contour::platform::SpawnError::NotFound;
+    auto session = sessionOverDetectedFile(testApp, "no-such-editor {path}");
+    QSignalSpy const notices(session.get(), &contour::session::TerminalSession::showNotification);
+    auto capture = core::log::ScopedCapture { "error" };
+    CHECK(followAt(testApp, *session, 3));
+    CHECK(capture.contains("Could not open the file:"));
+    REQUIRE(notices.count() == 1);
+    CHECK(notices.at(0).at(1).toString().contains("Could not open the file"));
+}
+
+TEST_CASE("TerminalSession: file_opener in a split or a tab runs in a pane where the path resolved",
+          "[contour][session][links]")
+{
+    auto const placement =
+        GENERATE(contour::actions::OutputPlacement::Split, contour::actions::OutputPlacement::Tab);
+    auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = owned.get();
+    TestApp testApp { std::move(owned) };
+    auto const win = contour::test::ScopedController { testApp.manager() };
+    testApp.fileSystem().addFile(inWorkDirectory("a.cpp"), "");
+    auto& config = testApp.app().config();
+    config.profile(testApp.app().profileName())->fileOpener =
+        contour::config::FileOpenerConfig { .command = "editor +{line} {path}", .placement = placement };
+    auto* const session = testApp.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    session->terminal().setCurrentWorkingDirectory("file://" + std::string { WorkDirectory });
+    session->terminal().writeToScreen("a.cpp:12:5");
+
+    CHECK(followAt(testApp, *session, 1));
+    CHECK(win->count() == (placement == contour::actions::OutputPlacement::Tab ? 2 : 1));
+    auto const& command = factory->requestedCommandOverrides.back();
+    REQUIRE(command.has_value());
+    CHECK(command->program == "editor");
+    CHECK(command->arguments == std::vector<std::string> { "+12", resolvedInWorkDirectory("a.cpp") });
+    CHECK(command->workingDirectory.lexically_normal()
+          == core::pathFromUtf8(WorkDirectory).value_or(std::filesystem::path {}).lexically_normal());
+    CHECK(testApp.launcher().detached.empty());
+}
+
+TEST_CASE("TerminalSession: a file_opener pane works where the file is, not where the shell is now",
+          "[contour][session][links]")
+{
+    // The path names a file in another directory than the one the shell reports: the pane starts in the
+    // file's, which beats the one a new pane would inherit from the acting pane.
+#ifdef _WIN32
+    constexpr auto Elsewhere = std::string_view { "C:/elsewhere" };
+#else
+    constexpr auto Elsewhere = std::string_view { "/elsewhere" };
+#endif
+    auto const placement =
+        GENERATE(contour::actions::OutputPlacement::Split, contour::actions::OutputPlacement::Tab);
+    auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = owned.get();
+    TestApp testApp { std::move(owned) };
+    auto const win = contour::test::ScopedController { testApp.manager() };
+    auto const file = std::format("{}/a.cpp", Elsewhere);
+    testApp.fileSystem().addFile(file, "");
+    testApp.app().config().profile(testApp.app().profileName())->fileOpener =
+        contour::config::FileOpenerConfig { .command = "editor {path}", .placement = placement };
+    auto* const session = testApp.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    session->terminal().setCurrentWorkingDirectory("file://" + std::string { WorkDirectory });
+    session->terminal().writeToScreen(file + ":3");
+
+    CHECK(followAt(testApp, *session, 3));
+    REQUIRE_FALSE(factory->requestedCwds.empty());
+    REQUIRE(factory->requestedCwds.back().has_value());
+    CHECK(*factory->requestedCwds.back()
+          == core::pathToUtf8(
+              core::pathFromUtf8(Elsewhere).value_or(std::filesystem::path {}).lexically_normal()));
+}
+
+TEST_CASE("TerminalSession: a pane whose command names no directory works where the acting pane does",
+          "[contour][session]")
+{
+    auto const placement =
+        GENERATE(contour::session::CommandPanePlacement::Split, contour::session::CommandPanePlacement::Tab);
+    auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = owned.get();
+    TestApp testApp { std::move(owned) };
+    auto const win = contour::test::ScopedController { testApp.manager() };
+    auto* const session = testApp.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    auto const inherited = session->workingDirectory();
+
+    auto command = vtpty::Process::ExecInfo {};
+    command.program = "pager";
+    REQUIRE(testApp.manager().openCommandPane(session, placement, command));
+    REQUIRE_FALSE(factory->requestedCwds.empty());
+    CHECK(factory->requestedCwds.back() == std::optional { inherited });
+}
+
+TEST_CASE("TerminalSession: hint mode opens a path with file_opener too",
+          "[contour][session][links][hintmode]")
+{
+    TestApp testApp;
+    auto session = sessionOverDetectedFile(testApp, "editor {path}:{line}");
+    // Hint mode resolves an absolute path where no working directory is known: it names one place.
+    REQUIRE((*session)(contour::actions::HintMode { .patterns = "filepath",
+                                                    .hintAction = vtbackend::HintAction::Open,
+                                                    .scope = vtbackend::HintScope::Visible }));
+    // The first match on the page gets the first label.
+    session->sendCharEvent(U'a',
+                           vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                           vtbackend::Modifiers {},
+                           vtbackend::KeyboardEventType::Press,
+                           std::chrono::steady_clock::now());
+    QCoreApplication::processEvents();
+    REQUIRE(testApp.launcher().detached.size() == 1);
+    CHECK(testApp.launcher().detached.back().program == "editor");
+    CHECK(testApp.launcher().detached.back().arguments
+          == qArguments({ resolvedInWorkDirectory("a.cpp") + ":12" }));
+}
+
+TEST_CASE("TerminalSession: hint mode's Open is refused where Ctrl+click is",
+          "[contour][session][links][hintmode]")
+{
+    // One follow path for every kind of link: a file:// URL in a pane replicating another machine names a
+    // file there, and so does a path a command printed on another machine.
+    TestApp testApp;
+    testApp.fileSystem().addFile(inWorkDirectory("doc.txt"), "x");
+    auto session = makeDisplaylessSession(testApp.app());
+    auto const openFirstHint = [&](std::string patterns) {
+        auto const hintMode = contour::actions::HintMode { .patterns = std::move(patterns),
+                                                           .hintAction = vtbackend::HintAction::Open,
+                                                           .scope = vtbackend::HintScope::Visible };
+        REQUIRE((*session)(hintMode));
+        session->sendCharEvent(U'a',
+                               vtbackend::KeyIdentity { .unshiftedKey = U'a' },
+                               vtbackend::Modifiers {},
+                               vtbackend::KeyboardEventType::Press,
+                               std::chrono::steady_clock::now());
+        testApp.drainLinkProbes();
+        QCoreApplication::processEvents();
+    };
+
+    SECTION("a file:// URL in a pane replicating another machine")
+    {
+        session->terminal().bindReplica(vtbackend::ReplicaRole::OtherMachine, vtbackend::HostIdentity {});
+        session->terminal().writeToScreen(
+            "see "
+            + localFileUrl(std::filesystem::path { inWorkDirectory("doc.txt") }).toString().toStdString());
+        openFirstHint("url");
+    }
+
+    SECTION("a path a command printed on another machine")
+    {
+        auto const generic = std::string { WorkDirectory };
+        auto const remote =
+            "file://otherhost.invalid" + std::string(generic.starts_with('/') ? "" : "/") + generic;
+        session->terminal().writeToScreen("\033]7;" + remote + "\033\\"
+                                          + "\033]133;A\033\\$ ls\r\n\033]133;C\033\\"
+                                          + "open doc.txt now\r\n\033]133;D;0\033\\");
+        session->terminal().setCurrentWorkingDirectory("file://" + generic);
+        openFirstHint("filepath");
+    }
+
+    CHECK(testApp.launcher().openedUrls.empty());
+    CHECK(testApp.launcher().detached.empty());
+}
+
+TEST_CASE("TerminalSession: Ctrl flips the pointer over a link in place", "[contour][session][links]")
+{
+    using contour::input::MouseCursorShape;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen("\033]8;;https://a.b/\033\\link\033]8;;\033\\");
+    session->terminal().setLinkDecorationMode(vtbackend::LinkDecorationMode::Modifier);
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) },
+        vtbackend::PixelCoordinate {});
+    CHECK(session.surface->cursorShapes.back() == MouseCursorShape::IBeam);
+
+    auto const now = std::chrono::steady_clock::now();
+    session->sendKeyEvent(vtbackend::Key::LeftControl,
+                          vtbackend::KeyboardModifiers {},
+                          vtbackend::KeyboardEventType::Press,
+                          now);
+    CHECK(session.surface->cursorShapes.back() == MouseCursorShape::PointingHand);
+    session->sendKeyEvent(vtbackend::Key::LeftControl,
+                          vtbackend::KeyboardModifiers { vtbackend::Modifier::Control },
+                          vtbackend::KeyboardEventType::Release,
+                          now);
+    CHECK(session.surface->cursorShapes.back() == MouseCursorShape::IBeam);
+}
+
+TEST_CASE("TerminalSession: a move on the same cell that changes the chord re-decides the pointer",
+          "[contour][session][links]")
+{
+    using contour::input::MouseCursorShape;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen("\033]8;;https://a.b/\033\\link\033]8;;\033\\");
+    session->terminal().setLinkDecorationMode(vtbackend::LinkDecorationMode::Modifier);
+    auto const onLink =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) };
+    session->sendMouseMoveEvent(vtbackend::Modifiers {}, onLink, vtbackend::PixelCoordinate {});
+    REQUIRE(session.surface->cursorShapes.back() == MouseCursorShape::IBeam);
+
+    // Ctrl went down while another window had the focus: no key event reached this session, only the move.
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers { vtbackend::Modifier::Control }, onLink, vtbackend::PixelCoordinate {});
+    CHECK(session.surface->cursorShapes.back() == MouseCursorShape::PointingHand);
+
+    session->sendMouseMoveEvent(vtbackend::Modifiers {}, onLink, vtbackend::PixelCoordinate {});
+    CHECK(session.surface->cursorShapes.back() == MouseCursorShape::IBeam);
+}
+
+TEST_CASE("TerminalSession: a config reload moves the follow modifiers with the binding",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    REQUIRE(session->terminal().settings().linkFollowModifiers
+            == std::optional { vtbackend::Modifiers { vtbackend::Modifier::Control } });
+
+    auto reloaded = testApp.app().config();
+    for (auto& mapping: reloaded.inputMappings.value().mouseMappings)
+        if (std::ranges::any_of(mapping.binding, [](contour::actions::Action const& action) {
+                return std::holds_alternative<contour::actions::FollowHyperlink>(action);
+            }))
+            mapping.modifiers = vtbackend::Modifiers { vtbackend::Modifier::Alt };
+    session->applyReloadedConfig(reloaded, reloaded.defaultProfileName.value());
+
+    CHECK(session->terminal().settings().linkFollowModifiers
+          == std::optional { vtbackend::Modifiers { vtbackend::Modifier::Alt } });
+    (void) session->terminal().updateHeldModifiers(vtbackend::Modifier::Alt);
+    CHECK(session->terminal().followModifiers() == vtbackend::FollowModifiers::Held);
+}
+
+TEST_CASE("TerminalSession: losing focus with Ctrl down lets go of it", "[contour][session][links]")
+{
+    using contour::input::MouseCursorShape;
+
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen("\033]8;;https://a.b/\033\\link\033]8;;\033\\");
+    session->terminal().setLinkDecorationMode(vtbackend::LinkDecorationMode::Modifier);
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) },
+        vtbackend::PixelCoordinate {});
+    session->sendKeyEvent(vtbackend::Key::LeftControl,
+                          vtbackend::KeyboardModifiers { vtbackend::Modifier::Control },
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+    REQUIRE(session.surface->cursorShapes.back() == MouseCursorShape::PointingHand);
+
+    // Ctrl+Alt+Tab: the release goes to the window that took the focus.
+    session->sendFocusOutEvent();
+    CHECK(session.surface->cursorShapes.back() == MouseCursorShape::IBeam);
+    CHECK(session->terminal().followModifiers() == vtbackend::FollowModifiers::Released);
+}
+
+TEST_CASE("TerminalSession: a modifier press while the pointer is off the grid leaves the shape alone",
+          "[contour][session][links]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    session->terminal().writeToScreen("\033]8;;https://a.b/\033\\link\033]8;;\033\\");
+    session->terminal().setLinkDecorationMode(vtbackend::LinkDecorationMode::Modifier);
+    session->sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) },
+        vtbackend::PixelCoordinate {});
+    session->onPointerLeft();
+    session.surface->cursorShapes.clear();
+
+    session->sendKeyEvent(vtbackend::Key::LeftControl,
+                          vtbackend::KeyboardModifiers { vtbackend::Modifier::Control },
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+    CHECK(session.surface->cursorShapes.empty());
+}
+
+TEST_CASE("TerminalSession: Ctrl over output the parser thread is writing reads the screen under the lock",
           "[contour][session][hyperlink][threading]")
 {
-    // With Ctrl held, the pointer shows whether it rests on a path that would open, and a path resolves
-    // against the directory of the command that printed it: the block store and the fold cache, which the
-    // parser thread changes as output arrives. That is read inside the lock the move takes. Read after it,
-    // ThreadSanitizer (`ctest --preset=clang-tsan`) reports the records and the fold cache raced between
-    // this thread and the writer; elsewhere this stands as a no-crash smoke test.
+    // The pointer shows whether it rests on something to open -- a link, detected or OSC 8, or a collapsed
+    // fold's label: the grid, the link index and the fold cache, which the parser thread changes as output
+    // arrives. That is read inside the lock the move takes. Read after it, ThreadSanitizer
+    // (`ctest --preset=clang-tsan`) reports the fold cache raced between this thread and the writer;
+    // elsewhere this stands as a no-crash smoke test.
     TestApp testApp;
     auto session = makeSessionWithSurface(testApp.app());
 
@@ -9058,18 +9870,19 @@ TEST_CASE("TerminalSession: what an opener opens is opened once the terminal loc
     CHECK(atLaunch.lockWasFree());
 
     // A path under the pointer, naming a file that exists here.
-    QTemporaryDir const dir;
-    auto const directory = std::filesystem::path(dir.path().toStdU16String());
-    std::ofstream(directory / "doc.txt") << "x";
-    terminal.setCurrentWorkingDirectory("file://" + directory.generic_string());
+    testApp.fileSystem().addFile(inWorkDirectory("doc.txt"), "x");
+    terminal.setCurrentWorkingDirectory("file://" + std::string { WorkDirectory });
     terminal.writeToScreen("\r\nopen doc.txt now");
     terminal.sendMouseMoveEvent(
         Modifiers {},
         vtbackend::CellLocation { .line = vtbackend::LineOffset(1), .column = vtbackend::ColumnOffset(6) },
         vtbackend::PixelCoordinate {},
         /*uiHandledHint=*/false);
-    REQUIRE(terminal.pathTextAtMousePosition() == "doc.txt");
+    REQUIRE(vtbackend::test::printedPathUnderPointer(terminal) == "doc.txt");
     CHECK((*session)(actions::FollowHyperlink {}));
+    // Opened once the probe has answered, back on this thread.
+    testApp.drainLinkProbes();
+    QCoreApplication::processEvents();
     CHECK(atLaunch.lockWasFree());
 
     // The selection.

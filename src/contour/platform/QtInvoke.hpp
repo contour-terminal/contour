@@ -4,6 +4,7 @@
 #include <QtCore/QObject>
 #include <QtCore/Qt>
 
+#include <mutex>
 #include <type_traits>
 #include <utility>
 
@@ -93,6 +94,40 @@ void postToObject(QObject* obj, F fun)
 {
     QMetaObject::invokeMethod(obj, detail::PostedCall<F> { std::move(fun) }, Qt::QueuedConnection);
 }
+
+/// A QObject that work on another thread may post to for as long as the object lives.
+///
+/// postToObject() needs the object alive while it posts, which a job that outlives the object cannot know.
+/// The job shares this instead: the object's owner withdraws it before the object dies (on the object's
+/// thread), a post holds the same mutex, so it either completes before the withdrawal or finds nothing to
+/// post to. What was posted before is dropped by Qt with the object.
+class PostTarget
+{
+  public:
+    /// @param target The object posts go to. Borrowed until withdraw().
+    explicit PostTarget(QObject& target) noexcept: _target { &target } {}
+
+    /// Posts @p fun to the target's thread, unless the target was withdrawn. Callable from any thread.
+    /// @param fun What to run there.
+    template <typename F>
+    void post(F fun)
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        if (_target != nullptr)
+            postToObject(_target, std::move(fun));
+    }
+
+    /// Drops every later post. Called by the target's owner before the target dies.
+    void withdraw() noexcept
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _target = nullptr;
+    }
+
+  private:
+    std::mutex _mutex;
+    QObject* _target; ///< Guarded by _mutex; null once withdrawn.
+};
 
 } // namespace contour::platform
 

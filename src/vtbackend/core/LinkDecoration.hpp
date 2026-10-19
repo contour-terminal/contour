@@ -15,4 +15,13 @@ enum class LinkDecorationRole : uint8_t
     Hover,    ///< The link the pointer is over.
 };
 
+/// When links are decorated: hyperlink_decoration.mode, for OSC 8 hyperlinks and detected links alike.
+enum class LinkDecorationMode : uint8_t
+{
+    Always = 0, ///< Always (the default).
+    Hover,      ///< Only the link under the pointer.
+    Modifier,   ///< Every link while the follow modifier is held.
+    Never,      ///< Never; the follow gesture still opens them.
+};
+
 } // namespace vtbackend

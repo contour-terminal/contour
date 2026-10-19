@@ -2977,6 +2977,7 @@ TEST_CASE("Config: every configuration enum is written as its table's token", "[
                         vtbackend::SearchCaseSensitivity,
                         vtbackend::LineNumberMode,
                         vtbackend::StickyHeaderMode,
+                        vtbackend::LinkDecorationMode,
                         vtbackend::ScrollbarMarkSource>();
 }
 
@@ -7526,6 +7527,476 @@ TEST_CASE("Config: the decorator names the documentation lists are the ones the 
     // The example's own values must be among them.
     CHECK(text.contains("normal: dotted-underline"));
     CHECK(text.contains("hover: underline"));
+}
+
+TEST_CASE("Config: hyperlink_decoration.mode reads, writes and defaults", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const config =
+        loadFromYaml(dir, "profiles:\n  main:\n    hyperlink_decoration:\n      mode: modifier\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->hyperlinkDecoration.value().mode == vtbackend::LinkDecorationMode::Modifier);
+    CHECK(contour::config::TerminalProfile {}.hyperlinkDecoration.value().mode
+          == vtbackend::LinkDecorationMode::Always);
+
+    auto const generated = contour::config::defaultConfigString();
+    CHECK(generated.contains("mode: always"));
+    CHECK(generated.contains("normal: dotted-underline"));
+}
+
+TEST_CASE("Config: an unknown hyperlink_decoration.mode is reported and keeps always", "[config][links]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config =
+        loadFromYaml(dir, "profiles:\n  main:\n    hyperlink_decoration:\n      mode: sometimes\n"sv);
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.contains("'sometimes'"));
+    CHECK(capture.contains("hyperlink_decoration.mode"));
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->hyperlinkDecoration.value().mode == vtbackend::LinkDecorationMode::Always);
+}
+
+TEST_CASE("Config: the generated hyperlink_decoration comment lists the names the parser accepts",
+          "[config][links]")
+{
+    namespace doc = contour::config::documentation;
+    auto const text = std::string_view { doc::HyperlinkDecorationConfig.value };
+
+    // The decorator names are the sentence after "under the pointer: ", up to its full stop, spread over
+    // comment lines.
+    constexpr auto Marker = "under the pointer: "sv;
+    auto const begin = text.find(Marker);
+    REQUIRE(begin != std::string_view::npos);
+    auto const start = begin + Marker.size();
+    auto const sentence = text.substr(start, text.find('.', start) - start);
+
+    auto listed = std::vector<std::string> {};
+    for (auto const line: std::views::split(sentence, '\n'))
+    {
+        auto words = std::string_view { line.begin(), line.end() };
+        words.remove_prefix(words.starts_with("{comment} ") ? std::string_view { "{comment} " }.size() : 0);
+        for (auto const word: std::views::split(words, ","sv))
+        {
+            auto name = std::string { word.begin(), word.end() };
+            std::erase(name, ' ');
+            if (!name.empty())
+                listed.push_back(std::move(name));
+        }
+    }
+
+    for (auto const& [token, decorator]: vtrasterizer::DecoratorNames)
+    {
+        INFO("table name: " << token);
+        CHECK(std::ranges::find(listed, std::string { token }) != listed.end());
+    }
+    for (auto const& name: listed)
+    {
+        INFO("documented name: " << name);
+        CHECK(vtrasterizer::toDecorator(name).has_value());
+    }
+
+    // Every row of the mode table has its line: "{comment}   <token> - ...".
+    for (auto const& row: contour::config::configEnumValues<vtbackend::LinkDecorationMode>())
+    {
+        INFO("mode: " << row.token);
+        CHECK(text.contains(std::format("{{comment}}   {} ", row.token)));
+    }
+}
+
+TEST_CASE("Config: a profile without hint patterns shares the built-in link table", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, "profiles:\n  main:\n    shell: /bin/sh\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(contour::config::linkPatternsFor(*profile) == vtbackend::LinkPatterns::builtins());
+}
+
+TEST_CASE("Config: a broken hint pattern is reported once at load, naming it", "[config][links]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(
+        dir,
+        "profiles:\n  main:\n    shell: /bin/sh\n    hint_patterns:\n      - name: bad\n        regex: '([a-'\n"sv);
+    INFO("captured error log:\n" << capture.text());
+    auto const& text = capture.text();
+    auto const first = text.find("'bad'");
+    REQUIRE(first != std::string::npos);
+    CHECK(text.find("'bad'", first + 1) == std::string::npos);
+    CHECK(text.contains("'main'"));
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(contour::config::linkPatternsFor(*profile)->find("bad") == nullptr);
+}
+
+TEST_CASE("Config: a profile inheriting a broken hint pattern does not report it again", "[config][links]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\nprofiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    hint_patterns:\n      - name: bad\n        regex: '([a-'\n"
+                                     "  other:\n    shell: /bin/sh\n"sv);
+    auto const& text = capture.text();
+    auto const first = text.find("'bad'");
+    REQUIRE(first != std::string::npos);
+    CHECK(text.find("'bad'", first + 1) == std::string::npos);
+}
+
+TEST_CASE("Config: sessionSettings hands the terminal the profile's compiled link table", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(
+        dir,
+        "profiles:\n  main:\n    shell: /bin/sh\n    hint_patterns:\n      - name: jira\n        regex: '\\b[A-Z]+-\\d+\\b'\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const settings =
+        contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark);
+    REQUIRE(settings.linkPatterns != nullptr);
+    CHECK(settings.linkPatterns->find("jira") != nullptr);
+    CHECK(settings.linkPatterns != vtbackend::LinkPatterns::builtins());
+}
+
+// }}}
+
+TEST_CASE("Config: the follow gesture's modifiers come from the mouse bindings", "[config][links]")
+{
+    auto const defaults = contour::config::Config {};
+    CHECK(contour::config::followHyperlinkModifiers(defaults)
+          == vtbackend::Modifiers { vtbackend::Modifier::Control });
+
+    auto const alt = contour::test::loadConfigFromYaml(
+        "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n");
+    CHECK(contour::config::followHyperlinkModifiers(alt)
+          == vtbackend::Modifiers { vtbackend::Modifier::Alt });
+}
+
+TEST_CASE("Config: no mouse binding that follows links leaves no follow modifiers", "[config][links]")
+{
+    auto const none = contour::test::loadConfigFromYaml(
+        "input_mapping:\n  - { mods: [Alt], mouse: Left, action: PasteClipboard }\n");
+    CHECK(contour::config::followHyperlinkModifiers(none) == std::nullopt);
+}
+
+TEST_CASE("Config: sessionSettings carries the follow modifiers", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const config =
+        loadFromYaml(dir,
+                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                     "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const settings =
+        contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark);
+    CHECK(settings.linkFollowModifiers
+          == std::optional { vtbackend::Modifiers { vtbackend::Modifier::Alt } });
+}
+
+TEST_CASE("Config: mode modifier without a follow binding is one diagnostic naming every such profile",
+          "[config][links]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    // "other" sets no mode and inherits modifier from the default profile; "plain" says always.
+    auto const config =
+        loadFromYaml(dir,
+                     "default_profile: main\n"
+                     "profiles:\n"
+                     "  main:\n    shell: /bin/sh\n    hyperlink_decoration:\n      mode: modifier\n"
+                     "  other:\n    shell: /bin/sh\n"
+                     "  plain:\n    shell: /bin/sh\n    hyperlink_decoration:\n      mode: always\n"
+                     "input_mapping:\n  - { mods: [Alt], mouse: Left, action: PasteClipboard }\n"sv);
+    INFO("captured error log:\n" << capture.text());
+    auto const& text = capture.text();
+    auto const first = text.find("hyperlink_decoration.mode is modifier");
+    REQUIRE(first != std::string::npos);
+    CHECK(text.find("hyperlink_decoration.mode is modifier", first + 1) == std::string::npos);
+    CHECK(text.contains("in profiles main, other but no FollowHyperlink mouse binding exists"));
+    CHECK_FALSE(text.contains("plain"));
+}
+
+TEST_CASE("Config: mode modifier with a follow binding is not reported", "[config][links]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(
+        dir,
+        "profiles:\n  main:\n    shell: /bin/sh\n    hyperlink_decoration:\n      mode: modifier\n"
+        "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n"sv);
+    INFO("captured error log:\n" << capture.text());
+    CHECK_FALSE(capture.contains("hyperlink_decoration.mode is modifier"));
+}
+
+// {{{ file_opener
+
+namespace
+{
+/// Loads a main profile whose `file_opener` entry is @p entry: its value, as it follows the key.
+[[nodiscard]] contour::config::FileOpenerConfig fileOpenerOf(QTemporaryDir& dir, std::string_view entry)
+{
+    auto const config = loadFromYaml(dir,
+                                     std::format("default_profile: main\n"
+                                                 "profiles:\n"
+                                                 "    main:\n"
+                                                 "        shell: /bin/sh\n"
+                                                 "        file_opener:{}\n",
+                                                 entry));
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    return profile->fileOpener.value();
+}
+} // namespace
+
+TEST_CASE("Config: file_opener reads a string or a map, and rejects an unknown placeholder",
+          "[config][links]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+
+    auto const asString = fileOpenerOf(dir, " 'code --goto {path}:{line}'");
+    CHECK(asString.command == "code --goto {path}:{line}");
+    CHECK(asString.placement == contour::actions::OutputPlacement::Detached);
+
+    auto const asMap = fileOpenerOf(dir,
+                                    "\n"
+                                    "            command: 'nvim +{line} {path}'\n"
+                                    "            placement: split\n");
+    CHECK(asMap.command == "nvim +{line} {path}");
+    CHECK(asMap.placement == contour::actions::OutputPlacement::Split);
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().empty());
+
+    // Reported, and kept as written: it is disabled where a file is opened, so that a save of the profile
+    // writes back what the user wrote rather than nothing.
+    auto const bad = fileOpenerOf(dir, " 'code {file}'");
+    CHECK(bad.command == "code {file}");
+    CHECK(capture.contains("file_opener 'code {file}': an unknown placeholder"));
+}
+
+TEST_CASE("Config: an invalid file_opener survives the writer and the reader as written", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n"
+                                     "    main:\n"
+                                     "        shell: /bin/sh\n"
+                                     "        file_opener: 'code {file}'\n"sv);
+    REQUIRE(config.profile("main") != nullptr);
+    REQUIRE(config.profile("main")->fileOpener.value().command == "code {file}");
+
+    QTemporaryDir again;
+    auto const reloaded =
+        loadFromYaml(again, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+    REQUIRE(reloaded.profile("main") != nullptr);
+    CHECK(reloaded.profile("main")->fileOpener.value().command == "code {file}");
+}
+
+TEST_CASE("Config: file_opener's string form runs detached, whatever the profile inherited",
+          "[config][links]")
+{
+    // A profile starts as a copy of the default one: the string form names its command alone, which runs
+    // detached.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n"
+                                     "    main:\n"
+                                     "        shell: /bin/sh\n"
+                                     "        file_opener:\n"
+                                     "            command: 'nvim +{line} {path}'\n"
+                                     "            placement: split\n"
+                                     "    other:\n"
+                                     "        shell: /bin/sh\n"
+                                     "        file_opener: 'code --goto {path}'\n"sv);
+    REQUIRE(config.profile("main") != nullptr);
+    REQUIRE(config.profile("other") != nullptr);
+    CHECK(config.profile("main")->fileOpener.value().placement == contour::actions::OutputPlacement::Split);
+    CHECK(config.profile("other")->fileOpener.value().command == "code --goto {path}");
+    CHECK(config.profile("other")->fileOpener.value().placement
+          == contour::actions::OutputPlacement::Detached);
+}
+
+TEST_CASE("Config: file_opener defaults to the system's default application", "[config][links]")
+{
+    auto const defaults = contour::config::Config {};
+    auto const* profile = defaults.profile(defaults.defaultProfileName.value());
+    REQUIRE(profile != nullptr);
+    CHECK(profile->fileOpener.value().command.empty());
+    CHECK(profile->fileOpener.value().placement == contour::actions::OutputPlacement::Detached);
+}
+
+TEST_CASE("Config: the generated config spells out file_opener and reads it back", "[config][links]")
+{
+    auto const generated = contour::config::defaultConfigString();
+    CHECK(generated.contains("file_opener:"));
+    CHECK(generated.contains("placement: detached"));
+    CHECK(generated.contains("{path}"));
+
+    // A configured opener survives the writer and the reader.
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto config = contour::config::Config {};
+    auto* profile = config.profile(config.defaultProfileName.value());
+    REQUIRE(profile != nullptr);
+    profile->fileOpener =
+        contour::config::FileOpenerConfig { .command = "code --goto '{path}:{line}'",
+                                            .placement = contour::actions::OutputPlacement::Tab };
+    auto const reloaded =
+        loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().empty());
+    auto const* back = reloaded.profile(config.defaultProfileName.value());
+    REQUIRE(back != nullptr);
+    CHECK(back->fileOpener.value().command == "code --goto '{path}:{line}'");
+    CHECK(back->fileOpener.value().placement == contour::actions::OutputPlacement::Tab);
+}
+
+// }}}
+
+// {{{ hint_patterns: clickable, url, name-only overrides
+
+TEST_CASE("Config: hint_patterns take clickable and url, and a built-in's name alone", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n"
+                                     "  main:\n"
+                                     "    shell: /bin/sh\n"
+                                     "    hint_patterns:\n"
+                                     "      - name: url\n"
+                                     "        clickable: false\n"
+                                     "      - name: jira\n"
+                                     "        regex: '\\b[A-Z]+-\\d+\\b'\n"
+                                     "        clickable: true\n"
+                                     "        url: 'https://jira.example.com/browse/{0}'\n"sv);
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().empty());
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& patterns = profile->hintPatterns.value();
+    REQUIRE(patterns.size() == 2);
+    CHECK(patterns[0].regex.empty());
+    CHECK(patterns[0].clickable == false);
+    CHECK_FALSE(patterns[0].url.has_value());
+    CHECK(patterns[1].clickable == true);
+    CHECK(patterns[1].url == "https://jira.example.com/browse/{0}");
+
+    auto const specs = contour::config::linkPatternSpecs(*profile);
+    REQUIRE(specs.size() == 2);
+    CHECK(specs[0].regex == std::nullopt);
+    CHECK(specs[0].activation == vtbackend::LinkActivation::HintOnly);
+    CHECK(specs[1].activation == vtbackend::LinkActivation::Clickable);
+    CHECK(specs[1].urlTemplate == "https://jira.example.com/browse/{0}");
+
+    auto const table = contour::config::linkPatternsFor(*profile);
+    REQUIRE(table->find("url") != nullptr);
+    CHECK(table->find("url")->activation == vtbackend::LinkActivation::HintOnly);
+    REQUIRE(table->find("jira") != nullptr);
+    CHECK(table->find("jira")->activation == vtbackend::LinkActivation::Clickable);
+    CHECK(table->find("jira")->urlTemplate.has_value());
+}
+
+TEST_CASE("Config: a name-only hint pattern that names no built-in is skipped and reported",
+          "[config][links]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n"
+                                     "  main:\n"
+                                     "    shell: /bin/sh\n"
+                                     "    hint_patterns:\n"
+                                     "      - name: nobody\n"
+                                     "        clickable: true\n"sv);
+    REQUIRE(config.profile("main") != nullptr);
+    CHECK(config.profile("main")->hintPatterns.value().empty());
+    CHECK(capture.contains("nobody"));
+    CHECK(capture.contains("filepath")); // it names the built-ins a name-only entry may override
+}
+
+TEST_CASE("Config: a hint pattern's url naming a group its regex lacks is reported at load",
+          "[config][links]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n"
+                                     "  main:\n"
+                                     "    shell: /bin/sh\n"
+                                     "    hint_patterns:\n"
+                                     "      - name: jira\n"
+                                     "        regex: '\\b[A-Z]+-\\d+\\b'\n"
+                                     "        clickable: true\n"
+                                     "        url: 'https://j/{1}'\n"sv);
+    REQUIRE(config.profile("main") != nullptr);
+    CHECK(capture.contains("jira"));
+    CHECK(capture.contains("capture group"));
+}
+
+TEST_CASE("Config: hint_patterns' new keys survive a write and a read", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto config = contour::config::Config {};
+    auto* const profile = config.profile(config.defaultProfileName.value());
+    REQUIRE(profile != nullptr);
+    profile->hintPatterns.value() = {
+        contour::config::HintPatternConfig { .name = "url", .regex = {}, .clickable = false, .url = {} },
+        contour::config::HintPatternConfig {
+            .name = "jira", .regex = "[A-Z]+-[0-9]+", .clickable = true, .url = "https://j/{0}" },
+    };
+    auto const reloaded =
+        loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+    auto const* back = reloaded.profile(config.defaultProfileName.value());
+    REQUIRE(back != nullptr);
+    CHECK(back->hintPatterns.value() == profile->hintPatterns.value());
+}
+
+TEST_CASE("Config: the generated config documents clickable patterns", "[config][links]")
+{
+    auto const generated = contour::config::defaultConfigString();
+    CHECK(generated.contains("clickable:"));
+    CHECK(generated.contains("url:"));
+    CHECK(generated.contains("group 1"));
+}
+
+TEST_CASE("Config: a malformed key drops its hint pattern alone, and says which", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n"
+                                     "  main:\n"
+                                     "    shell: /bin/sh\n"
+                                     "    hint_patterns:\n"
+                                     "      - name: jira\n"
+                                     "        regex: '[A-Z]+-[0-9]+'\n"
+                                     "        clickable: maybe\n"
+                                     "      - name: ticket\n"
+                                     "        regex: 'T-[0-9]+'\n"
+                                     "        url: [not, a, string]\n"
+                                     "      - name: uuid\n"
+                                     "        regex: '[0-9a-f]{8}'\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& patterns = profile->hintPatterns.value();
+    REQUIRE(patterns.size() == 1);
+    CHECK(patterns[0].name == "uuid");
+    CHECK(capture.contains("jira"));
+    CHECK(capture.contains("ticket"));
 }
 
 // }}}

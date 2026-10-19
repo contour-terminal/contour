@@ -4,13 +4,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <set>
+#include <string>
+#include <vector>
 
 using namespace vtbackend;
 
@@ -22,6 +26,7 @@ class MockExecutor: public HintModeHandler::Executor
 {
   public:
     std::string lastSelectedText;
+    LinkTarget lastTarget {};
     HintAction lastAction = HintAction::Copy;
     CellLocation lastStart {};
     CellLocation lastEnd {};
@@ -30,15 +35,13 @@ class MockExecutor: public HintModeHandler::Executor
     int hintExitedCount = 0;
     int redrawCount = 0;
 
-    void onHintSelected(std::string const& matchedText,
-                        HintAction action,
-                        CellLocation start,
-                        CellLocation end) override
+    void onHintSelected(HintMatch const& match, HintAction action) override
     {
-        lastSelectedText = matchedText;
+        lastSelectedText = match.matchedText;
+        lastTarget = match.target;
         lastAction = action;
-        lastStart = start;
-        lastEnd = end;
+        lastStart = match.start;
+        lastEnd = match.end;
         ++hintSelectedCount;
     }
 
@@ -47,52 +50,79 @@ class MockExecutor: public HintModeHandler::Executor
     void requestRedraw() override { ++redrawCount; }
 };
 
-/// The full set of built-in patterns, materialized on first use.
-auto const& allPatterns()
+/// A hint resolver from one that rewrites text, as the tests wrote them before targets carried more.
+template <typename Rewrite>
+[[nodiscard]] auto resolverOf(Rewrite rewrite) -> HintResolver
 {
-    static auto const patterns = HintModeHandler::builtinPatterns();
-    return patterns;
-}
-
-/// Returns only the URL pattern for precise count-based test assertions.
-auto urlOnlyPatterns() -> std::vector<HintPattern>
-{
-    auto result = std::vector<HintPattern>();
-    for (auto& p: HintModeHandler::builtinPatterns())
-        if (p.name == "url")
-            result.push_back(std::move(p));
-    return result;
-}
-
-/// Returns only the IPv6 pattern for precise test assertions.
-auto ipv6OnlyPatterns() -> std::vector<HintPattern>
-{
-    auto result = std::vector<HintPattern>();
-    for (auto& p: HintModeHandler::builtinPatterns())
-        if (p.name == "ipv6")
-            result.push_back(std::move(p));
-    return result;
-}
-
-/// @return A resolve hook that keeps a match as written where @p keeps holds, and drops it elsewhere.
-[[nodiscard]] auto keepingWhere(std::function<bool(std::string const&)> keeps)
-{
-    return [keeps = std::move(keeps)](std::string const& matchStr,
-                                      LineOffset /*row*/) -> std::optional<std::string> {
-        if (!keeps(matchStr))
+    return [rewrite = std::move(rewrite)](LinkCandidate const& candidate,
+                                          LineOffset row) -> std::optional<LinkTarget> {
+        auto text = rewrite(candidate.target, row);
+        if (!text)
             return std::nullopt;
-        return matchStr;
+        return LinkTarget { .kind = candidate.kind,
+                            .target = std::move(*text),
+                            .location = candidate.location,
+                            .pathKind = PathKind::Missing,
+                            .directory = {} };
     };
 }
 
-/// Returns only the filepath pattern for precise test assertions.
-auto filepathOnlyPatterns() -> std::vector<HintPattern>
+/// The terminal's rule for a row with no directory to look in: a bare word is no path.
+HintResolver withoutDirectory()
 {
-    auto result = std::vector<HintPattern>();
-    for (auto& p: HintModeHandler::builtinPatterns())
-        if (p.name == "filepath")
-            result.push_back(std::move(p));
-    return result;
+    return [](LinkCandidate const& candidate, LineOffset) -> std::optional<LinkTarget> {
+        if (candidate.kind == LinkKind::Path && candidate.target.find_first_of("/\\") == std::string::npos)
+            return std::nullopt;
+        return LinkTarget { .kind = candidate.kind,
+                            .target = candidate.target,
+                            .location = candidate.location,
+                            .pathKind = PathKind::Missing,
+                            .directory = {} };
+    };
+}
+
+/// Every built-in pattern, kept as printed.
+auto allPatterns() -> HintPatternSet
+{
+    return HintPatternSet {};
+}
+
+/// Only the URL pattern, for precise count-based test assertions.
+auto urlOnlyPatterns() -> HintPatternSet
+{
+    return HintPatternSet { .table = LinkPatterns::builtins(), .names = { "url" }, .resolve = {} };
+}
+
+/// Only the IPv6 pattern, for precise test assertions.
+auto ipv6OnlyPatterns() -> HintPatternSet
+{
+    return HintPatternSet { .table = LinkPatterns::builtins(), .names = { "ipv6" }, .resolve = {} };
+}
+
+/// Only the filepath pattern, for precise test assertions; matches are kept as printed.
+auto filepathOnlyPatterns() -> HintPatternSet
+{
+    return HintPatternSet { .table = LinkPatterns::builtins(), .names = { "filepath" }, .resolve = {} };
+}
+
+/// The filepath pattern under the terminal's rule for a row with no directory to look in.
+auto withoutDirectoryPatterns() -> HintPatternSet
+{
+    return HintPatternSet { .table = LinkPatterns::builtins(),
+                            .names = { "filepath" },
+                            .resolve = withoutDirectory() };
+}
+
+/// @return A resolve hook that keeps a match as written where @p keeps holds, and drops it elsewhere.
+template <typename Keeps>
+[[nodiscard]] auto keepingWhere(Keeps keeps) -> HintResolver
+{
+    return resolverOf([keeps = std::move(keeps)](std::string const& text,
+                                                 LineOffset /*row*/) -> std::optional<std::string> {
+        if (!keeps(text))
+            return std::nullopt;
+        return text;
+    });
 }
 
 /// @p lines as unwrapped rows starting at grid line 0, every one of them labelable.
@@ -100,12 +130,12 @@ auto scanArea(std::vector<std::string> const& lines) -> HintScanArea
 {
     auto area = HintScanArea {
         .rows = {},
+        .continuesBelow = LineContinuation::No,
         .labelableRows = HintRowRange { .first = LineOffset(0),
                                         .last = LineOffset::cast_from(lines.size()) - LineOffset(1) },
     };
     for (auto const i: std::views::iota(size_t { 0 }, lines.size()))
-        area.rows.push_back(HintScanRow {
-            .text = lines[i], .line = LineOffset::cast_from(i), .continuation = LineContinuation::No });
+        area.rows.push_back(makePlainScanRow(lines[i], LineOffset::cast_from(i)));
     return area;
 }
 
@@ -116,19 +146,31 @@ auto wrappedScanArea(std::vector<std::string> const& lines, LineOffset firstLine
 {
     auto area = HintScanArea {
         .rows = {},
+        .continuesBelow = LineContinuation::No,
         .labelableRows =
             HintRowRange { .first = firstLine,
                            .last = firstLine + LineOffset::cast_from(lines.size()) - LineOffset(1) },
     };
     for (auto const i: std::views::iota(size_t { 0 }, lines.size()))
-        area.rows.push_back(
-            HintScanRow { .text = lines[i],
-                          .line = firstLine + LineOffset::cast_from(i),
-                          .continuation = i == 0 ? LineContinuation::No : LineContinuation::Yes });
+        area.rows.push_back(makePlainScanRow(lines[i],
+                                             firstLine + LineOffset::cast_from(i),
+                                             i == 0 ? LineContinuation::No : LineContinuation::Yes));
     return area;
 }
 
 } // namespace
+
+TEST_CASE("HintModeHandler.FilepathIsLinearOnALongWordRun", "[hintmode][links]")
+{
+    // §2.4 item 1: master's filepath regex was O(n^2) on a word run (80 s at 64 KB). A freeze test, no
+    // timing.
+    auto executor = MockExecutor {};
+    auto handler = HintModeHandler { executor };
+    handler.activate(
+        scanArea({ std::string(std::size_t { 32 } * 1024, 'a') }), filepathOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 1); // one bare word, kept as printed: the old regex never matched one
+    CHECK(handler.matches()[0].matchedText.size() == std::size_t { 32 } * 1024);
+}
 
 TEST_CASE("HintModeHandler.LabelAssignment.SingleChar", "[hintmode]")
 {
@@ -418,15 +460,19 @@ TEST_CASE("HintModeHandler.BareRelativeFilePath", "[hintmode]")
     CHECK(foundHelpers);
 }
 
-TEST_CASE("HintModeHandler.BareRelativeDoesNotMatchPlainWords", "[hintmode]")
+TEST_CASE("HintModeHandler.PlainWordsAreNoPathWithoutADirectory", "[hintmode]")
 {
     auto executor = MockExecutor {};
     auto handler = HintModeHandler { executor };
 
-    // Plain words without slashes must NOT match the filepath pattern.
+    // The grammar finds every word as a candidate path; with no directory to look in, the terminal's rule
+    // drops the ones without a slash.
     auto lines = std::vector<std::string> { "hello world foo bar" };
 
     handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 4); // control: they are found
+
+    handler.activate(scanArea(lines), withoutDirectoryPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
@@ -441,10 +487,7 @@ TEST_CASE("HintModeHandler.ValidatorFiltersMatches", "[hintmode]")
 
     // Create a filepath pattern whose resolve hook keeps only "/accept/path".
     auto patterns = filepathOnlyPatterns();
-    for (auto& p: patterns)
-    {
-        p.resolve = keepingWhere([](std::string const& matchStr) { return matchStr.contains("accept"); });
-    }
+    patterns.resolve = keepingWhere([](std::string const& matchStr) { return matchStr.contains("accept"); });
 
     handler.activate(scanArea(lines), patterns, HintAction::Open);
 
@@ -486,20 +529,14 @@ TEST_CASE("HintModeHandler.BareFilenameWithValidatedPattern", "[hintmode]")
     // Simulate bare filenames, extensionless files, and directories.
     auto lines = std::vector<std::string> { "error in main.cpp and README.md also Makefile and src" };
 
-    // Create a filepath pattern with the broader regex (includes bare name branch)
-    // and a resolve hook that keeps specific names.
-    auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "filepath",
-            .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                                std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .resolve = keepingWhere([](std::string const& matchStr) -> bool {
-                // Simulate: these entries exist on disk, anything else doesn't.
-                return matchStr == "main.cpp" || matchStr == "README.md" || matchStr == "Makefile"
-                       || matchStr == "src";
-            }),
-        },
-    };
+    // The built-in filepath grammar finds bare names; a resolve hook keeps specific ones.
+    auto patterns = HintPatternSet { .table = LinkPatterns::builtins(),
+                                     .names = { "filepath" },
+                                     .resolve = keepingWhere([](std::string const& matchStr) -> bool {
+                                         // Simulate: these entries exist on disk, anything else doesn't.
+                                         return matchStr == "main.cpp" || matchStr == "README.md"
+                                                || matchStr == "Makefile" || matchStr == "src";
+                                     }) };
 
     handler.activate(scanArea(lines), patterns, HintAction::Open);
 
@@ -520,17 +557,12 @@ TEST_CASE("HintModeHandler.BareFilenameFilteredByValidator", "[hintmode]")
     // when the resolve hook finds they do not exist on disk.
     auto lines = std::vector<std::string> { "version v0.6.3 and example.com and real.txt also build" };
 
-    auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "filepath",
-            .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                                std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .resolve = keepingWhere([](std::string const& matchStr) -> bool {
-                // Only real.txt "exists".
-                return matchStr == "real.txt";
-            }),
-        },
-    };
+    auto patterns = HintPatternSet { .table = LinkPatterns::builtins(),
+                                     .names = { "filepath" },
+                                     .resolve = keepingWhere([](std::string const& matchStr) -> bool {
+                                         // Only real.txt "exists".
+                                         return matchStr == "real.txt";
+                                     }) };
 
     handler.activate(scanArea(lines), patterns, HintAction::Copy);
 
@@ -539,42 +571,42 @@ TEST_CASE("HintModeHandler.BareFilenameFilteredByValidator", "[hintmode]")
     CHECK(handler.matches()[0].matchedText == "real.txt");
 }
 
-TEST_CASE("HintModeHandler.SingleCharTokensNotMatched", "[hintmode]")
+TEST_CASE("HintModeHandler.SingleCharWordsAreFoundButNoPathWithoutADirectory", "[hintmode]")
 {
     auto executor = MockExecutor {};
     auto handler = HintModeHandler { executor };
 
-    // Single-character tokens are below the 2-char minimum of the broad regex branch.
+    // The grammar finds single-character words, as it finds every bare word; the terminal's rule
+    // for a row with no directory to look in drops them, and every other bare word with them.
     auto lines = std::vector<std::string> { "a b c d" };
 
-    auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "filepath",
-            .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                                std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .resolve = keepingWhere([](std::string const&) -> bool { return true; }), // Accept everything.
-        },
-    };
+    // Control: the grammar does find all four, at their columns.
+    handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Copy);
+    REQUIRE(handler.matches().size() == 4);
+    CHECK(handler.matches()[0].start.column == ColumnOffset(0));
+    CHECK(handler.matches()[1].start.column == ColumnOffset(2));
+    CHECK(handler.matches()[2].start.column == ColumnOffset(4));
+    CHECK(handler.matches()[3].start.column == ColumnOffset(6));
 
-    handler.activate(scanArea(lines), patterns, HintAction::Copy);
+    handler.activate(scanArea(lines), withoutDirectoryPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
     CHECK(handler.matches().empty());
 }
 
-TEST_CASE("HintModeHandler.BuiltinRegexDoesNotMatchBareFilenames", "[hintmode]")
+TEST_CASE("HintModeHandler.BareFilenamesAreNoPathWithoutADirectory", "[hintmode]")
 {
     auto executor = MockExecutor {};
     auto handler = HintModeHandler { executor };
 
-    // With the default builtin patterns (no resolve hook, no broad regex),
-    // bare filenames must NOT be matched — they need a path separator.
+    // A bare filename is found by the grammar, but with no directory to look in nothing tells it from
+    // prose, so the terminal's rule offers none.
     auto lines = std::vector<std::string> { "edit main.cpp and README.md" };
 
-    handler.activate(scanArea(lines), filepathOnlyPatterns(), HintAction::Copy);
+    handler.activate(scanArea(lines), withoutDirectoryPatterns(), HintAction::Copy);
 
     REQUIRE(handler.isActive());
-    // No filepath matches because there are no slashes.
+    // No hint, because there are no slashes.
     CHECK(handler.matches().empty());
 }
 
@@ -602,21 +634,16 @@ TEST_CASE("HintModeHandler.CwdRelativeFilesystemValidation", "[hintmode]")
 
     // Mirror the production resolve hook from Terminal::activateHintMode:
     // resolve bare names relative to CWD, then check filesystem existence.
-    auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "filepath",
-            .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                                std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .resolve = keepingWhere([cwd](std::string const& matchStr) -> bool {
-                auto resolved = std::string {};
-                if (matchStr.starts_with("/"))
-                    resolved = matchStr;
-                else
-                    resolved = cwd + "/" + matchStr;
-                return fs::exists(resolved);
-            }),
-        },
-    };
+    auto patterns = HintPatternSet { .table = LinkPatterns::builtins(),
+                                     .names = { "filepath" },
+                                     .resolve = keepingWhere([&cwd](std::string const& matchStr) -> bool {
+                                         auto resolved = std::string {};
+                                         if (matchStr.starts_with("/"))
+                                             resolved = matchStr;
+                                         else
+                                             resolved = cwd + "/" + matchStr;
+                                         return fs::exists(resolved);
+                                     }) };
 
     handler.activate(scanArea(lines), patterns, HintAction::Open);
 
@@ -652,18 +679,13 @@ TEST_CASE("HintModeHandler.HiddenFilesWithValidatedPattern", "[hintmode]")
         "check .gitignore and .bashrc also .config and README.md",
     };
 
-    auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "filepath",
-            .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                                std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .resolve = keepingWhere([](std::string const& matchStr) -> bool {
-                // Simulate: all dotfiles and README.md exist on disk.
-                return matchStr == ".gitignore" || matchStr == ".bashrc" || matchStr == ".config"
-                       || matchStr == "README.md";
-            }),
-        },
-    };
+    auto patterns = HintPatternSet { .table = LinkPatterns::builtins(),
+                                     .names = { "filepath" },
+                                     .resolve = keepingWhere([](std::string const& matchStr) -> bool {
+                                         // Simulate: all dotfiles and README.md exist on disk.
+                                         return matchStr == ".gitignore" || matchStr == ".bashrc"
+                                                || matchStr == ".config" || matchStr == "README.md";
+                                     }) };
 
     handler.activate(scanArea(lines), patterns, HintAction::Open);
 
@@ -685,19 +707,15 @@ TEST_CASE("HintModeHandler.DotPrefixedRelativePath", "[hintmode]")
     auto handler = HintModeHandler { executor };
 
     // Dot-prefixed relative paths like .config/settings and .local/bin/tool
-    // should be matched via alternative 3 of the broadened regex.
+    // should be matched by the built-in filepath grammar.
     auto lines = std::vector<std::string> {
         "open .config/settings and .local/bin/tool",
     };
 
-    auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "filepath",
-            .regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                                std::regex_constants::ECMAScript | std::regex_constants::optimize),
-            .resolve = keepingWhere([](std::string const&) -> bool { return true; }), // Accept everything.
-        },
-    };
+    auto patterns =
+        HintPatternSet { .table = LinkPatterns::builtins(),
+                         .names = { "filepath" },
+                         .resolve = keepingWhere([](std::string const&) -> bool { return true; }) };
 
     handler.activate(scanArea(lines), patterns, HintAction::Open);
 
@@ -718,16 +736,14 @@ TEST_CASE("HintModeHandler.TransformerRewritesMatchedText", "[hintmode]")
 
     auto lines = std::vector<std::string> { "open src/foo.cpp for editing" };
 
-    auto patterns = std::vector<HintPattern> {
-        HintPattern {
-            .name = "filepath",
-            .regex = std::regex(R"([\w./]+)", std::regex_constants::ECMAScript),
-            .resolve = [](std::string const& matchStr, LineOffset /*row*/) -> std::optional<std::string> {
-                if (!matchStr.contains('/'))
-                    return std::nullopt;
-                return "/project/" + matchStr;
-            },
-        },
+    auto patterns = HintPatternSet {
+        .table = LinkPatterns::builtins(),
+        .names = { "filepath" },
+        .resolve = resolverOf([](std::string const& text, LineOffset /*row*/) -> std::optional<std::string> {
+            if (!text.contains('/'))
+                return std::nullopt;
+            return "/project/" + text;
+        }),
     };
 
     handler.activate(scanArea(lines), patterns, HintAction::Copy);
@@ -742,6 +758,9 @@ TEST_CASE("HintModeHandler.TransformerRewritesMatchedText", "[hintmode]")
     handler.processInput(U'a');
     CHECK(executor.hintSelectedCount == 1);
     CHECK(executor.lastSelectedText == "/project/src/foo.cpp");
+    // And what it stands for, which Open hands on as a link.
+    CHECK(executor.lastTarget.kind == LinkKind::Path);
+    CHECK(executor.lastTarget.target == "/project/src/foo.cpp");
 }
 
 TEST_CASE("HintModeHandler.IPv6FullAddress", "[hintmode]")
@@ -942,105 +961,6 @@ TEST_CASE("HintModeHandler.MatchAtLineStartWithUnicode", "[hintmode]")
     CHECK(handler.matches()[0].start.column == ColumnOffset(0));
     CHECK(handler.matches()[0].end.column == ColumnOffset(16));
 }
-
-// {{{ Logical-line grouping and offset mapping
-
-TEST_CASE("buildLogicalLines.UnwrappedRowsStayApart", "[hintmode]")
-{
-    auto const rows = std::vector<HintScanRow> {
-        HintScanRow { .text = "one", .line = LineOffset(0), .continuation = LineContinuation::No },
-        HintScanRow { .text = "two", .line = LineOffset(1), .continuation = LineContinuation::No },
-    };
-
-    auto const logical = buildLogicalLines(rows);
-
-    REQUIRE(logical.size() == 2);
-    CHECK(logical[0].text == "one");
-    CHECK(logical[0].firstLine == LineOffset(0));
-    CHECK(logical[1].text == "two");
-    CHECK(logical[1].firstLine == LineOffset(1));
-}
-
-TEST_CASE("buildLogicalLines.ContinuationsJoinTheHead", "[hintmode]")
-{
-    auto const rows = std::vector<HintScanRow> {
-        HintScanRow { .text = "head", .line = LineOffset(3), .continuation = LineContinuation::No },
-        HintScanRow { .text = "-mid", .line = LineOffset(4), .continuation = LineContinuation::Yes },
-        HintScanRow { .text = "-end", .line = LineOffset(5), .continuation = LineContinuation::Yes },
-        HintScanRow { .text = "next", .line = LineOffset(6), .continuation = LineContinuation::No },
-    };
-
-    auto const logical = buildLogicalLines(rows);
-
-    REQUIRE(logical.size() == 2);
-    CHECK(logical[0].text == "head-mid-end");
-    CHECK(logical[0].firstLine == LineOffset(3));
-    CHECK(logical[0].rowCodepointEnds == std::vector<size_t> { 4, 8, 12 });
-    CHECK(logical[1].text == "next");
-    CHECK(logical[1].firstLine == LineOffset(6));
-}
-
-TEST_CASE("buildLogicalLines.LeadingContinuationHeadsItsOwnLine", "[hintmode]")
-{
-    // The head scrolled out of the scanned range: the continuation is all we can see of it, and
-    // must not be dropped.
-    auto const rows = std::vector<HintScanRow> {
-        HintScanRow { .text = "tail", .line = LineOffset(0), .continuation = LineContinuation::Yes },
-        HintScanRow { .text = "-end", .line = LineOffset(1), .continuation = LineContinuation::Yes },
-    };
-
-    auto const logical = buildLogicalLines(rows);
-
-    REQUIRE(logical.size() == 1);
-    CHECK(logical[0].text == "tail-end");
-    CHECK(logical[0].firstLine == LineOffset(0));
-}
-
-TEST_CASE("buildLogicalLines.NonConsecutiveRowsBreakTheRun", "[hintmode]")
-{
-    // A gap in the offsets would break gridPositionOf()'s firstLine + rowIndex arithmetic.
-    auto const rows = std::vector<HintScanRow> {
-        HintScanRow { .text = "aaa", .line = LineOffset(0), .continuation = LineContinuation::No },
-        HintScanRow { .text = "bbb", .line = LineOffset(7), .continuation = LineContinuation::Yes },
-    };
-
-    auto const logical = buildLogicalLines(rows);
-
-    REQUIRE(logical.size() == 2);
-    CHECK(logical[1].firstLine == LineOffset(7));
-}
-
-TEST_CASE("gridPositionOf.MapsAcrossRowBoundaries", "[hintmode]")
-{
-    auto const logical = HintLogicalLine {
-        .text = "abcdefghi",
-        .firstLine = LineOffset(-2),
-        .rowCodepointEnds = { 3, 6, 9 },
-    };
-
-    // First row.
-    CHECK(gridPositionOf(logical, 0) == CellLocation { .line = LineOffset(-2), .column = ColumnOffset(0) });
-    CHECK(gridPositionOf(logical, 2) == CellLocation { .line = LineOffset(-2), .column = ColumnOffset(2) });
-    // Second row starts exactly at the boundary.
-    CHECK(gridPositionOf(logical, 3) == CellLocation { .line = LineOffset(-1), .column = ColumnOffset(0) });
-    CHECK(gridPositionOf(logical, 5) == CellLocation { .line = LineOffset(-1), .column = ColumnOffset(2) });
-    // Third row.
-    CHECK(gridPositionOf(logical, 6) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) });
-    CHECK(gridPositionOf(logical, 8) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
-    // Past the end clamps to the last existing cell.
-    CHECK(gridPositionOf(logical, 9) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
-    CHECK(gridPositionOf(logical, 99) == CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
-}
-
-TEST_CASE("gridPositionOf.EmptyLogicalLineClampsToItsFirstCell", "[hintmode]")
-{
-    auto const logical =
-        HintLogicalLine { .text = "", .firstLine = LineOffset(4), .rowCodepointEnds = { 0 } };
-
-    CHECK(gridPositionOf(logical, 0) == CellLocation { .line = LineOffset(4), .column = ColumnOffset(0) });
-}
-
-// }}}
 
 // {{{ Wrapped-line matching
 
@@ -1394,10 +1314,14 @@ TEST_CASE("HintModeHandler.LongestMatchWinsAtTheSameStart", "[hintmode]")
     // Two patterns that match at the very same position with different lengths. The sort's
     // tie-break puts the longer one first, and the overlap pass then drops the shorter -- the rule
     // the wrapped-line overlap comparison relies on.
-    auto patterns = std::vector<HintPattern> {
-        HintPattern { .name = "short", .regex = std::regex(R"([0-9a-f]{7})"), .resolve = {} },
-        HintPattern { .name = "long", .regex = std::regex(R"([0-9a-f]{10})"), .resolve = {} },
+    auto const entries = std::array {
+        LinkPatternSpec { .name = "short", .regex = R"([0-9a-f]{7})", .activation = {} },
+        LinkPatternSpec { .name = "long", .regex = R"([0-9a-f]{10})", .activation = {} },
     };
+    auto patterns =
+        HintPatternSet { .table = std::make_shared<LinkPatterns const>(LinkPatterns::compile(entries)),
+                         .names = { "short", "long" },
+                         .resolve = {} };
 
     handler.activate(scanArea(std::vector<std::string> { "abcdef0123" }), patterns, HintAction::Copy);
 

@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <format>
 #include <memory>
+#include <ranges>
 #include <utility>
 
 namespace vtbackend
@@ -328,12 +329,18 @@ void ViCommands::searchCurrentWord()
     jumpToNextMatch(1);
 }
 
+void ViCommands::followLinkAtCursor()
+{
+    _terminal->followLinkAt(cursorPosition);
+}
+
 void ViCommands::enterHintMode(HintAction action)
 {
-    // `gh`/`gH` scan the visible page with the built-in patterns; the scrollback scope is reachable
+    // `gh`/`gH` scan the visible page with the profile's pattern table; the scrollback scope is reachable
     // only through an input_mapping, which can name the limit.
     _terminal->activateHintMode(HintModeRequest {
-        .patterns = HintModeHandler::builtinPatterns(),
+        .patterns =
+            HintPatternSet { .table = _terminal->settings().linkPatterns, .names = {}, .resolve = {} },
         .action = action,
         .scope = HintScope::Visible,
         .scrollbackLimit = LineCount(0),
@@ -1226,6 +1233,23 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             _terminal->viewport().makeVisibleWithinSafeArea(unbox<LineOffset>(cursorPosition.line),
                                                             LineCount(_terminal->pageSize().lines / 2));
             return cursorPosition;
+        }
+        case ViMotion::LinkForward:  // ]x
+        case ViMotion::LinkBackward: // [x
+        {
+            auto const direction =
+                motion == ViMotion::LinkForward ? LinkDirection::Forward : LinkDirection::Backward;
+            // One key press's scan, whatever its count.
+            auto budget = _terminal->linkScanBudget();
+            auto position = cursorPosition;
+            for ([[maybe_unused]] auto const _: std::views::iota(0U, count))
+            {
+                auto const next = _terminal->linkStartFrom(position, direction, budget);
+                if (!next)
+                    break;
+                position = *next;
+            }
+            return position == cursorPosition ? cursorPosition : addJumpHistory(position);
         }
     }
     core::unreachable();

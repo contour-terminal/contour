@@ -5,6 +5,7 @@
 
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/links/LinkTypes.hpp>
 
 #include <cstdint>
 #include <optional>
@@ -71,6 +72,11 @@ struct ContextMenuState
     /// clicked cell the instant it travels to the menu row the user is reaching for — so an action that
     /// asked again at click time would answer about a cell nobody clicked.
     std::string hyperlinkUnderCursor;
+
+    /// The detected link the user right-clicked, resolved far enough to open (a path only once confirmed);
+    /// nullopt where there was none, or an OSC 8 link was there. Carried by the rows, for the reason
+    /// hyperlinkUnderCursor is.
+    std::optional<vtbackend::LinkTarget> linkUnderCursor {};
 
     /// The right-clicked grid line, when a fold covers it -- nullopt means there is nothing to toggle.
     ///

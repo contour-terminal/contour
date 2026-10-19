@@ -2,10 +2,13 @@
 #pragma once
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/links/LinkMatcher.hpp>
+#include <vtbackend/links/LinkPatterns.hpp>
+#include <vtbackend/links/ScanText.hpp>
 
 #include <functional>
+#include <memory>
 #include <optional>
-#include <regex>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,28 +33,6 @@ enum class HintScope : uint8_t
     Scrollback = 1, ///< The visible page plus scrollback history, up to a configured limit.
 };
 
-/// Whether a physical row continues the logical line begun on the row above.
-///
-/// A logical line is what was actually written; the rows below its head exist only because the
-/// window happened to be too narrow. Hint patterns are matched against the logical line, so a URL
-/// broken across two rows is still one match.
-enum class LineContinuation : uint8_t
-{
-    No = 0,  ///< This row starts a new logical line.
-    Yes = 1, ///< This row is a wrapped continuation of the row above.
-};
-
-/// One physical terminal row handed to the hint scanner.
-struct HintScanRow
-{
-    /// The row's full, untrimmed text: exactly one codepoint per grid cell, so a codepoint index
-    /// into it is a column offset (wide-character continuation cells emit a space).
-    std::string text;
-    /// Grid line offset of this row. Zero is the top of the page; negative reaches into history.
-    LineOffset line;
-    LineContinuation continuation = LineContinuation::No;
-};
-
 /// An inclusive range of grid rows.
 struct HintRowRange
 {
@@ -64,36 +45,40 @@ struct HintRowRange
     }
 };
 
+/// What a hint stands for, by its pattern's rule. Given the match and the grid row it starts on, it returns
+/// the target the hint carries (a relative path resolved to an absolute one), or nullopt to drop it (a path
+/// naming no file). The overlay still shows the text as printed.
+using HintResolver = std::function<std::optional<LinkTarget>(LinkCandidate const&, LineOffset)>;
+
+/// The patterns one hint activation scans with.
+struct HintPatternSet
+{
+    /// The table, compiled once per profile (Terminal's Settings::linkPatterns).
+    std::shared_ptr<LinkPatterns const> table = LinkPatterns::builtins();
+    /// Which of its patterns take part; empty: all of them.
+    std::vector<std::string> names {};
+    /// Unset: every match is kept as printed.
+    HintResolver resolve {};
+};
+
 /// The terminal region one hint activation scans.
 struct HintScanArea
 {
     /// The rows to scan, in ascending, consecutive grid-line order.
-    std::vector<HintScanRow> rows;
-
-    /// The rows whose matches may be labelled. A match starting outside it is discarded — its label
-    /// could not be drawn, so it would be unreachable. Rows outside it still contribute their text,
-    /// so a match running past the range still yields its complete text.
+    std::vector<ScanRow> rows;
+    /// Whether the row after the last one continues it.
+    LineContinuation continuesBelow = LineContinuation::No;
+    /// The rows whose matches may be labelled. A match starting outside it is discarded, because its label
+    /// could not be drawn. Rows outside it still contribute their text, so a match running past the range
+    /// still yields its complete text.
     HintRowRange labelableRows;
-};
-
-/// A named regex pattern used for hint scanning.
-struct HintPattern
-{
-    std::string name;
-    std::regex regex;
-    /// Optional: what a match stands for. Given the matched text and the grid row the match starts on --
-    /// what a match means can depend on where it was printed (a path, on the directory its command ran
-    /// in) -- it returns the text the hint carries, e.g. a relative path resolved to an absolute one, or
-    /// nullopt to drop the match, e.g. one that names no existing file. The overlay still shows the
-    /// original terminal text. Unset, every match is kept as written.
-    std::function<std::optional<std::string>(std::string const&, LineOffset)> resolve;
 };
 
 /// What one hint-mode activation should scan and do.
 struct HintModeRequest
 {
-    /// The regex patterns to scan for.
-    std::vector<HintPattern> patterns;
+    /// The patterns to scan for.
+    HintPatternSet patterns {};
 
     /// What to do with the match the user selects.
     HintAction action = HintAction::Copy;
@@ -113,23 +98,16 @@ struct HintModeRequest
 /// a wrapped logical line; the region they name is a run of text, not a rectangle.
 struct HintMatch
 {
-    std::string label;       ///< The label shown on the overlay (e.g. "a", "bc").
-    std::string matchedText; ///< The actual matched text.
-    CellLocation start;      ///< Start position in the grid.
-    CellLocation end;        ///< End position in the grid (inclusive).
-};
-
-/// A run of consecutive physical rows forming one logical line, plus what is needed to map a
-/// codepoint index within @ref text back to the grid cell it came from.
-struct HintLogicalLine
-{
-    std::string text;     ///< Concatenated row texts, in row order.
-    LineOffset firstLine; ///< Grid offset of the first row.
-
-    /// Where each row ends within @ref text, as an exclusive codepoint index, in row order. Stored
-    /// cumulatively rather than as per-row lengths so @ref gridPositionOf can binary-search it: a
-    /// linear walk is O(rows) per call, and one wrapped line can be a thousand rows long.
-    std::vector<size_t> rowCodepointEnds;
+    std::string label; ///< The label shown on the overlay (e.g. "a", "bc").
+    /// What Copy, Paste and Select act on: the match as printed; a path, the absolute form it resolved to.
+    std::string matchedText;
+    /// What the hint stands for, which Open opens: a custom match's template expansion, a path resolved.
+    LinkTarget target;
+    /// Whether Open may open @ref target: not where the printed text chose a scheme outside the built-in URL
+    /// schemes (LinkCandidate::opening).
+    LinkOpening opening = LinkOpening::Refused;
+    CellLocation start; ///< Start position in the grid.
+    CellLocation end;   ///< End position in the grid (inclusive).
 };
 
 /// Handles hint mode logic: scanning visible text for regex matches,
@@ -145,16 +123,11 @@ class HintModeHandler
 
         /// Called when a hint has been selected by the user.
         ///
-        /// @param matchedText The text that was matched by the hint pattern.
-        /// @param action      The action to perform on the match.
-        /// @param start       The grid-absolute start position of the match (line 0 = top of the
-        ///                    page, negative = history).
-        /// @param end         The grid-absolute end position of the match (inclusive). It may lie
-        ///                    on a later row than @p start when the match spans a wrapped line.
-        virtual void onHintSelected(std::string const& matchedText,
-                                    HintAction action,
-                                    CellLocation start,
-                                    CellLocation end) = 0;
+        /// @param match  The match: its text, what it stands for (a path resolved at its location), and its
+        ///               grid-absolute range (line 0 = top of the page, negative = history; the end
+        ///               inclusive, on a later row than the start where the match spans a wrapped line).
+        /// @param action The action to perform on the match.
+        virtual void onHintSelected(HintMatch const& match, HintAction action) = 0;
 
         /// Called when hint mode is entered.
         virtual void onHintModeEntered() = 0;
@@ -174,10 +147,10 @@ class HintModeHandler
     /// pattern may span several rows.
     ///
     /// @param area     The rows to scan and which of them may carry a label.
-    /// @param patterns The regex patterns to scan for; taken by value and moved into the handler,
-    ///                 so a caller with a throwaway vector should std::move it in.
+    /// @param patterns The patterns to scan with; taken by value and moved into the handler,
+    ///                 so a caller with a throwaway set should std::move it in.
     /// @param action   The action to perform on selection.
-    void activate(HintScanArea const& area, std::vector<HintPattern> patterns, HintAction action);
+    void activate(HintScanArea const& area, HintPatternSet patterns, HintAction action);
 
     /// Re-scans @p area using the patterns and action stored by @ref activate.
     /// Called on viewport scroll to update visible-scope hints without re-entering hint mode.
@@ -211,9 +184,6 @@ class HintModeHandler
     /// Returns the hint action for the current session.
     [[nodiscard]] HintAction action() const noexcept { return _action; }
 
-    /// Returns built-in default hint patterns (URLs, file paths, git hashes).
-    [[nodiscard]] static std::vector<HintPattern> builtinPatterns();
-
   private:
     /// Core scanning logic shared by activate() and refresh().
     /// Clears existing matches, scans the rows, sorts, deduplicates, and assigns labels.
@@ -228,55 +198,10 @@ class HintModeHandler
     Executor& _executor;
     bool _active = false;
     HintAction _action = HintAction::Copy;
-    std::vector<HintPattern> _patterns; ///< Stored on activate for refresh on scroll.
+    HintPatternSet _patterns; ///< Stored on activate for refresh on scroll.
     std::vector<HintMatch> _allMatches;
     std::vector<HintMatch> _filteredMatches;
     std::string _filter;
 };
-
-/// Converts a UTF-8 byte offset within @p text to the corresponding codepoint index.
-///
-/// In the column-aligned UTF-8 strings the hint scanner uses (see @ref Line::toUtf8ColumnAligned),
-/// each grid cell emits exactly one codepoint (a wide character's continuation cell emits a space).
-/// Therefore the codepoint index equals the column index for these strings.
-[[nodiscard]] auto utf8ByteOffsetToCodepointIndex(std::string_view text, size_t byteOffset) noexcept
-    -> size_t;
-
-/// Converts a monotonically non-decreasing sequence of UTF-8 byte offsets within one string to
-/// codepoint indices in a single forward pass over that string.
-///
-/// @ref utf8ByteOffsetToCodepointIndex counts from the start of the string on every call, which is
-/// quadratic across the many matches of one long logical line — and a wrapped logical line can be a
-/// thousand rows of text. Regex matches arrive in increasing, non-overlapping position order, so
-/// this remembers where the previous conversion ended and counts only the delta.
-class Utf8CodepointCursor
-{
-  public:
-    explicit Utf8CodepointCursor(std::string_view text) noexcept: _text { text } {}
-
-    /// @param byteOffset Must be at least the offset given to the previous call.
-    /// @return The codepoint index @p byteOffset falls on.
-    [[nodiscard]] auto codepointIndexAt(size_t byteOffset) noexcept -> size_t;
-
-  private:
-    std::string_view _text;
-    size_t _byteOffset = 0;
-    size_t _codepointIndex = 0;
-};
-
-/// Groups @p rows into logical lines, joining each run of wrapped continuations onto the row that
-/// heads it. A leading continuation row (its head scrolled out of the scanned range) heads its own
-/// logical line rather than being dropped.
-///
-/// @param rows Rows in ascending, consecutive grid-line order.
-/// @return One entry per logical line, in the same order.
-[[nodiscard]] auto buildLogicalLines(std::vector<HintScanRow> const& rows) -> std::vector<HintLogicalLine>;
-
-/// Maps a codepoint index within @p logical back to the grid cell it came from.
-///
-/// An index at or past the end of the logical line clamps to its last cell, so a caller need not
-/// special-case a zero-length tail.
-[[nodiscard]] auto gridPositionOf(HintLogicalLine const& logical, size_t codepointIndex) noexcept
-    -> CellLocation;
 
 } // namespace vtbackend

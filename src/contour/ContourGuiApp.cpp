@@ -143,8 +143,12 @@ bool hasStrandedQmlOverrides(fs::path const& configHome)
 
 namespace
 {
-    /// Worker threads of the pool every session's status-line commands run on.
+    /// Worker threads of the pool every session's status-line commands and link matching run on.
     constexpr auto StatusLineCommandThreads = std::size_t { 2 };
+
+    /// Worker threads every session's path probes run on: one, so that a probe blocked on a hung mount stalls
+    /// only the other probes.
+    constexpr auto LinkProbeThreads = std::size_t { 1 };
 
 #ifndef _WIN32
     /// Blocks every signal in the constructing thread and restores the previous mask on destruction.
@@ -175,7 +179,7 @@ namespace
     };
 #endif
 
-    /// Creates the pool every session's status-line commands run on.
+    /// Creates a pool for the app's background work: status-line commands, link matching, path probes.
     ///
     /// On POSIX the workers are created with every signal blocked. Otherwise they would keep SIGINT and
     /// SIGTERM unblocked, and the kernel may deliver a process-directed signal to any thread that does
@@ -183,12 +187,14 @@ namespace
     /// sigwait thread (vthost::runDaemon), so a delivery to a pool worker would kill the process with
     /// the default disposition before the daemon could clean up its socket. The spawned shells do not
     /// inherit the blocked mask (SystemCommandCapture resets it).
-    [[nodiscard]] core::async::ThreadPoolExecutor makeStatusLineCommandExecutor()
+    /// @param threads The number of workers.
+    /// @return The pool.
+    [[nodiscard]] core::async::ThreadPoolExecutor makeBackgroundExecutor(std::size_t threads)
     {
 #ifndef _WIN32
         auto const signalsBlocked = ScopedAllSignalsBlocked {};
 #endif
-        return core::async::ThreadPoolExecutor { StatusLineCommandThreads };
+        return core::async::ThreadPoolExecutor { threads };
     }
 
     /// The production ProgramReachablePredicate: the reachability test every external launch in the
@@ -277,11 +283,14 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              vtbackend::TerminalClocks terminalClocks,
                              std::optional<vtbackend::HostIdentity> hostIdentity,
                              core::platform::FileSystem const* fileSystem,
-                             std::shared_ptr<vtpty::ProcessPlacement> processPlacement):
+                             std::shared_ptr<vtpty::ProcessPlacement> processPlacement,
+                             std::optional<vtbackend::LinkDetectionServices> linkServices):
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
-    _commandExecutor(makeStatusLineCommandExecutor()),
+    _commandExecutor(makeBackgroundExecutor(StatusLineCommandThreads)),
     _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
+    _linkProbeExecutor(makeBackgroundExecutor(LinkProbeThreads)),
+    _injectedLinkServices { std::move(linkServices) },
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
         sessionFactory ? std::move(sessionFactory)
                        : std::make_unique<session::AppSessionFactory>(*this, _processPlacement))),
@@ -304,10 +313,24 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
         *this, *_sessionFactory, *_layoutStore, *_commandHistoryStore, QDir::homePath().toStdString()),
     _gpuInventory { display::makePlatformGpuInventory() }
 {
+    // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
+    // services carry the app's.
+    Require(!_injectedLinkServices || &_injectedLinkServices->fileSystem == &_fileSystem);
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
     link("contour.client", bind(&ContourGuiApp::clientAction, this));
+}
+
+vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
+{
+    if (_injectedLinkServices)
+        return *_injectedLinkServices;
+    return { .matchExecutor = _commandExecutor,
+             .probeExecutor = _linkProbeExecutor,
+             .fileSystem = fileSystem(),
+             .clock = _terminalClocks.steady.get(),
+             .tuning = {} };
 }
 
 ContourGuiApp::~ContourGuiApp()

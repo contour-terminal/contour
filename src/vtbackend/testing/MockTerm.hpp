@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/WindowSizeStack.hpp>
+#include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <vtpty/MockPty.hpp>
@@ -13,6 +14,7 @@
 
 #include <libunicode/convert.h>
 
+#include <atomic>
 #include <chrono>
 #include <concepts>
 #include <optional>
@@ -45,11 +47,14 @@ class MockTerm: public Terminal::NullEvents
     /// @param commandServices Who runs `{Command}` status-line items; nullopt renders them empty.
     /// @param localTime The time zone the terminal reads its clocks in: UTC unless a test names another,
     ///                  so that no test depends on the zone of the machine it runs on.
+    /// @param linkServices Where passive link detection runs; nullopt detects nothing. Its filesystem is then
+    ///                     the terminal's own too.
     explicit MockTerm(PageSize size,
                       HistoryLimits historyLimits = {},
                       size_t ptyReadBufferSize = 1024,
                       std::optional<StatusLineCommandServices> commandServices = std::nullopt,
-                      LocalTimeConverter localTime = &fixedOffsetLocalTime<>);
+                      LocalTimeConverter localTime = &fixedOffsetLocalTime<>,
+                      std::optional<LinkDetectionServices> linkServices = std::nullopt);
 
     /// A terminal reading its clocks in the time zone @p localTime.
     MockTerm(PageSize size, LocalTimeConverter localTime):
@@ -62,9 +67,13 @@ class MockTerm: public Terminal::NullEvents
     /// @see createSettings for what the other constructors set.
     /// @param commandServices Who runs `{Command}` status-line items; nullopt renders them empty.
     /// @param localTime The time zone the terminal reads its clocks in, UTC unless a test names another.
+    /// @param linkServices Where passive link detection runs; nullopt detects nothing. Its filesystem is then
+    ///                     the terminal's own too, so that the paths detection finds and the path under the
+    ///                     pointer are looked up in the same place, as Terminal() asks.
     explicit MockTerm(vtbackend::Settings settings,
                       std::optional<StatusLineCommandServices> commandServices = std::nullopt,
-                      LocalTimeConverter localTime = &fixedOffsetLocalTime<>);
+                      LocalTimeConverter localTime = &fixedOffsetLocalTime<>,
+                      std::optional<LinkDetectionServices> linkServices = std::nullopt);
 
     /// A scrollback with no headroom, which is what a bare line count has always meant here.
     MockTerm(PageSize size,
@@ -292,6 +301,12 @@ class MockTerm: public Terminal::NullEvents
     /// only on the absence of a crash.
     void openDocument(std::string_view fileOrUrl) override { openedDocument = fileOrUrl; }
 
+    /// The last resolved link the terminal asked to open as a link (a path at its location); recorded instead
+    /// of the default, which hands its target to openDocument().
+    std::optional<LinkTarget> openedLink;
+
+    void openLink(LinkTarget const& link) override { openedLink = link; }
+
     void setWindowFrameColor(RGBColor color) override
     {
         windowFrameColor = color;
@@ -330,7 +345,15 @@ class MockTerm: public Terminal::NullEvents
     /// by default, so only an OSC 7 URL with no host is provably local.
     HostIdentity identity;
 
-    [[nodiscard]] LocalIdentity localIdentity() const noexcept override { return identity.view(); }
+    /// How often the terminal asked for that identity: once per working directory it resolved. Atomic, as
+    /// the terminal may ask on any thread.
+    mutable std::atomic<int> localIdentityQueries { 0 };
+
+    [[nodiscard]] LocalIdentity localIdentity() const noexcept override
+    {
+        ++localIdentityQueries;
+        return identity.view();
+    }
 
     /// What new output does to a view scrolled back into the history: it stays by default, as a headless
     /// terminal's view does. @see Terminal::Events::outputFollowing
@@ -406,20 +429,23 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      HistoryLimits historyLimits,
                                      size_t ptyReadBufferSize,
                                      std::optional<StatusLineCommandServices> commandServices,
-                                     LocalTimeConverter localTime):
+                                     LocalTimeConverter localTime,
+                                     std::optional<LinkDetectionServices> linkServices):
     MockTerm { createSettings(pageSize, historyLimits, ptyReadBufferSize),
                std::move(commandServices),
-               localTime }
+               localTime,
+               std::move(linkServices) }
 {
 }
 
 template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      std::optional<StatusLineCommandServices> commandServices,
-                                     LocalTimeConverter localTime):
+                                     LocalTimeConverter localTime,
+                                     std::optional<LinkDetectionServices> linkServices):
     terminal { *this,
                core::defaultEnvironment(),
-               core::platform::NativeFileSystem::instance(),
+               linkServices ? linkServices->fileSystem : core::platform::NativeFileSystem::instance(),
                std::make_unique<PtyDevice>(settings.pageSize),
                std::move(settings),
                std::move(commandServices),
@@ -428,7 +454,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                    auto const token = nextSemanticBlockToken;
                    ++nextSemanticBlockToken.back();
                    return token;
-               } }
+               },
+               std::move(linkServices) }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {

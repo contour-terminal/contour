@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/command/Shortcut.hpp>
+#include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
 #include <contour/platform/QtPath.hpp>
 #include <contour/window/SettingsController.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/CommandBlockOutcome.hpp>
+#include <vtbackend/links/LinkMatcher.hpp>
+#include <vtbackend/links/LinkPatterns.hpp>
+#include <vtbackend/links/ScanText.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/shell/Folding.hpp>
@@ -13,6 +18,7 @@
 
 #include <text_shaper/Font.hpp>
 
+#include <core/Assert.hpp>
 #include <core/Utf8Path.hpp>
 
 #include <yaml-cpp/yaml.h>
@@ -28,6 +34,7 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <ranges>
@@ -58,6 +65,9 @@ namespace
         std::function<QVariant(TerminalProfile const&)> get;        //!< Reads the field as a QVariant.
         std::function<void(TerminalProfile&, QVariant const&)> set; //!< Writes the field from QVariant.
         QStringList options {}; //!< For "enum": the allowed values (the combo model + accepted set).
+        /// What is wrong with a value, shown under the editor; empty when nothing is. Absent for a field
+        /// whose every value is usable.
+        std::function<QString(QVariant const&)> validate {};
     };
 
     /// One titled group of related profile fields, as the settings page shows them.
@@ -885,12 +895,25 @@ namespace
                       "Whether to blur content behind the transparent terminal window (platform dependent).",
                       [](auto& p) -> auto& { return p.background.value().blur; }),
               } },
-            { "Hyperlinks",
+            { "Links",
               "⧉",
               {
+                  enumFieldFromTable<vtbackend::LinkDecorationMode>(
+                      "hyperlink_decoration_mode",
+                      "Show links",
+                      "When links are decorated: always, only the one under the pointer, all of them while "
+                      "the "
+                      "follow modifier is held, or never. Applies to OSC 8 hyperlinks and detected links "
+                      "alike.",
+                      [](TerminalProfile const& p) { return p.hyperlinkDecoration.value().mode; },
+                      [](TerminalProfile& p, auto v) {
+                          auto hd = p.hyperlinkDecoration.value();
+                          hd.mode = v;
+                          p.hyperlinkDecoration = hd;
+                      }),
                   enumField(
                       "hyperlink_decoration_normal",
-                      "Hyperlink decoration (normal)",
+                      "Normal style",
                       "The underline style for hyperlinks in their normal state.",
                       vtrasterizer::DecoratorNames,
                       [](TerminalProfile const& p) { return p.hyperlinkDecoration.value().normal; },
@@ -901,7 +924,7 @@ namespace
                       }),
                   enumField(
                       "hyperlink_decoration_hover",
-                      "Hyperlink decoration (hover)",
+                      "Hover style",
                       "The underline style for hyperlinks when hovered.",
                       vtrasterizer::DecoratorNames,
                       [](TerminalProfile const& p) { return p.hyperlinkDecoration.value().hover; },
@@ -909,6 +932,42 @@ namespace
                           auto hd = p.hyperlinkDecoration.value();
                           hd.hover = v;
                           p.hyperlinkDecoration = hd;
+                      }),
+                  ProfileFieldDescriptor {
+                      .key = "file_opener_command",
+                      .label = "Open files with",
+                      .help =
+                          "A command line for detected file paths, with {path}, {line} and {column}; empty "
+                          "opens them with the system's default application. No shell is involved.",
+                      .type = "string",
+                      .get =
+                          [](TerminalProfile const& p) {
+                              return QVariant(toQString(p.fileOpener.value().command));
+                          },
+                      .set =
+                          [](TerminalProfile& p, QVariant const& v) {
+                              auto opener = p.fileOpener.value();
+                              opener.command = v.toString().toStdString();
+                              p.fileOpener = opener;
+                          },
+                      .options = {},
+                      .validate = [](QVariant const& v) -> QString {
+                          auto const text = v.toString().toStdString();
+                          if (text.empty())
+                              return {};
+                          auto const parsed = config::FileOpenerTemplate::parse(text);
+                          return parsed ? QString {} : toQString(config::describe(parsed.error()));
+                      } },
+                  enumFieldFromTable<actions::OutputPlacement>(
+                      "file_opener_placement",
+                      "Open in",
+                      "Where a file opened with the command above appears: a program of its own "
+                      "(detached), or a Contour pane running it (split, tab).",
+                      [](TerminalProfile const& p) { return p.fileOpener.value().placement; },
+                      [](TerminalProfile& p, auto v) {
+                          auto opener = p.fileOpener.value();
+                          opener.placement = v;
+                          p.fileOpener = opener;
                       }),
               } },
             { "Status line",
@@ -1893,11 +1952,31 @@ bool SettingsController::fail(std::string const& error)
     return false;
 }
 
+std::optional<std::string> SettingsController::draftProblem() const
+{
+    // A field whose value has a problem (an invalid file_opener) is saved as written: the reader keeps it and
+    // reports it, and the terminal disables it, so a refusal would guard nothing. Its row shows the problem.
+    //
+    // A pattern the reader would skip, or one of the profile's own the terminal would disable: each row shows
+    // its own. A built-in's broken override does not refuse the save: the page cannot change its regex, and
+    // the reader keeps the entry and reports it at every load, so a refusal would guard nothing and block
+    // every unrelated edit.
+    for (auto const& pattern: _draft.hintPatterns.value())
+        if (auto const reason = config::skippedHintPatternReason(pattern))
+            return std::format("Link patterns: {}.", *reason);
+    for (auto const& diagnostic: config::linkPatternsFor(_draft)->diagnostics())
+        if (diagnostic.severity() == vtbackend::LinkPatternSeverity::Error
+            && !vtbackend::isBuiltinLinkPatternName(diagnostic.pattern))
+            return diagnostic.message();
+    return std::nullopt;
+}
+
 void SettingsController::refresh()
 {
     auto const& cfg = _config();
     _gpus = _gpuInventory ? _gpuInventory->list() : std::vector<display::GpuCandidate> {};
     _locked = cfg.guiConfigLocked.value();
+    _linkGesture = QString::fromStdString(command::describeLinkGesture(cfg));
     _defaultProfile = QString::fromStdString(cfg.defaultProfileName.value());
 
     // Profiles, name-sorted for a stable list.
@@ -1976,6 +2055,8 @@ QVariantList SettingsController::profileFields() const
             row[QStringLiteral("help")] = descriptor.help;
             row[QStringLiteral("type")] = descriptor.type;
             row[QStringLiteral("value")] = descriptor.get(_draft);
+            row[QStringLiteral("problem")] =
+                descriptor.validate ? descriptor.validate(row[QStringLiteral("value")]) : QString {};
             row[QStringLiteral("options")] = descriptor.options;
             row[QStringLiteral("group")] = group.title;
             row[QStringLiteral("groupGlyph")] = group.glyph;
@@ -2115,6 +2196,8 @@ bool SettingsController::saveProfile()
         return fail("This profile has no name yet — use \"Save As\".");
     if (_editingReadOnly)
         return fail("This profile is defined in contour.yml and cannot be overwritten — use \"Save As\".");
+    if (auto const problem = draftProblem())
+        return fail(*problem);
 
     if (auto const result = _store->saveProfile(_editingProfile.toStdString(), _draft); !result)
         return fail(result.error());
@@ -2137,6 +2220,8 @@ bool SettingsController::saveProfileAs(QString const& newName)
     // inline and side-file profiles, matching renameProfile's collision guard.
     if (_config().findProfile(trimmed.toStdString()) != nullptr)
         return fail("A profile with that name already exists; choose another name.");
+    if (auto const problem = draftProblem())
+        return fail(*problem);
 
     if (auto const result = _store->saveProfile(trimmed.toStdString(), _draft); !result)
         return fail(result.error());
@@ -2741,6 +2826,290 @@ void SettingsController::setIndicatorSegment(int segmentIndex, QString const& va
     }
     _draft.statusLine = statusLine;
     emit draftChanged();
+}
+
+// }}}
+
+// {{{ Link patterns
+
+namespace
+{
+    using config::HintPatternConfig;
+
+    /// How many rows of SettingsController::linkPatterns the built-ins take, ahead of the profile's own.
+    [[nodiscard]] int builtinLinkPatternRows()
+    {
+        return static_cast<int>(vtbackend::builtinLinkPatternNames().size());
+    }
+
+    /// The profile's own patterns among @p entries: those that name no built-in, in their order.
+    [[nodiscard]] auto userLinkPatterns(std::vector<HintPatternConfig>& entries)
+    {
+        return entries | std::views::filter([](HintPatternConfig const& entry) {
+                   return !vtbackend::isBuiltinLinkPatternName(entry.name);
+               });
+    }
+
+    /// The entry of @p entries that user row @p index (counted from the first row after the built-ins'
+    /// rows) shows.
+    /// @return It, or the end of @p entries for an index out of range.
+    [[nodiscard]] std::vector<HintPatternConfig>::iterator userLinkPatternAt(
+        std::vector<HintPatternConfig>& entries, int index)
+    {
+        if (index < 0)
+            return entries.end();
+        auto users = userLinkPatterns(entries);
+        auto const found = std::ranges::next(users.begin(), index, users.end());
+        return found == users.end() ? entries.end() : found.base();
+    }
+
+    /// A row's `kind`: what the page calls the kind of link a pattern finds.
+    [[nodiscard]] QString linkKindName(vtbackend::LinkKind kind)
+    {
+        switch (kind)
+        {
+            case vtbackend::LinkKind::Url: return QStringLiteral("url");
+            case vtbackend::LinkKind::Path: return QStringLiteral("path");
+            case vtbackend::LinkKind::Custom: return QStringLiteral("custom");
+        }
+        return QStringLiteral("custom");
+    }
+
+    /// The regex the last of @p entries named @p name gives that built-in, as the terminal applies them in
+    /// order.
+    /// @return The regex; nullopt when no entry by that name gives one.
+    [[nodiscard]] std::optional<std::string> regexOverrideOf(std::span<HintPatternConfig const> entries,
+                                                             std::string_view name)
+    {
+        auto overrides =
+            entries | std::views::reverse | std::views::filter([name](HintPatternConfig const& entry) {
+                return entry.name == name && !entry.regex.empty();
+            });
+        return overrides.empty() ? std::nullopt : std::optional { overrides.front().regex };
+    }
+
+    /// The last of @p entries named @p name: the one whose keys win.
+    /// @return It, or the end of @p entries when none has that name.
+    [[nodiscard]] std::vector<HintPatternConfig>::iterator lastEntryNamed(
+        std::vector<HintPatternConfig>& entries, std::string_view name)
+    {
+        auto const found = std::ranges::find(std::views::reverse(entries), name, &HintPatternConfig::name);
+        return found.base() == entries.begin() ? entries.end() : std::prev(found.base());
+    }
+
+    /// The messages @p table has for the pattern @p name, one per line; empty when it has none.
+    [[nodiscard]] QString diagnosticsOf(vtbackend::LinkPatterns const& table, std::string_view name)
+    {
+        auto text = QStringList {};
+        for (auto const& diagnostic: table.diagnostics())
+            if (diagnostic.pattern == name)
+                text.push_back(QString::fromStdString(diagnostic.message()));
+        return text.join(QLatin1Char('\n'));
+    }
+
+    /// What a user row shows as its problem: why the reader would skip the entry, else what compiling it
+    /// reports.
+    [[nodiscard]] QString problemOf(HintPatternConfig const& entry, vtbackend::LinkPatterns const& table)
+    {
+        if (auto const reason = config::skippedHintPatternReason(entry))
+            return QString::fromStdString(*reason);
+        return diagnosticsOf(table, entry.name);
+    }
+
+    /// The length, in UTF-16 code units, of the first @p bytes bytes of @p text: the offset QML counts in.
+    [[nodiscard]] int utf16Offset(std::string_view text, std::size_t bytes)
+    {
+        return static_cast<int>(toQString(text.substr(0, bytes)).size());
+    }
+} // namespace
+
+QVariantList SettingsController::linkPatterns() const
+{
+    auto rows = QVariantList {};
+    if (!_hasDraft)
+        return rows;
+    auto const table = config::linkPatternsFor(_draft);
+    auto const& entries = _draft.hintPatterns.value();
+    for (auto const name: vtbackend::builtinLinkPatternNames())
+    {
+        // Every built-in compiles on its own (LinkPatterns' tests hold them to it), and the rows the
+        // mutators count are one per name.
+        auto const* builtin = vtbackend::LinkPatterns::builtins()->find(name);
+        Require(builtin != nullptr);
+        // As the terminal has it: the compiled table, which applies the entries by its name in order. A
+        // broken override leaves the built-in out of it: the row shows that override's regex, finds
+        // nothing, and says why.
+        auto const* effective = table->find(name);
+        auto row = QVariantMap {};
+        row[QStringLiteral("name")] = toQString(name);
+        row[QStringLiteral("regex")] = QString::fromStdString(
+            effective ? effective->source : regexOverrideOf(entries, name).value_or(builtin->source));
+        row[QStringLiteral("clickable")] =
+            effective != nullptr && effective->activation == vtbackend::LinkActivation::Clickable;
+        row[QStringLiteral("url")] = QString {};
+        row[QStringLiteral("builtin")] = true;
+        row[QStringLiteral("kind")] = linkKindName(builtin->kind);
+        row[QStringLiteral("problem")] = diagnosticsOf(*table, name);
+        rows.push_back(row);
+    }
+    for (auto const& entry: entries)
+    {
+        if (vtbackend::isBuiltinLinkPatternName(entry.name))
+            continue; // shown on its built-in's row
+        auto row = QVariantMap {};
+        row[QStringLiteral("name")] = QString::fromStdString(entry.name);
+        row[QStringLiteral("regex")] = QString::fromStdString(entry.regex);
+        row[QStringLiteral("clickable")] = entry.clickable.value_or(false);
+        row[QStringLiteral("url")] = QString::fromStdString(entry.url.value_or(std::string {}));
+        row[QStringLiteral("builtin")] = false;
+        row[QStringLiteral("kind")] = linkKindName(vtbackend::LinkKind::Custom);
+        row[QStringLiteral("problem")] = problemOf(entry, *table);
+        rows.push_back(row);
+    }
+    return rows;
+}
+
+void SettingsController::addLinkPattern()
+{
+    if (!_hasDraft || _editingReadOnly)
+        return;
+    auto patterns = _draft.hintPatterns.value();
+    auto const isTaken = [&patterns](std::string const& name) {
+        return std::ranges::find(patterns, name, &HintPatternConfig::name) != patterns.end();
+    };
+    auto freeNames = std::views::iota(1)
+                     | std::views::transform([](int number) { return std::format("pattern{}", number); })
+                     | std::views::filter(std::not_fn(isTaken));
+    patterns.push_back(
+        HintPatternConfig { .name = *freeNames.begin(), .regex = {}, .clickable = true, .url = {} });
+    _draft.hintPatterns = std::move(patterns);
+    emit draftChanged();
+}
+
+void SettingsController::setLinkPattern(int index, QVariantMap const& row)
+{
+    if (!_hasDraft || _editingReadOnly || index < 0)
+        return;
+    auto patterns = _draft.hintPatterns.value();
+    auto const clickable = row.value(QStringLiteral("clickable")).toBool();
+    if (index < builtinLinkPatternRows())
+    {
+        // A built-in keeps its regex: its row writes `clickable` alone, as a name-only override.
+        auto const name = vtbackend::builtinLinkPatternNames()[static_cast<std::size_t>(index)];
+        auto const* builtin = vtbackend::LinkPatterns::builtins()->find(name);
+        auto const byDefault =
+            builtin != nullptr && builtin->activation == vtbackend::LinkActivation::Clickable;
+        // The terminal merges the entries by its name, in order, each changing the keys it gives: cleared on
+        // every one, then given to the last, the one whose keys win, only where it differs from the default.
+        auto const named = [name](HintPatternConfig const& entry) {
+            return entry.name == name;
+        };
+        for (auto& entry: patterns | std::views::filter(named))
+            entry.clickable = std::nullopt;
+        if (clickable != byDefault)
+        {
+            auto entry = lastEntryNamed(patterns, name);
+            if (entry == patterns.end())
+                entry = patterns.insert(
+                    patterns.end(),
+                    HintPatternConfig {
+                        .name = std::string { name }, .regex = {}, .clickable = {}, .url = {} });
+            entry->clickable = clickable;
+        }
+        // An entry that now changes nothing goes.
+        std::erase_if(patterns, [&named](HintPatternConfig const& entry) {
+            return named(entry) && entry.regex.empty() && !entry.clickable && !entry.url;
+        });
+    }
+    else
+    {
+        auto const entry = userLinkPatternAt(patterns, index - builtinLinkPatternRows());
+        if (entry == patterns.end())
+            return;
+        auto const name = row.value(QStringLiteral("name")).toString().trimmed().toStdString();
+        // Renamed after a built-in or another pattern, it would merge into that one's row.
+        if (name != entry->name
+            && (vtbackend::isBuiltinLinkPatternName(name)
+                || std::ranges::find(patterns, name, &HintPatternConfig::name) != patterns.end()))
+        {
+            fail(std::format("A link pattern named '{}' exists already; choose another name.", name));
+            emit draftChanged(); // the row shows its name again, not the refused one
+            return;
+        }
+        auto const url = row.value(QStringLiteral("url")).toString().toStdString();
+        entry->name = name;
+        entry->regex = row.value(QStringLiteral("regex")).toString().toStdString();
+        entry->clickable = clickable;
+        entry->url = url.empty() ? std::nullopt : std::optional { url };
+    }
+    _draft.hintPatterns = std::move(patterns);
+    emit draftChanged();
+}
+
+void SettingsController::removeLinkPattern(int index)
+{
+    if (!_hasDraft || _editingReadOnly || index < builtinLinkPatternRows())
+        return;
+    auto patterns = _draft.hintPatterns.value();
+    auto const entry = userLinkPatternAt(patterns, index - builtinLinkPatternRows());
+    if (entry == patterns.end())
+        return;
+    patterns.erase(entry);
+    _draft.hintPatterns = std::move(patterns);
+    emit draftChanged();
+}
+
+QVariantMap SettingsController::previewLinkPattern(QVariantMap const& row, QString const& sample) const
+{
+    auto const name = row.value(QStringLiteral("name")).toString().toStdString();
+    auto const regex = row.value(QStringLiteral("regex")).toString().toStdString();
+    auto const url = row.value(QStringLiteral("url")).toString().toStdString();
+    // The row on its own, as the terminal would compile it: a built-in's row carries the regex in effect.
+    auto const entries = std::array { vtbackend::LinkPatternSpec {
+        .name = name,
+        .regex = regex.empty() ? std::nullopt : std::optional { regex },
+        .activation = row.value(QStringLiteral("clickable")).toBool() ? vtbackend::LinkActivation::Clickable
+                                                                      : vtbackend::LinkActivation::HintOnly,
+        .urlTemplate = url.empty() ? std::nullopt : std::optional { url },
+    } };
+    auto const table = vtbackend::LinkPatterns::compile(entries);
+
+    auto result = QVariantMap {};
+    result[QStringLiteral("problem")] = diagnosticsOf(table, name);
+    result[QStringLiteral("note")] = QString {};
+    auto spans = QVariantList {};
+    auto const* pattern = table.find(name);
+    if (pattern != nullptr)
+    {
+        auto const text = sample.toStdString();
+        auto const rows = std::array { vtbackend::makePlainScanRow(text) };
+        auto const scan = vtbackend::ScanText { rows, vtbackend::ScanClip {} };
+        auto const patternIndex = static_cast<std::size_t>(pattern - table.patterns().data());
+        auto const clickable = pattern->activation == vtbackend::LinkActivation::Clickable;
+        auto anyRefused = false;
+        for (auto const& candidate: vtbackend::findLinks(
+                 scan, table, vtbackend::PatternSelection::All, vtbackend::LinkOverlap::Keep))
+            if (candidate.patternIndex == patternIndex)
+            {
+                // A match the terminal would not make a link (§7.6), shown as such, as it underlines nothing.
+                auto const refused = clickable && candidate.opening == vtbackend::LinkOpening::Refused;
+                anyRefused = anyRefused || refused;
+                auto span = QVariantMap {};
+                span[QStringLiteral("start")] = utf16Offset(text, candidate.byteBegin);
+                span[QStringLiteral("end")] = utf16Offset(text, candidate.byteEnd);
+                span[QStringLiteral("target")] = QString::fromStdString(candidate.target);
+                span[QStringLiteral("refused")] = refused;
+                spans.push_back(span);
+            }
+        if (pattern->kind == vtbackend::LinkKind::Path)
+            result[QStringLiteral("note")] =
+                tr("Paths are underlined in the terminal once they are found to exist.");
+        else if (anyRefused)
+            result[QStringLiteral("note")] =
+                tr("A struck-out match is no link: the printed text names no scheme Contour opens.");
+    }
+    result[QStringLiteral("spans")] = spans;
+    return result;
 }
 
 // }}}

@@ -74,7 +74,7 @@ namespace
     }
 } // namespace
 
-std::string shortcutText(vtbackend::Modifiers modifiers, ShortcutInput input)
+std::string modifiersText(vtbackend::Modifiers modifiers)
 {
     auto result = std::string {};
 
@@ -85,9 +85,12 @@ std::string shortcutText(vtbackend::Modifiers modifiers, ShortcutInput input)
         result += row.name;
         result += '+';
     }
-
-    result += inputText(input);
     return result;
+}
+
+std::string shortcutText(vtbackend::Modifiers modifiers, ShortcutInput input)
+{
+    return modifiersText(modifiers) + inputText(input);
 }
 
 std::unordered_map<std::string, std::string> shortcutIndex(config::InputMappings const& mappings)
@@ -109,6 +112,19 @@ std::unordered_map<std::string, std::string> shortcutIndex(config::Config const&
     indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, result);
     indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, result);
     return result;
+}
+
+std::string describeLinkGesture(config::Config const& config)
+{
+    auto const follow = config::followHyperlinkModifiers(config);
+    if (!follow)
+        return "No mouse binding follows links (input_mapping has no FollowHyperlink)";
+    auto plain = modifiersText(*follow) + "Click";
+    auto const bypass = config.bypassMouseProtocolModifiers.value();
+    if (bypass == vtbackend::Modifiers {})
+        return plain;
+    return std::format(
+        "{} ({}{} inside applications that use the mouse)", plain, modifiersText(bypass), plain);
 }
 
 } // namespace contour::command

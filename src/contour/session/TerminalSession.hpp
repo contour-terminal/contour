@@ -11,6 +11,7 @@
 #include <contour/platform/Audio.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/Notifier.hpp>
+#include <contour/platform/QtInvoke.hpp>
 #include <contour/session/DisplaySurface.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
@@ -44,6 +45,7 @@
 #include <expected>
 #include <format>
 #include <initializer_list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -148,6 +150,21 @@ enum class RemoteDispatch : uint8_t
     RunHere = 0, ///< The terminal is this session's own: the handler runs the action itself.
     Performed,   ///< The remote end that hosts the terminal performs it.
     Refused,     ///< The remote end cannot, or cannot be reached; the user has been told.
+};
+
+/// What an opener was to open when it failed, which names the failure's notice.
+enum class OpenFailure : uint8_t
+{
+    CommandOutput = 0, ///< OpenCommandOutput's output, in a pager.
+    File,              ///< A file, with file_opener.
+};
+
+/// What the follow gesture did at a cell.
+enum class LinkFollow : uint8_t
+{
+    NothingThere = 0, ///< No link, or one that is not opened (a path printed on another machine).
+    Opened,           ///< A link was opened.
+    Probing,          ///< A path is being looked for on the probe thread; it opens once found.
 };
 
 /// Where a pointer over the gutter is: the row it names and the segment it is over.
@@ -359,6 +376,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param uri  The hyperlink under the pointer, or empty when there is none.
     /// @param cell Where the pointer is, in viewport coordinates.
     void updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell);
+
+    /// What the tooltip says for the detected link under the pointer (detectedLinkTooltip()). The caller
+    /// holds the terminal lock.
+    /// @return The text; empty over no detected link, or one printed as it opens. Valid until the next call.
+    [[nodiscard]] std::string const& hoveredDetectedLinkTooltip();
 
   public:
     QString getBellSource() const noexcept
@@ -800,6 +822,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void copyToClipboard(std::string_view data) override;
     void setPointerShape(std::string_view cssName) override;
     void openDocument(std::string_view /*fileOrUrl*/) override;
+    /// Opens a resolved link: a URL or a template's expansion as a hyperlink, a path through openLocalPath().
+    /// Ctrl+click, the context menu's pinned link and hint mode's Open all end here.
+    /// @param link The link; a path only once confirmed.
+    void openLink(vtbackend::LinkTarget const& link) override;
+    /// Opens what the follow gesture finds at @p position (vtbackend::Terminal::lookUpLinkAt()), for a caller
+    /// with a cell of its own: the vi cursor's (`gx`). A path the probe has not answered is looked for on the
+    /// probe thread, and opened back on the GUI thread once found; one printed on another machine is
+    /// refused, and the refusal logged.
+    /// @param position A cell of the page on display, in grid coordinates.
+    void followLinkAt(vtbackend::CellLocation position) override;
     void inspect() override;
     void notify(std::string_view title, std::string_view content) override;
     void showDesktopNotification(vtbackend::DesktopNotification const& notification) override;
@@ -1104,7 +1136,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ///
     /// @param action The action to run.
     /// @return Whether the action applied. An action may decline — FollowHyperlink with no link under
-    ///         the cursor returns false, which is what lets a key binding fall through to the terminal.
+    ///         the cursor returns false, which is what lets a key binding fall through to the terminal. A
+    ///         path still being looked for counts as followed, as it opens once found: its key stays
+    ///         claimed even should the probe then find no file.
     bool executeAction(actions::Action const& action);
 
     void scheduleRedraw();
@@ -1342,6 +1376,32 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool resetConfig();
     void followHyperlink(vtbackend::HyperlinkInfo const& hyperlink);
 
+    /// What the follow gesture finds at the pointer's cell (vtbackend::Terminal::lookUpLinkAt()), read in the
+    /// same hold of the terminal lock as the cell, and acted on as followLinkAt() acts.
+    /// @return What became of it; NothingThere off the grid.
+    [[nodiscard]] LinkFollow followLinkUnderPointer();
+
+    /// What a follow gesture found at a cell; defined in the .cpp.
+    struct FoundLink;
+
+    /// What lies at @p position, and what a path there would be probed with. The caller holds the terminal
+    /// lock.
+    /// @param position A cell of the page on display, in grid coordinates.
+    /// @return What was found.
+    [[nodiscard]] FoundLink findLinkAt(vtbackend::CellLocation position);
+
+    /// Acts on what a follow gesture found, the terminal lock released: opens it, probes a path, or logs a
+    /// refusal.
+    /// @param found What findLinkAt() found.
+    /// @return What became of it.
+    [[nodiscard]] LinkFollow follow(FoundLink found);
+
+    /// Opens a confirmed local path (§7.3): a directory in the file manager; a file with the profile's
+    /// file_opener at its location -- detached, or in a split or a tab whose working directory is the one the
+    /// path resolved against -- or, without one, with the application it is associated with.
+    /// @param link A path link, its target the absolute place.
+    void openLocalPath(vtbackend::LinkTarget const& link);
+
     /// Hands @p url to the desktop's handler, logging why nothing happened when it will not go.
     ///
     /// One place rather than one per action: five actions open something, they all report the same
@@ -1371,9 +1431,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] std::expected<void, vtbackend::CommandBlockActionError> copyBlockText(
         std::expected<std::string, vtbackend::CommandBlockActionError> text);
 
-    /// Logs why OpenCommandOutput showed nothing and tells the user through showNotification().
+    /// Logs why an opener showed nothing and tells the user through showNotification().
+    /// @param what What it was to open.
     /// @param reason What went wrong, lower-case and without a trailing period.
-    void reportOpenOutputFailure(std::string_view reason);
+    void reportOpenFailure(OpenFailure what, std::string_view reason);
 
     void setFontSize(text::FontSize size);
 
@@ -1430,6 +1491,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param lastCommand The newest record that ran a command, as a record change left the store; zero
     ///                    when none had.
     void withdrawFinishNoticeIfNextCommandStarted(vtbackend::CommandBlockId lastCommand);
+
+    /// Hands the terminal the chord now held and, if that changes how links are presented, re-decides the
+    /// pointer. GUI thread; takes the terminal lock.
+    /// @param held The chord now held.
+    void onHeldModifiersChanged(vtbackend::Modifiers held);
+
+    /// Re-decides the pointer shape where the pointer rests: a held or released modifier changes it without a
+    /// move. Does nothing while the pointer is off the grid. GUI thread; takes the terminal lock.
+    void refreshPointerShape();
 
     void setDefaultCursor();
     void configureTerminal();
@@ -1498,6 +1568,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     crispy::Point _accumulatedAngleScroll;
     input::HorizontalWheelGesture _horizontalWheelGesture;
     HyperlinkHoverTracker _hyperlinkHover;
+    /// The tooltip last worked out for a detected link, by the link's id and the index holding it, so that
+    /// tracing one link along its cells reads nothing from the index (hoveredDetectedLinkTooltip()). GUI
+    /// thread only. Also reset when a configuration reload may have replaced the detector, whose ids start
+    /// over: a new index may reuse the old one's address.
+    struct DetectedLinkTooltip
+    {
+        vtbackend::LinkIndex const* index = nullptr; ///< The index it was read from; none at first.
+        vtbackend::LinkId link {};                   ///< The link it was worked out for; none at first.
+        /// detectedLinkTooltip() of that link, elided as the tooltip shows it; empty for none.
+        std::string text;
+    };
+    DetectedLinkTooltip _detectedLinkTooltip {};
     /// Never null: a NullAnnouncer stands in wherever there is nothing to announce through, so the call
     /// sites never have to ask whether announcing is possible.
     std::unique_ptr<platform::Announcer> _announcer = std::make_unique<platform::NullAnnouncer>();
@@ -1548,6 +1630,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Declared above _terminal so it outlives the cache's last callback.
     std::mutex _renderNotifyMutex;
     DisplaySurface* _renderNotifyTarget = nullptr; ///< Guarded by _renderNotifyMutex.
+
+    /// Where a job on another thread (a follow gesture's path probe) hands its result back to this session,
+    /// shared with the job: ~TerminalSession() withdraws it first, so a job that answers later posts nothing.
+    std::shared_ptr<platform::PostTarget> _postTarget = std::make_shared<platform::PostTarget>(*this);
 
     vtbackend::Terminal _terminal;
     /// A notice is on screen and the pane is alive only to be dismissed: the shell exited too early,

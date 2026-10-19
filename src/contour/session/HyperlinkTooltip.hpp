@@ -10,6 +10,11 @@
 #include <string_view>
 #include <utility>
 
+namespace vtbackend
+{
+struct DetectedLink;
+} // namespace vtbackend
+
 namespace contour::session
 {
 
@@ -43,6 +48,12 @@ namespace contour::session
 [[nodiscard]] std::string hyperlinkTooltipText(std::string_view uri,
                                                std::optional<std::string_view> localHost,
                                                size_t maxLength);
+
+/// What the hover tooltip says for a detected link: its target where that differs from what is printed (a
+/// template's expansion, a relative path's absolute form with its location), else nothing.
+/// @param link The link.
+/// @return The text; empty for no tooltip.
+[[nodiscard]] std::string detectedLinkTooltip(vtbackend::DetectedLink const& link);
 
 /// Tracks which hyperlink the pointer is over, and says when a tooltip should appear or vanish.
 ///

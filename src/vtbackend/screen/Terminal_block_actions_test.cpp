@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/testing/DetectingTerm.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -8,7 +9,7 @@
 
 #include <core/Utf8Path.hpp>
 #include <core/platform/PathUtils.hpp>
-#include <core/testing/ScopedTempDir.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -16,7 +17,6 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -424,19 +424,31 @@ void stampBlock(
     mock.terminal.primaryScreen().grid().lineAt(LineOffset(row)).adoptBlock(CommandBlockId(id));
 }
 
-/// Fills @p root with `a/notes.txt` and an empty `b`.
-void makeTwoDirectories(std::filesystem::path const& root)
+/// Fills @p root of @p files with `a/notes.txt` and an empty `b`: for the lookup, which reads no filesystem
+/// itself, and for hint mode on a DetectingTerm, whose terminal looks paths up in its in-memory one.
+void makeTwoDirectories(core::platform::testing::InMemoryFileSystem& files, std::filesystem::path const& root)
 {
-    std::filesystem::create_directories(root / "a");
-    std::filesystem::create_directories(root / "b");
-    std::ofstream(root / "a" / "notes.txt") << "x";
+    files.addFile(root / "a" / "notes.txt", "x");
+    files.addDirectory(root / "b");
 }
 
-/// @return The local path under the mouse pointer, as a path; empty where its text is no path, names no
-///         existing file, or is refused.
-[[nodiscard]] std::optional<std::filesystem::path> localPathAtMouse(MockTerm<> const& mock)
+/// Where the in-memory tests' files live. Absolute here: on Windows a root without a drive is relative to the
+/// current drive.
+[[nodiscard]] std::filesystem::path memoryRoot()
 {
-    return mock.terminal.localPathAtMousePosition()
+#ifdef _WIN32
+    return std::filesystem::path { "C:/proj" };
+#else
+    return std::filesystem::path { "/proj" };
+#endif
+}
+
+/// @return The local path under the mouse pointer, as a path, looked up in @p files as the probe thread looks
+///         it up; empty where its text is no path, names no existing file, or is refused.
+[[nodiscard]] std::optional<std::filesystem::path> localPathAtMouse(MockTerm<>& mock,
+                                                                    core::platform::FileSystem const& files)
+{
+    return followedPathUnderPointer(mock.terminal, files)
         .value_or(std::nullopt)
         .transform([](std::string const& path) {
             return core::pathFromUtf8(path).value_or(std::filesystem::path {});
@@ -445,12 +457,12 @@ void makeTwoDirectories(std::filesystem::path const& root)
 
 } // namespace
 
-TEST_CASE("Terminal.localPathAtMousePosition.resolvesAgainstTheDirectoryOfTheCommandThatPrintedIt",
+TEST_CASE("Terminal.pathUnderThePointer.resolvesAgainstTheDirectoryOfTheCommandThatPrintedIt",
           "[semanticblocks][blockpaths]")
 {
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-block-path" };
-    auto const& root = tmpDir.path();
-    makeTwoDirectories(root);
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto const root = memoryRoot();
+    makeTwoDirectories(files, root);
     auto const notes = (root / "a" / "notes.txt").lexically_normal();
 
     auto mock = MockTerm<> { PageSize { LineCount(4), ColumnCount(80) }, LineCount(10) };
@@ -465,27 +477,27 @@ TEST_CASE("Terminal.localPathAtMousePosition.resolvesAgainstTheDirectoryOfTheCom
     SECTION("a row of a local block resolves against that block's directory")
     {
         stampBlock(mock, 7, root / "a", ContextLocality::Local, 0);
-        CHECK(localPathAtMouse(mock) == notes);
+        CHECK(localPathAtMouse(mock, files) == notes);
     }
 
     SECTION("a row of a block that ran elsewhere is refused, even where the name exists here")
     {
         mock.terminal.setCurrentWorkingDirectory(fileUrlOf(root / "a"));
         stampBlock(mock, 7, root / "a", ContextLocality::Foreign, 0);
-        CHECK(mock.terminal.localPathAtMousePosition() == std::unexpected(PathRefusal::RanElsewhere));
+        CHECK(followedPathUnderPointer(mock.terminal, files) == std::unexpected(PathRefusal::RanElsewhere));
     }
 
     SECTION("a row of a block whose directory nothing vouches for keeps the OSC 7 directory")
     {
         stampBlock(mock, 7, root / "a", ContextLocality::Unknown, 0);
-        CHECK_FALSE(localPathAtMouse(mock).has_value()); // b holds no notes.txt
+        CHECK_FALSE(localPathAtMouse(mock, files).has_value()); // b holds no notes.txt
     }
 
     SECTION("a row outside any block keeps the OSC 7 directory")
     {
-        CHECK_FALSE(localPathAtMouse(mock).has_value()); // b holds no notes.txt
+        CHECK_FALSE(localPathAtMouse(mock, files).has_value()); // b holds no notes.txt
         mock.terminal.setCurrentWorkingDirectory(fileUrlOf(root / "a"));
-        CHECK(localPathAtMouse(mock) == notes);
+        CHECK(localPathAtMouse(mock, files) == notes);
     }
 
     SECTION("a row of the alternate screen belongs to no block")
@@ -493,17 +505,17 @@ TEST_CASE("Terminal.localPathAtMousePosition.resolvesAgainstTheDirectoryOfTheCom
         stampBlock(mock, 7, root / "a", ContextLocality::Foreign, 0);
         mock.writeToScreen("\033[?1049h\033[Hsee notes.txt"sv);
         mock.terminal.setCurrentWorkingDirectory(fileUrlOf(root / "a"));
-        CHECK(localPathAtMouse(mock) == notes);
+        CHECK(localPathAtMouse(mock, files) == notes);
     }
 }
 
-TEST_CASE("Terminal.localPathAtMousePosition.refusesAnAbsolutePathPrintedOnAnotherMachine",
+TEST_CASE("Terminal.pathUnderThePointer.refusesAnAbsolutePathPrintedOnAnotherMachine",
           "[semanticblocks][blockpaths]")
 {
     // The file it names lives on that machine; one of that name here is another file.
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-block-abs" };
-    auto const& root = tmpDir.path();
-    makeTwoDirectories(root);
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto const root = memoryRoot();
+    makeTwoDirectories(files, root);
 
     auto mock = MockTerm<> { PageSize { LineCount(4), ColumnCount(240) }, LineCount(10) };
     mock.writeToScreen("see " + core::platform::normalizePath(root / "a" / "notes.txt"));
@@ -511,31 +523,110 @@ TEST_CASE("Terminal.localPathAtMousePosition.refusesAnAbsolutePathPrintedOnAnoth
                                      CellLocation { .line = LineOffset(0), .column = ColumnOffset(8) },
                                      PixelCoordinate {},
                                      false);
-    REQUIRE(localPathAtMouse(mock) == (root / "a" / "notes.txt").lexically_normal());
+    REQUIRE(localPathAtMouse(mock, files) == (root / "a" / "notes.txt").lexically_normal());
 
     SECTION("by a command that ran there")
     {
         stampBlock(mock, 7, root / "a", ContextLocality::Foreign, 0);
-        CHECK(mock.terminal.localPathAtMousePosition() == std::unexpected(PathRefusal::RanElsewhere));
+        CHECK(followedPathUnderPointer(mock.terminal, files) == std::unexpected(PathRefusal::RanElsewhere));
     }
 
     SECTION("on a replica of that machine's terminal, outside any block")
     {
         mock.terminal.bindReplica(ReplicaRole::OtherMachine, HostIdentity {});
-        CHECK(mock.terminal.localPathAtMousePosition()
+        CHECK(followedPathUnderPointer(mock.terminal, files)
               == std::unexpected(PathRefusal::ReplicaOfAnotherMachine));
+    }
+}
+
+TEST_CASE("Terminal.fileUrl.isThePathItNamesAndRefusedWhereAPathIs", "[semanticblocks][blockpaths][links]")
+{
+    // §7.6: printed text never reaches the opener of OSC 8 links, which runs a program. A file:// URL found
+    // in output is the local path it names: refused where a printed path is, underlined once the probe has
+    // found it, and opened as a path is.
+    auto term =
+        DetectingTerm { PageSize { LineCount(4), ColumnCount(80) }, {}, HistoryLimits::plain(LineCount(10)) };
+    auto& mock = term.mock;
+    auto const root = memoryRoot();
+    makeTwoDirectories(term.files, root);
+    auto const notes = (root / "a" / "notes.txt").lexically_normal();
+    auto const at = CellLocation { .line = LineOffset(0), .column = ColumnOffset(6) };
+    auto const lookup = [&] {
+        auto const _ = std::scoped_lock { mock.terminal };
+        return mock.terminal.lookUpLinkAt(at);
+    };
+
+    SECTION("here: the path, once found")
+    {
+        mock.writeToScreen("see " + fileUrlOf(notes));
+        auto const found = lookup();
+        CHECK_FALSE(found.target); // not known yet: handed to the probe as a path
+        REQUIRE(found.printedPath);
+        CHECK(found.printedPath->kind == LinkKind::Path);
+        CHECK(core::pathFromUtf8(found.printedPath->target) == notes);
+        REQUIRE(found.pathToProbe);
+#ifndef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+        term.cycle();
+        auto const* link = term.linkAt(0, 6);
+        REQUIRE(link != nullptr);
+        CHECK(link->target.kind == LinkKind::Path);
+        CHECK(link->target.pathKind == PathKind::File);
+        CHECK(core::pathFromUtf8(link->target.target) == notes);
+#endif
+    }
+
+    SECTION("by a command that ran on another machine")
+    {
+        mock.writeToScreen("see " + fileUrlOf(notes));
+        stampBlock(mock, 7, root / "a", ContextLocality::Foreign, 0);
+        auto const found = lookup();
+        CHECK_FALSE(found.target);
+        CHECK(found.refusal == PathRefusal::RanElsewhere);
+#ifndef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+        term.cycle();
+        CHECK(term.linkAt(0, 6) == nullptr);
+#endif
+    }
+
+    SECTION("on a replica of another machine's terminal")
+    {
+        mock.writeToScreen("see " + fileUrlOf(notes));
+        mock.terminal.bindReplica(ReplicaRole::OtherMachine, HostIdentity {});
+        auto const found = lookup();
+        CHECK_FALSE(found.target);
+        CHECK(found.refusal == PathRefusal::ReplicaOfAnotherMachine);
+#ifndef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+        term.cycle();
+        CHECK(term.linkAt(0, 6) == nullptr);
+#endif
+    }
+
+    SECTION("naming another host: no link at all")
+    {
+        auto const path = core::platform::normalizePath(notes);
+        mock.writeToScreen("see file://otherhost.invalid" + std::string(path.starts_with('/') ? "" : "/")
+                           + path);
+        auto const found = lookup();
+        CHECK_FALSE(found.target);
+        CHECK_FALSE(found.printedPath);
+        CHECK_FALSE(found.refusal);
+#ifndef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+        term.cycle();
+        CHECK(term.linkAt(0, 6) == nullptr);
+#endif
     }
 }
 
 TEST_CASE("Terminal.hintMode.resolvesPathsAgainstTheDirectoryOfTheCommandThatPrintedThem",
           "[semanticblocks][blockpaths]")
 {
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-block-hint" };
-    auto const& root = tmpDir.path();
-    makeTwoDirectories(root);
+    auto term =
+        DetectingTerm { PageSize { LineCount(4), ColumnCount(60) }, {}, HistoryLimits::plain(LineCount(10)) };
+    auto& mock = term.mock;
+    auto const root = memoryRoot();
+    makeTwoDirectories(term.files, root);
     auto const notes = (root / "a" / "notes.txt").lexically_normal();
 
-    auto mock = MockTerm<> { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.writeToScreen("local notes.txt\r\nremote notes.txt\r\nplain notes.txt"sv);
     stampBlock(mock, 7, root / "a", ContextLocality::Local, 0);
     stampBlock(mock, 8, root / "a", ContextLocality::Foreign, 1);
@@ -543,8 +634,7 @@ TEST_CASE("Terminal.hintMode.resolvesPathsAgainstTheDirectoryOfTheCommandThatPri
     auto const activate = [&] {
         mock.terminal.flushInput();
         mock.terminal.activateHintMode(
-            vtbackend::HintModeRequest { .patterns = vtbackend::HintModeHandler::builtinPatterns(),
-                                         .action = vtbackend::HintAction::Copy });
+            vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
         return mock.terminal.hintMatches();
     };
 
@@ -557,6 +647,9 @@ TEST_CASE("Terminal.hintMode.resolvesPathsAgainstTheDirectoryOfTheCommandThatPri
         REQUIRE(matches.size() == 1);
         CHECK(matches[0].start.line == LineOffset(0));
         CHECK(core::pathFromUtf8(matches[0].matchedText) == notes);
+        // What the hint carries besides the text: what it names, and the directory it was found in.
+        CHECK(matches[0].target.pathKind == vtbackend::PathKind::File);
+        CHECK(core::pathFromUtf8(matches[0].target.directory) == root / "a");
     }
 
     SECTION("without one: a block's own directory is enough")
@@ -565,6 +658,9 @@ TEST_CASE("Terminal.hintMode.resolvesPathsAgainstTheDirectoryOfTheCommandThatPri
         REQUIRE(matches.size() == 1);
         CHECK(matches[0].start.line == LineOffset(0));
         CHECK(core::pathFromUtf8(matches[0].matchedText) == notes);
+        // What the hint carries besides the text: what it names, and the directory it was found in.
+        CHECK(matches[0].target.pathKind == vtbackend::PathKind::File);
+        CHECK(core::pathFromUtf8(matches[0].target.directory) == root / "a");
     }
 
     SECTION("a command that ran elsewhere is refused even where the OSC 7 directory holds the name")
@@ -586,8 +682,8 @@ TEST_CASE("Terminal.hintMode.blocksWithoutALocalDirectoryLeavePathsAsWritten", "
     REQUIRE(mock.terminal.commandBlockAt(LineOffset(1)) != nullptr);
     mock.terminal.flushInput();
 
-    mock.terminal.activateHintMode(vtbackend::HintModeRequest {
-        .patterns = vtbackend::HintModeHandler::builtinPatterns(), .action = vtbackend::HintAction::Copy });
+    mock.terminal.activateHintMode(
+        vtbackend::HintModeRequest { .patterns = {}, .action = vtbackend::HintAction::Copy });
 
     auto const& matches = mock.terminal.hintMatches();
     REQUIRE(matches.size() == 1);
@@ -601,8 +697,7 @@ namespace
 [[nodiscard]] std::vector<HintMatch> hintsOf(MockTerm<>& mock, HintAction action = HintAction::Copy)
 {
     mock.terminal.flushInput();
-    mock.terminal.activateHintMode(
-        HintModeRequest { .patterns = HintModeHandler::builtinPatterns(), .action = action });
+    mock.terminal.activateHintMode(HintModeRequest { .patterns = {}, .action = action });
     return mock.terminal.hintMatches();
 }
 
@@ -613,11 +708,12 @@ TEST_CASE("Terminal.hintMode.aRowOutsideAnyBlockKeepsItsPathsAsWrittenBesideALoc
 {
     // Whether a row's paths resolve is the row's own question: a block elsewhere that ran in a local
     // directory gives a row outside any block nothing to resolve against.
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-block-hint-mixed" };
-    auto const& root = tmpDir.path();
-    makeTwoDirectories(root);
+    auto term =
+        DetectingTerm { PageSize { LineCount(4), ColumnCount(60) }, {}, HistoryLimits::plain(LineCount(10)) };
+    auto& mock = term.mock;
+    auto const root = memoryRoot();
+    makeTwoDirectories(term.files, root);
 
-    auto mock = MockTerm<> { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.writeToScreen("local notes.txt\r\nsee src/main.cpp"sv);
     stampBlock(mock, 7, root / "a", ContextLocality::Local, 0);
 
@@ -644,16 +740,17 @@ TEST_CASE("Terminal.hintMode.offersNoPathACommandPrintedOnAnotherMachineWithoutA
     CHECK(matches[0].matchedText == "/etc/hosts");
 }
 
-TEST_CASE("Terminal.localPathAtMousePosition.refusesWhatARemoteShellPrintsInsideALocalBlock",
+TEST_CASE("Terminal.pathUnderThePointer.refusesWhatARemoteShellPrintsInsideALocalBlock",
           "[semanticblocks][blockpaths]")
 {
     // `ssh host` is a local command. A remote shell that reports its directory but marks no commands leaves
     // everything it prints in that block, which started in a local directory holding the same name.
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-block-ssh" };
-    auto const& root = tmpDir.path();
-    makeTwoDirectories(root);
+    auto term =
+        DetectingTerm { PageSize { LineCount(4), ColumnCount(60) }, {}, HistoryLimits::plain(LineCount(10)) };
+    auto& mock = term.mock;
+    auto const root = memoryRoot();
+    makeTwoDirectories(term.files, root);
 
-    auto mock = MockTerm<> { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.terminal.setCurrentWorkingDirectory(fileUrlOf(root / "a"));
     mock.writeToScreen("\033]133;A\033\\$ ssh host\r\n\033]133;C\033\\"sv);
 
@@ -661,29 +758,31 @@ TEST_CASE("Terminal.localPathAtMousePosition.refusesWhatARemoteShellPrintsInside
     {
         mock.writeToScreen("notes.txt\r\n"sv);
         pointAt(mock, 1);
-        CHECK(localPathAtMouse(mock) == (root / "a" / "notes.txt").lexically_normal());
+        CHECK(localPathAtMouse(mock, term.files) == (root / "a" / "notes.txt").lexically_normal());
     }
 
     SECTION("once it reports one on another host: refused, by the mouse and by hint mode")
     {
         mock.writeToScreen("\033]7;file://otherhost.invalid/srv/app\033\\notes.txt\r\n"sv);
         pointAt(mock, 1);
-        CHECK(mock.terminal.localPathAtMousePosition() == std::unexpected(PathRefusal::RanElsewhere));
+        CHECK(followedPathUnderPointer(mock.terminal, term.files)
+              == std::unexpected(PathRefusal::RanElsewhere));
         CHECK(hintsOf(mock).empty());
     }
 }
 
-TEST_CASE("Terminal.localPathAtMousePosition.keepsRefusingWhatARemoteShellPrintedOnceTheLocalPromptIsBack",
+TEST_CASE("Terminal.pathUnderThePointer.keepsRefusingWhatARemoteShellPrintedOnceTheLocalPromptIsBack",
           "[semanticblocks][blockpaths]")
 {
     // The remote shell of `ssh host` reports its directory and prints a name the block's local directory
     // holds too. Back at the local prompt the terminal's directory is local again, yet those rows were
     // printed there.
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-block-ssh-done" };
-    auto const& root = tmpDir.path();
-    makeTwoDirectories(root);
+    auto term =
+        DetectingTerm { PageSize { LineCount(4), ColumnCount(60) }, {}, HistoryLimits::plain(LineCount(10)) };
+    auto& mock = term.mock;
+    auto const root = memoryRoot();
+    makeTwoDirectories(term.files, root);
 
-    auto mock = MockTerm<> { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.terminal.setCurrentWorkingDirectory(fileUrlOf(root / "a"));
     mock.writeToScreen("\033]133;A\033\\$ ssh host\r\n\033]133;C\033\\"sv);
     mock.writeToScreen("\033]7;file://otherhost.invalid/srv/app\033\\notes.txt\r\n"sv);
@@ -703,22 +802,22 @@ TEST_CASE("Terminal.localPathAtMousePosition.keepsRefusingWhatARemoteShellPrinte
     REQUIRE(ssh != nullptr);
     REQUIRE(ssh->state == CommandBlockState::Finished);
     pointAt(mock, 1);
-    CHECK(mock.terminal.localPathAtMousePosition() == std::unexpected(PathRefusal::RanElsewhere));
+    CHECK(followedPathUnderPointer(mock.terminal, term.files) == std::unexpected(PathRefusal::RanElsewhere));
     CHECK(hintsOf(mock).empty());
 }
 
-TEST_CASE("Terminal.localPathAtMousePosition.followsACdInTheCommandLine", "[semanticblocks][blockpaths]")
+TEST_CASE("Terminal.pathUnderThePointer.followsACdInTheCommandLine", "[semanticblocks][blockpaths]")
 {
     // `cd build && ninja` started in proj and printed paths relative to proj/build, which the shell reports
     // (OSC 7) only as the next prompt starts. The file is proj/src/f; proj/../src/f is no file.
-    auto const tmpDir = core::testing::ScopedTempDir { "contour-block-cd" };
-    auto const root = tmpDir.path() / "proj";
-    std::filesystem::create_directories(root / "build");
-    std::filesystem::create_directories(root / "src");
-    std::ofstream(root / "src" / "f") << "x";
+    auto term =
+        DetectingTerm { PageSize { LineCount(4), ColumnCount(60) }, {}, HistoryLimits::plain(LineCount(10)) };
+    auto& mock = term.mock;
+    auto const root = memoryRoot() / "proj";
+    term.files.addDirectory(root / "build");
+    term.files.addFile(root / "src" / "f", "x");
     auto const file = (root / "src" / "f").lexically_normal();
 
-    auto mock = MockTerm<> { PageSize { LineCount(4), ColumnCount(60) }, LineCount(10) };
     mock.terminal.setCurrentWorkingDirectory(fileUrlOf(root));
     mock.writeToScreen("\033]133;A\033\\$ cd build && ninja\r\n\033]133;C\033\\../src/f:12: error\r\n"
                        "\033]133;D;1\033\\\033]7;"
@@ -729,13 +828,40 @@ TEST_CASE("Terminal.localPathAtMousePosition.followsACdInTheCommandLine", "[sema
                                      CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) },
                                      PixelCoordinate {},
                                      false);
-    CHECK(localPathAtMouse(mock) == file);
+    CHECK(localPathAtMouse(mock, term.files) == file);
 
     auto const matches = hintsOf(mock);
     auto const onOutput =
         std::ranges::find(matches, LineOffset(1), [](HintMatch const& match) { return match.start.line; });
     REQUIRE(onOutput != matches.end());
     CHECK(core::pathFromUtf8(onOutput->matchedText) == file);
+}
+
+TEST_CASE("Terminal.hintMode.namesTheDirectoryAPathWasFoundIn", "[semanticblocks][blockpaths][links]")
+{
+    // The command started in a directory that offers no place to look -- on Windows one whose name is not
+    // UTF-8 -- and left the shell in a, which holds the name: the hint names a, not the directory before it.
+    auto term =
+        DetectingTerm { PageSize { LineCount(4), ColumnCount(60) }, {}, HistoryLimits::plain(LineCount(10)) };
+    auto& mock = term.mock;
+    auto const root = memoryRoot();
+    makeTwoDirectories(term.files, root);
+
+    mock.writeToScreen("see notes.txt"sv);
+    auto record = CommandBlockRecord {};
+    record.id = CommandBlockId(7);
+    record.state = CommandBlockState::Finished;
+    record.workingDirectory =
+        WorkingDirectorySnapshot { .path = "/nonexistent-\xff", .locality = ContextLocality::Local };
+    record.endWorkingDirectory = WorkingDirectorySnapshot { .path = core::platform::normalizePath(root / "a"),
+                                                            .locality = ContextLocality::Local };
+    mock.terminal.adoptCommandBlock(std::move(record), AdoptMode::Snapshot);
+    mock.terminal.primaryScreen().grid().lineAt(LineOffset(0)).adoptBlock(CommandBlockId(7));
+
+    auto const matches = hintsOf(mock);
+    REQUIRE(matches.size() == 1);
+    CHECK(core::pathFromUtf8(matches[0].matchedText) == (root / "a" / "notes.txt").lexically_normal());
+    CHECK(core::pathFromUtf8(matches[0].target.directory) == root / "a");
 }
 
 TEST_CASE("Terminal.hintMode.offersNoPathOnAReplicaOfAnotherMachine", "[semanticblocks][blockpaths]")
@@ -759,13 +885,13 @@ namespace
                                      CellLocation { .line = LineOffset(0), .column = ColumnOffset(column) },
                                      PixelCoordinate {},
                                      false);
-    auto const _ = std::scoped_lock { mock.terminal };
-    return mock.terminal.pathTextAtMousePosition();
+    return printedPathUnderPointer(mock.terminal);
 }
 
 } // namespace
 
-TEST_CASE("Terminal.pathTextAtMousePosition.countsAWideCharacterAsTwoColumns", "[semanticblocks][blockpaths]")
+TEST_CASE("Terminal.printedPathUnderThePointer.countsAWideCharacterAsTwoColumns",
+          "[semanticblocks][blockpaths]")
 {
     auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(40) } };
     mock.writeToScreen("\xe6\x9d\xb1\xe4\xba\xac src/a.txt"sv); // 東京 takes columns 0-3; the path 5-13
@@ -777,7 +903,7 @@ TEST_CASE("Terminal.pathTextAtMousePosition.countsAWideCharacterAsTwoColumns", "
     CHECK(pathTextAtColumn(mock, 14) == std::nullopt);
 }
 
-TEST_CASE("Terminal.pathTextAtMousePosition.countsAClusterAsOneColumn", "[semanticblocks][blockpaths]")
+TEST_CASE("Terminal.printedPathUnderThePointer.countsAClusterAsOneColumn", "[semanticblocks][blockpaths]")
 {
     auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(40) } };
     // Two "e" + COMBINING ACUTE ACCENT clusters, one column each; the path takes columns 3-11.
@@ -790,7 +916,7 @@ TEST_CASE("Terminal.pathTextAtMousePosition.countsAClusterAsOneColumn", "[semant
     CHECK(pathTextAtColumn(mock, 2) == std::nullopt);
 }
 
-TEST_CASE("Terminal.pathTextAtMousePosition.findsASecondPathRightOfWideCharacters",
+TEST_CASE("Terminal.printedPathUnderThePointer.findsASecondPathRightOfWideCharacters",
           "[semanticblocks][blockpaths]")
 {
     auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(40) } };
@@ -801,4 +927,24 @@ TEST_CASE("Terminal.pathTextAtMousePosition.findsASecondPathRightOfWideCharacter
     CHECK(pathTextAtColumn(mock, 15) == "b.txt");
     CHECK(pathTextAtColumn(mock, 19) == "b.txt");
     CHECK(pathTextAtColumn(mock, 12) == std::nullopt);
+}
+
+TEST_CASE("Terminal.printedPathUnderThePointer.findsAPathWrappedAcrossRows",
+          "[semanticblocks][blockpaths][links]")
+{
+    auto mock = MockTerm<> { PageSize { LineCount(3), ColumnCount(10) } };
+    mock.writeToScreen("cd /tmp/abcdefgh"sv); // wraps after column 9: "cd /tmp/ab" + "cdefgh"
+    mock.terminal.flushInput();
+
+    auto const pathAt = [&](LineOffset line, ColumnOffset column) {
+        mock.terminal.sendMouseMoveEvent(
+            Modifier::None, CellLocation { .line = line, .column = column }, PixelCoordinate {}, false);
+        return printedPathUnderPointer(mock.terminal);
+    };
+
+    CHECK(pathAt(LineOffset(1), ColumnOffset(3)) == "/tmp/abcdefgh");
+    CHECK(pathAt(LineOffset(0), ColumnOffset(4)) == "/tmp/abcdefgh");
+    CHECK(pathAt(LineOffset(0), ColumnOffset(1)) == "cd"); // a bare word is a path candidate, resolved later
+    CHECK(pathAt(LineOffset(0), ColumnOffset(2)) == std::nullopt);
+    CHECK(pathAt(LineOffset(1), ColumnOffset(6)) == std::nullopt);
 }

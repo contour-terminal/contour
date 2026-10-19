@@ -40,7 +40,7 @@ namespace
 
     bool hasHyperlinkUnderCursor(ContextMenuState const& state) noexcept
     {
-        return !state.hyperlinkUnderCursor.empty();
+        return !state.hyperlinkUnderCursor.empty() || state.linkUnderCursor.has_value();
     }
 
     bool hasLocalWorkingDirectory(ContextMenuState const& state) noexcept
@@ -112,7 +112,7 @@ namespace
         return Table::command(HyperlinkAction {}, title)
             .shownWhen(hasHyperlinkUnderCursor)
             .actionFrom([](ContextMenuState const& state) -> actions::Action {
-                return HyperlinkAction { .uri = state.hyperlinkUnderCursor };
+                return HyperlinkAction { .uri = state.hyperlinkUnderCursor, .link = state.linkUnderCursor };
             });
     }
 

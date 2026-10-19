@@ -18,9 +18,12 @@
 #include <core/Utils.hpp>
 
 #include <QtCore/QLocale>
+#include <QtCore/QPointer>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QAccessible>
+#include <QtGui/QColor>
 #include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlIncubator>
 #include <QtQuick/QQuickItem>
@@ -474,6 +477,27 @@ TEST_CASE("SettingsPage groups the profile fields into collapsible sections", "[
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("SettingsPage names the gesture that opens links", "[contour][gui][qml][settings][links]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* item = fx.item();
+    REQUIRE(item != nullptr);
+
+    clickButton(item->findChild<QObject*>("newProfileButton"));
+    fx.settle();
+
+    // The text is the controller's, which reads input_mapping and the bypass modifier: nothing in the QML
+    // spells a gesture.
+    auto* label = item->findChild<QObject*>("linkGestureLabel");
+    REQUIRE(label != nullptr);
+    CHECK(!fx.controller->linkGesture().isEmpty());
+    CHECK(label->property("text").toString() == fx.controller->linkGesture());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("SettingsPage filters the fields and reopens what it matched", "[contour][gui][qml][settings]")
 {
     contour::test::QmlMessageCapture const warnings;
@@ -659,6 +683,158 @@ TEST_CASE("SettingsPage's indicator editor is inert on a read-only profile", "[c
     fx.settle();
     CHECK(fx.controller->indicatorSegment(0) == before);
 
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage's link pattern list is inert on a read-only profile",
+          "[contour][gui][qml][settings][links]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* item = fx.item();
+    REQUIRE(item != nullptr);
+
+    // "main" comes from contour.yml, so the page shows it read-only.
+    fx.controller->editProfile("main");
+    REQUIRE(fx.controller->editingReadOnly());
+    fx.page->setProperty("editorMode", "profile");
+    fx.settle();
+
+    auto* list = item->findChild<QObject*>("linkPatternList");
+    REQUIRE(list != nullptr);
+    CHECK_FALSE(list->property("editable").toBool());
+    auto const* add = item->findChild<QObject*>("addLinkPatternButton");
+    REQUIRE(add != nullptr);
+    CHECK_FALSE(add->property("enabled").toBool());
+
+    // Its one write path refuses too, and so would the controller behind it.
+    auto const before = fx.controller->linkPatterns();
+    QMetaObject::invokeMethod(list,
+                              "commit",
+                              Q_ARG(QVariant, QVariant { 1 }),
+                              Q_ARG(QVariant, QVariant { QStringLiteral("clickable") }),
+                              Q_ARG(QVariant, QVariant { false }));
+    fx.settle();
+    CHECK(fx.controller->linkPatterns() == before);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage's link pattern list adds, previews and removes patterns",
+          "[contour][gui][qml][settings][links]")
+{
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* item = fx.item();
+    REQUIRE(item != nullptr);
+
+    // A GUI-owned profile, so the draft is editable.
+    clickButton(item->findChild<QObject*>("newProfileButton"));
+    item->findChild<QObject*>("saveAsField")->setProperty("text", "work");
+    clickButton(item->findChild<QObject*>("saveProfileAsButton"));
+    REQUIRE(!fx.controller->editingReadOnly());
+    fx.page->setProperty("editorMode", "profile");
+    fx.settle();
+
+    auto* list = item->findChild<QObject*>("linkPatternList");
+    REQUIRE(list != nullptr);
+    CHECK(list->property("editable").toBool());
+
+    // The preview shows what the selected row, the url built-in, finds in the sample.
+    auto const* preview = item->findChild<QObject*>("linkPatternPreview");
+    REQUIRE(preview != nullptr);
+    list->setProperty("sample", QStringLiteral("see https://example.com/x and more"));
+    fx.settle();
+    CHECK(preview->property("text").toString() == "see <u>https://example.com/x</u> and more");
+
+    auto const builtins = fx.controller->linkPatterns().size();
+    clickButton(item->findChild<QObject*>("addLinkPatternButton"));
+    fx.settle();
+    REQUIRE(fx.controller->linkPatterns().size() == builtins + 1);
+    auto const added = fx.controller->linkPatterns().back().toMap();
+
+    // The new row says what it lacks, in the chrome style's error colour. A delegate has no QObject parent,
+    // so the label is looked for in the visual tree.
+    auto const* shown = findDescendant(*item, [](QQuickItem const& label) {
+        return label.objectName() == "linkPatternProblem" && !label.property("text").toString().isEmpty();
+    });
+    REQUIRE(shown != nullptr);
+    CHECK(shown->property("text").toString() == added.value("problem").toString());
+    auto const* style = fx.engine.rootContext()->contextProperty("chromeStyle").value<QObject*>();
+    REQUIRE(style != nullptr);
+    CHECK(shown->property("color").value<QColor>() == style->property("errorColor").value<QColor>());
+
+    // Deleting asks first, naming the pattern, and removes it once confirmed.
+    QMetaObject::invokeMethod(list,
+                              "deleteRequested",
+                              Q_ARG(int, static_cast<int>(builtins)),
+                              Q_ARG(QString, added.value("name").toString()));
+    fx.settle();
+    auto* dialog = item->findChild<QObject*>("deleteDialog");
+    REQUIRE(dialog != nullptr);
+    CHECK(dialog->property("message").toString()
+          == QStringLiteral("Remove the link pattern “%1” from this profile?")
+                 .arg(added.value("name").toString()));
+    QMetaObject::invokeMethod(dialog, "confirmed");
+    fx.settle();
+    CHECK(fx.controller->linkPatterns().size() == builtins);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingsPage's link pattern list takes what is typed, one field after the other",
+          "[contour][gui][qml][settings][links]")
+{
+    // Typed for real into the list's own fields: leaving the name field commits it, which changes the model,
+    // while the focus is already on its way to the regex field.
+    contour::test::QmlMessageCapture const warnings;
+
+    auto fx = PageFixture(OneProfile);
+    auto* page = fx.item();
+    REQUIRE(page != nullptr);
+    clickButton(page->findChild<QObject*>("newProfileButton"));
+    page->findChild<QObject*>("saveAsField")->setProperty("text", "work");
+    clickButton(page->findChild<QObject*>("saveProfileAsButton"));
+    REQUIRE(!fx.controller->editingReadOnly());
+    fx.page->setProperty("editorMode", "profile");
+    auto window = TestWindow(1000, 800);
+    window.show(*page);
+    fx.settle();
+
+    clickButton(page->findChild<QObject*>("addLinkPatternButton"));
+    fx.settle();
+    auto const row = static_cast<int>(fx.controller->linkPatterns().size()) - 1;
+    auto const added = fx.controller->linkPatterns().back().toMap().value("name").toString();
+
+    // The new row's fields, found in the visual tree: a delegate has no QObject parent.
+    auto const fieldOf = [&](QString const& objectName) -> QQuickItem& {
+        auto* const name = findDescendant(*page, [&](QQuickItem const& item) {
+            return item.objectName() == "linkPatternName" && item.property("text").toString() == added;
+        });
+        return required(findDescendant(required(required(name).parentItem()), [&](QQuickItem const& item) {
+            return item.objectName() == objectName;
+        }));
+    };
+
+    auto* const name = &fieldOf("linkPatternName");
+    auto const regex = QPointer<QQuickItem> { &fieldOf("linkPatternRegex") };
+    TestWindow::focus(*name);
+    QMetaObject::invokeMethod(name, "selectAll");
+    window.type("jira");
+    regex->forceActiveFocus(); // leaves the name field, which commits it
+    fx.settle();
+    // The field the focus went to is still there, and still has it.
+    REQUIRE_FALSE(regex.isNull());
+    CHECK(regex->hasActiveFocus());
+    window.type("T-[0-9]");
+    window.press(Qt::Key_Return);
+    fx.settle();
+
+    auto const stored = fx.controller->linkPatterns().at(row).toMap();
+    CHECK(stored.value("name").toString() == "jira");
+    CHECK(stored.value("regex").toString() == "T-[0-9]");
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -953,6 +1129,28 @@ TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save th
         CHECK(editor(key, "QQuickComboBox").property("currentText").toString() == "relative");
     }
 
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SettingRow shows what is wrong with its value under it", "[contour][gui][qml][settings][links]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto const rows = SettingRowFactory {};
+    auto const row = rows.make({ { "fieldKey", "file_opener_command" },
+                                 { "type", "string" },
+                                 { "value", "code {file}" },
+                                 { "problem", "an unknown placeholder" } });
+    auto const* problem = row->findChild<QQuickItem*>("settingProblem");
+    REQUIRE(problem != nullptr);
+    CHECK(problem->isVisible());
+    CHECK(problem->property("text").toString() == "an unknown placeholder");
+    // In the chrome style's error colour, which follows the theme.
+    auto const* style = rows.engine.rootContext()->contextProperty("chromeStyle").value<QObject*>();
+    REQUIRE(style != nullptr);
+    CHECK(problem->property("color").value<QColor>() == style->property("errorColor").value<QColor>());
+
+    row->setProperty("problem", QString {});
+    CHECK_FALSE(problem->isVisible());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
