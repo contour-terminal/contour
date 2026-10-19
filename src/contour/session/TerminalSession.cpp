@@ -16,6 +16,7 @@
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/session/CommandBlockTooltip.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
+#include <contour/session/ExitCode.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/LocalFileAction.hpp>
 #include <contour/session/Logging.hpp>
@@ -1314,26 +1315,14 @@ void TerminalSession::onClosed()
     auto const now = steady_clock::now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - _startTime);
 
-    if (auto* localProcess = dynamic_cast<vtpty::Process*>(&_terminal.device()))
-    {
-        auto const exitStatus = localProcess->checkStatus();
-        if (exitStatus)
-            sessionLog()(
-                "Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);
-        else
-            sessionLog()("Process terminated after {} seconds.", diff.count());
-    }
-#ifdef VTPTY_LIBSSH2
-    else if (auto* sshSession = dynamic_cast<vtpty::SshSession*>(&_terminal.device()))
-    {
-        auto const exitStatus = sshSession->exitStatus();
-        if (exitStatus)
-            sessionLog()(
-                "Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);
-        else
-            sessionLog()("Process terminated after {} seconds.", diff.count());
-    }
-#endif
+    auto const exitStatus = sessionExitStatusOf(_terminal.device());
+    if (exitStatus)
+        std::visit(
+            [&](auto const& status) {
+                sessionLog()(
+                    "Process terminated after {} seconds with exit status {}.", diff.count(), status);
+            },
+            *exitStatus);
     else
         sessionLog()("Process terminated after {} seconds.", diff.count());
 
@@ -1357,8 +1346,10 @@ void TerminalSession::onClosed()
     }
 
     // A pager is expected to end at once -- a `q`, or a `more` whose output fits one screen -- so only a
-    // shell's quick end is taken for a failure to start.
-    if (_role == SessionRole::Shell && diff < _app.earlyExitThreshold() && !_terminationRequested)
+    // shell's quick end is taken for a failure to start, and only when the shell did not say it succeeded:
+    // `exit` or Ctrl+D moments after opening a window closes it like at any other time.
+    if (_role == SessionRole::Shell && diff < _app.earlyExitThreshold() && !_terminationRequested
+        && quickExitNoticeFor(exitStatus) == QuickExitNotice::Show)
     {
         // Deliberately do NOT emit sessionClosed here: removeSession() would prune this pane from the
         // model and tear down its QML item, destroying the very screen the message below is shown on

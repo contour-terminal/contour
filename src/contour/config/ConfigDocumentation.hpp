@@ -1911,9 +1911,10 @@ constexpr StringLiteral DefaultProfilesWeb {
 };
 
 constexpr StringLiteral EarlyExitThresholdWeb {
-    "option determines the early threshold time. If contour attempts to close earlier than specified "
-    "threshold, additional message will be printed that contour terminated too early and additional key "
-    "press is required to close contour."
+    "option determines the early threshold time. If the shell ends earlier than the specified threshold "
+    "without a successful exit status, additional message will be printed that the shell terminated too "
+    "quickly and additional key press is required to close contour. A shell that exits successfully -- "
+    "`exit` or Ctrl+D -- closes the window at once."
 };
 
 constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new process should be spawned when "
