@@ -919,6 +919,38 @@ TEST_CASE("Terminal.a_binding_is_offered_the_click_count_before_the_selection", 
     CHECK_FALSE(mock.terminal.leftMouseButtonPressed());
 }
 
+TEST_CASE("Terminal.a_claimed_press_whose_release_never_arrives_does_not_select_on_moves",
+          "[terminal][semanticblocks]")
+{
+    // A claimed press may hand focus elsewhere (following a link opens the browser), so its release can be
+    // lost. The pointer moving afterwards must neither start nor extend a selection, even with the
+    // block-selection modifier held.
+    auto mock = MockTerm { ColumnCount(11), LineCount(3) };
+    mock.writeToScreen("hello world\r\nhello world");
+
+    using namespace vtbackend;
+    auto const claimAll = [](uint8_t) {
+        return MousePressClaim::Claimed;
+    };
+    mock.terminal.sendMousePressEvent(Modifier::Control,
+                                      MouseButton::Left,
+                                      0_lineOffset + 1_columnOffset,
+                                      vtbackend::PixelCoordinate {},
+                                      false,
+                                      claimAll);
+    mock.terminal.sendMouseMoveEvent(Modifier::None,
+                                     1_lineOffset + 8_columnOffset,
+                                     vtbackend::PixelCoordinate { .x = { 80 }, .y = { 20 } },
+                                     false);
+    mock.terminal.sendMouseMoveEvent(Modifier::Control,
+                                     1_lineOffset + 9_columnOffset,
+                                     vtbackend::PixelCoordinate { .x = { 90 }, .y = { 20 } },
+                                     false);
+
+    CHECK_FALSE(mock.terminal.selectionAvailable());
+    CHECK_FALSE(mock.terminal.leftMouseButtonPressed());
+}
+
 TEST_CASE("Terminal.a_press_an_application_asked_for_is_never_offered_to_a_binding",
           "[terminal][semanticblocks]")
 {

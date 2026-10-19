@@ -4575,6 +4575,56 @@ void seedHoveredHyperlink(contour::session::TerminalSession& session, std::strin
 }
 } // namespace
 
+TEST_CASE("TerminalSession: Ctrl+click on a link follows it and starts no block selection",
+          "[contour][session][hyperlink][input]")
+{
+    // The default config binds Ctrl+Left to FollowHyperlink AND makes Ctrl the block-selection modifier. A
+    // press on a link must be the binding's alone: opening the link hands focus to the browser, so its
+    // release never arrives, and a selection started by the press would follow every later move of the
+    // pointer.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& launcher = testApp.launcher();
+    auto const ctrl = Modifiers { vtbackend::Modifier::Control };
+    auto const origin =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(0) };
+    auto const elsewhere =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(6) };
+    auto const pixelsElsewhere = vtbackend::PixelCoordinate { .x = { 60 }, .y = { 40 } };
+
+    SECTION("on a link: followed, and no release leaves the pointer selecting")
+    {
+        seedHoveredHyperlink(*session, "https://contour-terminal.org/");
+        REQUIRE(session->terminal().isMouseHoveringHyperlink());
+
+        session->sendMousePressEvent(
+            ctrl, vtbackend::MouseButton::Left, origin, vtbackend::PixelCoordinate {});
+        // No release: the browser took focus.
+        session->sendMouseMoveEvent(Modifiers {}, elsewhere, pixelsElsewhere);
+
+        REQUIRE(launcher.openedUrls.size() == 1);
+        CHECK(launcher.openedUrls.back().toString().toStdString() == "https://contour-terminal.org/");
+        CHECK_FALSE(session->terminal().selectionAvailable());
+        CHECK_FALSE(session->terminal().leftMouseButtonPressed());
+    }
+
+    SECTION("off a link: the block selection is unchanged")
+    {
+        session->terminal().writeToScreen("plain text, no link here\r\nmore text on line two\r\nand three");
+        REQUIRE_FALSE(session->terminal().isMouseHoveringHyperlink());
+
+        session->sendMousePressEvent(
+            ctrl, vtbackend::MouseButton::Left, origin, vtbackend::PixelCoordinate {});
+        session->sendMouseMoveEvent(ctrl, elsewhere, pixelsElsewhere);
+
+        CHECK(launcher.openedUrls.empty());
+        REQUIRE(session->terminal().selectionAvailable());
+        CHECK(dynamic_cast<vtbackend::RectangularSelection const*>(session->terminal().selector())
+              != nullptr);
+        CHECK(session->terminal().leftMouseButtonPressed());
+    }
+}
+
 TEST_CASE("TerminalSession: a file:// link in a pane replicating another machine opens nothing here",
           "[contour][session][hyperlink]")
 {

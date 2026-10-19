@@ -1521,6 +1521,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                                                               vtbackend::Modifiers modifiers,
                                                               uint8_t clickCount) const;
 
+    /// The actions of the follow gesture for this press: the ordinary binding of @p button, when it follows
+    /// links and the pointer is over one (vtbackend::Terminal::isPointerOverLink). Such a press is claimed,
+    /// so it starts no selection: following the link takes the focus, and with it the press's release. Only
+    /// looks: it runs under the terminal lock, inside the claimant.
+    /// @param button The pressed button.
+    /// @param modifiers The chord, with the bypass modifier already removed (@see bindingModifiers).
+    /// @return The bound actions, or nullptr -- also for a binding executeAllActions() would refuse.
+    [[nodiscard]] config::ActionList const* linkFollowBinding(vtbackend::MouseButton button,
+                                                              vtbackend::Modifiers modifiers) const;
+
     /// The actions an ordinary press of @p button is bound to: the user's mappings first, then the built-in
     /// fallbacks, as for a press the grid declined.
     /// @param button The pressed button.

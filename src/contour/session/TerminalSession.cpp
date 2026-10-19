@@ -2582,7 +2582,9 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     auto const sanitizedModifier = bindingModifiers(modifiers);
 
     // A binding that names a click count is offered the press BEFORE the terminal's own multi-click
-    // selection acts on it -- only the terminal knows the count, and only until it has used it. The
+    // selection acts on it -- only the terminal knows the count, and only until it has used it. So is the
+    // follow gesture on a link: its chord is the block-selection modifier by default, and following the link
+    // hands focus to the browser, so a selection the press started would never see its release. The
     // claimant only looks the binding up (it runs under the lock); the actions run once it is released.
     //
     // The claimant captures one reference, to this struct, so that it fits std::function's small buffer
@@ -2601,6 +2603,8 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
         return _terminal.sendMousePressEvent(
             modifiers, button, pos, pixelPosition, uiHandledHint, [&claim](uint8_t clickCount) {
                 claim.claimed = claim.session.clickCountBinding(claim.button, claim.modifiers, clickCount);
+                if (claim.claimed == nullptr)
+                    claim.claimed = claim.session.linkFollowBinding(claim.button, claim.modifiers);
                 return claim.claimed != nullptr ? vtbackend::MousePressClaim::Claimed
                                                 : vtbackend::MousePressClaim::Unclaimed;
             });
@@ -2676,6 +2680,24 @@ config::ActionList const* TerminalSession::mouseBinding(MouseButton button, Modi
             config::apply(_config.inputMappings.value().mouseMappings, button, modifiers, flags))
         return actions;
     return config::applyBuiltinFallback(_config, button, modifiers, flags);
+}
+
+config::ActionList const* TerminalSession::linkFollowBinding(MouseButton button, Modifiers modifiers) const
+{
+    // The link the pointer shape shows, not a scan of the cell: only a press the user sees land on a link is
+    // taken from the selection, and the check is two atomic loads under the lock.
+    if (!_terminal.isPointerOverLink())
+        return nullptr;
+
+    auto const* actions = mouseBinding(button, modifiers);
+    if (actions == nullptr || !config::followsHyperlink(*actions))
+        return nullptr;
+
+    // As for a `clicks:` binding: one that will not run must not claim. FollowHyperlink is no toggle, so
+    // while key mappings are off the press stays the selection's.
+    if (!_allowKeyMappings && !togglesKeyMappings(*actions))
+        return nullptr;
+    return actions;
 }
 
 config::ActionList const* TerminalSession::clickCountBinding(MouseButton button,

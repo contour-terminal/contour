@@ -820,13 +820,17 @@ std::shared_ptr<vtbackend::LinkPatterns const> linkPatternsFor(TerminalProfile c
         vtbackend::LinkPatterns::compile(linkPatternSpecs(profile)));
 }
 
+bool followsHyperlink(ActionList const& actions)
+{
+    return std::ranges::any_of(actions, [](actions::Action const& action) {
+        return std::holds_alternative<actions::FollowHyperlink>(action);
+    });
+}
+
 std::optional<vtbackend::Modifiers> followHyperlinkModifiers(Config const& config)
 {
     for (auto const& mapping: config.inputMappings.value().mouseMappings)
-        if (mapping.input == vtbackend::MouseButton::Left
-            && std::ranges::any_of(mapping.binding, [](actions::Action const& action) {
-                   return std::holds_alternative<actions::FollowHyperlink>(action);
-               }))
+        if (mapping.input == vtbackend::MouseButton::Left && followsHyperlink(mapping.binding))
             return mapping.modifiers;
     return std::nullopt;
 }

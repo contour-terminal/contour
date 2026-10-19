@@ -5483,7 +5483,7 @@ LinkPointer Terminal::hoverPointer() const noexcept
 
 LinkPointerShape Terminal::linkPointerShape() const noexcept
 {
-    if (!isMouseHoveringHyperlink() && _hoveringLinkId.load() == LinkId {})
+    if (!isPointerOverLink())
         return LinkPointerShape::Default;
     return presentLink(_settings.linkDecorationMode, hoverPointer(), followModifiers()).pointer;
 }

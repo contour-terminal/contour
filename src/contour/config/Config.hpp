@@ -2821,6 +2821,11 @@ struct ResolvedSessionConfig
 /// @return The table; never null.
 [[nodiscard]] std::shared_ptr<vtbackend::LinkPatterns const> linkPatternsFor(TerminalProfile const& profile);
 
+/// Whether @p actions include a FollowHyperlink: the binding is the follow gesture.
+/// @param actions A binding's actions.
+/// @return True when one of them follows the link under the pointer.
+[[nodiscard]] bool followsHyperlink(ActionList const& actions);
+
 /// The modifiers of the left-button mouse binding that runs FollowHyperlink.
 ///
 /// Only the first such binding counts, and its match modes are ignored: links are revealed for one chord, and

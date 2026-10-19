@@ -1455,6 +1455,14 @@ class Terminal
     /// (mouse tracking on, the bypass modifier not held), so that the link stays at rest.
     [[nodiscard]] LinkPointer hoverPointer() const noexcept;
 
+    /// Whether the pointer is over a link, an OSC 8 one or a detected one, as of the last pointer event
+    /// (hoveringHyperlinkId(), hoveringLinkId()): the link the pointer shape is decided for.
+    /// @return True when there is one.
+    [[nodiscard]] bool isPointerOverLink() const noexcept
+    {
+        return isMouseHoveringHyperlink() || _hoveringLinkId.load() != LinkId {};
+    }
+
     /// The pointer shape the link under the pointer asks for, an OSC 8 link or a detected one, as of the last
     /// pointer event (hoveringHyperlinkId(), hoveringLinkId()); Default when there is none.
     [[nodiscard]] LinkPointerShape linkPointerShape() const noexcept;
