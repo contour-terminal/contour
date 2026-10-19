@@ -6,6 +6,7 @@
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/platform/NativeWindowFrame.hpp>
+#include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/platform/WindowShadowController.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
@@ -715,9 +716,12 @@ class WindowController:
 
     /// Scale-settlement handler (DevicePixelRatioChange / screenChanged): when the window's resolved
     /// content scale actually changed, re-derives the font DPI (grid reflows in place) and issues ONE
-    /// grid-preserving corrective window resize (user decision: monitor moves and late Wayland
+    /// queued grid-preserving corrective window resize (user decision: monitor moves and late Wayland
     /// fractional-scale arrival keep the grid, not the pixel size). Idempotent per scale value.
     void onWindowScaleMaybeChanged();
+
+    /// Restores the captured grid after DPI processing and the native move/resize loop finish.
+    void settlePendingWindowScaleChange();
 
     /// OS window activation handler (QWindow::activeChanged): grants focus ownership to this window
     /// when it becomes the active OS window and revokes it when it stops being active, so alt-tabbing
@@ -868,6 +872,14 @@ class WindowController:
     bool _maximizedState = false;
     // The content scale the geometry was last derived for (settlement idempotence latch).
     double _lastAppliedScale = 0.0;
+    // Page captured before native DPI resizing; also coalesces the queued settlement callback.
+    struct PendingScalePage
+    {
+        vtbackend::PageSize page;
+        int sessionId;
+    };
+    std::optional<PendingScalePage> _pendingScalePage;
+    platform::WindowMoveResizePhase _nativeMoveResizePhase = platform::WindowMoveResizePhase::Idle;
     // True while our own content-driven resize is in flight (straddle guard, see onWindowScaleMaybeChanged).
     bool _inContentDrivenResize = false;
 };

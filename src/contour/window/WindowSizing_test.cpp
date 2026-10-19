@@ -25,6 +25,9 @@
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
+#ifdef _WIN32
+    #include <QtCore/qt_windows.h>
+#endif
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -510,6 +513,126 @@ TEST_CASE("content-driven resizes refuse displayless/sessionless requesters", "[
         requester, vtbackend::ImageSize { vtbackend::Width(800), vtbackend::Height(600) }));
     CHECK(window.size() == before);
 }
+
+TEST_CASE("DPI settlement restores rows after the native suggested resize",
+          "[contour][sizing][dpi-settlement]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& profile = app.app().config().profiles.value().at("main");
+    profile.margins = contour::config::WindowMargins { .horizontal = contour::config::HorizontalMargin { 0 },
+                                                       .vertical = contour::config::VerticalMargin { 0 } };
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    controller->bindWindow(&window);
+    controller->setChromeHeight(34);
+    auto* session = app.manager().createSession(controller->windowId());
+    REQUIRE(session);
+    contour::test::FakeDisplaySurface surface;
+    surface.attachedSession = session;
+    session->attachDisplay(surface);
+    controller->showInitial();
+    QCoreApplication::processEvents();
+    auto const alignedSize = window.size();
+
+    // Metrics double with scale, preserving the logical grid size. Qt delivers this notification
+    // synchronously, then overwrites the window with the native suggested rectangle afterward.
+    surface.devicePixelRatioValue = 2.0;
+    surface.cellSizeValue = { vtbackend::Width(16), vtbackend::Height(32) };
+    auto event = QEvent(QEvent::DevicePixelRatioChange);
+    QCoreApplication::sendEvent(&window, &event);
+    CHECK(window.size() == alignedSize);
+    auto const nativeSize = alignedSize + QSize(0, 7);
+    window.resize(nativeSize);
+    QCoreApplication::sendEvent(&window, &event); // same-scale echo must not lose the pending correction
+
+    SECTION("normal window settles after native processing")
+    {
+        QCoreApplication::processEvents();
+        CHECK(window.size() == alignedSize);
+        QCoreApplication::processEvents();
+        CHECK(window.size() == alignedSize); // no resize loop
+    }
+    SECTION("another scale notification coalesces with the original page")
+    {
+        surface.devicePixelRatioValue = 1.5;
+        surface.cellSizeValue = { vtbackend::Width(12), vtbackend::Height(24) };
+        QCoreApplication::sendEvent(&window, &event);
+        QCoreApplication::processEvents();
+        CHECK(window.size() == alignedSize);
+    }
+    SECTION("a window maximized before settlement keeps its native size")
+    {
+        window.showMaximized();
+        QCoreApplication::processEvents();
+        CHECK(window.visibility() == QWindow::Maximized);
+        CHECK(window.size() != alignedSize);
+    }
+    SECTION("a detached display cancels the pending resize")
+    {
+        session->detachDisplay(surface);
+        QCoreApplication::processEvents();
+        CHECK(window.size() == nativeSize);
+    }
+    if (session->display() == &surface)
+        session->detachDisplay(surface);
+    surface.attachedSession = nullptr;
+}
+
+#ifdef _WIN32
+TEST_CASE("DPI settlement waits for the native move loop to end", "[contour][sizing][dpi-settlement][native]")
+{
+    if (QGuiApplication::platformName() != "windows")
+        SKIP("Requires the native Windows platform.");
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().rememberWindowPosition = false;
+    auto& profile = app.app().config().profiles.value().at("main");
+    profile.terminalSize = vtbackend::PageSize { vtbackend::LineCount(20), vtbackend::ColumnCount(70) };
+    profile.margins = contour::config::WindowMargins { .horizontal = contour::config::HorizontalMargin { 0 },
+                                                       .vertical = contour::config::VerticalMargin { 0 } };
+    ScopedController controller { app.manager() };
+    QQuickWindow window;
+    controller->bindWindow(&window);
+    controller->setChromeHeight(34);
+    auto* session = app.manager().createSession(controller->windowId());
+    REQUIRE(session);
+    contour::test::FakeDisplaySurface surface;
+    surface.attachedSession = session;
+    surface.cellSizeValue = { vtbackend::Width(11), vtbackend::Height(23) };
+    session->attachDisplay(surface);
+    controller->showInitial();
+    QCoreApplication::processEvents();
+    auto const page = session->terminal().totalPageSize();
+    auto const originalSize = window.size();
+    auto const hwnd = reinterpret_cast<HWND>(window.winId());
+    SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0);
+    surface.devicePixelRatioValue = window.devicePixelRatio() == 1.5 ? 2.0 : 1.5;
+    surface.cellSizeValue = { vtbackend::Width(16), vtbackend::Height(35) };
+    auto event = QEvent(QEvent::DevicePixelRatioChange);
+    QCoreApplication::sendEvent(&window, &event);
+    window.resize(originalSize + QSize(0, 7));
+    auto const nativeSize = window.size();
+    QCoreApplication::processEvents(); // Qt queued calls run while the native drag is still active
+    CHECK(window.size() == nativeSize);
+    window.resize(originalSize); // Windows' later drag proposal must not discard the captured page
+    QCoreApplication::processEvents();
+    CHECK(window.size() == originalSize);
+    auto const expected = contour::geometry::windowSizeForPage(
+        page,
+        surface.cellSizeValue,
+        {},
+        surface.devicePixelRatioValue,
+        contour::geometry::Chrome { .width = 0, .height = 34 },
+        contour::session::configuredGutterWidth(
+            session->config(), surface.cellSizeValue, surface.devicePixelRatioValue));
+    SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+    QCoreApplication::processEvents();
+    CHECK(window.size() == QSize(expected.width, expected.height));
+    QCoreApplication::processEvents();
+    CHECK(window.size() == QSize(expected.width, expected.height));
+    session->detachDisplay(surface);
+    surface.attachedSession = nullptr;
+}
+#endif
 
 TEST_CASE("a DevicePixelRatioChange event reaches the scale-settlement handler", "[contour][sizing]")
 {

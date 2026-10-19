@@ -33,8 +33,12 @@ namespace
     class WindowResizeGrid final: public QObject
     {
       public:
-        WindowResizeGrid(QWindow& window, std::function<std::optional<geometry::RowResizeGrid>()> grid):
-            _window { &window }, _grid { std::move(grid) }
+        WindowResizeGrid(QWindow& window,
+                         std::function<std::optional<geometry::RowResizeGrid>()> grid,
+                         std::function<void(WindowMoveResizePhase)> interactionChanged):
+            _window { &window },
+            _grid { std::move(grid) },
+            _interactionChanged { std::move(interactionChanged) }
         {
             window.installEventFilter(this);
             attach();
@@ -96,6 +100,9 @@ namespace
                                            DWORD_PTR reference)
         {
             auto& self = *reinterpret_cast<WindowResizeGrid*>(reference);
+            if (self._interactionChanged && (message == WM_ENTERSIZEMOVE || message == WM_EXITSIZEMOVE))
+                self._interactionChanged(message == WM_ENTERSIZEMOVE ? WindowMoveResizePhase::Active
+                                                                     : WindowMoveResizePhase::Idle);
             if (message == WM_SIZING)
                 if (auto const result = self.sizingResult(wParam, lParam))
                     return *result;
@@ -138,6 +145,7 @@ namespace
 
         QPointer<QWindow> _window;
         std::function<std::optional<geometry::RowResizeGrid>()> _grid;
+        std::function<void(WindowMoveResizePhase)> _interactionChanged;
         HWND _nativeWindow = nullptr;
     };
 } // namespace
@@ -145,12 +153,13 @@ namespace
 
 std::unique_ptr<QObject> makeWindowResizeGrid(
     [[maybe_unused]] QWindow& window,
-    [[maybe_unused]] std::function<std::optional<geometry::RowResizeGrid>()> const& grid)
+    [[maybe_unused]] std::function<std::optional<geometry::RowResizeGrid>()> const& grid,
+    [[maybe_unused]] std::function<void(WindowMoveResizePhase)> const& interactionChanged)
 {
 #ifdef _WIN32
     if (QGuiApplication::platformName() != QStringLiteral("windows"))
         return nullptr;
-    return std::make_unique<WindowResizeGrid>(window, grid);
+    return std::make_unique<WindowResizeGrid>(window, grid, interactionChanged);
 #elifdef __APPLE__
     return makeCocoaWindowResizeGrid(window, grid);
 #else

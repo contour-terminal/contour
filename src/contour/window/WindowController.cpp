@@ -949,7 +949,16 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
 
     _osWindow = osWindow;
 
-    _resizeGrid = platform::makeWindowResizeGrid(*osWindow, [this] { return rowResizeGrid(); });
+    _resizeGrid = platform::makeWindowResizeGrid(
+        *osWindow,
+        [this] { return rowResizeGrid(); },
+        [this](platform::WindowMoveResizePhase phase) {
+            _nativeMoveResizePhase = phase;
+            display::displayLog()("Native move/resize {}.",
+                                  phase == platform::WindowMoveResizePhase::Active ? "started" : "ended");
+            if (phase == platform::WindowMoveResizePhase::Idle && _pendingScalePage)
+                platform::postToObject(this, [this] { settlePendingWindowScaleChange(); });
+        });
 
     // Still unexposed, so the scene graph has not chosen a graphics device yet.
     _manager.app().applyGraphicsDevice(*osWindow);
@@ -1248,8 +1257,32 @@ void WindowController::onWindowScaleMaybeChanged()
     // fullscreen/maximized (never resize those; the reflow stands).
     if (_inContentDrivenResize)
         return;
-    if (_osWindow != nullptr && _osWindow->visibility() == QQuickWindow::Visibility::Windowed)
-        resizeWindowForPage(*display, pageBefore);
+    if (_osWindow == nullptr || _osWindow->visibility() != QQuickWindow::Visibility::Windowed
+        || _pendingScalePage)
+        return;
+
+    // Qt announces the screen synchronously inside WM_DPICHANGED, before applying the suggested
+    // native rectangle. A resize here would be overwritten by that rectangle. Keep the first page
+    // across coalesced scale notifications and correct only after native processing has returned.
+    _pendingScalePage = PendingScalePage { .page = pageBefore, .sessionId = session->id() };
+    platform::postToObject(this, [this] { settlePendingWindowScaleChange(); });
+}
+
+void WindowController::settlePendingWindowScaleChange()
+{
+    // Queued Qt calls can run inside Windows' nested move loop. Keep the original page until
+    // WM_EXITSIZEMOVE: otherwise the next native proposal overwrites our corrective resize.
+    if (_nativeMoveResizePhase == platform::WindowMoveResizePhase::Active)
+        return;
+    auto const pending = std::exchange(_pendingScalePage, std::nullopt);
+    auto* session = activeSession();
+    auto* display = session != nullptr ? session->display() : nullptr;
+    if (!pending || session == nullptr || session->id() != pending->sessionId || display == nullptr
+        || !display->hasSession() || _osWindow == nullptr
+        || _osWindow->visibility() != QQuickWindow::Visibility::Windowed || _inContentDrivenResize)
+        return;
+    display->applyContentScaleChange();
+    resizeWindowForPage(*display, pending->page);
 }
 
 QQuickWindow* WindowController::osWindowFor(session::DisplaySurface& requester) noexcept
