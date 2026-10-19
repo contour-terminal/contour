@@ -518,6 +518,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Applies `renderer.gpu` to OpenGL through the driver's environment (Linux only).
     void applyOpenGlGpuSelection();
 
+    /// Keeps Qt Multimedia from probing the GPUs for hardware video when it loads for the bell
+    /// (@see platform::MultimediaHardwareProbeVariables), leaving any variable the user exported alone.
+    /// Like the GPU selection, it is the environment of this process only, which shells do not inherit.
+    void keepMultimediaOffTheGpus();
+
     /// Logs the GPU the first window's first frame was drawn on.
     /// @param window The window, before it is first exposed.
     void logGpuInUse(QQuickWindow& window);
