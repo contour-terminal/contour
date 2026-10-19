@@ -240,6 +240,7 @@ namespace
 
     void sendWheelEvent(crispy::Point const& pixelDelta,
                         crispy::Point const& angleDelta,
+                        vtbackend::CellLocation wheelCell,
                         PixelCoordinate const& currentMousePixelPosition,
                         vtbackend::Modifiers modifiers,
                         vtbackend::ScrollPhase scrollPhase,
@@ -261,10 +262,12 @@ namespace
         if (scrollPhase == vtbackend::ScrollPhase::Momentum && terminal.isMomentumScrollActive())
             return;
 
-        // Smooth scrolling path: bypass line quantization for the primary screen.
-        // Skip smooth scrolling when modifiers are held so that modifier+wheel bindings
-        // (e.g. Alt+Wheel for opacity, Ctrl+Wheel for font size) are handled by the binding system.
-        if (terminal.settings().smoothScrolling && !terminal.isAlternateScreen() && modifiers.none())
+        // Smooth scrolling path: bypass line quantization while page 1 -- the primary screen -- is on
+        // display, wherever the cursor writes. Skip smooth scrolling when modifiers are held so that
+        // modifier+wheel bindings (e.g. Alt+Wheel for opacity, Ctrl+Wheel for font size) are handled by the
+        // binding system.
+        if (terminal.settings().smoothScrolling
+            && terminal.displayedScreenType() == vtbackend::ScreenType::Primary && modifiers.none())
         {
             auto const now = steady_clock::now();
             auto effectivePixelDelta = 0.0f;
@@ -350,20 +353,15 @@ namespace
         auto const horizontalScrollEvent =
             columnsScroll.as<int>() > 0 ? VTMouseButton::WheelRight : VTMouseButton::WheelLeft;
 
-        // These are synthesized at the pointer's EXISTING resting position, not a fresh click
-        // elsewhere, so the terminal's own last-tracked cell is exactly right here -- unlike a real
-        // press, there is no new position for this "click" to have missed.
-        // Under the lock: _currentMousePosition is ordinary mutable terminal state, and the resize
-        // path (Terminal::resizeScreen) clamps it from another thread. An unsynchronized read is a
-        // data race TSan would rightly flag, even though the worst it could do here is aim a
-        // synthesized wheel "click" at a stale cell.
-        auto const wheelClickPosition =
-            core::locked(terminal, [&] { return terminal.currentMousePosition(); });
-
+        // These are synthesized where the wheel turned, which is where the pointer rests: the cell the
+        // wheel event names, as its pixel position names the pixel. Not the terminal's last-tracked cell,
+        // which is not the pointer's before any pointer event (its default, the top-left cell) nor once the
+        // pointer has left the grid (the cell it left from) -- a notch aimed there was reported there, and
+        // put the pointer back on it.
         for (int i = 0; i < std::abs(columnsScroll.as<int>()); ++i)
         {
             session.sendMousePressEvent(
-                modifiers, horizontalScrollEvent, wheelClickPosition, currentMousePixelPosition);
+                modifiers, horizontalScrollEvent, wheelCell, currentMousePixelPosition);
         }
 
         auto const verticalScrollEvent =
@@ -371,8 +369,7 @@ namespace
 
         for (int i = 0; i < std::abs(linesScroll.as<int>()); ++i)
         {
-            session.sendMousePressEvent(
-                modifiers, verticalScrollEvent, wheelClickPosition, currentMousePixelPosition);
+            session.sendMousePressEvent(modifiers, verticalScrollEvent, wheelCell, currentMousePixelPosition);
         }
     }
 
@@ -725,7 +722,15 @@ void sendWheelEvent(QWheelEvent* event, TerminalSession& session)
     }();
 
     auto const scrollPhase = input::mapScrollPhase(event->phase());
-    sendWheelEvent(pixelDelta, angleDelta, pixelPosition, modifiers, scrollPhase, event->inverted(), session);
+    auto const position = event->position().toPoint();
+    sendWheelEvent(pixelDelta,
+                   angleDelta,
+                   makeMouseCellLocation(position.x(), position.y(), session),
+                   pixelPosition,
+                   modifiers,
+                   scrollPhase,
+                   event->inverted(),
+                   session);
     event->accept();
 }
 

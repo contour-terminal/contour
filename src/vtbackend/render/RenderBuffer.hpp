@@ -5,21 +5,22 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Image.hpp>
+#include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/StickyHeaderKind.hpp>
 #include <vtbackend/core/TextScale.hpp>
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/grid/Line.hpp>
 
-#include <gsl/pointers>
-
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace vtbackend
@@ -75,6 +76,9 @@ struct RenderCell
     /// How this cell's glyph is sized and placed, and which row of its block it draws (kitty text
     /// sizing protocol, `OSC 66`). Ordinary text leaves it at its default.
     GlyphSizing sizing {};
+
+    /// Whether, and how, this cell is drawn as part of a link (OSC 8 or detected).
+    LinkDecorationRole linkRole = LinkDecorationRole::None;
 
     bool groupStart = false;
     bool groupEnd = false;
@@ -158,15 +162,28 @@ ColumnOffset layoutRenderText(std::vector<RenderCell>& output,
 /// @param cells The cells, left to right; none is marked when it is empty.
 void markShapingGroup(std::span<RenderCell> cells) noexcept;
 
+/// Which display a part of the frame belongs to: the main display, seen through the viewport -- which
+/// scrolls, smoothly too, and folds -- or a status line, drawn row for row, which does neither.
+enum class RenderedDisplay : uint8_t
+{
+    Main = 0,   ///< The main display: the page on display, through the viewport.
+    StatusLine, ///< A status line: its own rows, without a viewport.
+};
+
 struct RenderCursor
 {
     CellLocation position;
     CursorShape shape;
     int width = 1;
-    std::optional<CellLocation> animateFrom {};  ///< Grid position cursor is animating from.
+    /// Screen position the cursor is animating from: between two cells where the motion took over part of the
+    /// way along another, as the cursor was drawn there (@see lerpCellLocation for where that holds).
+    std::optional<FractionalCellLocation> animateFrom {};
     float animationProgress = 1.0f;              ///< 0.0 = at animateFrom, 1.0 = at position.
     RGBColor cursorColor {};                     ///< Resolved cursor color at target position.
     std::optional<RGBColor> animateFromColor {}; ///< Cursor color at animation source position.
+    /// The display the cursor is on. A status line's cursor does not scroll with the page, nor is it clipped
+    /// to it.
+    RenderedDisplay display = RenderedDisplay::Main;
 };
 
 /// A status line whose bar spans the window's whole width: the gutter and the page margins beside it, too.
@@ -254,22 +271,57 @@ struct RenderBuffer
     RenderStickyHeader _retiredStickyHeader {};
 };
 
-/// Lock-guarded handle to a read-only RenderBuffer object.
+/// Lock-guarded handle to a read-only RenderBuffer object: holds the buffer's reader lock for as long as it
+/// lives. Move-only, as the lock is: a copy would unlock it a second time.
 ///
 /// @see RenderBuffer
 struct RenderBufferRef
 {
-    gsl::not_null<RenderBuffer const*> buffer;
-    gsl::not_null<std::mutex*> guard;
+    /// Takes @p lock, which the reference holds until it goes.
+    /// @param buf The buffer to read.
+    /// @param lock The buffer's reader lock.
+    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): _buffer { buf }, _lock { lock } {}
 
-    [[nodiscard]] RenderBuffer const& get() const noexcept { return *buffer; }
-
-    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): buffer { &buf }, guard { &lock }
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    /// Takes @p lock, which the reference holds until it goes, and calls @p onRelease once it has let go.
+    /// @param buf The buffer to read.
+    /// @param lock The buffer's reader lock.
+    /// @param onRelease Called on the thread letting go, after the unlock; an empty one is not called.
+    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock, std::function<void()> const& onRelease):
+        _buffer { buf }, _lock { lock }, _onRelease { &onRelease }
     {
-        guard->lock();
     }
+#endif
 
-    ~RenderBufferRef() { guard->unlock(); }
+    // The same in every build, though only a passive build's destructor does more than unlock.
+    RenderBufferRef(RenderBufferRef&&) noexcept = default;
+    RenderBufferRef(RenderBufferRef const&) = delete;
+    /// Not assigned: a passive build's reference calls back as it lets go, which assigning over it would
+    /// skip.
+    RenderBufferRef& operator=(RenderBufferRef&&) = delete;
+    RenderBufferRef& operator=(RenderBufferRef const&) = delete;
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    ~RenderBufferRef()
+    {
+        if (!_lock.owns_lock())
+            return;
+        _lock.unlock();
+        if (_onRelease != nullptr && *_onRelease)
+            (*_onRelease)();
+    }
+#else
+    ~RenderBufferRef() = default;
+#endif
+
+    [[nodiscard]] RenderBuffer const& get() const noexcept { return _buffer.get(); }
+
+  private:
+    std::reference_wrapper<RenderBuffer const> _buffer;
+    std::unique_lock<std::mutex> _lock;
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    std::function<void()> const* _onRelease = nullptr; ///< What to call once the lock is let go; may be null.
+#endif
 };
 
 /// Reflects the current state of a RenderDoubleBuffer object.
@@ -294,6 +346,18 @@ constexpr std::string_view toString(RenderBufferState state) noexcept
 
 struct RenderDoubleBuffer
 {
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    RenderDoubleBuffer() = default;
+
+    /// @param onFrontBufferReleased Called on a reader's thread each time it lets go of the front buffer
+    ///        (@see RenderBufferRef), without any lock held: a frame filled while the reader held the front
+    ///        buffer can be swapped in now.
+    explicit RenderDoubleBuffer(std::function<void()> onFrontBufferReleased):
+        _onFrontBufferReleased { std::move(onFrontBufferReleased) }
+    {
+    }
+#endif
+
     std::mutex mutable readerLock;
     std::atomic<size_t> currentBackBufferIndex = 0;
 
@@ -316,13 +380,22 @@ struct RenderDoubleBuffer
         // if (state == RenderBufferState::TrySwapBuffers)
         //     const_cast<RenderDoubleBuffer*>(this)->swapBuffers(lastUpdate);
         RenderBuffer const& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+        return { frontBuffer, readerLock, _onFrontBufferReleased };
+#else
         return { frontBuffer, readerLock };
+#endif
     }
 
     void clear() { backBuffer().clear(); }
 
     // Swaps front with back buffer. May only be invoked by the writer thread.
     bool swapBuffers(std::chrono::steady_clock::time_point now) noexcept;
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+  private:
+    std::function<void()> _onFrontBufferReleased; ///< @see RenderDoubleBuffer(std::function<void()>)
+#endif
 };
 
 } // namespace vtbackend

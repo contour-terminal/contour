@@ -751,10 +751,10 @@ void ScreenMirror::syncInputEncoding(RemoteScreen const& screen)
             _terminal->setMode(mode, want);
     }
 
-    // The mouse state AFTER the modes, and never through setMode. Two mode handlers write into it:
-    // DECCKM rewrites the wheel mode while the alternate screen is up, and enabling a protocol
-    // resets the wheel mode to Default. Applying the resolved values last makes the server's answer
-    // the one that survives.
+    // The mouse state AFTER the modes, and never through setMode. Mode handlers write into it:
+    // DECCKM picks the form of the wheel's cursor keys, and ?1007 and every protocol change derive
+    // the wheel mode afresh -- as does setMouseProtocol() below. Applying the resolved values last
+    // makes the server's answer the one that survives.
     //
     // Asserted unconditionally, defaults included, for the reason applySessionState gives: the
     // server states this outright on every snapshot and then stays quiet, so a mirror that only

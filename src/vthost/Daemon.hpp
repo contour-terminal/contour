@@ -131,10 +131,13 @@ struct DaemonConfig
 ///        carry `--background`, or the child would background in turn and never bind.
 /// @param socketPath The control socket the spawned daemon binds; readiness is probed on the
 ///        native endpoint beside it.
+/// @param placement Places the daemon before it runs, as a session's shell is placed, so that it
+///        lives in no tab's resource domain. POSIX only.
 /// @param timeout How long to wait for it to accept connections.
 /// @return EXIT_SUCCESS once it is serving, EXIT_FAILURE on spawn failure or timeout.
 [[nodiscard]] int runDaemonDetached(std::vector<std::string> commandLine,
                                     std::filesystem::path const& socketPath,
+                                    vtpty::ProcessPlacement& placement,
                                     std::chrono::seconds timeout = std::chrono::seconds(5));
 
 /// Reaching the daemon over its local AF_UNIX control socket (the default).
@@ -239,11 +242,15 @@ struct DaemonSpawnOptions
 /// client is gone. An already-running daemon keeps whatever policy it was started with.
 /// @param endpoint Where to reach the daemon.
 /// @param daemonBinary Path to the `contour` binary (argv[0] of the client).
+/// @param placement Places a spawned daemon before it runs, as a session's shell is placed: the
+///        daemon holds every hosted session's scrollback, and must live in neither the client's own
+///        resource domain nor the tab's it was started from. POSIX only.
 /// @param spawnOptions Options forwarded to a spawned daemon's command line.
 /// @param timeout How long to wait for a spawned daemon to accept connections.
 /// @return EXIT_SUCCESS if a daemon is confirmed running, EXIT_FAILURE otherwise.
 [[nodiscard]] int ensureDaemon(AttachEndpoint const& endpoint,
                                std::string_view daemonBinary,
+                               vtpty::ProcessPlacement& placement,
                                DaemonSpawnOptions const& spawnOptions = {},
                                std::chrono::seconds timeout = std::chrono::seconds(5));
 

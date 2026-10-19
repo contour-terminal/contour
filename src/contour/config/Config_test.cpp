@@ -28,6 +28,8 @@
 
 #include <vtpty/test/NonAsciiSample.hpp>
 
+#include <vtrasterizer/Decorator.hpp>
+
 #include <text_shaper/Font.hpp>
 
 #include <crispy/StrongHash.hpp>
@@ -49,12 +51,14 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -5679,9 +5683,9 @@ TEST_CASE("Config: the gutter colors the generated config quotes are what the de
         std::format("#     failure: {}\n", palette.blockStatusColor(CommandBlockOutcome::Failure))));
     CHECK(generated.contains(
         std::format("#     running: {}\n", palette.blockStatusColor(CommandBlockOutcome::Running))));
-    for (auto const [key, outcome]: { std::pair { "success"sv, CommandBlockOutcome::Success },
-                                      std::pair { "failure"sv, CommandBlockOutcome::Failure },
-                                      std::pair { "running"sv, CommandBlockOutcome::Running } })
+    for (auto const& [key, outcome]: { std::pair { "success"sv, CommandBlockOutcome::Success },
+                                       std::pair { "failure"sv, CommandBlockOutcome::Failure },
+                                       std::pair { "running"sv, CommandBlockOutcome::Running } })
     {
         INFO("block_status_hover." << key);
         CHECK(generated.contains(std::format("#     {}: {}\n", key, palette.blockStatusHoverColor(outcome))));
@@ -7389,6 +7393,125 @@ TEST_CASE("Config: the generated config and the reference docs carry every comma
     CHECK(profile["scrollbar"]["position"].as<std::string>() == "Right");
     CHECK(profileDoc.contains("position: Right"));
     CHECK(profileDoc.contains("The default is Right"));
+}
+
+// }}}
+
+// {{{ hyperlink_decoration
+
+namespace
+{
+/// Loads a main profile whose `hyperlink_decoration` map is @p body and returns its decorators.
+[[nodiscard]] contour::config::HyperlinkDecorationConfig hyperlinkDecorationOf(QTemporaryDir& dir,
+                                                                               std::string_view body)
+{
+    auto const config = loadFromYaml(dir,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        hyperlink_decoration:
+{}
+)",
+                                                 body));
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    return profile->hyperlinkDecoration.value();
+}
+} // namespace
+
+TEST_CASE("Config: hyperlink_decoration accepts the spelling the documentation used",
+          "[config][hyperlink-decoration]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+
+    // `dotted` is what the documentation showed for years. The hover default is Underline, so the
+    // value read back can only have come from the file.
+    auto const decorators = hyperlinkDecorationOf(dir,
+                                                  "            normal: curly-underline\n"
+                                                  "            hover: dotted\n");
+    CHECK(decorators.normal == vtrasterizer::Decorator::CurlyUnderline);
+    CHECK(decorators.hover == vtrasterizer::Decorator::DottedUnderline);
+    CHECK_FALSE(capture.contains("hyperlink_decoration"));
+}
+
+TEST_CASE("Config: every decorator name parses, whatever its case", "[config][hyperlink-decoration]")
+{
+    for (auto const& [token, decorator]: vtrasterizer::DecoratorNames)
+    {
+        QTemporaryDir dir;
+        auto capture = core::log::ScopedCapture { "error" };
+
+        auto upper = std::string { token };
+        std::ranges::transform(
+            upper, upper.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+
+        INFO("token: " << token);
+        CHECK(hyperlinkDecorationOf(dir, std::format("            hover: {}\n", token)).hover == decorator);
+        CHECK(hyperlinkDecorationOf(dir, std::format("            hover: {}\n", upper)).hover == decorator);
+        CHECK_FALSE(capture.contains("hyperlink_decoration"));
+    }
+}
+
+TEST_CASE("Config: an unknown hyperlink decorator is reported and keeps its default",
+          "[config][hyperlink-decoration]")
+{
+    QTemporaryDir dir;
+    auto capture = core::log::ScopedCapture { "error" };
+
+    auto const decorators = hyperlinkDecorationOf(dir,
+                                                  "            normal: wavy\n"
+                                                  "            hover: framed\n");
+
+    // The bad value costs only its own key: normal keeps the default, hover still loads.
+    CHECK(decorators.normal == contour::config::HyperlinkDecorationConfig {}.normal);
+    CHECK(decorators.hover == vtrasterizer::Decorator::Framed);
+
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.contains("wavy"));
+    CHECK(capture.contains("hyperlink_decoration.normal"));
+    for (auto const& [token, decorator]: vtrasterizer::DecoratorNames)
+        CHECK(capture.contains(token));
+}
+
+TEST_CASE("Config: the decorator names the documentation lists are the ones the parser accepts",
+          "[config][hyperlink-decoration]")
+{
+    namespace doc = contour::config::documentation;
+    auto const text = std::string_view { doc::HyperlinkDecorationWeb.value };
+
+    constexpr auto Marker = "Possible values: "sv;
+    auto const begin = text.find(Marker);
+    REQUIRE(begin != std::string_view::npos);
+    auto const start = begin + Marker.size();
+    auto const line = text.substr(start, text.find('\n', start) - start);
+
+    auto listed = std::vector<std::string_view> {};
+    for (auto const word: std::views::split(line, ", "sv))
+    {
+        auto const name = std::string_view { word.begin(), word.end() };
+        // The sentence ends in a remark ("encircle (if implemented)"): the name is the first word.
+        listed.push_back(name.substr(0, name.find(' ')));
+    }
+
+    // Every listed name parses ...
+    for (auto const name: listed)
+    {
+        INFO("documented name: " << name);
+        CHECK(vtrasterizer::toDecorator(name).has_value());
+    }
+    // ... and every name the parser prints is listed.
+    for (auto const& [token, decorator]: vtrasterizer::DecoratorNames)
+    {
+        INFO("table name: " << token);
+        CHECK(std::ranges::find(listed, token) != listed.end());
+    }
+
+    // The example's own values must be among them.
+    CHECK(text.contains("normal: dotted-underline"));
+    CHECK(text.contains("hover: underline"));
 }
 
 // }}}

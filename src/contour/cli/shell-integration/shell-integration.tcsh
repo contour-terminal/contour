@@ -26,15 +26,34 @@
 # prompt reports a command block with no text in it. The terminal ignores an empty block.
 
 # An awk program that prints OSC 7 -- the working directory as a file:// URL, its path percent-encoded
-# byte by byte as a command line is (A-Z a-z 0-9 / . _ ~ - kept) -- for precmd: one program, reading no
-# input, as the only process a prompt starts. tcsh keeps PWD and HOST in the environment, newlines and
-# all; run in the C locale, awk counts bytes rather than characters.
-set __contour_osc7 = 'BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i; path = ENVIRON["PWD"]; printf "\033]7;file://%s", ENVIRON["HOST"]; for (i = 1; i <= length(path); i++) { c = substr(path, i, 1); if (c ~ /[A-Za-z0-9\/._~-]/) printf "%s", c; else printf "%%%02X", ord[c] } printf "\033\\" }'
+# byte by byte as a command line is (A-Z a-z 0-9 / . _ ~ - kept) -- for precmd. It reads the path from
+# its input, which is `pwd -L`, lines and all (a name may hold newlines). HOST it takes from the
+# environment. Run in the C locale, awk counts bytes rather than characters.
+#
+# A path is absolute. Input that does not begin with a slash -- none at all, or the complaint pwd makes
+# when the working directory is gone, which `|&` takes in so that it is not shown at every prompt -- is no
+# path, and awk then prints nothing.
+#
+# The path is not read from PWD in the environment, as the host name is. tcsh has no pwd builtin: this is
+# pwd(1), a program of its own, which asks the kernel (getcwd) and so never touches tcsh's wide-character
+# strings. -L makes it print PWD when that is absolute, free of . and .. and names the very directory the
+# process is in, and the kernel's answer only otherwise. A directory entered through a symbolic link thus
+# keeps the path the user sees (GNU's pwd would resolve it, as -P is its default), and a PWD that is
+# unusable is not trusted.
+#
+# PWD is unusable in tcsh 6.24.14 and later, where wchar_t is four bytes (Linux), for a directory whose
+# name holds a character above U+FFFF -- an emoji: they cannot write it back as UTF-8. config_f.h defines
+# UTF16_STRINGS there, so one_wctomb() in tc.str.c hands the character to wcstombs() as a surrogate pair,
+# which glibc refuses, and writes the code point's low byte instead. The environment tcsh exports,
+# `echo $cwd` and the argument of its `cd` all get that: PWD ends at the first such character and names
+# another directory.
+set __contour_osc7 = 'BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i; while ((getline line) > 0) path = (lines++ ? path "\n" : "") line; if (path !~ /^\//) exit; printf "\033]7;file://%s", ENVIRON["HOST"]; for (i = 1; i <= length(path); i++) { c = substr(path, i, 1); if (c ~ /[A-Za-z0-9\/._~-]/) printf "%s", c; else printf "%%%02X", ord[c] } printf "\033\\" }'
 
 set __contour_esc = "`printf '\033'`"
 set __contour_bel = "`printf '\007'`"
 
-alias precmd 'echo -n "${__contour_esc}]133;D;${status}${__contour_bel}${__contour_esc}[?2028l"; env LC_ALL=C awk "$__contour_osc7"; echo -n "${__contour_esc}]133;A${__contour_bel}"; set __contour_prompted'
+# \pwd: whatever the user aliased pwd to does not run here.
+alias precmd 'echo -n "${__contour_esc}]133;D;${status}${__contour_bel}${__contour_esc}[?2028l"; \pwd -L |& env LC_ALL=C awk "$__contour_osc7"; echo -n "${__contour_esc}]133;A${__contour_bel}"; set __contour_prompted'
 alias postcmd 'if ( $?__contour_prompted ) echo -n "${__contour_esc}[?2028h${__contour_esc}]133;C${__contour_bel}"'
 
 # OSC 133;B, as a %{...%} literal at the end of the prompt.

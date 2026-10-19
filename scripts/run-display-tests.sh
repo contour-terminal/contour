@@ -13,6 +13,9 @@
 #   3. X11 fallback: DISPLAY is set -> QT_QPA_PLATFORM=xcb (XWayland/Xorg deliver frames for
 #      unmapped windows).
 #
+# Whichever compositor runs them, the tests run on a private session bus (see its configuration
+# below).
+#
 # Usage: scripts/run-display-tests.sh <path-to-contour_gui_test> [extra test binary args...]
 
 set -euo pipefail
@@ -20,6 +23,38 @@ set -euo pipefail
 TEST_BINARY="${1:?usage: $0 <path-to-contour_gui_test> [args...]}"
 shift
 [ -x "$TEST_BINARY" ] || { echo "error: $TEST_BINARY is not executable" >&2; exit 64; }
+
+command -v dbus-run-session >/dev/null || {
+    echo "error: dbus-run-session not found; the display tests run on a private session bus" >&2
+    exit 1
+}
+
+WESTON_PID=""
+BUS_CONFIG="$(mktemp)"
+trap '[ -z "$WESTON_PID" ] || kill "$WESTON_PID" 2>/dev/null || true; rm -f "$BUS_CONFIG"' EXIT
+
+# The tests run on a private session bus, for the reason the compositor is a private one: a test run
+# must not reach the desktop session it is started from, and a real platform plugin reaches the
+# session bus as it comes up. Qt's AT-SPI bridge does under wayland and xcb alike; where a desktop is
+# named, so do Qt's desktop-portal lookup and the desktop's own platform theme. This bus has no
+# services, so nothing asked of it is ever activated, and no accessibility bus is registered on it,
+# so the bridge stays off; AT_SPI_BUS_ADDRESS would send it to the desktop's directly, which is why
+# run_tests() unsets it. (Against a live X server, Qt finds the desktop's through the server as
+# well.) CONTOUR_TEST_PRIVATE_SESSION_BUS tells the suite that its bus is a private one:
+# test_main.cpp fails a run that reaches any other.
+cat >"$BUS_CONFIG" <<EOF
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus-busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:tmpdir=${TMPDIR:-/tmp}</listen>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+EOF
 
 # LeakSanitizer is disabled for the display route ONLY. Under a real compositor, process exit leaves
 # ~6.5KB in ~135 allocations entirely inside Qt's QPA/RHI and the Mesa/EGL/wayland driver teardown
@@ -34,10 +69,12 @@ shift
 run_tests()
 {
     CONTOUR_TEST_DISPLAY=1 \
+    CONTOUR_TEST_PRIVATE_SESSION_BUS=1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
     ASAN_OPTIONS="hard_rss_limit_mb=4096:${ASAN_OPTIONS:-}" \
     LSAN_OPTIONS="${LSAN_OPTIONS:-detect_leaks=0}" \
-        "$TEST_BINARY" "[display]" "$@"
+        dbus-run-session --config-file="$BUS_CONFIG" -- \
+            env -u AT_SPI_BUS_ADDRESS "$TEST_BINARY" "[display]" "$@"
 }
 
 # 1. Explicit caller-chosen platform.
@@ -60,7 +97,6 @@ if command -v weston >/dev/null; then
     weston --backend=headless --socket="$SOCKET" --width=1280 --height=800 \
         >"$XDG_RUNTIME_DIR/weston-$SOCKET.log" 2>&1 &
     WESTON_PID=$!
-    trap 'kill "$WESTON_PID" 2>/dev/null || true' EXIT
 
     # Wait (bounded) for the compositor socket to appear.
     for _ in $(seq 1 50); do

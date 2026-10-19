@@ -11,25 +11,12 @@
 namespace vtbackend
 {
 
-enum class HyperlinkState : uint8_t
-{
-    /// Default hyperlink state.
-    Inactive,
-
-    /// mouse or cursor is hovering this hyperlink
-    Hover,
-
-    /// mouse or cursor is hovering and has this item selected (e.g. via pressing Ctrl)
-    // Active,
-};
-
 using URI = std::string;
 
 struct HyperlinkInfo
 {                       // TODO: rename to Hyperlink
     std::string userId; //!< application provided ID
     URI uri;
-    mutable HyperlinkState state = HyperlinkState::Inactive;
 
     /// Whether this link targets a file rather than a network resource. Which machine's file it is takes
     /// the host name to answer -- see @ref vtbackend::isLocalHost in FileUrl.hpp.

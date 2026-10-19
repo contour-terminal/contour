@@ -190,8 +190,13 @@ QString TerminalAccessible::text(QAccessible::Text which) const
     {
         case QAccessible::Name: return item->session().title();
         case QAccessible::Value: {
+            // The caret's line, while the caret is in view: not a line of a page nobody sees, nor of the
+            // status line DECSASD may have selected.
             auto const lock = std::lock_guard { item->terminal() };
-            auto const& screen = item->terminal().currentScreen();
+            auto const& terminal = item->terminal();
+            if (!terminal.isCursorInViewport())
+                return {};
+            auto const& screen = terminal.currentScreen();
             return QString::fromStdString(screen.lineTextAt(screen.cursor().position.line));
         }
         default: return {};
@@ -330,7 +335,9 @@ QString TerminalAccessible::text(int startOffset, int endOffset) const
     auto utf8 = std::string {};
     utf8.reserve(static_cast<size_t>(end - begin));
 
-    auto const& screen = terminal.currentScreen();
+    // What is shown: the page on display, not the cursor's page, nor the status line DECSASD may have
+    // selected.
+    auto const& screen = terminal.displayedPage();
     auto const lastColumn = boxed_cast<vtbackend::ColumnOffset>(columns);
     auto const stride = unbox<int>(columns) + 1;
     auto const lastLine = cellAtFlatOffset(end - 1, columns).line;

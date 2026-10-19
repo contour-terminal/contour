@@ -223,6 +223,30 @@ TEST_CASE("Terminal.sendMouseLeaveEvent.hoversNothingUntilThePointerIsBack", "[t
     }
 }
 
+TEST_CASE("Terminal.firstPointerEventOntoTheTopLeftCellHoversItsLink", "[terminal][hyperlink]")
+{
+    // The first pointer event names the pointer's cell, whichever cell that is: the top-left one too, which a
+    // fresh terminal's pointer position reads as before any event.
+    auto mc = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033]8;;https://example.com/\033\\link\033]8;;\033\\");
+    auto const topLeft = CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) };
+
+    SECTION("a move")
+    {
+        terminal.sendMouseMoveEvent(Modifier::None, topLeft, vtbackend::PixelCoordinate {}, false);
+    }
+
+    SECTION("a press")
+    {
+        std::ignore = terminal.sendMousePressEvent(
+            Modifier::None, vtbackend::MouseButton::Left, topLeft, vtbackend::PixelCoordinate {}, false);
+    }
+
+    CHECK(terminal.isMouseHoveringHyperlink());
+    CHECK(terminal.currentMouseGridPosition() == topLeft);
+}
+
 TEST_CASE("Terminal.localPathAtMousePosition", "[terminal]")
 {
     namespace fs = std::filesystem;
@@ -1573,6 +1597,81 @@ TEST_CASE("Terminal.DECATC.doesNotRecolorTheStatusLine", "[terminal]")
     CHECK(sample(statusLine) == statusBefore);
 }
 
+TEST_CASE("Terminal.statusLine.takesNoHighlightOfTheMainPage", "[terminal][statusline]")
+{
+    using namespace vtbackend;
+
+    // A selection, a yank highlight and a search match belong to the page they were made on, the main
+    // display's. The status line is a screen of its own -- DEC STD 070 ch. 14's status display -- and none
+    // of them may colour its cells, whatever rows they cover: not row 0, whose coordinates the status line's
+    // own row shares, nor the main page's last row, which it sits beside.
+    auto mc = MockTerm { PageSize { .lines = LineCount(4), .columns = ColumnCount(20) }, LineCount(0) };
+    auto& vt = mc.terminal;
+    vt.tick(chrono::steady_clock::time_point());
+
+    auto const type = GENERATE(StatusDisplayType::Indicator, StatusDisplayType::HostWritable);
+    INFO("status line: " << (type == StatusDisplayType::Indicator ? "indicator" : "host-writable"));
+    switch (type)
+    {
+        case StatusDisplayType::Indicator: vt.setStatusDisplay(StatusDisplayType::Indicator); break;
+        case StatusDisplayType::HostWritable:
+            mc.writeToScreen("\033[2$~"); // DECSSDT host-writable
+            vt.answerHostWritableStatusLineRequest(HostWritableStatusLineAnswer::Shown);
+            mc.writeToScreen("\033[1$}match on the status line\033[0$}"); // DECSASD there and back
+            break;
+        default: FAIL("not a status line type the test covers");
+    }
+    REQUIRE(vt.statusDisplayType() == type);
+    mc.writeToScreen("\033[Hmatch on row 0\033[4;1Hmatch on the last row");
+
+    // Every rendered (foreground, background) pair on the status line, of the per-cell and the batched paths.
+    auto const statusLine = LineOffset::cast_from(unbox(vt.pageSize().lines));
+    auto sample = [&] {
+        vt.refreshRenderBuffer();
+        auto const buf = vt.renderBuffer();
+        auto colors = std::vector<std::pair<RGBColor, RGBColor>> {};
+        for (auto const& cell: buf.get().cells)
+            if (cell.position.line == statusLine)
+                colors.emplace_back(cell.attributes.foregroundColor, cell.attributes.backgroundColor);
+        for (auto const& renderLine: buf.get().lines)
+            if (renderLine.lineOffset == statusLine)
+            {
+                colors.emplace_back(renderLine.textAttributes.foregroundColor,
+                                    renderLine.textAttributes.backgroundColor);
+                colors.emplace_back(renderLine.fillAttributes.foregroundColor,
+                                    renderLine.fillAttributes.backgroundColor);
+            }
+        return colors;
+    };
+    auto const unmarked = sample();
+    REQUIRE_FALSE(unmarked.empty()); // the status line must actually be rendered, or this proves nothing
+
+    auto const row = GENERATE(LineOffset(0), LineOffset(3));
+    INFO("the main page's row " << row.value);
+    auto const from = CellLocation { .line = row, .column = ColumnOffset(0) };
+    auto const to = CellLocation { .line = row, .column = ColumnOffset(19) };
+
+    auto const mark = GENERATE(std::string_view { "a selection" },
+                               std::string_view { "a yank highlight" },
+                               std::string_view { "a search match" });
+    INFO(mark);
+    if (mark == "a selection")
+    {
+        vt.setSelector(std::make_unique<LinearSelection>(vt.selectionHelper(), from, [] {}));
+        (void) vt.selector()->extend(to);
+        REQUIRE(vt.isSelected(vt.primaryScreen(), from));
+    }
+    else if (mark == "a yank highlight")
+    {
+        vt.setHighlightRange(LinearHighlight { .from = from, .to = to });
+        REQUIRE(vt.isHighlighted(from));
+    }
+    else
+        (void) vt.setNewSearchTerm(U"match", SearchOrigin::Typed);
+
+    CHECK(sample() == unmarked);
+}
+
 TEST_CASE("Terminal.UnderlineStyleClearing", "[terminal]")
 {
     // Each subsequent underline style should clear the former if present.
@@ -1868,6 +1967,7 @@ TEST_CASE("Terminal.answerHostWritableStatusLineRequest.a_denied_line_titles_the
     auto& terminal = mc.terminal;
     terminal.settings().syncWindowTitleWithHostWritableStatusDisplay = true;
     terminal.setWindowTitle("before");
+    mc.writeToScreen("\033[2$~"); // DECSSDT: the application asks for the host-writable status line
     auto const writeStatus = [&](std::string_view text) {
         mc.writeToScreen(std::format("\033[1$}}\033[2K\033[G{}\033[0$}}", text));
     };
@@ -1902,6 +2002,319 @@ TEST_CASE("Terminal.answerHostWritableStatusLineRequest.a_denied_line_titles_the
         CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
         writeStatus("status");
         CHECK(terminal.windowTitle() == "before");
+    }
+}
+
+TEST_CASE("Terminal.DECSASD.selects_only_a_status_line_DECSSDT_selected", "[terminal]")
+{
+    // DEC STD 070 ch. 14 §3 DECSASD: "Note that the Host Writable Status Line must be selected through
+    // DECSSDT for DECSASD to be able to select the Host Writable Status Line." Selected, not yet shown:
+    // MockTerm never answers the request DECSSDT 2 makes. A DECSASD 1 that came first is not remembered, as
+    // in mintty. DECSSDT's note, "The type of Status Line can also be changed through a Set-Up field": the
+    // configuration showing the host-writable status line selects it as well.
+    using vtbackend::ActiveStatusDisplay;
+    using vtbackend::StatusDisplayType;
+    auto const [shown, setup, active] =
+        GENERATE(table<StatusDisplayType, std::string_view, ActiveStatusDisplay>({
+            { StatusDisplayType::None, "\033[1$}", ActiveStatusDisplay::Main },         // no DECSSDT
+            { StatusDisplayType::None, "\033[1$~\033[1$}", ActiveStatusDisplay::Main }, // the indicator
+            { StatusDisplayType::None,
+              "\033[2$~\033[0$~\033[1$}",
+              ActiveStatusDisplay::Main },                                              // selected, then none
+            { StatusDisplayType::None, "\033[1$}\033[2$~", ActiveStatusDisplay::Main }, // DECSASD first
+            { StatusDisplayType::None, "\033[2$~\033[1$}", ActiveStatusDisplay::StatusLine }, // host-writable
+            { StatusDisplayType::None,
+              "\033[2$~\033[1$~\033[2$~\033[1$}",
+              ActiveStatusDisplay::StatusLine }, // selected again
+            { StatusDisplayType::HostWritable,
+              "\033[1$}",
+              ActiveStatusDisplay::StatusLine }, // by the configuration
+        }));
+    INFO(std::format("shown {}, then {}", static_cast<int>(shown), e(setup)));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusDisplay(shown);
+    mc.writeToScreen(setup);
+    mc.writeToScreen("X");
+
+    CHECK(terminal.activeStatusDisplay() == active);
+    auto const& written = active == ActiveStatusDisplay::Main ? terminal.primaryScreen()
+                                                              : terminal.hostWritableStatusLineDisplay();
+    CHECK(written.grid().lineText(LineOffset { 0 }).starts_with('X'));
+
+    mc.resetReplyData();
+    mc.writeToScreen("\033P$q$}\033\\"); // DECRQSS DECSASD
+    terminal.flushInput();
+    CHECK(e(mc.replyData())
+          == e(std::format("\033P1$r{}$}}\033\\", active == ActiveStatusDisplay::Main ? 0 : 1)));
+}
+
+TEST_CASE("Terminal.DECSSDT.another_type_leaves_the_host_writable_status_line", "[terminal]")
+{
+    // DEC STD 070 ch. 14 §2.3: "If the Status Display Type is chosen to be something other than "Host
+    // Writable", the Status Display will be exited".
+    auto const type =
+        GENERATE(std::string_view { "\033[0$~" }, std::string_view { "\033[1$~" }); // none, indicator
+    INFO(e(type));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033[2$~\033[1$}"); // DECSSDT host-writable, DECSASD: write to it
+    REQUIRE(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+    mc.writeToScreen(type);
+    mc.writeToScreen("X");
+
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset { 0 }).starts_with('X'));
+    CHECK_FALSE(terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset { 0 }).contains('X'));
+
+    mc.resetReplyData();
+    mc.writeToScreen("\033P$q$}\033\\"); // DECRQSS DECSASD
+    terminal.flushInput();
+    CHECK(e(mc.replyData()) == e("\033P1$r0$}\033\\"));
+}
+
+TEST_CASE("Terminal.DECSASD.margins_received_on_the_status_line_are_ignored", "[terminal]")
+{
+    // DEC STD 070 ch. 14 §2: "controls which affect some portion of the Main Display do not affect the
+    // contents or the ANSI state of the Status Display", §2.3: "most ANSI control functions received will
+    // affect only the Status Display", and §2.2 keeps no margins among the status line's own state. xterm
+    // drops DECSTBM there.
+    auto const [mode, margins, request, reply] =
+        GENERATE(table<std::string_view, std::string_view, std::string_view, std::string_view>({
+            { "", "\033[2;4r", "r", "\033P1$r1;5r\033\\" },           // DECSTBM
+            { "\033[?69h", "\033[3;6s", "s", "\033P1$r1;20s\033\\" }, // DECSLRM, DECLRMM set
+        }));
+    INFO(e(margins));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen(mode);
+    mc.writeToScreen("\033[2$~\033[1$}AB"); // DECSSDT host-writable, DECSASD: write to it
+    mc.writeToScreen(margins);
+    mc.writeToScreen("C\033[0$}"); // where the status line's cursor was; back to the main display
+    CHECK(terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset { 0 }).starts_with("ABC"));
+
+    mc.resetReplyData();
+    mc.writeToScreen(std::format("\033P$q{}\033\\", request)); // DECRQSS, on the main display
+    terminal.flushInput();
+    CHECK(e(mc.replyData()) == e(reply));
+}
+
+TEST_CASE("Terminal.DECSTR.received_on_the_status_line_resets_the_main_display", "[terminal]")
+{
+    // DEC STD 070 ch. 4 DECSTR, soft_terminal_reset(): "active_display = MAIN_DISPLAY;" comes before the
+    // margins, the rendition and the cursor save buffer are reset, so they are the main display's. xterm's
+    // ReallyReset leaves the status line first as well.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen("\033[1m\033[?6h");         // SGR bold, DECOM, on the main display
+    mc.writeToScreen("\033[2$~\033[1$}\033[4m"); // the status line, underlined
+    mc.writeToScreen("\033[!p");                 // DECSTR, received on the status line
+
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    auto const& cursor = terminal.primaryScreen().cursor();
+    CHECK_FALSE(cursor.graphicsRendition.flags.contains(vtbackend::CellFlag::Bold));
+    CHECK_FALSE(cursor.originMode);
+}
+
+TEST_CASE("Terminal.DECSTR.keeps_the_status_display_type", "[terminal][statusline]")
+{
+    // DEC STD 070 ch. 14 §2.3: DECSTR -- "The Status Display will be exited, but not erased" (RIS: "erased
+    // and exited"); ch. 4's DECSTR state table has "Active Display -- Main Display (status display is
+    // exited)" and no status display type. xterm's soft reset only exits (handle_DECSASD), and mintty changes
+    // the type on a full reset only.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+
+    SECTION("the indicator")
+    {
+        mc.writeToScreen("\033[1$~"); // DECSSDT: the indicator
+        REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+        mc.writeToScreen("\033[!p");
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    }
+
+    SECTION("the host-writable status line, exited but not erased")
+    {
+        mc.writeToScreen("\033[2$~"); // DECSSDT: the host-writable status line
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+        mc.writeToScreen("\033[1$}kept");
+        REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+
+        mc.writeToScreen("\033[!p");
+        CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+        CHECK(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains("kept"));
+
+        // Still selected, so DECSASD may enter it again.
+        mc.writeToScreen("\033[1$}");
+        CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+
+        // RIS, by contrast, erases and exits it, and returns to the configured type.
+        mc.writeToScreen("\033c");
+        CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+        CHECK(terminal.statusDisplayType() == terminal.factorySettings().statusDisplayType);
+        CHECK(terminal.statusDisplayType() != vtbackend::StatusDisplayType::HostWritable);
+        CHECK_FALSE(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains("kept"));
+    }
+}
+
+TEST_CASE("Terminal.revisions.rowsThatScrolledOutBeforeTheStatusLineAppearsAreStamped",
+          "[terminal][statusline]")
+{
+    // Vi mode shows the indicator status line, which takes a row from the page: a page resize. The rows the
+    // output scrolled into the history before it, with no finalize in between, are stamped by the next one
+    // as the page's rows are.
+    auto mc = MockTerm { PageSize { LineCount(7), ColumnCount(40) }, LineCount(30) };
+    auto& terminal = mc.terminal;
+    for (auto const i: std::views::iota(0, 18))
+        mc.writeToScreen(std::format("line {}\r\n", i));
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    auto& grid = terminal.displayedPage().grid();
+    REQUIRE(grid.pageSize().lines == LineCount(6));
+    grid.finalizeRevisions();
+
+    auto const history = unbox<int>(grid.historyLineCount());
+    REQUIRE(history > 0);
+    for (auto const offset: std::views::iota(-history, unbox<int>(grid.pageSize().lines)))
+    {
+        INFO("row " << offset);
+        auto const& line = std::as_const(grid).lineAt(vtbackend::LineOffset(offset));
+        CHECK_FALSE(line.isDirty());
+        CHECK(line.revision() != 0);
+    }
+}
+
+TEST_CASE("Terminal.statusNotices.RIS_drops_the_notice_of_a_locked_keyboard", "[terminal][statusline]")
+{
+    // RIS resets KAM with every other mode, so the locked keyboard's notice goes too: a notice put up later,
+    // vi mode's, is then the only one, and taking it down shows the type RIS left.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 20 } } };
+    auto& terminal = mc.terminal;
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+    mc.writeToScreen("\033[2h"); // KAM: the keyboard locked, its notice up
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    mc.writeToScreen("\033c");
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
+
+TEST_CASE("Terminal.statusNotices.the_host_may_not_take_a_notice_down", "[terminal][statusline]")
+{
+    // DEC STD 070 ch. 14 §2.1.1: "The host may not directly program or affect the Error Line", DEC's own
+    // notice. RIS, DECSSDT and the frontend's grant of the host-writable status line leave a notice up; the
+    // type the host chose is what comes back once the last notice is down.
+    // Wide enough for the whole "key bindings disabled" notice: the indicator line is clipped to the page.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 40 } } };
+    auto& terminal = mc.terminal;
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    SECTION("RIS during vi mode")
+    {
+        terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+        mc.writeToScreen("\033c");
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+        terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+        CHECK(terminal.statusDisplayType() == terminal.factorySettings().statusDisplayType);
+    }
+
+    SECTION("DECSSDT while the key bindings are disabled")
+    {
+        terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(
+            "{}", "{Text:text=key bindings disabled,Left= « ,Right= » }", "{}"));
+        terminal.pushStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled,
+                                   vtbackend::StatusDisplayType::Indicator);
+        mc.writeToScreen("\033[1$~\033[0$~"); // DECSSDT indicator, then none
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+        terminal.refreshRenderBuffer(); // the frame writes the indicator status line
+        CHECK(terminal.indicatorStatusLineDisplay().renderMainPageText().contains("key bindings disabled"));
+
+        terminal.popStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+    }
+
+    SECTION("the host-writable status line granted during vi mode")
+    {
+        terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        mc.writeToScreen("\033[2$~"); // DECSSDT host-writable: asked of the frontend
+        terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+        terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
+        CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+    }
+}
+
+TEST_CASE("Terminal.userInputLock.noHostResetUnlocksIt", "[terminal][statusline]")
+{
+    // KAM is the host's, which DECSTR, RM and RIS reset (DEC STD 070 ch. 6 §6.2); the user's lock is not KAM.
+    // It, and its notice, outlast them, and only the user lifts it.
+    auto const reset = GENERATE(
+        std::string_view { "\033[!p" }, std::string_view { "\033[2l" }, std::string_view { "\033c" });
+    INFO("reset: " << core::escape(reset));
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 40 } } };
+    auto& terminal = mc.terminal;
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+
+    terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    mc.writeToScreen(reset);
+
+    CHECK(terminal.userInputLock() == vtbackend::UserInputLock::Locked);
+    CHECK_FALSE(terminal.allowInput());
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    mc.resetReplyData();
+    mc.sendCharSequence("x");
+    CHECK(mc.replyData().empty());
+
+    terminal.setUserInputLock(vtbackend::UserInputLock::Unlocked);
+    CHECK(terminal.allowInput());
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+    mc.sendCharSequence("x");
+    CHECK(mc.replyData() == "x");
+}
+
+TEST_CASE("Terminal.userInputLock.andTheHostsKAMAreIndependent", "[terminal]")
+{
+    // Either lock holds the keyboard; neither lifts the other.
+    auto mc = MockTerm { PageSize { LineCount { 5 }, ColumnCount { 40 } } };
+    auto& terminal = mc.terminal;
+
+    SECTION("the host locks, the user locks and unlocks")
+    {
+        mc.writeToScreen("\033[2h"); // KAM set
+        terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+        terminal.setUserInputLock(vtbackend::UserInputLock::Unlocked);
+        CHECK(terminal.isModeEnabled(vtbackend::AnsiMode::KeyboardAction));
+        CHECK_FALSE(terminal.allowInput());
+        mc.writeToScreen("\033[2l"); // KAM reset
+        CHECK(terminal.allowInput());
+    }
+
+    SECTION("the user locks, the host locks and unlocks")
+    {
+        terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+        mc.writeToScreen("\033[2h\033[2l"); // KAM set, then reset
+        CHECK_FALSE(terminal.allowInput());
+        terminal.setUserInputLock(vtbackend::UserInputLock::Unlocked);
+        CHECK(terminal.allowInput());
+    }
+
+    SECTION("the host's KAM is reported as the host set it")
+    {
+        // DECRQM answers for KAM alone: the user's lock is no mode of the host's.
+        terminal.setUserInputLock(vtbackend::UserInputLock::Locked);
+        mc.discardPendingReplies();
+        mc.writeToScreen("\033[2$p"); // DECRQM KAM
+        terminal.flushInput();
+        CHECK(mc.replyData() == "\033[2;2$y"); // reset
     }
 }
 
@@ -3625,6 +4038,165 @@ TEST_CASE("Terminal.historyEviction.keepsTheViCursorInsideTheAddressableGrid", "
 }
 // }}}
 
+TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorMovesNothingOnThePage", "[terminal]")
+{
+    // The indicator status line is a one-row screen of its own, written anew by every frame. Text wider than
+    // the page is cut at its last column (anOverflowingIndicatorShowsItsHead), but a line feed in the text
+    // still scrolls the one row -- which is no output to the page on display: the vi cursor and the window
+    // onto the page stay where they are, frame after frame.
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) }, LineCount(10) };
+    auto& terminal = mc.terminal;
+    printLines(mc, "line", 10);
+    terminal.setStatusLineDefinition(
+        vtbackend::parseStatusLineDefinition("an indicator\nwider than\nthe page", "", ""));
+    terminal.inputHandler().setMode(vtbackend::ViMode::Normal); // shows the indicator status line
+    auto const viCursor = CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) };
+    terminal.moveNormalModeCursorTo(viCursor);
+    REQUIRE(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+
+    for ([[maybe_unused]] auto const frame: std::views::iota(0, 5))
+        terminal.refreshRenderBuffer();
+
+    CHECK(terminal.normalModeCursorPosition() == viCursor);
+    CHECK(terminal.viewport().scrollOffset() == vtbackend::ScrollOffset(0));
+}
+
+namespace
+{
+/// Whether the application leaves autowrap (DECAWM) set.
+enum class AutoWrap : uint8_t
+{
+    Reset = 0,
+    Set,
+};
+} // namespace
+
+TEST_CASE("Terminal.indicatorStatusLine.anOverflowingIndicatorShowsItsHead", "[terminal]")
+{
+    // The indicator status line ends at the page's last column, and a segment wider than what is left of the
+    // row is cut there, with its head shown. Autowrap carried the overflow onto the next row, which on the
+    // one-row line is a scroll: the tail was shown. Without autowrap the last column took every character
+    // past it, and showed the last one.
+    auto const [definition, head] = GENERATE(table<std::string_view, std::string_view>({
+        { "0123456789", "01234567" },
+        { "0123456界9", "0123456" },                      // a wide character with one column left
+        { "012345\u2764\uFE0Fyz", "012345\u2764\uFE0F" }, // VS16 widens the heart into the last column
+        { "abcdefgh\u0301z", "abcdefgh\u0301" }, // a combining mark joins the character in the last column
+        { "012345\U0001F468\u200D\U0001F469z",
+          "012345\U0001F468\u200D\U0001F469" }, // a joined sequence stays whole
+    }));
+    auto const autoWrap = GENERATE(AutoWrap::Set, AutoWrap::Reset);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(8) } };
+    auto& terminal = mc.terminal;
+    if (autoWrap == AutoWrap::Reset)
+        mc.writeToScreen("\033[?7l"); // DECAWM reset; the indicator status line writes under it too
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(definition, "", ""));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+
+    auto text = terminal.indicatorStatusLineDisplay().renderMainPageText();
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\n'))
+        text.pop_back();
+    CHECK(text == head);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theRightSegmentEndsInTheLastColumn", "[terminal][statusline]")
+{
+    // The right segment is placed by its width in columns: "│" is one column and three bytes, and a byte
+    // count put it two columns short of the last one. A segment shown is one narrower than the line (the rule
+    // kept): twelve bytes of CJK are eight columns, and fit on a ten-column line.
+    auto const [columns, right, line] = GENERATE(table<int, std::string_view, std::string>({
+        { 20, "ab│", std::string(17, ' ') + "ab│" },
+        { 10, "界界界界", "  界界界界" },
+    }));
+    INFO(right);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(columns) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", "", right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.aSegmentIsMeasuredAsTheGridLaysItOut", "[terminal][statusline]")
+{
+    // The grid gives every grapheme cluster at least one column, so a zero-width space takes one; and with
+    // DEC mode 2027 reset a cluster is as wide as its first codepoint, so a heart that VS16 would widen stays
+    // one column. Either way the right segment ends in the last column.
+    auto const [unicodeMode, right, columns, line] =
+        GENERATE(table<std::string_view, std::string_view, int, std::string>({
+            { "\033[?2027h", "ab\u200B", 20, std::string(17, ' ') + "ab\u200B" },
+            { "\033[?2027l", "\u2764\uFE0F", 10, std::string(9, ' ') + "\u2764\uFE0F" },
+        }));
+    INFO(e(right));
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(columns) } };
+    auto& terminal = mc.terminal;
+    mc.writeToScreen(unicodeMode);
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", "", right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theMiddleSegmentIsCentred", "[terminal][statusline]")
+{
+    // The middle segment starts at (columns - its width) / 2, its width in columns. A byte count put "│││"
+    // (nine bytes, three columns) one column left of the middle of a 20-column line, and hid fourteen columns
+    // of CJK (21 bytes) that fit.
+    auto const [middle, line] = GENERATE(table<std::string_view, std::string>({
+        { "│││", std::string(8, ' ') + "│││" + std::string(9, ' ') },
+        { "界界界界界界界", std::string(3, ' ') + "界界界界界界界" + std::string(3, ' ') },
+    }));
+    INFO(middle);
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition("", middle, ""));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theRightSegmentLeavesTheOnesBeforeItWhole", "[terminal][statusline]")
+{
+    // The right segment is not shown where it would overlap what the left segment, or a middle one shown,
+    // takes, in columns: on a 20-column line "RIGHT" starts at column 15.
+    auto const [left, middle, right, line] =
+        GENERATE(table<std::string_view, std::string_view, std::string_view, std::string>({
+            { "0123456789abcdef", "", "RIGHT", "0123456789abcdef    " }, // the left segment reaches column 15
+            { "界界界界界界界界", "", "RIGHT", "界界界界界界界界    " }, // so does a CJK one, in columns
+            { "0123456789abcde", "", "RIGHT", "0123456789abcdeRIGHT" },  // it ends where the right one starts
+            { "", "0123456789", "RIGHTS", "     0123456789     " },      // the middle one ends at column 15
+            { "", "012345678", "RIGHTS", "     012345678RIGHTS" },       // it ends where the right one starts
+        }));
+    INFO(std::format("left {}, middle {}, right {}", left, middle, right));
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(left, middle, right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
+TEST_CASE("Terminal.indicatorStatusLine.theMiddleSegmentLeavesTheLeftOneWhole", "[terminal][statusline]")
+{
+    // The middle segment is not shown where it would overlap what the left segment takes, in columns: on a
+    // 20-column line "XY" starts at column 9, "XYZW" at 8. A middle segment not shown takes no columns.
+    auto const [left, middle, right, line] =
+        GENERATE(table<std::string_view, std::string_view, std::string_view, std::string>({
+            { "0123456789abcdef", "XY", "", "0123456789abcdef    " },  // the left segment reaches column 9
+            { "界界界界界", "XY", "", "界界界界界          " },        // so does a CJK one, in columns
+            { "012345678", "XY", "", "012345678XY         " },         // it ends where the middle one starts
+            { "0123456789", "XYZW", "RIGHT", "0123456789     RIGHT" }, // the right one after a hidden middle
+        }));
+    INFO(std::format("left {}, middle {}, right {}", left, middle, right));
+    auto mc = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto& terminal = mc.terminal;
+    terminal.setStatusLineDefinition(vtbackend::parseStatusLineDefinition(left, middle, right));
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.refreshRenderBuffer();
+    CHECK(terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)) == line);
+}
+
 TEST_CASE("Terminal.historyEviction.theOldestScrollbackLineIsAlwaysAPrompt", "[terminal][history-eviction]")
 {
     // What the issue actually asks for, driven end to end through real OSC 133 sequences.
@@ -3804,6 +4376,139 @@ TEST_CASE("Terminal.processInputOnce.aReadFailingWithoutErrnoClosesThePty", "[te
     CHECK_FALSE(mock.terminal.processInputOnce());
     CHECK(mock.mockPty().isClosed());
 }
+
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+namespace
+{
+/// A PTY that, its output read, has nothing more: a read then fails with EAGAIN, as a real PTY's does when
+/// its wait times out. Records the wait each read was given.
+class DrainedPty final: public vtpty::MockPty
+{
+  public:
+    using vtpty::MockPty::MockPty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t size) override
+    {
+        _lastTimeout = timeout;
+        if (!isStdoutDataAvailable())
+        {
+            errno = EAGAIN;
+            return std::nullopt;
+        }
+        return MockPty::read(storage, timeout, size);
+    }
+
+    /// @return The wait the last read was given; milliseconds::max() for none, a wait without end.
+    [[nodiscard]] std::chrono::milliseconds lastTimeout() const noexcept
+    {
+        return _lastTimeout.value_or(std::chrono::milliseconds::max());
+    }
+
+    /// Counts the wake-up, which ends the wait of a read in progress, or of the next one.
+    void wakeupReader() override { _wakeups.fetch_add(1, std::memory_order_relaxed); }
+
+    /// @return How often another thread woke the reader.
+    [[nodiscard]] int wakeups() const noexcept { return _wakeups.load(std::memory_order_relaxed); }
+
+  private:
+    std::optional<std::chrono::milliseconds> _lastTimeout;
+    std::atomic<int> _wakeups = 0;
+};
+
+/// Whether the display paints a frame -- which sets the terminal's frame clock (Terminal::tick()) -- each
+/// time a test lets time pass. A passive build's display paints only when told to, and nothing tells it while
+/// a fill waits.
+enum class DisplayPaints : uint8_t
+{
+    No = 0,
+    Yes,
+};
+} // namespace
+
+TEST_CASE("Terminal.processInputOnce.passive.aThrottledFillRunsOnceItIsDue", "[terminal]")
+{
+    // A passive build fills the render buffer on the reader thread after each batch, at most once per refresh
+    // interval. A batch that lands inside the interval leaves its fill for later: the reader waits for no
+    // more than the rest of the interval, and runs the fill when that wait finds nothing to read.
+    auto mock = MockTerm<DrainedPty> { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10), 1024 };
+    auto& terminal = mock.terminal;
+    terminal.setRefreshRate(vtbackend::RefreshRate { 50.0 });
+    constexpr auto Interval = std::chrono::milliseconds(20);
+    auto const paints = GENERATE(DisplayPaints::No, DisplayPaints::Yes);
+    auto const letTimePass = [&](std::chrono::milliseconds duration) {
+        mock.steadyClock.advance(duration);
+        if (paints == DisplayPaints::Yes)
+            terminal.tick(mock.steadyClock.now());
+    };
+    letTimePass(Interval); // the first fill is due at once
+
+    mock.mockPty().appendStdOutBuffer("first");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(trimmedTextScreenshot(mock) == "first");
+
+    mock.mockPty().appendStdOutBuffer("\r\nsecond");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(trimmedTextScreenshot(mock) == "first"); // the fill waits for the interval
+
+    // Nothing more to read, at the same instant: the reader waits for the rest of the interval, not for none.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+    CHECK(trimmedTextScreenshot(mock) == "first");
+
+    // The interval has passed: the read finds nothing again, and the fill runs.
+    letTimePass(Interval);
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == std::chrono::milliseconds(0));
+    CHECK(trimmedTextScreenshot(mock) == "first\nsecond");
+
+    // With nothing left to fill, the reader waits a whole interval, and fills nothing.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+}
+
+TEST_CASE("Terminal.processInputOnce.passive.aHeldFrontBufferIsRetriedWhenTheDisplayLetsGo",
+          "[terminal][threading]")
+{
+    // A frame filled while the display holds the front buffer waits to be swapped in. The reader does not
+    // poll to retry the swap: it waits a whole interval, which new output or the display letting go -- a
+    // wake-up -- ends, and swaps then.
+    auto mock = MockTerm<DrainedPty> { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10), 1024 };
+    auto& terminal = mock.terminal;
+    terminal.setRefreshRate(vtbackend::RefreshRate { 50.0 });
+    constexpr auto Interval = std::chrono::milliseconds(20);
+    mock.steadyClock.advance(Interval); // the first fill is due at once
+
+    // The display holds the front buffer on a thread of its own: a thread may not try a lock it owns.
+    auto held = std::promise<void> {};
+    auto letGo = std::promise<void> {};
+    auto display = std::thread([&terminal, &held, released = letGo.get_future()] {
+        auto const frame = terminal.renderBuffer();
+        held.set_value();
+        released.wait();
+    });
+    held.get_future().wait();
+
+    mock.mockPty().appendStdOutBuffer("first");
+    REQUIRE(terminal.processInputOnce());
+    REQUIRE(terminal.renderBufferState() == vtbackend::RenderBufferState::TrySwapBuffers);
+
+    // Nothing more to read: a whole interval's wait, not none.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(mock.mockPty().lastTimeout() == Interval);
+    CHECK(mock.mockPty().wakeups() == 0);
+
+    letGo.set_value();
+    display.join();
+    CHECK(mock.mockPty().wakeups() == 1);
+
+    // Woken, the reader finds nothing to read, and swaps the frame in.
+    REQUIRE(terminal.processInputOnce());
+    CHECK(terminal.renderBufferState() == vtbackend::RenderBufferState::WaitingForRefresh);
+    CHECK(trimmedTextScreenshot(mock) == "first");
+}
+#endif
 
 TEST_CASE("Terminal.processInputOnce.readsAheadWhileTheStateIsTaken", "[terminal][threading]")
 {

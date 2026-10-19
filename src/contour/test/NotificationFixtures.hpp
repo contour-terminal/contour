@@ -27,18 +27,19 @@ namespace contour::test
     return notification;
 }
 
-/// Whether this run's session bus is the private one test/e2e/notification-nonblocking.sh stands up,
-/// rather than the machine's own.
+/// Whether this run's session bus is a private one a harness stands up, rather than the machine's own:
+/// the wedged one of test/e2e/notification-nonblocking.sh, or the empty one of
+/// scripts/run-display-tests.sh, where Qt's platform plugin reaches the bus as it comes up.
 ///
 /// Only there may a test reach a bus at all, or put a notification on it: on a developer's own desktop
 /// a notification would pop up at them and stay there, and a suite that talks to whatever bus the
-/// machine has depends on it. The wedged-bus harness sets the variable, and there by construction
-/// nothing can be displayed -- so the real transports are covered exactly where covering them is
-/// harmless. test_main.cpp fails a run that reaches a bus anywhere else.
-/// @return Whether the session bus is the harness's.
+/// machine has depends on it. The harnesses set the variable, and there by construction nothing can be
+/// displayed -- so the real transports are covered exactly where covering them is harmless.
+/// test_main.cpp fails a run that reaches a bus anywhere else.
+/// @return Whether the session bus is a harness's.
 [[nodiscard]] inline bool onPrivateSessionBus()
 {
-    return qEnvironmentVariableIsSet("CONTOUR_TEST_NOTIFICATION_SEND");
+    return qEnvironmentVariableIsSet("CONTOUR_TEST_PRIVATE_SESSION_BUS");
 }
 
 /// Runs @p exercise against whatever session bus the machine has, and requires it to have returned

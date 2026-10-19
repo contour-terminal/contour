@@ -2457,29 +2457,34 @@ TEST_CASE("SaveRestoreCursor.AltVsMain", "[screen]")
 
 TEST_CASE("AlternateScreen.DECSET_47_1047_1049", "[screen]")
 {
-    // Mirrors esctest DECSETTests.doAltBuftest for the three alternate-screen modes. They differ only
-    // in whether the cursor is carried across the switch (47, 1047 -- xterm's continuous, terminal-level
-    // cursor) or saved and restored (1049), and whether the alternate page is erased on the way out
-    // (1047, 1049) or kept (47). @see Terminal::setAlternateScreen, alternateScreenBehavior.
+    // Mirrors esctest DECSETTests.doAltBuftest for the three alternate-screen modes. All three carry the
+    // cursor into the alternate screen (xterm's continuous, terminal-level cursor); they differ in whether
+    // it is carried back out (47, 1047) or the saved one restored (1049), and whether the alternate page is
+    // erased on the way out (1047, 1049) or kept (47). @see Terminal::setAlternateScreen,
+    // alternateScreenBehavior.
     int mode = 0;
-    bool cursorCarried = false;   // 47, 1047: the cursor does not move across enter/exit
+    bool carriedOnEnter = false;  // 47, 1047, 1049: the cursor does not move entering the alternate screen
+    bool carriedOnExit = false;   // 47, 1047: nor leaving it
     bool altErasedOnExit = false; // 1047, 1049: the alternate page is blank when re-entered
     SECTION("mode 47 (ALTBUF)")
     {
         mode = 47;
-        cursorCarried = true;
+        carriedOnEnter = true;
+        carriedOnExit = true;
         altErasedOnExit = false;
     }
     SECTION("mode 1047 (OPT_ALTBUF)")
     {
         mode = 1047;
-        cursorCarried = true;
+        carriedOnEnter = true;
+        carriedOnExit = true;
         altErasedOnExit = true;
     }
     SECTION("mode 1049 (OPT_ALTBUF_CURSOR)")
     {
         mode = 1049;
-        cursorCarried = false;
+        carriedOnEnter = true;
+        carriedOnExit = false;
         altErasedOnExit = true;
     }
     CAPTURE(mode);
@@ -2494,10 +2499,10 @@ TEST_CASE("AlternateScreen.DECSET_47_1047_1049", "[screen]")
     auto const primaryCursor = mock.terminal.currentScreen().cursor().position;
     REQUIRE(primaryCursor == CellLocation { LineOffset(1), ColumnOffset(3) });
 
-    // Enter the alternate screen. Modes 47 and 1047 must not move the cursor.
+    // Enter the alternate screen. No mode moves the cursor.
     mock.writeToScreen(set);
     REQUIRE(mock.terminal.isAlternateScreen());
-    if (cursorCarried)
+    if (carriedOnEnter)
         CHECK(mock.terminal.currentScreen().cursor().position == primaryCursor);
 
     // Erase the alternate page and scribble "def" on lines 2 and 3 (1-based), exactly as esctest does.
@@ -2510,7 +2515,7 @@ TEST_CASE("AlternateScreen.DECSET_47_1047_1049", "[screen]")
     auto const beforeExit = mock.terminal.currentScreen().cursor().position;
     mock.writeToScreen(reset);
     REQUIRE(mock.terminal.isPrimaryScreen());
-    CHECK(mock.terminal.currentScreen().cursor().position == (cursorCarried ? beforeExit : primaryCursor));
+    CHECK(mock.terminal.currentScreen().cursor().position == (carriedOnExit ? beforeExit : primaryCursor));
 
     // The primary content is untouched by any of the three modes.
     CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(0)) == "abc  ");
@@ -2524,6 +2529,82 @@ TEST_CASE("AlternateScreen.DECSET_47_1047_1049", "[screen]")
           == (altErasedOnExit ? "     " : "def  "));
     CHECK(mock.terminal.currentScreen().grid().lineText(LineOffset(2))
           == (altErasedOnExit ? "     " : "def  "));
+}
+
+TEST_CASE("AlternateScreen.1049_entersWithTheCursorWhereItWas", "[screen]")
+{
+    // ?1049h saves the cursor and switches with it: xterm's cursor is terminal-level (ToAlternate swaps the
+    // line storage only), Windows Terminal copies the main cursor into its new alternate buffer, and foot's
+    // cursor "retains its position from the normal grid". Not the alternate screen's own cursor, which is
+    // where the previous full-screen application left it, with that application's rendition.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[?1049h\033[4;6H\033[1mfull\033[?1049l"); // an earlier full-screen application
+    mock.writeToScreen("\033[2;3H");                                  // the shell
+
+    mock.writeToScreen("\033[?1049hX");
+    CHECK(terminal.alternateScreen().grid().lineText(LineOffset(1)) == "  X       ");
+    CHECK(terminal.alternateScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(3) });
+    CHECK_FALSE(terminal.alternateScreen().cursor().graphicsRendition.flags.contains(CellFlag::Bold));
+
+    // Leaving, the cursor the primary page kept comes back: 1049's DECRC.
+    mock.writeToScreen("\033[5;5H\033[?1049l");
+    CHECK(terminal.primaryScreen().cursor().position == CellLocation { LineOffset(1), ColumnOffset(2) });
+}
+
+TEST_CASE("AlternateScreen.1049_savesTheCursorAsDECSCDoes", "[screen]")
+{
+    // ?1049h saves the cursor into the main screen's DECSC buffer before it switches: xterm's CursorSave
+    // before ToAlternate, Windows Terminal's CursorSaveState() in _SetAlternateScreenBufferMode. A DECRC
+    // after ?1049l therefore returns to where ?1049h was received, not to an older DECSC. 47 and 1047 save
+    // nothing.
+    auto const [mode, line, column] = GENERATE(table<int, int, int>({
+        { 1049, 3, 4 }, // B, where ?1049h was received
+        { 1047, 1, 2 }, // A, the DECSC
+        { 47, 1, 2 },
+    }));
+    CAPTURE(mode);
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    mock.writeToScreen("\033[2;3H\0337"); // DECSC at A
+    mock.writeToScreen("\033[4;5H");      // B
+    mock.writeToScreen(std::format("\033[?{}h\033[?{}l", mode, mode));
+    mock.writeToScreen("\033[H\0338"); // DECRC
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { LineOffset(line), ColumnOffset(column) });
+}
+
+TEST_CASE("AlternateScreen.1049_savesTheCursorPageAlsoFromTheStatusLine", "[screen]")
+{
+    // ?1049h received while DECSASD selects the status line still enters the alternate screen from the cursor
+    // page, and so saves that page's cursor, the page with it, as DECSC on it would.
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("\033[3 P\0337");                  // DECSC on page 3
+    mock.writeToScreen("\033[1 P\033[4;5H");              // page 1, B
+    mock.writeToScreen("\033[2$~\033[1$}");               // the status line
+    mock.writeToScreen("\033[?1049h\033[?1049l\033[0$}"); // received there; back to the main display
+    mock.writeToScreen("\033[H\0338");                    // DECRC
+    CHECK(terminal.cursorPageIndex() == PageIndex(0));
+    CHECK(terminal.primaryScreen().cursor().position == CellLocation { LineOffset(3), ColumnOffset(4) });
+}
+
+TEST_CASE("AlternateScreen.textAfterTheSwitchLandsWhereTheCarriedCursorIs", "[screen]")
+{
+    // 47 and 1047 carry the cursor across the switch both ways, so the next character is written where the
+    // cursor was -- on its row, not on the row the other screen's own cursor was left on.
+    auto const mode = GENERATE(47, 1047);
+    CAPTURE(mode);
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto& terminal = mock.terminal;
+    mock.writeToScreen("ab\r\nab"); // the cursor at line 1, column 2
+
+    mock.writeToScreen(std::format("\033[?{}hX", mode));
+    CHECK(terminal.alternateScreen().grid().lineText(LineOffset(0)) == "     ");
+    CHECK(terminal.alternateScreen().grid().lineText(LineOffset(1)) == "  X  ");
+
+    mock.writeToScreen(std::format("\033[3;2H\033[?{}lY", mode)); // leave from line 2, column 1
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset(1)) == "ab   ");
+    CHECK(terminal.primaryScreen().grid().lineText(LineOffset(2)) == " Y   ");
 }
 
 TEST_CASE("DCH.worksOutsideTopBottomMargin", "[screen]")

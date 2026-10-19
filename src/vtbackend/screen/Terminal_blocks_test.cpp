@@ -275,7 +275,7 @@ TEST_CASE("Terminal.blocks.onlyThePrimaryPageIsStamped", "[terminal][semanticblo
 
     SECTION("the host-writable status line")
     {
-        mc.writeToScreen("\033[1$}"); // DECSASD: to the status line
+        mc.writeToScreen("\033[2$~\033[1$}"); // DECSSDT: host-writable; DECSASD: to the status line
         mc.writeToScreen("x");
 
         auto const& statusLine = mc.terminal.hostWritableStatusLineDisplay();
@@ -1287,7 +1287,7 @@ TEST_CASE("Terminal.blocks.aDecPageOrAStatusLineFeedsNoBlock", "[terminal][seman
     }
     SECTION("the host-writable status line")
     {
-        mc.writeToScreen("\033[1$}"); // DECSASD: to the status line
+        mc.writeToScreen("\033[2$~\033[1$}"); // DECSSDT: host-writable; DECSASD: to the status line
     }
 
     mc.writeToScreen("\033]133;A\033\\$ \033]133;C\033\\x\r\n\033]133;D;0\033\\");

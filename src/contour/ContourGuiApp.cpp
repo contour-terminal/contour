@@ -275,16 +275,19 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer,
                              std::unique_ptr<session::CommandOutputFiles> commandOutputFiles,
                              vtbackend::TerminalClocks terminalClocks,
-                             std::optional<vtbackend::HostIdentity> hostIdentity):
+                             std::optional<vtbackend::HostIdentity> hostIdentity,
+                             core::platform::FileSystem const* fileSystem,
+                             std::shared_ptr<vtpty::ProcessPlacement> processPlacement):
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeStatusLineCommandExecutor()),
+    _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
-        sessionFactory
-            ? std::move(sessionFactory)
-            : std::make_unique<session::AppSessionFactory>(*this, vtpty::makeDefaultProcessPlacement()))),
+        sessionFactory ? std::move(sessionFactory)
+                       : std::make_unique<session::AppSessionFactory>(*this, _processPlacement))),
     _routingFactory(static_cast<remote::RoutingSessionFactory*>(_sessionFactory.get())),
-    _externalLauncher(externalLauncher ? std::move(externalLauncher) : platform::makeExternalLauncher()),
+    _externalLauncher(externalLauncher ? std::move(externalLauncher)
+                                       : platform::makeExternalLauncher(_processPlacement)),
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),
@@ -294,6 +297,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _terminalClocks(terminalClocks),
     // Read once, for every session, rather than by each one on the GUI thread as it is built.
     _hostIdentity(hostIdentity ? std::move(*hostIdentity) : thisMachineIdentity()),
+    _fileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(
@@ -304,11 +308,6 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
     link("contour.info.config", bind(&ContourGuiApp::checkConfig, this));
     link("contour.client", bind(&ContourGuiApp::clientAction, this));
-}
-
-core::platform::FileSystem const& ContourGuiApp::fileSystem() const noexcept
-{
-    return core::platform::NativeFileSystem::instance();
 }
 
 ContourGuiApp::~ContourGuiApp()
@@ -596,7 +595,7 @@ int ContourGuiApp::clientAction()
                                                                 .configPath = attachConfig,
                                                                 .profileName = attachProfile,
                                                                 .sizePolicy = *sizePolicy };
-        if (vthost::ensureDaemon(endpoint, programPath(), daemonOptions) != EXIT_SUCCESS)
+        if (vthost::ensureDaemon(endpoint, programPath(), *_processPlacement, daemonOptions) != EXIT_SUCCESS)
         {
             cerr << std::format("contour client: daemon did not start within 5 seconds.\n");
             return EXIT_FAILURE;
@@ -606,7 +605,8 @@ int ContourGuiApp::clientAction()
     auto adopt = std::function<void()> {};
     if (wantsTmux)
     {
-        _tmuxController = std::make_unique<remote::TmuxController>(tmuxSocket);
+        _tmuxController =
+            std::make_unique<remote::TmuxController>(tmuxSocket, _processPlacement, fileSystem());
         if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
         {
             cerr << std::format("contour client --tmux: {}\n", connected.error());

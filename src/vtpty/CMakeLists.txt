@@ -44,7 +44,9 @@ set(vtpty_HEADERS
     ChannelPty.hpp
     CommandCapture.hpp
     CommandLine.hpp
+    DetachedProcess.hpp # POSIX only; defined in Process_unix.cpp
     EnvironmentBlock.hpp
+    ErrnoText.hpp
     ImageSize.hpp
     MockPty.hpp
     MockViewPty.hpp
@@ -108,8 +110,8 @@ if(UNIX)
     check_function_exists(close_range HAVE_CLOSE_RANGE)
 
     list(APPEND vtpty_LIBRARIES util)
-    list(APPEND vtpty_SOURCES ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
-    list(APPEND vtpty_SOURCES ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
+    list(APPEND vtpty_SOURCES ProcessCgroup.cpp ScopeRequestEncoding.cpp SystemdScopePlacement.cpp UnixPty.cpp UnixUtils.cpp)
+    list(APPEND vtpty_SOURCES ProcessCgroup.hpp ScopeRequestEncoding.hpp SystemdScopePlacement.hpp UnixPty.hpp UnixUtils.hpp)
 else()
     list(APPEND vtpty_SOURCES ConPty.cpp)
     list(APPEND vtpty_HEADERS ConPty.hpp)
@@ -154,6 +156,7 @@ if(VTPTY_TESTING)
         CommandCapture_test.cpp
         CommandLine_test.cpp
         EnvironmentBlock_test.cpp
+        ErrnoText_test.cpp
         ImageSize_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
@@ -175,7 +178,7 @@ if(VTPTY_TESTING)
         target_compile_definitions(vtpty_test PRIVATE
             VTPTY_CONPTY_OSC133_PROBE="$<TARGET_FILE:conpty_osc133_probe>")
     else()
-        target_sources(vtpty_test PRIVATE ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp)
+        target_sources(vtpty_test PRIVATE ProcessCgroup_test.cpp ProcessPlacement_test.cpp ScopeRequestEncoding_test.cpp SystemdScopePlacement_test.cpp UnixPty_test.cpp UnixUtils_test.cpp)
     endif()
     if(_include_SshSession_module)
         target_sources(vtpty_test PRIVATE SshKnownHosts_test.cpp SshSession_test.cpp)

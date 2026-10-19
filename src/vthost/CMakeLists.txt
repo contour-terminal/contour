@@ -122,6 +122,7 @@ if(VTHOST_TESTING)
         proto/PduTrace_test.cpp
         proto/Wire_test.cpp
         tmux/ControlModeParser_test.cpp
+        tmux/ControlModeSpawn_test.cpp
         tmux/ControlOutput_test.cpp
         tmux/ControlSession_test.cpp
         tmux/ImsgServer_test.cpp

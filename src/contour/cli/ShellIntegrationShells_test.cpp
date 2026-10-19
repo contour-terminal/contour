@@ -53,6 +53,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -183,6 +184,8 @@ struct ShellLaunch
     std::vector<std::string> arguments; ///< The command-line arguments, with the same substitutions.
     std::string command;                ///< The command line typed at the prompt.
     vtbackend::CommandLineSource commandLineSource {}; ///< How the terminal learns that command line.
+    /// The command line that puts the shell into AwkwardDirectory, whose name the shell expands from "cwd*".
+    std::string enterDirectory = "cd cwd*";
 };
 
 /// @return Every shell the integration scripts target, and how each is started here.
@@ -229,6 +232,10 @@ struct ShellLaunch
             .arguments = { "-i" },
             .command = std::string { TcshCommand },
             .commandLineSource = vtbackend::CommandLineSource::Recovered, // tcsh cannot report it
+            // tcsh 6.24.14 and later cannot cd into a name holding a character above U+FFFF, which
+            // AwkwardDirectory does: its cd hands the system call the name cut at that character. So
+            // sh enters the directory, and a new tcsh starts in it.
+            .enterDirectory = "sh -c 'cd cwd* && exec tcsh -i'",
         },
         ShellLaunch {
             .shell = "pwsh",
@@ -596,7 +603,7 @@ void checkWorkingDirectoryReport(ShellLaunch const& launch)
     auto const expected = core::platform::normalizePath(std::filesystem::canonical(directory));
 
     auto changeDirectory = launch;
-    changeDirectory.command = "cd cwd*";
+    changeDirectory.command = launch.enterDirectory;
     checkCommandCycle(*session, changeDirectory);
     // Each a command of its own: bash sends no command line for one typed twice in a row.
     auto const nextRunsIn = [&](std::string command) {
@@ -634,6 +641,45 @@ void checkWorkingDirectoryReport(ShellLaunch const& launch)
     };
     CHECK((std::ranges::all_of(reports, byBel) || std::ranges::none_of(reports, byBel)));
 }
+
+#ifndef _WIN32
+/// Changes @p launch's shell into a directory through a symbolic link, and checks that the terminal learned
+/// from OSC 7 the link's path -- the logical one, which the shell shows and `cd` extends -- rather than the
+/// path of the directory it leads to. (Not on Windows, where creating a symbolic link takes a privilege.)
+void checkSymlinkedDirectoryReport(ShellLaunch const& launch)
+{
+    auto const session = start(launch);
+    session->terminal().identity.hostname = core::platform::hostName();
+    // HOME with every symbolic link above it resolved, as the kernel names it.
+    auto const home = std::filesystem::canonical(session->home());
+    auto const target = home / "target directory";
+    auto const link = home / "link directory";
+    REQUIRE(std::filesystem::create_directory(target));
+    auto error = std::error_code {};
+    std::filesystem::create_directory_symlink(target, link, error);
+    REQUIRE_FALSE(error);
+    awaitPromptEnd(*session);
+
+    auto changeDirectory = launch;
+    changeDirectory.command = "cd link*";
+    checkCommandCycle(*session, changeDirectory);
+    auto next = launch;
+    next.command = "echo here";
+    checkCommandCycle(*session, next);
+
+    auto const* const record = session->terminal().terminal.commandBlocks().lastFinished();
+    REQUIRE(record != nullptr);
+    // A shell may spell the directories above the link the way it reached them: tcsh starts from HOME as
+    // spelled, which on macOS lies under /var, a link to /private/var, where the others ask the kernel. Those
+    // resolved, the path must still end in the link rather than in the directory it leads to.
+    auto const reported = core::pathFromTrustedUtf8(record->workingDirectory.path);
+    auto const resolvedAbove = core::platform::normalizePath(
+        std::filesystem::weakly_canonical(reported.parent_path()) / reported.filename());
+    CHECK(resolvedAbove == core::platform::normalizePath(link));
+    CHECK(resolvedAbove != core::platform::normalizePath(target));
+    CHECK(record->workingDirectory.locality == vtbackend::ContextLocality::Local);
+}
+#endif
 
 /// A working directory longer than the longest command line a script sends. It goes out whole, or not at
 /// all: cut, it would name another directory.
@@ -892,6 +938,14 @@ TEST_CASE("bash integration reports the working directory as a file URL", "[shel
     checkWorkingDirectoryReport(launchFor("bash"));
 }
 
+#ifndef _WIN32
+TEST_CASE("bash integration reports a directory entered through a symbolic link by the link's path",
+          "[shell-integration][shells][bash]")
+{
+    checkSymlinkedDirectoryReport(launchFor("bash"));
+}
+#endif
+
 TEST_CASE("the shell harness ends a shell that ignores a hangup", "[shell-integration][shells][bash]")
 {
     // As a system rc file's `trap '' HUP` makes it, and busy with a command rather than reading the
@@ -943,6 +997,14 @@ TEST_CASE("zsh integration reports the working directory as a file URL", "[shell
 {
     checkWorkingDirectoryReport(launchFor("zsh"));
 }
+
+#ifndef _WIN32
+TEST_CASE("zsh integration reports a directory entered through a symbolic link by the link's path",
+          "[shell-integration][shells][zsh]")
+{
+    checkSymlinkedDirectoryReport(launchFor("zsh"));
+}
+#endif
 
 TEST_CASE("fish integration reports prompts, the command line and its end",
           "[shell-integration][shells][fish]")
@@ -1044,6 +1106,14 @@ TEST_CASE("fish integration reports the working directory as a file URL", "[shel
     checkWorkingDirectoryReport(launch);
 }
 
+#ifndef _WIN32
+TEST_CASE("fish integration reports a directory entered through a symbolic link by the link's path",
+          "[shell-integration][shells][fish]")
+{
+    checkSymlinkedDirectoryReport(launchFor("fish"));
+}
+#endif
+
 TEST_CASE("tcsh integration ends its prompt where typing begins", "[shell-integration][shells][tcsh]")
 {
     // tcsh reports no command line, so the terminal reads it back off the screen from the ;B column
@@ -1065,6 +1135,42 @@ TEST_CASE("tcsh integration sourced twice still marks the prompt once", "[shell-
 TEST_CASE("tcsh integration reports the working directory as a file URL", "[shell-integration][shells][tcsh]")
 {
     checkWorkingDirectoryReport(launchFor("tcsh"));
+}
+
+#ifndef _WIN32
+TEST_CASE("tcsh integration reports a directory entered through a symbolic link by the link's path",
+          "[shell-integration][shells][tcsh]")
+{
+    checkSymlinkedDirectoryReport(launchFor("tcsh"));
+}
+#endif
+
+TEST_CASE("tcsh integration sends no working directory once it is gone", "[shell-integration][shells][tcsh]")
+{
+    // pwd has no path to tell then, and says so on stderr: neither an OSC 7 with an empty path nor that
+    // complaint, shown at every prompt, may reach the terminal.
+    auto const launch = launchFor("tcsh");
+    auto const session = start(launch);
+    auto const host = core::platform::hostName();
+    session->terminal().identity.hostname = host;
+    REQUIRE(std::filesystem::create_directory(session->home() / "gone"));
+    awaitPromptEnd(*session);
+
+    auto const typeCommand = [&](std::string command) {
+        auto next = launch;
+        next.command = std::move(command);
+        checkCommandCycle(*session, next);
+    };
+    typeCommand("cd gone");
+    auto const removedAt = session->transcript().size();
+    typeCommand("rmdir ../gone");
+    typeCommand("echo here");
+
+    auto const afterRemoval = std::string_view { session->transcript() }.substr(removedAt);
+    INFO("what the shell wrote: " << core::escape(afterRemoval));
+    CHECK_FALSE(afterRemoval.contains("pwd:"));
+    for (auto const& report: oscPayloads(afterRemoval, "\x1b]7;"sv))
+        CHECK(report.text != std::format("file://{}", host));
 }
 
 TEST_CASE("PowerShell integration reports prompts, the command line and its end",
@@ -1180,3 +1286,11 @@ TEST_CASE("PowerShell integration reports the working directory as a file URL",
 {
     checkWorkingDirectoryReport(launchFor("pwsh"));
 }
+
+#ifndef _WIN32
+TEST_CASE("PowerShell integration reports a directory entered through a symbolic link by the link's path",
+          "[shell-integration][shells][pwsh]")
+{
+    checkSymlinkedDirectoryReport(launchFor("pwsh"));
+}
+#endif

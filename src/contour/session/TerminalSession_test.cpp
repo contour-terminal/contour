@@ -82,6 +82,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -557,6 +558,34 @@ TEST_CASE("TerminalSession: key and char events write their encoding into the PT
     CHECK(mockPtyOf(*session).stdinBuffer() == "a\r");
 }
 
+TEST_CASE("TerminalSession: a bare Ctrl press does not hide the pointer", "[contour][session]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    // hide_while_typing is on by default (Config.hpp ~596); assert that rather than assume it
+    REQUIRE(session->profile().mouse.value().hideWhileTyping);
+    auto const now = std::chrono::steady_clock::now();
+    session->sendKeyEvent(vtbackend::Key::LeftControl,
+                          vtbackend::KeyboardModifiers { vtbackend::Modifier::Control },
+                          vtbackend::KeyboardEventType::Press,
+                          now);
+    CHECK((session.surface->cursorShapes.empty()
+           || session.surface->cursorShapes.back() != contour::input::MouseCursorShape::Hidden));
+}
+
+TEST_CASE("TerminalSession: a non-modifier key still hides the pointer while typing", "[contour][session]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    REQUIRE(session->profile().mouse.value().hideWhileTyping);
+    session.surface->cursorShapes.clear();
+    auto const now = std::chrono::steady_clock::now();
+    session->sendKeyEvent(
+        vtbackend::Key::F5, vtbackend::KeyboardModifiers {}, vtbackend::KeyboardEventType::Press, now);
+    REQUIRE_FALSE(session.surface->cursorShapes.empty());
+    CHECK(session.surface->cursorShapes.back() == contour::input::MouseCursorShape::Hidden);
+}
+
 TEST_CASE("TerminalSession: mouse events without a mouse protocol write nothing and do not crash",
           "[contour][session][input]")
 {
@@ -900,10 +929,10 @@ TEST_CASE("TerminalSession: the context-menu actions and the state they are gate
             session->terminal().writeToScreen(std::format("line {}\r\n", i));
         REQUIRE(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
 
-        // DECSTR resets the status display (setStatusDisplay(None)), which gives the main page back the
-        // row the profile's status line was using and so pulls exactly one line out of the history. That
-        // is the sequence doing its job -- what matters is that the scrollback SURVIVES.
+        // DECSTR exits the status display "but not erased" (DEC STD 070 ch. 14 §2.3): the profile's status
+        // line stays, and with it the page's height. What matters is that the scrollback SURVIVES.
         CHECK((*session)(contour::actions::SoftReset {}));
+        CHECK(session->terminal().statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
         CHECK(session->terminal().primaryScreen().historyLineCount() > vtbackend::LineCount(0));
         CHECK(
             session->terminal().primaryScreen().grid().lineText(vtbackend::LineOffset(-1)).contains("line"));
@@ -1968,15 +1997,16 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
 
     SECTION("the cursor leaving for another page")
     {
-        // DECPCCM reset: page 0 stays on display, but the viewport cannot scroll while the cursor is away.
+        // DECPCCM reset: page 0 stays on display, and the viewport, the window onto it, still scrolls to a
+        // tick wherever the cursor writes.
         terminal.writeToScreen(vtbackend::test::commandRun("make", numberedOutput(3), 0));
         pane->refreshScrollbarMarks();
         REQUIRE(pane->scrollbarMarks().size() == 1);
 
         terminal.writeToScreen("\033[?64l");
-        terminal.setPage(vtbackend::PageIndex(3), /*moveCursorHome*/ true);
+        terminal.setPage(vtbackend::PageIndex(3), vtbackend::PageCursorPlacement::Home);
         pane->refreshScrollbarMarks();
-        CHECK(pane->scrollbarMarks().isEmpty());
+        CHECK(pane->scrollbarMarks().size() == 1);
     }
 
     SECTION("another page put on display")
@@ -1987,9 +2017,9 @@ TEST_CASE("TerminalSession: a scrollbar marks refresh notices every input the ti
         pane->refreshScrollbarMarks();
         REQUIRE(pane->scrollbarMarks().size() == 1);
 
-        terminal.setPage(vtbackend::PageIndex(3), /*moveCursorHome*/ true);
+        terminal.setPage(vtbackend::PageIndex(3), vtbackend::PageCursorPlacement::Home);
         terminal.writeToScreen("\033[?64l");
-        terminal.setPage(vtbackend::PageIndex(0), /*moveCursorHome*/ false);
+        terminal.setPage(vtbackend::PageIndex(0), vtbackend::PageCursorPlacement::PagesOwn);
         REQUIRE(terminal.isPrimaryScreen());
         pane->refreshScrollbarMarks();
         CHECK(pane->scrollbarMarks().isEmpty());
@@ -2424,10 +2454,12 @@ TEST_CASE("TerminalSession: a configuration reload hands the status line's layou
 namespace
 {
 
-/// Denies @p session's host-writable status line, then has the application write @p text to it and
-/// return to the main display, as a program that keeps its status in DEC's status line does.
+/// Has the application ask for @p session's host-writable status line (DECSSDT 2), denies it, then has the
+/// application write @p text to it and return to the main display, as a program that keeps its status in
+/// DEC's status line does.
 void writeToDeniedStatusLine(contour::session::TerminalSession& session, std::string_view text)
 {
+    session.terminal().writeToScreen("\033[2$~");
     session.executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
     session.terminal().writeToScreen(std::format("\033[1$}}{}\033[0$}}", text));
 }
@@ -2439,7 +2471,165 @@ void setSyncToWindowTitle(contour::ContourGuiApp& app, bool sync)
         profile.statusLine.value().syncWindowTitleWithHostWritableStatusDisplay = sync;
 }
 
+/// Sets every profile's `status_line.display` in @p app's configuration.
+void setStatusLineDisplay(contour::ContourGuiApp& app, vtbackend::StatusDisplayType type)
+{
+    for (auto& [name, profile]: app.config().profiles.value())
+        profile.statusLine.value().initialType = type;
+}
+
+/// Has the application select @p session's host-writable status line (DECSSDT 2), the user allow it, and
+/// the application write to it (DECSASD 1).
+void writeToAllowedStatusLine(contour::session::TerminalSession& session)
+{
+    session.terminal().writeToScreen("\033[2$~");
+    session.executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+    session.terminal().writeToScreen("\033[1$}");
+    REQUIRE(session.terminal().activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+}
+
 } // namespace
+
+TEST_CASE(
+    "TerminalSession: a reload that changes the status line type selects it and leaves a host-writable one",
+    "[contour][session][config]")
+{
+    // DEC STD 070 ch. 14 §3 DECSSDT: "The type of Status Line can also be changed through a Set-Up field",
+    // which the configuration is; §2.3: "If the Status Display Type is chosen to be something other than
+    // "Host Writable", the Status Display will be exited". A reload that changes the configured type is that
+    // change: here from none to the indicator.
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), vtbackend::StatusDisplayType::None);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    writeToAllowedStatusLine(*session);
+
+    reloadSessionWith(*session,
+                      "",
+                      "        status_line:\n"
+                      "            display: indicator\n");
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+
+    terminal.writeToScreen("\033[1$}X"); // DECSASD again, and text
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    CHECK(terminal.primaryScreen().renderMainPageText().contains('X'));
+    CHECK_FALSE(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains('X'));
+}
+
+TEST_CASE("TerminalSession: a reload that keeps the status line type leaves the host's selection alone",
+          "[contour][session][config]")
+{
+    // A reload that leaves `status_line.display` as it was is no Set-Up change of the type (DEC STD 070 ch.
+    // 14 §3): what the host selected since stays, as in mintty's term_reconfig(), which acts only where the
+    // configured value changed.
+    contour::test::ConfiguredTestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    writeToAllowedStatusLine(*session);
+
+    reloadSessionWith(*session,
+                      "",
+                      "        status_line:\n"
+                      "            display: indicator\n");
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+
+    terminal.writeToScreen("X");
+    CHECK(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains('X'));
+    CHECK_FALSE(terminal.primaryScreen().renderMainPageText().contains('X'));
+}
+
+TEST_CASE("TerminalSession: a status line type a reload changes during vi mode outlasts it",
+          "[contour][session][config]")
+{
+    // Vi mode's indicator is a notice put up for a while (pushStatusDisplay), not the user's type. A reload
+    // that changes the configured type meanwhile leaves the notice up, and is what leaving vi mode shows.
+    contour::test::ConfiguredTestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+    reloadSessionWith(*session,
+                      "",
+                      "        status_line:\n"
+                      "            display: none\n");
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Insert);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
+
+TEST_CASE("TerminalSession: re-enabling key bindings brings back the status line type shown before",
+          "[contour][session][config]")
+{
+    // The "key bindings disabled" indicator is a notice put up for a while, as vi mode's is (and as DEC STD
+    // 070's Error Line, ch. 14 §2.1.1, "replaces the currently displayed Status Line" until a key restores
+    // it): taking it down shows again what it replaced.
+    auto const shownBefore =
+        GENERATE(vtbackend::StatusDisplayType::None, vtbackend::StatusDisplayType::Indicator);
+    INFO("shown before: " << static_cast<int>(shownBefore));
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), shownBefore);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    REQUIRE(terminal.statusDisplayType() == shownBefore);
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.indicatorStatusLineDisplay().renderMainPageText().contains("key bindings disabled"));
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == shownBefore);
+}
+
+TEST_CASE("TerminalSession: the key bindings notice outlasts a host's keyboard unlock",
+          "[contour][session][config]")
+{
+    // KAM reset -- DECSTR, or CSI 2 l -- takes down the notice of a locked keyboard, which it never put up
+    // here: the key bindings stay disabled, and so does their notice. "The host may not directly program or
+    // affect the Error Line" (DEC STD 070 ch. 14 §2.1.1), the notice DEC has.
+    auto const unlock = GENERATE(std::string_view { "\033[!p" }, std::string_view { "\033[2l" });
+    INFO("unlock: " << core::escape(unlock));
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), vtbackend::StatusDisplayType::None);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    REQUIRE(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    terminal.writeToScreen(unlock);
+
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.indicatorStatusLineDisplay().renderMainPageText().contains("key bindings disabled"));
+
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
+
+TEST_CASE("TerminalSession: vi mode's notice outlasts the key bindings notice", "[contour][session][config]")
+{
+    // Two notices up at once: each comes down alone, and the type shown before the first comes back with the
+    // last.
+    contour::test::ConfiguredTestApp testApp;
+    setStatusLineDisplay(testApp.app(), vtbackend::StatusDisplayType::None);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Normal);
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    REQUIRE((*session)(contour::actions::ToggleAllKeyMaps {}));
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+
+    (*session)(contour::actions::ViNormalMode {});
+    REQUIRE(terminal.inputHandler().mode() == vtbackend::ViMode::Insert);
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::None);
+}
 
 TEST_CASE("TerminalSession: a denied status line's text becomes the window title when configured",
           "[contour][session][config]")
@@ -2494,6 +2684,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
         setSyncToWindowTitle(testApp.app(), true);
         auto session = makeDisplaylessSession(testApp.app());
         session->terminal().setWindowTitle("before");
+        session->terminal().writeToScreen("\033[2$~");
         session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
         reloadSessionWith(*session,
                           "",
@@ -2507,12 +2698,32 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
     {
         setSyncToWindowTitle(testApp.app(), false);
         auto session = makeDisplaylessSession(testApp.app());
+        session->terminal().writeToScreen("\033[2$~");
         session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
         reloadSessionWith(*session,
                           "",
                           "        status_line:\n"
                           "            sync_to_window_title: true\n");
         session->terminal().writeToScreen("\033[1$}status text\033[0$}");
+        CHECK(session->terminal().windowTitle() == "status text");
+    }
+
+    // Every way out of the status line hands the text over as DECSASD 0 does: DECSSDT selecting another type
+    // exits it (DEC STD 070 ch. 14 §2.3), and so does DECSTR ("The Status Display will be exited, but not
+    // erased").
+    SECTION("left by a control other than DECSASD 0")
+    {
+        using Exit = std::pair<std::string_view, std::string_view>;
+        auto const [name, exit] = GENERATE(
+            Exit { "DECSSDT 0", "\033[0$~" }, Exit { "DECSSDT 1", "\033[1$~" }, Exit { "DECSTR", "\033[!p" });
+        INFO("exit: " << name);
+        setSyncToWindowTitle(testApp.app(), true);
+        auto session = makeDisplaylessSession(testApp.app());
+        session->terminal().writeToScreen("\033[2$~");
+        session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
+        session->terminal().writeToScreen("\033[1$}status text");
+        session->terminal().writeToScreen(exit);
+        CHECK(session->terminal().activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
         CHECK(session->terminal().windowTitle() == "status text");
     }
 }
@@ -3900,6 +4111,40 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
     }
 }
 
+TEST_CASE("TerminalSession: the find bar wraps to the top of the page on display",
+          "[contour][session][search]")
+{
+    // DECPCCM reset: page 1 stays on display, its history holding the only two matches, while the cursor
+    // writes to page 3, which holds none. Stepping on from the last match wraps to the first, at the top of
+    // page 1's history.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen("needle one\r\n");
+    for (auto const i: std::views::iota(0, 10))
+        terminal.writeToScreen(std::format("hay {}\r\n", i));
+    terminal.writeToScreen("needle two\r\n");
+    for (auto const i: std::views::iota(0, 40))
+        terminal.writeToScreen(std::format("more hay {}\r\n", i));
+    terminal.writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, then the cursor to page 3
+    REQUIRE(terminal.displayedPageIndex() == vtbackend::PageIndex(0));
+    auto const top = -boxed_cast<vtbackend::LineOffset>(terminal.primaryScreen().historyLineCount());
+    auto const first = vtbackend::CellLocation { .line = top, .column = vtbackend::ColumnOffset(0) };
+    auto const last = vtbackend::CellLocation { .line = top + vtbackend::LineOffset(11),
+                                                .column = vtbackend::ColumnOffset(0) };
+
+    session->searchBarOpened();
+    session->setSearchPattern(QStringLiteral("needle"));
+    {
+        auto const _ = std::scoped_lock { terminal };
+        terminal.moveNormalModeCursorTo(last);
+    }
+    session->searchNext();
+
+    auto const _ = std::scoped_lock { terminal };
+    CHECK(terminal.normalModeCursorPosition() == first);
+}
+
 TEST_CASE("TerminalSession: SearchReverse asks for the find bar without switching Vi mode",
           "[contour][session][search]")
 {
@@ -4284,6 +4529,13 @@ TEST_CASE("TerminalSession: a capture asked of a background pane is refused, not
 
 namespace
 {
+/// @param path An absolute path.
+/// @return @p path as a local file URL, '/'-separated on every platform, as QUrl wants it.
+[[nodiscard]] QUrl localFileUrl(std::filesystem::path const& path)
+{
+    return QUrl::fromLocalFile(QString::fromStdU16String(path.generic_u16string()));
+}
+
 /// Writes an OSC-8 hyperlink cell to @p session's screen and hovers the mouse over it, so
 /// terminal().tryGetHoveringHyperlink() resolves — the precondition FollowHyperlink needs to reach
 /// TerminalSession::followHyperlink() without a display. @p uri is the OSC-8 target.
@@ -4325,7 +4577,7 @@ TEST_CASE("TerminalSession: a file:// link in a pane replicating another machine
         CHECK((*session)(actions::FollowHyperlink {}));
         CHECK((*session)(actions::FollowHyperlink { .uri = uri }));
         CHECK(launcher.openedUrls.empty());
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
 
         // A link of another scheme is no path, and still opens.
         CHECK((*session)(actions::FollowHyperlink { .uri = "https://example.com/page" }));
@@ -4439,12 +4691,93 @@ TEST_CASE("TerminalSession: a path a command printed on another machine opens no
     CHECK(capture.contains("Not opening \"doc.txt\": the command that printed it ran on another machine."));
 }
 
+TEST_CASE("TerminalSession: a path under the pointer opens as the app's filesystem names it",
+          "[contour][session][hyperlink]")
+{
+    // The terminal finds the path through the app's filesystem, and opening it asks the same one. Asked of
+    // the disk instead, a path only the app's filesystem holds reached the desktop as a relative URL.
+    namespace actions = contour::actions;
+    contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::Fixture };
+    // Absolute on every platform, as the temporary directory is; a name in the in-memory filesystem only.
+    auto const work = std::filesystem::temp_directory_path() / "contour-in-memory-work";
+    testApp.fileSystem().addDirectory(work);
+    testApp.fileSystem().addFile(work / "doc.txt", "x");
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    auto& launcher = testApp.launcher();
+
+    terminal.setCurrentWorkingDirectory(localFileUrl(work).toString().toStdString());
+    terminal.writeToScreen("open doc.txt now");
+    terminal.sendMouseMoveEvent(
+        vtbackend::Modifiers {},
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(6) },
+        vtbackend::PixelCoordinate {},
+        /*uiHandledHint=*/false);
+    REQUIRE(terminal.pathTextAtMousePosition() == "doc.txt");
+
+    CHECK((*session)(actions::FollowHyperlink {}));
+    REQUIRE(launcher.openedUrls.size() == 1);
+    CHECK(launcher.openedUrls.back() == localFileUrl(work / "doc.txt"));
+}
+
+TEST_CASE("TerminalSession: a file:// hyperlink is followed as the app's filesystem names it",
+          "[contour][session][hyperlink]")
+{
+    // Asked of the app's filesystem, where the terminal finds the paths it shows: a program only it holds is
+    // run, through `contour config`. Asked of the disk, it was no file, and went to the desktop.
+    namespace actions = contour::actions;
+    contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::Fixture };
+    // A program by either platform's rule: an execute bit, and a name ending in ".exe". Absolute on every
+    // platform, as the temporary directory is; a name in the in-memory filesystem only.
+    auto const tool = std::filesystem::temp_directory_path() / "contour-in-memory-bin" / "tool.exe";
+    testApp.fileSystem().addExecutable(tool);
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& launcher = testApp.launcher();
+
+    seedHoveredHyperlink(*session, localFileUrl(tool).toString().toStdString());
+    REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
+    CHECK((*session)(actions::FollowHyperlink {}));
+
+    CHECK(launcher.openedUrls.empty());
+    REQUIRE(launcher.detached.size() == 1);
+    CHECK(launcher.detached.back().arguments.front() == QStringLiteral("config"));
+    CHECK(launcher.detached.back().arguments.back() == localFileUrl(tool).toLocalFile());
+}
+
+TEST_CASE(
+    "TerminalSession: a file:// hyperlink to a text file opens in the editor the app's environment names",
+    "[contour][session][hyperlink]")
+{
+    // $EDITOR is read through the app's environment, as every other variable is: a text file only the app's
+    // filesystem holds opens in the editor that environment names, through `contour config`.
+    namespace actions = contour::actions;
+    contour::test::TestApp testApp { contour::test::TestApp::SessionFiles::Fixture,
+                                     { { "EDITOR", "contour-test-editor" } } };
+    // Absolute on every platform, as the temporary directory is; a name in the in-memory filesystem only.
+    auto const notes = std::filesystem::temp_directory_path() / "contour-in-memory-doc" / "notes.txt";
+    testApp.fileSystem().addFile(notes, "x");
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& launcher = testApp.launcher();
+
+    seedHoveredHyperlink(*session, localFileUrl(notes).toString().toStdString());
+    REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
+    CHECK((*session)(actions::FollowHyperlink {}));
+
+    CHECK(launcher.openedUrls.empty());
+    REQUIRE(launcher.detached.size() == 1);
+    auto const& arguments = launcher.detached.back().arguments;
+    REQUIRE(arguments.size() == 4);
+    CHECK(arguments.at(0) == QStringLiteral("config"));
+    CHECK(arguments.at(2) == QStringLiteral("contour-test-editor"));
+    CHECK(arguments.at(3) == localFileUrl(notes).toLocalFile());
+}
+
 TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the external launcher",
           "[contour][session][hyperlink]")
 {
     // followHyperlink() branches on the hovered link's URI: a remote link and a local non-file both
-    // open via openUrl; a local link to an existing executable file runs `contour config ...` via the
-    // launcher's execute(). Driving them headlessly (hover + FollowHyperlink) exercises all the
+    // open via openUrl; a local link to an existing executable file starts `contour config ...` via the
+    // launcher's runDetached(). Driving them headlessly (hover + FollowHyperlink) exercises all the
     // launcher-routing arms without opening a browser or spawning a process.
     namespace actions = contour::actions;
 
@@ -4459,10 +4792,10 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK((*session)(actions::FollowHyperlink {}));
         REQUIRE(launcher.openedUrls.size() == 1);
         CHECK(launcher.openedUrls.back().toString().toStdString() == "https://example.com/page");
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
     }
 
-    SECTION("a local file:// link to a non-existent path opens via openUrl (not executed)")
+    SECTION("a local file:// link to a non-existent path opens via openUrl (not run)")
     {
         contour::test::TestApp testApp;
         auto session = makeDisplaylessSession(testApp.app());
@@ -4472,7 +4805,7 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
         CHECK((*session)(actions::FollowHyperlink {}));
         CHECK(launcher.openedUrls.size() == 1);
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
     }
 
     SECTION("a local file:// link opens the file its tooltip names")
@@ -4553,14 +4886,14 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         CHECK((*session)(actions::FollowHyperlink {}));
         REQUIRE(launcher.openedUrls.size() == 1);
         CHECK(launcher.openedUrls.back().host() == QStringLiteral("some-other-host.invalid"));
-        CHECK(launcher.executed.empty());
+        CHECK(launcher.detached.empty());
     }
 
 #ifndef _WIN32
     // The "is this an executable file" branch of followHyperlink() keys off POSIX owner-execute
     // permission; Windows determines executability by extension, not filesystem perms, so this Unix
     // semantics section does not apply there.
-    SECTION("a local file:// link to an executable file runs `contour config` via execute()")
+    SECTION("a local file:// link to an executable file starts `contour config` without waiting for it")
     {
         // The authority-free form reaches the executable branch too: it used to be classified as remote
         // (its host is ""), so a file:///path link to a script fell through to openUrl() instead.
@@ -4587,10 +4920,13 @@ TEST_CASE("TerminalSession: FollowHyperlink routes each URI class through the ex
         seedHoveredHyperlink(*session, uri);
         REQUIRE(session->terminal().tryGetHoveringHyperlink() != nullptr);
         CHECK((*session)(actions::FollowHyperlink {}));
-        REQUIRE(launcher.executed.size() == 1);
-        CHECK(launcher.executed.back().arguments.contains(QStringLiteral("config")));
+        // Detached: the second Contour runs until its window is closed, and waiting for it would hold up
+        // the GUI thread -- every window of this Contour -- all that time. The launcher has nothing that
+        // waits for a program any more.
+        REQUIRE(launcher.detached.size() == 1);
+        CHECK(launcher.detached.back().arguments.contains(QStringLiteral("config")));
         // The path reaches `contour config` as the filesystem spells it, not as a URL.
-        CHECK(launcher.executed.back().arguments.back() == QString::fromStdString(exePath.generic_string()));
+        CHECK(launcher.detached.back().arguments.back() == QString::fromStdString(exePath.generic_string()));
     }
 #endif
 }
@@ -5028,6 +5364,58 @@ TEST_CASE("TerminalSession: things with no place in the accessibility tree are a
     }
 }
 
+TEST_CASE("TerminalSession: the read-only lock is the user's, which no host reset undoes",
+          "[contour][session][input]")
+{
+    // DECSTR, KAM's reset and RIS reset the host's keyboard lock, KAM (DEC STD 070 ch. 6 §6.2); the user's
+    // read-only lock is not KAM, and outlasts them.
+    auto const reset = GENERATE(
+        std::string_view { "\033[!p" }, std::string_view { "\033[2l" }, std::string_view { "\033c" });
+    INFO("reset: " << core::escape(reset));
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {}));
+    REQUIRE_FALSE(terminal.allowInput());
+    terminal.writeToScreen(reset);
+    CHECK_FALSE(terminal.allowInput());
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {}));
+    CHECK(terminal.allowInput());
+}
+
+TEST_CASE("TerminalSession: the read-only toggle leaves the host's keyboard lock alone",
+          "[contour][session][input]")
+{
+    // KAM is the host's: the user locking and unlocking their own lock over it neither lifts nor sets it. The
+    // menu's check mark shows the user's lock, and what is announced says which lock holds the keyboard.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    auto announcer = std::make_unique<RecordingAnnouncer>();
+    auto* recorder = announcer.get();
+    session->setAnnouncer(std::move(announcer));
+    terminal.writeToScreen("\033[2h"); // KAM: the host locks the keyboard
+    REQUIRE_FALSE(terminal.allowInput());
+    CHECK_FALSE(session->contextMenuState().inputProtected);
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {})); // the user locks too
+    CHECK_FALSE(terminal.allowInput());
+    CHECK(session->contextMenuState().inputProtected);
+    REQUIRE(recorder->said.size() == 1);
+    CHECK(recorder->said.back().message == QStringLiteral("Read-only"));
+
+    REQUIRE((*session)(contour::actions::ToggleInputProtection {})); // and unlocks
+    CHECK_FALSE(terminal.allowInput());
+    CHECK_FALSE(session->contextMenuState().inputProtected);
+    REQUIRE(recorder->said.size() == 2);
+    CHECK(recorder->said.back().message == QStringLiteral("Read-only: the application locked the keyboard"));
+
+    terminal.writeToScreen("\033[2l"); // the host unlocks
+    CHECK(terminal.allowInput());
+}
+
 // {{{ What a session asks of its VIEW
 //
 // Every case above runs display-less, because until session::DisplaySurface existed the only view was a
@@ -5179,6 +5567,55 @@ TEST_CASE("TerminalSession tells the surface which screen buffer is live", "[con
 
     held->terminal().writeToScreen("\033[?1049l");
     CHECK(surface.bufferChanges.back() == vtbackend::ScreenType::Primary);
+}
+
+TEST_CASE("TerminalSession tells the surface of the page on display and not of the cursor's page",
+          "[contour][session][view]")
+{
+    // DECPCCM reset: the application writes to page 3 while page 1 stays on display. The scrollbar and the
+    // pointer shape belong to the page on display, so nothing changes until page 3 comes on display.
+    TestApp testApp;
+    auto held = makeSessionWithSurface(testApp.app());
+    auto& surface = *held.surface;
+    REQUIRE(held->getIsScrollbarVisible());
+    surface.bufferChanges.clear();
+
+    held->terminal().writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, the cursor to page 3
+    CHECK(surface.bufferChanges.empty());
+    CHECK(held->getIsScrollbarVisible());
+    surface.cursorShapes.clear();
+    held->sendFocusInEvent();
+    REQUIRE_FALSE(surface.cursorShapes.empty());
+    CHECK(surface.cursorShapes.back() == contour::input::MouseCursorShape::IBeam);
+
+    surface.bufferChanges.clear();
+    held->terminal().writeToScreen("\033[?64h"); // DECPCCM set: page 3 comes on display
+    CHECK(surface.bufferChanges == std::vector { vtbackend::ScreenType::Alternate });
+    CHECK_FALSE(held->getIsScrollbarVisible());
+    surface.cursorShapes.clear();
+    held->sendFocusInEvent();
+    REQUIRE_FALSE(surface.cursorShapes.empty());
+    CHECK(surface.cursorShapes.back() == contour::input::MouseCursorShape::Arrow);
+}
+
+TEST_CASE("TerminalSession: the wheel glides over the page on display while the cursor writes to another",
+          "[contour][session][input]")
+{
+    // Page 1 is on display with its history while the application writes to page 3 (DECPCCM reset): a wheel
+    // notch takes the smooth-scrolling path over page 1, as it does with the cursor there.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    REQUIRE(pane->terminal().settings().smoothScrolling);
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 40))
+        pane->terminal().writeToScreen("line\r\n");
+    pane->terminal().writeToScreen("\033[?64l\033[3 P"); // DECPCCM reset, the cursor to page 3
+    REQUIRE(pane->terminal().displayedPageIndex() == vtbackend::PageIndex(0));
+
+    auto wheel = QWheelEvent { QPointF(10, 10), QPointF(10, 10), QPoint(0, 0),      QPoint(0, 120),
+                               Qt::NoButton,    Qt::NoModifier,  Qt::NoScrollPhase, false };
+    contour::session::sendWheelEvent(&wheel, *pane);
+
+    CHECK(pane->terminal().isMomentumScrollActive());
 }
 
 TEST_CASE("TerminalSession::attachDisplay releases a surface it is taking the session from",
@@ -7543,6 +7980,46 @@ TEST_CASE("TerminalSession: the context menu pins the command block that was rig
     QGuiApplication::clipboard()->clear();
 }
 
+TEST_CASE("TerminalSession: the context menu offers a line's fold and block only while the pointer is on it",
+          "[contour][session][contextmenu][semanticblocks]")
+{
+    // The rows act on the line the pointer is on, and there is none while the pointer is on no cell: not the
+    // top-left one before any pointer event, nor the one it left. A menu opened from the keyboard then
+    // offers no line's fold or block.
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    writeFinishedBlock(*session, "make", "built\r\nlinked\r\n");
+    auto const* make = session->terminal().commandBlockAt(vtbackend::LineOffset(0));
+    REQUIRE(make != nullptr);
+    REQUIRE(session->terminal().foldContaining(vtbackend::LineOffset(0)).has_value());
+    auto const onTheOutput = vtbackend::CellLocation { vtbackend::LineOffset(1), vtbackend::ColumnOffset(0) };
+
+    SECTION("before any pointer event")
+    {
+        auto const state = session->contextMenuState();
+        CHECK_FALSE(state.foldLine.has_value());
+        CHECK_FALSE(state.blockUnderCursor.has_value());
+    }
+
+    SECTION("with the pointer on the block's output")
+    {
+        session->sendMouseMoveEvent(Modifiers {}, onTheOutput, vtbackend::PixelCoordinate {});
+        auto const state = session->contextMenuState();
+        CHECK(state.foldLine == vtbackend::LineOffset(1));
+        REQUIRE(state.blockUnderCursor.has_value());
+        CHECK(state.blockUnderCursor->id == make->id);
+    }
+
+    SECTION("once the pointer has left the grid")
+    {
+        session->sendMouseMoveEvent(Modifiers {}, onTheOutput, vtbackend::PixelCoordinate {});
+        session->onPointerLeft();
+        auto const state = session->contextMenuState();
+        CHECK_FALSE(state.foldLine.has_value());
+        CHECK_FALSE(state.blockUnderCursor.has_value());
+    }
+}
+
 TEST_CASE("TerminalSession: a right-click on an output tail the next prompt shares pins the prompt's block",
           "[contour][session][contextmenu][semanticblocks]")
 {
@@ -8911,7 +9388,7 @@ TEST_CASE("TerminalSession: key bindings toggled off with resize reports echoed 
 TEST_CASE("TerminalSession: input protection toggled on with resize reports echoed locally does not deadlock",
           "[contour][session][input]")
 {
-    // Protecting the input locks the keyboard (KAM), which puts the indicator status line up.
+    // Protecting the input locks the keyboard with the user's lock, which puts the indicator status line up.
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     session->terminal().setStatusDisplay(vtbackend::StatusDisplayType::None);
@@ -8922,6 +9399,31 @@ TEST_CASE("TerminalSession: input protection toggled on with resize reports echo
 
     CHECK_FALSE(session->terminal().allowInput());
     CHECK(reportedItsPage(*session));
+}
+
+TEST_CASE("TerminalSession: toggling the status line selects its type and leaves a host-writable one",
+          "[contour][session]")
+{
+    // DEC STD 070 ch. 14 §3 DECSSDT: "The type of Status Line can also be changed through a Set-Up field",
+    // and the user's toggle is that field; §2.3: "If the Status Display Type is chosen to be something other
+    // than "Host Writable", the Status Display will be exited". So the toggle that hides the host-writable
+    // status line leaves it, and DECSASD can no longer select it.
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen("\033[2$~"); // DECSSDT: the host-writable status line
+    session->executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+    terminal.writeToScreen("\033[1$}"); // DECSASD: write to it
+    REQUIRE(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
+
+    CHECK((*session)(contour::actions::ToggleStatusLine {})); // the indicator instead
+    CHECK(terminal.statusDisplayType() == vtbackend::StatusDisplayType::Indicator);
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+
+    terminal.writeToScreen("\033[1$}X"); // DECSASD again, and text
+    CHECK(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
+    CHECK(terminal.primaryScreen().renderMainPageText().contains('X'));
+    CHECK_FALSE(terminal.hostWritableStatusLineDisplay().renderMainPageText().contains('X'));
 }
 
 TEST_CASE("TerminalSession: the status line toggled with resize reports echoed locally does not deadlock",
@@ -9195,6 +9697,57 @@ TEST_CASE("TerminalSession: a selection report the wheel raises reaches the PTY 
 
     INFO("queued: " << core::escape(pane->terminal().peekInput()));
     CHECK(mockPtyOf(*pane).stdinBuffer().contains("\033[>"));
+}
+
+TEST_CASE("TerminalSession: a horizontal wheel notch is reported at the cell it turns over",
+          "[contour][session][input]")
+{
+    // A notch is not a press at a new spot, but it happens where the pointer is, and its event says where
+    // that is. Remembered positions are not the pointer's: before any pointer event the terminal's is only
+    // its default, the top-left cell, and once the pointer has left the grid it is the cell it left from.
+    TestApp testApp;
+    auto pane = makeSessionWithSurface(testApp.app());
+    pane->terminal().writeToScreen("\033[?1000h\033[?1006h"); // button events, SGR encoding
+    auto const& cellSize = pane.surface->cellSizeValue;
+    auto const pixelCentreOf = [&](vtbackend::CellLocation cell) {
+        return QPointF((unbox<double>(cell.column) + 0.5) * unbox<double>(cellSize.width),
+                       (unbox<double>(cell.line) + 0.5) * unbox<double>(cellSize.height));
+    };
+    auto const underTheWheel =
+        vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = vtbackend::ColumnOffset(3) };
+
+    SECTION("before any pointer event")
+    {
+    }
+
+    SECTION("once the pointer has left the grid")
+    {
+        pane->terminal().sendMouseMoveEvent(Modifiers {},
+                                            vtbackend::CellLocation { .line = vtbackend::LineOffset(5),
+                                                                      .column = vtbackend::ColumnOffset(7) },
+                                            vtbackend::PixelCoordinate {},
+                                            false);
+        pane->terminal().sendMouseLeaveEvent();
+    }
+
+    SECTION("with the pointer moved onto that cell")
+    {
+        pane->terminal().sendMouseMoveEvent(
+            Modifiers {}, underTheWheel, vtbackend::PixelCoordinate {}, false);
+    }
+
+    discardWrittenInput(*pane);
+    auto const position = pixelCentreOf(underTheWheel);
+    auto wheel = QWheelEvent { position,     position,       QPoint(0, 0),      QPoint(120, 0),
+                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false };
+    contour::session::sendWheelEvent(&wheel, *pane);
+
+    auto const& reports = mockPtyOf(*pane).stdinBuffer();
+    INFO("reports: " << core::escape(reports));
+    CHECK(reports.contains(";4;3M"));
+    CHECK_FALSE(reports.contains(";1;1M"));
+    CHECK_FALSE(reports.contains(";8;6M"));
+    CHECK(pane->terminal().currentMouseGridPosition() == underTheWheel);
 }
 
 TEST_CASE("TerminalSession: a desktop notification's answer reaches the PTY at once",

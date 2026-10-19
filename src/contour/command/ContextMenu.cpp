@@ -235,8 +235,8 @@ namespace
 
             Table::separator(),
 
-            // Read-only == input protection (KAM). The check reflects the pane's state at open time;
-            // picking it runs ToggleInputProtection, which flips it for the next open.
+            // Read-only == the user's read-only lock (not the host's KAM). The check reflects the pane's
+            // state at open time; picking it runs ToggleInputProtection, which flips it for the next open.
             Table::command(ToggleInputProtection {}, "Read-Only Mode").checkedWhen(inputProtected),
 
             Table::separator(),

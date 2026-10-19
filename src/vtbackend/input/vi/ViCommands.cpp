@@ -114,10 +114,7 @@ namespace
 
     CellLocation getRightMostNonEmptyCellLocation(Terminal const& terminal, LineOffset lineOffset) noexcept
     {
-        if (terminal.isPrimaryScreen())
-            return terminal.primaryScreen().grid().rightMostNonEmptyAt(lineOffset);
-        else
-            return terminal.alternateScreen().grid().rightMostNonEmptyAt(lineOffset);
+        return terminal.displayedPage().grid().rightMostNonEmptyAt(lineOffset);
     }
 
     constexpr std::optional<std::pair<char, bool>> matchingPairOfChar(char32_t input) noexcept
@@ -169,6 +166,11 @@ namespace
 } // namespace
 
 using namespace std;
+
+Screen const& ViCommands::viewedPage() const noexcept
+{
+    return _terminal->displayedPage();
+}
 
 ViCommands::ViCommands(Terminal& theTerminal): _terminal { &theTerminal }
 {
@@ -242,40 +244,42 @@ void ViCommands::modeChanged(ViMode mode)
             _terminal->setCursorShape(_lastCursorShape);
             _terminal->viewport().forceScrollToBottom();
             _terminal->clearSearch();
-            _terminal->popStatusDisplay();
+            _terminal->popStatusDisplay(StatusNotice::ViMode);
             break;
         case ViMode::Normal:
             _lastCursorShape = _terminal->cursorShape();
             _lastCursorVisible = _terminal->isModeEnabled(DECMode::VisibleCursor);
             _terminal->setMode(DECMode::VisibleCursor, true);
 
+            // Where the terminal cursor is on its page -- a position every page has, as all share one size --
+            // not the status line's, should DECSASD have selected it.
             if (_lastMode == ViMode::Insert)
-                cursorPosition = _terminal->currentScreen().cursor().position;
+                cursorPosition = _terminal->pageAt(_terminal->cursorPageIndex()).cursor().position;
             if (_terminal->selectionAvailable())
                 _terminal->clearSelection();
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::Visual:
             _terminal->setSelector(make_unique<LinearSelection>(
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::VisualLine:
             _terminal->setSelector(make_unique<FullLineSelection>(
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::VisualBlock:
             _terminal->setSelector(make_unique<RectangularSelection>(
                 _terminal->selectionHelper(), selectFrom, _terminal->selectionUpdatedHelper()));
             (void) _terminal->selector()->extend(cursorPosition);
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
         case ViMode::Hint:
             // Keep cursor visible and status indicator, similar to Normal mode.
-            _terminal->pushStatusDisplay(StatusDisplayType::Indicator);
+            _terminal->pushStatusDisplay(StatusNotice::ViMode, StatusDisplayType::Indicator);
             break;
     }
 
@@ -564,9 +568,8 @@ CellLocation ViCommands::prev(CellLocation location) const noexcept
     if (location.column.value > 0)
         return { .line = location.line, .column = location.column - 1 };
 
-    auto const topLineOffset = _terminal->isPrimaryScreen()
-                                   ? -boxed_cast<LineOffset>(_terminal->primaryScreen().historyLineCount())
-                                   : LineOffset(0);
+    // Every page but the primary one has no history, and so stops at row 0.
+    auto const topLineOffset = -boxed_cast<LineOffset>(viewedPage().historyLineCount());
     if (location.line > topLineOffset)
     {
         // The previous VISIBLE line: wrapping backwards off the start of a line must not drop the
@@ -585,7 +588,7 @@ CellLocation ViCommands::next(CellLocation location) const noexcept
     auto const rightMargin = _terminal->pageSize().columns.as<ColumnOffset>() - 1;
     if (location.column < rightMargin)
     {
-        auto const width = max(uint8_t { 1 }, _terminal->currentScreen().cellWidthAt(location));
+        auto const width = max(uint8_t { 1 }, viewedPage().cellWidthAt(location));
         return { .line = location.line, .column = location.column + ColumnOffset::cast_from(width) };
     }
 
@@ -600,7 +603,8 @@ CellLocation ViCommands::next(CellLocation location) const noexcept
 
 CellLocation ViCommands::findMatchingPairFrom(CellLocation location) const noexcept
 {
-    auto const& cell = _terminal->primaryScreen().at(cursorPosition);
+    // The page the match is then searched on (compareCellTextAt), which is not always the primary one.
+    auto const& cell = viewedPage().at(cursorPosition);
     if (cell.codepointCount() != 1)
         return location;
 
@@ -692,7 +696,7 @@ CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char lef
 CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
                                                    TextObject textObject) const noexcept
 {
-    auto const gridTop = -_terminal->currentScreen().historyLineCount().as<LineOffset>();
+    auto const gridTop = -viewedPage().historyLineCount().as<LineOffset>();
     auto const gridBottom = _terminal->pageSize().lines.as<LineOffset>() - 1;
     auto const rightMargin = _terminal->pageSize().columns.as<ColumnOffset>() - 1;
     auto a = cursorPosition;
@@ -705,14 +709,12 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
         case TextObject::DoubleQuotes: return expandMatchingPair(scope, '"', '"');
         case TextObject::LineMark:
             // Walk the line upwards until we find a marked line.
-            while (a.line > gridTop
-                   && !_terminal->currentScreen().isLineFlagEnabledAt(a.line, NavigationMarkFlags))
+            while (a.line > gridTop && !viewedPage().isLineFlagEnabledAt(a.line, NavigationMarkFlags))
                 --a.line;
             if (scope == TextObjectScope::Inner && a != cursorPosition)
                 ++a.line;
             // Walk the line downwards until we find a marked line.
-            while (b.line < gridBottom
-                   && !_terminal->currentScreen().isLineFlagEnabledAt(b.line, NavigationMarkFlags))
+            while (b.line < gridBottom && !viewedPage().isLineFlagEnabledAt(b.line, NavigationMarkFlags))
                 ++b.line;
             if (scope == TextObjectScope::Inner && b != cursorPosition)
                 --b.line;
@@ -721,9 +723,9 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
             b.column = rightMargin;
             break;
         case TextObject::Paragraph:
-            while (a.line > gridTop && !_terminal->currentScreen().isLineEmpty(a.line - 1))
+            while (a.line > gridTop && !viewedPage().isLineEmpty(a.line - 1))
                 --a.line;
-            while (b.line < gridBottom && !_terminal->currentScreen().isLineEmpty(b.line))
+            while (b.line < gridBottom && !viewedPage().isLineEmpty(b.line))
                 ++b.line;
             break;
         case TextObject::RoundBrackets: return expandMatchingPair(scope, '(', ')');
@@ -735,9 +737,9 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
             break;
         }
         case TextObject::BigWord: {
-            while (a.column.value > 0 && !_terminal->currentScreen().isCellEmpty(prev(a)))
+            while (a.column.value > 0 && !viewedPage().isCellEmpty(prev(a)))
                 a = prev(a);
-            while (b.column < rightMargin && !_terminal->currentScreen().isCellEmpty(next(b)))
+            while (b.column < rightMargin && !viewedPage().isCellEmpty(next(b)))
                 b = next(b);
             break;
         }
@@ -762,20 +764,20 @@ CellLocationRange ViCommands::translateToCellRange(ViMotion motion, unsigned cou
 CellLocation ViCommands::findBeginOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept
 {
     auto const firstAddressableLocation =
-        CellLocation { .line = -LineOffset::cast_from(_terminal->currentScreen().historyLineCount()),
+        CellLocation { .line = -LineOffset::cast_from(viewedPage().historyLineCount()),
                        .column = ColumnOffset(0) };
 
     auto current = location;
     auto leftLocation = prev(current);
-    auto leftClass = wordSkipClass(_terminal->currentScreen().cellTextAt(leftLocation));
+    auto leftClass = wordSkipClass(viewedPage().cellTextAt(leftLocation));
     auto continuationClass =
-        jumpOver == JumpOver::Yes ? leftClass : wordSkipClass(_terminal->currentScreen().cellTextAt(current));
+        jumpOver == JumpOver::Yes ? leftClass : wordSkipClass(viewedPage().cellTextAt(current));
 
     while (current != firstAddressableLocation && leftClass == continuationClass)
     {
         current = leftLocation;
         leftLocation = prev(current);
-        leftClass = wordSkipClass(_terminal->currentScreen().cellTextAt(leftLocation));
+        leftClass = wordSkipClass(viewedPage().cellTextAt(leftLocation));
         if (continuationClass == WordSkipClass::Whitespace && leftClass != WordSkipClass::Whitespace)
             continuationClass = leftClass;
     }
@@ -817,7 +819,7 @@ CellLocation ViCommands::snapToCellRight(CellLocation location) const noexcept
 
 bool ViCommands::compareCellTextAt(CellLocation position, char32_t codepoint) const noexcept
 {
-    return _terminal->currentScreen().compareCellTextAt(position, codepoint);
+    return viewedPage().compareCellTextAt(position, codepoint);
 }
 
 LineOffset ViCommands::stepVisible(LineOffset line, VerticalDirection direction) const noexcept
@@ -866,7 +868,7 @@ CellLocation ViCommands::revealOrSnap(CellLocation position)
 
 CellLocation ViCommands::globalCharUp(CellLocation location, char ch, unsigned count) const noexcept
 {
-    auto const pageTop = -_terminal->currentScreen().historyLineCount().as<LineOffset>();
+    auto const pageTop = -viewedPage().historyLineCount().as<LineOffset>();
     auto result = CellLocation { .line = location.line, .column = ColumnOffset(0) };
     while (count > 0)
     {
@@ -874,7 +876,7 @@ CellLocation ViCommands::globalCharUp(CellLocation location, char ch, unsigned c
             result.line = stepVisible(result.line, VerticalDirection::Up);
         while (result.line > pageTop)
         {
-            auto const& line = _terminal->currentScreen().lineTextAt(result.line, false, true);
+            auto const& line = viewedPage().lineTextAt(result.line, false, true);
             if (line.size() == 1 && line[0] == ch)
                 break;
             // Stepping by VISIBLE lines, so the walk skips a collapsed block whole rather than
@@ -898,7 +900,7 @@ CellLocation ViCommands::globalCharDown(CellLocation location, char ch, unsigned
             result.line = stepVisible(result.line, VerticalDirection::Down);
         while (result.line < pageBottom)
         {
-            auto const& line = _terminal->currentScreen().lineTextAt(result.line, false, true);
+            auto const& line = viewedPage().lineTextAt(result.line, false, true);
             if (line.size() == 1 && line[0] == ch)
                 break;
             if (!tryStepVisible(result.line, VerticalDirection::Down))
@@ -946,11 +948,10 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
         case ViMotion::FileBegin: // gg
             // Snapped DOWNWARDS: the oldest addressable line may itself be inside a collapsed block,
             // and the top of the document the user can see is the first line below it.
-            return snapToCell(
-                { .line = _terminal->snapToVisibleLine(
-                      LineOffset::cast_from(-_terminal->currentScreen().historyLineCount().as<int>()),
-                      VerticalDirection::Down),
-                  .column = ColumnOffset(0) });
+            return snapToCell({ .line = _terminal->snapToVisibleLine(
+                                    LineOffset::cast_from(-viewedPage().historyLineCount().as<int>()),
+                                    VerticalDirection::Down),
+                                .column = ColumnOffset(0) });
         case ViMotion::FileEnd: // G
             return addJumpHistory(
                 snapToCell({ .line = _terminal->snapToVisibleLine(
@@ -974,7 +975,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
         {
             auto result = CellLocation { .line = cursorPosition.line, .column = ColumnOffset(0) };
             while (result.column < _terminal->pageSize().columns.as<ColumnOffset>() - 1
-                   && _terminal->currentScreen().isCellEmpty(result))
+                   && viewedPage().isCellEmpty(result))
                 ++result.column;
             return result;
         }
@@ -1004,14 +1005,13 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                      .column = cursorPosition.column };
         case ViMotion::ParagraphBackward: // {
         {
-            auto const pageTop = -_terminal->currentScreen().historyLineCount().as<LineOffset>();
+            auto const pageTop = -viewedPage().historyLineCount().as<LineOffset>();
             auto prev = CellLocation { .line = cursorPosition.line, .column = ColumnOffset(0) };
             if (prev.line.value > 0)
                 prev.line = stepVisible(prev.line, VerticalDirection::Up);
             auto current = prev;
             while (current.line > pageTop
-                   && (!_terminal->currentScreen().isLineEmpty(current.line)
-                       || _terminal->currentScreen().isLineEmpty(prev.line)))
+                   && (!viewedPage().isLineEmpty(current.line) || viewedPage().isLineEmpty(prev.line)))
             {
                 prev.line = current.line;
                 if (!tryStepVisible(current.line, VerticalDirection::Up))
@@ -1029,15 +1029,15 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             return addJumpHistory(globalCharDown(cursorPosition, '}', count));
         case ViMotion::LineMarkUp: // [m
         {
-            auto const gridTop = -_terminal->currentScreen().historyLineCount().as<LineOffset>();
+            auto const gridTop = -viewedPage().historyLineCount().as<LineOffset>();
             auto result = CellLocation { .line = cursorPosition.line, .column = ColumnOffset(0) };
             while (count > 0)
             {
                 if (result.line > gridTop
-                    && _terminal->currentScreen().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
+                    && viewedPage().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
                     result.line = stepVisible(result.line, VerticalDirection::Up);
                 while (result.line > gridTop
-                       && !_terminal->currentScreen().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
+                       && !viewedPage().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
                 {
                     if (!tryStepVisible(result.line, VerticalDirection::Up))
                         break;
@@ -1056,7 +1056,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                     result.line = stepVisible(result.line, VerticalDirection::Down);
                 while (result.line < pageBottom)
                 {
-                    if (_terminal->currentScreen().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
+                    if (viewedPage().isLineFlagEnabledAt(result.line, NavigationMarkFlags))
                         break;
                     if (!tryStepVisible(result.line, VerticalDirection::Down))
                         break;
@@ -1073,8 +1073,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                 prev.line = stepVisible(prev.line, VerticalDirection::Down);
             auto current = prev;
             while (current.line < pageBottom
-                   && (!_terminal->currentScreen().isLineEmpty(current.line)
-                       || _terminal->currentScreen().isLineEmpty(prev.line)))
+                   && (!viewedPage().isLineEmpty(current.line) || viewedPage().isLineEmpty(prev.line)))
             {
                 prev.line = current.line;
                 if (!tryStepVisible(current.line, VerticalDirection::Down))
@@ -1134,8 +1133,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                 prev.column++;
             auto current = prev;
             while (current.column + 1 < rightMargin
-                   && (_terminal->currentScreen().isCellEmpty(current)
-                       || !_terminal->currentScreen().isCellEmpty(prev)))
+                   && (viewedPage().isCellEmpty(current) || !viewedPage().isCellEmpty(prev)))
             {
                 prev = current;
                 current.column++;
@@ -1151,8 +1149,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
                 prev.column++;
             auto current = prev;
             while (current.column + 1 < rightMargin
-                   && (!_terminal->currentScreen().isCellEmpty(current)
-                       || _terminal->currentScreen().isCellEmpty(prev)))
+                   && (!viewedPage().isCellEmpty(current) || viewedPage().isCellEmpty(prev)))
             {
                 prev.column = current.column;
                 current.column++;
@@ -1167,8 +1164,7 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             auto current = prev;
 
             while (current.column.value > 0
-                   && (!_terminal->currentScreen().isCellEmpty(current)
-                       || _terminal->currentScreen().isCellEmpty(prev)))
+                   && (!viewedPage().isCellEmpty(current) || viewedPage().isCellEmpty(prev)))
             {
                 prev.column = current.column;
                 current.column--;
@@ -1186,11 +1182,11 @@ CellLocation ViCommands::translateToCellLocationAndRecord(ViMotion motion, unsig
             auto result = cursorPosition;
             while (count > 0)
             {
-                auto initialClass = wordSkipClass(_terminal->currentScreen().cellTextAt(result));
+                auto initialClass = wordSkipClass(viewedPage().cellTextAt(result));
                 result = next(result);
                 while (result != lastAddressableLocation
-                       && shouldSkipForUntilWordBegin(
-                           wordSkipClass(_terminal->currentScreen().cellTextAt(result)), initialClass))
+                       && shouldSkipForUntilWordBegin(wordSkipClass(viewedPage().cellTextAt(result)),
+                                                      initialClass))
                     result = next(result);
                 --count;
             }
@@ -1244,7 +1240,7 @@ optional<CellLocation> ViCommands::toCharRight(CellLocation startPosition) const
         // if on wrong line
         if (result.line != startPosition.line)
             return std::nullopt;
-        if (_terminal->currentScreen().compareCellTextAt(result, _lastChar))
+        if (viewedPage().compareCellTextAt(result, _lastChar))
             return result;
         // if reached end of the line
         if (result.column == rightMargin)
@@ -1261,7 +1257,7 @@ optional<CellLocation> ViCommands::toCharLeft(CellLocation startPosition) const 
     {
         if (result.line != startPosition.line)
             return std::nullopt;
-        if (_terminal->currentScreen().compareCellTextAt(result, _lastChar))
+        if (viewedPage().compareCellTextAt(result, _lastChar))
             return result;
         result = prev(result);
     }

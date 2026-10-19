@@ -4,6 +4,14 @@ endif()
 
 include(PedanticCompiler)
 
+# Coverage instruments the first-party code under src/ only, never the fetched third-party code. Instrumented,
+# a library's translation units built for a CPU extension -- libunicode compiles its scanner for AVX-512 -- reset
+# their counters with that extension's instructions, and the runtime resets every unit's counters in each fork
+# child (__gcov_fork): on a CPU without the extension every child died of SIGILL before it could exec.
+if(CONTOUR_CODE_COVERAGE_ENABLED)
+    add_compile_options(-g --coverage)
+endif()
+
 add_subdirectory(crispy)
 add_subdirectory(text_shaper)
 add_subdirectory(vtpty)

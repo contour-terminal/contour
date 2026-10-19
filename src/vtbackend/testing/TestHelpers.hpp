@@ -81,7 +81,7 @@ template <typename S>
 
     vtbackend::CellLocation lastPos = {};
     size_t lastCount = 0;
-    for (vtbackend::RenderCell const& cell: renderBuffer.buffer->cells)
+    for (vtbackend::RenderCell const& cell: renderBuffer.get().cells)
     {
         auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
         auto& currentLine = lines.at(unbox<size_t>(cell.position.line));
@@ -92,7 +92,7 @@ template <typename S>
         lastPos = cell.position;
         lastCount = 1;
     }
-    for (vtbackend::RenderLine const& line: renderBuffer.buffer->lines)
+    for (vtbackend::RenderLine const& line: renderBuffer.get().lines)
     {
         auto& currentLine = lines.at(unbox<size_t>(line.lineOffset));
         currentLine = unicode::convert_to<char>(std::u32string_view(line.text));
@@ -234,16 +234,72 @@ void printLines(MockTerm<T>& mt, std::string_view prefix, int count)
     mt.writeToScreen(text);
 }
 
+/// Moves the pointer over @p column of row @p line, as hovering would.
+/// @param mt     The terminal.
+/// @param line   The screen row.
+/// @param column The column.
+/// @param pixels Where that is in device pixels, from the grid's top left.
+template <typename T = vtpty::MockPty>
+void pointAt(MockTerm<T>& mt, int line, int column, PixelCoordinate pixels = {})
+{
+    mt.terminal.sendMouseMoveEvent(Modifier::None,
+                                   CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) },
+                                   pixels,
+                                   /*uiHandledHint=*/false);
+}
+
+/// Presses @p button over @p column of row @p line.
+/// @param mt     The terminal.
+/// @param button The button.
+/// @param line   The screen row.
+/// @param column The column.
+/// @param pixels Where that is in device pixels, from the grid's top left.
+template <typename T = vtpty::MockPty>
+void pressAt(MockTerm<T>& mt, MouseButton button, int line, int column, PixelCoordinate pixels = {})
+{
+    (void) mt.terminal.sendMousePressEvent(
+        Modifier::None,
+        button,
+        CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) },
+        pixels,
+        /*uiHandledHint=*/false);
+}
+
+/// Releases @p button wherever the pointer is.
+/// @param mt     The terminal.
+/// @param button The button.
+template <typename T = vtpty::MockPty>
+void release(MockTerm<T>& mt, MouseButton button)
+{
+    (void) mt.terminal.sendMouseReleaseEvent(
+        Modifier::None, button, PixelCoordinate {}, /*uiHandledHint=*/false);
+}
+
 /// Moves the cursor to page 3 with DECPCCM reset, so page 0, the primary screen, stays on display: the page
-/// on display and the cursor's part ways, and the viewport, which follows the cursor's page, may not scroll.
+/// on display and the cursor's part ways. The viewport, the window onto the page on display, still scrolls.
 /// @param mt The terminal, its cursor on page 0.
 template <typename T = vtpty::MockPty>
 void moveCursorOffTheDisplayedPage(MockTerm<T>& mt)
 {
     mt.writeToScreen("\033[?64l");
-    mt.terminal.setPage(PageIndex(3), /*moveCursorHome*/ true);
+    mt.terminal.setPage(PageIndex(3), PageCursorPlacement::Home);
     REQUIRE(mt.terminal.isAlternateScreen());
     REQUIRE(mt.terminal.foldingAppliesToDisplayedPage());
+}
+
+/// Puts page 3 on display, then brings the cursor back to page 0 with DECPCCM reset: the cursor writes to the
+/// primary screen while a page with no history is on display, so the viewport, the window onto it, may not
+/// scroll.
+/// @param mt The terminal, its cursor on page 0.
+template <typename T = vtpty::MockPty>
+void moveDisplayOffTheCursorsPage(MockTerm<T>& mt)
+{
+    mt.writeToScreen("\033[?64h");
+    mt.terminal.setPage(PageIndex(3), PageCursorPlacement::Home);
+    mt.writeToScreen("\033[?64l");
+    mt.terminal.setPage(PageIndex(0), PageCursorPlacement::PagesOwn);
+    REQUIRE(mt.terminal.isPrimaryScreen());
+    REQUIRE_FALSE(mt.terminal.foldingAppliesToDisplayedPage());
 }
 
 /// Collapses the one fold @p mt has, through the fold state as a click would leave it.
@@ -431,6 +487,22 @@ template <typename T = vtpty::MockPty>
         .value_or("<error>");
 }
 
+/// The cells the terminal renders on screen row @p row, by column.
+/// @param mock The terminal; its render buffer is refreshed first.
+/// @param row The screen row.
+/// @return The row's render cells, keyed by column.
+template <typename T = vtpty::MockPty>
+[[nodiscard]] std::map<int, RenderCell> renderedRow(MockTerm<T>& mock, LineOffset row)
+{
+    mock.terminal.refreshRenderBuffer();
+    auto const buffer = mock.terminal.renderBuffer();
+    auto cells = std::map<int, RenderCell> {};
+    for (auto const& cell: buffer.get().cells)
+        if (cell.position.line == row)
+            cells.emplace(unbox<int>(cell.position.column), cell);
+    return cells;
+}
+
 /// @return @p directory as OSC 7 reports it.
 [[nodiscard]] inline std::string fileUrlOf(std::filesystem::path const& directory)
 {
@@ -502,17 +574,41 @@ inline void pauseAfter(size_t rounds)
     return steps;
 }
 
+// Whether this translation unit is built with ThreadSanitizer: GCC says so with __SANITIZE_THREAD__,
+// clang with __has_feature(thread_sanitizer). Local to this header; undefined right below.
+#ifdef __SANITIZE_THREAD__
+    #define VTBACKEND_TEST_HELPERS_TSAN
+#endif
+#ifdef __has_feature
+    #if __has_feature(thread_sanitizer)
+        #define VTBACKEND_TEST_HELPERS_TSAN
+    #endif
+#endif
+
+/// How many times longer a budget for work that must finish is in this build than in an unsanitized one.
+/// ThreadSanitizer runs code 5 to 15 times slower (its documentation), so a budget sized for an unsanitized
+/// run can run out while the work is merely slow: the upper end of that range. AddressSanitizer's slowdown,
+/// about 2x, fits the budgets as they are. A real deadlock still fails, only later.
+#ifdef VTBACKEND_TEST_HELPERS_TSAN
+inline constexpr auto SanitizerSlowdown = 15;
+#else
+inline constexpr auto SanitizerSlowdown = 1;
+#endif
+#undef VTBACKEND_TEST_HELPERS_TSAN
+
 /// Runs @p body, and ends the test run with a message should it not return within @p budget: a thread that
 /// deadlocked on the terminal lock holds it for good, so the case could neither fail nor unwind.
-/// @param budget How long @p body may take.
+/// @param budget How long @p body may take in an unsanitized build; a sanitized one stretches it by
+///               SanitizerSlowdown.
 /// @param body What might deadlock.
 inline void failOnDeadlock(std::chrono::milliseconds budget, std::function<void()> const& body)
 {
-    auto const watchdog = std::jthread { [budget](std::stop_token const& returned) {
+    auto const allowed = budget * SanitizerSlowdown;
+    auto const watchdog = std::jthread { [allowed](std::stop_token const& returned) {
         auto mutex = std::mutex {};
         auto lock = std::unique_lock { mutex };
         auto wake = std::condition_variable_any {};
-        if (wake.wait_for(lock, returned, budget, [&returned] { return returned.stop_requested(); }))
+        if (wake.wait_for(lock, returned, allowed, [&returned] { return returned.stop_requested(); }))
             return;
         std::fputs("Deadlocked: the thread holding the terminal lock took it again.\n", stderr);
         std::_Exit(EXIT_FAILURE);

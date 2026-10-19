@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cerrno>
+#include <cstdint>
 #include <expected>
 #include <system_error>
 
@@ -45,6 +46,32 @@ bool applyTerminalSettings(int fd, termios const& tio);
 
 void saveClose(gsl::not_null<int*> fd) noexcept;
 void saveDup2(int a, int b) noexcept;
+
+/// How closeDescriptorsAbove() finds the descriptors to close, the fastest first.
+enum class DescriptorSweep : std::uint8_t
+{
+    Kernel,  ///< close_range(): the kernel closes them all (Linux 5.9, FreeBSD 12.2, glibc 2.34).
+    Listing, ///< Linux: the open ones, listed from /proc/self/fd with getdents64 into a buffer on the stack.
+    Bounded, ///< Every number up to the limit, open or not.
+};
+
+/// @return One above the highest descriptor this process may open: sysconf(_SC_OPEN_MAX), or 1024 where it
+///         is indeterminate. Read before a fork(): POSIX.1-2008 took sysconf() off the async-signal-safe
+///         list.
+[[nodiscard]] int openDescriptorLimit() noexcept;
+
+/// Closes every descriptor above @p keepFd, for a child between fork() and exec().
+///
+/// Async-signal-safe -- no allocation and no exception: after a fork() in a multi-threaded process the child
+/// may call only async-signal-safe functions (fork(2) NOTES; POSIX XSH fork()). It calls close(), open() and
+/// lseek() of POSIX's async-signal-safe list; close_range() -- the C library's wrapper, or syscall(), which
+/// is not POSIX, where the library has none -- and getdents64 through syscall(): system calls that touch no
+/// library state but errno. A way that is not there -- close_range() before Linux 5.9, /proc/self/fd off
+/// Linux -- hands over to the next.
+/// @param keepFd The highest descriptor kept.
+/// @param limit One above the highest descriptor that can be open, from openDescriptorLimit().
+/// @param first The way tried first; tests force the slower ones with it.
+void closeDescriptorsAbove(int keepFd, int limit, DescriptorSweep first = DescriptorSweep::Kernel) noexcept;
 
 // {{{ impl
 inline termios getTerminalSettings(int fd) noexcept

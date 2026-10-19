@@ -59,21 +59,12 @@ class RecordingExternalLauncher final: public contour::platform::ExternalLaunche
     [[nodiscard]] std::expected<void, contour::platform::SpawnError> runDetached(
         QString const& program, QStringList const& arguments) override
     {
+        if (onLaunch)
+            onLaunch();
         detached.push_back({ program, arguments });
         if (detachedError)
             return std::unexpected(*detachedError);
         return {};
-    }
-
-    [[nodiscard]] std::expected<int, contour::platform::SpawnError> execute(
-        QString const& program, QStringList const& arguments) override
-    {
-        if (onLaunch)
-            onLaunch();
-        executed.push_back({ program, arguments });
-        if (executeError)
-            return std::unexpected(*executeError);
-        return 0;
     }
 
     [[nodiscard]] std::expected<void, contour::platform::SpawnError> runDetachedWithInput(
@@ -89,14 +80,13 @@ class RecordingExternalLauncher final: public contour::platform::ExternalLaunche
 
     std::vector<QUrl> openedUrls;
     std::vector<Execution> detached;
-    std::vector<Execution> executed;
     std::vector<PipedExecution> piped; ///< Every runDetachedWithInput() request, in order.
 
     /// Reads an input file as a request hands it over; unset records no content.
     std::function<std::string(std::filesystem::path const&)> readInput;
 
-    /// Runs as each openUrl() or execute() request arrives, before it is recorded; unset runs nothing. What a
-    /// test checks of the moment something is launched, such as whether a lock is still held then.
+    /// Runs as each openUrl() or runDetached() request arrives, before it is recorded; unset runs nothing.
+    /// What a test checks of the moment something is launched, such as whether a lock is still held then.
     std::function<void()> onLaunch;
 
     /// What openUrl() fails with; empty means it accepts (set one to exercise the error path).
@@ -105,9 +95,6 @@ class RecordingExternalLauncher final: public contour::platform::ExternalLaunche
     /// What runDetached() fails with; empty means the child started. Set one to reach the
     /// "not even the fallback would take it" path.
     std::optional<contour::platform::SpawnError> detachedError;
-
-    /// What execute() fails with; empty means the child ran and exited 0.
-    std::optional<contour::platform::SpawnError> executeError;
 
     /// What runDetachedWithInput() fails with; empty means the child started.
     std::optional<contour::platform::SpawnError> pipedError;

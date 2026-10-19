@@ -438,7 +438,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         if (profile().scrollbar.value().position == config::ScrollBarPosition::Hidden)
             return false;
 
-        if ((_currentScreenType == vtbackend::ScreenType::Alternate)
+        // The page on display: with DECPCCM reset the cursor may write to another page, under nobody's view.
+        if ((_terminal.displayedScreenType() == vtbackend::ScreenType::Alternate)
             && profile().scrollbar.value().hideScrollbarInAltScreen)
             return false;
 
@@ -676,7 +677,6 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     vtpty::Pty& pty() noexcept { return _terminal.device(); }
     vtbackend::Terminal& terminal() noexcept { return _terminal; }
     vtbackend::Terminal const& terminal() const noexcept { return _terminal; }
-    vtbackend::ScreenType currentScreenType() const noexcept { return _currentScreenType; }
 
     /// The session's current working directory, for inheritance when spawning a new tab, window or
     /// split pane from this one. On non-Windows this reads the local Process's working directory (when
@@ -1569,8 +1569,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     // state vars
     //
-    vtbackend::ScreenType _currentScreenType = vtbackend::ScreenType::Primary;
-    vtbackend::CellLocation _currentMousePosition = vtbackend::CellLocation {};
+
+    /// The cell the mouse cursor's shape was last decided for, in main-page rows.
+    ///
+    /// Not the pointer's position, which is the terminal's (Terminal::currentMouseGridPosition()): a press or
+    /// a wheel notch moves that onto a new cell without deciding the shape, so the next move onto that cell
+    /// must still decide it. Read by sendMouseMoveEvent()'s shape decision alone; @ref _isPointerShapeStale
+    /// says when the shape no longer holds even for this cell.
+    vtbackend::CellLocation _pointerShapeCell {};
 
     /// Whether the pointer was last seen over the gutter rather than over the grid.
     ///
@@ -1631,6 +1637,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// GUI thread in setDefaultCursor(). Caching it here rather than reading the pointer-shape stack
     /// back is still the point: that stack belongs to the parser thread.
     std::atomic<std::optional<input::MouseCursorShape>> _applicationPointerShape;
+    /// The type of status display the configuration named when it was last applied; nothing before the first
+    /// application. A reload or profile switch selects the type only where it changes this: a Set-Up change
+    /// of the type (DEC STD 070 ch. 14 §3), which an unchanged field is not.
+    std::optional<vtbackend::StatusDisplayType> _configuredStatusDisplayType;
     bool _allowKeyMappings = true;
     std::unique_ptr<platform::Audio> _audio;
     std::vector<int> _musicalNotesBuffer;

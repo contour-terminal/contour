@@ -20,6 +20,8 @@
 
 #ifdef __linux__
     #include <sys/syscall.h>
+
+    #include <poll.h>
 #endif
 
 namespace vtpty
@@ -42,8 +44,41 @@ namespace
 } // namespace
 #endif
 
-ParkedChild::ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate) noexcept:
-    _pid { pid }, _pidfd { std::move(pidfd) }, _gate { std::move(gate) }
+namespace
+{
+    /// @return Whether the process behind @p pidfd has exited, reaped or not; false when there is no
+    ///         pidfd to ask.
+    [[nodiscard]] bool hasProcessExited([[maybe_unused]] OwnedFd const& pidfd) noexcept
+    {
+#ifdef __linux__
+        // A pidfd becomes readable once its process has exited -- before anyone waited for it, so a
+        // zombie counts as gone -- and never because another process has come to reuse the pid. Not
+        // signal 0, which reaches a zombie: pidfd_send_signal() answers ESRCH only once it was reaped.
+        if (!pidfd.isOpen())
+            return false;
+        auto pollFd = pollfd { .fd = pidfd.get(), .events = POLLIN, .revents = 0 };
+        auto ready = 0;
+        while ((ready = ::poll(&pollFd, 1, 0)) < 0 && errno == EINTR)
+            ;
+        return ready > 0 && (pollFd.revents & POLLIN) != 0;
+#else
+        return false;
+#endif
+    }
+} // namespace
+
+UnplacedChild::UnplacedChild(int pid, OwnedFd pidfd, ProcessRole role) noexcept:
+    _pid { pid }, _pidfd { std::move(pidfd) }, _role { role }
+{
+}
+
+bool UnplacedChild::hasExited() const noexcept
+{
+    return hasProcessExited(_pidfd);
+}
+
+ParkedChild::ParkedChild(int pid, OwnedFd pidfd, OwnedFd gate, ProcessRole role) noexcept:
+    _pid { pid }, _pidfd { std::move(pidfd) }, _gate { std::move(gate) }, _role { role }
 {
 }
 
@@ -54,14 +89,14 @@ ParkedChild::~ParkedChild()
 
 bool ParkedChild::hasExited() const noexcept
 {
-#if defined(__linux__) && defined(SYS_pidfd_send_signal)
-    // Signal 0 checks without sending; a pidfd answers ESRCH once its process has exited, reaped or
-    // not, and never for a process that merely reuses the pid.
-    return _pidfd.isOpen() && ::syscall(SYS_pidfd_send_signal, _pidfd.get(), 0, nullptr, 0) < 0
-           && errno == ESRCH;
-#else
-    return false;
-#endif
+    return hasProcessExited(_pidfd);
+}
+
+UnplacedChild ParkedChild::releaseUnplaced() noexcept
+{
+    auto unplaced = UnplacedChild { _pid, std::move(_pidfd), _role };
+    release();
+    return unplaced;
 }
 
 void ParkedChild::release() noexcept
@@ -97,7 +132,23 @@ std::expected<Gate, std::error_code> makeGate()
     #endif
     return gate;
 }
+
+void awaitGateRelease(int fd) noexcept
+{
+    auto byte = char {};
+    while (::read(fd, &byte, 1) < 0 && errno == EINTR)
+        ;
+}
 #endif
+
+OwnedFd openPidFd([[maybe_unused]] int pid) noexcept
+{
+#if defined(__linux__) && defined(SYS_pidfd_open)
+    return OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, pid, 0)) };
+#else
+    return OwnedFd {};
+#endif
+}
 
 namespace
 {

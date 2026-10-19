@@ -120,7 +120,7 @@ TEST_CASE("ScrollbarMarks.userMarks.theAlternateScreenKeepsItsMarksToItself", "[
         REQUIRE(mc.terminal.userMarks().ids().size() == 1);
         auto const marked = *mc.terminal.userMarks().ids().begin();
 
-        mc.writeToScreen("\033[?1049hvim\r\n");
+        mc.writeToScreen("\033[?1049h\033[Hvim\r\n");
         enterNormalModeAtTop(mc);
         REQUIRE(mc.terminal.currentScreen().grid().stableLineIdOf(LineOffset(0)) == marked);
         mc.sendCharSequence("mmmm");
@@ -862,11 +862,11 @@ TEST_CASE("ScrollbarMarks.reveal.anEvictedLineIsRefused", "[scrollbar-marks]")
     CHECK(mc.terminal.viewport().scrollOffset() == before);
 }
 
-TEST_CASE("ScrollbarMarks.reveal.theCursorOnAnotherPageIsRefused", "[scrollbar-marks]")
+TEST_CASE("ScrollbarMarks.reveal.anotherPageOnDisplayIsRefused", "[scrollbar-marks]")
 {
-    // DECPCCM reset: the cursor moves to page 3 while page 0 stays on display. The viewport follows the
-    // cursor's page and may not scroll, so a tick drawn before the cursor left is refused when clicked --
-    // before it opens the fold it would have revealed.
+    // DECPCCM reset: page 3 is on display while the cursor writes to page 0. The viewport is the window onto
+    // page 3, which has no history, so a tick drawn before page 3 came up is refused when clicked -- before
+    // it opens the fold it would have revealed.
     auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(30) }, LineCount(100) };
     test::startCommand(mc, "ls");
     test::printLines(mc, "out", 20);
@@ -882,7 +882,7 @@ TEST_CASE("ScrollbarMarks.reveal.theCursorOnAnotherPageIsRefused", "[scrollbar-m
     auto const& grid = mc.terminal.primaryScreen().grid();
     auto const generation = grid.stableIdGeneration();
 
-    test::moveCursorOffTheDisplayedPage(mc);
+    test::moveDisplayOffTheCursorsPage(mc);
     auto const topLine = mc.terminal.viewport().topLine();
 
     auto const reveal = mc.terminal.revealStableLineAtTop(head, generation);
@@ -911,24 +911,18 @@ TEST_CASE("ScrollbarMarks.reveal.aTickIsOfferedExactlyWhereAClickLands", "[scrol
         CHECK(mc.terminal.revealStableLineAtTop(head, generation).has_value());
     }
 
-    SECTION("the cursor on another page, page 0 on display")
+    SECTION("the cursor on another page, page 0 on display: offered, and a click lands")
     {
+        // The viewport is the window onto the page on display, wherever the cursor writes.
         test::moveCursorOffTheDisplayedPage(mc);
 
-        CHECK(mc.terminal.scrollbarMarkInputs().empty());
-        CHECK_FALSE(mc.terminal.revealStableLineAtTop(head, generation).has_value());
+        CHECK_FALSE(mc.terminal.scrollbarMarkInputs().empty());
+        CHECK(mc.terminal.revealStableLineAtTop(head, generation).has_value());
     }
 
-    SECTION("the cursor back on page 0, another page on display")
+    SECTION("the cursor back on page 0, another page on display: neither")
     {
-        // The viewport may scroll here -- it follows the cursor's page -- so only the page on display
-        // refuses.
-        mc.writeToScreen("\033[?64h");
-        mc.terminal.setPage(PageIndex(3), /*moveCursorHome*/ true);
-        mc.writeToScreen("\033[?64l");
-        mc.terminal.setPage(PageIndex(0), /*moveCursorHome*/ false);
-        REQUIRE(mc.terminal.isPrimaryScreen());
-        REQUIRE_FALSE(mc.terminal.foldingAppliesToDisplayedPage());
+        test::moveDisplayOffTheCursorsPage(mc);
         auto const before = mc.terminal.viewport().scrollOffset();
 
         CHECK(mc.terminal.scrollbarMarkInputs().empty());

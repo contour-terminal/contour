@@ -58,13 +58,30 @@ inline constexpr auto DecoratorNames = std::array {
     std::pair { std::string_view { "encircle" }, Decorator::Encircle },
 };
 
-std::optional<Decorator> toDecorator(std::string const& value) noexcept;
+/// Further spellings of a decorator that a configuration file accepts but never prints.
+///
+/// `dotted` is here because the configuration documentation showed `normal: dotted` for years, so
+/// files in the wild spell it that way. A row here is read by @ref toDecorator and nowhere else:
+/// the formatter and the settings page's option list use @ref DecoratorNames, so an alias neither
+/// changes what is written back nor appears as a second choice in the combo box.
+inline constexpr auto DecoratorAliases = std::array {
+    std::pair { std::string_view { "dotted" }, Decorator::DottedUnderline },
+};
+
+/// Looks a configuration token up in @ref DecoratorNames, then in @ref DecoratorAliases.
+/// @param value The token, already lowercased; matching is exact.
+/// @return The decorator it names, or nothing when @p value is not a known spelling.
+[[nodiscard]] std::optional<Decorator> toDecorator(std::string_view value) noexcept;
 
 // {{{ impl
-inline std::optional<Decorator> toDecorator(std::string const& value) noexcept
+inline std::optional<Decorator> toDecorator(std::string_view value) noexcept
 {
     for (auto const& [token, decorator]: DecoratorNames)
         if (token == value)
+            return { decorator };
+
+    for (auto const& [alias, decorator]: DecoratorAliases)
+        if (alias == value)
             return { decorator };
 
     return std::nullopt;

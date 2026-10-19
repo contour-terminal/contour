@@ -16,6 +16,7 @@
 #include <contour/session/CommandBlockTooltip.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/HostedOperation.hpp>
+#include <contour/session/LocalFileAction.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/ScreenshotFile.hpp>
 #include <contour/session/SpawnCommand.hpp>
@@ -43,7 +44,6 @@
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
-#include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
 #include <QtCore/QMimeData>
 #include <QtCore/QPointer>
@@ -706,7 +706,6 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
     if (!_display)
         return;
 
-    _currentScreenType = type;
     emit isScrollbarVisibleChanged();
     requestScrollbarMarksRefresh(); // the alternate screen shows no ticks
     // Re-check _display at dispatch: a tab switch or split collapse may have detached it (via
@@ -1163,12 +1162,14 @@ void TerminalSession::openDocument(std::string_view fileOrUrl)
 
     // A single-letter scheme is a Windows drive letter (e.g. "C:\path"), not a real URL scheme —
     // QUrl otherwise parses "C:" as the scheme and the path never resolves as a local file. Treat
-    // such a value (and a genuinely scheme-less one) as a filesystem path.
+    // such a value (and a genuinely scheme-less one) as a filesystem path -- asked of the app's filesystem,
+    // the one the terminal found the path under the pointer on, not of the disk.
     if (url.scheme().isEmpty() || url.scheme().size() == 1)
     {
-        auto const fileInfo = QFileInfo(text);
-        if (fileInfo.exists())
-            url = QUrl::fromLocalFile(fileInfo.absoluteFilePath());
+        auto const& fileSystem = _app.fileSystem();
+        if (auto const path = core::pathFromUtf8(fileOrUrl); path && fileSystem.exists(*path))
+            url = QUrl::fromLocalFile(
+                platform::toQString(path->is_absolute() ? *path : fileSystem.currentPath() / *path));
     }
 
     openExternally(url, "document", fileOrUrl);
@@ -2070,8 +2071,9 @@ void TerminalSession::searchBarOpened()
         auto const restingOnAVisibleMatch =
             !_terminal.search().pattern.empty()
             && _terminal.viewport().isLineVisible(_terminal.normalModeCursorPosition().line);
+        // Where the terminal cursor is on its page, not on the status line DECSASD may have selected.
         if (!restingOnAVisibleMatch && _terminal.inputHandler().mode() == vtbackend::ViMode::Insert)
-            _terminal.moveNormalModeCursorTo(_terminal.currentScreen().cursor().position);
+            _terminal.moveNormalModeCursorTo(_terminal.pageAt(_terminal.cursorPageIndex()).cursor().position);
     }
 
     refreshSearchStatus();
@@ -2242,7 +2244,8 @@ void TerminalSession::wrapSearchTo(SearchWrapEdge edge)
         if (_terminal.search().pattern.empty())
             return;
 
-        auto const& screen = _terminal.currentScreen();
+        // The page on display, the one Terminal::search() reads.
+        auto const& screen = _terminal.displayedPage();
         auto const from =
             edge == SearchWrapEdge::Top
                 ? CellLocation { .line = -boxed_cast<vtbackend::LineOffset>(screen.historyLineCount()),
@@ -2431,9 +2434,10 @@ void TerminalSession::sendKeyEvent(Key key,
         return;
     }
 
-    // Guarded like sendCharEvent: a display-less session (background pane, headless test) has no
-    // mouse cursor to hide.
-    if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
+    // A bare modifier is no typing: hiding the pointer then hides the very link Ctrl is held to reach.
+    // Guarded for display-less sessions (background pane, headless test), which have no cursor to hide.
+    auto const modifierOnly = vtbackend::isModifierKey(key);
+    if (_profile.mouse.value().hideWhileTyping && _display != nullptr && !modifierOnly)
         _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
     if (eventType != KeyboardEventType::Release)
@@ -2703,7 +2707,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // cell it came from. The flag is that invalidation: without it the gutter's pointing hand survived
     // over the grid until the pointer happened to cross into another cell.
     auto const decidesPointerShape =
-        (pos != _currentMousePosition || _isPointerShapeStale) && _display != nullptr;
+        (pos != _pointerShapeCell || _isPointerShapeStale) && _display != nullptr;
 
     // The hovered link is read inside the lock the move already takes, rather than asked for again
     // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
@@ -2733,7 +2737,7 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     if (decidesPointerShape)
     {
         _isPointerShapeStale = false;
-        _currentMousePosition = pos;
+        _pointerShapeCell = pos;
         if (hover.targetShape)
             _display->setMouseCursorShape(*hover.targetShape);
         else
@@ -3506,7 +3510,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // Left for the window to fill in: whether this tab holds more than one pane is not something
             // a session knows about itself.
             .hasSplits = false,
-            .inputProtected = !terminal().allowInput(),
+            .inputProtected = terminal().userInputLock() == vtbackend::UserInputLock::Locked,
             // A property of the build and the machine, asked once here so the menu itself stays a pure
             // function of this snapshot.
             .canSpeak = _app.speechSynthesizer().available(),
@@ -4204,8 +4208,8 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
     auto l = lock_guard { terminal() };
     // A file, replayed on its own: standaloneScreenshot() puts the replaying terminal in the state to draw
     // it.
-    auto const screenshot = standaloneScreenshot(terminal().isPrimaryScreen() ? terminal().primaryScreen()
-                                                                              : terminal().alternateScreen());
+    // Of what is shown: the page on display -- not page 15 for every page but the primary one.
+    auto const screenshot = standaloneScreenshot(terminal().displayedPage());
     ofstream ofs { "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
     return true;
@@ -4484,17 +4488,26 @@ bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
     input::inputLog()("{} key mappings.", _allowKeyMappings ? "Enabling" : "Disabling");
 
     // Locked: setStatusDisplay() resizes the page and reflows the grid, exactly as ViNormalMode does, and the
-    // resize may write a report, sent once the lock is released.
+    // resize may write a report, sent once the lock is released. The indicator is a notice the terminal puts
+    // up, as vi mode's is, not a type the user chose: it selects nothing, and DECSASD keeps what was
+    // selected. DEC STD 070 has such a notice of its own, the Error Line (ch. 14 §2.1.1): it "replaces the
+    // currently displayed Status Line (Indicator or Host Writable)" for a while, and "The host may not
+    // directly program or affect the Error Line".
     {
         auto const _ = std::scoped_lock { _terminal };
+        // Put up and taken down as vi mode's is (push/pop), so that re-enabling shows again what it replaced.
         if (!_allowKeyMappings)
         {
             terminal().setStatusLineDefinition(parseStatusLineDefinition(
                 "{}", "{Text:text=key bindings disabled,Left= « ,Right= » }", "{}"));
-            terminal().setStatusDisplay(StatusDisplayType::Indicator);
+            terminal().pushStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled,
+                                         StatusDisplayType::Indicator);
         }
         else
+        {
             terminal().resetStatusLineDefinition();
+            terminal().popStatusDisplay(vtbackend::StatusNotice::KeyBindingsDisabled);
+        }
     }
     return true;
 }
@@ -4515,30 +4528,43 @@ bool TerminalSession::operator()(actions::ToggleInputMethodHandling)
 
 bool TerminalSession::operator()(actions::ToggleInputProtection)
 {
-    // Locked around the terminal calls only; announce() below is Qt accessibility and must not run
-    // with the terminal lock held. Through runUnderStateLock(): locking the keyboard (KAM) puts the indicator
-    // status line up, which resizes. See ViNormalMode for the rationale.
-    auto const allowInput = _terminal.runUnderStateLock([&]() {
-        terminal().setAllowInput(!terminal().allowInput());
-        return terminal().allowInput();
+    // The user's own lock, not KAM: KAM is the host's, which DECSTR, CSI 2 l and RIS reset, and no host
+    // sequence may undo what the user locked. Locked around the terminal calls only; announce() below is Qt
+    // accessibility and must not run with the terminal lock held. Through runUnderStateLock(): the lock puts
+    // the indicator status line up, which resizes. See ViNormalMode for the rationale.
+    auto const userLock = _terminal.runUnderStateLock([&]() {
+        auto const toggled = terminal().userInputLock() == vtbackend::UserInputLock::Locked
+                                 ? vtbackend::UserInputLock::Unlocked
+                                 : vtbackend::UserInputLock::Locked;
+        terminal().setUserInputLock(toggled);
+        return toggled;
     });
+    // What typing does now, and which lock holds it: the user who unlocked while the application's KAM still
+    // holds the keyboard hears why typing still does nothing, rather than the "Read-only" they just lifted.
+    auto const announcement = [&] {
+        if (userLock == vtbackend::UserInputLock::Locked)
+            return QObject::tr("Read-only");
+        if (_terminal.isModeEnabled(vtbackend::AnsiMode::KeyboardAction))
+            return QObject::tr("Read-only: the application locked the keyboard");
+        return QObject::tr("Editable");
+    }();
 
     // Assertive: this changes what typing does, so a client mid-sentence should be interrupted rather
     // than tell the user about it after they have already typed into a terminal that ignored them.
-    announce(allowInput ? QObject::tr("Editable") : QObject::tr("Read-only"),
-             QAccessible::AnnouncementPoliteness::Assertive);
+    announce(announcement, QAccessible::AnnouncementPoliteness::Assertive);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
-    // Locked: the status line resizes the page. See ViNormalMode.
+    // Locked: the status line resizes the page. See ViNormalMode. The user's choice is a selection, which a
+    // host-writable status line DECSASD had selected gives way to.
     {
         auto const _ = std::scoped_lock { _terminal };
         if (terminal().statusDisplayType() != StatusDisplayType::Indicator)
-            terminal().setStatusDisplay(StatusDisplayType::Indicator);
+            terminal().selectStatusDisplayByUser(StatusDisplayType::Indicator);
         else
-            terminal().setStatusDisplay(StatusDisplayType::None);
+            terminal().selectStatusDisplayByUser(StatusDisplayType::None);
 
         // `savedStatusDisplayType` holds only a value if the application has been overriding
         // the status display type. But the user now actively requests a given type,
@@ -4925,8 +4951,9 @@ void TerminalSession::setDefaultCursor()
         return;
     }
 
+    // The page on display, which the pointer is over -- not the cursor's, with DECPCCM reset.
     using Type = vtbackend::ScreenType;
-    switch (_terminal.screenType())
+    switch (_terminal.displayedScreenType())
     {
         case Type::Primary: _display->setMouseCursorShape(input::MouseCursorShape::IBeam); break;
         case Type::Alternate: _display->setMouseCursorShape(input::MouseCursorShape::Arrow); break;
@@ -5270,7 +5297,15 @@ void TerminalSession::configureTerminal()
         // below.
         _terminal.setMode(vtbackend::DECMode::NoSixelScrolling,
                           configured.sixelScrolling == vtbackend::SixelScrolling::Disabled);
-        _terminal.setStatusDisplay(configured.statusDisplayType);
+        // The configuration is the Set-Up field DEC STD 070 ch. 14 §3 DECSSDT notes ("The type of Status
+        // Line can also be changed through a Set-Up field"), so a type it changes is the user's selection, as
+        // the toggle's is -- one that also exits a host-writable line the host put up (ch. 14 §2.3), where
+        // mintty's term_reconfig() leaves that line alone. A reload or profile switch that leaves the
+        // configured type as it was changes nothing, and leaves what the host selected since alone, as
+        // term_reconfig() acts only where the configured value changed (mintty term.c:506-509).
+        if (_configuredStatusDisplayType != configured.statusDisplayType)
+            _terminal.selectConfiguredStatusDisplay(configured.statusDisplayType);
+        _configuredStatusDisplayType = configured.statusDisplayType;
         sessionLog()("imageCanvasCeiling={}, sixelScrolling={}, goodImageProtocol={}",
                      _terminal.imageCanvasCeiling(),
                      _config.images.value().sixelScrolling,
@@ -5518,30 +5553,38 @@ void TerminalSession::followHyperlink(vtbackend::HyperlinkInfo const& hyperlink)
     }
 
     auto const path = QString::fromStdString(*localPath);
-    // qEnvironmentVariable() rather than getenv(): this runs on the GUI thread while the PTY and render
-    // threads are live, and getenv() is not thread safe.
-    auto const editorEnv = qEnvironmentVariable("EDITOR");
-    auto const fileInfo = QFileInfo(path);
+    // Through the app's environment, as every variable is read, not getenv(): this runs on the GUI thread
+    // while the PTY and render threads are live.
+    auto const editor = _app.processEnvironment().get("EDITOR").value_or(std::string {});
+    // Asked of the app's filesystem, where the terminal finds the paths it shows, not of the disk.
+    auto const action = core::pathFromUtf8(*localPath)
+                            .transform([&](std::filesystem::path const& file) {
+                                return localFileAction(file, _app.fileSystem(), NativeExecutableRule, editor);
+                            })
+                            .value_or(LocalFileAction::OpenOnDesktop);
 
-    // An executable file is run through `contour config <path>`; any other file is handed to $EDITOR the
-    // same way. Anything else -- a directory, a missing path -- goes to the desktop, as a plain local file
-    // URL: an authority that survived would be read as a network location, file://host/tmp as //host/tmp.
-    if (fileInfo.isFile() && (fileInfo.isExecutable() || !editorEnv.isEmpty()))
+    // A program is run through `contour config <path>`; any other file is handed to $EDITOR the same way.
+    // Anything else -- a directory, a missing path -- goes to the desktop, as a plain local file URL: an
+    // authority that survived would be read as a network location, file://host/tmp as //host/tmp.
+    // Detached: the second Contour runs until its window is closed, and this is the GUI thread.
+    if (action == LocalFileAction::OpenOnDesktop)
     {
-        auto args = QStringList { "config", platform::toQString(_config.configFile) };
-        if (!fileInfo.isExecutable())
-            args << editorEnv;
-        args << path;
-        if (auto const ran =
-                _app.externalLauncher().execute(QString::fromStdString(_app.programPath()), args);
-            !ran)
-            errorLog()(
-                "Could not open \"{}\" in an editor: {}.", *localPath, platform::describe(ran.error()));
+        auto const url = QUrl::fromLocalFile(path);
+        openExternally(url, "hyperlink", url.toString().toStdString());
         return;
     }
 
-    auto const url = QUrl::fromLocalFile(path);
-    openExternally(url, "hyperlink", url.toString().toStdString());
+    auto args = QStringList { "config", platform::toQString(_config.configFile) };
+    if (action == LocalFileAction::Edit)
+        args << QString::fromStdString(editor);
+    args << path;
+    if (auto const started =
+            _app.externalLauncher().runDetached(QString::fromStdString(_app.programPath()), args);
+        !started)
+        errorLog()("Could not {} \"{}\": {}.",
+                   describeAction(action),
+                   *localPath,
+                   platform::describe(started.error()));
 }
 
 // }}}

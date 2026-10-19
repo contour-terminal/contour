@@ -955,6 +955,38 @@ TEST_CASE("DEC pages beyond primary/alternate mirror faithfully", "[vthost][mirr
     h.loop.blockOn(drive(&h, std::move(scenario)));
 }
 
+TEST_CASE("the status line DECSASD selects hides the mirror's cursor", "[vthost][mirror]")
+{
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    h.serverTerminal(session)->writeToScreen("main-display-here");
+
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] {
+            return h->mirror->primaryScreen().grid().renderMainPageText().contains("main-display-here");
+        });
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
+
+        // DECSASD sends output to the host-writable status line, whose cursor is then the one shown. Its
+        // position does not travel -- the cursor sent is the page on display's -- so the mirror draws none,
+        // rather than one at its own status line's column 0: the daemon withholds DECTCEM.
+        serverWrites(h, session, "\033[2$~\033[1$}\033[1;5Hstatus"); // DECSSDT, DECSASD, column 4, write
+        co_await waitUntil(&h->loop,
+                           [&] { return !h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor); });
+        CHECK(!h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
+
+        // Back on the main display, the cursor is shown again.
+        serverWrites(h, session, "\033[0$}");
+        co_await waitUntil(&h->loop,
+                           [&] { return h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor); });
+        CHECK(h->mirror->isModeEnabled(vtbackend::DECMode::VisibleCursor));
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
 TEST_CASE("a decoupled cursor page hides the mirror's cursor", "[vthost][mirror]")
 {
     auto h = MirrorHarness {};

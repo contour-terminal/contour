@@ -13,8 +13,8 @@
 /// to decode all of them to answer a question about frames.
 ///
 /// They earned that cost once, by establishing that per-cell work is not a bottleneck (about 20 ns
-/// per cell, with `renderCells` under 1.5% of a run) -- @see docs/internals/performance-backlog.md.
-/// Turning them back on is for re-testing that specific claim, not for general profiling.
+/// per cell, with `renderCells` under 1.5% of a run). Turning them back on is for re-testing that
+/// specific claim, not for general profiling; docs/internals/profiling.md says how.
 #ifdef CONTOUR_TRACY_CELL_ZONES
     #define CONTOUR_TRACY_CELL_ZONE() ZoneScoped
 #else

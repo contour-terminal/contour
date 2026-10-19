@@ -6,6 +6,7 @@
 #include <crispy/Point.hpp>
 #include <crispy/Size.hpp>
 
+#include <cmath>
 #include <format>
 
 namespace vtrasterizer
@@ -68,6 +69,23 @@ struct GridMetrics
     constexpr crispy::Point map(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept
     {
         return map(pos.line, pos.column, yPixelOffset);
+    }
+
+    /// Maps a screen position that may lie between cells to target surface coordinates, as a cell's top left
+    /// is mapped: where a cursor moving between two cells is drawn.
+    ///
+    /// @param pos           screen position, in cells
+    /// @param yPixelOffset  sub-cell Y pixel offset for smooth scrolling (default: 0)
+    ///
+    /// @return 2D point in drawing system coordinates, to the nearest pixel.
+    [[nodiscard]] crispy::Point map(vtbackend::FractionalCellLocation pos,
+                                    int yPixelOffset = 0) const noexcept
+    {
+        auto const x =
+            pageMargin.left + static_cast<int>(std::lround(pos.column * cellSize.width.as<float>()));
+        auto const y = pageMargin.top + static_cast<int>(std::lround(pos.line * cellSize.height.as<float>()))
+                       + yPixelOffset;
+        return { .x = x, .y = y };
     }
 
     constexpr crispy::Point mapTopLeft(vtbackend::CellLocation pos, int yPixelOffset = 0) const noexcept

@@ -42,6 +42,7 @@
 #include <fstream>
 #include <functional>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -387,6 +388,31 @@ class ConfigurableStartPty final: public vtpty::ChannelPty
     StartBehavior _behavior;
 };
 
+/// The process's own environment, but for the names a test sets, which read as the test set them.
+class TestEnvironment final: public core::Environment
+{
+  public:
+    /// The names a test sets, and their values.
+    using Overrides = std::map<std::string, std::string, std::less<>>;
+
+    /// @param overrides The names a test sets; every other name reads as the process's own environment has
+    /// it.
+    explicit TestEnvironment(Overrides overrides = {}): _overrides { std::move(overrides) } {}
+
+    /// @param name Name of the variable to look up.
+    /// @return What the test set it to; else what the process's own environment holds.
+    [[nodiscard]] std::optional<std::string> get(std::string_view name) const override
+    {
+        if (auto const i = _overrides.find(name); i != _overrides.end())
+            return i->second;
+        return _live.get(name);
+    }
+
+  private:
+    core::LiveEnvironment _live;
+    Overrides _overrides;
+};
+
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves
 /// to the default "main" profile) without running the GUI. The default-constructed config already
 /// seeds a "main" profile and a "default" colorscheme, so no config file is needed. The app's real
@@ -408,31 +434,75 @@ class TestApp
     ///                observation pointer first) to drive the read-aloud path. @see defaultSpeech()
     ///                for what a test app gets without one.
     /// @param identity The machine the app's sessions run on. @see testHostIdentity() for the default.
+    /// @param fileSystem Where the app's sessions look up paths; null for this machine's. Borrowed.
+    /// @param environment The environment variables the app reads as the test sets them.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
                      std::unique_ptr<contour::platform::SpeechSynthesizer> speech = nullptr,
-                     vtbackend::HostIdentity identity = testHostIdentity()):
+                     vtbackend::HostIdentity identity = testHostIdentity(),
+                     core::platform::FileSystem const* fileSystem = nullptr,
+                     TestEnvironment::Overrides environment = {}):
+        _environment { std::move(environment) },
         _app(_environment,
              withTestNotifier(std::move(factory)),
              makeRecordingLauncher(),
              std::move(layoutStore),
              std::move(commandHistoryStore),
-             speech ? std::move(speech) : defaultSpeech(),
+             speechOrDefault(std::move(speech)),
              makeOutputFiles(),
              clocks(),
-             std::move(identity))
+             std::move(identity),
+             fileSystem)
     {
-        char const* argv[] = { "contour", "terminal" };
-        // Parse the "terminal" subcommand so parameters() carries every contour.terminal.* default
-        // (profile, dump-state-at-exit, ...) that TerminalSession reads during construction.
-        REQUIRE(_app.parseParametersForTesting(2, argv));
+        parseTerminalVerb();
     }
 
     /// A test app whose sessions run on @p identity: for a test of what counts as this machine.
     /// @param identity The machine the app's sessions run on.
     explicit TestApp(vtbackend::HostIdentity identity):
         TestApp(nullptr, nullptr, nullptr, nullptr, std::move(identity))
+    {
+    }
+
+    /// A test app whose processes are placed by @p placement, and which opens and starts programs with the
+    /// app's own default launcher rather than a recording one -- so launcher() is not available on it.
+    /// @param placement Places what the app's default session factory and launcher start.
+    explicit TestApp(std::shared_ptr<vtpty::ProcessPlacement> placement):
+        _app(_environment,
+             nullptr,
+             nullptr,
+             nullptr,
+             nullptr,
+             defaultSpeech(),
+             makeOutputFiles(),
+             clocks(),
+             testHostIdentity(),
+             nullptr,
+             std::move(placement))
+    {
+        parseTerminalVerb();
+    }
+
+    /// Where the sessions of a test app look up paths.
+    enum class SessionFiles : uint8_t
+    {
+        ThisMachine = 0, ///< This machine's.
+        Fixture,         ///< The fixture's own in-memory filesystem, fileSystem(), which the test fills.
+    };
+
+    /// A test app whose sessions look up paths where @p files says: for a test of what a path names, the
+    /// fixture's own filesystem, the one its command output files are on too.
+    /// @param files Where the app's sessions look up paths.
+    /// @param environment The environment variables the app reads as the test sets them.
+    explicit TestApp(SessionFiles files, TestEnvironment::Overrides environment = {}):
+        TestApp(nullptr,
+                nullptr,
+                nullptr,
+                nullptr,
+                testHostIdentity(),
+                files == SessionFiles::Fixture ? &_fileSystem : nullptr,
+                std::move(environment))
     {
     }
 
@@ -470,7 +540,11 @@ class TestApp
         return _app.sessionsManager();
     }
     /// The recording launcher wired into this app (records URL-open / process-spawn requests).
-    [[nodiscard]] RecordingExternalLauncher& launcher() noexcept { return *_launcher; }
+    [[nodiscard]] RecordingExternalLauncher& launcher() noexcept
+    {
+        REQUIRE(_launcher != nullptr); // not on an app built with the default launcher
+        return *_launcher;
+    }
 
     /// Where OpenCommandOutput's files go in a test app: a directory on the in-memory filesystem.
     static constexpr std::string_view OutputDirectory = "/run/contour-test-output";
@@ -496,6 +570,14 @@ class TestApp
     [[nodiscard]] core::platform::ManualWallClock& wallClock() noexcept { return _wallClock; }
 
   private:
+    /// Parses the "terminal" subcommand, so that parameters() carries every contour.terminal.* default
+    /// (profile, dump-state-at-exit, ...) that TerminalSession reads during construction.
+    void parseTerminalVerb()
+    {
+        char const* argv[] = { "contour", "terminal" };
+        REQUIRE(_app.parseParametersForTesting(2, argv));
+    }
+
     /// The synthesizer a test app gets when the test does not name one.
     ///
     /// The NULL one, never the production synthesizer -- and this is the single place that decides
@@ -506,6 +588,17 @@ class TestApp
     [[nodiscard]] static std::unique_ptr<contour::platform::SpeechSynthesizer> defaultSpeech()
     {
         return std::make_unique<contour::platform::NullSpeechSynthesizer>();
+    }
+
+    /// The synthesizer a test names, or defaultSpeech() when it names none.
+    /// @param speech The test's synthesizer; null for none.
+    /// @return @p speech, or the default one.
+    [[nodiscard]] static std::unique_ptr<contour::platform::SpeechSynthesizer> speechOrDefault(
+        std::unique_ptr<contour::platform::SpeechSynthesizer> speech)
+    {
+        if (speech)
+            return speech;
+        return defaultSpeech();
     }
 
     /// The app's command output files, on the fixture's in-memory filesystem.
@@ -537,8 +630,9 @@ class TestApp
 
     RecordingExternalLauncher* _launcher = nullptr;
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
-    /// reads as. A test that cares injects a core::testing::FakeEnvironment instead.
-    core::LiveEnvironment _environment;
+    /// reads as. A test that cares sets the names it needs (TestApp(SessionFiles,
+    /// TestEnvironment::Overrides)).
+    TestEnvironment _environment;
     /// Declared before _app, whose sessions borrow them. They start at the time the app is made, so that
     /// times read from them look like times the suite runs at.
     core::platform::ManualClock _steadyClock { core::platform::defaultSteadyClock().now() };

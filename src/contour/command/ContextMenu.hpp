@@ -56,7 +56,7 @@ struct ContextMenuState
     bool hasLastCommand = false;           ///< A finished OSC 133 command block sits in the scrollback.
     bool hasLocalWorkingDirectory = false; ///< OSC 7 reported a working directory on THIS host (openable).
     bool hasSplits = false;                ///< This tab holds more than one pane.
-    bool inputProtected = false;           ///< Input protection (KAM / read-only) is on for this pane.
+    bool inputProtected = false; ///< The user's read-only lock is on for this pane (not the host's KAM).
     /// Whether this build can speak, and this platform has a voice to speak with.
     ///
     /// A fact about the machine rather than about the pane, but it belongs in the snapshot for the same
