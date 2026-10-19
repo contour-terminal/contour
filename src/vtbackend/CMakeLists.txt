@@ -15,6 +15,7 @@ set(vtbackend_HEADERS
     screen/AsciiText.hpp
     vt/Capabilities.hpp
     testing/CatchStringMakers.hpp
+    testing/DetectingTerm.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
     grid/CellUtil.hpp
@@ -48,6 +49,7 @@ set(vtbackend_HEADERS
     input/ClickCounter.hpp
     input/InputBinding.hpp
     input/InputGenerator.hpp
+    input/HeldModifiers.hpp
     input/InputHandler.hpp
     input/vi/JumpHistory.hpp
     vt/KittyClipboard.hpp
@@ -56,8 +58,18 @@ set(vtbackend_HEADERS
     core/LineFlags.hpp
     grid/LineSoA.hpp
     core/LinkDecoration.hpp
+    screen/LinkDetector.hpp
+    links/LinkIndex.hpp
+    links/LinkMatcher.hpp
+    links/LinkPatterns.hpp
+    links/LinkUrlTemplate.hpp
+    links/LinkTypes.hpp
+    links/PathProbe.hpp
+    links/PathResolution.hpp
     shell/LivePromptMarks.hpp
+    screen/LinkPresentation.hpp
     screen/LocalTime.hpp
+    screen/PrintedLinks.hpp
     Logging.hpp
     vt/MacroDefinition.hpp
     shell/MarkArbiter.hpp
@@ -74,6 +86,7 @@ set(vtbackend_HEADERS
     render/RenderBuffer.hpp
     screen/RenderBufferBuilder.hpp
     core/RowMove.hpp
+    links/ScanText.hpp
     screen/Screen.hpp
     screen/ScreenTestFixtures.hpp
     shell/ScrollbarMarks.hpp
@@ -158,6 +171,15 @@ set(vtbackend_SOURCES
     vt/KittyClipboard.cpp
     graphics/KittyGraphics.cpp
     vt/TextSizing.cpp
+    screen/LinkDetector.cpp
+    links/LinkIndex.cpp
+    links/LinkMatcher.cpp
+    links/LinkPatterns.cpp
+    links/LinkUrlTemplate.cpp
+    links/PathProbe.cpp
+    links/PathResolution.cpp
+    links/ScanText.cpp
+    screen/PrintedLinks.cpp
     screen/Screen.cpp
     shell/SemanticBlockTracker.cpp
     vt/SemanticPrompt.cpp
@@ -268,6 +290,16 @@ if(LIBTERMINAL_TESTING)
         shell/Folding_test.cpp
         screen/Gutter_test.cpp
         shell/PromptRegion_test.cpp
+        screen/LinkDetector_test.cpp
+        links/LinkIndex_test.cpp
+        links/LinkMatcher_test.cpp
+        links/LinkPatterns_test.cpp
+        links/LinkUrlTemplate_test.cpp
+        screen/LinkPresentation_test.cpp
+        links/PathResolution_test.cpp
+        links/PathProbe_test.cpp
+        links/ScanText_test.cpp
+        screen/PrintedLinks_test.cpp
         shell/ScrollbarMarks_test.cpp
         shell/StableIdSet_test.cpp
         shell/UserMarkIndex_test.cpp
@@ -279,6 +311,7 @@ if(LIBTERMINAL_TESTING)
         graphics/GoodImageProtocol_test.cpp
         graphics/XtSmGraphics_test.cpp
         input/ClickCounter_test.cpp
+        input/HeldModifiers_test.cpp
         input/InputGenerator_test.cpp
         input/vi/Selector_test.cpp
         vt/Functions_test.cpp
@@ -322,6 +355,7 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_gutter_test.cpp
         screen/Terminal_mirrorSeams_test.cpp
         screen/Terminal_blocks_test.cpp
+        screen/Terminal_links_test.cpp
         screen/BulkScan_test.cpp
         shell/ShellIntegration_test.cpp
         grid/LineSoA_test.cpp
@@ -368,18 +402,27 @@ if(LIBTERMINAL_TESTING)
         add_test(NAME bench_headless_throughput_rejects_unknown_kind
                  COMMAND bench-headless throughput size 1 runs 1 kinds no-such-workload)
         set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES PASS_REGULAR_EXPRESSION
-                             "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui\\.")
+                             "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui, link-prose, link-line\\.")
         add_test(NAME bench_headless_snapshot_smoke COMMAND bench-headless snapshot frames 10 runs 1)
         # The benchmarks with an application on a real PTY: a script under /bin/sh on POSIX, and
         # `bench-headless pty-child` through ConPTY on Windows.
         add_test(NAME bench_headless_throughput_pty_smoke
                  COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty)
+        # Link detection on, as the GUI runs it: the row reports the match jobs inside the run and after it, and
+        # the links indexed. How many, and whether the run was too short for detection to scan inside it, is
+        # the machine's speed to say; only the warning's wording is checked, where it appears. Through ConPTY
+        # the row also says how much of the output arrived, and the lines may end in CRLF.
+        add_test(NAME bench_headless_throughput_links_smoke
+                 COMMAND bench-headless throughput size 1 runs 1 kinds ascii screens primary pty refresh-hz 60 links)
+        set_tests_properties(bench_headless_throughput_links_smoke PROPERTIES PASS_REGULAR_EXPRESSION
+                             "link detection: on\r?\nascii +primary +[0-9.]+ MiB/s +[0-9]+ bytes/read( +[0-9.]+% arrived)? +[0-9]+ match jobs in the run, +[0-9]+ after it, +[0-9]+ links(  \\(under [0-9]+ ms, detection's longest wait: it could not scan inside the measurement\\))?\r?\n")
         add_test(NAME bench_headless_keypress_smoke COMMAND bench-headless keypress seconds 1 rate 100)
         set(BENCH_HEADLESS_SMOKE_TESTS
             bench_headless_throughput_smoke
             bench_headless_throughput_rejects_unknown_kind
             bench_headless_snapshot_smoke
             bench_headless_throughput_pty_smoke
+            bench_headless_throughput_links_smoke
             bench_headless_keypress_smoke)
         # ConPTY has no slave end that `bench-headless pty` could write into.
         if(NOT WIN32)

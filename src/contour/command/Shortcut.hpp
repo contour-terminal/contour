@@ -65,6 +65,11 @@ static_assert(std::ranges::all_of(ShortcutModifierTable,
               "parser refuses sends them to a binding that silently never fires -- which is exactly "
               "what issue #1987 was. Add the spelling to contour::config::ConfigModifierTable as an alias.");
 
+/// Renders a chord's modifiers the way a UI shows them, each followed by a plus: "Ctrl+Shift+".
+/// @param modifiers The chord modifiers (locks are not part of a binding and must not be passed).
+/// @return The rendered modifiers; empty when @p modifiers is.
+[[nodiscard]] std::string modifiersText(vtbackend::Modifiers modifiers);
+
 /// Renders a key chord the way a UI shows it, e.g. "Ctrl+Shift+P" or "Alt+Enter".
 ///
 /// @param modifiers The chord modifiers (locks are not part of a binding and must not be passed).
@@ -94,5 +99,11 @@ static_assert(std::ranges::all_of(ShortcutModifierTable,
 /// left out: the user's binding is found first, so that chord never reaches the fallback.
 /// @param config The configuration: its input mappings and the options that enable fallback rows.
 [[nodiscard]] std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config);
+
+/// How links are opened, for the settings page: "Ctrl+Click (Shift+Ctrl+Click inside applications that use
+/// the mouse)". Spelled as the shortcut column spells a chord.
+/// @param config The loaded configuration: its FollowHyperlink mouse binding and bypass modifiers.
+/// @return The gesture, spelled for a user.
+[[nodiscard]] std::string describeLinkGesture(config::Config const& config);
 
 } // namespace contour::command

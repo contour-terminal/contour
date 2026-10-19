@@ -8,6 +8,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
+#include <vtbackend/links/LinkTypes.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Utils.hpp>
@@ -49,7 +50,7 @@ struct DecreaseFontSize{};
 struct DecreaseOpacity{};
 struct FocusNextSearchMatch{};
 struct FocusPreviousSearchMatch{};
-struct FollowHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
+struct FollowHyperlink{ std::string uri; std::optional<vtbackend::LinkTarget> link {}; }; // pinned by the context menu (uri: OSC 8, link: detected); neither => whatever lies under the mouse cursor right now
 struct HintMode{ std::string patterns; vtbackend::HintAction hintAction = vtbackend::HintAction::Copy; vtbackend::HintScope scope = vtbackend::HintScope::Visible; };
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
@@ -134,7 +135,7 @@ struct SoftReset{};              // DECSTR: reset modes/rendition/cursor, keepin
 struct CopyLastCommandPrompt{};  // OSC 133: the prompt line(s) of the last finished command
 struct CopyLastCommandOutput{};  // OSC 133: what the last finished command printed
 struct CopyLastCommandBlock{};   // OSC 133: both of the above
-struct CopyHyperlink{ std::string uri; }; // empty uri => whatever lies under the mouse cursor right now
+struct CopyHyperlink{ std::string uri; std::optional<vtbackend::LinkTarget> link {}; }; // pinned by the context menu (uri: OSC 8, link: detected); neither => whatever lies under the mouse cursor right now
 // Colorize the active tab. No color => open the tab's color picker; a color => apply it right away.
 struct SetTabColor{ std::optional<vtbackend::RGBColor> color; };
 struct ResetTabColor{}; // drop the user's tab color, revealing any color the application assigned

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/config/Actions.hpp>
+#include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/CellRectangle.hpp>
 #include <contour/input/KeyMapping.hpp>
@@ -23,8 +24,15 @@
 #include <contour/session/TerminalSession.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
+#include <vtbackend/input/HeldModifiers.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 #include <vtbackend/input/vi/ViCommands.hpp>
+#include <vtbackend/links/LinkTypes.hpp>
+#include <vtbackend/links/PathProbe.hpp>
+#include <vtbackend/links/PathResolution.hpp>
+#include <vtbackend/screen/LinkDetector.hpp>
+#include <vtbackend/screen/LinkPresentation.hpp>
+#include <vtbackend/screen/PrintedLinks.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
@@ -39,6 +47,7 @@
 #include <core/Assert.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/async/IExecutor.hpp>
 #include <core/platform/PathUtils.hpp>
 
 #include <QtCore/QDeadlineTimer>
@@ -217,15 +226,6 @@ namespace
         return appDefault;
     }
 
-    /// Whether @p actions turns key mappings back on: the one binding executeAllActions() still runs
-    /// while they are toggled off.
-    [[nodiscard]] bool togglesKeyMappings(std::vector<actions::Action> const& actions)
-    {
-        return std::ranges::any_of(actions, [](actions::Action const& action) {
-            return holds_alternative<actions::ToggleAllKeyMaps>(action);
-        });
-    }
-
     class ExitWatcherThread: public QThread
     {
       public:
@@ -320,7 +320,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
                 app.statusLineCommandServices(),
                 app.terminalClocks(),
-                vtbackend::randomSemanticBlockTokens() },
+                vtbackend::randomSemanticBlockTokens(),
+                app.linkDetectionServices() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
     // fixed for the notifier's life: it decides how a backend that cannot observe a close behaves,
@@ -365,6 +366,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
 TerminalSession::~TerminalSession()
 {
     sessionLog()("Destroying terminal session.");
+    // First: a path probe that answers from now on finds nothing to hand its result to.
+    _postTarget->withdraw();
     _terminating = true;
 
     // Stop forwarding renderBufferUpdated() before anything is torn down: the status-line command cache
@@ -2434,9 +2437,12 @@ void TerminalSession::sendKeyEvent(Key key,
         return;
     }
 
+    auto const modifierOnly = vtbackend::isModifierKey(key);
+    if (modifierOnly)
+        onHeldModifiersChanged(vtbackend::heldAfter(key, eventType, modifiers.chord));
+
     // A bare modifier is no typing: hiding the pointer then hides the very link Ctrl is held to reach.
     // Guarded for display-less sessions (background pane, headless test), which have no cursor to hide.
-    auto const modifierOnly = vtbackend::isModifierKey(key);
     if (_profile.mouse.value().hideWhileTyping && _display != nullptr && !modifierOnly)
         _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
 
@@ -2567,7 +2573,9 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
     auto const sanitizedModifier = bindingModifiers(modifiers);
 
     // A binding that names a click count is offered the press BEFORE the terminal's own multi-click
-    // selection acts on it -- only the terminal knows the count, and only until it has used it. The
+    // selection acts on it -- only the terminal knows the count, and only until it has used it. So is the
+    // follow gesture on a link: its chord is the block-selection modifier by default, and following the link
+    // hands focus to the browser, so a selection the press started would never see its release. The
     // claimant only looks the binding up (it runs under the lock); the actions run once it is released.
     //
     // The claimant captures one reference, to this struct, so that it fits std::function's small buffer
@@ -2586,6 +2594,8 @@ void TerminalSession::sendMousePressEvent(Modifiers modifiers,
         return _terminal.sendMousePressEvent(
             modifiers, button, pos, pixelPosition, uiHandledHint, [&claim](uint8_t clickCount) {
                 claim.claimed = claim.session.clickCountBinding(claim.button, claim.modifiers, clickCount);
+                if (claim.claimed == nullptr)
+                    claim.claimed = claim.session.linkFollowBinding(claim.button, claim.modifiers);
                 return claim.claimed != nullptr ? vtbackend::MousePressClaim::Claimed
                                                 : vtbackend::MousePressClaim::Unclaimed;
             });
@@ -2651,8 +2661,7 @@ bool TerminalSession::applyFallbackMouseBinding(MouseButton button)
 
 vtbackend::Modifiers TerminalSession::bindingModifiers(vtbackend::Modifiers modifiers) const
 {
-    auto const bypass = _config.bypassMouseProtocolModifiers.value();
-    return modifiers.contains(bypass) ? modifiers.without(bypass) : modifiers;
+    return vtbackend::bindingModifiers(modifiers, _config.bypassMouseProtocolModifiers.value());
 }
 
 config::ActionList const* TerminalSession::mouseBinding(MouseButton button, Modifiers modifiers) const
@@ -2662,6 +2671,31 @@ config::ActionList const* TerminalSession::mouseBinding(MouseButton button, Modi
             config::apply(_config.inputMappings.value().mouseMappings, button, modifiers, flags))
         return actions;
     return config::applyBuiltinFallback(_config, button, modifiers, flags);
+}
+
+config::ActionList const* TerminalSession::linkFollowBinding(MouseButton button, Modifiers modifiers) const
+{
+    // The follow gesture is a left click (config::followHyperlinkModifiers). The binding first: it is cheap,
+    // and most presses are no follow gesture at all.
+    if (button != MouseButton::Left)
+        return nullptr;
+    auto const* binding = mouseBinding(button, modifiers);
+    if (binding == nullptr || !config::containsAction<actions::FollowHyperlink>(*binding)
+        || !willRun(*binding))
+        return nullptr;
+
+    // Then the cell as it is now, as the follow itself will look it up -- not the hover state of the last
+    // pointer event, which output or a scroll under a still pointer leaves stale, and which knows nothing of
+    // a row detection has not scanned yet. Only a link that opens at once is claimed: an OSC 8 one, or a
+    // target known now. A path still to be probed opens later, if it exists at all, so a Ctrl+drag starting
+    // on one that does not still block-selects.
+    auto const position = _terminal.currentMouseGridPosition();
+    if (!position)
+        return nullptr;
+    auto const lookup = _terminal.lookUpLinkAt(*position);
+    if (lookup.hyperlink == nullptr && !lookup.target)
+        return nullptr;
+    return binding;
 }
 
 config::ActionList const* TerminalSession::clickCountBinding(MouseButton button,
@@ -2679,11 +2713,15 @@ config::ActionList const* TerminalSession::clickCountBinding(MouseButton button,
         actions = config::applyBuiltinFallback(_config, button, modifiers, flags, clickCount);
 
     // A binding that will not run must not claim: the press would skip the terminal's own selection and
-    // then do nothing at all. While key mappings are toggled off, executeAllActions() runs only the
-    // binding that turns them back on.
-    if (actions != nullptr && !_allowKeyMappings && !togglesKeyMappings(*actions))
+    // then do nothing at all.
+    if (actions != nullptr && !willRun(*actions))
         return nullptr;
     return actions;
+}
+
+bool TerminalSession::willRun(config::ActionList const& actions) const
+{
+    return _allowKeyMappings || config::containsAction<actions::ToggleAllKeyMaps>(actions);
 }
 
 void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
@@ -2706,35 +2744,54 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
     // the gutter changes the shape behind this decision's back, and leaving it lands the pointer on the
     // cell it came from. The flag is that invalidation: without it the gutter's pointing hand survived
     // over the grid until the pointer happened to cross into another cell.
-    auto const decidesPointerShape =
+    //
+    // A move that carries another chord than the terminal last knew of changes the answer in place too (Ctrl
+    // went down while another window had the focus, so no key event came here): the lambda below applies the
+    // chord first and reports it.
+    auto const decidesPointerShapeForCell =
         (pos != _pointerShapeCell || _isPointerShapeStale) && _display != nullptr;
 
     // The hovered link is read inside the lock the move already takes, rather than asked for again
     // afterwards. tryGetHoveringHyperlink() re-queries the screen and needs the same non-recursive
     // mutex, so a second acquisition here would be one more chance to deadlock, and a callback fired
     // from vtbackend's own hover-state update would run WITH the lock held and self-deadlock outright.
-    // The pointer's shape is decided in there too: whether Ctrl points at a path asks the block store and
-    // the fold cache, which the parser thread changes and the render thread reads.
+    // The pointer's shape is decided in there too: whether it rests on a link or a collapsed fold's label
+    // asks the link index and the fold cache, which the parser thread and the render fill change. Neither
+    // asks the filesystem: a printed path is a link only once detection has found the file, off this thread.
     struct Hover
     {
-        std::string uri;                                    ///< The hovered link's; empty over none.
+        /// What the tooltip names: the OSC 8 link's URI, or a detected link's target where it differs from
+        /// its text; empty over none.
+        std::string uri;
         std::optional<input::MouseCursorShape> targetShape; ///< Over something to open; else the default.
+        bool decidesPointerShape = false;                   ///< Whether this move decides the shape.
     };
     // Through runUnderStateLock(): a move the application tracks is reported, as a press is.
     auto const hover = _terminal.runUnderStateLock([&]() -> Hover {
+        // The chord first, so that the shape below is read for the chord this move carries; the terminal's
+        // own pass over it in sendMouseMoveEvent() then finds nothing new.
+        auto const chordChanged =
+            _terminal.updateHeldModifiers(modifiers) == vtbackend::LinkRevealChange::Changed;
+        auto const decidesPointerShape = decidesPointerShapeForCell || (chordChanged && _display != nullptr);
         _terminal.sendMouseMoveEvent(modifiers, pos, pixelPosition, UiHandledHint);
-        auto const link = _terminal.tryGetHoveringHyperlink();
-        auto const pointsAtTarget =
-            decidesPointerShape
-            && (_terminal.isMouseHoveringHyperlink() || _terminal.collapsedFoldLabelAt(pos).has_value()
-                || (modifiers.contains(vtbackend::Modifier::Control)
-                    && _terminal.localPathAtMousePosition().value_or(std::nullopt).has_value()));
-        return Hover { .uri = link ? link->uri : std::string {},
+        // Read only on a new cell, where the tooltip is updated (below).
+        auto const tooltipTarget = [&]() -> std::string {
+            if (!decidesPointerShapeForCell)
+                return {};
+            if (auto const link = _terminal.tryGetHoveringHyperlink())
+                return link->uri;
+            return hoveredDetectedLinkTooltip();
+        };
+        auto const pointsAtTarget = decidesPointerShape
+                                    && (_terminal.linkPointerShape() == vtbackend::LinkPointerShape::Hand
+                                        || _terminal.collapsedFoldLabelAt(pos).has_value());
+        return Hover { .uri = tooltipTarget(),
                        .targetShape = pointsAtTarget ? std::optional { input::MouseCursorShape::PointingHand }
-                                                     : std::nullopt };
+                                                     : std::nullopt,
+                       .decidesPointerShape = decidesPointerShape };
     });
 
-    if (decidesPointerShape)
+    if (hover.decidesPointerShape)
     {
         _isPointerShapeStale = false;
         _pointerShapeCell = pos;
@@ -2742,9 +2799,11 @@ void TerminalSession::sendMouseMoveEvent(vtbackend::Modifiers modifiers,
             _display->setMouseCursorShape(*hover.targetShape);
         else
             setDefaultCursor();
-
-        updateHyperlinkHover(hover.uri, pos);
     }
+
+    // The hover state (tooltip) follows the cell, not the chord.
+    if (decidesPointerShapeForCell)
+        updateHyperlinkHover(hover.uri, pos);
 }
 
 namespace
@@ -2960,12 +3019,37 @@ ConsumedByStickyHeader TerminalSession::sendStickyHeaderHoverEvent(
     return ConsumedByStickyHeader::Yes;
 }
 
+namespace
+{
+    /// The most codepoints a link's tooltip shows; a longer target is elided in its middle.
+    constexpr auto MaxTooltipLength = size_t { 100 };
+} // namespace
+
+std::string const& TerminalSession::hoveredDetectedLinkTooltip()
+{
+    // A new link is read by pointer, not copied; within the one last read, nothing is read at all. Keyed on
+    // the index too, as a new detector's ids start over; and kept elided, so a move along one link copies
+    // at most a tooltip's worth.
+    auto const id = _terminal.hoveringLinkId();
+    auto const* const index = _terminal.detectedLinks();
+    if (id != _detectedLinkTooltip.link || index != _detectedLinkTooltip.index)
+    {
+        auto const* const link = index != nullptr ? index->find(id) : nullptr;
+        _detectedLinkTooltip = DetectedLinkTooltip {
+            .index = index,
+            .link = id,
+            .text =
+                link != nullptr ? elideMiddle(detectedLinkTooltip(*link), MaxTooltipLength) : std::string {},
+        };
+    }
+    return _detectedLinkTooltip.text;
+}
+
 void TerminalSession::updateHyperlinkHover(std::string_view uri, vtbackend::CellLocation cell)
 {
     if (!_config.hyperlinkHoverTooltip.value())
         return;
 
-    auto constexpr MaxTooltipLength = size_t { 100 };
     auto const change = _hyperlinkHover.update(uri, cell, MaxTooltipLength);
     if (!change.changed)
         return;
@@ -3237,9 +3321,31 @@ void TerminalSession::paneSeen()
         withdrawFinishNotice();
 }
 
+void TerminalSession::onHeldModifiersChanged(vtbackend::Modifiers held)
+{
+    if (_terminal.runUnderStateLock([&]() { return _terminal.updateHeldModifiers(held); })
+        == vtbackend::LinkRevealChange::Changed)
+        refreshPointerShape();
+}
+
+void TerminalSession::refreshPointerShape()
+{
+    // Stale: the pointer is off the grid, and the next move onto it decides.
+    if (_display == nullptr || _isPointerShapeStale)
+        return;
+    if (core::locked(_terminal, [&] { return _terminal.linkPointerShape(); })
+        == vtbackend::LinkPointerShape::Hand)
+        _display->setMouseCursorShape(input::MouseCursorShape::PointingHand);
+    else
+        setDefaultCursor();
+}
+
 void TerminalSession::sendFocusOutEvent()
 {
     // TODO maybe paint with "faint" colors
+
+    // Focus left with a modifier down (Ctrl+Alt+Tab) reports no release: nothing is held now.
+    onHeldModifiersChanged(vtbackend::Modifiers {});
     terminal().sendFocusOutEvent();
 
     scheduleRedraw();
@@ -3459,6 +3565,14 @@ command::ContextMenuState TerminalSession::contextMenuState()
 
         // Neither the header nor the gutter is a cell, so no link is under either.
         auto const hyperlink = pinned ? nullptr : terminal().tryGetHoveringHyperlink();
+        // Else a detected link, as far as the follow gesture resolves it without looking: a path only once
+        // the probe has confirmed it, for a row carries what it opens and no probe.
+        auto const detected = [&]() -> std::optional<vtbackend::LinkTarget> {
+            if (pinned || hyperlink)
+                return std::nullopt;
+            auto const position = terminal().currentMouseGridPosition();
+            return position ? terminal().lookUpLinkAt(*position).target : std::nullopt;
+        }();
 
         // The grid line under the pointer, where the right press just put the terminal's: the very position
         // `block` above was resolved from, so the fold row and the block rows name the same block. Not this
@@ -3522,6 +3636,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
             // Taken now, while the pointer is still on the cell the user clicked. The rows built from this
             // carry the URI with them, because by the time one is picked the pointer has moved to the menu.
             .hyperlinkUnderCursor = hyperlink ? hyperlink->uri : std::string {},
+            .linkUnderCursor = detected,
             // Taken now for the same reason the hyperlink is: the row acts on the line that was
             // clicked, and the pointer will have left it by the time the row is picked.
             .foldLine = foldLine,
@@ -3687,12 +3802,38 @@ namespace
     }
 } // namespace
 
-void TerminalSession::reportOpenOutputFailure(std::string_view reason)
+namespace
 {
-    errorLog()("Could not open the command output: {}.", reason);
-    emit showNotification(tr("Open Output"),
-                          tr("Could not open the command output: %1.")
-                              .arg(QString::fromUtf8(reason.data(), static_cast<qsizetype>(reason.size()))));
+    /// What a failure to open is called: its notice's title and text, and what the log says could not be
+    /// opened.
+    struct OpenFailureText
+    {
+        char const* title;        ///< The notice's title, translatable.
+        char const* message;      ///< The notice's text, translatable as one sentence; %1 is the reason.
+        std::string_view subject; ///< For the log, which is not translated: "Could not open <subject>: …".
+    };
+
+    /// One row per OpenFailure, in its order.
+    constexpr auto OpenFailureTexts = std::array {
+        OpenFailureText { .title = QT_TRANSLATE_NOOP("contour::session::TerminalSession", "Open Output"),
+                          .message = QT_TRANSLATE_NOOP("contour::session::TerminalSession",
+                                                       "Could not open the command output: %1."),
+                          .subject = "the command output" },
+        OpenFailureText {
+            .title = QT_TRANSLATE_NOOP("contour::session::TerminalSession", "Open File"),
+            .message = QT_TRANSLATE_NOOP("contour::session::TerminalSession", "Could not open the file: %1."),
+            .subject = "the file" },
+    };
+    static_assert(OpenFailureTexts.size() == static_cast<std::size_t>(OpenFailure::File) + 1);
+} // namespace
+
+void TerminalSession::reportOpenFailure(OpenFailure what, std::string_view reason)
+{
+    auto const& text = OpenFailureTexts.at(static_cast<std::size_t>(what));
+    errorLog()("Could not open {}: {}.", text.subject, reason);
+    emit showNotification(
+        tr(text.title),
+        tr(text.message).arg(QString::fromUtf8(reason.data(), static_cast<qsizetype>(reason.size()))));
 }
 
 bool TerminalSession::operator()(actions::OpenCommandOutput const& action)
@@ -3722,7 +3863,8 @@ bool TerminalSession::operator()(actions::OpenCommandOutput const& action)
     auto const& program = action.program.empty() ? _config.commandBlocks.value().pager : action.program;
     if (program.find_first_not_of(" \t\r\n") == std::string::npos)
     {
-        reportOpenOutputFailure("no program to open it with (program:, else command_blocks.pager)");
+        reportOpenFailure(OpenFailure::CommandOutput,
+                          "no program to open it with (program:, else command_blocks.pager)");
         return false;
     }
 
@@ -3732,7 +3874,7 @@ bool TerminalSession::operator()(actions::OpenCommandOutput const& action)
     if (pane)
         if (auto const refusal = _manager->commandPaneRefusal(this, *pane))
         {
-            reportOpenOutputFailure(describe(*refusal));
+            reportOpenFailure(OpenFailure::CommandOutput, describe(*refusal));
             return false;
         }
 
@@ -3740,7 +3882,7 @@ bool TerminalSession::operator()(actions::OpenCommandOutput const& action)
     auto const file = files.create(*output);
     if (!file)
     {
-        reportOpenOutputFailure(describe(file.error()));
+        reportOpenFailure(OpenFailure::CommandOutput, describe(file.error()));
         return false;
     }
 
@@ -3752,7 +3894,7 @@ bool TerminalSession::operator()(actions::OpenCommandOutput const& action)
         auto const started = _app.externalLauncher().runDetachedWithInput(program, *file);
         files.release(*file);
         if (!started)
-            reportOpenOutputFailure(platform::describe(started.error()));
+            reportOpenFailure(OpenFailure::CommandOutput, platform::describe(started.error()));
         return started.has_value();
     }
 
@@ -3765,7 +3907,7 @@ bool TerminalSession::operator()(actions::OpenCommandOutput const& action)
     if (!opened)
     {
         files.release(*file);
-        reportOpenOutputFailure(describe(opened.error()));
+        reportOpenFailure(OpenFailure::CommandOutput, describe(opened.error()));
         return false;
     }
 
@@ -3780,18 +3922,30 @@ bool TerminalSession::operator()(actions::CopyHyperlink const& action)
     // A URI the caller pinned wins: the context menu captured the link the user right-clicked, and asking
     // the terminal again now would answer about wherever the pointer has since wandered. A key binding
     // pins nothing, and for it "the link under the cursor" is exactly the right question.
+    if (action.link)
+    {
+        copyToClipboard(action.link->target);
+        return true;
+    }
     if (!action.uri.empty())
     {
         copyToClipboard(action.uri);
         return true;
     }
 
-    auto const l = scoped_lock { terminal() };
-    auto const hyperlink = terminal().tryGetHoveringHyperlink();
-    if (!hyperlink)
+    // What the follow gesture would open there: an OSC 8 link, a detected one, a URL found on demand. A path
+    // the probe has not confirmed copies nothing, as where it resolves is not known yet.
+    auto const address = core::locked(_terminal, [&]() -> std::optional<std::string> {
+        auto const position = _terminal.currentMouseGridPosition();
+        auto const lookup = position ? _terminal.lookUpLinkAt(*position) : vtbackend::LinkLookup {};
+        if (lookup.hyperlink)
+            return lookup.hyperlink->uri;
+        return lookup.target.transform([](vtbackend::LinkTarget const& target) { return target.target; });
+    });
+    if (!address)
         return false;
 
-    copyToClipboard(hyperlink->uri);
+    copyToClipboard(*address);
     return true;
 }
 
@@ -3942,46 +4096,170 @@ bool TerminalSession::operator()(actions::FollowHyperlink const& action)
 {
     // Pinned by the caller (the context menu, which captured the link the user right-clicked) beats asking
     // the terminal where the pointer happens to rest now. See operator()(CopyHyperlink) above.
+    if (action.link)
+    {
+        openLink(*action.link);
+        return true;
+    }
     if (!action.uri.empty())
     {
         followHyperlink(vtbackend::HyperlinkInfo { .userId = {}, .uri = action.uri });
         return true;
     }
 
-    // Looked up under the lock, and opened once it is released: the desktop's handler is another process, and
-    // an executable link runs one, neither of which the parser thread may wait for.
-    auto hyperlink = std::shared_ptr<vtbackend::HyperlinkInfo const> {};
-    auto path = std::expected<std::optional<std::string>, vtbackend::PathRefusal> {};
-    auto pathText = std::optional<std::string> {};
+    // An action reports whether it acted, and the binding falls through where it did not: a path that is
+    // being looked for has been acted on, as it opens once found.
+    return followLinkUnderPointer() != LinkFollow::NothingThere;
+}
+
+/// What a follow gesture found at a cell, read under the terminal lock and acted on once it is released: the
+/// desktop's handler is another process, and an executable link runs one, neither of which the parser thread
+/// may wait for.
+struct TerminalSession::FoundLink
+{
+    vtbackend::LinkLookup lookup;                    ///< What lies at the cell.
+    std::shared_ptr<vtbackend::PathProbe> probe;     ///< Null without link detection.
+    core::async::IExecutor* probeExecutor = nullptr; ///< The app's probe thread; null without detection.
+};
+
+TerminalSession::FoundLink TerminalSession::findLinkAt(vtbackend::CellLocation position)
+{
+    auto const* const detector = _terminal.linkDetector();
+    return FoundLink { .lookup = _terminal.lookUpLinkAt(position),
+                       .probe = detector ? detector->pathProbe() : nullptr,
+                       .probeExecutor = detector ? &detector->services().probeExecutor : nullptr };
+}
+
+void TerminalSession::followLinkAt(vtbackend::CellLocation position)
+{
+    // Nothing to fall through to: vi's `gx` consumed its keys whatever lies there.
+    std::ignore = follow(core::locked(_terminal, [&] { return findLinkAt(position); }));
+}
+
+LinkFollow TerminalSession::followLinkUnderPointer()
+{
+    // The pointer's cell and what lies there, in one hold of the lock.
+    auto found = core::locked(_terminal, [&]() -> std::optional<FoundLink> {
+        auto const position = _terminal.currentMouseGridPosition();
+        return position ? std::optional { findLinkAt(*position) } : std::nullopt;
+    });
+    return found ? follow(std::move(*found)) : LinkFollow::NothingThere;
+}
+
+LinkFollow TerminalSession::follow(FoundLink found)
+{
+    // The application's own link, as it wrote it: its file:// to a program is run, as an OSC 8 link's is.
+    if (found.lookup.hyperlink)
     {
-        auto const l = scoped_lock { terminal() };
-        hyperlink = terminal().tryGetHoveringHyperlink();
-        if (!hyperlink)
-        {
-            path = terminal().localPathAtMousePosition();
-            if (!path)
-                pathText = terminal().pathTextAtMousePosition();
-        }
+        followHyperlink(*found.lookup.hyperlink);
+        return LinkFollow::Opened;
+    }
+    if (found.lookup.target)
+    {
+        openLink(*found.lookup.target);
+        return LinkFollow::Opened;
+    }
+    if (found.lookup.refusal)
+    {
+        // The path names a file on another machine: its command ran there, or the pane replicates that
+        // machine's daemon, for the reason followHyperlink() refuses a file:// link there. Said, as that
+        // refusal is.
+        errorLog()("Not opening \"{}\": {}",
+                   found.lookup.printedPath ? found.lookup.printedPath->target : std::string {},
+                   refusalReason(*found.lookup.refusal));
+        return LinkFollow::NothingThere;
+    }
+    if (!found.lookup.pathToProbe || !found.lookup.printedPath || !found.probe
+        || found.probeExecutor == nullptr)
+        return LinkFollow::NothingThere;
+
+    // Printed too recently to be known: looked for on the probe thread, which a hung mount stalls alone, and
+    // opened back on this thread once found. The session may be gone by then; its post target says so.
+    vtbackend::probeAsync(
+        std::move(found.probe),
+        *found.probeExecutor,
+        std::move(*found.lookup.pathToProbe),
+        [this,
+         postTarget = _postTarget,
+         printed = std::move(*found.lookup.printedPath),
+         directories = std::move(found.lookup.pathDirectories)](vtbackend::ResolvedPath const& answer) {
+            if (answer.kind == vtbackend::PathKind::Missing)
+                return;
+            // Posted to this session, so Qt drops the call should the session die before it runs.
+            postTarget->post([this, link = vtbackend::resolvedPathTarget(printed, answer, directories)] {
+                openLink(link);
+            });
+        });
+    return LinkFollow::Probing;
+}
+
+void TerminalSession::openLink(vtbackend::LinkTarget const& link)
+{
+    switch (link.kind)
+    {
+        case vtbackend::LinkKind::Url:
+        case vtbackend::LinkKind::Custom:
+            // A file:// URL found in output arrives as the path it names (vtbackend::classifyPrintedLink()):
+            // never here, where followHyperlink() would run a program it names (§7.6).
+            if (vtbackend::isFileUrl(link.target))
+            {
+                errorLog()("Not opening \"{}\": a file:// link found in output opens as the file it names.",
+                           link.target);
+                return;
+            }
+            followHyperlink(vtbackend::HyperlinkInfo { .userId = {}, .uri = link.target });
+            return;
+        case vtbackend::LinkKind::Path: openLocalPath(link); return;
+    }
+}
+
+void TerminalSession::openLocalPath(vtbackend::LinkTarget const& link)
+{
+    auto const& opener = _profile.fileOpener.value();
+    // Validated when the configuration was read, and split again for each file it opens. An empty one parses
+    // to no program; one with a problem was reported then, and is kept as written only for the settings
+    // page: it opens as an empty one does.
+    auto const parsed = config::FileOpenerTemplate::parse(opener.command);
+
+    // A directory goes to the file manager, and without a usable file_opener a file to the application it is
+    // associated with, which takes no location (§7.3).
+    if (link.pathKind == vtbackend::PathKind::Directory || !parsed)
+    {
+        auto const url = QUrl::fromLocalFile(QString::fromStdString(link.target));
+        openExternally(url, link.pathKind == vtbackend::PathKind::Directory ? "folder" : "file", link.target);
+        return;
+    }
+    auto argv = parsed->expand(link.target, link.location);
+
+    auto const pane = commandPaneFor(opener.placement);
+    if (!pane)
+    {
+        // Detached: a program of its own, started without waiting for it.
+        auto arguments = QStringList {};
+        for (auto const& argument: argv | std::views::drop(1))
+            arguments.append(QString::fromStdString(argument));
+        if (auto const started =
+                _app.externalLauncher().runDetached(QString::fromStdString(argv.front()), arguments);
+            !started)
+            reportOpenFailure(OpenFailure::File, platform::describe(started.error()));
+        return;
     }
 
-    if (hyperlink)
+    if (_manager == nullptr)
     {
-        followHyperlink(*hyperlink);
-        return true;
+        reportOpenFailure(OpenFailure::File, describe(CommandPaneError::NoPane));
+        return;
     }
-    if (path && *path)
-    {
-        openDocument(**path);
-        return true;
-    }
-    if (path)
-        return false; // no path there, or none that names an existing file
-
-    // The path names a file on another machine: its command ran there, or the pane replicates that machine's
-    // daemon, for the reason followHyperlink() refuses a file:// link there. Said, as that refusal is.
-    if (pathText)
-        errorLog()("Not opening \"{}\": {}", *pathText, refusalReason(path.error()));
-    return false;
+    // In a pane, working where a relative path was found, or else in the file's own directory.
+    auto command = vtpty::Process::ExecInfo {};
+    command.program = argv.front();
+    command.arguments.assign(std::next(argv.begin()), argv.end());
+    command.workingDirectory =
+        link.directory.empty()
+            ? core::pathFromUtf8(link.target).value_or(std::filesystem::path {}).parent_path()
+            : core::pathFromUtf8(link.directory).value_or(std::filesystem::path {});
+    if (auto const opened = _manager->openCommandPane(this, *pane, command); !opened)
+        reportOpenFailure(OpenFailure::File, describe(opened.error()));
 }
 
 bool TerminalSession::operator()(actions::HintMode const& action)
@@ -3991,66 +4269,31 @@ bool TerminalSession::operator()(actions::HintMode const& action)
                  action.hintAction,
                  action.scope);
 
-    // Start with builtin patterns.
-    auto patterns = vtbackend::HintModeHandler::builtinPatterns();
-
-    // Merge user-configured patterns: override builtins with same name, append new ones.
-    for (auto const& userPattern: profile().hintPatterns.value())
-    {
-        try
+    // The table was compiled, and its problems reported, when the profile was applied. Read under the lock,
+    // as configureTerminal() replaces it under the lock, filtered by name against that same table, and handed
+    // to hint mode in the same hold. Through runUnderStateLock(): hint mode puts the indicator status line
+    // up, which resizes. See ViNormalMode.
+    terminal().runUnderStateLock([&]() {
+        auto const table = terminal().settings().linkPatterns;
+        auto names = std::vector<std::string> {};
+        if (!action.patterns.empty() && action.patterns != "all")
         {
-            auto compiled = vtbackend::HintPattern {
-                .name = userPattern.name,
-                .regex = std::regex(userPattern.regex,
-                                    std::regex_constants::ECMAScript | std::regex_constants::optimize),
-                .resolve = {},
-            };
-            auto const it =
-                std::ranges::find_if(patterns, [&](auto const& p) { return p.name == userPattern.name; });
-            if (it != patterns.end())
-                *it = std::move(compiled); // Override builtin with same name.
+            for (auto const name: core::split(std::string_view(action.patterns), '|'))
+                if (table->find(name) != nullptr)
+                    names.emplace_back(name);
+            if (names.empty())
+                sessionLog()("No hint patterns matched '{}', falling back to all patterns", action.patterns);
             else
-                patterns.push_back(std::move(compiled)); // Append new user pattern.
+                sessionLog()("Filtered to {} hint pattern(s) matching '{}'", names.size(), action.patterns);
         }
-        catch (std::regex_error const& e)
-        {
-            sessionLog()("Skipping hint pattern '{}': invalid regex '{}': {}",
-                         userPattern.name,
-                         userPattern.regex,
-                         e.what());
-        }
-    }
-
-    // Filter by requested pattern name(s) if specified.
-    if (!action.patterns.empty() && action.patterns != "all")
-    {
-        auto const requestedNames = core::split(std::string_view(action.patterns), '|');
-        auto const nameMatches = [&](auto const& p) {
-            return std::ranges::find(requestedNames, std::string_view(p.name)) != requestedNames.end();
-        };
-
-        if (std::ranges::any_of(patterns, nameMatches))
-        {
-            std::erase_if(patterns, [&](auto const& p) { return !nameMatches(p); });
-            sessionLog()("Filtered to {} hint pattern(s) matching '{}'", patterns.size(), action.patterns);
-        }
-        else
-        {
-            sessionLog()("No hint patterns matched '{}', falling back to all patterns", action.patterns);
-        }
-    }
-
-    auto request = vtbackend::HintModeRequest {
-        .patterns = std::move(patterns),
-        .action = action.hintAction,
-        .scope = action.scope,
-        .scrollbackLimit = profile().hintScrollbackLines.value(),
-    };
-    // Locked: hint mode puts the indicator status line up, which resizes. See ViNormalMode.
-    {
-        auto const _ = std::scoped_lock { terminal() };
-        terminal().activateHintMode(std::move(request));
-    }
+        terminal().activateHintMode(vtbackend::HintModeRequest {
+            .patterns =
+                vtbackend::HintPatternSet { .table = table, .names = std::move(names), .resolve = {} },
+            .action = action.hintAction,
+            .scope = action.scope,
+            .scrollbackLimit = profile().hintScrollbackLines.value(),
+        });
+    });
     return true;
 }
 
@@ -4993,7 +5236,7 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& actio
         return executionCount;
     }
 
-    if (togglesKeyMappings(actions))
+    if (config::containsAction<actions::ToggleAllKeyMaps>(actions))
     {
         bool const ex = executeAction(actions::ToggleAllKeyMaps {});
         scheduleRedraw();
@@ -5289,6 +5532,11 @@ void TerminalSession::configureTerminal()
         _terminal.setWordDelimiters(_config.wordDelimiters.value());
         _terminal.setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
         _terminal.setMouseProtocolBypassModifiers(configured.mouseProtocolBypassModifiers);
+        _terminal.setLinkPatterns(configured.linkPatterns);
+        // A new table means a new detector, whose link ids start over.
+        _detectedLinkTooltip = {};
+        _terminal.setLinkDecorationMode(configured.linkDecorationMode);
+        _terminal.setLinkFollowModifiers(configured.linkFollowModifiers);
         _terminal.setMouseBlockSelectionModifiers(_config.mouseBlockSelectionModifiers.value());
         _terminal.setLastMarkRangeOffset(configured.copyLastMarkRangeOffset);
 

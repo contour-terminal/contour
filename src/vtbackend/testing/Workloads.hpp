@@ -37,15 +37,16 @@ struct Workload
     WorkloadWriter writeUnit; ///< Appends one line or one frame of it.
 };
 
+/// @return A random number in [@p low, @p high], drawn from @p rng directly, so that it is the same with
+/// every
+///         standard library. Slightly biased towards @p low, which a benchmark does not mind.
+inline int drawBetween(std::mt19937& rng, int low, int high)
+{
+    return low + static_cast<int>(rng() % static_cast<std::mt19937::result_type>(high - low + 1));
+}
+
 namespace detail
 {
-    /// @return A random number in [@p low, @p high], drawn from @p rng directly, so that it is the same with
-    ///         every standard library. Slightly biased towards @p low, which a benchmark does not mind.
-    inline int drawBetween(std::mt19937& rng, int low, int high)
-    {
-        return low + static_cast<int>(rng() % static_cast<std::mt19937::result_type>(high - low + 1));
-    }
-
     /// Appends @p count random printable ASCII characters (0x21 to 0x7E).
     inline void appendPrintable(std::string& out, std::mt19937& rng, int count)
     {

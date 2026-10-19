@@ -9,6 +9,7 @@
 #include <contour/command/Command.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/test/CoreFixtures.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -153,4 +154,18 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
         auto const twice = shortcutIndex(mappings);
         CHECK(twice.at("ScrollToTop") == "Ctrl+A");
     }
+}
+
+TEST_CASE("describeLinkGesture spells the follow gesture as the shortcut column spells a chord",
+          "[contour][links]")
+{
+    CHECK(describeLinkGesture(config::Config {})
+          == "Ctrl+Click (Shift+Ctrl+Click inside applications that use the mouse)");
+    CHECK(describeLinkGesture(contour::test::loadConfigFromYaml(
+              "input_mapping:\n  - { mods: [Alt], mouse: Left, action: FollowHyperlink }\n"))
+          == "Alt+Click (Shift+Alt+Click inside applications that use the mouse)");
+    CHECK(
+        describeLinkGesture(contour::test::loadConfigFromYaml(
+                                "input_mapping:\n  - { mods: [Alt], mouse: Left, action: PasteClipboard }\n"))
+            .starts_with("No mouse binding follows links"));
 }

@@ -33,7 +33,8 @@ When in [normal mode](../input-modes.md), you can use:
 - `gh` — activate hint mode with **Copy** action (yank the match to clipboard)
 - `gH` — activate hint mode with **Open** action (open the match, e.g. URL in browser)
 
-These commands scan for all builtin patterns (URLs, file paths, git hashes, IPs).
+These commands scan with the profile's patterns: the builtins (URLs, file paths,
+git hashes, IPs) and your own `hint_patterns`.
 
 ## Using Hint Mode
 
@@ -51,17 +52,19 @@ Contour ships with the following builtin pattern detectors:
 
 | Pattern     | Examples                                     | Description                        |
 |-------------|----------------------------------------------|------------------------------------|
-| `url`       | `https://example.com`, `http://localhost:8080` | HTTP and HTTPS URLs              |
-| `filepath`  | `/home/user/file.txt`, `./src/main.cpp`, `lib/utils.h` | Absolute, relative, and home-relative (`~/...`) file paths |
+| `url`       | `https://example.com`, `http://localhost:8080` | `http`, `https`, `ftp`, `file` and `mailto` URLs |
+| `filepath`  | `/home/user/file.txt`, `./src/main.cpp`, `src/main.cpp:12:5`, `C:\Users\me\notes.txt`, `Makefile` | Absolute, relative, home-relative (`~/...`) and Windows paths, and bare file names; a `:line[:column]` or `(line[,column])` after one is kept as its location |
 | `githash`   | `a1b2c3d`, `abc1234567890def1234567890abcdef12345678` | 7–40 character hex strings (git commit SHAs) |
 | `ipv4`      | `192.168.1.1`, `10.0.0.1:8080`               | IPv4 addresses, optionally with port |
 | `ipv6`      | `::1`, `fe80::1`, `2001:0db8:85a3:0000:0000:8a2e:0370:7334` | IPv6 addresses |
 
 ### Smart File Path Detection
 
+Hint mode and the links Contour underlines in output share one path grammar,
+which takes bare names and a location printed after a path (`main.cpp:42:10`).
 When the terminal knows the current working directory, or the directory a command
 ran in (via [shell integration](../vt-extensions/osc-133-shell-integration.md)),
-Contour broadens its file path detection to also match:
+file path detection also matches:
 
 - **Bare filenames with extensions** — `main.cpp`, `README.md`
 - **Extensionless files** — `Makefile`, `LICENSE`, `Dockerfile`, `CHANGELOG`
@@ -80,8 +83,8 @@ The `hint_action` parameter controls what happens when you select a match:
 
 | Action         | Description                                                  |
 |----------------|--------------------------------------------------------------|
-| `Copy`         | Copy the matched text to the system clipboard (default)      |
-| `Open`         | Open the match — URLs open in the browser, files open in the configured editor |
+| `Copy`         | Copy the matched text to the system clipboard (default); a path, resolved to its absolute form |
+| `Open`         | Open the match as Ctrl+click opens it — web URLs in the browser, directories in the file manager, and files (a `file://` URL among them) with [`file_opener`](../configuration/links.md#file_opener) at the line they were printed with |
 | `Paste`        | Paste the matched text into the terminal input               |
 | `CopyAndPaste` | Copy to clipboard **and** paste into the terminal            |
 | `Select`       | Enter vi visual mode with the match range pre-selected for manual adjustment |
@@ -204,6 +207,76 @@ You can then reference custom patterns in key bindings just like builtins:
 input_mapping:
     - { mods: [Control, Shift], key: I, action: HintMode, patterns: uuid, hint_action: Copy }
 ```
+
+Back-references (`\1` to `\9`) are not supported; a pattern using one is reported
+when the configuration is loaded and disabled.
+
+### Clickable Patterns
+
+[Links in Terminal Output](../configuration/links.md) describes the links Contour
+finds in output, and how they open, in full.
+
+A pattern can also be found in the terminal's output without entering hint mode:
+with `clickable: true` its matches are decorated as links are (see
+`hyperlink_decoration`) and opened with Ctrl+click. `url` says what is opened,
+with `{0}` standing for the whole match and `{1}` to `{9}` for its capture
+groups. Without `url`, the match is opened as printed.
+
+Where the printed text chooses the scheme (no `url`, or a `url` that does not
+start with a scheme of its own, such as `{0}`), a match opens only with a scheme
+Contour opens in URLs it finds itself: `http`, `https`, `ftp`, `mailto` or
+`file`. Any other is no link: it is not underlined, and hint mode offers it to
+copy and opens nothing. A `url` that writes its scheme itself may open any.
+
+Only what a URL cannot hold is percent-encoded as a group is put in: spaces,
+control characters and `` "#<>[\]^`{|} ``. Characters such as `/ ? & = + @ : %`
+pass through, so a group placed in a query can add parameters, and one placed
+before the host can change it. Write the scheme and the host in the template
+itself, as the examples below do, and put groups after them.
+
+```yaml
+profiles:
+  main:
+    hint_patterns:
+      - name: jira
+        regex: '\b[A-Z][A-Z0-9]+-\d+\b'
+        clickable: true
+        url: 'https://jira.example.com/browse/{0}'
+      - name: github_issue
+        regex: '\b([\w.-]+)/([\w.-]+)#(\d+)\b'
+        clickable: true
+        url: 'https://github.com/{1}/{2}/issues/{3}'
+      - name: commit
+        regex: '\b[0-9a-f]{7,40}\b'
+        clickable: true
+        url: 'https://github.com/contour-terminal/contour/commit/{0}'
+```
+
+The builtins `url` and `filepath` are clickable, and `githash`, `ipv4` and `ipv6`
+are offered in hint mode only. An entry named like a builtin changes only the keys
+it gives, so it may leave out its `regex`:
+
+```yaml
+    hint_patterns:
+      - name: filepath
+        clickable: false   # stop underlining paths; hint mode still offers them
+```
+
+A `url` template applies to your own patterns only: a builtin opens what it finds,
+and a `url` given to one is reported and ignored. So `clickable: true` on
+`githash`, `ipv4` or `ipv6` alone makes no link, as a bare hash or address names
+no scheme; to link commits to their page, write a pattern of your own with a
+`url`, as `commit` above does.
+
+A `url` that names a capture group the regex does not have, such as `{2}` for a
+regex with one group, is reported when the configuration is loaded and disables
+the pattern.
+
+A regex that overrides `filepath` must say which part of its match is the path:
+capture group 1 is the path, groups 2 and 3 a `:line[:column]` printed after it,
+and groups 4 and 5 a `(line[,column])`. An override of `filepath` without a
+capture group is reported and disabled. Every other pattern's link is its whole
+match, `{0}`.
 
 ### Path Resolution
 

@@ -2243,7 +2243,7 @@ TEST_CASE("Terminal.blocks.droppedRowsTakeWhatNamedThemWithThem", "[terminal][se
         fill();
         runCommand(mc, "ls", { "a" });
         mc.writeToScreen(PromptStart);
-        mc.terminal.activateHintMode(HintModeRequest { .patterns = HintModeHandler::builtinPatterns(),
+        mc.terminal.activateHintMode(HintModeRequest { .patterns = {},
                                                        .action = HintAction::Copy,
                                                        .scope = HintScope::Scrollback,
                                                        .scrollbackLimit = LineCount(1000) });

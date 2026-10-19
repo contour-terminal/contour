@@ -37,6 +37,22 @@ using namespace std::string_literals;
 namespace contour::session
 {
 
+namespace
+{
+    /// The working directory a new pane asks for: the one its command names, where it names one -- a
+    /// file_opener pane works where its file is -- else the one inherited from the pane it opens beside.
+    /// @param command What the pane runs instead of a shell, if anything.
+    /// @param inherited The working directory of the pane it opens beside, if known.
+    /// @return The directory to ask the session factory for, as UTF-8.
+    [[nodiscard]] std::optional<std::string> paneWorkingDirectory(
+        std::optional<vtpty::Process::ExecInfo> const& command, std::optional<std::string> inherited)
+    {
+        if (command && !command->workingDirectory.empty())
+            return core::pathToUtf8(command->workingDirectory);
+        return inherited;
+    }
+} // namespace
+
 TerminalSessionManager::TerminalSessionManager(ContourGuiApp& app,
                                                SessionFactory& factory,
                                                config::LayoutStore& layouts,
@@ -220,7 +236,8 @@ TerminalSession* TerminalSessionManager::createSessionInBackground(
     // Pre-mint the session id so the model's allocator (see ctor) hands it back, keeping the model
     // tab/pane and the Qt session on one id.
     auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
-    auto* session = createBackingSession(sessionId, ptyPath, pageSize, command, profileName, role);
+    auto* session = createBackingSession(
+        sessionId, paneWorkingDirectory(command, std::move(ptyPath)), pageSize, command, profileName, role);
 
     // Mirror this new session into the vtworkspace model as a new single-pane tab.
     if (auto* tab = _model->createTab(window))
@@ -1649,7 +1666,8 @@ TerminalSession* TerminalSessionManager::splitPane(TerminalSession* acting,
     // _pendingSessionId, so the model allocator (invoked inside splitActivePane) hands back exactly
     // this id — same backing-session-first order as createSessionInBackground/createTab.
     auto const newSessionId = vtworkspace::SessionId { _nextSessionId++ };
-    auto* session = createBackingSession(newSessionId, std::move(cwd), pageSize, command, std::nullopt, role);
+    auto* session = createBackingSession(
+        newSessionId, paneWorkingDirectory(command, std::move(cwd)), pageSize, command, std::nullopt, role);
     if (session == nullptr)
         return nullptr; // no backing session, no split
 

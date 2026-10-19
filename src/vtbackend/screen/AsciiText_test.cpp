@@ -129,9 +129,9 @@ TEST_CASE("isDecoderIdleAt.agreesWithTheDecoderAtEveryOffset", "[AsciiText]")
     {
         auto rng = std::mt19937 { seed };
         auto text = std::string {};
-        for ([[maybe_unused]] auto const byte: std::views::iota(0, test::detail::drawBetween(rng, 1, 12)))
+        for ([[maybe_unused]] auto const byte: std::views::iota(0, test::drawBetween(rng, 1, 12)))
             text += Alphabet[static_cast<size_t>(
-                test::detail::drawBetween(rng, 0, static_cast<int>(Alphabet.size()) - 1))];
+                test::drawBetween(rng, 0, static_cast<int>(Alphabet.size()) - 1))];
         auto decoder = unicode::utf8_decoder_state {};
         for (auto const offset: std::views::iota(size_t { 0 }, text.size() + 1))
         {

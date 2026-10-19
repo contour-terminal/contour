@@ -43,7 +43,7 @@ void ViInputHandler::registerAllCommands()
         std::array<std::pair<char, TextObjectScope>, 2> { { std::pair { 'i', TextObjectScope::Inner },
                                                             std::pair { 'a', TextObjectScope::A } } };
 
-    auto constexpr MotionMappings = std::array<std::pair<std::string_view, ViMotion>, 48> { {
+    auto constexpr MotionMappings = std::array<std::pair<std::string_view, ViMotion>, 50> { {
         // clang-format off
         { "$", ViMotion::LineEnd },
         { "%", ViMotion::ParenthesisMatching },
@@ -72,9 +72,11 @@ void ViInputHandler::registerAllCommands()
         { "[[", ViMotion::GlobalCurlyOpenUp },
         { "[]", ViMotion::GlobalCurlyCloseUp },
         { "[m", ViMotion::LineMarkUp },
+        { "[x", ViMotion::LinkBackward },
         { "][", ViMotion::GlobalCurlyCloseDown },
         { "]]", ViMotion::GlobalCurlyOpenDown },
         { "]m", ViMotion::LineMarkDown },
+        { "]x", ViMotion::LinkForward },
         { "^", ViMotion::LineTextBegin },
         { "b", ViMotion::WordBackward },
         { "e", ViMotion::WordEndForward },
@@ -152,6 +154,7 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor->paste(count(), true); });
     registerCommand(ModeSelect::Normal, "gh", [this]() { _executor->enterHintMode(HintAction::Copy); });
     registerCommand(ModeSelect::Normal, "gH", [this]() { _executor->enterHintMode(HintAction::Open); });
+    registerCommand(ModeSelect::Normal, "gx", [this]() { _executor->followLinkAtCursor(); });
 
     // Vim's fold keys. One row each, so a sixth is a row here and an enumerator in ViFoldCommand.
     auto constexpr FoldMappings = std::array<std::pair<std::string_view, ViFoldCommand>, 5> { {

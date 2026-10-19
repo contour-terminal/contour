@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/Actions.hpp>
+#include <contour/config/BlockActionEnums.hpp>
 #include <contour/config/ConfigDocumentation.hpp>
 #include <contour/config/ConfigEnum.hpp>
 #include <contour/config/FinishNotificationConfig.hpp>
@@ -14,11 +15,13 @@
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/core/Primitives.hpp> // CursorDisplay
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputBinding.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
+#include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/shell/MarkArbiter.hpp>
@@ -58,6 +61,7 @@
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -635,15 +639,35 @@ struct BackgroundConfig
 
 struct HyperlinkDecorationConfig
 {
+    vtbackend::LinkDecorationMode mode {
+        vtbackend::LinkDecorationMode::Always
+    }; ///< When links are decorated.
     vtrasterizer::Decorator normal { vtrasterizer::Decorator::DottedUnderline };
     vtrasterizer::Decorator hover { vtrasterizer::Decorator::Underline };
 };
 
-/// A user-defined hint pattern for hint mode scanning.
+/// How a detected file path opens (file_opener, §7.4).
+struct FileOpenerConfig
+{
+    /// A command line with {path}, {line} and {column} (FileOpenerTemplate); empty: the system's default
+    /// application. Validated when it is read: one with a problem is reported, and kept as written, so that
+    /// a save writes it back; it opens files as an empty one does.
+    std::string command;
+    /// Where the program runs: detached (a program of its own), or a Contour pane, a split or a tab.
+    actions::OutputPlacement placement { actions::OutputPlacement::Detached };
+};
+
+/// A user-defined hint pattern, or an override of a built-in one.
 struct HintPatternConfig
 {
-    std::string name;  ///< Pattern identifier (e.g. "uuid", "docker_id").
-    std::string regex; ///< ECMAScript regex to match against visible text.
+    std::string name;  ///< Pattern identifier (e.g. "uuid"); a built-in's name overrides that pattern.
+    std::string regex; ///< ECMAScript regex; empty in a name-only override of a built-in.
+    /// Detected in output, decorated and opened with Ctrl+click; unset keeps the default. A YAML bool
+    /// (serialisation boundary); `linkPatternSpecs()` converts it to `LinkActivation`.
+    std::optional<bool> clickable {};
+    std::optional<std::string> url {}; ///< A URL template over {0}-{9}; unset opens the match as printed.
+
+    bool operator==(HintPatternConfig const&) const = default;
 };
 
 struct PermissionsConfig
@@ -964,6 +988,7 @@ struct TerminalProfile
     ConfigEntry<BackgroundConfig, documentation::Background> background {};
     ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
     ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
+    ConfigEntry<FileOpenerConfig, documentation::FileOpener> fileOpener {};
     ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
     ConfigEntry<vtbackend::LineCount, documentation::HintScrollbackLines> hintScrollbackLines {
         vtbackend::LineCount { 1000 }
@@ -1937,7 +1962,8 @@ struct YAMLConfigReader
     /// loader (whose `profiles/<name>.yml` document root IS the body) calls it directly.
     /// @param profileNode The profile body map; a null node is a no-op (@p where keeps its base values).
     /// @param where The profile to populate; pre-seed it with an inheritance base before calling.
-    void loadProfileBody(YAML::Node const& child, TerminalProfile& where);
+    /// @param profileName The profile's name, as problems found in its body name it.
+    void loadProfileBody(YAML::Node const& child, TerminalProfile& where, std::string_view profileName);
 
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
@@ -1963,10 +1989,14 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, StatusLineConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, BackgroundConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HyperlinkDecorationConfig& where);
+    /// Reads file_opener as a command line, or as a map of `command` and `placement`, and validates the command
+    /// (FileOpenerTemplate::parse()): one that cannot be used is reported and cleared, so files open with the
+    /// system's default application.
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, FileOpenerConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PermissionsConfig& where);
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
-                       std::vector<HintPatternConfig>& where);
+                       std::vector<HintPatternConfig>& where) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::ArcStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::BrailleStyle& where);
@@ -2207,11 +2237,15 @@ struct Writer
             }
             result += indent + "hint_patterns:\n";
             for (auto const& p: patterns)
-                result += std::format("{}    - name: {}\n{}      regex: {}\n",
-                                      indent,
-                                      SingleQuoted { p.name },
-                                      indent,
-                                      SingleQuoted { p.regex });
+            {
+                result += std::format("{}    - name: {}\n", indent, SingleQuoted { p.name });
+                if (!p.regex.empty())
+                    result += std::format("{}      regex: {}\n", indent, SingleQuoted { p.regex });
+                if (p.clickable)
+                    result += std::format("{}      clickable: {}\n", indent, *p.clickable);
+                if (p.url)
+                    result += std::format("{}      url: {}\n", indent, SingleQuoted { *p.url });
+            }
         }
         return result;
     }
@@ -2394,7 +2428,12 @@ struct Writer
 
     [[nodiscard]] std::string format(std::string_view doc, HyperlinkDecorationConfig const& v)
     {
-        return format(doc, v.normal, v.hover);
+        return format(doc, v.mode, v.normal, v.hover);
+    }
+
+    [[nodiscard]] std::string format(std::string_view doc, FileOpenerConfig const& v)
+    {
+        return format(doc, SingleQuoted { v.command }, v.placement);
     }
 
     [[nodiscard]] std::string format(std::string_view doc, PermissionsConfig const& v)
@@ -2766,6 +2805,44 @@ struct ResolvedSessionConfig
     TerminalProfile const& profile,
     vtbackend::ColorPreference colorPreference,
     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
+
+/// Why the reader skips a hint_patterns entry: one needs a name, and a regex unless it names a built-in.
+/// @param pattern The entry as read.
+/// @return What is wrong with it, or nullopt for an entry the reader keeps.
+[[nodiscard]] std::optional<std::string> skippedHintPatternReason(HintPatternConfig const& pattern);
+
+/// The profile's hint_patterns as link pattern entries.
+/// @param profile The profile.
+/// @return One entry per hint_patterns entry, in order.
+[[nodiscard]] std::vector<vtbackend::LinkPatternSpec> linkPatternSpecs(TerminalProfile const& profile);
+
+/// The profile's link pattern table, compiled: the shared built-in table when the profile has no
+/// hint_patterns.
+/// @param profile The profile.
+/// @return The table; never null.
+[[nodiscard]] std::shared_ptr<vtbackend::LinkPatterns const> linkPatternsFor(TerminalProfile const& profile);
+
+/// Whether @p actions include an action of type @p A: FollowHyperlink makes a binding the follow gesture,
+/// ToggleAllKeyMaps one that still runs while key mappings are off.
+/// @tparam A The action type looked for, one of actions::Action's alternatives.
+/// @param actions A binding's actions.
+/// @return True when one of them is an @p A.
+template <typename A>
+[[nodiscard]] bool containsAction(ActionList const& actions)
+{
+    return std::ranges::any_of(
+        actions, [](actions::Action const& action) { return std::holds_alternative<A>(action); });
+}
+
+/// The modifiers of the left-button mouse binding that runs FollowHyperlink.
+///
+/// Only the first such binding counts, and its match modes are ignored: links are revealed for one chord, and
+/// a second binding (Ctrl+Click and Alt+Click both following) reveals nothing for the later one. The modes,
+/// which pick a binding by terminal state such as the alternate screen, are ignored because the reveal is
+/// decided before any click and cannot know which binding that click would find.
+/// @param config The loaded configuration.
+/// @return Them; nullopt when no binding follows links.
+[[nodiscard]] std::optional<vtbackend::Modifiers> followHyperlinkModifiers(Config const& config);
 
 /// Resolves @p profile's hosted-session configuration: @ref sessionSettings plus the shell,
 /// sandbox policy and startup layout a daemon-hosted session ALSO needs. The one place

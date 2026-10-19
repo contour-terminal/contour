@@ -11,6 +11,7 @@
 
 #include <core/Escape.hpp>
 #include <core/Utils.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <libunicode/convert.h>
 
@@ -667,9 +668,11 @@ TEST_CASE("MultiPage.DECPCCM_reset.theLinkUnderThePointerIsOnThePageOnDisplay", 
 TEST_CASE("MultiPage.DECPCCM_reset.thePathUnderThePointerIsOnThePageOnDisplay", "[screen]")
 {
     // Row 0 of page 1 belongs to a block that ran on another machine, which refuses its paths; row 0 of page
-    // 3 belongs to no block.
+    // 3 belongs to no block. The lookup reads no filesystem; where a path is handed to the probe, it looks in
+    // an empty one.
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
     auto& terminal = mock.terminal;
+    auto const files = core::platform::testing::InMemoryFileSystem {};
 
     SECTION("page 1 on display")
     {
@@ -677,8 +680,8 @@ TEST_CASE("MultiPage.DECPCCM_reset.thePathUnderThePointerIsOnThePageOnDisplay", 
         stampForeignBlockOnRow0(mock);
         pointAt(mock, 0, 6);
 
-        CHECK(terminal.pathTextAtMousePosition() == "notes.txt");
-        CHECK(terminal.localPathAtMousePosition() == std::unexpected(PathRefusal::RanElsewhere));
+        CHECK(printedPathUnderPointer(terminal) == "notes.txt");
+        CHECK(followedPathUnderPointer(terminal, files) == std::unexpected(PathRefusal::RanElsewhere));
     }
 
     SECTION("page 3 on display")
@@ -687,8 +690,8 @@ TEST_CASE("MultiPage.DECPCCM_reset.thePathUnderThePointerIsOnThePageOnDisplay", 
         stampForeignBlockOnRow0(mock);
         pointAt(mock, 0, 6);
 
-        CHECK(terminal.pathTextAtMousePosition() == "other.txt");
-        CHECK(terminal.localPathAtMousePosition().has_value());
+        CHECK(printedPathUnderPointer(terminal) == "other.txt");
+        CHECK(followedPathUnderPointer(terminal, files).has_value());
     }
 }
 
@@ -729,8 +732,7 @@ TEST_CASE("MultiPage.DECPCCM_reset.hintModeLabelsThePageOnDisplay", "[screen]")
     }));
     showOnePageOfTwo(mock, "visit https://one.example/ now", "visit https://three.example/ now", shown);
 
-    terminal.activateHintMode(
-        HintModeRequest { .patterns = HintModeHandler::builtinPatterns(), .action = HintAction::Copy });
+    terminal.activateHintMode(HintModeRequest { .patterns = {}, .action = HintAction::Copy });
     REQUIRE(terminal.hintMatches().size() == 1);
     CHECK(terminal.hintMatches().at(0).matchedText == url);
 }

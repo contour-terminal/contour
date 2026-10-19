@@ -3,6 +3,8 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 
+#include <vtbackend/links/LinkTypes.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -174,6 +176,32 @@ TEST_CASE("ContextMenu.hyperlink.onlyUnderTheCursor", "[contextmenu]")
     auto const elsewhere = buildContextMenu(state);
     CHECK(find(elsewhere, "Open Link") == nullptr);
     CHECK(find(elsewhere, "Copy Link Address") == nullptr);
+}
+
+TEST_CASE("ContextMenu.detectedLinkIsPinned", "[contextmenu][links]")
+{
+    // A detected link is carried as resolved, for the reason an OSC 8 one is carried: by the time a row is
+    // picked the pointer has left it.
+    auto state = fullyEnabledState();
+    state.hyperlinkUnderCursor.clear(); // no OSC 8 link: the detected one alone shows the rows
+    state.linkUnderCursor =
+        vtbackend::LinkTarget { .kind = vtbackend::LinkKind::Path,
+                                .target = "/w/a.cpp",
+                                .location = vtbackend::LinkLocation { .line = 3, .column = 1 },
+                                .pathKind = vtbackend::PathKind::File,
+                                .directory = "/w" };
+    auto const entries = buildContextMenu(state);
+
+    auto const* open = find(entries, "Open Link");
+    REQUIRE(open != nullptr);
+    REQUIRE(std::holds_alternative<actions::FollowHyperlink>(open->action));
+    CHECK(std::get<actions::FollowHyperlink>(open->action).link == state.linkUnderCursor);
+    CHECK(std::get<actions::FollowHyperlink>(open->action).uri.empty());
+
+    auto const* copy = find(entries, "Copy Link Address");
+    REQUIRE(copy != nullptr);
+    REQUIRE(std::holds_alternative<actions::CopyHyperlink>(copy->action));
+    CHECK(std::get<actions::CopyHyperlink>(copy->action).link == state.linkUnderCursor);
 }
 
 TEST_CASE("ContextMenu.toggleFold.grayedRatherThanHiddenWithoutAFold", "[contextmenu]")

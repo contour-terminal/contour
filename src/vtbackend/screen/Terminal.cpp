@@ -6,10 +6,15 @@
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/input/HeldModifiers.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
+#include <vtbackend/links/LinkMatcher.hpp>
+#include <vtbackend/links/PathResolution.hpp>
+#include <vtbackend/links/ScanText.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Gutter.hpp>
+#include <vtbackend/screen/PrintedLinks.hpp>
 #include <vtbackend/screen/RenderBufferBuilder.hpp>
 #include <vtbackend/shell/CommandBlockPaths.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
@@ -50,11 +55,11 @@
 #include <numeric>
 #include <optional>
 #include <ranges>
-#include <regex>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -163,40 +168,11 @@ namespace // {{{ helpers
         return it->second;
     }
 
-    /// The existing local file or directory @p match names, normalised.
-    /// @param files Where each candidate is looked up.
-    /// @param directories Where a relative @p match is looked up, first to last; none resolves it nowhere.
-    /// @param home The home directory a `~/` path is relative to; empty when unknown.
-    /// @param match The path as printed.
-    /// @return The first of its candidates that exists, as a normalised UTF-8 path; nullopt when none does.
-    std::optional<std::string> resolveExistingLocalPath(core::platform::FileSystem const& files,
-                                                        std::span<std::string const> directories,
-                                                        std::string const& home,
-                                                        std::string const& match)
+    /// Whether @p path is a single word with no directory part: what prose is made of, too. A lone `~`
+    /// or `~10` is one as well; only a leading `~/` names the home directory.
+    [[nodiscard]] bool isBarePathName(std::string_view path) noexcept
     {
-        auto const inDirectory = [](std::string_view directory,
-                                    std::string_view relative) -> std::optional<std::filesystem::path> {
-            auto const base = core::pathFromUtf8(directory);
-            auto const rest = core::pathFromUtf8(relative);
-            if (directory.empty() || !base || !rest)
-                return std::nullopt;
-            return *base / *rest;
-        };
-        auto const existing =
-            [&files](std::optional<std::filesystem::path> const& candidate) -> std::optional<std::string> {
-            if (!candidate || !files.exists(*candidate))
-                return std::nullopt;
-            return core::pathToUtf8(candidate->lexically_normal());
-        };
-
-        if (match.starts_with("~/"))
-            return existing(inDirectory(home, std::string_view { match }.substr(2)));
-        if (auto const matchPath = core::pathFromUtf8(match); matchPath && matchPath->is_absolute())
-            return existing(*matchPath);
-        for (auto const& directory: directories)
-            if (auto found = existing(inDirectory(directory, match)))
-                return found;
-        return std::nullopt;
+        return path.find_first_of("/\\") == std::string_view::npos;
     }
 
     constexpr size_t MaxColorPaletteSaveStackSize = 10;
@@ -289,10 +265,12 @@ Terminal::Terminal(Events& eventListener,
                    Settings factorySettings,
                    optional<StatusLineCommandServices> commandServices,
                    TerminalClocks clocks,
-                   SemanticBlockTokenSource sessionTokens):
+                   SemanticBlockTokenSource sessionTokens,
+                   std::optional<LinkDetectionServices> linkServices):
     _eventListener { eventListener },
     _homeDirectory { env.get("HOME").value_or("") },
     _fileSystem { fileSystem },
+    _linkServices { std::move(linkServices) },
     // Read here rather than per reply: what it names is how this terminal was launched, and a
     // configuration value re-read on every DA/DSR/CPR is a lookup on a path that answers thousands
     // of times a second.
@@ -359,7 +337,9 @@ Terminal::Terminal(Events& eventListener,
                                                 [this](StatusLineCommandOutput output) {
                                                     onStatusLineCommandCompleted(output);
                                                 })
-                                          : nullptr }
+                                          : nullptr },
+    // Last: its redraw request reaches what every member above holds.
+    _linkDetector { makeLinkDetector() }
 {
     // Through setTerminalId, so the three pieces of state derived from the identity are derived in
     // ONE place. Seeding _terminalId/_operatingLevel in the member list and stopping there left the
@@ -803,7 +783,8 @@ bool Terminal::refreshRenderBuffer(bool locked)
     return _renderBuffer.state == RenderBufferState::WaitingForRefresh;
 }
 
-bool Terminal::ensureFreshRenderBuffer(bool locked)
+template <std::invocable<RenderBuffer&> Fill>
+bool Terminal::refreshRenderBufferWith(Fill const& fill)
 {
     if (isRenderingSuppressed())
     {
@@ -825,10 +806,7 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
         case RenderBufferState::RefreshBuffersAndTrySwap: {
             auto& backBuffer = _renderBuffer.backBuffer();
             auto const lastCursorPos = backBuffer.cursor;
-            if (!locked)
-                fillRenderBuffer(_renderBuffer.backBuffer(), true);
-            else
-                fillRenderBufferInternal(_renderBuffer.backBuffer(), true);
+            fill(backBuffer);
             auto const cursorChanged =
                 lastCursorPos.has_value() != backBuffer.cursor.has_value()
                 || (backBuffer.cursor.has_value() && backBuffer.cursor->position != lastCursorPos->position);
@@ -855,6 +833,14 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
         break;
     }
     return true;
+}
+
+bool Terminal::ensureFreshRenderBuffer(bool locked)
+{
+    // The display's frames: link detection sees them.
+    if (!locked)
+        return refreshRenderBufferWith([this](RenderBuffer& output) { fillRenderBuffer(output, true); });
+    return refreshRenderBufferWith([this](RenderBuffer& output) { fillRenderFrame(output, true); });
 }
 
 PageSize Terminal::TheSelectionHelper::pageSize() const noexcept
@@ -912,7 +898,37 @@ InputMethodData Terminal::inputMethodData() const
 void Terminal::fillRenderBuffer(RenderBuffer& output, bool includeSelection)
 {
     auto const _ = std::lock_guard { _ownStateLock };
+    fillRenderFrame(output, includeSelection);
+}
+
+void Terminal::fillRenderFrame(RenderBuffer& output, bool includeSelection)
+{
+    // The fill reads _screenDirty anyway; link detection takes its signal of new output from here, so that
+    // the parser's path gains no instruction. Before the build, so that its hover query sees what detection
+    // adopts.
+    auto const change = _screenDirty.exchange(false) ? FrameChange::ScreenChanged : FrameChange::Unchanged;
+#ifdef LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE
+    // Every fill runs on the parser thread here, and detection's collect stays off the parser's path.
+    std::ignore = change;
+#else
+    if (_linkDetector)
+        detectLinks(change);
+#endif
     fillRenderBufferInternal(output, includeSelection);
+}
+
+void Terminal::detectLinks(FrameChange change)
+{
+    auto const now = currentTime();
+    _linkSource.beginFrame();
+    // A link may have appeared under a pointer that has not moved. The frame draws it anyway, from a query of
+    // its own; the tooltip and the pointer shape read this.
+    if (_linkDetector->onFrame(_linkSource, now, change) == LinkIndexChange::Changed)
+        refreshHoveredLink(currentMouseGridPosition());
+    // Published after every frame: a scan the frame left due -- a match it dropped as stale -- is known only
+    // from here, and nextRender() reads this without the lock.
+    auto const due = _linkDetector->nextDue(now);
+    _linkScanDue.store(due ? now + *due : chrono::steady_clock::time_point::max(), std::memory_order_relaxed);
 }
 
 void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelection)
@@ -923,7 +939,6 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     output.clear();
 
     _changes.store(0);
-    _screenDirty = false;
     ++_lastFrameID;
 
 #ifdef CONTOUR_PERF_STATS
@@ -942,10 +957,14 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     auto const mainDisplayReverseVideo = isModeEnabled(vtbackend::DECMode::ReverseVideo);
 
-    // The link under the pointer is asked for once, here, as this frame's own: the pointer's cell holds
+    // The links under the pointer are asked for once, here, as this frame's own: the pointer's cell holds
     // another link after a scroll, a screen switch or new output even while the pointer stands still, and
-    // no pointer event says so. A pure query -- unlike updateHoveringHyperlinkState() it tells nobody.
-    auto const hoveredHyperlink = hyperlinkIdUnderPointer();
+    // no pointer event says so. Pure queries -- unlike updateHoveringHyperlinkState() they tell nobody. There
+    // may be no index: a crossfade snapshot builds with no detection before it.
+    auto const pointer = currentMouseGridPosition();
+    auto const links = FrameLinks { .hoveredHyperlink = hyperlinkIdUnderPointer(pointer),
+                                    .detectedLinks = detectedLinks(),
+                                    .hoveredDetectedLink = detectedLinkIdUnderPointer(pointer) };
 
     // A non-empty search pattern forces every visible line onto the per-cell render path (the
     // uniform-line fast path emits one RenderLine and no per-cell data). Hint mode needs the same:
@@ -981,38 +1000,24 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     auto& displayedScreen = pageAt(_displayedPage);
 
+    // One builder for either branch: Grid::render takes it by forwarding reference.
+    auto builder = RenderBufferBuilder { *this,
+                                         displayedScreen,
+                                         output,
+                                         baseLine,
+                                         mainDisplayReverseVideo,
+                                         _colorPalette.colorLookupTable,
+                                         HighlightSearchMatches::Yes,
+                                         inputMethodData(),
+                                         effectiveCursorPosition,
+                                         includeSelection,
+                                         links,
+                                         RenderedDisplay::Main };
     if (foldingAppliesToDisplayedPage())
-        _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
-                                                                            displayedScreen,
-                                                                            output,
-                                                                            baseLine,
-                                                                            mainDisplayReverseVideo,
-                                                                            _colorPalette.colorLookupTable,
-                                                                            HighlightSearchMatches::Yes,
-                                                                            inputMethodData(),
-                                                                            effectiveCursorPosition,
-                                                                            includeSelection,
-                                                                            hoveredHyperlink,
-                                                                            RenderedDisplay::Main },
-                                                      _viewport.scrollOffset(),
-                                                      renderLinesPerCell,
-                                                      smoothScrollExtra,
-                                                      foldProjection());
+        _lastRenderPassHints = displayedScreen.render(
+            builder, _viewport.scrollOffset(), renderLinesPerCell, smoothScrollExtra, foldProjection());
     else
-        _lastRenderPassHints = displayedScreen.render(RenderBufferBuilder { *this,
-                                                                            displayedScreen,
-                                                                            output,
-                                                                            baseLine,
-                                                                            mainDisplayReverseVideo,
-                                                                            _colorPalette.colorLookupTable,
-                                                                            HighlightSearchMatches::Yes,
-                                                                            inputMethodData(),
-                                                                            effectiveCursorPosition,
-                                                                            includeSelection,
-                                                                            hoveredHyperlink,
-                                                                            RenderedDisplay::Main },
-                                                      _viewport.scrollOffset(),
-                                                      renderLinesPerCell);
+        _lastRenderPassHints = displayedScreen.render(builder, _viewport.scrollOffset(), renderLinesPerCell);
 
     // After both branches: the gutter and the fold labels belong to the main display whichever page it is
     // showing, and each is a no-op on a page folding does not apply to.
@@ -1236,7 +1241,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                 InputMethodData {},
                                                                 nullopt,
                                                                 includeSelection,
-                                                                HyperlinkId {},
+                                                                FrameLinks {},
                                                                 RenderedDisplay::StatusLine },
                                           ScrollOffset(0));
             // The terminal's own furniture, so its bar may span the window's whole width (#2139), and its
@@ -1269,7 +1274,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                                        InputMethodData {},
                                                                        statusLineCursor,
                                                                        includeSelection,
-                                                                       HyperlinkId {},
+                                                                       FrameLinks {},
                                                                        RenderedDisplay::StatusLine },
                                                  ScrollOffset(0));
             return _hostWritableStatusLineScreen.pageSize().lines;
@@ -1630,6 +1635,8 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                                       bool uiHandledHint,
                                       MousePressClaimant const& claimant)
 {
+    // The event carries the chord held at its moment: the one a frontend learns of without a key event.
+    (void) updateHeldModifiers(modifiers);
     _currentMousePixelPosition = pixelPosition;
 
     // A press is not necessarily preceded by a MouseMove landing exactly here: the windowing system
@@ -1689,8 +1696,6 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
                    modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
            });
 
-    // TODO: Ctrl+(Left)Click's should still be caught by the terminal iff there's a hyperlink
-    // under the current position
     flushInput();
     return Handled { eventHandledByApp && !isModeEnabled(DECMode::MousePassiveTracking) };
 }
@@ -1958,6 +1963,7 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     if (!(isPrimaryScreen() || isAlternateScreen()))
         return;
 
+    (void) updateHeldModifiers(modifiers);
     _currentMousePixelPosition = pixelPosition;
 
     // Back from off the grid is a move too, even onto the cell it left from.
@@ -2464,18 +2470,198 @@ void Terminal::updateCursorVisibilityState() const noexcept
 
 HyperlinkId Terminal::hyperlinkIdUnderPointer() const
 {
-    auto const position = currentMouseGridPosition();
-    return position ? displayedPage().hyperlinkIdAt(*position) : HyperlinkId {};
+    return hyperlinkIdUnderPointer(currentMouseGridPosition());
+}
+
+HyperlinkId Terminal::hyperlinkIdUnderPointer(std::optional<CellLocation> pointer) const
+{
+    return pointer ? displayedPage().hyperlinkIdAt(*pointer) : HyperlinkId {};
+}
+
+DetectedLink const* Terminal::detectedLinkAt(CellLocation gridPosition) const
+{
+    // The page on display, which is what the index describes and what the fill draws -- not the cursor's.
+    auto const* index = detectedLinks();
+    if (!index)
+        return nullptr;
+    auto const spans = currentSpansOn(*index, displayedPage().grid(), gridPosition.line);
+    auto const span =
+        std::ranges::find_if(spans, [column = gridPosition.column](LinkRowSpan const& candidate) {
+            return candidate.first <= column && column <= candidate.last;
+        });
+    return span != spans.end() ? index->find(span->link) : nullptr;
+}
+
+LinkId Terminal::detectedLinkIdUnderPointer(std::optional<CellLocation> pointer) const
+{
+    auto const* link = pointer ? detectedLinkAt(*pointer) : nullptr;
+    return link ? link->id : LinkId {};
+}
+
+void Terminal::refreshHoveredLink(std::optional<CellLocation> pointer)
+{
+    _hoveringLinkId = detectedLinkIdUnderPointer(pointer);
+}
+
+namespace
+{
+    /// The rows of the page on display from a vi link motion's cursor on, in its direction of travel, as one
+    /// key press has seen them: those the index answers for, and those the key press scanned itself.
+    class LinkMotionRows
+    {
+      public:
+        /// @param grid The page on display's grid.
+        /// @param from The row the motion starts on.
+        /// @param direction Which way it goes.
+        LinkMotionRows(Grid const& grid, LineOffset from, LinkDirection direction):
+            _grid { grid },
+            _direction { direction },
+            _top { -boxed_cast<LineOffset>(grid.historyLineCount()) },
+            _bottom { boxed_cast<LineOffset>(grid.pageSize().lines) - 1 },
+            _walked { from },
+            _readEnd { from }
+        {
+        }
+
+        /// @return The last row in the direction of travel.
+        [[nodiscard]] LineOffset edge() const noexcept { return isForward() ? _bottom : _top; }
+
+        /// The first row up to @p end that the index does not answer for and this key press has not scanned:
+        /// what lies there may be a link the index does not know. Resumes where the last call stopped: a scan
+        /// only adds rows answered for or scanned within one key press, under the lock.
+        /// @param index The links detected on the page on display; null for none.
+        /// @param end The last row to look at, in the direction of travel.
+        /// @return The row; nullopt when every row up to @p end is answered for.
+        [[nodiscard]] std::optional<LineOffset> firstUnread(LinkIndex const* index, LineOffset end)
+        {
+            auto const rows = unbox(isForward() ? end - _walked : _walked - end) + 1;
+            for (auto const offset: std::views::iota(0, std::max(rows, 0)))
+            {
+                auto const line = isForward() ? _walked + LineOffset(offset) : _walked - LineOffset(offset);
+                if (!isRead(line) && (index == nullptr || !isScannedAsItIs(*index, _grid, line)))
+                {
+                    _walked = line;
+                    return line;
+                }
+            }
+            if (rows > 0)
+                _walked = isForward() ? end + LineOffset(1) : end - LineOffset(1);
+            return std::nullopt;
+        }
+
+        /// @return The page to scan from @p hole on, in the direction of travel, within the grid: first,
+        /// last.
+        [[nodiscard]] std::pair<LineOffset, LineOffset> pageFrom(LineOffset hole) const noexcept
+        {
+            auto const span = boxed_cast<LineOffset>(_grid.pageSize().lines) - 1;
+            return isForward() ? std::pair { hole, std::min(_bottom, hole + span) }
+                               : std::pair { std::max(_top, hole - span), hole };
+        }
+
+        /// Notes rows [@p first, @p last] as scanned by this key press: a row the index still does not hold
+        /// as it is after its scan (a scan dropped as stale) is not scanned twice.
+        void markRead(LineOffset first, LineOffset last) noexcept
+        {
+            _readEnd = isForward() ? std::max(_readEnd, last + LineOffset(1))
+                                   : std::min(_readEnd, first - LineOffset(1));
+        }
+
+      private:
+        [[nodiscard]] bool isForward() const noexcept { return _direction == LinkDirection::Forward; }
+
+        [[nodiscard]] bool isRead(LineOffset line) const noexcept
+        {
+            return isForward() ? line < _readEnd : line > _readEnd;
+        }
+
+        Grid const& _grid;
+        LinkDirection _direction;
+        LineOffset _top;
+        LineOffset _bottom;
+        LineOffset _walked;  ///< The rows from the cursor's up to here are answered for or scanned.
+        LineOffset _readEnd; ///< The rows from the cursor's that this key press scanned end before here.
+    };
+} // namespace
+
+LinkScanBudget Terminal::linkScanBudget() const noexcept
+{
+    return LinkScanBudget { .pages = _linkDetector ? _linkDetector->services().tuning.motionSearchPages : 0 };
+}
+
+std::optional<CellLocation> Terminal::linkStartFrom(CellLocation from,
+                                                    LinkDirection direction,
+                                                    LinkScanBudget& budget)
+{
+    if (!_linkDetector)
+        return std::nullopt;
+
+    // The page on display, which is what the index describes, as detectedLinkAt() reads it.
+    auto& grid = displayedPage().grid();
+    auto const step = [direction](LinkIndex const& index, int64_t row, ColumnOffset column) {
+        return direction == LinkDirection::Forward ? index.next(row, column) : index.previous(row, column);
+    };
+
+    // A path confirmed, or a background scan finished, since the last frame counts at once.
+    auto indexChange = _linkDetector->adoptFinished(_linkSource);
+    _linkSource.beginFrame();
+
+    auto rows = LinkMotionRows { grid, from.line, direction };
+    auto found = std::optional<CellLocation> {};
+    auto searchFrom = from; // where the index walk resumes, past a link this key press could not confirm
+    while (true)
+    {
+        auto const* index = detectedLinks();
+        auto const* link =
+            index ? step(*index, grid.stableLineIdOf(searchFrom.line), searchFrom.column) : nullptr;
+        auto const head = link ? grid.lineOffsetOf(link->spans.front().row) : std::nullopt;
+        // Every row up to the index's answer must be answered for, and without one, every row to the edge.
+        if (auto const hole = rows.firstUnread(index, head.value_or(rows.edge())))
+        {
+            if (budget.pages <= 0)
+                break;
+            auto const [first, last] = rows.pageFrom(*hole);
+            auto const scan = _linkDetector->scanNow(_linkSource, first, last);
+            if (scan.index == LinkIndexChange::Changed)
+                indexChange = LinkIndexChange::Changed;
+            if (scan.linesRead > 0)
+                --budget.pages;
+            rows.markRead(first, last);
+            continue;
+        }
+        if (!head)
+            break; // no link to the edge
+        auto const start = CellLocation { .line = *head, .column = link->spans.front().first };
+        if (detectedLinkAt(start) == link)
+        {
+            found = start;
+            break;
+        }
+        // Scanned by this key press, and still not indexed as it is now: passed over.
+        searchFrom = start;
+    }
+    // A link may have appeared under a pointer that has not moved, as after a frame that adopts one.
+    if (indexChange == LinkIndexChange::Changed)
+        refreshHoveredLink(currentMouseGridPosition());
+    return found;
+}
+
+void Terminal::followLinkAt(CellLocation gridPosition)
+{
+    runOutsideStateLock([this, gridPosition] { _eventListener.followLinkAt(gridPosition); });
 }
 
 void Terminal::updateHoveringHyperlinkState()
 {
-    // The cell the hover tooltip reads too (@see tryGetHoveringHyperlink), so the two agree.
-    auto const newState = hyperlinkIdUnderPointer();
+    // The cell the hover tooltip reads too (@see tryGetHoveringHyperlink), so the two agree. Translated once,
+    // for both kinds of link.
+    auto const pointer = currentMouseGridPosition();
+    auto const newState = hyperlinkIdUnderPointer(pointer);
 
     auto const oldState = _hoveringHyperlinkId.exchange(newState);
+    auto const oldLink = _hoveringLinkId.load();
+    refreshHoveredLink(pointer);
 
-    if (newState != oldState)
+    if (newState != oldState || _hoveringLinkId.load() != oldLink)
         renderBufferUpdated();
 }
 
@@ -2533,6 +2719,15 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     // Momentum scrolling animation scheduling at display refresh rate.
     if (_isGliding.load(std::memory_order_relaxed))
         nextWakeup = std::min(nextWakeup, _refreshInterval.get().value);
+
+    // Link detection's next scan, as the last frame published it: the detector is the fill's, under the state
+    // lock this does not take. Not while synchronized output suppresses the fill, for the reason the status
+    // line's commands give.
+    if (auto const due = _linkScanDue.load(std::memory_order_relaxed);
+        due != chrono::steady_clock::time_point::max() && !isRenderingSuppressed())
+        nextWakeup = std::min(
+            nextWakeup,
+            chrono::ceil<chrono::milliseconds>(std::max(due - now, chrono::steady_clock::duration::zero())));
 
     if (nextWakeup == chrono::milliseconds::max())
         return nullopt;
@@ -3876,14 +4071,20 @@ void Terminal::fillStickyHeader(RenderBuffer& output, LineOffset baseLine) const
 
     switch (decision->kind)
     {
-        case StickyHeaderKind::Command:
-            // Decided only for a head above the viewport, whose input row the gathering found.
+        case StickyHeaderKind::Command: {
+            // Decided only for a head above the viewport, whose input row the gathering found -- on the
+            // primary screen, which is on display then, so the detected links are its own.
+            auto const& grid = primaryScreen().grid();
+            auto const* const index = detectedLinks();
             RenderBufferBuilder::renderDetachedLine(header.cells,
                                                     *this,
-                                                    primaryScreen().grid().lineAt(*gathered.inputLine),
+                                                    grid.lineAt(*gathered.inputLine),
+                                                    index ? currentSpansOn(*index, grid, *gathered.inputLine)
+                                                          : std::span<LinkRowSpan const> {},
                                                     baseLine,
                                                     textColumns);
             break;
+        }
         case StickyHeaderKind::Evicted: {
             // No row of the block's prompt survives to be copied, so the record speaks for it: the command
             // line it kept, sanitised, in the gutter's own quieter text colour.
@@ -4439,6 +4640,10 @@ void Terminal::rowsDropped(LineCount pageShift)
 void Terminal::screenUpdated()
 {
     ZoneScoped;
+    // The screen changed whatever is drawn next, and the display's next frame tells link detection so: set
+    // ahead of the returns, which skip only the notification. The same one store as after them.
+    _screenDirty = true;
+
     if (isRenderingSuppressed())
         return;
 
@@ -4448,7 +4653,6 @@ void Terminal::screenUpdated()
         return;
     }
 
-    _screenDirty = true;
     _eventListener.screenUpdated();
 }
 
@@ -4480,6 +4684,9 @@ void Terminal::runWithOwnStateLockReleased(std::function<void()> const& pause)
 
 void Terminal::renderBufferUpdated()
 {
+    // As in screenUpdated(): ahead of the returns, which skip only the notification.
+    _screenDirty = true;
+
     if (isRenderingSuppressed())
         return;
 
@@ -4489,7 +4696,6 @@ void Terminal::renderBufferUpdated()
         return;
     }
 
-    _screenDirty = true;
     _eventListener.renderBufferUpdated();
 }
 
@@ -4578,81 +4784,99 @@ void Terminal::openDocument(string_view data)
     runOutsideStateLock([this, document = string(data)] { _eventListener.openDocument(document); });
 }
 
-namespace
+void Terminal::openLink(LinkTarget const& link)
 {
+    runOutsideStateLock([this, link] { _eventListener.openLink(link); });
+}
 
-    /// A row's text as the grid lays it out, with every byte tied to the columns of the cell it came from.
-    struct RowTextWithColumns
-    {
-        std::string text;                ///< The row's text: a cell's own text, a space for an empty cell.
-        std::vector<size_t> firstColumn; ///< Per byte of @ref text: the first column of its cell.
-        std::vector<size_t> lastColumn;  ///< Per byte of @ref text: the last column of its cell.
-    };
-
-    /// Reads @p line cell by cell, so a byte offset into the text can be mapped back to a grid column.
-    ///
-    /// The cells decide their own width and text: a wide character's second cell and a cell with no text
-    /// of its own add nothing, a grapheme cluster is one cell however many codepoints it holds, and an
-    /// empty cell is one space, so a path is not glued to the text across a gap.
-    /// @param line The row to read.
-    /// @return The row's text and, per byte, the columns of the cell holding it.
-    [[nodiscard]] RowTextWithColumns rowTextWithColumns(Line const& line)
-    {
-        auto row = RowTextWithColumns {};
-        auto const columns = static_cast<size_t>(*line.size());
-        for (auto const column: std::views::iota(size_t { 0 }, columns))
-        {
-            auto const offset = ColumnOffset::cast_from(column);
-            auto const cellText = line.toUtf8(offset, offset + ColumnOffset(1));
-            auto const width = static_cast<size_t>(std::max<uint8_t>(line.cellWidthAt(offset), 1));
-            row.text += cellText;
-            row.firstColumn.insert(row.firstColumn.end(), cellText.size(), column);
-            row.lastColumn.insert(row.lastColumn.end(), cellText.size(), column + width - 1);
-        }
-        return row;
-    }
-
-} // namespace
-
-std::optional<std::string> Terminal::pathTextAtMousePosition() const
+std::optional<Terminal::LogicalLineScan> Terminal::scanLogicalLineAt(CellLocation gridPosition) const
 {
-    auto const mousePosition = currentMouseGridPosition();
-    if (!mousePosition)
+    auto const& screen = displayedPage();
+    auto const historyTop = -screen.historyLineCount().as<LineOffset>();
+    auto const gridBottom = pageSize().lines.as<LineOffset>() - LineOffset(1);
+    if (gridPosition.line < historyTop || gridPosition.line > gridBottom)
         return std::nullopt;
 
-    auto const row = rowTextWithColumns(displayedPage().grid().lineAt(mousePosition->line));
-    auto const& lineText = row.text;
-    auto const mouseColumn = static_cast<size_t>(*mousePosition->column);
+    // The logical line holding the cell, no further than one scan budget either way.
+    auto const extent = scanExtentOf(screen.grid(), gridPosition.line, gridPosition.line);
+    auto const rows = scanRowsOf(screen.grid(), extent.first, extent.last);
+    for (auto& text: joinLogicalLines(rows, extent.continuesBelow))
+        if (text.lineOf(0) <= gridPosition.line && gridPosition.line <= text.lineOf(text.rowCount() - 1))
+        {
+            auto const row = unbox<std::size_t>(gridPosition.line - text.lineOf(0));
+            return LogicalLineScan { .text = std::move(text),
+                                     .position = ScanPosition { .row = row, .column = gridPosition.column } };
+        }
+    return std::nullopt;
+}
 
-    static auto const localPathRegex = [] {
-        // Matches, in order: drive-letter absolute paths (C:/foo, C:\foo) for Windows,
-        // ~/ home-relative paths, / absolute paths, ./ and ../ relative paths, paths
-        // containing a separator, and bare filenames. Both '/' and '\\' separators are
-        // accepted so native Windows paths are detected as well as POSIX ones. A literal '~'
-        // is allowed inside path components so Windows 8.3 short names (e.g. RUNNER~1) and
-        // tilde-suffixed backup files (e.g. file~) are matched in full rather than truncated.
-        return std::regex(
-            R"((?:[A-Za-z]:[\\/][\w.~\\/-]+|~?[\\/][\w.~\\/-]+|\.{1,2}[\\/][\w.~\\/-]+|[\w.][\w.~-]*[\\/][\w.~\\/-]+|[\w.][\w.~-]+))",
-            std::regex_constants::ECMAScript | std::regex_constants::optimize);
-    }();
+LinkLookup Terminal::lookUpLinkAt(CellLocation gridPosition) const
+{
+    auto lookup = LinkLookup {};
 
-    auto matchIter = std::sregex_iterator(lineText.begin(), lineText.end(), localPathRegex);
-    auto const matchEnd = std::sregex_iterator();
-    for (; matchIter != matchEnd; ++matchIter)
+    // The page on display, as the pointer and the index read it -- not the cursor's.
+    if (auto hyperlink = displayedPage().hyperlinkAt(gridPosition))
     {
-        auto const& match = *matchIter;
-        if (match.empty())
-            continue;
-
-        auto const startColumn = row.firstColumn[static_cast<size_t>(match.position())];
-        auto const endColumn = row.lastColumn[static_cast<size_t>(match.position() + match.length()) - 1];
-
-        // Matches do not overlap, so the first that spans the mouse is the only one.
-        if (startColumn <= mouseColumn && mouseColumn <= endColumn)
-            return match.str();
+        lookup.hyperlink = std::move(hyperlink);
+        return lookup;
+    }
+    if (auto const* const link = detectedLinkAt(gridPosition))
+    {
+        lookup.target = link->target;
+        return lookup;
+    }
+    // The index holds the row as it is: what it found there is all there is (§7.2), and no pattern runs on
+    // this thread -- but a path found there and not confirmed yet, its probe pending or dropped by the cap on
+    // what may wait, is looked for: the click is the user asking, and it opens once found.
+    auto const& grid = displayedPage().grid();
+    if (auto const* const index = detectedLinks(); index && isScannedAsItIs(*index, grid, gridPosition.line))
+    {
+        if (auto const* const pending =
+                _linkDetector->unconfirmedPathAt(grid.stableLineIdOf(gridPosition.line), gridPosition.column))
+        {
+            lookup.printedPath = pending->link.target;
+            lookup.pathToProbe = *pending->query;
+            lookup.pathDirectories = pending->directories;
+        }
+        return lookup;
     }
 
-    return std::nullopt;
+    // Not scanned yet, or written since: this one logical line, now, with the grammar detection uses, merged
+    // so that a URL's own path is no second link.
+    auto const scan = scanLogicalLineAt(gridPosition);
+    if (!scan)
+        return lookup;
+    auto const candidates =
+        findLinks(scan->text, *_settings.linkPatterns, PatternSelection::ClickableOnly, LinkOverlap::Merge);
+    auto const candidate = std::ranges::find_if(candidates, [&](LinkCandidate const& found) {
+        return found.first <= scan->position && scan->position <= found.last;
+    });
+    if (candidate == candidates.end())
+        return lookup;
+
+    // Classified as detection classifies it: a path against the directories of the command that printed the
+    // logical line's first row, and from the probe's cache where it knows.
+    if (candidate->kind == LinkKind::Path)
+        lookup.printedPath = printedLinkTarget(*candidate);
+    auto const* const probe = _linkDetector ? _linkDetector->pathProbe().get() : nullptr;
+    auto classified = classifyPrintedLink(
+        printedLinkTarget(*candidate), localPathBaseAt(scan->text.lineOf(0)), linkMachine(), probe);
+    std::visit(core::Overloaded {
+                   [&](LinkTarget& target) { lookup.target = std::move(target); },
+                   [&](PathToProbe& toProbe) {
+                       lookup.printedPath = std::move(toProbe.printed);
+                       lookup.pathToProbe = std::move(toProbe.query);
+                       lookup.pathDirectories = std::move(toProbe.directories);
+                   },
+                   [&](RefusedPath& refused) {
+                       lookup.printedPath = std::move(refused.printed);
+                       lookup.refusal = refused.reason;
+                   },
+                   [&](MissingPath& missing) { lookup.printedPath = std::move(missing.printed); },
+                   [](NotALink) {},
+               },
+               classified);
+    return lookup;
 }
 
 std::expected<PathBases, PathRefusal> Terminal::localPathBaseAt(LineOffset row) const
@@ -4696,16 +4920,30 @@ void Terminal::recordForeignDirectory()
         _commandBlocks.foreignDirectoryReported();
 }
 
-std::expected<std::optional<std::string>, PathRefusal> Terminal::localPathAtMousePosition() const
+core::platform::FileSystem const& Terminal::pathFileSystem() const noexcept
 {
-    auto const mousePosition = currentMouseGridPosition();
-    auto const text = mousePosition ? pathTextAtMousePosition() : std::nullopt;
-    if (!text)
-        return std::nullopt;
+    return _linkServices ? _linkServices->fileSystem : _fileSystem;
+}
 
-    return localPathBaseAt(mousePosition->line).transform([&](PathBases const& bases) {
-        return resolveExistingLocalPath(_fileSystem, bases, _homeDirectory, *text);
-    });
+LinkMachine Terminal::linkMachine() const
+{
+    return LinkMachine { .home = _homeDirectory, .hostname = std::string { localIdentity().hostname } };
+}
+
+std::expected<PathBases, PathRefusal> Terminal::TerminalLinkSource::pathBasesAt(LineOffset row) const
+{
+    if (_memo.frame != _frame)
+        _memo = Memo { .frame = _frame, .directory = std::nullopt, .bases = {} };
+    if (!_memo.directory)
+        _memo.directory = _terminal.terminalDirectory();
+    if (!*_memo.directory)
+        return std::unexpected(_memo.directory->error());
+
+    auto const* const block = _terminal.pathBlockAt(row);
+    auto const known = std::ranges::find(_memo.bases, block, [](auto const& entry) { return entry.first; });
+    if (known != _memo.bases.end())
+        return known->second;
+    return _memo.bases.emplace_back(block, localPathBaseFor(block, **_memo.directory)).second;
 }
 
 // {{{ Hint mode
@@ -4718,7 +4956,7 @@ HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollback
     auto const historyTop = -screen.historyLineCount().as<LineOffset>();
 
     // A scrollback limit is a row count; a negative value (an out-of-range config) would push
-    // labelableRows.first past last and underflow the reserve() below, so clamp it to zero.
+    // labelableRows.first past last and underflow the row count below, so clamp it to zero.
     scrollbackLimit = std::max(scrollbackLimit, LineCount(0));
 
     // A label can only be typed once it has been drawn. Under Visible that is the viewport; under
@@ -4736,26 +4974,14 @@ HintScanArea Terminal::collectHintScanArea(HintScope scope, LineCount scrollback
                               .last = _viewport.translateScreenToGridLine(gridBottom) };
     }();
 
-    // Extend the scan to whole logical lines: a pattern that wraps across the boundary is then
-    // matched in full, and only its tail goes unrendered.
-    auto first = labelableRows.first;
-    while (first > historyTop && screen.isLineWrapped(first))
-        --first;
-    auto last = labelableRows.last;
-    while (last < gridBottom && screen.isLineWrapped(last + LineOffset(1)))
-        ++last;
-
-    auto area = HintScanArea { .rows = {}, .labelableRows = labelableRows };
-    area.rows.reserve(unbox<size_t>(last - first) + 1);
-    for (auto line = first; line <= last; ++line)
-        area.rows.push_back(HintScanRow {
-            // Column-aligned on purpose: one codepoint per grid cell (a wide character's
-            // continuation cell becomes a space) is what makes a codepoint index a column.
-            .text = screen.lineTextColumnAlignedAt(line),
-            .line = line,
-            .continuation = screen.isLineWrapped(line) ? LineContinuation::Yes : LineContinuation::No,
-        });
-    return area;
+    // Whole logical lines, so a pattern wrapped across the labelable range's edge is still matched in full --
+    // but no further than one scan budget either way (MaxScanCells): beyond it the text is cut anyway.
+    auto const extent = scanExtentOf(screen.grid(), labelableRows.first, labelableRows.last);
+    return HintScanArea {
+        .rows = scanRowsOf(screen.grid(), extent.first, extent.last),
+        .continuesBelow = extent.continuesBelow,
+        .labelableRows = labelableRows,
+    };
 }
 
 void Terminal::refreshHints()
@@ -4774,66 +5000,63 @@ void Terminal::activateHintMode(HintModeRequest request)
     _hintScope = request.scope;
     auto const area = collectHintScanArea(request.scope, request.scrollbackLimit);
 
-    auto mutablePatterns = std::move(request.patterns);
-
     // A path resolves against the directory of the command that printed it, and outside any block against the
-    // working directory for opening locally (localPathBaseAt()) -- decided per row, as the mouse decides it.
-    // A row whose paths name files on another machine offers none of them: none here may stand in for them. A
-    // row with no directory to resolve against offers what the pattern as given matches, as written. A row
-    // with one offers what exists there, resolved, matched by a pattern broadened to bare filenames,
-    // extensionless files (e.g. "Makefile") and directories (e.g. "src").
-    for (auto& pattern: mutablePatterns)
-    {
-        if (pattern.name != "filepath")
-            continue;
-
-        auto asWritten = std::move(pattern.regex);
-        pattern.regex = std::regex(R"((?:~?/[\w./-]+|\.{1,2}/[\w./-]+|[\w.][\w.-]*/[\w./-]+|[\w.][\w.-]+))",
-                                   std::regex_constants::ECMAScript | std::regex_constants::optimize);
-
-        // Resolved as the mouse resolves a path (resolveExistingLocalPath), so both name the same file.
-        // Memoized per activation: the broadened regex matches every bare word, and a scrollback-scope
-        // scan of a thousand rows would otherwise stat() each repeated one again — brutal on a network
-        // filesystem. Repetition is the norm in terminal output (a file named once per compiler
-        // diagnostic), so the cache earns its keep. Kept per block: one name means different files in the
-        // outputs of commands that ran in different directories. What a block's rows resolve against is
-        // worked out once, at its first match, against the terminal's directory as it was at activation;
-        // a visible-scope refresh re-scans against the same.
-        struct BlockPaths
-        {
-            std::expected<PathBases, PathRefusal> bases;
-            std::map<std::string, optional<string>, std::less<>> resolved;
+    // working directory for opening locally (localPathBaseAt()), decided per row as the mouse decides it, and
+    // is classified as detection and a click classify it (classifyPrintedLink()). A row whose paths name
+    // files on another machine offers none. A row with no directory to resolve against still resolves an
+    // absolute or `~/` path, and offers what is printed as written when that names nothing -- except a bare
+    // word, which only a lookup could tell from prose. What the probe's cache does not know is looked up at
+    // once, as hint mode is user-initiated (§12), through the probe where detection runs, which fills its
+    // cache, and in the terminal's filesystem otherwise. What a block's rows resolve against is worked out
+    // once per activation.
+    auto mutablePatterns = std::move(request.patterns);
+    mutablePatterns.resolve =
+        [this,
+         here = terminalDirectory(),
+         blocks = std::make_shared<std::map<CommandBlockId, std::expected<PathBases, PathRefusal>>>()](
+            LinkCandidate const& candidate, LineOffset row) -> std::optional<LinkTarget> {
+        auto printed = printedLinkTarget(candidate);
+        // A URL or a custom link is as it opens; a file:// URL is the path it names (§7.6), and goes on as
+        // one.
+        if (candidate.kind != LinkKind::Path && !isFileUrl(printed.target))
+            return printed;
+        if (!here)
+            return std::nullopt;
+        auto const* const block = pathBlockAt(row);
+        auto const id = block ? block->id : CommandBlockId {};
+        auto known = blocks->find(id);
+        if (known == blocks->end())
+            known = blocks->emplace(id, localPathBaseFor(block, *here)).first;
+        auto const& bases = known->second;
+        // Cannot resolve ~/ when HOME is unset: offered as written.
+        if (bases && printed.target.starts_with("~/") && _homeDirectory.empty())
+            return printed;
+        auto const asWritten = [&bases](LinkTarget written) -> std::optional<LinkTarget> {
+            if (bases->empty() && !isBarePathName(written.target))
+                return written;
+            return std::nullopt;
         };
-        pattern.resolve = [this,
-                           here = terminalDirectory(),
-                           asWritten = std::move(asWritten),
-                           blocks = std::make_shared<std::map<CommandBlockId, BlockPaths>>()](
-                              std::string const& matchStr, LineOffset row) -> optional<string> {
-            if (!here)
-                return std::nullopt;
-            auto const* const block = pathBlockAt(row);
-            auto const id = block ? block->id : CommandBlockId {};
-            auto known = blocks->find(id);
-            if (known == blocks->end())
-            {
-                auto paths = BlockPaths { .bases = localPathBaseFor(block, *here), .resolved = {} };
-                known = blocks->emplace(id, std::move(paths)).first;
-            }
-            auto& [bases, resolved] = known->second;
-            if (!bases)
-                return std::nullopt;
-            if (bases->empty())
-                return std::regex_match(matchStr, asWritten) ? optional { matchStr } : std::nullopt;
-            // Cannot resolve ~/ paths when HOME is unset — let them through unvalidated, as written.
-            if (matchStr.starts_with("~/") && _homeDirectory.empty())
-                return matchStr;
-            if (auto const cached = resolved.find(matchStr); cached != resolved.end())
-                return cached->second;
-            return resolved
-                .emplace(matchStr, resolveExistingLocalPath(_fileSystem, *bases, _homeDirectory, matchStr))
-                .first->second;
-        };
-    }
+        auto* const probe = _linkDetector ? _linkDetector->pathProbe().get() : nullptr;
+        auto classified = classifyPrintedLink(std::move(printed), bases, linkMachine(), probe);
+        return std::visit(
+            core::Overloaded {
+                [](LinkTarget& target) -> std::optional<LinkTarget> { return std::move(target); },
+                [&](PathToProbe& toProbe) -> std::optional<LinkTarget> {
+                    auto const answer =
+                        probe ? probe->probe(toProbe.query)
+                              : resolveLocalPath(pathFileSystem(), toProbe.query.candidates)
+                                    .value_or(ResolvedPath {
+                                        .path = {}, .kind = PathKind::Missing, .candidateIndex = 0 });
+                    if (answer.kind == PathKind::Missing)
+                        return asWritten(std::move(toProbe.printed));
+                    return resolvedPathTarget(std::move(toProbe.printed), answer, toProbe.directories);
+                },
+                [](RefusedPath const&) -> std::optional<LinkTarget> { return std::nullopt; },
+                [&](MissingPath& missing) { return asWritten(std::move(missing.printed)); },
+                [](NotALink) -> std::optional<LinkTarget> { return std::nullopt; },
+            },
+            classified);
+    };
 
     _hintModeHandler.activate(area, std::move(mutablePatterns), request.action);
     _inputHandler.setMode(ViMode::Hint);
@@ -4996,15 +5219,18 @@ namespace
     }
 } // namespace
 
-void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
-                                                HintAction action,
-                                                CellLocation start,
-                                                CellLocation end)
+void Terminal::HintModeExecutor::onHintSelected(HintMatch const& match, HintAction action)
 {
+    auto const& matchedText = match.matchedText;
     switch (action)
     {
         case HintAction::Copy: terminal._eventListener.copyToClipboard(matchedText); break;
-        case HintAction::Open: terminal.openDocument(matchedText); break;
+        case HintAction::Open:
+            // As Ctrl+click opens it, with its refusals: a path with file_opener at its location, a URL as a
+            // link is followed. Nothing, where the printed text chose a scheme no link may open (§7.6).
+            if (match.opening == LinkOpening::Allowed)
+                terminal.openLink(match.target);
+            break;
         case HintAction::Paste: typeHint(terminal, matchedText); break;
         case HintAction::CopyAndPaste:
             terminal._eventListener.copyToClipboard(matchedText);
@@ -5017,9 +5243,9 @@ void Terminal::HintModeExecutor::onHintSelected(std::string const& matchedText,
 
             // Enter vi visual mode with the match range pre-selected. The positions are already
             // grid-absolute, which is what the Vi cursor speaks.
-            terminal._viCommands.cursorPosition = start;
+            terminal._viCommands.cursorPosition = match.start;
             terminal._inputHandler.setMode(ViMode::Visual);
-            terminal._viCommands.moveCursorTo(end);
+            terminal._viCommands.moveCursorTo(match.end);
             break;
         }
     }
@@ -5197,6 +5423,83 @@ void Terminal::setMarginBellVolume(BellVolume volume)
 void Terminal::setGenerateFocusEvents(bool enabled)
 {
     changeInputEncoding([&](InputGenerator& input) { input.setGenerateFocusEvents(enabled); });
+}
+
+void Terminal::setLinkPatterns(std::shared_ptr<LinkPatterns const> patterns)
+{
+    // The table in use: replacing the detector would throw away its index and its probe cache, and the links
+    // would vanish until the next quiet time, on every reload of a profile that uses the built-ins.
+    if (patterns == _settings.linkPatterns)
+        return;
+    _settings.linkPatterns = std::move(patterns);
+    // Replaced, not changed: the jobs in flight finish against the table they started with, and their results
+    // find nobody to adopt them.
+    _linkDetector = makeLinkDetector();
+    _linkScanDue.store(chrono::steady_clock::time_point::max(), std::memory_order_relaxed);
+    // The new detector's ids start over: the hovered one would name another link, or none.
+    _hoveringLinkId = LinkId {};
+}
+
+std::unique_ptr<LinkDetector> Terminal::makeLinkDetector()
+{
+    if (!_linkServices || !_settings.linkPatterns->hasClickable())
+        return nullptr;
+    // breakLoopAndRefreshRenderBuffer() touches atomics and the any-thread notifications only, so a job
+    // thread may call it, as the status line's commands do.
+    return std::make_unique<LinkDetector>(
+        *_linkServices, _settings.linkPatterns, [this] { breakLoopAndRefreshRenderBuffer(); });
+}
+
+LinkIndex const* Terminal::detectedLinks() const noexcept
+{
+    if (!_linkDetector)
+        return nullptr;
+    auto const shown =
+        LinkIndexKey { .page = _displayedPage, .generation = displayedPage().grid().stableIdGeneration() };
+    return _linkDetector->indexes(shown) ? &_linkDetector->index() : nullptr;
+}
+
+void Terminal::setLinkDecorationMode(LinkDecorationMode mode)
+{
+    _settings.linkDecorationMode = mode;
+    renderBufferUpdated();
+}
+
+FollowModifiers Terminal::followModifiers() const noexcept
+{
+    auto const& follow = _settings.linkFollowModifiers;
+    return follow && *follow != Modifiers {}
+                   && bindingModifiers(_heldModifiers, _settings.mouseProtocolBypassModifiers) == *follow
+               ? FollowModifiers::Held
+               : FollowModifiers::Released;
+}
+
+LinkPointer Terminal::hoverPointer() const noexcept
+{
+    return allowPassMouseEventToApp(_heldModifiers) ? LinkPointer::Elsewhere : LinkPointer::Over;
+}
+
+LinkPointerShape Terminal::linkPointerShape() const noexcept
+{
+    if (!isPointerOverLink())
+        return LinkPointerShape::Default;
+    return presentLink(_settings.linkDecorationMode, hoverPointer(), followModifiers()).pointer;
+}
+
+LinkRevealChange Terminal::updateHeldModifiers(Modifiers held)
+{
+    auto const before = std::pair { followModifiers(), hoverPointer() };
+    _heldModifiers = held;
+    if (std::pair { followModifiers(), hoverPointer() } == before)
+        return LinkRevealChange::Unchanged;
+    renderBufferUpdated();
+    return LinkRevealChange::Changed;
+}
+
+void Terminal::setLinkFollowModifiers(std::optional<Modifiers> modifiers)
+{
+    _settings.linkFollowModifiers = modifiers;
+    renderBufferUpdated();
 }
 
 void Terminal::setMouseProtocol(MouseProtocol protocol, bool enabled)
@@ -6851,14 +7154,13 @@ void Terminal::setPage(PageIndex target, PageCursorPlacement placement)
             finalizeScreenTransition();
 
         auto const savedChanges = _changes.load();
-        bool const savedScreenDirty = _screenDirty;
         auto const savedFrameID = _lastFrameID.load();
 
+        // The build alone: no frame of the display's, so neither link detection nor _screenDirty sees it.
         RenderBuffer snapshotBuffer;
         fillRenderBufferInternal(snapshotBuffer, false);
 
         _changes.store(savedChanges);
-        _screenDirty = savedScreenDirty;
         _lastFrameID.store(savedFrameID);
 
         _screenTransition.snapshotCells = std::move(snapshotBuffer.cells);
@@ -7090,7 +7392,11 @@ void Terminal::synchronizedOutput(bool enabled)
 
     {
         ZoneScopedN("syncOut.refreshed");
-        refreshRenderBuffer(true);
+        // The build alone, on the parser thread: link detection runs on the display's next frame, which the
+        // batch's screenUpdated() tells of the block through _screenDirty.
+        _renderBuffer.state = RenderBufferState::RefreshBuffersAndTrySwap;
+        std::ignore =
+            refreshRenderBufferWith([this](RenderBuffer& output) { fillRenderBufferInternal(output, true); });
         _eventListener.screenUpdated();
     }
 }

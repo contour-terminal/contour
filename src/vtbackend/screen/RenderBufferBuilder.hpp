@@ -4,16 +4,34 @@
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/Search.hpp>
+#include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 
 #include <gsl/pointers>
 
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace vtbackend
 {
+
+/// What one frame knows about the links on the screen a RenderBufferBuilder renders: which are under the
+/// pointer, and where the detected ones are. The caller decides it per screen, as only the page on display
+/// has the pointer over it and detected links on it; a status line gets none of it.
+struct FrameLinks
+{
+    /// The OSC 8 link the pointer is over (Terminal::hyperlinkIdUnderPointer()); none for a screen the
+    /// pointer is not over.
+    HyperlinkId hoveredHyperlink {};
+    /// The links detected on the screen rendered (Terminal::detectedLinks()); nullptr for a screen whose rows
+    /// the index does not name. Valid for the pass, which holds the terminal lock.
+    LinkIndex const* detectedLinks = nullptr;
+    /// The detected link the pointer is over (Terminal::detectedLinkAt() at the pointer's cell); none for a
+    /// screen the pointer is not over.
+    LinkId hoveredDetectedLink {};
+};
 
 /**
  * RenderBufferBuilder renders the current screen state into a RenderBuffer.
@@ -28,9 +46,8 @@ class RenderBufferBuilder
     ///               status line and a non-displayed page are rendered through the same builder, so
     ///               anything that needs to look at neighbouring cells must go through this rather
     ///               than re-resolving via Terminal::currentScreen().
-    /// @param hoveredHyperlink The OSC 8 link the pointer is over in this frame, which the builder draws
-    ///                         in the hover role (Terminal::hyperlinkIdUnderPointer()); none for a screen
-    ///                         the pointer is not over.
+    /// @param links The links of this frame on @p screen: the ones under the pointer, which the builder draws
+    ///              in the hover role, and the detected ones; none of either for a screen that has none.
     /// @param display Which display @p screen is drawn on: the main display maps its rows through the
     ///                viewport, a status line draws its rows as they are.
     RenderBufferBuilder(Terminal const& terminal,
@@ -43,7 +60,7 @@ class RenderBufferBuilder
                         InputMethodData inputMethodData,
                         std::optional<CellLocation> theCursorPosition,
                         bool includeSelection,
-                        HyperlinkId hoveredHyperlink,
+                        FrameLinks links,
                         RenderedDisplay display);
 
     /// Renders grid row @p line as host chrome copying it: its own colours, SGR and hyperlinks, but no
@@ -61,6 +78,11 @@ class RenderBufferBuilder
     /// @param terminal The terminal whose palette, colour mode and blink phase apply. A link on the row is
     ///                 drawn at rest: the header is no hover target.
     /// @param line The grid row to copy.
+    /// @param detectedLinks The links detected on @p line (currentSpansOn()), which take the role its OSC 8
+    ///                      links take; none for a row written since its scan. The header's row lies above
+    ///                      the viewport, so it has them only while it lies inside detection's scan and
+    ///                      retention window (LinkDetectorTuning::scanMarginPages, retentionMarginPages): a
+    ///                      header copied from further up shows its links undecorated.
     /// @param screenRow The screen row the copy is drawn on.
     /// @param columns How many columns to copy at most; a wide glyph that would straddle the limit is
     ///                dropped whole.
@@ -68,6 +90,7 @@ class RenderBufferBuilder
     static void renderDetachedLine(std::vector<RenderCell>& output,
                                    Terminal const& terminal,
                                    Line const& line,
+                                   std::span<LinkRowSpan const> detectedLinks,
                                    LineOffset screenRow,
                                    ColumnCount columns);
 
@@ -130,9 +153,9 @@ class RenderBufferBuilder
     /// @return true if the line is drawn.
     [[nodiscard]] bool isGridLineDrawn(LineOffset line) const;
 
-    /// Whether the main page's marks -- its selection and its yank highlight -- apply to the screen drawn:
-    /// on the main display only. A status line is a display of its own (DEC STD 070 ch. 14), which neither
-    /// covers, whatever coordinates its rows share with the page's.
+    /// Whether the main page's marks -- its selection, its yank highlight and the links detected on it --
+    /// apply to the screen drawn: on the main display only. A status line is a display of its own (DEC STD
+    /// 070 ch. 14), which none of them covers, whatever coordinates its rows share with the page's.
     /// @return true on the main display.
     [[nodiscard]] bool takesTheMainPagesMarks() const noexcept { return _display == RenderedDisplay::Main; }
 
@@ -257,6 +280,24 @@ class RenderBufferBuilder
     /// @param column The column of the cell, on the row prepareSearchHighlights() last prepared.
     void paintSearchHighlight(ColumnOffset column);
 
+    /// Works out which cells of grid row @p gridLine detected links decorate, into _rowLinkRoles, as
+    /// prepareSearchHighlights() does for the search. A row written since its scan gets none: it holds other
+    /// text at the columns its links were found at, until it is scanned again.
+    /// @param gridLine The grid row about to be rendered.
+    void prepareLinkOverlay(LineOffset gridLine);
+
+    /// The role a detected link gives @p column of the row prepareLinkOverlay() last prepared.
+    /// @param column A grid column, not the display column DECDWL doubles.
+    /// @return The role; None where no detected link draws anything.
+    [[nodiscard]] LinkDecorationRole detectedRoleAt(ColumnOffset column) const noexcept;
+
+    /// The role a cell of the row prepareLinkOverlay() last prepared takes: its OSC 8 link's, else a detected
+    /// link's. A cell holding an OSC 8 link holds no detected one: the scan does not read it.
+    /// @param hyperlink The cell's OSC 8 link; none for a cell without one, which costs no lookup.
+    /// @param column The cell's grid column, not the display column DECDWL doubles.
+    /// @return The role; None where nothing is drawn.
+    [[nodiscard]] LinkDecorationRole linkRoleAt(HyperlinkId hyperlink, ColumnOffset column) const noexcept;
+
     /// Tests if the given screen line offset does contain a cursor (either ANSI cursor or vi cursor, if
     /// shown) and returns false otherwise, which guarantees that no cursor is to be rendered
     /// on the given line offset.
@@ -279,7 +320,18 @@ class RenderBufferBuilder
     InputMethodData _inputMethodData;
     bool _includeSelection;
     HyperlinkId _hoveredHyperlink; ///< The OSC 8 link under the pointer, as the frame was asked to draw it.
-    RenderedDisplay _display;      ///< The display the screen is drawn on.
+    LinkDecorationMode _linkMode;  ///< hyperlink_decoration.mode, fixed for the pass.
+    FollowModifiers _followModifiers; ///< Whether the follow modifiers are held, fixed for the pass.
+    LinkPointer _hoverPointer; ///< Where the pointer counts as being over its link, fixed for the pass.
+    /// The role of a detected link's cells while the pointer is elsewhere, fixed for the pass.
+    LinkDecorationRole _detectedRestRole;
+    /// The role of the cells of the detected link under the pointer, fixed for the pass.
+    LinkDecorationRole _detectedHoverRole;
+    /// The links detected on the screen rendered; nullptr when it has none, or when neither role above draws
+    /// anything, which spares every row its lookup.
+    LinkIndex const* _detectedLinks;
+    LinkId _hoveredDetectedLink; ///< The detected link under the pointer, as the frame was asked to draw it.
+    RenderedDisplay _display;    ///< The display the screen is drawn on.
     mutable HyperlinkId _lastRoleLink {};                            ///< The link osc8RoleOf() answered last.
     mutable LinkDecorationRole _lastRole = LinkDecorationRole::None; ///< The role it answered for it.
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
@@ -319,6 +371,10 @@ class RenderBufferBuilder
 
     /// How each cell of the row being rendered is painted for the search, by column; empty for none.
     std::vector<SearchHighlight> _rowSearchHighlights;
+
+    /// The role detected links give each cell of the row being rendered, by grid column; empty when none
+    /// draws anything there, which is what keeps a row on the batched path and a cell to one test.
+    std::vector<LinkDecorationRole> _rowLinkRoles;
 
     // Current line flags being rendered.
     LineFlags _currentLineFlags = LineFlag::None;

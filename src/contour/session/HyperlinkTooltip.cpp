@@ -2,10 +2,13 @@
 #include <contour/session/HyperlinkTooltip.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
+#include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
+#include <format>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <vector>
 
 namespace contour::session
@@ -84,6 +87,14 @@ std::string hyperlinkTooltipText(std::string_view uri,
         vtbackend::sanitizeCommandLine(localFilePath(uri, localHost).value_or(std::string { uri }),
                                        vtbackend::SanitizePurpose::Display),
         maxLength);
+}
+
+std::string detectedLinkTooltip(vtbackend::DetectedLink const& link)
+{
+    auto shown = link.target.target;
+    if (link.target.kind == vtbackend::LinkKind::Path && link.target.location)
+        shown += std::format(":{}:{}", link.target.location->line, link.target.location->column);
+    return shown == link.text ? std::string {} : shown;
 }
 
 HyperlinkHoverTracker::Change HyperlinkHoverTracker::update(std::string_view uri,

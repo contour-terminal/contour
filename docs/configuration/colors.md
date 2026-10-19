@@ -59,6 +59,7 @@ color_schemes:
 
 ### `hyperlink_decoration`
 allows you to customize the colors used for hyperlink decoration when hovering over them.
+These colours apply to the links Contour [detects in output](links.md) as well as to OSC 8 hyperlinks.
 ``` yaml
 color_schemes:
   default:

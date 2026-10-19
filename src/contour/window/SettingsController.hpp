@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,10 @@ class SettingsController: public QObject
     /// Save-As or Delete is offered.
     Q_PROPERTY(bool locked READ locked NOTIFY changed)
 
+    /// How links are opened, spelled for the page: "Ctrl+Click (Shift+Ctrl+Click inside applications that use
+    /// the mouse)". It comes from input_mapping, not from a profile.
+    Q_PROPERTY(QString linkGesture READ linkGesture NOTIFY changed)
+
     /// The profiles the page lists: one QVariantMap per profile
     /// { name, origin ("main"|"side"|"builtin"), editable (bool), isDefault (bool) }.
     Q_PROPERTY(QVariantList profiles READ profiles NOTIFY changed)
@@ -68,6 +73,14 @@ class SettingsController: public QObject
     /// The scalar fields of the profile currently being edited: one QVariantMap per field
     /// { key, label, help, type ("bool"|"int"|"double"|"string"), value }. Empty when nothing is open.
     Q_PROPERTY(QVariantList profileFields READ profileFields NOTIFY draftChanged)
+
+    /// The link patterns of the profile draft: the built-ins first, in table order, then the profile's own,
+    /// in its order. One QVariantMap per pattern { name, regex, clickable, url, builtin, kind
+    /// ("url"|"path"|"custom"), problem }. `clickable` and `builtin` are QML-facing bools (the page reads
+    /// them as such); `problem` says what the reader or the pattern compiler finds wrong, empty when nothing
+    /// is. A built-in's row shows the regex in effect, which the page does not edit. Empty when nothing is
+    /// open.
+    Q_PROPERTY(QVariantList linkPatterns READ linkPatterns NOTIFY draftChanged)
 
     /// The name of the profile draft being edited ("" for an unsaved new profile).
     Q_PROPERTY(QString editingProfile READ editingProfile NOTIFY draftChanged)
@@ -113,6 +126,7 @@ class SettingsController: public QObject
                        QObject* parent = nullptr);
 
     [[nodiscard]] bool locked() const noexcept { return _locked; }
+    [[nodiscard]] QString linkGesture() const { return _linkGesture; }
     [[nodiscard]] QVariantList profiles() const { return _profiles; }
     [[nodiscard]] QVariantList colorSchemes() const { return _colorSchemes; }
     [[nodiscard]] QString defaultProfile() const { return _defaultProfile; }
@@ -120,6 +134,7 @@ class SettingsController: public QObject
     [[nodiscard]] QVariantList globalFields() const;
 
     [[nodiscard]] QVariantList profileFields() const;
+    [[nodiscard]] QVariantList linkPatterns() const;
     [[nodiscard]] QString editingProfile() const { return _editingProfile; }
     [[nodiscard]] bool editingReadOnly() const noexcept { return _editingReadOnly; }
     [[nodiscard]] QString colorSchemeMode() const;
@@ -157,6 +172,31 @@ class SettingsController: public QObject
     /// Renames a GUI-created profile's side file from @p oldName to @p newName, moving the default-profile
     /// pointer and the open draft with it. Only side-file profiles can be renamed. @return success.
     Q_INVOKABLE bool renameProfile(QString const& oldName, QString const& newName);
+    // }}}
+
+    // {{{ Link patterns of the profile draft
+    /// Appends a pattern of the profile's own, clickable, under a name no pattern has; its regex is still to
+    /// be given. A no-op without a draft or on a read-only one.
+    Q_INVOKABLE void addLinkPattern();
+    /// Edits row @p index of @ref linkPatterns. A built-in's row takes `clickable` only, kept in the draft
+    /// as a name-only override, which goes again once it holds nothing the built-in does not; a user row
+    /// takes `name`, `regex`, `clickable` and `url` (empty: none). A name another pattern has is refused
+    /// with errorOccurred. A no-op without a draft, on a read-only one, or for an index out of range.
+    /// @param index The row.
+    /// @param row   The row as @ref linkPatterns spells it, with the keys edited.
+    Q_INVOKABLE void setLinkPattern(int index, QVariantMap const& row);
+    /// Removes row @p index of @ref linkPatterns, a pattern of the profile's own; a built-in's row stays.
+    /// A no-op without a draft, on a read-only one, or for an index out of range.
+    /// @param index The row.
+    Q_INVOKABLE void removeLinkPattern(int index);
+    /// What @p row, as @ref linkPatterns spells it, finds in @p sample: through the validation and the
+    /// matcher the terminal uses, without the disk, so a path is shown whether or not it exists.
+    /// @param row    The pattern, edited or not.
+    /// @param sample The text to match.
+    /// @return { spans: [{ start, end, target }] with UTF-16 offsets into @p sample, problem, note }; the
+    ///         note says, for a path pattern, when the terminal shows what it finds.
+    [[nodiscard]] Q_INVOKABLE QVariantMap previewLinkPattern(QVariantMap const& row,
+                                                             QString const& sample) const;
     // }}}
 
     /// Sets the default profile (persisted to settings.yml, overriding contour.yml). @return success.
@@ -250,6 +290,11 @@ class SettingsController: public QObject
     [[nodiscard]] bool isInlineColorScheme(std::string const& name) const;
     /// Reports @p error to the UI and returns false, for the `return fail(...)` idiom on write errors.
     bool fail(std::string const& error);
+    /// What the draft's link patterns have wrong (one the reader would skip, or one of the profile's own the
+    /// terminal would disable), so that a save refuses what the reader would discard. A field with a
+    /// problem (a descriptor's `validate`) is no reason: the reader keeps it, and its row shows the problem.
+    /// @return The first link pattern's problem; nullopt when none has one.
+    [[nodiscard]] std::optional<std::string> draftProblem() const;
 
     ConfigAccessor _config;
     std::shared_ptr<config::GuiConfigStore> _store;
@@ -258,6 +303,7 @@ class SettingsController: public QObject
     std::vector<display::GpuCandidate> _gpus; ///< Listed by refresh(), not on every property read.
 
     bool _locked = false;
+    QString _linkGesture; ///< Listed by refresh(): how links are opened.
     QVariantList _profiles;
     QVariantList _colorSchemes;
     QVariantList _keybindings;

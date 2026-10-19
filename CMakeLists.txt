@@ -66,8 +66,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 endif()
 
 # Compiler caching. Loaded before any compiler invocation so that CPM-fetched dependencies
-# get cached too. CompileCache.cmake prefers the fastcache-cc launcher (when installed and
-# FASTCACHE_ADDR names a daemon), falls back to sccache and then ccache, and no-ops when none
+# get cached too. CompileCache.cmake prefers the pace-cc launcher (when installed and
+# PACE_ADDR names a daemon), falls back to sccache and then ccache, and no-ops when none
 # is usable. It also declares the USE_COMPILER_CACHE option that gates all of it.
 include(CompileCache)
 include(ClangTidy)

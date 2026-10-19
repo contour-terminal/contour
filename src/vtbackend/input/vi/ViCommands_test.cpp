@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/links/LinkPatterns.hpp>
+#include <vtbackend/screen/Settings.hpp>
+#include <vtbackend/testing/DetectingTerm.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -8,10 +11,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <array>
 #include <format>
+#include <memory>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 
 // Checklist
@@ -865,5 +871,325 @@ TEST_CASE("vi.mark: `mm` on a prompt row toggles the user mark and leaves the pr
     mock.sendCharSequence("mm");
     CHECK_FALSE(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::UserMark));
     CHECK(screen.isLineFlagEnabledAt(vtbackend::LineOffset(0), vtbackend::LineFlag::Marked));
+}
+TEST_CASE("vi.hint: gh scans with the profile's pattern table", "[vi][hintmode][links]")
+{
+    auto settings = vtbackend::Settings {};
+    settings.pageSize = vtbackend::PageSize { vtbackend::LineCount(4), vtbackend::ColumnCount(40) };
+    auto const entries = std::array { vtbackend::LinkPatternSpec {
+        .name = "jira", .regex = R"(\b[A-Z]+-\d+\b)", .activation = {} } };
+    settings.linkPatterns =
+        std::make_shared<vtbackend::LinkPatterns const>(vtbackend::LinkPatterns::compile(entries));
+    auto mock = vtbackend::MockTerm<vtpty::MockPty> { std::move(settings) };
+    mock.writeToScreen("see ABC-123 now");
+    mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    mock.sendCharSequence("gh");
+    REQUIRE_FALSE(mock.terminal.hintMatches().empty());
+    CHECK(std::ranges::any_of(mock.terminal.hintMatches(),
+                              [](auto const& m) { return m.matchedText == "ABC-123"; }));
+}
+
+// {{{ links
+namespace
+{
+
+/// The directory the tests' files are in. Absolute here: on Windows a root directory without a drive is
+/// relative to the current drive.
+#ifdef _WIN32
+constexpr auto Work = std::string_view { "C:/w" };
+#else
+constexpr auto Work = std::string_view { "/w" };
+#endif
+
+/// Shows @p text on @p term in vi normal mode, the vi cursor at the top left, as setupMockTerminal() does.
+/// No detection cycle runs: the index is empty.
+void showInNormalMode(DetectingTerm& term, std::string_view text)
+{
+    term.mock.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    term.mock.writeToScreen(text);
+    term.mock.writeToScreen("\033[H");
+    term.mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    REQUIRE(term.mock.terminal.normalModeCursorPosition() == vtbackend::CellLocation {});
+}
+
+/// The vi cursor of @p term.
+[[nodiscard]] vtbackend::CellLocation viCursor(DetectingTerm const& term)
+{
+    return term.mock.terminal.normalModeCursorPosition();
+}
+
+[[nodiscard]] constexpr vtbackend::CellLocation at(int line, int column)
+{
+    return vtbackend::CellLocation { .line = vtbackend::LineOffset(line),
+                                     .column = vtbackend::ColumnOffset(column) };
+}
+
+/// A page of 6 rows and the indicator status line, as setupMockTerminal() makes it.
+constexpr auto LinkPage = vtbackend::PageSize { vtbackend::LineCount(7), vtbackend::ColumnCount(40) };
+
+} // namespace
+
+TEST_CASE("vi.link: ]x and [x visit link starts, scanning what is not indexed yet", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    showInNormalMode(term, "a https://x.y/ b\r\nc https://z.w/");
+
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(0, 2)); // found without a detection cycle: scanned on the keypress
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(1, 2));
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(1, 2)); // none further: the cursor stays
+    term.mock.sendCharSequence("[x");
+    CHECK(viCursor(term) == at(0, 2));
+    term.mock.sendCharSequence("[x");
+    CHECK(viCursor(term) == at(0, 2)); // none before it either
+    term.mock.sendCharSequence("gg02]x");
+    CHECK(viCursor(term) == at(1, 2));
+}
+
+TEST_CASE("vi.link: [x and ]x scan page by page beyond the index, into the scrollback", "[vi][links]")
+{
+    // Three pages of text, a link on the first row and on the last: neither is within a page of the other.
+    auto term = DetectingTerm { LinkPage, {}, vtbackend::HistoryLimits::plain(vtbackend::LineCount(30)) };
+    auto text = std::string { "top https://first.example/" };
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 16))
+        text += "\r\nplain";
+    text += "\r\nend https://last.example/";
+    term.mock.writeToScreen(text);
+    term.mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal); // the vi cursor ends the last row
+
+    term.mock.sendCharSequence("[x");
+    auto const last = viCursor(term);
+    CHECK(last.column == vtbackend::ColumnOffset(4));
+    term.mock.sendCharSequence("[x"); // two pages back, in the scrollback
+    auto const first = viCursor(term);
+    CHECK(first.column == vtbackend::ColumnOffset(4));
+    CHECK(first.line < vtbackend::LineOffset(0));
+    CHECK(last.line - first.line > vtbackend::LineOffset(11)); // two pages away
+    term.mock.sendCharSequence("gg0");
+    CHECK(viCursor(term).line == first.line); // the top row: nothing was skipped
+
+    term.mock.sendCharSequence("]x"); // from the index now
+    CHECK(viCursor(term) == first);
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == last);
+}
+
+TEST_CASE("vi.link: a path counts once its probe has confirmed it", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    auto const path = std::format("{}/notes.md", Work);
+    term.files.addFile(path, "");
+    showInNormalMode(term, std::format("see {}", path));
+
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(0, 0)); // the probe has only started
+    term.probe.drain();
+    term.mock.terminal.refreshRenderBuffer(); // the frame adopts its answer
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(0, 4));
+}
+
+TEST_CASE("vi.link: ]x combines with y as a motion", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    showInNormalMode(term, "ab https://x.y/");
+    term.mock.sendCharSequence("y]x");
+    CHECK(term.mock.clipboardData == "ab h"); // up to the link's first cell, as `y0` and `yw` take theirs
+}
+
+namespace
+{
+
+/// @p count plain lines, each ending with a line feed but the last.
+[[nodiscard]] std::string plainLines(int count)
+{
+    auto text = std::string {};
+    for (auto const line: std::views::iota(0, count))
+        text += line + 1 < count ? "plain\r\n" : "plain";
+    return text;
+}
+
+/// Shows @p text on @p term with the indicator status line set first, as setupMockTerminal() does, and runs a
+/// detection cycle over what the viewport shows: the viewport and a page above it are scanned, nothing else.
+void showAndDetect(DetectingTerm& term, std::string_view text)
+{
+    term.mock.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    term.mock.writeToScreen(text);
+    term.cycle();
+}
+
+/// The number of link spans the index holds on @p line of @p term's page on display.
+[[nodiscard]] std::size_t spansOn(DetectingTerm& term, int line)
+{
+    auto const _ = std::scoped_lock { term.mock.terminal };
+    auto const* index = term.mock.terminal.detectedLinks();
+    if (!index)
+        return 0;
+    return index->onRow(term.mock.terminal.displayedPage().grid().stableLineIdOf(vtbackend::LineOffset(line)))
+        .size();
+}
+
+/// 26 lines, rows -20 to 5 of a 6-row page: links at rows -16 and -12, beyond what a detection cycle at the
+/// bottom scans, and one at row 5, within it.
+[[nodiscard]] std::string linksAroundABand()
+{
+    return "top\r\n" + plainLines(3) + "\r\nband https://band.example/\r\n" + plainLines(3)
+           + "\r\nmore https://more.example/\r\n" + plainLines(16) + "\r\nend https://end.example/";
+}
+
+} // namespace
+
+TEST_CASE("vi.link: ]x finds a link in rows never scanned before one the index holds", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage, {}, vtbackend::HistoryLimits::plain(vtbackend::LineCount(30)) };
+    showAndDetect(term, linksAroundABand());
+    REQUIRE(term.linkAt(5, 4) != nullptr);
+    REQUIRE(term.linkAt(-16, 5) == nullptr); // the band: never scanned
+    term.mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    term.mock.sendCharSequence("gg0");
+    REQUIRE(viCursor(term) == at(-20, 0));
+
+    SECTION("one step")
+    {
+        term.mock.sendCharSequence("]x");
+        CHECK(viCursor(term) == at(-16, 5));
+        term.mock.sendCharSequence("]x");
+        CHECK(viCursor(term) == at(-12, 5));
+        term.mock.sendCharSequence("]x");
+        CHECK(viCursor(term) == at(5, 4));
+    }
+
+    SECTION("a count crossing the band")
+    {
+        term.mock.sendCharSequence("2]x");
+        CHECK(viCursor(term) == at(-12, 5));
+        term.mock.sendCharSequence("[x");
+        CHECK(viCursor(term) == at(-16, 5));
+    }
+}
+
+TEST_CASE("vi.link: ]x finds a link on a row rewritten since its scan", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    showAndDetect(term, "a\r\nx https://a.example/\r\nb\r\ny https://b.example/");
+    REQUIRE(term.linkAt(1, 2) != nullptr);
+    REQUIRE(term.linkAt(3, 2) != nullptr);
+    term.mock.writeToScreen("\033[2;1Hzz https://c.example/\033[K"); // row 1 now holds its link at column 3
+    term.mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    term.mock.sendCharSequence("gg0");
+
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(1, 3));
+}
+
+TEST_CASE("vi.link: repeated [x reach a link beyond one keypress's scan", "[vi][links]")
+{
+    // Two pages a keypress: the link 40 rows up is four keypresses away, each scanning further.
+    auto term = DetectingTerm { LinkPage,
+                                vtbackend::LinkDetectorTuning { .motionSearchPages = 2 },
+                                vtbackend::HistoryLimits::plain(vtbackend::LineCount(60)) };
+    term.mock.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    term.mock.writeToScreen("first https://first.example/\r\n" + plainLines(40));
+    term.mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    auto const start = viCursor(term);
+    REQUIRE(start.line == vtbackend::LineOffset(5));
+
+    for ([[maybe_unused]] auto const press: std::views::iota(0, 3))
+    {
+        term.mock.sendCharSequence("[x");
+        CHECK(viCursor(term) == start);
+    }
+    term.mock.sendCharSequence("[x");
+    CHECK(viCursor(term) == at(-35, 6));
+}
+
+TEST_CASE("vi.link: [x lands on a wrapped link's first row", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    auto const url = "https://example.com/" + std::string(40, 'a');
+
+    SECTION("from its continuation row")
+    {
+        showInNormalMode(term, "word " + url);
+        term.mock.sendCharSequence("j$");
+        REQUIRE(viCursor(term).line == vtbackend::LineOffset(1));
+        term.mock.sendCharSequence("[x");
+        CHECK(viCursor(term) == at(0, 5));
+    }
+
+    SECTION("whose first row is above the page scanned")
+    {
+        // Rows -4 to 5: the link's first row is -1 and its second 0; from row 5 the first page scanned is
+        // rows 0 to 5, which the logical line widens to row -1.
+        term.mock.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+        term.mock.writeToScreen("x\r\nx\r\nx\r\nword " + url + "\r\n" + plainLines(5));
+        term.mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+        REQUIRE(viCursor(term).line == vtbackend::LineOffset(5));
+        term.mock.sendCharSequence("[x");
+        CHECK(viCursor(term) == at(-1, 5));
+    }
+}
+
+TEST_CASE("vi.link: a scan refreshes the link under a pointer that has not moved", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    showInNormalMode(term, "a https://x.y/");
+    term.mock.terminal.sendMouseMoveEvent(
+        vtbackend::Modifier::None, at(0, 4), vtbackend::PixelCoordinate {}, false);
+    REQUIRE(term.mock.terminal.hoveringLinkId() == vtbackend::LinkId {});
+
+    term.mock.sendCharSequence("]x");
+    REQUIRE(term.linkAt(0, 4) != nullptr);
+    CHECK(term.mock.terminal.hoveringLinkId() == term.linkAt(0, 4)->id);
+}
+
+TEST_CASE("vi.link: ]x takes in a probe's answer without a frame", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    auto const path = std::format("{}/notes.md", Work);
+    term.files.addFile(path, "");
+    showInNormalMode(term, std::format("see {}", path));
+
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(0, 0)); // the probe has only started
+    term.probe.drain();                // and answered; no frame adopts it
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(0, 4));
+}
+
+TEST_CASE("vi.link: a scan beside the background match indexes a path once", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    auto const path = std::format("{}/notes.md", Work);
+    term.files.addFile(path, "");
+    term.mock.terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    term.mock.writeToScreen(std::format("see {}", path));
+    // A collect: its match job waits on the executor while `]x` scans the same row.
+    term.frame();
+    term.mock.terminal.tick(term.mock.terminal.currentTime() + term.tuning.debounce);
+    term.frame();
+    term.mock.terminal.inputHandler().setMode(vtbackend::ViMode::Normal);
+    term.mock.sendCharSequence("gg0]x");
+
+    for ([[maybe_unused]] auto const round: std::views::iota(0, 3))
+    {
+        term.match.drain();
+        term.probe.drain();
+        term.frame();
+    }
+    CHECK(spansOn(term, 0) == 1);
+}
+
+TEST_CASE("vi.link: ]x and [x stay put without link detection", "[vi][links]")
+{
+    auto mock = setupMockTerminal("a https://x.y/ b https://z.w/");
+    mock.sendCharSequence("]x");
+    CHECK(mock.terminal.normalModeCursorPosition() == at(0, 0));
+    mock.sendCharSequence("$");
+    auto const end = mock.terminal.normalModeCursorPosition();
+    mock.sendCharSequence("[x");
+    CHECK(mock.terminal.normalModeCursorPosition() == end);
 }
 // }}}

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/Logging.hpp>
+#include <vtbackend/links/LinkIndex.hpp>
+#include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/Workloads.hpp>
@@ -12,10 +14,15 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/Assert.hpp>
 #include <core/Environment.hpp>
 #include <core/Utils.hpp>
+#include <core/async/IExecutor.hpp>
+#include <core/async/ParkedWork.hpp>
+#include <core/async/ThreadPoolExecutor.hpp>
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
 #include <algorithm>
@@ -25,6 +32,9 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <coroutine>
+#include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -32,6 +42,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <random>
@@ -852,12 +863,15 @@ class ScratchFile
 class ChildSession
 {
   public:
-    /// @param launch   How to start the application: @see launchFor().
-    /// @param settings The terminal's settings; its page size is the PTY's too.
-    /// @param env      The environment the terminal reads.
+    /// @param launch       How to start the application: @see launchFor().
+    /// @param settings     The terminal's settings; its page size is the PTY's too.
+    /// @param env          The environment the terminal reads.
+    /// @param linkServices What the terminal detects links with; none for no detection. Its filesystem
+    ///                     must be the terminal's own, NativeFileSystem::instance().
     ChildSession(vtpty::Process::ExecInfo const& launch,
                  vtbackend::Settings const& settings,
-                 core::Environment const& env):
+                 core::Environment const& env,
+                 std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt):
         _terminal { _events,
                     env,
                     core::platform::NativeFileSystem::instance(),
@@ -870,7 +884,8 @@ class ChildSession
                     settings,
                     std::nullopt,
                     vtbackend::TerminalClocks::system(),
-                    vtbackend::randomSemanticBlockTokens() }
+                    vtbackend::randomSemanticBlockTokens(),
+                    std::move(linkServices) }
     {
     }
 
@@ -1151,6 +1166,89 @@ constexpr auto BenchScreens = std::array {
     BenchScreen { .name = "alternate", .entrySequence = "\033[?1049h" },
 };
 
+/// The words the link workloads' text is made of.
+constexpr auto LinkWorkloadWords = std::array<std::string_view, 16> {
+    "the",   "build", "finished", "with", "two",  "warnings", "see",   "logs",
+    "under", "for",   "details",  "and",  "then", "rerun",    "flags", "verbose",
+};
+
+/// Absolute paths that exist on a POSIX system, so that the probe finds them and the index holds them.
+/// Elsewhere they are paths that do not exist, which the probe looks for all the same.
+constexpr auto LinkWorkloadPaths =
+    std::array<std::string_view, 3> { "/usr/bin/env", "/etc/hosts", "/bin/sh" };
+
+/// How long one unit of the long-line link workload is.
+constexpr auto LinkLineUnitBytes = size_t { 100 } * 1024;
+
+/// @return One of the link workloads' words, drawn from @p rng.
+[[nodiscard]] std::string_view linkWorkloadWord(std::mt19937& rng)
+{
+    return LinkWorkloadWords[static_cast<size_t>(
+        vtbackend::test::drawBetween(rng, 0, static_cast<int>(LinkWorkloadWords.size()) - 1))];
+}
+
+/// Appends a URL, as a build or a test runner prints one.
+void appendLinkWorkloadUrl(std::string& out, std::mt19937& rng)
+{
+    out += std::format(
+        "https://example.com/{}/{}", linkWorkloadWord(rng), vtbackend::test::drawBetween(rng, 0, 9999));
+}
+
+/// Prose, as a build log or a man page writes it: a line of words, with a URL in about every third line and
+/// an absolute path in about every fourth.
+void writeLinkProseLine(std::string& out, std::mt19937& rng)
+{
+    for (auto const word: std::views::iota(0, vtbackend::test::drawBetween(rng, 6, 14)))
+    {
+        if (word != 0)
+            out.push_back(' ');
+        out += linkWorkloadWord(rng);
+    }
+    if (vtbackend::test::drawBetween(rng, 0, 2) == 0)
+    {
+        out += " see ";
+        appendLinkWorkloadUrl(out, rng);
+    }
+    if (vtbackend::test::drawBetween(rng, 0, 3) == 0)
+    {
+        out += " in ";
+        out += LinkWorkloadPaths[static_cast<size_t>(
+            vtbackend::test::drawBetween(rng, 0, static_cast<int>(LinkWorkloadPaths.size()) - 1))];
+    }
+    out += "\r\n";
+}
+
+/// 100 KB of words and URLs with no newline: the units run on into one logical line as long as the whole
+/// workload, which every scan reads again up to its cell limit, the worst case for the detector's collect.
+void writeLinkLineUnit(std::string& out, std::mt19937& rng)
+{
+    auto const end = out.size() + LinkLineUnitBytes;
+    while (out.size() < end)
+    {
+        if (vtbackend::test::drawBetween(rng, 0, 7) == 0)
+            appendLinkWorkloadUrl(out, rng);
+        else
+            out += linkWorkloadWord(rng);
+        out.push_back(' ');
+    }
+}
+
+/// The workloads that hold links, for measuring throughput with link detection on: the Workloads table's are
+/// random characters, with no URL and no path that exists. Throughput only; an empty `kinds` list picks them
+/// only with `links`.
+constexpr auto LinkWorkloads = std::array {
+    vtbackend::test::Workload { .name = "link-prose", .writeUnit = &writeLinkProseLine },
+    vtbackend::test::Workload { .name = "link-line", .writeUnit = &writeLinkLineUnit },
+};
+
+/// Every workload the throughput benchmark knows by name: the Workloads table's, then the link workloads.
+constexpr auto ThroughputWorkloads = [] {
+    auto all =
+        std::array<vtbackend::test::Workload, vtbackend::test::Workloads.size() + LinkWorkloads.size()> {};
+    std::ranges::copy(LinkWorkloads, std::ranges::copy(vtbackend::test::Workloads, all.begin()).out);
+    return all;
+}();
+
 /// @return The length of the longest name in @p table: the width of a report column that names its rows.
 template <typename Row, size_t N>
 [[nodiscard]] constexpr size_t longestName(std::array<Row, N> const& table)
@@ -1159,7 +1257,7 @@ template <typename Row, size_t N>
 }
 
 /// The widths of the workload and screen columns the throughput and snapshot reports align on.
-constexpr auto WorkloadColumnWidth = longestName(vtbackend::test::Workloads);
+constexpr auto WorkloadColumnWidth = longestName(ThroughputWorkloads);
 constexpr auto ScreenColumnWidth = longestName(BenchScreens);
 
 /// Finds the row of @p table that @p name names.
@@ -1277,6 +1375,82 @@ enum class ThroughputDevice : uint8_t
     std::unreachable();
 }
 
+/// Whether a throughput run detects links in its output, as the GUI does.
+enum class LinkDetection : uint8_t
+{
+    Off = 0, ///< No detection: the terminal alone.
+    On,      ///< Detection in the frames the refresh builds, its jobs on a LinkDetectionRig.
+};
+
+/// An executor that counts the jobs it is handed, and runs them on a pool of its own. It counts submissions:
+/// one per match job while a job hops onto the pool once, as LinkDetector's do.
+class CountingExecutor final: public core::async::IExecutor
+{
+  public:
+    /// @param threads How many threads its pool runs.
+    explicit CountingExecutor(std::size_t threads): _pool { threads } {}
+
+    void submit(std::coroutine_handle<> handle) override
+    {
+        _submitted.fetch_add(1, std::memory_order_relaxed);
+        _pool.submit(handle);
+    }
+
+    void submit(core::async::ParkedWork work) override
+    {
+        _submitted.fetch_add(1, std::memory_order_relaxed);
+        _pool.submit(std::move(work));
+    }
+
+    /// @return How many jobs it was handed so far.
+    [[nodiscard]] uint64_t submitted() const noexcept { return _submitted.load(std::memory_order_relaxed); }
+
+  private:
+    std::atomic<uint64_t> _submitted = 0; ///< Declared first, so that it outlives the pool's last job.
+    core::async::ThreadPoolExecutor _pool;
+};
+
+/// What link detection runs on during a `links` run, as the GUI runs it: a match pool, a probe thread, and
+/// the native filesystem. Lives from before the run's first terminal until after its last, because a
+/// terminal's detector does not wait for the jobs it leaves in flight.
+struct LinkDetectionRig
+{
+    /// The match pool: two threads, as the application's pool gives the detector, counting its match jobs.
+    CountingExecutor match { 2 };
+    /// The probe thread: a hung mount blocks only it.
+    core::async::ThreadPoolExecutor probe { 1 };
+    /// Detection's timing and bounds: the defaults, as the GUI runs them.
+    vtbackend::LinkDetectorTuning tuning {};
+
+    /// @return What a terminal detects links with: the rig's executors, the native filesystem, which
+    ///         ChildSession gives the terminal too, the steady clock, and the rig's tuning.
+    [[nodiscard]] vtbackend::LinkDetectionServices services()
+    {
+        return vtbackend::LinkDetectionServices { .matchExecutor = match,
+                                                  .probeExecutor = probe,
+                                                  .fileSystem = core::platform::NativeFileSystem::instance(),
+                                                  .clock = core::platform::defaultSteadyClock(),
+                                                  .tuning = tuning };
+    }
+};
+
+/// What link detection did in one `links` run.
+struct LinkDetectionCounts
+{
+    /// Match jobs handed to the pool while the workload streamed in: the detection the measurement includes.
+    uint64_t matchJobsInRun = 0;
+    /// Match jobs handed to it in the untimed settle after the run (LinkSettleTime).
+    uint64_t matchJobsAfter = 0;
+    size_t linksIndexed = 0; ///< Links the index held once the settle was over.
+
+    auto operator<=>(LinkDetectionCounts const&) const = default;
+};
+
+/// How long a `links` run lets detection work once its output has stopped, untimed: the quiet time a scan
+/// waits for (100 ms by default), then the scan, the probes, and the frames that adopt them, so that the
+/// run's count of indexed links says what detection found.
+constexpr auto LinkSettleTime = std::chrono::seconds { 1 };
+
 /// How the throughput benchmark runs. Its defaults are the command line's.
 struct ThroughputOptions
 {
@@ -1285,6 +1459,10 @@ struct ThroughputOptions
     unsigned ptyReadSize = ContourPtyReadSize; ///< Bytes per PTY read, as the parser takes them.
     ThroughputDevice device = ThroughputDevice::MockPty; ///< Where each run's bytes come from.
     unsigned refreshHz = 0; ///< Render-buffer refreshes per second during a pty run; 0 for none.
+    LinkDetection linkDetection = LinkDetection::Off; ///< Whether each terminal detects links.
+    /// What detection runs on: set exactly when linkDetection is On. Not owned, so that the options stay a
+    /// literal type; the rig outlives every run.
+    LinkDetectionRig* linkRig = nullptr;
 };
 
 /// What one throughput run measured. Runs order by how long they took first, so the fastest of several is the
@@ -1296,6 +1474,8 @@ struct ThroughputRun
     /// How much of what was written arrived, as a share of it; counted only through a PTY that does not pass
     /// the bytes through unchanged, @see PtyOutput.
     std::optional<double> arrived {};
+    /// What link detection did; counted with link detection on only.
+    std::optional<LinkDetectionCounts> detection {};
 
     auto operator<=>(ThroughputRun const&) const = default;
 };
@@ -1313,11 +1493,14 @@ struct ThroughputRun
     vt.mockPty().setReadData(input);
     return ThroughputRun { .elapsed = runWorkloadOnce(vt.terminal, vt.mockPty()),
                            .bytesPerRead = std::nullopt,
-                           .arrived = std::nullopt };
+                           .arrived = std::nullopt,
+                           .detection = std::nullopt };
 }
 
 /// Refreshes @p terminal's render buffer @p hz times a second until stopped, the way the render thread
-/// contends for the terminal's state while output floods in.
+/// contends for the terminal's state while output floods in. Each refresh first moves the terminal's clock to
+/// now, as the display does before every frame: what the frame decides by time -- the cursor's blink, link
+/// detection's quiet time -- is decided at the frame's own time.
 /// @return The refreshing thread, or no thread at all when @p hz is 0.
 [[nodiscard]] std::jthread startRefresher(vtbackend::Terminal& terminal, unsigned hz)
 {
@@ -1328,6 +1511,7 @@ struct ThroughputRun
         auto next = std::chrono::steady_clock::now();
         while (!stop.stop_requested())
         {
+            terminal.tick(std::chrono::steady_clock::now());
             terminal.refreshRenderBuffer();
             next += interval;
             sleepUntil(next);
@@ -1389,7 +1573,12 @@ struct ThroughputRun
     settings.pageSize = BenchPageSize;
     settings.historyLimits = vtbackend::HistoryLimits::plain(BenchHistory);
     settings.ptyReadBufferSize = options.ptyReadSize;
-    auto session = ChildSession { writer, settings, env };
+    auto session = ChildSession {
+        writer,
+        settings,
+        env,
+        options.linkRig ? std::optional { options.linkRig->services() } : std::nullopt,
+    };
     auto& terminal = session.terminal();
     terminal.setMode(vtbackend::DECMode::AutoWrap, true);
     // Straight to the screen, before the writer exists: fills the scrollback, @see BenchHistory.
@@ -1399,6 +1588,12 @@ struct ThroughputRun
     if (auto const started = session.start(); !started)
         return std::unexpected(started.error());
 
+    // The rig's counter is shared by every run: this run's jobs are the difference.
+    auto const matchJobs = [&] {
+        return options.linkRig ? options.linkRig->match.submitted() : uint64_t { 0 };
+    };
+    auto const matchJobsAtStart = matchJobs();
+
     // Stopped and joined when it goes out of scope, before the terminal does.
     auto const refresher = startRefresher(terminal, options.refreshHz);
 
@@ -1406,6 +1601,24 @@ struct ThroughputRun
     while (terminal.processInputOnce())
         answerHostQueries(terminal);
     auto const finished = std::chrono::steady_clock::now();
+    auto const matchJobsAtFinish = matchJobs();
+
+    // Untimed, and not for the empty runs that measure the writer: detection is given the quiet time the
+    // display would give it, while the refresher builds frames, and then says what it holds. Its jobs are
+    // counted apart from the run's.
+    auto const detection = [&]() -> std::optional<LinkDetectionCounts> {
+        if (!options.linkRig || input.empty())
+            return std::nullopt;
+        sleepUntil(finished + LinkSettleTime);
+        auto const linksIndexed = [&] {
+            auto const _ = std::scoped_lock { terminal };
+            auto const* const index = terminal.detectedLinks();
+            return index ? index->size() : 0;
+        }();
+        return LinkDetectionCounts { .matchJobsInRun = matchJobsAtFinish - matchJobsAtStart,
+                                     .matchJobsAfter = matchJobs() - matchJobsAtFinish,
+                                     .linksIndexed = linksIndexed };
+    }();
 
     // Where checkRun() asks how the writer ended (ConPTY), the answer is in: Process_win32's exit watcher
     // records the writer's exit before it closes the PTY, which is what ended the loop.
@@ -1417,8 +1630,27 @@ struct ThroughputRun
                 return std::unexpected("Nothing arrived."s);
             return ThroughputRun { .elapsed = finished - *firstRead,
                                    .bytesPerRead = process.bytesRead() / process.reads(),
-                                   .arrived = arrived };
+                                   .arrived = arrived,
+                                   .detection = detection };
         });
+}
+
+/// @return How a report row describes what link detection did in a run that took @p elapsed: the match jobs
+///         inside the measurement and after it, the links indexed, and, for a run shorter than @p maxWait --
+///         the longest a scan waits under continuous output -- that detection could not scan inside it.
+[[nodiscard]] std::string describe(LinkDetectionCounts const& counts,
+                                   std::chrono::nanoseconds elapsed,
+                                   std::chrono::milliseconds maxWait)
+{
+    auto text = std::format(" {:5} match jobs in the run, {:5} after it, {:6} links",
+                            counts.matchJobsInRun,
+                            counts.matchJobsAfter,
+                            counts.linksIndexed);
+    if (elapsed < maxWait)
+        text +=
+            std::format("  (under {} ms, detection's longest wait: it could not scan inside the measurement)",
+                        maxWait.count());
+    return text;
 }
 
 /// The fewest empty runs whose fastest is subtracted, where a platform subtracts the writer's start-up and
@@ -1515,6 +1747,7 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                            ThroughputOptions const& options,
                            core::Environment const& env)
 {
+    Require((options.linkDetection == LinkDetection::On) == (options.linkRig != nullptr));
     auto const writerStartup = measureWriterStartup(options, env);
     if (!writerStartup)
     {
@@ -1522,7 +1755,7 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
         return EXIT_FAILURE;
     }
     cout << std::format(
-        "Throughput: {} MiB per workload, fastest of {} runs, PTY reads of up to {} bytes, {}{}{}\n",
+        "Throughput: {} MiB per workload, fastest of {} runs, PTY reads of up to {} bytes, {}{}{}{}\n",
         options.bytesPerWorkload / (size_t { 1024 } * 1024),
         options.runs,
         core::nextPowerOfTwo(static_cast<size_t>(options.ptyReadSize)), // as Terminal rounds it
@@ -1535,7 +1768,8 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                                    std::chrono::duration<double, std::milli>(startup.elapsed).count(),
                                    startup.emptyRuns);
             })
-            .value_or(""));
+            .value_or(""),
+        options.linkRig ? ", link detection: on" : "");
     for (auto const& workload: workloads)
     {
         auto const input = vtbackend::test::makeWorkload(workload, options.bytesPerWorkload);
@@ -1558,6 +1792,8 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
                 row += std::format(" {:9} bytes/read", *fastest->bytesPerRead);
             if (fastest->arrived)
                 row += std::format(" {:6.1f}% arrived", 100.0 * *fastest->arrived);
+            if (fastest->detection)
+                row += describe(*fastest->detection, fastest->elapsed, options.linkRig->tuning.maxWait);
             cout << row << '\n';
         }
     }
@@ -1699,11 +1935,20 @@ class ContourHeadlessBench: public core::cli::App
         auto constexpr SnapshotDefaults = SnapshotOptions {};
 
         // What the throughput and snapshot benchmarks cover, which both pick alike: @see selectionFor().
-        auto const kindsOption = CLI::Option { .name = "kinds",
-                                               .v = CLI::Value { ""s },
-                                               .helpText = "Comma-separated workloads, all when empty; an "
-                                                           "unknown name lists the known ones.",
-                                               .placeholder = "LIST" };
+        // Throughput knows the link workloads as well. Static: an option holds a view of its help text.
+        static constexpr auto KindsHelp = std::string_view {
+            "Comma-separated workloads, all when empty; an unknown name lists the known ones."
+        };
+        static auto const throughputKindsHelp = std::format(
+            "{} The link workloads (link-prose, link-line) hold URLs and paths; an empty list picks "
+            "them only with links.",
+            KindsHelp);
+        auto const kindsOption = CLI::Option {
+            .name = "kinds", .v = CLI::Value { ""s }, .helpText = KindsHelp, .placeholder = "LIST"
+        };
+        auto const throughputKindsOption = CLI::Option {
+            .name = "kinds", .v = CLI::Value { ""s }, .helpText = throughputKindsHelp, .placeholder = "LIST"
+        };
         auto const screensOption =
             CLI::Option { .name = "screens",
                           .v = CLI::Value { ""s },
@@ -1735,7 +1980,7 @@ class ContourHeadlessBench: public core::cli::App
             CLI::Option { .name = "runs",
                           .v = CLI::Value { ThroughputDefaults.runs },
                           .helpText = "Runs per workload and screen; the fastest counts." },
-            kindsOption,
+            throughputKindsOption,
             screensOption,
             CLI::Option { .name = "read-size",
                           .v = CLI::Value { ThroughputDefaults.ptyReadSize },
@@ -1750,8 +1995,22 @@ class ContourHeadlessBench: public core::cli::App
                           .v = CLI::Value { ThroughputDefaults.refreshHz },
                           .helpText =
                               "With pty: refresh the render buffer this many times a second while the "
-                              "workload floods in, as the render thread does; 0 for never.",
+                              "workload floods in, moving the terminal's clock to the frame's time first, as "
+                              "the render thread does; 0 for never. links needs it.",
                           .placeholder = "HZ" },
+            CLI::Option {
+                .name = "links",
+                .v = CLI::Value { ThroughputDefaults.linkDetection == LinkDetection::On },
+                .helpText =
+                    "With pty and refresh-hz: run link detection as the GUI does -- a match pool, a probe "
+                    "thread, the native filesystem -- in the frames the refresh builds. Each run then waits "
+                    "an "
+                    "untimed second for detection to scan what it left, a second of wall time per run. Each "
+                    "row "
+                    "adds the match jobs of its fastest run, inside the measurement and in that second, and "
+                    "the "
+                    "links indexed then. Under continuous output a scan waits at most a second, so a run "
+                    "shorter than that cannot scan inside the measurement, and its row says so." },
         };
 
         auto const snapshotOptions = CLI::OptionList {
@@ -1933,12 +2192,17 @@ class ContourHeadlessBench: public core::cli::App
 
     /// Picks the workloads and screens that @p command's `kinds` and `screens` options name.
     /// @param command The subcommand, as the command line names it.
+    /// @param known The workloads it knows by name.
+    /// @param byDefault The workloads an empty `kinds` list picks.
     /// @return Both, or a message naming the unknown name and every known one.
-    [[nodiscard]] std::expected<BenchSelection, std::string> selectionFor(std::string_view command) const
+    [[nodiscard]] std::expected<BenchSelection, std::string> selectionFor(
+        std::string_view command,
+        std::span<vtbackend::test::Workload const> known,
+        std::span<vtbackend::test::Workload const> byDefault) const
     {
         auto const prefix = std::format("bench-headless.{}.", command);
-        return pickByName<vtbackend::test::Workload>(
-                   vtbackend::test::Workloads, parameters().str(prefix + "kinds"), "workload")
+        auto const names = parameters().str(prefix + "kinds");
+        return pickByName<vtbackend::test::Workload>(names.empty() ? byDefault : known, names, "workload")
             .and_then([&](std::vector<vtbackend::test::Workload> workloads) {
                 return pickByName<BenchScreen>(BenchScreens, parameters().str(prefix + "screens"), "screen")
                     .transform([&](std::vector<BenchScreen> screens) {
@@ -1953,25 +2217,44 @@ class ContourHeadlessBench: public core::cli::App
     /// @return EXIT_SUCCESS, or EXIT_FAILURE when an option is invalid or a run fails.
     int benchThroughput()
     {
-        auto const selection = selectionFor("throughput");
-        if (!selection)
-        {
-            cerr << selection.error() << '\n';
-            return EXIT_FAILURE;
-        }
-        auto const options = ThroughputOptions {
+        auto options = ThroughputOptions {
             .bytesPerWorkload = size_t { parameters().uint("bench-headless.throughput.size") } * 1024 * 1024,
             .runs = parameters().uint("bench-headless.throughput.runs"),
             .ptyReadSize = parameters().uint("bench-headless.throughput.read-size"),
             .device = parameters().boolean("bench-headless.throughput.pty") ? ThroughputDevice::RealPty
                                                                             : ThroughputDevice::MockPty,
             .refreshHz = parameters().uint("bench-headless.throughput.refresh-hz"),
+            .linkDetection = parameters().boolean("bench-headless.throughput.links") ? LinkDetection::On
+                                                                                     : LinkDetection::Off,
+            .linkRig = nullptr,
         };
         if (options.bytesPerWorkload == 0 || options.runs == 0 || options.ptyReadSize == 0)
         {
             cerr << "size, runs and read-size must each be at least 1.\n";
             return EXIT_FAILURE;
         }
+        if (options.linkDetection == LinkDetection::On
+            && (options.device != ThroughputDevice::RealPty || options.refreshHz == 0))
+        {
+            cerr << "links needs pty and a refresh-hz of at least 1: detection runs in the refresh's "
+                    "frames.\n";
+            return EXIT_FAILURE;
+        }
+        auto const selection =
+            selectionFor("throughput",
+                         ThroughputWorkloads,
+                         options.linkDetection == LinkDetection::On
+                             ? std::span<vtbackend::test::Workload const> { ThroughputWorkloads }
+                             : std::span<vtbackend::test::Workload const> { vtbackend::test::Workloads });
+        if (!selection)
+        {
+            cerr << selection.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        // Before the first terminal and after the last: a terminal's detector does not wait for its jobs.
+        auto rig = std::optional<LinkDetectionRig> {};
+        if (options.linkDetection == LinkDetection::On)
+            options.linkRig = &rig.emplace();
         return runThroughputBenchmark(
             selection->workloads, selection->screens, options, processEnvironment());
     }
@@ -1981,7 +2264,8 @@ class ContourHeadlessBench: public core::cli::App
     /// @return EXIT_SUCCESS, or EXIT_FAILURE when an option is invalid.
     int benchSnapshot()
     {
-        auto const selection = selectionFor("snapshot");
+        auto const selection =
+            selectionFor("snapshot", vtbackend::test::Workloads, vtbackend::test::Workloads);
         if (!selection)
         {
             cerr << selection.error() << '\n';

@@ -34,6 +34,7 @@ using vim motion keys and then start selecting.
 - Visual: `o` (open current selection into primary clipboard)
 - Normal: `gh` (enter [hint mode](demo/hint-mode.md) — copy selected match to clipboard)
 - Normal: `gH` (enter [hint mode](demo/hint-mode.md) — open selected match)
+- Normal: `gx` (opens the link under the cursor: a URL, a path, or a custom pattern)
 - Normal: `mm` (set or clear a [user mark](demo/line-marks.md#bookmarking-a-line-in-vi-normal-mode) on the cursor line)
 - Normal: `za` / `zo` / `zc` (toggle / open / close the [command block](demo/command-blocks.md#folding) under the cursor)
 - Normal: `zM` / `zR` (close / open every command block)
@@ -57,6 +58,8 @@ the terminal to scroll the view to make that target line visible.
 - `G`
 - `{` & `}`
 - `[m` & `]m` (previous / next mark: a prompt or a user mark)
+- `[count] ]x` (next link)
+- `[count] [x` (previous link)
 
 ### Supported text objects
 
@@ -74,11 +77,14 @@ the terminal to scroll the view to make that target line visible.
 
 ### Opening local files and URLs
 
-Contour currently only supports OSC-8 hyperlinks as well as explicitly opening selected text.
+Contour finds URLs, file paths and patterns of your own in the output and underlines them
+(see [Links in Terminal Output](configuration/links.md)). In normal mode, `]x` and `[x` move the
+cursor from one link to the next, scanning beyond the screen when needed, and `gx` opens the link
+under the cursor as Ctrl+click would. A path counts once Contour has found that it exists.
 
-In normal mode, you can open links by moving the cursor onto a resource (URL or local file) and
-then press `oiW` (open in (space separated) word) or use any of the other supported text objects
-to denote what to open.
+You can also open what is not detected as a link by moving the cursor onto a resource (URL or local
+file) and then pressing `oiW` (open in (space separated) word) or use any of the other supported text
+objects to denote what to open.
 
 You may as well type `oo` to open the URL under the current line. This works if no other information
 is on this current line, while spaces are trimmed left and right of the given URL in this line.

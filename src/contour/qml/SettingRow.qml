@@ -27,6 +27,8 @@ Item {
     // Shown in an "enum" combo instead of the stored values; same length as options. Empty = show options.
     property var optionLabels: []
     property bool editable: true
+    /// What is wrong with `value`, shown under the help text; empty when nothing is.
+    property string problem: ""
 
     /// Drop the card and draw a hover wash only; for rows inside a SettingsSection.
     property bool flat: false
@@ -120,6 +122,15 @@ Item {
                 text: root.help
                 visible: root.help.length > 0
                 color: root.subtleText
+                font.pointSize: 9
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Label {
+                objectName: "settingProblem"
+                text: root.problem
+                visible: root.problem.length > 0
+                color: chromeStyle.errorColor
                 font.pointSize: 9
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
