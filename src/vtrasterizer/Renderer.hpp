@@ -431,7 +431,8 @@ class Renderer
                             vtbackend::ColumnCount columns);
 
     /// Fills the status line's rows from the window's left edge to its right with the bar's background,
-    /// under the status line's own cells: the gutter and the page margins beside it take its color.
+    /// under the status line's own cells: the gutter and the page margins beside it take its color, the
+    /// margin above or below it does not.
     ///
     /// Drawn in the step that draws the status line, ahead of its cells, because one step draws its
     /// rectangles in the order they were issued.

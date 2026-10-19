@@ -2336,8 +2336,8 @@ TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[rend
     REQUIRE(bar.has_value());
     REQUIRE(bar->lineOffset == LineOffset(5));
 
-    // Seeded metrics: 10x20 cells, no margin -- so the status line's row spans y 100..119, and the 20 pixels
-    // the render target has left below it are the bar's too.
+    // Seeded metrics: 10x20 cells, no margin -- so the status line's row spans y 100..119. The 20 pixels the
+    // render target has left below it are not the bar's: they keep the default background.
     auto const& rectangles = fixture.renderTarget.rectangles;
     auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
         return r.x == 0 && r.y == 100 && r.color == RGBAColor(bar->background, 0xFF);
@@ -2345,7 +2345,7 @@ TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[rend
     REQUIRE(band != rectangles.end());
     CHECK(band->width == fixture.renderTarget.renderSize().width);
     CHECK(band->width == Width(260));
-    CHECK(band->height == Height(40));
+    CHECK(band->height == Height(20));
 
     // The status line paints its own background on its cells, after the bar and in the same step.
     auto const ownBackground = std::ranges::find_if(std::next(band), rectangles.end(), [&](auto const& r) {
@@ -2355,10 +2355,10 @@ TEST_CASE("Renderer.statusBar.spansTheWindowUnderTheIndicatorStatusLine", "[rend
     CHECK(ownBackground->step == band->step);
 }
 
-TEST_CASE("Renderer.statusBar.reachesPastTheMarginOfTheEdgeItSitsOn", "[renderer][statusline]")
+TEST_CASE("Renderer.statusBar.leavesTheMarginOfTheEdgeItSitsOnAlone", "[renderer][statusline]")
 {
-    // A top bar is drawn from the render target's top edge, over the margin above its row, down to its row's
-    // bottom: nothing of the pane's own background shows above it.
+    // A top bar spans the window's width but only its own row's height: the margin above it keeps the
+    // default background, as the strip below a bottom bar does.
     configureMockFont();
     ReconfigFixture fixture;
     auto metrics = ReconfigFixture::seededMetrics();
@@ -2377,14 +2377,14 @@ TEST_CASE("Renderer.statusBar.reachesPastTheMarginOfTheEdgeItSitsOn", "[renderer
     REQUIRE(bar.has_value());
     REQUIRE(bar->lineOffset == LineOffset(0));
 
-    // Row 0 spans y 6..25 under the 6-pixel top margin.
+    // Row 0 spans y 6..25 under the 6-pixel top margin, which the bar leaves alone.
     auto const& rectangles = fixture.renderTarget.rectangles;
     auto const band = std::ranges::find_if(rectangles, [&](auto const& r) {
         return r.x == 0 && r.color == RGBAColor(bar->background, 0xFF) && r.width == Width(260);
     });
     REQUIRE(band != rectangles.end());
-    CHECK(band->y == 0);
-    CHECK(band->height == Height(26));
+    CHECK(band->y == 6);
+    CHECK(band->height == Height(20));
 }
 
 TEST_CASE("Renderer.statusBar.drawsTheIndicatorFromTheGuttersLeftEdge", "[renderer][statusline]")
