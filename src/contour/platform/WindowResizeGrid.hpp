@@ -23,7 +23,7 @@ namespace contour::platform
 /// X11 uses size hints instead; Wayland has no resize-increment hint.
 /// @return An owning subscription, or nullptr where no subscription is required.
 [[nodiscard]] std::unique_ptr<QObject> makeWindowResizeGrid(
-    QWindow& window, std::function<std::optional<geometry::RowResizeGrid>()> grid);
+    QWindow& window, std::function<std::optional<geometry::RowResizeGrid>()> const& grid);
 
 /// Refines Qt's X11 size hints with the physical row metrics, preserving all unrelated hints.
 /// Call after applying Qt's ordinary hints; does not create a native window early.

@@ -3444,6 +3444,11 @@ command::ContextMenuState TerminalSession::contextMenuState()
         // its very first prompt included -- and ClearToPrompt keeps a record whose rows it took. Asked
         // without reading the rows, under the lock the parser waits on.
         auto const hasLastCommand = terminal().hasCommandBlockRows(vtbackend::CommandBlockTarget::Last);
+        // ...and whether its command line is known, apart from the prompt chrome its rows carry.
+        auto const* const lastBlock = terminal().targetedCommandBlock(vtbackend::CommandBlockTarget::Last);
+        auto const lastCommandLine = lastBlock != nullptr && !lastBlock->commandLine.empty()
+                                         ? command::CommandLinePresence::Present
+                                         : command::CommandLinePresence::Absent;
 
         // The block under the pointer, as an unpinned `target: pointer` action resolves it, and none over an
         // alternate-screen application. Opened from the sticky header or the gutter, the block the press
@@ -3523,6 +3528,7 @@ command::ContextMenuState TerminalSession::contextMenuState()
             .blockUnderCursor = blockUnderCursor,
             .livePrompt = terminal().shellIsPrompting() ? command::PromptPresence::Present
                                                         : command::PromptPresence::Absent,
+            .lastCommandLine = lastCommandLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
         };

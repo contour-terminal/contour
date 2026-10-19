@@ -608,7 +608,10 @@ inline void failOnDeadlock(std::chrono::milliseconds budget, std::function<void(
         auto mutex = std::mutex {};
         auto lock = std::unique_lock { mutex };
         auto wake = std::condition_variable_any {};
-        if (wake.wait_for(lock, returned, allowed, [&returned] { return returned.stop_requested(); }))
+        // Ask the token too: libstdc++'s wait_for answers false, as if timed out, when the stop lands
+        // between its first look at the predicate and its wait — that is, whenever @p body returns quickly.
+        if (wake.wait_for(lock, returned, allowed, [&returned] { return returned.stop_requested(); })
+            || returned.stop_requested())
             return;
         std::fputs("Deadlocked: the thread holding the terminal lock took it again.\n", stderr);
         std::_Exit(EXIT_FAILURE);

@@ -108,6 +108,7 @@
       <description>
         <ul>
           <li>Adds the global option <code>snap_to_rows</code> to align window heights to complete terminal rows, avoiding unused space below a bottom status line. Available in Settings and disabled by default (#2158).</li>
+          <li>Adds "Copy Last Command" to the terminal's context menu, copying the last finished command's command line without the prompt in front of it; "Copy Last Prompt" copies the prompt's lines, PS1 included</li>
           <li>Adds the profile option <code>copy_command_preserve_multiline</code> to preserve line breaks and tabs when using Copy Command. Disabled by default.</li>
           <li>Adds <code>tab_color</code> to profiles, giving newly opened tabs a default color while preserving layout, application and user overrides (#2152)</li>
           <li>Changes the indicator status line to span the window's whole width: its bar reaches the window's edges past the gutter and the page margins, and its text is laid out across the gutter's columns as well as the page's, so its middle sits in the bar's centre. The host-writable status line keeps the page's width (#2139)</li>
