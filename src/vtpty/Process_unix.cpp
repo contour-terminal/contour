@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/CommandLine.hpp>
+#include <vtpty/DetachedProcess.hpp>
 #include <vtpty/EnvironmentBlock.hpp>
+#include <vtpty/ErrnoText.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/Pty.hpp>
 #include <vtpty/SandboxInfo.hpp>
 #include <vtpty/UnixPty.hpp>
+#include <vtpty/UnixUtils.hpp>
 
 #include <core/Assert.hpp>
 #include <core/Environment.hpp>
@@ -16,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -25,12 +29,11 @@
 #include <format>
 #include <mutex>
 #include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
-#include <type_traits>
+#include <utility>
 
 #ifndef __FreeBSD__
     #include <utmp.h>
@@ -47,12 +50,14 @@
     #include <pty.h>
 #endif
 
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
 #include <csignal>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 
 // POSIX requires no header to declare `environ`; each platform is left to differ, and all three we
@@ -92,6 +97,10 @@ namespace
     /// How often a HangupGrace looks whether the child has ended, and whether the grace has passed.
     constexpr auto HangupGraceStep = std::chrono::milliseconds { 10 };
 
+    /// How long startDetached() waits, in milliseconds, for its intermediate process to name the program's:
+    /// no time at all once it has reaped that process, which sent the name before it exited.
+    constexpr auto DetachedHandoverTimeout = 5000;
+
     /// @return The signal that asks a child to end as @p hint says.
     [[nodiscard]] constexpr int signalFor(Process::TerminationHint hint) noexcept
     {
@@ -111,35 +120,11 @@ namespace
 
     // {{{ async-signal-safe helpers, for use between fork() and exec()
     //
-    // Everything in this block is called from the forked child before it has called exec(). Only
-    // async-signal-safe operations are permitted there: the child shares the parent's memory
-    // image, and any lock (notably the malloc arena) that another parent thread happened to hold
-    // at the moment of fork() is held forever in the child. So no printf, no strerror, no
-    // setenv, and no allocation.
-
-    /// Normalizes the two incompatible strerror_r() flavours to one shape.
-    ///
-    /// @param result What strerror_r() answered: a message pointer (GNU) or a status code (XSI).
-    /// @param buffer The buffer strerror_r() was given.
-    /// @return The message.
-    template <typename Result>
-    char const* strerrorResult(Result result, char* buffer) noexcept
-    {
-        if constexpr (std::is_pointer_v<Result>)
-            return result; // GNU: answers a pointer, which may or may not be `buffer`.
-        else
-            return result == 0 ? buffer : "unknown error"; // XSI: fills `buffer`.
-    }
-
-    /// Describes an errno value without allocating, unlike strerror() and std::generic_category().
-    ///
-    /// @param errorCode errno value to describe.
-    /// @param buffer Scratch space for the message; must outlive the returned pointer.
-    /// @return Human-readable description of @p errorCode.
-    [[nodiscard]] char const* errnoText(int errorCode, std::span<char> buffer) noexcept
-    {
-        return strerrorResult(::strerror_r(errorCode, buffer.data(), buffer.size()), buffer.data());
-    }
+    // Everything in this block is called from the forked child before it has called exec(). The child of
+    // a multi-threaded process may call only async-signal-safe functions until it execs (fork(2) NOTES;
+    // POSIX XSH fork()): it shares the parent's memory image, and a lock another thread held at the fork
+    // may be held in the child. So no printf, no strerror (errnoText() instead), no setenv, and no
+    // allocation.
 
     /// Writes @p text to @p fd in full, retrying on short writes and EINTR.
     ///
@@ -175,27 +160,7 @@ namespace
         ::close(fd);
     }
 
-    /// Blocks until the parent releases the gate: a byte, end-of-file, or any error but EINTR.
-    ///
-    /// @param fd The child's end of the gate.
-    void awaitGate(int fd) noexcept
-    {
-        auto byte = char {};
-        while (::read(fd, &byte, 1) < 0 && errno == EINTR)
-            ;
-    }
     // }}}
-
-    /// @return A pidfd for @p pid, or an empty OwnedFd where the kernel has none (before Linux 5.3).
-    [[nodiscard]] OwnedFd openPidFd(pid_t pid) noexcept
-    {
-#if defined(__linux__) && defined(SYS_pidfd_open)
-        return OwnedFd { static_cast<int>(::syscall(SYS_pidfd_open, pid, 0)) };
-#else
-        core::ignoreUnused(pid);
-        return OwnedFd {};
-#endif
-    }
 
     /// @return The current process environment's entries; none when it has been cleared.
     [[nodiscard]] vector<string_view> inheritedEnvironment()
@@ -209,41 +174,41 @@ namespace
         return entries;
     }
 
-    void saveDup2(int a, int b)
+    /// Makes @p b refer to what @p a does, and survive an exec, retrying dup2() on EBUSY and EINTR.
+    ///
+    /// Where @p a already is @p b -- this process's standard input closed, a descriptor opened
+    /// close-on-exec lands on 0 -- dup2() returns without changing anything (POSIX), the close-on-exec
+    /// flag included, and the exec would close it. The flag is cleared instead, with fcntl(), which is
+    /// async-signal-safe.
+    /// @param a The descriptor to hand over.
+    /// @param b The descriptor the exec keeps.
+    void saveDup2(int a, int b) noexcept
     {
+        if (a == b)
+        {
+            if (auto const flags = ::fcntl(a, F_GETFD); flags != -1)
+                (void) ::fcntl(a, F_SETFD, flags & ~FD_CLOEXEC);
+            return;
+        }
         while (dup2(a, b) == -1 && (errno == EBUSY || errno == EINTR))
             ;
     }
 
-    void closeAllFileDescriptorsAbove(int keepFd)
+    /// Hands the fast pipe's writer to the program as StdoutFastPipeFd, and closes the pipe's own
+    /// descriptors: the reader first, as it may sit on StdoutFastPipeFd itself, which the writer then takes;
+    /// the writer only where it is not StdoutFastPipeFd already. Async-signal-safe.
+    /// @param pipe The fast pipe; nothing is done where it has no writer.
+    void handOverFastPipe(UnixPipe& pipe) noexcept
     {
-#ifdef HAVE_CLOSE_RANGE
-        if (close_range(keepFd + 1, ~0U, 0) == 0)
+        auto const writer = pipe.writer();
+        if (writer == -1)
             return;
-#endif
-
-#ifdef __linux__
-        try
-        {
-            for (auto const& entry: fs::directory_iterator("/proc/self/fd"))
-            {
-                int const fd = std::stoi(entry.path().filename().string());
-                if (fd > keepFd)
-                    ::close(fd);
-            }
-            return;
-        }
-        catch (...) // NOLINT(bugprone-empty-catch)
-        {
-            // ignore
-        }
-#endif
-
-        // Fallback: close up to sysconf(_SC_OPEN_MAX)
-        int const maxFd = static_cast<int>(sysconf(_SC_OPEN_MAX));
-        for (int i = keepFd + 1; i < maxFd; ++i)
-            ::close(i);
+        pipe.closeReader();
+        saveDup2(writer, StdoutFastPipeFd);
+        if (writer != StdoutFastPipeFd)
+            pipe.closeWriter();
     }
+
 } // anonymous namespace
 
 struct Process::Private
@@ -435,10 +400,14 @@ StartResult Process::start()
     if (!gate)
         return std::unexpected(
             StartFailure { .error = StartError::SpawnFailed, .detail = gate.error().message() });
-    // Formatted before the fork: the child may not allocate.
+    // Formatted before the fork: the child may not allocate. Nor may it ask sysconf(), which POSIX.1-2008
+    // took off the async-signal-safe list.
     auto const oomScoreAdjust = _d->placement->childOomScoreAdjust()
                                     .transform([](int value) { return std::to_string(value); })
                                     .value_or(string {});
+    auto const descriptorLimit = util::openDescriptorLimit();
+    // Built here too: generic_string() builds a new string, on the heap for most working directories.
+    auto const cwd = _d->cwd.generic_string();
 
     auto const forked = fork();
 
@@ -451,7 +420,7 @@ StartResult Process::start()
             if (stdoutFastPipe)
                 stdoutFastPipe->closeWriter();
             _d->placement->placeThenRelease(
-                ParkedChild { forked, openPidFd(forked), std::move(gate->parentEnd) });
+                ParkedChild { forked, openPidFd(forked), std::move(gate->parentEnd), ProcessRole::Session });
             break;
         case -1: // fork error: there is no child, and pid keeps saying so
             return std::unexpected(
@@ -462,21 +431,22 @@ StartResult Process::start()
             // async-signal-safe calls, on values prepared before the fork.
             ::close(gate->parentEnd.get());
             writeOwnOomScoreAdjust(oomScoreAdjust);
-            awaitGate(gate->childEnd.get());
+            awaitGateRelease(gate->childEnd.get());
             ::close(gate->childEnd.get());
 
             (void) _d->pty->slave().login();
 
-            auto const& cwd = _d->cwd.generic_string();
             if (passesOwnEnvironment)
             {
-                if (!_d->cwd.empty() && chdir(cwd.c_str()) != 0)
+                if (!cwd.empty() && chdir(cwd.c_str()) != 0)
                 {
+                    // Read before the writes that report it, any of which may set errno.
+                    auto const failure = errno;
                     auto errorTextBuffer = array<char, 256> {};
                     writeAll(STDOUT_FILENO, "Failed to chdir to \"");
                     writeAll(STDOUT_FILENO, cwd);
                     writeAll(STDOUT_FILENO, "\". ");
-                    writeAll(STDOUT_FILENO, errnoText(errno, errorTextBuffer));
+                    writeAll(STDOUT_FILENO, errnoText(failure, errorTextBuffer));
                     writeAll(STDOUT_FILENO, "\n");
                     ::_exit(EXIT_FAILURE);
                 }
@@ -485,20 +455,20 @@ StartResult Process::start()
             }
 
             if (auto* pty = dynamic_cast<UnixPty*>(_d->pty.get()))
-            {
-                if (pty->stdoutFastPipe().writer() != -1)
-                {
-                    saveDup2(pty->stdoutFastPipe().writer(), StdoutFastPipeFd);
-                    pty->stdoutFastPipe().close();
-                }
-            }
+                handOverFastPipe(pty->stdoutFastPipe());
 
-            closeAllFileDescriptorsAbove(StdoutFastPipeFd);
+            util::closeDescriptorsAbove(StdoutFastPipeFd, descriptorLimit);
 
             // reset signal(s) to default that may have been changed in the parent process.
             signal(SIGPIPE, SIG_DFL);
 
+            // execvp() is not on POSIX's async-signal-safe list, and is tolerated here: glibc, musl and the
+            // BSDs search PATH in buffers on the stack; invocationToRun() has usually resolved the program to
+            // a path with a slash already, which execvp() runs without a search; and its fallback of running
+            // a file the kernel cannot execute (ENOEXEC) with sh is behaviour users rely on.
             ::execvp(childArgv[0], childArgv.data());
+            // Read before the writes below, any of which may set errno; replaced by the login shell's.
+            auto failure = errno;
 
             // Fallback: Try login shell. Everything this needs was computed before the fork.
             writeAll(STDOUT_FILENO, "\r\033[31;1mFailed to spawn ");
@@ -507,12 +477,15 @@ StartResult Process::start()
             writeAll(STDOUT_FILENO, loginShellText);
             writeAll(STDOUT_FILENO, "\n");
             if (!loginShellArgv.empty())
-                ::execvp(loginShellArgv[0], loginShellArgv.data());
+            {
+                ::execvp(loginShellArgv[0], loginShellArgv.data()); // tolerated as the execvp() above is
+                failure = errno;
+            }
 
             // Bad luck.
             auto errorTextBuffer = array<char, 256> {};
             writeAll(STDOUT_FILENO, "\r\nOut of luck. ");
-            writeAll(STDOUT_FILENO, errnoText(errno, errorTextBuffer));
+            writeAll(STDOUT_FILENO, errnoText(failure, errorTextBuffer));
             writeAll(STDOUT_FILENO, "\r\n\n");
             ::_exit(EXIT_FAILURE);
             break;
@@ -786,5 +759,106 @@ string Process::workingDirectory() const
     return "."s;
 #endif
 }
+
+// {{{ startDetached
+std::expected<int, std::error_code> startDetached(DetachedCommand const& command, ProcessPlacement& placement)
+{
+    auto const lastError = [] {
+        return std::unexpected(std::error_code { errno, std::generic_category() });
+    };
+
+    // Everything the two forked processes use is prepared here: between fork() and exec() they may not
+    // allocate. The files their standard streams are to use are opened here too, so that an input that
+    // cannot be read is reported to the caller, not found by a child nobody hears from.
+    auto arguments = command.argv.empty() ? vector<string> { command.image } : command.argv;
+    auto argv = vector<char*> {};
+    argv.reserve(arguments.size() + 1);
+    for (auto& argument: arguments)
+        argv.push_back(argument.data());
+    argv.push_back(nullptr);
+
+    auto const input = command.standardInput.empty()
+                           ? OwnedFd {}
+                           : OwnedFd { ::open(command.standardInput.c_str(), O_RDONLY | O_CLOEXEC) };
+    if (!command.standardInput.empty() && !input.isOpen())
+        return lastError();
+    auto const discard = command.output == DetachedOutput::Discarded
+                             ? OwnedFd { ::open("/dev/null", O_WRONLY | O_CLOEXEC) }
+                             : OwnedFd {};
+    if (command.output == DetachedOutput::Discarded && !discard.isOpen())
+        return lastError();
+
+    auto const oomScoreAdjust = placement.childOomScoreAdjust()
+                                    .transform([](int value) { return std::to_string(value); })
+                                    .value_or(string {});
+    auto const descriptorLimit = util::openDescriptorLimit();
+    auto gate = makeGate();
+    if (!gate)
+        return std::unexpected(gate.error());
+
+    auto const intermediate = ::fork();
+    if (intermediate < 0)
+        return lastError();
+    if (intermediate == 0)
+    {
+        // A session of its own, the program's process, and gone: the program is left to init, or to the
+        // nearest subreaper, to wait for -- not to this process. Async-signal-safe calls only.
+        ::setsid();
+        auto const program = ::fork();
+        if (program == 0)
+        {
+            // Parked first, as Process::start() parks a session's shell. @see ProcessPlacement.
+            ::close(gate->parentEnd.get());
+            writeOwnOomScoreAdjust(oomScoreAdjust);
+            awaitGateRelease(gate->childEnd.get());
+            ::close(gate->childEnd.get());
+            if (input.isOpen())
+                saveDup2(input.get(), STDIN_FILENO);
+            if (discard.isOpen())
+            {
+                saveDup2(discard.get(), STDOUT_FILENO);
+                saveDup2(discard.get(), STDERR_FILENO);
+            }
+            util::closeDescriptorsAbove(STDERR_FILENO, descriptorLimit);
+            // Neither what the caller ignores nor what its thread blocks -- the daemon blocks SIGINT and
+            // SIGTERM -- carries over into the program, as exec() would carry both.
+            signal(SIGPIPE, SIG_DFL);
+            auto noSignals = sigset_t {};
+            sigemptyset(&noSignals);
+            pthread_sigmask(SIG_SETMASK, &noSignals, nullptr);
+            ::execve(command.image.c_str(), argv.data(), environ);
+            ::_exit(127);
+        }
+        // Which process to place travels over the gate: written into the end the program waits on, it
+        // arrives at the end the parent holds. A failed fork sends its errno, negated.
+        auto const placed = std::bit_cast<std::array<char, sizeof(pid_t)>>(program > 0 ? program : -errno);
+        writeAll(gate->childEnd.get(), string_view { placed.data(), placed.size() });
+        ::_exit(program > 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+    }
+
+    gate->childEnd.reset();
+    auto status = 0;
+    while (::waitpid(intermediate, &status, 0) < 0 && errno == EINTR)
+        ;
+    // Once the intermediate is reaped, what it sent is there to read, or never comes. Waited for all the
+    // same, briefly, should a SIGCHLD handler have reaped it first; a program left waiting on the gate
+    // then runs unplaced, as the gate's end closes on the way out.
+    auto ready = pollfd { .fd = gate->parentEnd.get(), .events = POLLIN, .revents = 0 };
+    while (::poll(&ready, 1, DetachedHandoverTimeout) < 0 && errno == EINTR)
+        ;
+    auto received = std::array<char, sizeof(pid_t)> {};
+    auto const length = ::recv(gate->parentEnd.get(), received.data(), received.size(), MSG_DONTWAIT);
+    auto const pid = std::bit_cast<pid_t>(received);
+    if (std::cmp_not_equal(length, received.size()) || pid == 0)
+        return std::unexpected(std::make_error_code(std::errc::no_child_process));
+    if (pid < 0)
+        return std::unexpected(std::error_code { -pid, std::generic_category() });
+
+    // Not this process's child, yet its pid still names it: it waits on the gate, and only a signal from
+    // elsewhere could end it before the pidfd is opened.
+    placement.placeThenRelease(ParkedChild { pid, openPidFd(pid), std::move(gate->parentEnd), command.role });
+    return pid;
+}
+// }}}
 
 } // namespace vtpty

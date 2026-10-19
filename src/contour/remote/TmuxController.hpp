@@ -19,6 +19,9 @@
 #include <contour/session/SessionFactory.hpp>
 
 #include <vtpty/ChannelPty.hpp>
+#include <vtpty/ProcessPlacement.hpp>
+
+#include <core/platform/FileSystem.hpp>
 
 #include <QtCore/QObject>
 
@@ -117,7 +120,12 @@ class TmuxController final:
   public:
     /// @param tmuxSocket Optional tmux server socket path (-S); empty uses
     ///        tmux's default discovery.
-    explicit TmuxController(std::string tmuxSocket);
+    /// @param placement Places the `tmux -C` client before it runs, as the app places sessions.
+    /// @param fileSystem The files of this machine, among which tmux is looked for. Borrowed: it must outlive
+    ///        the controller.
+    TmuxController(std::string tmuxSocket,
+                   std::shared_ptr<vtpty::ProcessPlacement> placement,
+                   core::platform::FileSystem const& fileSystem);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~TmuxController() override;
@@ -315,6 +323,8 @@ class TmuxController final:
     // The reactor and the connect state machine (_reactor, _mutex, _connected, _state, _failure,
     // _stopped) live in RemoteController; the registry below is tmux-specific.
     std::string _tmuxSocket;
+    std::shared_ptr<vtpty::ProcessPlacement> _placement; ///< Places the tmux client; never null.
+    core::platform::FileSystem const& _fileSystem;       ///< Where tmux is looked for.
     std::deque<PendingPane> _pending;
     std::unordered_map<uint64_t, PaneFeed*> _feeds;         ///< Model-owned sinks, by pane.
     std::unordered_map<uint64_t, vtpty::ChannelPty*> _ptys; ///< Bound ptys, by pane.

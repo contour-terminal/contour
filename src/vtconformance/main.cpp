@@ -22,6 +22,10 @@ using namespace std::string_literals;
 namespace
 {
 
+/// The exit code of a run skipped for want of its test program (--skip-if-missing): automake's code for a
+/// skipped test, which the ctest registrations name as their SKIP_RETURN_CODE.
+constexpr auto ExitSkipped = 77;
+
 /// The conformance harness CLI.
 ///
 /// It drives an external VT test program (vttest today) against Contour's own terminal engine over a
@@ -85,7 +89,7 @@ class ConformanceApp: public core::cli::App
                             "suite-dir", CLI::Value { ""s }, "Where a fetched suite (esctest) lives." },
                         CLI::Option { "skip-if-missing",
                                       CLI::Value { false },
-                                      "Exits successfully when the test program is not installed." },
+                                      "Exits with 77, a skip, when the test program is not installed." },
                         CLI::Option { "command-dir",
                                       CLI::Value { ""s },
                                       "Directory holding the recorded command files a replayed "
@@ -126,19 +130,21 @@ class ConformanceApp: public core::cli::App
         if (auto const value = parameters().str("vtconformance.run.suite-dir"); !value.empty())
             options.suiteDirectory = fs::path(value);
 
-        if (!isSuiteAvailable(suite, options.suiteDirectory))
+        if (!isSuiteAvailable(suite, options, isProgramAvailable))
         {
-            auto const message = suite.entryPoint.empty()
-                                     ? std::format("Test program '{}' is not installed.\n", suite.program)
-                                     : std::format("Suite '{}' was not found. Fetch it first "
-                                                   "(scripts/fetch-esctest.sh), then pass --suite-dir.\n",
-                                                   suite.name);
+            auto const message =
+                suite.entryPoint.empty()
+                    ? std::format("Test program '{}' is not installed.\n", programOf(suite, options))
+                    : std::format("Suite '{}' was not found. Fetch it first "
+                                  "(scripts/fetch-esctest.sh), then pass --suite-dir.\n",
+                                  suite.name);
             if (parameters().boolean("vtconformance.run.skip-if-missing"))
             {
-                // A gate that cannot find its test program has measured nothing. Say so loudly, but
-                // do not fail a build that never promised to have the suite installed.
+                // A gate that cannot find its test program has measured nothing. Say so loudly, and
+                // report a skip rather than a pass, but do not fail a build that never promised to have
+                // the suite installed.
                 std::cerr << message << "Skipping the conformance run.\n";
-                return EXIT_SUCCESS;
+                return ExitSkipped;
             }
             std::cerr << message;
             return EXIT_FAILURE;

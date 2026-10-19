@@ -887,6 +887,10 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     if (cursorOpt)
     {
         auto const cursor = *cursorOpt;
+        // The main display's cursor scrolls with the page; a status line's does not, nor is it clipped to
+        // the page's area.
+        auto const cursorPixelOffset =
+            cursor.display == vtbackend::RenderedDisplay::Main ? smoothPixelOffset : 0;
 
         // When smooth-scrolling is active, flush pending status line commands first (unclipped),
         // so the cursor can be flushed separately within a scissor rect.
@@ -896,8 +900,8 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         auto const isAnimating = cursor.animateFrom.has_value() && cursor.animationProgress < 1.0f;
         if (isAnimating)
         {
-            auto const fromPixel = _gridMetrics.map(*cursor.animateFrom, smoothPixelOffset);
-            auto const toPixel = _gridMetrics.map(cursor.position, smoothPixelOffset);
+            auto const fromPixel = _gridMetrics.map(*cursor.animateFrom, cursorPixelOffset);
+            auto const toPixel = _gridMetrics.map(cursor.position, cursorPixelOffset);
             auto const animationProgress = cursor.animationProgress;
             auto const interpolated = crispy::Point {
                 .x = fromPixel.x
@@ -916,11 +920,11 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         {
             _cursorRenderer.setShape(cursor.shape);
             _cursorRenderer.render(
-                _gridMetrics.map(cursor.position, smoothPixelOffset), cursor.width, cursor.cursorColor);
+                _gridMetrics.map(cursor.position, cursorPixelOffset), cursor.width, cursor.cursorColor);
         }
 
         // Scissor-clip cursor to the main display area to prevent overflow into the status line.
-        if (smoothPixelOffset != 0)
+        if (cursorPixelOffset != 0)
         {
             auto const cellHeight = _gridMetrics.cellSize.height.as<int>();
             auto const mainAreaTop =

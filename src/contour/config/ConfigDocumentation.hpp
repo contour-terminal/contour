@@ -2885,7 +2885,7 @@ constexpr StringLiteral HyperlinkDecorationWeb {
     "profiles:\n"
     "  profile_name:\n"
     "    hyperlink_decoration:\n"
-    "      normal: dotted\n"
+    "      normal: dotted-underline\n"
     "      hover: underline\n"
     "```\n"
     "\n"

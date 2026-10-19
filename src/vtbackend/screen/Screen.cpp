@@ -403,6 +403,8 @@ void Screen::hardReset()
 {
     _grid.reset();
     _cursor = {};
+    // DEC STD 070 DECSC: "On initialization or reset the values of the save buffer are cleared".
+    _savedCursor = {};
     _lastCursorPosition = {};
     _outputStartMarking = OutputStartMarking::Unseen;
     resetProtection();
@@ -673,6 +675,12 @@ Screen::ClusterPlacement Screen::placeInRun(char32_t codepoint, GraphemeRun& run
         placement = ClusterPlacement::JoinsLastCluster;
     run.previousCodepoint = codepoint;
     return placement;
+}
+
+bool Screen::joinsLastCluster(char32_t codepoint) const noexcept
+{
+    auto run = seedGraphemeStateFromLastCell();
+    return placeInRun(codepoint, run) == ClusterPlacement::JoinsLastCluster;
 }
 
 void Screen::appendToLastCluster(char32_t codepoint)
@@ -1266,28 +1274,29 @@ void Screen::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
         margin.horizontal.from.value == 0 && margin.horizontal.to.value + 1 == pageSize().columns.value
         && margin.vertical.from.value == 0 && margin.vertical.to.value + 1 == pageSize().lines.value;
 
-    // A scroll of the whole page carries every row along with its id, so there is no row move to follow
-    // (Grid::rowMoveOfScrollUp() says so too), and no margin for the grid to look at either: the line
-    // feed that scrolls the page goes straight to the grid's whole-page scroll.
-    auto const scrollCount = [&]() {
-        if (isFullPageMargin) [[likely]]
-            return _grid.scrollUp(n, sgr);
+    if (isFullPageMargin) [[likely]]
+    {
+        // A scroll of the whole page carries every row along with its id, so there is no row move to follow
+        // (Grid::rowMoveOfScrollUp() says so too), and no margin for the grid to look at either: the line
+        // feed that scrolls the page goes straight to the grid's whole-page scroll. The terminal moves the
+        // viewport, the Normal-mode cursor and the selection with the rows, where this screen is the page on
+        // display.
+        auto const scrollCount = _grid.scrollUp(n, sgr);
+        updateCursorIterator();
+        _linesScrolledIntoHistory += unbox<uint64_t>(scrollCount);
+        _terminal->onBufferScrolled(*this, scrollCount);
+    }
+    else
+    {
         followScrollUp(n, margin);
-        return _grid.scrollUp(n, sgr, margin);
-    }();
-    updateCursorIterator();
-
-    // Whichever branch scrolled: a top-anchored region feeds the history as the whole page does, and a view
-    // scrolled back follows those lines too (a progress bar pinned below such a region is a common case).
-    _terminal->outputScrolledIntoHistory(scrollCount);
-
-    // Only notify the viewport/Vi-cursor/selection of a scrollback scroll when the
-    // scroll covered the whole page. A scroll confined to a sub-page margin region
-    // (e.g. a top-anchored partial DECSTBM region) may still feed lines into
-    // scrollback, but the live area below the region did not move, so shifting the
-    // viewport, the Normal-mode cursor, or the active selection would be wrong.
-    if (isFullPageMargin)
-        _terminal->onBufferScrolled(scrollCount);
+        auto const scrollCount = _grid.scrollUp(n, sgr, margin);
+        updateCursorIterator();
+        // A top-anchored region (a partial DECSTBM region) feeds the history as the whole page does, and a
+        // view scrolled back follows those lines too (a progress bar pinned below such a region is a common
+        // case): counted here, for the terminal to read once per batch. But the live area below the region
+        // did not move, so shifting the viewport, the Normal-mode cursor or the selection would be wrong.
+        _linesScrolledIntoHistory += unbox<uint64_t>(scrollCount);
+    }
 
     // After either branch, because the scrollback may have just LOST rows rather than gained them.
     // Block-atomic eviction drops a whole command at once, and it reaches this path even for a
@@ -2185,42 +2194,27 @@ void Screen::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int
 
 void Screen::nextPage(int count)
 {
-    // NP: Move forward by count pages, cursor goes to home position.
-    // Clamp within DEC page range [0, MaxPageCount-2], never entering the alternate screen page.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value + count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, true);
+    _terminal->movePage(_terminal->cursorPageIndex().value + count, PageCursorPlacement::Home);
 }
 
 void Screen::previousPage(int count)
 {
-    // PP: Move backward by count pages, cursor goes to home position.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value - count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, true);
+    _terminal->movePage(_terminal->cursorPageIndex().value - count, PageCursorPlacement::Home);
 }
 
 void Screen::pagePositionAbsolute(int pageNumber)
 {
-    // PPA: Move to absolute 1-based page number, preserve cursor position.
-    auto const target = PageIndex(std::clamp(pageNumber - 1, 0, MaxPageCount - 2));
-    _terminal->setPage(target, false);
+    _terminal->movePage(pageNumber - 1, PageCursorPlacement::SameLineAndColumn);
 }
 
 void Screen::pagePositionRelative(int count)
 {
-    // PPR: Move forward by count pages, preserve cursor position.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value + count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, false);
+    _terminal->movePage(_terminal->cursorPageIndex().value + count, PageCursorPlacement::SameLineAndColumn);
 }
 
 void Screen::pagePositionBackward(int count)
 {
-    // PPB: Move backward by count pages, preserve cursor position.
-    auto const target =
-        PageIndex(std::clamp(_terminal->cursorPageIndex().value - count, 0, MaxPageCount - 2));
-    _terminal->setPage(target, false);
+    _terminal->movePage(_terminal->cursorPageIndex().value - count, PageCursorPlacement::SameLineAndColumn);
 }
 
 void Screen::requestDisplayedExtent()
@@ -4896,8 +4890,9 @@ void Screen::saveCursor()
 void Screen::restoreCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECRC.html
-    _terminal->restoreCursorPage();
-    restoreCursor(_savedCursor);
+    // Back to the page DECSC saved, then what DECSC saved there, restored on that page.
+    auto& saved = _terminal->restoreCursorPage(*this);
+    saved.restoreCursor(saved.savedCursorState());
 }
 
 void Screen::restoreCursor(Cursor const& savedCursor)
@@ -4905,11 +4900,17 @@ void Screen::restoreCursor(Cursor const& savedCursor)
     // DECRC restores cursor state -- position, SGR, charsets, origin mode (DECOM), and the last-column
     // (wrap-pending) flag -- but NOT the autowrap mode (DECAWM): that is a terminal mode, not cursor
     // state (DEC STD 070), so a DECRC after a DECRESET DECAWM leaves autowrap off. Matches xterm.
-    _cursor = savedCursor;
-    _cursor.position = clampCoordinate(_cursor.position);
+    adoptCursor(savedCursor);
     _terminal->setMode(DECMode::Origin, savedCursor.originMode);
-    updateCursorIterator();
     verifyState();
+}
+
+void Screen::adoptCursor(Cursor const& cursor) noexcept
+{
+    _cursor = cursor;
+    _cursor.position = clampCoordinate(_cursor.position);
+    // Writing goes through the cached cursor line, which must follow the cursor to its row here.
+    updateCursorIterator();
 }
 
 void Screen::reply(std::string_view text)
@@ -7842,6 +7843,8 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case DECSLRM: {
             if (!_terminal->isModeEnabled(DECMode::LeftRightMargin))
                 return ApplyResult::Invalid;
+            if (_terminal->activeStatusDisplay() != ActiveStatusDisplay::Main)
+                return ApplyResult::Ok; // As DECSTBM below.
             auto l = decr(seq.paramOpt<ColumnOffset>(0));
             auto r = decr(seq.paramOpt<ColumnOffset>(1));
             _terminal->setLeftRightMargin(l, r);
@@ -7856,6 +7859,11 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             return r;
         }
         case DECSTBM:
+            // The margins are the main display's. Received on a status line, which keeps none of its own (DEC
+            // STD 070 ch. 14 §2.2) and leaves the main display's state alone (ch. 14 §2), it is ignored, as
+            // xterm drops it there.
+            if (_terminal->activeStatusDisplay() != ActiveStatusDisplay::Main)
+                return ApplyResult::Ok;
             _terminal->setTopBottomMargin(decr(seq.paramOpt<LineOffset>(0)),
                                           decr(seq.paramOpt<LineOffset>(1)));
             moveCursorTo({}, {});
@@ -8075,12 +8083,9 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // Changes the status line display type.
             switch (seq.paramOr(0, 0))
             {
-                case 0: _terminal->setStatusDisplay(StatusDisplayType::None); break;
-                case 1: _terminal->setStatusDisplay(StatusDisplayType::Indicator); break;
-                case 2:
-                    if (_terminal->statusDisplayType() != StatusDisplayType::HostWritable)
-                        _terminal->requestShowHostWritableStatusLine();
-                    break;
+                case 0: _terminal->selectStatusDisplayByHost(StatusDisplayType::None); break;
+                case 1: _terminal->selectStatusDisplayByHost(StatusDisplayType::Indicator); break;
+                case 2: _terminal->selectStatusDisplayByHost(StatusDisplayType::HostWritable); break;
                 default: return ApplyResult::Invalid;
             }
             break;
@@ -8089,12 +8094,13 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
             // Selects whether the terminal sends data to the main display or the status line.
             switch (seq.paramOr(0, 0))
             {
-                case 0:
-                    _terminal->syncWindowTitleWithDeniedStatusLine();
-                    _terminal->setActiveStatusDisplay(ActiveStatusDisplay::Main);
-                    break;
+                case 0: _terminal->exitStatusLine(); break;
 
-                case 1: _terminal->setActiveStatusDisplay(ActiveStatusDisplay::StatusLine); break;
+                case 1:
+                    // Only a host-writable status line DECSSDT selected (DEC STD 070 ch. 14 §3 DECSASD).
+                    if (_terminal->isHostWritableStatusLineSelected())
+                        _terminal->setActiveStatusDisplay(ActiveStatusDisplay::StatusLine);
+                    break;
                 default: return ApplyResult::Invalid;
             }
             break;

@@ -12,16 +12,21 @@
 #include <vtrasterizer/RendererTestHelpers.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
+#include <core/Utils.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <vector>
 
 using namespace vtbackend;
 using namespace vtrasterizer;
+using core::eachElement;
 
 namespace
 {
@@ -51,9 +56,13 @@ constexpr auto NimbusUnderlinePosition = 9;
 class DecorationProbe
 {
   public:
-    explicit DecorationProbe(GridMetrics const& gridMetrics):
-        _gridMetrics { gridMetrics },
-        _renderer { _gridMetrics, Decorator::DottedUnderline, Decorator::Underline }
+    /// @param gridMetrics The grid the decorations are drawn on.
+    /// @param hyperlinkNormal The decorator a link at rest is drawn with.
+    /// @param hyperlinkHover The decorator the link under the pointer is drawn with.
+    explicit DecorationProbe(GridMetrics const& gridMetrics,
+                             Decorator hyperlinkNormal = Decorator::DottedUnderline,
+                             Decorator hyperlinkHover = Decorator::Underline):
+        _gridMetrics { gridMetrics }, _renderer { _gridMetrics, hyperlinkNormal, hyperlinkHover }
     {
         _renderer.setRenderTarget(_renderTarget, _allocator);
         _atlas = std::make_unique<Renderable::TextureAtlas>(
@@ -74,6 +83,31 @@ class DecorationProbe
         auto const& uploads = _renderTarget.getMockBackend().uploadCommands;
         REQUIRE(uploads.size() == std::numeric_limits<Decorator>::count());
         return uploads[static_cast<size_t>(decoration)];
+    }
+
+    /// Draws @p cell and names the decorations that reached the backend for it, in the order drawn.
+    ///
+    /// A decoration is told apart by the atlas tile it samples: every Decorator has a tile of its own, and
+    /// upload() has where each one lives.
+    ///
+    /// @param cell The cell to draw.
+    /// @return One entry per decorated column, so a cell of width N draws each of its decorations N times.
+    [[nodiscard]] std::vector<Decorator> decorationsDrawnFor(vtbackend::RenderCell const& cell)
+    {
+        auto const& drawn = _renderTarget.getMockBackend().renderCommands;
+        auto const before = drawn.size();
+        _renderer.renderCell(cell);
+
+        auto decorations = std::vector<Decorator> {};
+        for (auto const& command: std::span(drawn).subspan(before))
+            for (auto const decoration: eachElement<Decorator>())
+            {
+                auto const& tile = upload(decoration).location;
+                if (tile.x.value == command.tileLocation.x.value
+                    && tile.y.value == command.tileLocation.y.value)
+                    decorations.push_back(decoration);
+            }
+        return decorations;
     }
 
   private:
@@ -331,4 +365,55 @@ TEST_CASE("DecorationRenderer.doubleUnderlineThicknessFollowsTwoThirds", "[decor
         UNSCOPED_INFO(row);
 
     CHECK(inkedRows(rows) == 4); // two strokes of ceil(2 * 2/3) == 2 rows each
+}
+
+TEST_CASE("DecorationRenderer.linkRoleUsesTheConfiguredDecorators", "[decoration][links]")
+{
+    using vtbackend::LinkDecorationRole;
+    STATIC_REQUIRE(decoratorFor(LinkDecorationRole::None, Decorator::Framed, Decorator::Overline)
+                   == std::nullopt);
+    STATIC_REQUIRE(decoratorFor(LinkDecorationRole::Normal, Decorator::Framed, Decorator::Overline)
+                   == Decorator::Framed);
+    STATIC_REQUIRE(decoratorFor(LinkDecorationRole::Hover, Decorator::Framed, Decorator::Overline)
+                   == Decorator::Overline);
+}
+
+TEST_CASE("DecorationRenderer.aLinkCellIsDrawnWithTheProfilesDecorator", "[decoration][links]")
+{
+    using vtbackend::LinkDecorationRole;
+
+    // Decorators the cell's own flags never ask for, so what is drawn can only be the profile's choice.
+    auto probe = DecorationProbe { gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, 1),
+                                   Decorator::Framed,
+                                   Decorator::Overline };
+    auto cell = vtbackend::RenderCell {};
+    cell.width = 1;
+
+    SECTION("a cell outside any link is drawn without")
+    {
+        cell.linkRole = LinkDecorationRole::None;
+        CHECK(probe.decorationsDrawnFor(cell).empty());
+    }
+
+    SECTION("a link at rest takes the normal decorator")
+    {
+        cell.linkRole = LinkDecorationRole::Normal;
+        CHECK(probe.decorationsDrawnFor(cell) == std::vector { Decorator::Framed });
+    }
+
+    SECTION("the hovered link takes the hover decorator")
+    {
+        cell.linkRole = LinkDecorationRole::Hover;
+        CHECK(probe.decorationsDrawnFor(cell) == std::vector { Decorator::Overline });
+    }
+
+    SECTION("it adds to what the cell's own flags draw, and spans a wide cell")
+    {
+        cell.linkRole = LinkDecorationRole::Normal;
+        cell.width = 2;
+        cell.attributes.flags = vtbackend::CellFlags { vtbackend::CellFlag::CrossedOut };
+        CHECK(probe.decorationsDrawnFor(cell)
+              == std::vector {
+                  Decorator::CrossedOut, Decorator::CrossedOut, Decorator::Framed, Decorator::Framed });
+    }
 }

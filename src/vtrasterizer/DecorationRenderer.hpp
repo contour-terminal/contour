@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/LinkDecoration.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Screen.hpp>
 
@@ -8,10 +9,30 @@
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
 
+#include <optional>
+
 namespace vtrasterizer
 {
 
 struct GridMetrics;
+
+/// The decorator a link cell is drawn with.
+/// @param role The cell's link role.
+/// @param normal The profile's hyperlink_decoration.normal.
+/// @param hover The profile's hyperlink_decoration.hover.
+/// @return The decorator; nullopt for LinkDecorationRole::None.
+[[nodiscard]] constexpr std::optional<Decorator> decoratorFor(vtbackend::LinkDecorationRole role,
+                                                              Decorator normal,
+                                                              Decorator hover) noexcept
+{
+    switch (role)
+    {
+        case vtbackend::LinkDecorationRole::None: return std::nullopt;
+        case vtbackend::LinkDecorationRole::Normal: return normal;
+        case vtbackend::LinkDecorationRole::Hover: return hover;
+    }
+    return std::nullopt;
+}
 
 /// Renders any kind of grid cell decorations, ranging from basic underline to surrounding boxes.
 class DecorationRenderer: public Renderable

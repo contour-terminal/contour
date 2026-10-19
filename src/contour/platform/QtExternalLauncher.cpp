@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/Logging.hpp>
 #include <contour/platform/QtExternalLauncher.hpp>
 #include <contour/platform/QtPath.hpp>
 
 #include <vtpty/CommandLine.hpp>
+#ifndef _WIN32
+    #include <vtpty/DetachedProcess.hpp>
+#endif
+
+#include <core/Assert.hpp>
 
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>
 
+#include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 namespace contour::platform
 {
@@ -19,7 +29,39 @@ namespace
     {
         return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
     }
+
+    /// @return The file @p program names: itself where it holds a path, otherwise the one
+    ///         isReachableProgram() found on PATH -- on Windows trying %PATHEXT%'s suffixes (`more` is
+    ///         more.com), where CreateProcess would try only ".exe".
+    [[nodiscard]] QString executableFor(QString const& program)
+    {
+        auto const namesPath = program.contains(QLatin1Char('/')) || program.contains(QLatin1Char('\\'));
+        return namesPath ? program : QStandardPaths::findExecutable(program);
+    }
+
+#ifndef _WIN32
+    /// Starts @p command detached, placed by @p placement before it runs.
+    /// @return Nothing once it was handed to the placement, or why it was not started.
+    [[nodiscard]] std::expected<void, SpawnError> startPlaced(vtpty::DetachedCommand const& command,
+                                                              vtpty::ProcessPlacement& placement)
+    {
+        return vtpty::startDetached(command, placement)
+            .transform([](int /*pid*/) {})
+            .transform_error([&](std::error_code const& error) {
+                launcherLog()("Could not start {}: {}.", command.image, error.message());
+                return SpawnError::StartFailed;
+            });
+    }
+#endif
 } // namespace
+
+QtExternalLauncher::QtExternalLauncher(std::shared_ptr<vtpty::ProcessPlacement> placement):
+    _placement { std::move(placement) }
+{
+    // A construction-time requirement rather than a runtime error: a launcher built without one is a
+    // wiring mistake, and there is no answer to give a user about it.
+    Require(_placement != nullptr);
+}
 
 std::expected<void, LaunchError> QtExternalLauncher::openUrl(QUrl const& url)
 {
@@ -40,28 +82,22 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetached(QString const& p
     if (!isReachableProgram(program))
         return std::unexpected(SpawnError::NotFound);
 
+#ifdef _WIN32
     if (!QProcess::startDetached(program, arguments))
         return std::unexpected(SpawnError::StartFailed);
-
     return {};
-}
-
-std::expected<int, SpawnError> QtExternalLauncher::execute(QString const& program,
-                                                           QStringList const& arguments)
-{
-    if (!isReachableProgram(program))
-        return std::unexpected(SpawnError::NotFound);
-
-    // QProcess::execute() answers with two sentinels below zero and an exit code at or above it:
-    // -2 could not be started, -1 started and crashed. Both are the absence of an exit code, not
-    // an exit code, which is what separating the channels is for.
-    auto const exitCode = QProcess::execute(program, arguments);
-    if (exitCode == -2)
-        return std::unexpected(SpawnError::StartFailed);
-    if (exitCode == -1)
-        return std::unexpected(SpawnError::Crashed);
-
-    return exitCode;
+#else
+    // Its standard streams are this process's, as QProcess::startDetached() leaves them.
+    auto argv = std::vector<std::string> { program.toStdString() };
+    for (auto const& argument: arguments)
+        argv.push_back(argument.toStdString());
+    return startPlaced(vtpty::DetachedCommand { .image = executableFor(program).toStdString(),
+                                                .argv = std::move(argv),
+                                                .standardInput = {},
+                                                .output = vtpty::DetachedOutput::Inherited,
+                                                .role = vtpty::ProcessRole::Program },
+                       *_placement);
+#endif
 }
 
 std::expected<void, SpawnError> QtExternalLauncher::runDetachedWithInput(
@@ -75,21 +111,17 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetachedWithInput(
     if (!isReachableProgram(program))
         return std::unexpected(SpawnError::NotFound);
 
+#ifdef _WIN32
     auto arguments = QStringList {};
     for (auto const& argument: invocation.arguments)
         arguments.append(fromUtf8(argument));
 
     auto process = QProcess {};
-    // A bare name runs as isReachableProgram() found it, on PATH: on Windows that tries %PATHEXT%'s
-    // suffixes (`more` is more.com), where CreateProcess would try only ".exe".
-    auto const namesPath = program.contains(QLatin1Char('/')) || program.contains(QLatin1Char('\\'));
-    process.setProgram(namesPath ? program : QStandardPaths::findExecutable(program));
+    process.setProgram(executableFor(program));
     process.setArguments(arguments);
-#ifdef _WIN32
     // What the configuration wrote after the program, unchanged: the child splits it by its own rules.
     if (!invocation.writtenArguments.empty())
         process.setNativeArguments(fromUtf8(invocation.writtenArguments));
-#endif
     process.setStandardInputFile(toQString(inputFile));
     process.setStandardOutputFile(QProcess::nullDevice());
     process.setStandardErrorFile(QProcess::nullDevice());
@@ -98,8 +130,19 @@ std::expected<void, SpawnError> QtExternalLauncher::runDetachedWithInput(
     // started is reported at once; nothing waits for one that can.
     if (!process.startDetached())
         return std::unexpected(SpawnError::StartFailed);
-
     return {};
+#else
+    // Detached, and placed: the child is not this process's, so nothing ends it at exit. A program that
+    // cannot be started is reported at once; nothing waits for one that can.
+    auto argv = std::vector<std::string> { invocation.program };
+    argv.insert(argv.end(), invocation.arguments.begin(), invocation.arguments.end());
+    return startPlaced(vtpty::DetachedCommand { .image = executableFor(program).toStdString(),
+                                                .argv = std::move(argv),
+                                                .standardInput = inputFile,
+                                                .output = vtpty::DetachedOutput::Discarded,
+                                                .role = vtpty::ProcessRole::Program },
+                       *_placement);
+#endif
 }
 
 } // namespace contour::platform

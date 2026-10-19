@@ -2475,6 +2475,38 @@ TEST_CASE("Renderer.lineFlash.tintsTheRowAJumpLandedOn", "[renderer][stickyheade
     CHECK(band->color.alpha() > 0);
 }
 
+TEST_CASE("Renderer.cursor.onTheStatusLineStaysPutWhileThePageScrollsSmoothly", "[renderer][statusline]")
+{
+    // DECSASD selects the host-writable status line, so the cursor is its own. The page's smooth scroll moves
+    // the main display's rows and not the status line's: its cursor is drawn at the status line's own pixels.
+    configureMockFont();
+    ReconfigFixture fixture;
+    fixture.attachRenderTarget();
+
+    auto mc = vtbackend::MockTerm { PageSize { LineCount(6), ColumnCount(20) }, LineCount(100) };
+    vtbackend::test::printLines(mc, "out", 20);
+    mc.writeToScreen("\033[2$~"); // DECSSDT host-writable
+    mc.terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
+    // DECSASD, the status line's column 4, a steady bar, and a cursor colour no cell has.
+    mc.writeToScreen("\033[1$}\033[1;5H\033[6 q\033]12;rgb:1212/3434/5656\033\\");
+    scrollPartway(mc);
+
+    (void) fixture.renderer.render(mc.terminal, /*pressureHint*/ false);
+
+    auto const statusRow = mc.terminal.mainPageTopRow() + mc.terminal.pageSize().lines.as<LineOffset>();
+    auto const expected = RendererTest::liveGridMetrics(fixture.renderer)
+                              .map(vtbackend::CellLocation { .line = statusRow, .column = ColumnOffset(4) });
+    auto const cursorColor = atlas::normalize(RGBColor { 0x12, 0x34, 0x56 }, 1.0f);
+    auto const& tiles = fixture.renderTarget.getMockBackend().renderCommands;
+    auto const cursorTile = std::ranges::find_if(tiles, [&](auto const& tile) {
+        return tile.color[0] == cursorColor[0] && tile.color[1] == cursorColor[1]
+               && tile.color[2] == cursorColor[2];
+    });
+    REQUIRE(cursorTile != tiles.end());
+    CHECK(cursorTile->x.value == expected.x);
+    CHECK(cursorTile->y.value == expected.y);
+}
+
 int main(int argc, char* argv[])
 {
     core::testing::suppressWindowsDialogs();

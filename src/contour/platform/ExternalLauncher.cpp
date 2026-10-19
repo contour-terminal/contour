@@ -6,16 +6,18 @@
     #include <contour/platform/PortalExternalLauncher.hpp>
 #endif
 
+#include <utility>
+
 namespace contour::platform
 {
 
-std::unique_ptr<ExternalLauncher> makeExternalLauncher()
+std::unique_ptr<ExternalLauncher> makeExternalLauncher(std::shared_ptr<vtpty::ProcessPlacement> placement)
 {
 #ifdef __linux__
-    return std::make_unique<PortalExternalLauncher>(qtPortalCaller(OpenUriPortalInterface),
-                                                    std::make_unique<QtExternalLauncher>());
+    return std::make_unique<PortalExternalLauncher>(
+        qtPortalCaller(OpenUriPortalInterface), std::make_unique<QtExternalLauncher>(std::move(placement)));
 #else
-    return std::make_unique<QtExternalLauncher>();
+    return std::make_unique<QtExternalLauncher>(std::move(placement));
 #endif
 }
 

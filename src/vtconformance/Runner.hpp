@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -92,11 +93,24 @@ struct RunOptions
 /// @return Whether @p program can be found and executed.
 [[nodiscard]] bool isProgramAvailable(std::string const& program);
 
-/// @return Whether @p suite can be run at all: its program is on PATH and, if it has one, its entry
-///         point is present in @p suiteDirectory.
+/// @return The program a run of @p suite executes: the override in @p options when it names one, else the
+///         suite's own.
+[[nodiscard]] std::string programOf(Suite const& suite, RunOptions const& options);
+
+/// Tells whether a program can be found and executed. @see isProgramAvailable, the one a run asks.
+using ProgramProbe = std::function<bool(std::string const&)>;
+
+/// @return Whether @p suite can be run at all as @p options would run it: the program it executes
+///         (programOf) can be found, as @p isAvailable says, and, if the suite has one, its entry point is
+///         present in the suite directory of @p options.
 ///
 /// A suite that has not been fetched must degrade to a skip, never to a failure -- a red gate that
 /// merely means "you did not clone a GPL repository" teaches everyone to ignore the gate.
-[[nodiscard]] bool isSuiteAvailable(Suite const& suite, std::filesystem::path const& suiteDirectory);
+/// @param suite The suite to run.
+/// @param options How it would run.
+/// @param isAvailable Asked about the program the run executes.
+[[nodiscard]] bool isSuiteAvailable(Suite const& suite,
+                                    RunOptions const& options,
+                                    ProgramProbe const& isAvailable);
 
 } // namespace vtconformance

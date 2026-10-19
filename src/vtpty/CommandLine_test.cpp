@@ -26,6 +26,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+    #include <paths.h>
+#endif
+
 using vtpty::ProgramInvocation;
 using vtpty::readAsCommandLine;
 
@@ -321,6 +325,27 @@ TEST_CASE("resolveExecutablePath falls back to the name it was given", "[command
     // No PATH at all, and an empty name, are both just "nothing to search".
     CHECK(vtpty::resolveExecutablePath("contour", "", noFiles) == "contour");
     CHECK(vtpty::resolveExecutablePath("", pathList({ "/usr/bin" }), noFiles).empty());
+}
+
+TEST_CASE("execSearchPath is the environment's PATH, or the C library's default without one", "[commandline]")
+{
+    // execvp()'s choice, kept by a spawn that looks the program up before the fork and runs execv().
+    CHECK(vtpty::execSearchPath("/opt/tools/bin:/usr/bin") == "/opt/tools/bin:/usr/bin");
+    CHECK(vtpty::execSearchPath(std::string {}).empty()); // set, but empty: searched as it is
+#ifndef _WIN32
+    // Unset: the default the C library's own execvp() searches.
+    auto const fallback = vtpty::execSearchPath(std::nullopt);
+    CHECK_FALSE(fallback.ends_with('\0'));
+    #ifdef __GLIBC__
+    // glibc's CS_PATH, which its execvpe() searches: the distribution's choice ("/bin:/usr/bin" upstream,
+    // "/usr/bin" on Fedora), so only that there is one is asserted.
+    CHECK_FALSE(fallback.empty());
+    #elifdef _PATH_DEFPATH
+    CHECK(fallback == _PATH_DEFPATH); // FreeBSD's, Darwin's and musl's execvp() search it
+    #else
+    CHECK_FALSE(fallback.empty());
+    #endif
+#endif
 }
 
 TEST_CASE("resolveExecutablePath skips empty PATH entries", "[commandline]")

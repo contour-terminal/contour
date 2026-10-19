@@ -80,8 +80,6 @@ class PortalExternalLauncher final: public QObject, public ExternalLauncher
     [[nodiscard]] std::expected<void, LaunchError> openUrl(QUrl const& url) override;
     [[nodiscard]] std::expected<void, SpawnError> runDetached(QString const& program,
                                                               QStringList const& arguments) override;
-    [[nodiscard]] std::expected<int, SpawnError> execute(QString const& program,
-                                                         QStringList const& arguments) override;
     [[nodiscard]] std::expected<void, SpawnError> runDetachedWithInput(
         std::string const& commandLine, std::filesystem::path const& inputFile) override;
 
@@ -98,8 +96,8 @@ class PortalExternalLauncher final: public QObject, public ExternalLauncher
     /// How a portal method call is issued.
     PortalCaller _call;
 
-    /// The process-spawning half, which the portal has nothing to do with: runDetached(), execute()
-    /// and runDetachedWithInput() start a child directly on both paths, so they are delegated rather than
+    /// The process-spawning half, which the portal has nothing to do with: runDetached() and
+    /// runDetachedWithInput() start a child directly on both paths, so they are delegated rather than
     /// repeated.
     /// It is also what the xdg-open fallback goes through. Never null.
     std::unique_ptr<ExternalLauncher> _processes;

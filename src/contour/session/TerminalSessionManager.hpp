@@ -755,7 +755,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     // {{{ vtworkspace::ModelEvents — turn model changes into Qt model/signal notifications
     void tabAboutToBeAdded(vtworkspace::WindowId window, int index) override;
-    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
+    void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId id, int index) override;
     void tabAboutToBeRemoved(vtworkspace::WindowId window, int index) override;
     void tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
     void tabAboutToBeMoved(vtworkspace::WindowId window, int fromIndex, int toIndex) override;

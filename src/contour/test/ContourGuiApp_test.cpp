@@ -11,7 +11,9 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/TempDir.hpp>
 
+#include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
+#include <vtpty/test/ProcessTesting.hpp>
 
 #include <core/Utf8Path.hpp>
 #include <core/testing/ScopedTempDir.hpp>
@@ -376,3 +378,22 @@ TEST_CASE("classifyVerbatimCommand runs an executable sitting in the current dir
     CHECK(contour::classifyVerbatimCommand(core::pathToUtf8(script.filename()), nothingIsReachable).kind
           == VerbatimCommandKind::Program);
 }
+
+#ifndef _WIN32
+TEST_CASE("ContourGuiApp places what it starts through the placement it was given",
+          "[contour][app][placement]")
+{
+    // The composition root hands one placement to the default session factory, the default launcher and the
+    // daemon and tmux spawns; a test hands in a fake and sees what is placed.
+    auto const placement = std::make_shared<vtpty::testing::ReleasingPlacement>();
+    TestApp testApp { std::shared_ptr<vtpty::ProcessPlacement> { placement } };
+    CHECK(&testApp.app().processPlacement() == placement.get());
+
+    // A program the app's own launcher starts -- the xdg-open a local-file link is handed to, say.
+    REQUIRE(testApp.app()
+                .externalLauncher()
+                .runDetached(QStringLiteral("sh"), { QStringLiteral("-c"), QStringLiteral("exit 0") })
+                .has_value());
+    CHECK(placement->pids().size() == 1);
+}
+#endif

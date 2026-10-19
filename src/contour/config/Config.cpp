@@ -2109,39 +2109,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     logger()("Loading entry: {}, value {}", entry, static_cast<unsigned>(where));
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
-                                     std::string const& entry,
-                                     vtrasterizer::Decorator& where)
-{
-    auto parseModifierKey = [](std::string const& key) -> std::optional<vtrasterizer::Decorator> {
-        auto const literal = core::toLower(key);
-
-        using std::pair;
-        auto constexpr Mappings = std::array {
-            pair { "underline", vtrasterizer::Decorator::Underline },
-            pair { "dotted-underline", vtrasterizer::Decorator::DottedUnderline },
-            pair { "double-underline", vtrasterizer::Decorator::DoubleUnderline },
-            pair { "curly-underline", vtrasterizer::Decorator::CurlyUnderline },
-            pair { "dashed-underline", vtrasterizer::Decorator::DashedUnderline },
-            pair { "overline", vtrasterizer::Decorator::Overline },
-            pair { "crossed-out", vtrasterizer::Decorator::CrossedOut },
-            pair { "framed", vtrasterizer::Decorator::Framed },
-            pair { "encircle", vtrasterizer::Decorator::Encircle },
-        };
-        for (auto const& mapping: Mappings)
-            if (mapping.first == literal)
-                return { mapping.second };
-        return std::nullopt;
-    };
-
-    if (auto const child = node[entry])
-    {
-        auto opt = parseModifierKey(child.as<std::string>());
-        if (opt.has_value())
-            where = opt.value();
-    }
-}
-
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Bell& where)
 {
     if (auto const child = node[entry])
@@ -2368,6 +2335,8 @@ namespace
     /// @param parse  Maps a spelling to a value. Defaults to the ConfigEnum.hpp token table; the
     ///               text_shaper enums pass their own `make*()`, since a `contour::config` table
     ///               cannot be hung off a type owned by a lower layer.
+    /// @param accepted The spellings to name in the diagnostic of an unknown value, already
+    ///               formatted as a list; empty when the set is too large or too open to enumerate.
     /// @return Whether @p entry was present and recognized, so a caller can add a fallback (a
     ///         deprecated spelling, say) without duplicating the reading and the reporting.
     template <typename Enum, typename Parser = decltype(&configEnumFromToken<Enum>)>
@@ -2376,7 +2345,8 @@ namespace
                         std::string const& shownAs,
                         Enum& where,
                         core::log::Category const& logger,
-                        Parser parse = configEnumFromToken<Enum>)
+                        Parser parse = configEnumFromToken<Enum>,
+                        std::string_view accepted = {})
     {
         auto const child = node[entry];
         if (!child)
@@ -2401,8 +2371,27 @@ namespace
             where = *value;
             return true;
         }
-        errorLog()("Unknown value for {} ({}): '{}'; keeping {}.", shownAs, placeOf(child), rawValue, where);
+        errorLog()("Unknown value for {} ({}): '{}'; keeping {}.{}{}",
+                   shownAs,
+                   placeOf(child),
+                   rawValue,
+                   where,
+                   accepted.empty() ? "" : " Accepted values: ",
+                   accepted);
         return false;
+    }
+
+    /// The decorator names a configuration file may use, comma separated, for a diagnostic.
+    [[nodiscard]] std::string acceptedDecoratorNames()
+    {
+        auto names = std::string {};
+        for (auto const& [token, decorator]: vtrasterizer::DecoratorNames)
+        {
+            if (!names.empty())
+                names += ", ";
+            names += token;
+        }
+        return names;
     }
 } // namespace
 
@@ -2410,6 +2399,22 @@ template <ConfigEnumConcept Enum>
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Enum& where)
 {
     (void) loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger);
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     vtrasterizer::Decorator& where)
+{
+    // The spellings are vtrasterizer::DecoratorNames' (and its aliases'), the table the writer and the
+    // settings page read too; a miss is reported and keeps the value `where` already holds.
+    (void) loadConfigEnum(
+        node,
+        entry,
+        keyPathTo(node, entry),
+        where,
+        logger,
+        [](std::string const& token) { return vtrasterizer::toDecorator(core::toLower(token)); },
+        acceptedDecoratorNames());
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, text::FontSize& where)

@@ -79,6 +79,9 @@ cd build
 %doc README.md docs/CONTRIBUTING.md TODO.md
 %{_bindir}/*
 %{_datadir}/*
+# The systemd user drop-ins that keep Contour's own unit running through an out-of-memory kill inside it:
+# one directory per unit name the desktops' launchers use (systemd reads lib, never lib64).
+%{_prefix}/lib/systemd/user/app-*org.contourterminal.Contour*.d/
 
 
 %changelog

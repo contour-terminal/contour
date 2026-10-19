@@ -28,6 +28,11 @@ class RenderBufferBuilder
     ///               status line and a non-displayed page are rendered through the same builder, so
     ///               anything that needs to look at neighbouring cells must go through this rather
     ///               than re-resolving via Terminal::currentScreen().
+    /// @param hoveredHyperlink The OSC 8 link the pointer is over in this frame, which the builder draws
+    ///                         in the hover role (Terminal::hyperlinkIdUnderPointer()); none for a screen
+    ///                         the pointer is not over.
+    /// @param display Which display @p screen is drawn on: the main display maps its rows through the
+    ///                viewport, a status line draws its rows as they are.
     RenderBufferBuilder(Terminal const& terminal,
                         Screen const& screen,
                         RenderBuffer& output,
@@ -37,7 +42,9 @@ class RenderBufferBuilder
                         HighlightSearchMatches highlightSearchMatches,
                         InputMethodData inputMethodData,
                         std::optional<CellLocation> theCursorPosition,
-                        bool includeSelection);
+                        bool includeSelection,
+                        HyperlinkId hoveredHyperlink,
+                        RenderedDisplay display);
 
     /// Renders grid row @p line as host chrome copying it: its own colours, SGR and hyperlinks, but no
     /// cursor, selection, search match or yank highlight -- those describe the row where it really is.
@@ -51,7 +58,8 @@ class RenderBufferBuilder
     /// a blank row. Appended rather than returned, so the header copies into storage its frame keeps.
     ///
     /// @param output Where the cells go, after whatever it already holds.
-    /// @param terminal The terminal whose palette, colour mode, blink phase and hyperlinks apply.
+    /// @param terminal The terminal whose palette, colour mode and blink phase apply. A link on the row is
+    ///                 drawn at rest: the header is no hover target.
     /// @param line The grid row to copy.
     /// @param screenRow The screen row the copy is drawn on.
     /// @param columns How many columns to copy at most; a wide glyph that would straddle the limit is
@@ -99,6 +107,35 @@ class RenderBufferBuilder
 
     [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
 
+    /// The grid position of the cell drawn at @p screenPosition: through the viewport on the main display,
+    /// the same position on a status line, which has no viewport.
+    ///
+    /// Not noexcept, for the reason startLine() gives.
+    /// @param screenPosition Where the cell is drawn, relative to the screen's first row.
+    /// @return Where the cell is in the screen's grid.
+    [[nodiscard]] CellLocation gridPositionOf(CellLocation screenPosition) const;
+
+    /// The row grid line @p line is drawn on: the inverse of gridPositionOf().
+    ///
+    /// Not noexcept, for the reason startLine() gives.
+    /// @param line A line of the screen's grid.
+    /// @return The row it is drawn on, relative to the screen's first row.
+    [[nodiscard]] LineOffset screenLineOf(LineOffset line) const;
+
+    /// Whether grid line @p line is drawn at all: inside the viewport on the main display, inside the
+    /// screen's own rows on a status line.
+    ///
+    /// Not noexcept, for the reason startLine() gives.
+    /// @param line A line of the screen's grid.
+    /// @return true if the line is drawn.
+    [[nodiscard]] bool isGridLineDrawn(LineOffset line) const;
+
+    /// Whether the main page's marks -- its selection and its yank highlight -- apply to the screen drawn:
+    /// on the main display only. A status line is a display of its own (DEC STD 070 ch. 14), which neither
+    /// covers, whatever coordinates its rows share with the page's.
+    /// @return true on the main display.
+    [[nodiscard]] bool takesTheMainPagesMarks() const noexcept { return _display == RenderedDisplay::Main; }
+
     /// The tint for @p id, resolved once per LINE -- not per cell, and only when @ref
     /// _contextTintingPossible said a tint could apply at all, which is what keeps the ordinary
     /// session (no scheme sets a tint) at one bool test per line.
@@ -127,13 +164,21 @@ class RenderBufferBuilder
 
     /// Constructs a RenderCell for the given screen Cell.
     [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
-                                                   HyperlinkStorage const& hyperlinks,
                                                    ConstCellProxy cell,
                                                    LineFlags lineFlags,
                                                    RGBColor fg,
                                                    RGBColor bg,
                                                    LineOffset line,
                                                    ColumnOffset column);
+
+    /// The link role an OSC 8 hyperlink's cells take this frame.
+    ///
+    /// A link the terminal no longer holds (evicted from the hyperlink cache) is dead -- nothing opens it --
+    /// so it gets no decoration. Looking a link up also refreshes it in the cache, keeping the links on
+    /// screen from ageing out. The last answer is remembered, so a run of one link's cells costs one lookup.
+    /// @param hyperlink The cell's hyperlink; none gives LinkDecorationRole::None.
+    /// @return Hover for the link under the pointer, Normal for any other live one, None for a dead one.
+    [[nodiscard]] LinkDecorationRole osc8RoleOf(HyperlinkId hyperlink) const noexcept;
 
     /// Constructs the final foreground/background colors to be displayed on the screen.
     ///
@@ -233,6 +278,10 @@ class RenderBufferBuilder
     HighlightSearchMatches _highlightSearchMatches;
     InputMethodData _inputMethodData;
     bool _includeSelection;
+    HyperlinkId _hoveredHyperlink; ///< The OSC 8 link under the pointer, as the frame was asked to draw it.
+    RenderedDisplay _display;      ///< The display the screen is drawn on.
+    mutable HyperlinkId _lastRoleLink {};                            ///< The link osc8RoleOf() answered last.
+    mutable LinkDecorationRole _lastRole = LinkDecorationRole::None; ///< The role it answered for it.
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 
     int _prevWidth = 0;

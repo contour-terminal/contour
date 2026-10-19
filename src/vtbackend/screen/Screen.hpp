@@ -1261,7 +1261,19 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
         return _grid.lineAt(position.line).cellWidthAt(position.column);
     }
 
+    /// Whether @p codepoint, written next, would join the grapheme cluster written last rather than start a
+    /// cell of its own -- a combining mark, a variation selector, a joiner and what it joins --, as
+    /// writeText() decides it. Asked ahead of the write, of the codepoint before any charset mapping.
+    /// @param codepoint The codepoint.
+    /// @return true where writeText() would add @p codepoint to the cluster written last.
+    [[nodiscard]] bool joinsLastCluster(char32_t codepoint) const noexcept;
+
     [[nodiscard]] LineCount historyLineCount() const noexcept { return _grid.historyLineCount(); }
+
+    /// How many lines this screen's output has scrolled into its history since the screen was made: by the
+    /// whole page or by a top-anchored region, as Grid::scrollUp() reports them. Only ever grows; the
+    /// terminal follows output by its difference on the page on display (@see Terminal::followOutput).
+    [[nodiscard]] uint64_t linesScrolledIntoHistory() const noexcept { return _linesScrolledIntoHistory; }
 
     [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept
     {
@@ -1288,6 +1300,15 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void saveCursor();
     void restoreCursor();
     void restoreCursor(Cursor const& savedCursor);
+
+    /// Takes @p cursor over as this screen's cursor -- its position, rendition, character sets, origin mode
+    /// and pending wrap -- as a switch of screen that carries the cursor across hands it on.
+    /// @param cursor The cursor to take over; its position is held to the page.
+    void adoptCursor(Cursor const& cursor) noexcept;
+
+    /// How this screen measures a grapheme cluster, per DEC mode 2027.
+    /// @return whether a late codepoint may revise its cluster's width.
+    [[nodiscard]] ClusterWidthPolicy clusterWidthPolicy() const noexcept;
 
     void restoreGraphicsRendition();
     void saveGraphicsRendition();
@@ -1492,9 +1513,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Anchored on @c _lastCursorPosition -- the cluster head -- not on the cursor, which has already
     /// moved past it. Does nothing unless the cursor still sits immediately after that head, so an
     /// intervening cursor move or scroll cannot make this touch an unrelated cell.
-    /// @return whether a late codepoint may revise its cluster's width, per DEC mode 2027.
-    [[nodiscard]] ClusterWidthPolicy clusterWidthPolicy() const noexcept;
-
     void applyClusterWidthChange(int delta) noexcept;
 
     /// @return The rightmost column that may still be written on the cursor's line: the right margin
@@ -1602,6 +1620,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     Grid _grid;
 
     Cursor _cursor {};
+    /// What DECSC saved here, but the page (Terminal::_savedCursorPage): DECRC reads only the buffer of the
+    /// page its screen buffer's last DECSC was received on, and every other page keeps its own, unread until
+    /// a DECSC there, because a resize reflows a page's saved cursor with its grid. A status line's is its
+    /// own.
     Cursor _savedCursor {};
 
     /// What a row the cursor reaches is handed where it carries nothing yet: the OSC 3008 context and the
@@ -1649,6 +1671,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     GraphicsAttributes _savedGraphicsRenditions {};
 
     CellLocation _lastCursorPosition {};
+
+    /// @see linesScrolledIntoHistory()
+    uint64_t _linesScrolledIntoHistory = 0;
 
     Line* _currentLine = nullptr;
     std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;

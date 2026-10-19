@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtpty/DetachedProcess.hpp>
 #include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
@@ -11,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <expected>
@@ -18,17 +20,21 @@
 #include <format>
 #include <fstream>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #ifndef _WIN32
+    #include <sys/wait.h>
+
     #include <unistd.h>
 #endif
 
@@ -456,6 +462,18 @@ TEST_CASE("Process.runsARelativeProgramFromItsWorkingDirectory", "[process]")
     (void) hangUp(process);
 }
 
+TEST_CASE("Process.saysWhyItCannotEnterItsWorkingDirectory", "[process]")
+{
+    // The child says why chdir() failed, as chdir() reported it, and exits.
+    auto const directory = core::testing::ScopedTempDir { "contour-process" };
+    auto exec = execInfo("/bin/sh", { "-c", "exit 0" });
+    exec.workingDirectory = directory.path() / "no-such-directory";
+    auto process = vtpty::testing::unplacedProcess(exec, PageSize);
+    REQUIRE(process.start().has_value());
+    CHECK(printed(process, "no-such-directory\". No such file or directory"));
+    (void) hangUp(process);
+}
+
 TEST_CASE("Process.fallsBackFromAProgramThatIsNotThere", "[process]")
 {
     // A single word that names no program has no command line to read: the child says so, and runs the
@@ -465,4 +483,217 @@ TEST_CASE("Process.fallsBackFromAProgramThatIsNotThere", "[process]")
     CHECK(printed(process, "Failed to spawn contour-no-such-program"));
     (void) hangUp(process);
 }
+
+namespace
+{
+
+/// @return What @p path holds; std::nullopt where there is no such file.
+std::optional<std::string> fileContent(std::filesystem::path const& path)
+{
+    auto in = std::ifstream { path };
+    if (!in)
+        return std::nullopt;
+    return std::string { std::istreambuf_iterator<char> { in }, {} };
+}
+
+/// Waits up to ten seconds for @p file to read @p expected.
+/// @return @p expected once @p file reads it. Else what it read last ("<missing>" where it never existed),
+///         followed by what "<file>.part" and "<file>.err" hold -- where a script writes its work in progress
+///         and the status of each step -- so that a failed comparison says how far the script got.
+std::string eventuallyReads(std::filesystem::path const& file, std::string_view expected)
+{
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+    auto last = std::optional<std::string> {};
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        last = fileContent(file);
+        if (last == expected)
+            return std::string { expected };
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    auto const beside = [&](std::string_view suffix) {
+        auto const path = std::filesystem::path { file.string() + std::string { suffix } };
+        return std::format("\n[{}: {}]", path.filename().string(), fileContent(path).value_or("<missing>"));
+    };
+    return last.value_or("<missing>") + beside(".part") + beside(".err");
+}
+
+/// @return What runs `/bin/sh -c SCRIPT TARGET`: the script reads @p target as "$0".
+vtpty::DetachedCommand shellScript(std::string_view script, std::filesystem::path const& target)
+{
+    return vtpty::DetachedCommand { .image = "/bin/sh",
+                                    .argv = { "sh", "-c", std::string { script }, target.string() },
+                                    .standardInput = {},
+                                    .output = vtpty::DetachedOutput::Inherited,
+                                    .role = vtpty::ProcessRole::Program };
+}
+
+} // namespace
+
+TEST_CASE("startDetached.placed before it runs", "[process][placement]")
+{
+    // Handed to the placement parked, as a session's shell is, so that nothing it starts is born in this
+    // process's resource domain.
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto const target = directory.path() / "ran.txt";
+    auto placement = RecordingPlacement {};
+    auto const dropOnExit = DropOnExit { placement };
+
+    auto const pid = vtpty::startDetached(shellScript(R"(echo ran > "$0")", target), placement);
+    REQUIRE(pid.has_value());
+    REQUIRE(placement.pids() == std::vector { *pid });
+    CHECK_FALSE(std::filesystem::exists(target)); // parked: it cannot have run
+    #ifdef __linux__
+    CHECK(executableOf(*pid) == executableOf(::getpid())); // still the forked copy of this test
+    #endif
+
+    placement.release(*pid);
+    CHECK(eventuallyReads(target, "ran\n") == "ran\n");
+}
+
+TEST_CASE("startDetached.detached from this process", "[process][placement]")
+{
+    // Nothing here waits for it or reaps it, and a hangup of this process's session does not reach it.
+    auto placement = RecordingPlacement {};
+    auto const dropOnExit = DropOnExit { placement };
+    auto const pid = vtpty::startDetached(vtpty::DetachedCommand { .image = "/bin/sh",
+                                                                   .argv = { "sh", "-c", "exit 0" },
+                                                                   .standardInput = {},
+                                                                   .output = {},
+                                                                   .role = vtpty::ProcessRole::Program },
+                                          placement);
+    REQUIRE(pid.has_value());
+
+    auto status = 0;
+    CHECK(::waitpid(*pid, &status, WNOHANG) == -1);
+    CHECK(errno == ECHILD);
+    #ifdef __linux__
+    CHECK(::getsid(*pid) != ::getsid(0));
+    #endif
+}
+
+    #ifdef __linux__
+TEST_CASE("startDetached.reads the given file and discards its output", "[process][placement]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto const input = directory.path() / "input.txt";
+    std::ofstream { input } << "piped\n";
+    auto const target = directory.path() / "copied.txt";
+    // What the shell's own standard output and error are, as /proc names them, written after what it read.
+    // Both are read before any redirection: dash (Ubuntu's /bin/sh) applies a simple command's redirections
+    // in the shell process itself, so /proc/$$ under a redirect names the redirect, not the program's
+    // descriptor.
+    auto command =
+        shellScript(R"(out=$(readlink /proc/$$/fd/1); err=$(readlink /proc/$$/fd/2); cat > "$0.part"; )"
+                    R"(printf '%s\n%s\n' "$out" "$err" >> "$0.part"; mv "$0.part" "$0")",
+                    target);
+    command.standardInput = input;
+    command.output = vtpty::DetachedOutput::Discarded;
+    auto placement = vtpty::NoPlacement {};
+
+    REQUIRE(vtpty::startDetached(command, placement).has_value());
+    CHECK(eventuallyReads(target, "piped\n/dev/null\n/dev/null\n") == "piped\n/dev/null\n/dev/null\n");
+}
+
+namespace
+{
+/// Closes this process's standard input for as long as it lives, as a CI runner may start the suite with
+/// it closed, and restores it after, a failed check included.
+class StandardInputClosed
+{
+  public:
+    StandardInputClosed(): _saved { ::dup(STDIN_FILENO) } { ::close(STDIN_FILENO); }
+    StandardInputClosed(StandardInputClosed const&) = delete;
+    StandardInputClosed& operator=(StandardInputClosed const&) = delete;
+    StandardInputClosed(StandardInputClosed&&) = delete;
+    StandardInputClosed& operator=(StandardInputClosed&&) = delete;
+
+    ~StandardInputClosed()
+    {
+        if (_saved < 0)
+            return;
+        ::dup2(_saved, STDIN_FILENO);
+        ::close(_saved);
+    }
+
+  private:
+    int _saved; ///< Standard input, kept above it while closed; -1 where it was closed already.
+};
+} // namespace
+
+TEST_CASE("startDetached.reads the given file with this process's standard input closed",
+          "[process][placement]")
+{
+    // Descriptor 0 is free, so the input, opened close-on-exec, lands on it: handing it to the program as its
+    // standard input is then a dup2() of 0 onto itself, which changes nothing -- the flag included.
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto const input = directory.path() / "input.txt";
+    std::ofstream { input } << "piped\n";
+    auto const target = directory.path() / "copied.txt";
+    auto command = shellScript(R"(cat > "$0.part"; mv "$0.part" "$0")", target);
+    command.standardInput = input;
+    command.output = vtpty::DetachedOutput::Discarded;
+    auto placement = vtpty::NoPlacement {};
+
+    {
+        auto const closed = StandardInputClosed {};
+        REQUIRE(vtpty::startDetached(command, placement).has_value());
+    }
+    CHECK(eventuallyReads(target, "piped\n") == "piped\n");
+}
+    #endif
+
+TEST_CASE("startDetached.an input that cannot be read starts nothing", "[process][placement]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto command = shellScript("exit 0", directory.path() / "unused.txt");
+    command.standardInput = directory.path() / "no-such-input.txt";
+    auto placement = RecordingPlacement {};
+
+    auto const pid = vtpty::startDetached(command, placement);
+    REQUIRE_FALSE(pid.has_value());
+    CHECK(pid.error() == std::errc::no_such_file_or_directory);
+    CHECK(placement.pids().empty());
+}
+
+    #ifdef __linux__
+TEST_CASE("startDetached.starts the program with no signal blocked", "[process][placement]")
+{
+    // The daemon blocks SIGINT and SIGTERM on every thread, for a thread of its own to sigwait() for them.
+    auto blocked = sigset_t {};
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGINT);
+    sigaddset(&blocked, SIGTERM);
+    auto previous = sigset_t {};
+    REQUIRE(pthread_sigmask(SIG_BLOCK, &blocked, &previous) == 0);
+
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto const target = directory.path() / "mask.txt";
+    auto placement = vtpty::NoPlacement {};
+    auto const pid = vtpty::startDetached(
+        shellScript(R"(grep SigBlk /proc/self/status > "$0.part"; mv "$0.part" "$0")", target), placement);
+    pthread_sigmask(SIG_SETMASK, &previous, nullptr);
+
+    REQUIRE(pid.has_value());
+    CHECK(eventuallyReads(target, "SigBlk:\t0000000000000000\n") == "SigBlk:\t0000000000000000\n");
+}
+
+TEST_CASE("startDetached.sets the oom_score_adj its placement supplies", "[process][placement]")
+{
+    auto const directory = core::testing::ScopedTempDir { "contour-detached" };
+    auto const target = directory.path() / "ready.txt";
+    // Raising one's own oom_score_adj takes no privilege; lowering it would.
+    auto const wanted = std::min(oomScoreAdjustOf(::getpid()) + 7, 1000);
+    auto placement = RecordingPlacement { wanted };
+    auto const dropOnExit = DropOnExit { placement };
+
+    auto const pid =
+        vtpty::startDetached(shellScript(R"(echo ready > "$0"; exec sleep 30)", target), placement);
+    REQUIRE(pid.has_value());
+    placement.release(*pid);
+    REQUIRE(eventuallyReads(target, "ready\n") == "ready\n");
+    CHECK(oomScoreAdjustOf(*pid) == wanted);
+    ::kill(*pid, SIGKILL); // started by this test, and nobody's child here: nothing else ends it
+}
+    #endif
 #endif

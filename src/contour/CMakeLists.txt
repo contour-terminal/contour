@@ -491,6 +491,16 @@ target_link_libraries(contour_block_tooltip PUBLIC vtbackend)
 target_include_directories(contour_block_tooltip PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
+# {{{ contour_local_file: what following a hyperlink to a file on this machine does with it
+# Qt-free, and tested in contour_test, for the reason contour_block_tooltip is.
+add_library(contour_local_file STATIC
+    session/LocalFileAction.cpp
+    session/LocalFileAction.hpp
+)
+target_link_libraries(contour_local_file PUBLIC core::base core::platform)
+target_include_directories(contour_local_file PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# }}}
+
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
 target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
@@ -623,6 +633,7 @@ target_link_libraries(contour_core
     contour_command
     contour_command_output
     contour_cli
+    contour_local_file
     vtworkspace
     # remote/ runs the daemon client on core-cpp's event loop, session/ writes command output through
     # core::platform's filesystem, and main.cpp suppresses the Windows error dialogs through
@@ -688,35 +699,22 @@ if(CONTOUR_FRONTEND_GUI)
         # resources.qrc again — doing so would duplicate the resource registration symbols.
         add_executable(contour_gui_test
             test/test_main.cpp
-            remote/NativeController_test.cpp
             remote/RemoteController_test.cpp
-            remote/TmuxController_test.cpp
             platform/AudioNote_test.cpp
             test/BenignQtMessages_test.cpp
-            window/CommandPaletteModel_test.cpp
-            config/Config_test.cpp
             config/GpuSelector_test.cpp
-            window/SettingsController_test.cpp
-            test/SettingsPageQml_test.cpp
             test/Accessibility_qml_test.cpp
             platform/SpeechSynthesizer_test.cpp
-            test/ContourGuiApp_test.cpp
-            display/DisplayRendering_test.cpp
             display/ContentScale_test.cpp
             session/ExitCode_test.cpp
             display/CaretReportGate_test.cpp
-            display/TerminalAccessible_test.cpp
-            session/SessionInput_test.cpp
             session/HyperlinkTooltip_test.cpp
-            session/FontControl_test.cpp
             input/HorizontalWheelGesture_test.cpp
             display/ImeQueryRect_test.cpp
             display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
             test/MainWindowControllerMock.hpp
-            session/FocusRouting_test.cpp
-            window/MultiWindow_test.cpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/Notifier_test.cpp
@@ -741,22 +739,14 @@ if(CONTOUR_FRONTEND_GUI)
             display/RhiVertexLayout_test.cpp
             display/ScreenshotReadback_test.cpp
             display/ScreenshotRhiReadback_test.cpp
-            session/TabSizeInheritance_test.cpp
-            session/TerminalSessionManager_test.cpp
-            session/TerminalSession_test.cpp
-            test/QmlComponents_test.cpp
             window/TabColorScheme_test.cpp
             test/ContourTuiStyle_test.cpp
-            window/UiStyleProvider_test.cpp
             window/WindowControlStyleProvider_test.cpp
-            window/TabListModel_test.cpp
             window/TabLabel_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
-            window/WindowSizing_test.cpp
             platform/WindowResizeGrid_test.cpp
         )
-        set_target_properties(contour_gui_test PROPERTIES AUTOMOC ON)
         if(APPLE)
             target_sources(contour_gui_test PRIVATE platform/CocoaWindowResizeGrid_test.mm)
             set_target_properties(contour_gui_test PROPERTIES
@@ -766,18 +756,63 @@ if(CONTOUR_FRONTEND_GUI)
         if(CONTOUR_WITH_GPU_SELECTION)
             target_sources(contour_gui_test PRIVATE display/GraphicsDeviceSelector_test.cpp)
         endif()
-        target_link_libraries(contour_gui_test
-            PRIVATE
-            contour_core
-            core::net_tls # remote/NativeController_test serves TLS
-            Qt6::Test
-            Qt6::GuiPrivate # rhi/qrhi.h + qrhigles2_p.h for the end-to-end screenshot readback test
-            Catch2::Catch2
+
+        # The suite's heavyweight sources: every one whose compile peaks at 2 GB or more with GCC at -O2 -g, the
+        # flags of CI's RelWithDebInfo builds. Measured in October 2026 with GCC 16.2, as the compiler's peak
+        # resident set compiling each of the suite's sources alone: Config_test 7.96 GB, TerminalSession_test
+        # 4.15 GB, QmlComponents_test 3.32 GB, the others listed here 2.13 to 2.99 GB -- what the frontend's
+        # headers cost every source that includes them -- and every source not listed 1.73 GB or less. One at a
+        # time, beside three of the light ones, a 4-job build stays under 16 GB. To re-measure, compile each
+        # source alone with the flags compile_commands.json gives it, -O2 -g in place of the optimisation
+        # flags, and read the compiler's peak (wait4's ru_maxrss).
+        #
+        # They compile in an object library of their own, in contour_heavy_compile_pool (see the top-level
+        # CMakeLists.txt), as a pool is a target property before CMake 4.2 and CI has 3.31. A source listed
+        # here is not listed in the suite's own sources.
+        set(contour_gui_test_heavy_sources
+            config/Config_test.cpp
+            display/DisplayRendering_test.cpp
+            display/TerminalAccessible_test.cpp
+            remote/NativeController_test.cpp
+            remote/TmuxController_test.cpp
+            session/FocusRouting_test.cpp
+            session/FontControl_test.cpp
+            session/SessionInput_test.cpp
+            session/TabSizeInheritance_test.cpp
+            session/TerminalSessionManager_test.cpp
+            session/TerminalSession_test.cpp
+            test/ContourGuiApp_test.cpp
+            test/QmlComponents_test.cpp
+            test/SettingsPageQml_test.cpp
+            window/CommandPaletteModel_test.cpp
+            window/MultiWindow_test.cpp
+            window/SettingsController_test.cpp
+            window/TabListModel_test.cpp
+            window/UiStyleProvider_test.cpp
+            window/WindowSizing_test.cpp
         )
-        target_include_directories(contour_gui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
-        if(NOT WIN32)
-            target_compile_options(contour_gui_test PRIVATE -Wno-c2y-extensions)
+        add_library(contour_gui_test_heavy OBJECT ${contour_gui_test_heavy_sources})
+        if(CMAKE_GENERATOR MATCHES "Ninja")
+            set_target_properties(contour_gui_test_heavy PROPERTIES JOB_POOL_COMPILE contour_heavy_compile_pool)
         endif()
+
+        # Both are built alike: the same usage requirements, include path, options and moc.
+        foreach(target IN ITEMS contour_gui_test contour_gui_test_heavy)
+            set_target_properties(${target} PROPERTIES AUTOMOC ON)
+            target_link_libraries(${target}
+                PRIVATE
+                contour_core
+                core::net_tls # remote/NativeController_test serves TLS
+                Qt6::Test
+                Qt6::GuiPrivate # rhi/qrhi.h + qrhigles2_p.h for the end-to-end screenshot readback test
+                Catch2::Catch2
+            )
+            target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+            if(NOT WIN32)
+                target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
+            endif()
+        endforeach()
+        target_link_libraries(contour_gui_test PRIVATE contour_gui_test_heavy)
 
         # The QThread join forwarding, as for the executable itself (see contour_tsan_thread_join).
         if(TARGET contour_tsan_thread_join)
@@ -994,6 +1029,7 @@ if(CONTOUR_TESTING)
         session/ScreenshotFile_test.cpp
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp
+        session/LocalFileAction_test.cpp
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
         platform/SessionVisibility_test.cpp
@@ -1007,6 +1043,7 @@ if(CONTOUR_TESTING)
         contour_command
         contour_command_output
         contour_cli
+        contour_local_file
         vtbackend
         core::testing
         Catch2::Catch2)
@@ -1100,10 +1137,22 @@ if(NOT(WIN32) AND CONTOUR_PACKAGE_TERMINFO)
     else()
         message(STATUS "Executable tic found (${TIC}).")
     endif()
+    set(terminfo_generate contour generate terminfo to ${terminfo_file})
+    if(CONTOUR_CODE_COVERAGE_ENABLED)
+        # This step runs the instrumented contour, which on exit merges its counters into the build tree's .gcda
+        # files. Once a source has changed they are stale, and the coverage runtime, which trusts a stale file's
+        # layout, may read past its end: the step died of SIGSEGV and failed the build. Its counters go to a
+        # directory of their own instead, emptied first; this run is no coverage anyone measures.
+        set(terminfo_counters "${CMAKE_CURRENT_BINARY_DIR}/terminfo-gcov")
+        set(terminfo_generate
+            ${CMAKE_COMMAND} -E rm -rf "${terminfo_counters}" &&
+            ${CMAKE_COMMAND} -E env "GCOV_PREFIX=${terminfo_counters}"
+                $<TARGET_FILE:contour> generate terminfo to ${terminfo_file})
+    endif()
     add_custom_command(
         TARGET contour POST_BUILD
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMAND contour generate terminfo to ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
+        COMMAND ${terminfo_generate} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
         COMMENT "Compiling ${terminfo_file}"
         BYPRODUCTS "${terminfo_file}"
         VERBATIM
@@ -1433,6 +1482,29 @@ else()
         install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
         install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
         install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+
+        # A desktop launches Contour as a systemd unit of its own, named after the application ID
+        # (https://systemd.io/DESKTOP_ENVIRONMENTS/), with OOMPolicy=stop: an out-of-memory kill of anything
+        # in it stops Contour. These drop-ins make the unit continue instead -- one per name pattern the
+        # launchers use -- see docs/internals/session-oom-isolation.md. systemd looks for user units under
+        # <prefix>/lib/systemd/user, never lib64, hence not CMAKE_INSTALL_LIBDIR. Not inside Flatpak, whose
+        # sandbox launches its own scope and installs nothing on the host.
+        if(LINUX AND CONTOUR_WITH_SYSTEMD AND NOT EXISTS "/.flatpak-info")
+            set(_systemdUserUnitDir "lib/systemd/user")
+            # KDE Plasma's KIO launcher (app-<id>@<random>.service), and XDG autostart (app-<id>@autostart.service).
+            set(_oomPolicyServices "app-${AppId}@.service")
+            # Launchers that start scopes: KDE's scope launcher (app-<id>-<random>.scope), GNOME Shell
+            # (app-gnome-<id>-<pid>.scope), and GLib's GDesktopAppInfo (app-glib-<id>-<pid>.scope).
+            set(_oomPolicyScopes "app-${AppId}-.scope" "app-gnome-${AppId}-.scope" "app-glib-${AppId}-.scope")
+            foreach(_unit IN LISTS _oomPolicyServices)
+                install(FILES "packaging/systemd/oom-policy-service.conf"
+                        DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
+            endforeach()
+            foreach(_unit IN LISTS _oomPolicyScopes)
+                install(FILES "packaging/systemd/oom-policy-scope.conf"
+                        DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
+            endforeach()
+        endif()
     endif()
 endif()
 

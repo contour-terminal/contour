@@ -9,6 +9,12 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <utility>
+
+#ifndef _WIN32
+    #include <paths.h>
+    #include <unistd.h>
+#endif
 
 namespace vtpty
 {
@@ -75,6 +81,30 @@ std::optional<std::string> findProgram(std::string_view program, ProgramSearch c
         return programFile(named->is_relative() ? search.workingDirectory / *named : *named)
             .transform([](std::filesystem::path const& found) { return core::pathToUtf8(found); });
     return findOnPath(*named, search.path, programFile);
+}
+
+std::string execSearchPath(std::optional<std::string> environmentPath)
+{
+    if (environmentPath)
+        return std::move(*environmentPath);
+    // Each C library's execvp() searches a default of its own where PATH is unset.
+#ifdef __GLIBC__
+    // glibc's execvpe() searches CS_PATH, which confstr(_CS_PATH) answers -- not <paths.h>'s _PATH_DEFPATH.
+    // The size includes the terminating null, which confstr() writes too.
+    auto const size = ::confstr(_CS_PATH, nullptr, 0);
+    if (size == 0)
+        return {};
+    auto path = std::string(size, '\0');
+    (void) ::confstr(_CS_PATH, path.data(), path.size());
+    path.pop_back();
+    return path;
+#elifdef _PATH_DEFPATH
+    // FreeBSD's, Darwin's and musl's execvp() search <paths.h>'s _PATH_DEFPATH; their confstr(_CS_PATH)
+    // answers another path.
+    return _PATH_DEFPATH;
+#else
+    return {};
+#endif
 }
 
 bool namesProgram(std::string_view program, ProgramSearch const& search)

@@ -162,9 +162,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       an in-memory factory (e.g. MockPty-backed) to run session-creation
     ///                       paths headlessly.
     /// @param externalLauncher Opens URLs / spawns child processes for a session. Null (the default)
-    ///                       wires whatever makeExternalLauncher() offers; tests pass a recording launcher
-    ///                       to assert open-document / follow-hyperlink / spawn routing without
-    ///                       actually launching anything.
+    ///                       wires whatever makeExternalLauncher() offers, placing what it starts as the
+    ///                       sessions are placed; tests pass a recording launcher to assert
+    ///                       open-document / follow-hyperlink / spawn routing without actually
+    ///                       launching anything.
     /// @param layoutStore    Persistence for named layouts (SaveLayout). Null (the default) wires the
     ///                       production FileLayoutStore (an atomically-replaced `layouts.yml`); tests
     ///                       pass an in-memory store to drive SaveLayout without touching the disk.
@@ -185,6 +186,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       locality by it. Null (the default) reads it once, here: the machine id and
     ///                       the host name. Tests pass a fixed one, so what counts as this machine does
     ///                       not depend on the machine they run on.
+    /// @param fileSystem     Where every session looks up the paths it shows and opens. Borrowed: it must
+    ///                       outlive the app. Null (the default) is this machine's; tests pass an in-memory
+    ///                       one, so that what a path names does not depend on the machine they run on.
+    /// @param processPlacement Places every process a session starts -- its shell, the programs it starts,
+    ///                       the daemon and the tmux client `contour client` spawns -- in a resource domain
+    ///                       of its own. Null (the default) wires vtpty::makeDefaultProcessPlacement();
+    ///                       tests pass a fake to see what is placed.
     /// @param env            The process environment every part of the application reads through.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -194,7 +202,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr,
                            std::unique_ptr<session::CommandOutputFiles> commandOutputFiles = nullptr,
                            vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
-                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt);
+                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
+                           core::platform::FileSystem const* fileSystem = nullptr,
+                           std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr);
     ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(cli::ContourApp::instance()); }
@@ -333,9 +343,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The identity read, or handed in, at construction.
     [[nodiscard]] vtbackend::HostIdentity const& hostIdentity() const noexcept { return _hostIdentity; }
 
-    /// Where every session's terminal looks up the paths printed on its screen.
-    /// @return This machine's filesystem.
-    [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept;
+    /// What places every process a session starts; the default session factory, the default launcher and
+    /// the daemon and tmux spawns all use it.
+    /// @return The placement handed in at construction, or the default one.
+    [[nodiscard]] vtpty::ProcessPlacement& processPlacement() const noexcept { return *_processPlacement; }
+
+    /// Where every session looks up the paths printed on its screen, and the ones it opens.
+    /// @return The filesystem handed in at construction; this machine's by default.
+    [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept { return _fileSystem; }
 
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
@@ -442,6 +457,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     core::async::StopSource _commandShutdown;
     vtpty::SystemCommandCapture _commandCapture;
     core::async::ThreadPoolExecutor _commandExecutor;
+    // Moves every process a session starts into a resource domain of its own: its shell, through the
+    // default session factory, and the programs it starts detached, through the default launcher.
+    // Declared before both.
+    std::shared_ptr<vtpty::ProcessPlacement> _processPlacement;
     // Declared before _sessionManager: the manager holds a reference to the factory.
     // Always a RoutingSessionFactory wrapping the injected/default factory,
     // so attach mode can switch the route without touching the manager.
@@ -465,6 +484,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     vtbackend::TerminalClocks _terminalClocks;
     // Likewise.
     vtbackend::HostIdentity _hostIdentity;
+    // Likewise; borrowed.
+    core::platform::FileSystem const& _fileSystem;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

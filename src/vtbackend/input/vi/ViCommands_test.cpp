@@ -461,6 +461,24 @@ TEST_CASE("vi.motion: b", "[vi]")
     REQUIRE(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
 }
 
+TEST_CASE("vi.motion: % matches the bracket on the screen the cursor walks", "[vi]")
+{
+    // The bracket under the cursor and the one it is matched with are read from the same screen: the primary
+    // one, and the alternate one while a full-screen application has it in use.
+    auto const screenSwitch = GENERATE(std::string_view {}, std::string_view { "\033[?1049h" });
+    INFO(std::format("screen switch: {}", screenSwitch.empty() ? "none" : "?1049h"));
+    auto mock =
+        setupMockTerminal(std::format("{}(x) [y]", screenSwitch),
+                          vtbackend::PageSize { vtbackend::LineCount(4), vtbackend::ColumnCount(20) });
+
+    mock.sendCharSequence("%");
+    CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 2_columnOffset);
+    mock.sendCharSequence("%");
+    CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 0_columnOffset);
+    mock.sendCharSequence("4l%");
+    CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 6_columnOffset);
+}
+
 TEST_CASE("ViCommands:modeChanged", "[vi]")
 {
     auto mock = setupMockTerminal(

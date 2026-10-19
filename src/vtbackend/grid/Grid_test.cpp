@@ -2486,6 +2486,62 @@ TEST_CASE("Grid.delta.growColumnsKeepsItsHistoryAddressable", "[grid][delta]")
     CHECK(reported == unbox<int>(grid.historyLineCount()) + unbox<int>(grid.pageSize().lines));
 }
 
+namespace
+{
+/// How a resize changes the page in the stamping test below.
+enum class PageChange : uint8_t
+{
+    Lines = 0, ///< Fewer lines: the ring rotates, and every row keeps its stable id.
+    Columns,   ///< More columns: no row keeps its identity, though nothing reflows here.
+    Narrower,  ///< Fewer columns than the rows' text: the reflow wraps them, and rebuilds the ring.
+};
+
+/// The page a resize in the stamping test below leaves, from a 3x5 one.
+/// @param change How the resize changes it.
+/// @return The new page size.
+[[nodiscard]] PageSize resizedPage(PageChange change)
+{
+    switch (change)
+    {
+        case PageChange::Lines: return PageSize { LineCount(2), ColumnCount(5) };
+        case PageChange::Columns: return PageSize { LineCount(3), ColumnCount(7) };
+        case PageChange::Narrower: return PageSize { LineCount(3), ColumnCount(3) };
+    }
+    return PageSize { LineCount(3), ColumnCount(5) };
+}
+} // namespace
+
+TEST_CASE("Grid.finalize.stampsTheRowsThatScrolledOutBeforeAResize", "[grid][delta]")
+{
+    // Rows written and scrolled into the history since the last finalize wait for its stamp. A resize in
+    // between must not hide them from it, whichever way it changes the page.
+    auto const change = GENERATE(PageChange::Lines, PageChange::Columns, PageChange::Narrower);
+    INFO("change: " << static_cast<int>(change));
+    auto grid = Grid(PageSize { LineCount(3), ColumnCount(5) }, true, LineCount(20));
+    grid.finalizeRevisions();
+    for (auto const i: std::views::iota(0, 6))
+    {
+        grid.setLineText(LineOffset(2), std::format("row{}", i));
+        grid.lineAt(LineOffset(2)).setWrappable(true);
+        grid.scrollUp(LineCount(1));
+    }
+    REQUIRE(grid.historyLineCount() == LineCount(6));
+
+    auto const newSize = resizedPage(change);
+    std::ignore = grid.resize(newSize, CellLocation { .line = LineOffset(2) }, WrapPending::No);
+    if (change == PageChange::Narrower)
+        REQUIRE(grid.historyLineCount() > LineCount(6)); // "rowN" wrapped onto a second row: reflowed
+    grid.finalizeRevisions();
+
+    for (auto const offset: std::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(newSize.lines)))
+    {
+        INFO("row " << offset);
+        auto const& line = std::as_const(grid).lineAt(LineOffset(offset));
+        CHECK_FALSE(line.isDirty());
+        CHECK(line.revision() != 0);
+    }
+}
+
 TEST_CASE("Grid.render_rows.draws_exactly_the_listed_rows", "[grid]")
 {
     // A 2-line page over 5 lines of history. An explicit row list picks rows that are NOT contiguous --
