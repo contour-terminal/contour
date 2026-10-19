@@ -2255,13 +2255,11 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
            || ascending(0xEE00, 0xEE05)             // progress bar (Fira Code)
            || detail::isGitBranchDrawing(codepoint) //
            || detail::Braille::isBraille(codepoint) //
-           || codepoint == 0xE0B0                   // 
-           || codepoint == 0xE0B2                   // 
-           || codepoint == 0xE0B4                   // 
+           || ascending(0xE0B0, 0xE0B4)             // solid and thin dividers, right half circle
            || codepoint == 0xE0B6                   // 
-           || codepoint == 0xE0BA                   // 
-           || codepoint == 0xE0BC                   // 
-           || codepoint == 0xE0BE                   // 
+           || ascending(0xE0B8, 0xE0BF)             // corner triangles and diagonal separators
+           || codepoint == 0xE0D6                   // 
+           || codepoint == 0xE0D7                   // 
         ;
 }
 
@@ -2774,12 +2772,21 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint,
         // }}}
 
         case 0xE0B0: return /*  */ triangle<Dir::Left, Inverted::No, 1>(size);
+        case 0xE0B1: return /*  */ lineArt().line({ .x=0, .y=0 }, { .x=1, .y=1 / 2_th }).line({ .x=1, .y=1 / 2_th }, { .x=0, .y=1 }).take();
         case 0xE0B2: return /*  */ triangle<Dir::Right, Inverted::No, 1>(size);
+        case 0xE0B3: return /*  */ lineArt().line({ .x=1, .y=0 }, { .x=0, .y=1 / 2_th }).line({ .x=0, .y=1 / 2_th }, { .x=1, .y=1 }).take();
         case 0xE0B4: return /*  */ blockElement<2>(size).halfFilledCircleRight();
         case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
+        case 0xE0B8: return /*  */ ld({ .x=0, .y=0 }, { .x=1, .y=1 });
+        case 0xE0B9:
+        case 0xE0BF: return lineArt().line({ .x=0, .y=1 }, { .x=1, .y=0 }).take();
+        case 0xE0BB:
+        case 0xE0BD: return lineArt().line({ .x=0, .y=0 }, { .x=1, .y=1 }).take();
         case 0xE0BA: return /*  */ ld({ .x=0, .y=1 }, { .x=1, .y=0 });
         case 0xE0BC: return /*  */ ud({ .x=0, .y=1 }, { .x=1, .y=0 });
         case 0xE0BE: return /*  */ ud({ .x=0, .y=0 }, { .x=1, .y=1 });
+        case 0xE0D6: return /*  */ triangle<Dir::Right, Inverted::Yes, 1>(size);
+        case 0xE0D7: return /*  */ triangle<Dir::Left, Inverted::Yes, 1>(size);
 
         // Contour's own private-use glyphs (@see docs/vt-extensions/private-use-glyphs.md).
         // Supplementary PUA-B rather than the BMP: E000..F8FF is comprehensively squatted by Nerd
