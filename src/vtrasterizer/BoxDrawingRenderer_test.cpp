@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <format>
+#include <ranges>
 
 using namespace vtrasterizer;
 using namespace vtbackend;
@@ -51,6 +52,29 @@ struct TestTileData
 };
 } // namespace
 
+TEST_CASE("Powerline inverse dividers complement the solid dividers", "[boxdrawing][powerline]")
+{
+    for (auto const size: { ImageSize { Width(11), Height(21) },
+                            ImageSize { Width(16), Height(32) },
+                            ImageSize { Width(17), Height(33) } })
+        for (auto const solid: { char32_t { 0xE0B0 }, char32_t { 0xE0B2 } })
+        {
+            auto const inverse = solid == 0xE0B0 ? char32_t { 0xE0D7 } : char32_t { 0xE0D6 };
+            CAPTURE(unbox<int>(size.width), unbox<int>(size.height), static_cast<unsigned>(solid));
+            REQUIRE(BoxDrawingRenderer::renderable(inverse));
+            auto const divider = BoxDrawingRendererTest::buildElements(solid, size, 1);
+            auto const cutout = BoxDrawingRendererTest::buildElements(inverse, size, 1);
+            REQUIRE(divider);
+            REQUIRE(cutout);
+            REQUIRE(divider->size() == cutout->size());
+            // Supersampling truncates each alpha average independently, losing at most one unit.
+            CHECK(std::ranges::all_of(std::views::iota(size_t { 0 }, divider->size()), [&](auto index) {
+                auto const coverage = static_cast<int>((*divider)[index]) + (*cutout)[index];
+                return coverage >= 254 && coverage <= 255;
+            }));
+        }
+}
+
 /// Counts the number of non-zero pixels in a buffer.
 static size_t countLitPixels(atlas::Buffer const& buffer)
 {
@@ -79,6 +103,53 @@ static atlas::Buffer verticalMirror(atlas::Buffer const& buffer, ImageSize size)
         for (auto x: std::views::iota(0zu, w))
             mirrored[(y * w) + x] = buffer[((h - 1 - y) * w) + x];
     return mirrored;
+}
+
+TEST_CASE("Powerline basic separators fit their tiles and preserve diagonal aliases", "[powerline]")
+{
+    for (auto const size: { ImageSize { Width(11), Height(21) }, ImageSize { Width(16), Height(32) } })
+    {
+        for (auto const codepoint:
+             { U'\uE0B1', U'\uE0B3', U'\uE0B8', U'\uE0B9', U'\uE0BB', U'\uE0BD', U'\uE0BF' })
+        {
+            REQUIRE(BoxDrawingRenderer::renderable(codepoint));
+            auto const tile = BoxDrawingRendererTest::buildElements(codepoint, size, 1);
+            REQUIRE(tile);
+            CHECK(tile->size() == size.area());
+            CHECK(countLitPixels(*tile) > 0);
+            CHECK(countLitPixels(*tile) < tile->size());
+        }
+        auto const lowerLeft = BoxDrawingRendererTest::buildElements(U'\uE0B8', size, 1);
+        REQUIRE(lowerLeft);
+        CHECK(lowerLeft->front() == 255);
+        CHECK(lowerLeft->back() == 0);
+        for (auto const pair: { std::pair { U'\uE0B9', U'\uE0BF' }, std::pair { U'\uE0BB', U'\uE0BD' } })
+            CHECK(BoxDrawingRendererTest::buildElements(pair.first, size, 1)
+                  == BoxDrawingRendererTest::buildElements(pair.second, size, 1));
+        for (auto const codepoint: { U'\uE0B1', U'\uE0B3' })
+        {
+            auto const chevron = BoxDrawingRendererTest::buildElements(codepoint, size, 1);
+            REQUIRE(chevron);
+            auto const width = size.width.as<size_t>();
+            auto const middle = size.height.as<size_t>() / 2;
+            auto const edgeCoverage = [&](size_t column) {
+                auto coverage = 0;
+                for (auto const row: std::views::iota(middle - 1, middle + 2))
+                    coverage += (*chevron)[(row * width) + column];
+                return coverage;
+            };
+            if (codepoint == U'\uE0B1')
+            {
+                CHECK(edgeCoverage(0) == 0);
+                CHECK(edgeCoverage(width - 1) > 0);
+            }
+            else
+            {
+                CHECK(edgeCoverage(0) > 0);
+                CHECK(edgeCoverage(width - 1) == 0);
+            }
+        }
+    }
 }
 
 TEST_CASE("BoxDrawingRenderer", "[renderer]")

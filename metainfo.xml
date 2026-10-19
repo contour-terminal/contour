@@ -107,6 +107,7 @@
     <release version="0.7.1" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds built-in drawing for more Powerline separators, including inverse dividers, thin chevrons and diagonal lines (#2160).</li>
           <li>Adds the global option <code>snap_to_rows</code> to align window heights to complete terminal rows, avoiding unused space below a bottom status line. Available in Settings and disabled by default (#2158).</li>
           <li>Adds "Copy Last Command" to the terminal's context menu, copying the last finished command's command line without the prompt in front of it; "Copy Last Prompt" copies the prompt's lines, PS1 included</li>
           <li>Adds detection of URLs, file paths (with their <code>:line:column</code>) and patterns of your own in terminal output: they are underlined like OSC 8 hyperlinks once output goes quiet and open with Ctrl+click, the context menu or vi's <code>gx</code>, and <code>]x</code> / <code>[x</code> move between them. Detection runs off the parser and its file checks on a thread of their own</li>
