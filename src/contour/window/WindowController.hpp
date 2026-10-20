@@ -6,10 +6,12 @@
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/platform/NativeWindowFrame.hpp>
+#include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/platform/WindowShadowController.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -129,7 +131,10 @@ class WindowController:
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
     /// @param windowId The backing vtworkspace::Window this controller adapts.
-    WindowController(session::TerminalSessionManager& manager, vtworkspace::WindowId windowId);
+    /// @param initialPosition The first window's remembered location, absent for additional windows.
+    WindowController(session::TerminalSessionManager& manager,
+                     vtworkspace::WindowId windowId,
+                     std::optional<WindowPosition> initialPosition = std::nullopt);
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -711,9 +716,12 @@ class WindowController:
 
     /// Scale-settlement handler (DevicePixelRatioChange / screenChanged): when the window's resolved
     /// content scale actually changed, re-derives the font DPI (grid reflows in place) and issues ONE
-    /// grid-preserving corrective window resize (user decision: monitor moves and late Wayland
+    /// queued grid-preserving corrective window resize (user decision: monitor moves and late Wayland
     /// fractional-scale arrival keep the grid, not the pixel size). Idempotent per scale value.
     void onWindowScaleMaybeChanged();
+
+    /// Restores the captured grid after DPI processing and the native move/resize loop finish.
+    void settlePendingWindowScaleChange();
 
     /// OS window activation handler (QWindow::activeChanged): grants focus ownership to this window
     /// when it becomes the active OS window and revokes it when it stops being active, so alt-tabbing
@@ -753,6 +761,14 @@ class WindowController:
 
     session::TerminalSessionManager& _manager;
     vtworkspace::WindowId _windowId;
+    // Retained until the first normal expose so late native frame margins can be clamped too.
+    std::optional<WindowPosition> _initialPosition;
+    std::optional<WindowPosition> _lastWindowPosition;
+
+    /// Records normal-window moves without persisting maximize/fullscreen coordinates.
+    void rememberWindowPosition();
+    /// Clamps and records the initial normal placement after the configured size has been calculated.
+    void restoreWindowPosition();
 
     // Wheel state for the tab strip. Separate from the grid's (which lives on TerminalSession) so a
     // gesture over the strip is judged on its own, and so the accumulator does not jump when the
@@ -856,6 +872,14 @@ class WindowController:
     bool _maximizedState = false;
     // The content scale the geometry was last derived for (settlement idempotence latch).
     double _lastAppliedScale = 0.0;
+    // Page captured before native DPI resizing; also coalesces the queued settlement callback.
+    struct PendingScalePage
+    {
+        vtbackend::PageSize page;
+        int sessionId;
+    };
+    std::optional<PendingScalePage> _pendingScalePage;
+    platform::WindowMoveResizePhase _nativeMoveResizePhase = platform::WindowMoveResizePhase::Idle;
     // True while our own content-driven resize is in flight (straddle guard, see onWindowScaleMaybeChanged).
     bool _inContentDrivenResize = false;
 };

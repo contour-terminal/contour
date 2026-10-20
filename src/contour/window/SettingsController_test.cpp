@@ -630,6 +630,16 @@ TEST_CASE("SettingsController: a derived colour is pinned in one edit, and follo
     CHECK(sourceOf("background") == "scheme");
 }
 
+TEST_CASE("SettingsController: remember window position persists and resets", "[settings][window-position]")
+{
+    auto fx = Fixture("remember_window_position: false\n");
+    CHECK_FALSE(fx.cfg.rememberWindowPosition.value());
+    REQUIRE(fx.controller->setGlobalField("remember_window_position", true));
+    CHECK(fx.cfg.rememberWindowPosition.value());
+    REQUIRE(fx.controller->resetGlobalField("remember_window_position"));
+    CHECK_FALSE(fx.cfg.rememberWindowPosition.value());
+}
+
 TEST_CASE("SettingsController: global overrides write settings.yml, apply, and reset", "[settings]")
 {
     auto fx = Fixture("default_profile: main\n"

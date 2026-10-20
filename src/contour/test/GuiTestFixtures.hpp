@@ -417,6 +417,28 @@ class TestEnvironment final: public core::Environment
     Overrides _overrides;
 };
 
+/// In-memory window location store; never reads or writes the test machine's user state.
+class InMemoryWindowPositionStore final: public contour::window::WindowPositionStore
+{
+  public:
+    std::optional<contour::window::WindowPosition> value;
+    mutable size_t loads = 0;
+    size_t saves = 0;
+    [[nodiscard]] std::expected<std::optional<contour::window::WindowPosition>, std::string> load(
+        std::filesystem::path const&) const override
+    {
+        ++loads;
+        return value;
+    }
+    [[nodiscard]] std::expected<void, std::string> save(
+        std::filesystem::path const&, contour::window::WindowPosition const& position) override
+    {
+        value = position;
+        ++saves;
+        return {};
+    }
+};
+
 /// Builds a ContourGuiApp whose parameters() are populated with defaults (so profileName() resolves
 /// to the default "main" profile) without running the GUI. The default-constructed config already
 /// seeds a "main" profile and a "default" colorscheme, so no config file is needed. The app's real
@@ -461,7 +483,8 @@ class TestApp
              std::move(identity),
              _sessionFiles,
              nullptr,
-             linkServices())
+             linkServices(),
+             std::make_unique<InMemoryWindowPositionStore>())
     {
         parseTerminalVerb();
     }
@@ -489,7 +512,8 @@ class TestApp
              testHostIdentity(),
              _sessionFiles,
              std::move(placement),
-             linkServices())
+             linkServices(),
+             std::make_unique<InMemoryWindowPositionStore>())
     {
         parseTerminalVerb();
     }
@@ -534,7 +558,8 @@ class TestApp
              testHostIdentity(),
              _sessionFiles,
              nullptr,
-             linkServices())
+             linkServices(),
+             std::make_unique<InMemoryWindowPositionStore>())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);

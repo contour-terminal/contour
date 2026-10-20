@@ -2305,6 +2305,28 @@ profiles:
     CHECK(alt->terminalSize.value().lines == vtbackend::LineCount(30));
 }
 
+TEST_CASE("Config: remember window position defaults and explicit values round trip",
+          "[config][window-position]")
+{
+    QTemporaryDir dir;
+    auto const defaults = loadFromYaml(dir, "default_profile: main\n");
+    auto const generated = YAML::Load(contour::config::defaultConfigString());
+#ifdef _WIN32
+    CHECK(defaults.rememberWindowPosition.value());
+    CHECK(generated["remember_window_position"].as<bool>());
+#else
+    CHECK_FALSE(defaults.rememberWindowPosition.value());
+    CHECK_FALSE(generated["remember_window_position"].as<bool>());
+#endif
+    for (auto const* value: { "true", "false" })
+    {
+        auto const configured = loadFromYaml(dir, std::string("remember_window_position: ") + value + "\n");
+        auto const reloaded =
+            loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(configured));
+        CHECK(reloaded.rememberWindowPosition.value() == (std::string_view(value) == "true"));
+    }
+}
+
 TEST_CASE("Config: row snapping is opt in and round trips", "[config][row-resize]")
 {
     QTemporaryDir dir;

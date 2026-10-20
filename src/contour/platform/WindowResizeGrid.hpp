@@ -5,6 +5,7 @@
 
 #include <QtCore/QObject>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -14,6 +15,13 @@ class QWindow;
 namespace contour::platform
 {
 
+/// Whether Windows is inside its native interactive move/resize loop.
+enum class WindowMoveResizePhase : uint8_t
+{
+    Idle,
+    Active
+};
+
 /// Installs a window-scoped native resize subscription on Windows or macOS.
 /// Must be created and destroyed on the window's GUI thread.
 /// @param window The window to constrain; no native handle is created early.
@@ -21,9 +29,12 @@ namespace contour::platform
 ///             Queried for each resize so configuration reloads and font/DPI changes take effect.
 /// Windows constrains each interactive proposal; macOS aligns the window when live resizing ends.
 /// X11 uses size hints instead; Wayland has no resize-increment hint.
+/// @param interactionChanged Receives Windows move/resize loop entry and exit, even with snapping disabled.
 /// @return An owning subscription, or nullptr where no subscription is required.
 [[nodiscard]] std::unique_ptr<QObject> makeWindowResizeGrid(
-    QWindow& window, std::function<std::optional<geometry::RowResizeGrid>()> const& grid);
+    QWindow& window,
+    std::function<std::optional<geometry::RowResizeGrid>()> const& grid,
+    std::function<void(WindowMoveResizePhase)> const& interactionChanged = {});
 
 /// Refines Qt's X11 size hints with the physical row metrics, preserving all unrelated hints.
 /// Call after applying Qt's ordinary hints; does not create a native window early.
