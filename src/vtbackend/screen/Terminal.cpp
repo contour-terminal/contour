@@ -1250,7 +1250,6 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                 .lineOffset = base,
                 .lines = _indicatorStatusScreen.pageSize().lines,
                 .background = indicatorStatusLineColors().background,
-                .position = _settings.statusDisplayPosition,
                 .leadingColumns = _indicatorStatusScreen.pageSize().columns - _settings.pageSize.columns,
             };
             return _indicatorStatusScreen.pageSize().lines;
