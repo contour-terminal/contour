@@ -16,6 +16,7 @@ add_library(contour_platform STATIC
     Announcer.hpp
     Audio.cpp Audio.hpp
     AudioNote.hpp
+    MultimediaEnvironment.hpp
     BlurBehind.cpp BlurBehind.hpp
     Clipboard.cpp Clipboard.hpp
     ColorConversion.hpp

@@ -5,6 +5,7 @@
 
 #include <contour/session/ExitCode.hpp>
 
+#include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -12,7 +13,10 @@
 #include <cstdlib>
 
 using contour::session::exitCodeFor;
+using contour::session::QuickExitNotice;
+using contour::session::quickExitNoticeFor;
 using contour::session::SessionExitStatus;
+using contour::session::sessionExitStatusOf;
 
 TEST_CASE("exitCodeFor: no session status preserves the event-loop fallback", "[contour][exitcode]")
 {
@@ -48,3 +52,35 @@ TEST_CASE("exitCodeFor: an SSH normal exit propagates its code and a signal exit
     CHECK(exitCodeFor(signalled, 0) == EXIT_FAILURE);
 }
 #endif
+
+TEST_CASE("quickExitNoticeFor: a quick exit is reported unless the shell said it succeeded",
+          "[contour][exitcode]")
+{
+    // A shell that ends within early_exit_threshold may have failed to start -- its error is on screen
+    // and must stay readable. A clean exit status says it did not: that is `exit` or Ctrl+D, and the
+    // window closes as it would at any other time.
+    using vtpty::Process;
+    CHECK(quickExitNoticeFor(Process::ExitStatus { Process::NormalExit { 0 } }) == QuickExitNotice::Skip);
+    CHECK(quickExitNoticeFor(Process::ExitStatus { Process::NormalExit { 1 } }) == QuickExitNotice::Show);
+    CHECK(quickExitNoticeFor(Process::ExitStatus { Process::NormalExit { 127 } }) == QuickExitNotice::Show);
+    CHECK(quickExitNoticeFor(Process::ExitStatus { Process::SignalExit { 11 } }) == QuickExitNotice::Show);
+    // A device that cannot tell how its program ended is not taken to have succeeded.
+    CHECK(quickExitNoticeFor(SessionExitStatus {}) == QuickExitNotice::Show);
+}
+
+#ifdef VTPTY_LIBSSH2
+TEST_CASE("quickExitNoticeFor: an SSH session's remote exit status counts the same", "[contour][exitcode]")
+{
+    using vtpty::SshSession;
+    CHECK(quickExitNoticeFor(SshSession::ExitStatus { SshSession::NormalExit { 0 } })
+          == QuickExitNotice::Skip);
+    CHECK(quickExitNoticeFor(SshSession::ExitStatus { SshSession::SignalExit { "TERM", "", "" } })
+          == QuickExitNotice::Show);
+}
+#endif
+
+TEST_CASE("sessionExitStatusOf: a device that runs no process reports no status", "[contour][exitcode]")
+{
+    auto const pty = vtpty::MockPty { vtpty::PageSize { vtpty::LineCount(5), vtpty::ColumnCount(20) } };
+    CHECK_FALSE(sessionExitStatusOf(pty).has_value());
+}

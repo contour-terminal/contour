@@ -2,10 +2,12 @@
 #pragma once
 
 #include <vtpty/Process.hpp>
+#include <vtpty/Pty.hpp>
 #ifdef VTPTY_LIBSSH2
     #include <vtpty/SshSession.hpp>
 #endif
 
+#include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <variant>
@@ -55,6 +57,40 @@ using SessionExitStatus = std::optional<std::variant<vtpty::Process::ExitStatus
 #else
     return mapProcess(std::get<vtpty::Process::ExitStatus>(*status));
 #endif
+}
+
+/// Reads how the program behind @p device ended.
+/// @param device The session's terminal device.
+/// @return Its exit status; nullopt for a device that runs no program of its own, or not yet ended.
+[[nodiscard]] inline SessionExitStatus sessionExitStatusOf(vtpty::Pty const& device)
+{
+    if (auto const* localProcess = dynamic_cast<vtpty::Process const*>(&device))
+        if (auto const status = localProcess->checkStatus())
+            return *status;
+#ifdef VTPTY_LIBSSH2
+    if (auto const* sshSession = dynamic_cast<vtpty::SshSession const*>(&device))
+        if (auto const status = sshSession->exitStatus())
+            return *status;
+#endif
+    return std::nullopt;
+}
+
+/// Whether a shell that ended within `early_exit_threshold` keeps its window open to say so.
+enum class QuickExitNotice : uint8_t
+{
+    Skip, ///< It said it succeeded -- `exit`, Ctrl+D -- so the window closes as at any other time.
+    Show, ///< It may have failed to start, and what it printed must stay readable.
+};
+
+/// Decides whether a shell's quick end is reported as a failed start.
+///
+/// Only an exit status of success clears it: a failure, a signal, and a device that cannot tell how its
+/// program ended are all taken for what the notice exists for.
+/// @param status How the shell ended.
+/// @return Whether the notice is shown.
+[[nodiscard]] inline QuickExitNotice quickExitNoticeFor(SessionExitStatus const& status) noexcept
+{
+    return exitCodeFor(status, EXIT_FAILURE) == EXIT_SUCCESS ? QuickExitNotice::Skip : QuickExitNotice::Show;
 }
 
 } // namespace contour::session

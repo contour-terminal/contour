@@ -15,6 +15,7 @@
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/platform/MultimediaEnvironment.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/platform/QtPath.hpp>
@@ -427,7 +428,10 @@ void ContourGuiApp::relaunchOnAutomaticGpu()
     // the only way onto another GPU is a new process: this one, restarted once without the variables it
     // set. The restarted one runs `auto` and has no watchdog, so it cannot restart again.
     auto const failed = _openGlGpuTitle.value_or("The configured GPU");
-    if (_selfOnlyEnvironment.empty())
+    // The marker is set together with every variable that selects a GPU; the list it sits in also holds
+    // ones that select none (keepMultimediaOffTheGpus()).
+    if (std::ranges::find(_selfOnlyEnvironment, display::SelfSetEnvironmentMarker)
+        == _selfOnlyEnvironment.end())
     {
         errorLog()("{} could not render. Contour set nothing to select it, so there is nothing to undo.",
                    failed);
@@ -506,6 +510,19 @@ void ContourGuiApp::reportGpuFallback(std::string_view failed, std::string_view 
     notification.title = "Contour";
     notification.body = message;
     _gpuNotifier->notify(notification);
+}
+
+void ContourGuiApp::keepMultimediaOffTheGpus()
+{
+    auto const isSet = [](std::string_view name) {
+        return qEnvironmentVariableIsSet(std::string(name).c_str());
+    };
+    for (auto const name: platform::multimediaProbeVariablesToEmpty(isSet))
+    {
+        auto nameStore = std::string(name);
+        qputenv(nameStore.c_str(), "");
+        _selfOnlyEnvironment.push_back(std::move(nameStore));
+    }
 }
 
 void ContourGuiApp::applyOpenGlGpuSelection()
@@ -1399,6 +1416,8 @@ int ContourGuiApp::terminalGuiAction()
     // The driver stack reads its GPU-selection variables when the display connection opens.
     takeGpuFallbackRequest();
     applyOpenGlGpuSelection();
+    // Before the multimedia warm-up below loads the backend, and while this is the only thread.
+    keepMultimediaOffTheGpus();
 
     // NB: We use QApplication over QGuiApplication because we want to use SystemTrayIcon.
     // NOTE: Cannot use ScopedTimer here because QApplication must live until end of function.
