@@ -54,7 +54,7 @@ TEST_CASE("restored native frames fit the work area for arbitrary saved position
 TEST_CASE("window position side file roundtrips and rejects malformed coordinates",
           "[contour][window-position]")
 {
-    QTemporaryDir directory;
+    QTemporaryDir const directory;
     REQUIRE(directory.isValid());
     auto const path = std::filesystem::path(directory.path().toStdWString()) / WindowPositionFileName;
     auto store = FileWindowPositionStore {};
