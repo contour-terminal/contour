@@ -101,7 +101,7 @@ namespace
             }
             if (!_view)
             {
-                auto* tile = NSApp.dockTile;
+                auto* const tile = NSApp.dockTile;
                 _previousContent = tile.contentView;
                 _view = [[ContourTaskbarProgressView alloc]
                     initWithFrame:NSMakeRect(0, 0, tile.size.width, tile.size.height)];

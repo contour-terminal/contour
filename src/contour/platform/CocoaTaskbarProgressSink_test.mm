@@ -14,7 +14,7 @@ TEST_CASE("Dock progress restores existing content and leaves badges alone",
 {
     if (QGuiApplication::platformName() != QStringLiteral("cocoa"))
         SKIP("Requires CONTOUR_TEST_DISPLAY=1 and the Cocoa Qt platform.");
-    auto* tile = NSApp.dockTile;
+    auto* const tile = NSApp.dockTile;
     NSView* const original = tile.contentView;
     NSString* const badge = tile.badgeLabel;
     auto sink = contour::platform::makeTaskbarProgressSink();
@@ -29,10 +29,11 @@ TEST_CASE("Dock progress restores existing content and leaves badges alone",
         REQUIRE(tile.contentView != nil);
         CHECK(tile.contentView != original);
         // Exercise drawing into a bitmap as well as the Dock's display path.
-        auto* image = [tile.contentView bitmapImageRepForCachingDisplayInRect:tile.contentView.bounds];
+        auto* const image = [tile.contentView bitmapImageRepForCachingDisplayInRect:tile.contentView.bounds];
         REQUIRE(image != nil);
         [tile.contentView cacheDisplayInRect:tile.contentView.bounds toBitmapImageRep:image];
-        CHECK((tile.badgeLabel == badge || [tile.badgeLabel isEqualToString:badge]));
+        NSString* const currentBadge = tile.badgeLabel;
+        CHECK((currentBadge == badge || (badge != nil && [currentBadge isEqualToString:badge])));
     }
     sink->setApplicationProgress({});
     CHECK(tile.contentView == original);
@@ -47,10 +48,10 @@ TEST_CASE("Dock progress restores custom content and preserves a nonempty badge"
 {
     if (QGuiApplication::platformName() != QStringLiteral("cocoa"))
         SKIP("Requires CONTOUR_TEST_DISPLAY=1 and the Cocoa Qt platform.");
-    auto* tile = NSApp.dockTile;
+    auto* const tile = NSApp.dockTile;
     NSView* const original = tile.contentView;
     NSString* const badge = tile.badgeLabel;
-    auto* custom = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, tile.size.width, tile.size.height)];
+    auto* const custom = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, tile.size.width, tile.size.height)];
     tile.contentView = custom;
     tile.badgeLabel = @"7";
     auto sink = contour::platform::makeTaskbarProgressSink();
@@ -78,10 +79,14 @@ TEST_CASE("Dock busy progress animates and determinate progress stops animating"
         SKIP("Requires CONTOUR_TEST_DISPLAY=1 and the Cocoa Qt platform.");
     auto sink = contour::platform::makeTaskbarProgressSink();
     auto const snapshot = [] {
-        auto* view = NSApp.dockTile.contentView;
-        auto* bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
+        auto* const view = NSApp.dockTile.contentView;
+        REQUIRE(view != nil);
+        auto* const bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
+        REQUIRE(bitmap != nil);
         [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
-        return [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+        auto* const image = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@ {}];
+        REQUIRE(image != nil);
+        return image;
     };
     auto const advanceAnimation = [] {
         QEventLoop loop;
@@ -90,7 +95,6 @@ TEST_CASE("Dock busy progress animates and determinate progress stops animating"
     };
     sink->setApplicationProgress({ .state = vtbackend::ProgressState::Indeterminate });
     auto* before = snapshot();
-    REQUIRE(before != nil);
     advanceAnimation();
     CHECK_FALSE([before isEqualToData:snapshot()]);
     sink->setApplicationProgress({ .state = vtbackend::ProgressState::Normal, .percentage = 60 });
