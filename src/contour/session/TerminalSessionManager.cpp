@@ -155,11 +155,11 @@ window::WindowController* TerminalSessionManager::createWindowController()
     {
         if (auto saved = _app.windowPositionStore().load(_app.config().configFile.parent_path()
                                                          / window::WindowPositionFileName))
-            initialPosition = std::move(*saved);
+            initialPosition = *saved;
         else
             errorLog()("Failed to load window position: {}", saved.error());
     }
-    auto* controller = new window::WindowController(*this, window->id(), std::move(initialPosition));
+    auto* controller = new window::WindowController(*this, window->id(), initialPosition);
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
     _controllersByWindow[window->id().value] = controller;
     // A freshly spawned window is the one the user is looking at. Seeding ownership here (rather than

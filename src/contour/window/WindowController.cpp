@@ -46,7 +46,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                                    std::optional<WindowPosition> initialPosition):
     _manager { manager },
     _windowId { windowId },
-    _initialPosition { std::move(initialPosition) },
+    _initialPosition { initialPosition },
     // The palette's sources. They hold references into the app's Config, which outlives every window
     // and survives a config reload in place (the loaded values are assigned into it, the object is not
     // replaced), so these references stay valid for this controller's whole life.
