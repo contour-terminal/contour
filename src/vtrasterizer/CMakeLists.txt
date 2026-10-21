@@ -37,6 +37,7 @@ set(_source_files
 )
 
 set(_test_files
+    BackgroundRenderer_test.cpp
     AtlasBudget_test.cpp
     TextClusterGrouper_test.cpp
     BoxDrawingRenderer_test.cpp

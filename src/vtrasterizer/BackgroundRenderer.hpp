@@ -21,11 +21,14 @@ class BackgroundRenderer: public Renderable
     /// @param gridMetrics
     /// @param defaultColor
     /// @param renderTarget
-    BackgroundRenderer(GridMetrics const& gridMetrics, vtbackend::RGBColor const& defaultColor);
+    BackgroundRenderer(GridMetrics const& gridMetrics, vtbackend::RGBColor defaultColor);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
 
     constexpr void setOpacity(float value) noexcept { _opacity = static_cast<uint8_t>(value * 255.f); }
+
+    /// Updates the default background for the active terminal without borrowing its palette.
+    constexpr void setDefaultColor(vtbackend::RGBColor color) noexcept { _defaultColor = color; }
 
     // TODO: pass background color directly (instead of whole grid cell),
     // because there is no need to detect bg/fg color more than once per grid cell!
@@ -39,7 +42,7 @@ class BackgroundRenderer: public Renderable
 
   private:
     // private data
-    vtbackend::RGBColor const& _defaultColor;
+    vtbackend::RGBColor _defaultColor;
     uint8_t _opacity = 255;
 };
 
