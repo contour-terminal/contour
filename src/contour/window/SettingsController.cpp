@@ -1537,6 +1537,11 @@ namespace
                             "Snap window height to rows",
                             "Align startup and manual resizing with one visible pane. Wayland: startup only.",
                             [](config::Config const& c) { return c.snapToRows.value(); }),
+            globalBoolField("remember_window_position",
+                            "Remember window position",
+                            "Remember position and monitor, without saving size. Defaults on for Windows; "
+                            "opt in on macOS/X11. Wayland controls placement. Restores on next startup.",
+                            [](config::Config const& c) { return c.rememberWindowPosition.value(); }),
             globalBoolField("tab_switch_on_horizontal_wheel",
                             "Switch tabs on horizontal wheel",
                             "A horizontal wheel tilt or trackpad swipe switches to the previous/next tab.",

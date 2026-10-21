@@ -1421,6 +1421,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("spawn_new_process", c.spawnNewProcess);
         loadFromEntry("reflow_on_resize", c.reflowOnResize);
         loadFromEntry("snap_to_rows", c.snapToRows);
+        loadFromEntry("remember_window_position", c.rememberWindowPosition);
         loadFromEntry("tab_switch_on_horizontal_wheel", c.tabSwitchOnHorizontalWheel);
         loadFromEntry("accessibility_announcements", c.accessibilityAnnouncements);
         loadFromEntry("accessibility_caret_reporting", c.accessibilityCaretReporting);

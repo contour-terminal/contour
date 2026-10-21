@@ -1460,6 +1460,11 @@ struct Config
     ConfigEntry<bool, documentation::SpawnNewProcess> spawnNewProcess { false };
     ConfigEntry<bool, documentation::ReflowOnResize> reflowOnResize { true };
     ConfigEntry<bool, documentation::SnapToRows> snapToRows { false };
+#ifdef _WIN32
+    ConfigEntry<bool, documentation::RememberWindowPosition> rememberWindowPosition { true };
+#else
+    ConfigEntry<bool, documentation::RememberWindowPosition> rememberWindowPosition { false };
+#endif
     ConfigEntry<bool, documentation::TabSwitchOnHorizontalWheel> tabSwitchOnHorizontalWheel { true };
     ConfigEntry<bool, documentation::HyperlinkHoverTooltip> hyperlinkHoverTooltip { true };
 

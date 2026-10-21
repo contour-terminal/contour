@@ -152,7 +152,18 @@ window::WindowController* TerminalSessionManager::createWindowController()
     // Every OS window gets its own vtworkspace::Window; the controller adapts exactly that window (all its
     // reads and writes are keyed by the WindowId).
     auto* window = _model->createWindow();
-    auto* controller = new window::WindowController(*this, window->id());
+    auto initialPosition = std::optional<window::WindowPosition> {};
+    // Restore only the first window. Additional windows keep the existing spawn-screen policy.
+    if (_app.config().rememberWindowPosition.value() && _controllersByWindow.empty()
+        && !_app.config().configFile.empty() && QGuiApplication::platformName() != QStringLiteral("wayland"))
+    {
+        if (auto saved = _app.windowPositionStore().load(_app.config().configFile.parent_path()
+                                                         / window::WindowPositionFileName))
+            initialPosition = *saved;
+        else
+            errorLog()("Failed to load window position: {}", saved.error());
+    }
+    auto* controller = new window::WindowController(*this, window->id(), initialPosition);
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
     _controllersByWindow[window->id().value] = controller;
     // A freshly spawned window is the one the user is looking at. Seeding ownership here (rather than

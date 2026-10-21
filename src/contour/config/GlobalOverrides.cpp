@@ -49,6 +49,7 @@ namespace
         scalar<&Config::spawnNewProcess>("spawn_new_process"),
         scalar<&Config::reflowOnResize>("reflow_on_resize"),
         scalar<&Config::snapToRows>("snap_to_rows"),
+        scalar<&Config::rememberWindowPosition>("remember_window_position"),
         scalar<&Config::tabSwitchOnHorizontalWheel>("tab_switch_on_horizontal_wheel"),
         scalar<&Config::accessibilityAnnouncements>("accessibility_announcements"),
         scalar<&Config::accessibilityCaretReporting>("accessibility_caret_reporting"),

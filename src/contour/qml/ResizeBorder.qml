@@ -16,6 +16,9 @@ Item {
 
     anchors.fill: parent
     z: 1000
+    // Resizing a maximized window can replace its normal restore geometry. Leave the top edge
+    // to the title bar in that state, so double-clicking it restores the window instead.
+    enabled: window.visibility === Window.Windowed
 
     // Helper to create one resize zone.
     component ResizeZone: MouseArea {

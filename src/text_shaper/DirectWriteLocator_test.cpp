@@ -118,6 +118,33 @@ TEMPLATE_TEST_CASE("DirectWriteLocator.shapers_preserve_covered_text",
         CHECK(glyph.glyph.index.value != 0);
 }
 
+TEST_CASE("DirectWriteShaper.refreshes_cached_metrics_after_DPI_change", "[directwrite][dpi]")
+{
+    auto locator = DirectWriteLocator {};
+    auto shaper = DirectWriteShaper({ 96, 96 }, locator);
+    auto const desc = description("Consolas");
+    auto const font = shaper.loadFont(desc, FontSize { 13 });
+    REQUIRE(font);
+    auto const initial = shaper.metrics(*font);
+    for (auto const dpi: { 144, 192, 96 })
+    {
+        shaper.setDPI({ dpi, dpi });
+        auto reference = DirectWriteShaper({ dpi, dpi }, locator);
+        auto const fresh = reference.loadFont(desc, FontSize { 13 });
+        REQUIRE(fresh);
+        CHECK(shaper.loadFont(desc, FontSize { 13 }) == font);
+        auto const actual = shaper.metrics(*font);
+        auto const expected = reference.metrics(*fresh);
+        CHECK(actual.lineHeight == expected.lineHeight);
+        CHECK(actual.advance == expected.advance);
+        CHECK(actual.ascender == expected.ascender);
+        CHECK(actual.descender == expected.descender);
+        CHECK(actual.underlinePosition == expected.underlinePosition);
+        CHECK(actual.underlineThickness == expected.underlineThickness);
+    }
+    CHECK(shaper.metrics(*font).lineHeight == initial.lineHeight);
+}
+
 TEST_CASE("DirectWriteShaper.disabled_fallback", "[directwrite][fallback]")
 {
     auto nativeLocator = DirectWriteLocator {};

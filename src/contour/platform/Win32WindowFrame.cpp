@@ -28,7 +28,9 @@ namespace
         if (!api.isUsable())
             return {};
 
-        auto const style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
+        // WS_CAPTION combines WS_BORDER and WS_DLGFRAME. Keep WS_BORDER's one-pixel allowance,
+        // but break the caption combination so its title height is not reserved above our chrome.
+        auto const style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE)) & ~WS_DLGFRAME;
         auto const exStyle = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
 
         auto rect = RECT { 0, 0, 0, 0 };

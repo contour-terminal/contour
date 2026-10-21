@@ -299,6 +299,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/UiStyleProvider.cpp
         window/WindowControlStyleProvider.cpp
         window/WindowController.cpp
+        window/WindowPositionStore.cpp
         session/SessionInput.cpp
         session/FontControl.cpp
         session/SpawnCommand.cpp
@@ -727,6 +728,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/LauncherProgress_test.cpp
             platform/LauncherProgressSink_test.cpp
             platform/NativeWindowFrame_test.cpp
+            window/WindowPositionStore_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
             platform/WindowShadowController_test.cpp
@@ -859,6 +861,20 @@ if(CONTOUR_FRONTEND_GUI)
             PROPERTIES
                 ENVIRONMENT
                     "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=detect_leaks=0;${CONTOUR_QML_TEST_ENVIRONMENT}")
+
+        if(WIN32)
+            # Native HWND geometry cannot be exercised through the offscreen platform. Keep the
+            # regular suite headless, and run the native cases separately on the Windows desktop.
+            add_test(NAME contour_windows_native_test
+                     COMMAND $<TARGET_FILE:contour_gui_test> "[native]")
+            set_tests_properties(contour_windows_native_test
+                PROPERTIES
+                    ENVIRONMENT
+                        "CONTOUR_TEST_DISPLAY=1;QT_QPA_PLATFORM=windows;QT_QUICK_BACKEND=software;${CONTOUR_QML_TEST_ENVIRONMENT}"
+                    RUN_SERIAL TRUE
+                    TIMEOUT 120
+                    LABELS "native;windows")
+        endif()
 
         # Under ThreadSanitizer, ignore_noninstrumented_modules=1, for this suite only.
         #

@@ -286,7 +286,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              core::platform::FileSystem const* fileSystem,
                              std::shared_ptr<vtpty::ProcessPlacement> processPlacement,
                              std::optional<vtbackend::LinkDetectionServices> linkServices,
-                             std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress):
+                             std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress,
+                             std::unique_ptr<window::WindowPositionStore> windowPositionStore):
     ContourApp { env },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeBackgroundExecutor(StatusLineCommandThreads)),
@@ -302,6 +303,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _layoutStore(layoutStore ? std::move(layoutStore) : std::make_unique<config::FileLayoutStore>()),
     _commandHistoryStore(commandHistoryStore ? std::move(commandHistoryStore)
                                              : std::make_unique<command::FileCommandHistoryStore>()),
+    _windowPositionStore(windowPositionStore ? std::move(windowPositionStore)
+                                             : std::make_unique<window::FileWindowPositionStore>()),
     _speechSynthesizer(speechSynthesizer ? std::move(speechSynthesizer) : platform::makeSpeechSynthesizer()),
     _commandOutputFiles(commandOutputFiles ? std::move(commandOutputFiles)
                                            : makeCommandOutputFiles(env, _processLiveness)),

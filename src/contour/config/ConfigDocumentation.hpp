@@ -1030,6 +1030,15 @@ constexpr StringLiteral SnapToRowsConfig {
     "snap_to_rows: {}\n"
 };
 
+constexpr StringLiteral RememberWindowPositionConfig {
+    "\n"
+    "{comment} Remember the normal window position and monitor, without saving window size.\n"
+    "{comment} Enabled by default on Windows; opt in on macOS and X11. Wayland controls placement.\n"
+    "{comment} Restoration applies to the first window at startup.\n"
+    "{comment} Saves monitor-relative x/y and a zero-based monitor index in window-position.yml.\n"
+    "remember_window_position: {}\n"
+};
+
 constexpr StringLiteral TabSwitchOnHorizontalWheelConfig {
     "\n"
     "{comment} Whether a horizontal mouse wheel tilt (or a horizontal trackpad swipe) over the tab\n"
@@ -1947,6 +1956,14 @@ constexpr StringLiteral SnapToRowsWeb {
     "no resize-increment hint, so only startup sizing is supported there. Maximized and fullscreen "
     "sizes are unrestricted. Fractional scaling can leave less than one logical pixel of rounding slack. "
     "A change applies at the next startup or manual resize."
+};
+
+constexpr StringLiteral RememberWindowPositionWeb {
+    "option remembers the last normal window position and monitor, without saving window size. "
+    "The default is `true` on Windows and `false` on other platforms. Enable it to opt in on macOS "
+    "and X11; Wayland leaves placement to the compositor. The first window restores its location "
+    "at startup. The window-position.yml side file stores monitor-relative x/y coordinates and a "
+    "zero-based monitor index. Disabling the option stops reading and writing position state."
 };
 
 constexpr StringLiteral TabSwitchOnHorizontalWheelWeb {
@@ -3307,6 +3324,7 @@ using PTYReadBufferSize = DocumentationEntry<PTYReadBufferSizeConfig, PTYReadBuf
 using PTYBufferObjectSize = DocumentationEntry<PTYBufferObjectSizeConfig, PTYBufferObjectSizeWeb>;
 using ReflowOnResize = DocumentationEntry<ReflowOnResizeConfig, ReflowOnResizeWeb>;
 using SnapToRows = DocumentationEntry<SnapToRowsConfig, SnapToRowsWeb>;
+using RememberWindowPosition = DocumentationEntry<RememberWindowPositionConfig, RememberWindowPositionWeb>;
 using TabSwitchOnHorizontalWheel =
     DocumentationEntry<TabSwitchOnHorizontalWheelConfig, TabSwitchOnHorizontalWheelWeb>;
 using GuiConfigLocked = DocumentationEntry<GuiConfigLockedConfig, GuiConfigLockedWeb>;
