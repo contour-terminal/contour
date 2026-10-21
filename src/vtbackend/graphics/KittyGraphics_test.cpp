@@ -446,7 +446,9 @@ TEST_CASE("KittyGraphics.an_oversized_but_positive_cell_count_is_clamped_to_the_
         pixels += "\x00\xFF\x00\xFF"sv;
     auto const encoded = core::base64::encode(pixels);
 
-    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=99,r=99;{}\033\\", encoded));
+    // `C=1`: a page-filling placement otherwise advances the cursor past the bottom-right corner, which
+    // wraps and scrolls the page by a line, as kitty does -- the clamp is what is under test here.
+    mock.writeToScreen(std::format("\033_Ga=T,f=32,s=2,v=2,i=1,c=99,r=99,C=1;{}\033\\", encoded));
 
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
     CHECK(screen.at(LineOffset(3), ColumnOffset(7)).imageFragment());
@@ -504,6 +506,141 @@ TEST_CASE("KittyGraphics.a_chunked_transmission_of_the_same_size_still_works", "
 
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).imageFragment());
 }
+
+// {{{ cursor movement
+// The spec: "After placing an image on the screen the cursor must be moved to the right by the number of
+// cols in the image placement rectangle and down by the number of rows" -- kitty's own graphics.c moves
+// it down by rows - 1, so it ends on the image's last row, immediately right of it. `C=1` opts out.
+
+TEST_CASE("KittyGraphics.cursor.a_placement_advances_past_the_image", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("\033[1;3H\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=1;/wAAAP8A\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(3)).imageFragment());
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(0), .column = ColumnOffset(4) });
+}
+
+TEST_CASE("KittyGraphics.cursor.a_tall_placement_leaves_the_cursor_on_its_last_row", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("\033[2;3H\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=3;/wAAAP8A\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(3), .column = ColumnOffset(4) });
+}
+
+TEST_CASE("KittyGraphics.cursor.a_put_advances_like_a_transmit_and_display", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("\033_Ga=t,f=24,i=7,s=2,v=1;/wAAAP8A\033\\"sv);
+    mock.writeToScreen("\033[3;2H\033_Ga=p,i=7,c=3,r=2\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(3), .column = ColumnOffset(4) });
+}
+
+TEST_CASE("KittyGraphics.cursor.C_1_keeps_the_cursor_where_it_was", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("\033[2;3H\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=3,C=1;/wAAAP8A\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(1), ColumnOffset(2)).imageFragment());
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
+}
+
+TEST_CASE("KittyGraphics.cursor.text_after_a_placement_continues_beside_it", "[kitty]")
+{
+    // What the advance is for: `icat`-style output writes the caption right after the image.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("AB\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=1;/wAAAP8A\033\\CD"sv);
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(2)).imageFragment());
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(4)).toUtf8() == "C");
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(0), ColumnOffset(5)).toUtf8() == "D");
+}
+
+TEST_CASE("KittyGraphics.cursor.reaching_the_right_edge_wraps_once", "[kitty]")
+{
+    // Leaving the screen is implementation-defined; Contour does what kitty's screen.c and ghostty do:
+    // a cursor pushed to or past the right edge moves to the first column of the next line.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("\033[2;9H\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=2;/wAAAP8A\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(3), .column = ColumnOffset(0) });
+}
+
+TEST_CASE("KittyGraphics.cursor.wrapping_off_the_bottom_margin_scrolls", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033[4;7H\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=1;/wAAAP8A\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(3), .column = ColumnOffset(0) });
+    // The image scrolled up with the page, as kitty scrolls for the wrapped cursor.
+    CHECK(mock.terminal.primaryScreen().at(LineOffset(2), ColumnOffset(6)).imageFragment());
+    CHECK_FALSE(mock.terminal.primaryScreen().at(LineOffset(3), ColumnOffset(6)).imageFragment());
+}
+
+TEST_CASE("KittyGraphics.cursor.without_autowrap_the_right_edge_clamps", "[kitty]")
+{
+    // DECAWM reset: a cursor never wraps, so it stops at the last column -- no wrap row, no scroll.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("\033[?7l\033[4;1H\033_Ga=T,f=24,i=7,s=2,v=1,c=8,r=1;/wAAAP8A\033\\"sv);
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(3), .column = ColumnOffset(7) });
+    CHECK_FALSE(screen.cursor().wrapPending);
+    CHECK(screen.at(LineOffset(3), ColumnOffset(0)).imageFragment());
+    CHECK(screen.at(LineOffset(3), ColumnOffset(7)).imageFragment());
+}
+
+TEST_CASE("KittyGraphics.cursor.the_right_margin_is_the_edge_inside_DECLRMM", "[kitty]")
+{
+    // Left/right margins 3..6 (1-based): the image reaching the right margin wraps to the LEFT margin.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("\033[?69h\033[3;6s\033[2;5H\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=1;/wAAAP8A\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(2), .column = ColumnOffset(2) });
+}
+
+TEST_CASE("KittyGraphics.cursor.without_autowrap_DECLRMM_clamps_to_the_right_margin", "[kitty]")
+{
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen(
+        "\033[?7l\033[?69h\033[3;6s\033[2;5H\033_Ga=T,f=24,i=7,s=2,v=1,c=3,r=1;/wAAAP8A\033\\"sv);
+    CHECK(mock.terminal.primaryScreen().cursor().position
+          == CellLocation { .line = LineOffset(1), .column = ColumnOffset(5) });
+}
+
+TEST_CASE("KittyGraphics.cursor.a_pending_wrap_start_wraps_once", "[kitty]")
+{
+    // Text filled the line, leaving the cursor on the last column with a wrap pending. The image is
+    // placed there, and pushing past the edge wraps once -- the pending wrap is consumed, not doubled.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(4), ColumnCount(8) } };
+    mock.writeToScreen("ABCDEFGH"sv);
+    REQUIRE(mock.terminal.primaryScreen().cursor().wrapPending);
+    mock.writeToScreen("\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=1;/wAAAP8A\033\\"sv);
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(screen.at(LineOffset(0), ColumnOffset(7)).imageFragment());
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) });
+    CHECK_FALSE(screen.cursor().wrapPending);
+}
+
+TEST_CASE("KittyGraphics.cursor.moving_down_scrolls_inside_a_DECSTBM_region", "[kitty]")
+{
+    // Region rows 1..3 (1-based), cursor on its second row, a three-row image: the cursor walks down by
+    // index, so reaching the bottom margin scrolls the region -- as kitty and ghostty do -- and the
+    // row below the region is left alone.
+    auto mock = MockTerm<vtpty::MockPty> { PageSize { LineCount(6), ColumnCount(10) } };
+    mock.writeToScreen("\033[1;3r\033[2;1H\033_Ga=T,f=24,i=7,s=2,v=1,c=2,r=3;/wAAAP8A\033\\"sv);
+    auto const& screen = mock.terminal.primaryScreen();
+    CHECK(screen.cursor().position == CellLocation { .line = LineOffset(2), .column = ColumnOffset(2) });
+    auto const rowAt = [&](int line) -> int {
+        auto const fragment = screen.at(LineOffset(line), ColumnOffset(0)).imageFragment();
+        return fragment ? unbox(fragment->offset().line) : -1;
+    };
+    CHECK(rowAt(0) == 0);  // scrolled up from line 1
+    CHECK(rowAt(1) == 1);  // scrolled up from line 2
+    CHECK(rowAt(2) == -1); // the region's freshly scrolled-in row
+    CHECK(rowAt(3) == 2);  // outside the region: never scrolled
+}
+// }}}
 
 // {{{ animation
 TEST_CASE("KittyGraphics.parse.frame_transmit_reinterprets_cell_keys", "[kitty]")

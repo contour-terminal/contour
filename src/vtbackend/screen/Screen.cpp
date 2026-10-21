@@ -315,7 +315,7 @@ namespace // {{{ helper
         ImageResize resizePolicy { ImageResize::NoResize };
         ImageLayer layer { ImageLayer::Replace };
         bool autoScroll {};
-        bool updateCursor {};
+        ImageCursorPolicy cursorPolicy { ImageCursorPolicy::Stay };
         bool requestStatus {};
     };
 
@@ -338,7 +338,8 @@ namespace // {{{ helper
                                 .value_or(ImageResize::NoResize),
             .layer = toImageLayer(message.header("L")),
             .autoScroll = message.header("l") != nullptr,
-            .updateCursor = message.header("u") != nullptr,
+            .cursorPolicy =
+                message.header("u") != nullptr ? ImageCursorPolicy::BelowImage : ImageCursorPolicy::Stay,
             .requestStatus = message.header("s") != nullptr,
         };
     }
@@ -3001,7 +3002,8 @@ void Screen::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
                 imageSize,
                 alignmentPolicy,
                 resizePolicy,
-                autoScrollAtBottomMargin);
+                autoScrollAtBottomMargin,
+                ImageCursorPolicy::BelowImage);
 
     if (!_terminal->isModeEnabled(DECMode::SixelCursorNextToGraphic))
         linefeed(topLeft.column);
@@ -3020,7 +3022,7 @@ void Screen::renderImage(shared_ptr<Image const> image,
                          ImageAlignment alignmentPolicy,
                          ImageResize resizePolicy,
                          bool autoScroll,
-                         bool updateCursor,
+                         ImageCursorPolicy cursorPolicy,
                          ImageLayer layer)
 {
     // Floor both extents at the one point every image protocol funnels through, so that no caller can
@@ -3085,8 +3087,17 @@ void Screen::renderImage(shared_ptr<Image const> image,
                                   CellLocation { .line = gridOffset.line, .column = gridOffset.column });
             cell.setHyperlink(_cursor.hyperlink);
         };
-        if (updateCursor)
-            moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
+        switch (cursorPolicy)
+        {
+            case ImageCursorPolicy::Stay: break;
+            case ImageCursorPolicy::BelowImage:
+                moveCursorTo(topLeft.line + cursorLineOffset, topLeft.column);
+                break;
+            case ImageCursorPolicy::AdvancePastImage:
+                advanceCursorPastImage(
+                    topLeft, GridSize { .lines = linesToBeRendered, .columns = columnsToBeRendered });
+                break;
+        }
     }
 
     // If there are lines remaining (image didn't fit on screen) and autoScroll is enabled,
@@ -3109,13 +3120,60 @@ void Screen::renderImage(shared_ptr<Image const> image,
         }
         // After auto-scroll, cursor is ON the last image row. Move it below.
         // Only for GIP — Sixel handles its own cursor positioning at the call site.
-        if (updateCursor && !isSixelImage)
+        if (cursorPolicy == ImageCursorPolicy::BelowImage && !isSixelImage)
             linefeed(topLeft.column);
     }
 
     // Move ANSI text cursor to the correct column after image placement.
-    if (updateCursor)
+    if (cursorPolicy == ImageCursorPolicy::BelowImage)
         moveCursorToColumn(topLeft.column);
+}
+
+namespace
+{
+    /// Where a cursor advanced past an image lands relative to the edge text wraps at.
+    enum class ImageEdge : uint8_t
+    {
+        Inside, ///< Left of the edge: immediately right of the image.
+        Wrap,   ///< At or past it, DECAWM set: the next line's first column.
+        Clamp,  ///< At or past it, DECAWM reset: the edge column itself.
+    };
+} // namespace
+
+void Screen::advanceCursorPastImage(CellLocation topLeft, GridSize rendered)
+{
+    // kitty's graphics.c: `c->x += effective_num_cols; c->y += effective_num_rows - 1`, after which its
+    // screen.c wraps a cursor at or past the right edge to column 0 of the next line and scrolls if that
+    // left the bottom margin. Index rather than an absolute move, so the scroll region is honoured the
+    // way kitty and ghostty honour it. The rows are the rendered ones, never more than the page holds, so
+    // the walk is bounded and never scrolls away rows the image could not draw.
+    //
+    // The edge is the one text wraps at -- the right margin inside a DECLRMM band, else the last page
+    // column -- and the wrap lands where a text wrap does, on the band's left margin. Both are asked
+    // here, where the cursor still sits on the image's top-left cell.
+    auto const lastColumn = lastWritableColumn();
+    auto const firstColumn = _terminal->isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins()
+                                 ? margin().horizontal.from
+                                 : ColumnOffset(0);
+    auto const targetColumn = topLeft.column + boxed_cast<ColumnOffset>(rendered.columns);
+    auto const edge = [&]() -> ImageEdge {
+        if (targetColumn <= lastColumn)
+            return ImageEdge::Inside;
+        return _terminal->isModeEnabled(DECMode::AutoWrap) ? ImageEdge::Wrap : ImageEdge::Clamp;
+    }();
+
+    auto const rowsToMove = unbox(rendered.lines) - 1 + (edge == ImageEdge::Wrap ? 1 : 0);
+    for ([[maybe_unused]] auto const _: core::times(rowsToMove))
+        index();
+
+    switch (edge)
+    {
+        case ImageEdge::Inside: _cursor.position.column = targetColumn; break;
+        case ImageEdge::Wrap: _cursor.position.column = firstColumn; break;
+        case ImageEdge::Clamp: _cursor.position.column = lastColumn; break;
+    }
+    _cursor.wrapPending = false;
+    updateCursorIterator();
 }
 
 namespace
@@ -5035,7 +5093,7 @@ void Screen::renderITerm2InlineImage(std::string_view arguments)
         ImageAlignment::TopStart,
         ImageResize::ResizeToFit,
         /*autoScroll*/ true,
-        /*updateCursor*/ true,
+        ImageCursorPolicy::BelowImage,
         ImageLayer::Above);
 }
 
@@ -6385,7 +6443,7 @@ void Screen::renderKittyImage(kitty_graphics::Command const& command,
                 ImageAlignment::TopStart,
                 ImageResize::ResizeToFit,
                 /*autoScroll*/ false,
-                /*updateCursor*/ !command.doNotMoveCursor,
+                command.doNotMoveCursor ? ImageCursorPolicy::Stay : ImageCursorPolicy::AdvancePastImage,
                 command.zIndex < 0 ? ImageLayer::Below : ImageLayer::Above);
 }
 
@@ -8394,7 +8452,7 @@ void Screen::regisImage(ImageSize pixelSize, Image::Data&& rgbaData)
                 ImageAlignment::TopStart,
                 ImageResize::ResizeToFit,
                 /*autoScroll*/ false,
-                /*updateCursor*/ false,
+                ImageCursorPolicy::Stay,
                 ImageLayer::Above);
 }
 
@@ -8818,7 +8876,7 @@ void Screen::handleGipRender(Message const& message)
                       params.resizePolicy,
                       params.autoScroll,
                       params.requestStatus,
-                      params.updateCursor,
+                      params.cursorPolicy,
                       params.layer);
 }
 
@@ -8865,7 +8923,7 @@ void Screen::handleGipOneshot(Message message)
                                      params.alignmentPolicy,
                                      params.resizePolicy,
                                      params.autoScroll,
-                                     params.updateCursor,
+                                     params.cursorPolicy,
                                      params.layer);
 
     if (params.requestStatus)
@@ -8929,7 +8987,7 @@ void Screen::renderImageByName(std::string const& name,
                                ImageResize resizePolicy,
                                bool autoScroll,
                                bool requestStatus,
-                               bool updateCursor,
+                               ImageCursorPolicy cursorPolicy,
                                ImageLayer layer)
 {
     auto const imageRef = _terminal->imagePool().findImageByName(name);
@@ -8944,7 +9002,7 @@ void Screen::renderImageByName(std::string const& name,
                     alignmentPolicy,
                     resizePolicy,
                     autoScroll,
-                    updateCursor,
+                    cursorPolicy,
                     layer);
 
     if (requestStatus)
@@ -8958,7 +9016,7 @@ bool Screen::renderImage(ImageFormat format,
                          ImageAlignment alignmentPolicy,
                          ImageResize resizePolicy,
                          bool autoScroll,
-                         bool updateCursor,
+                         ImageCursorPolicy cursorPolicy,
                          ImageLayer layer)
 {
     assert(format != ImageFormat::Auto && "Auto must be resolved before render");
@@ -9005,7 +9063,7 @@ bool Screen::renderImage(ImageFormat format,
                         alignmentPolicy,
                         resizePolicy,
                         autoScroll,
-                        updateCursor,
+                        cursorPolicy,
                         layer);
             return true;
         }
@@ -9024,7 +9082,7 @@ bool Screen::renderImage(ImageFormat format,
                 alignmentPolicy,
                 resizePolicy,
                 autoScroll,
-                updateCursor,
+                cursorPolicy,
                 layer);
     return true;
 }
