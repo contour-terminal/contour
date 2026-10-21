@@ -23,8 +23,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
-#include <format>
-#include <print>
 #include <string>
 #include <string_view>
 
@@ -152,12 +150,18 @@ void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QS
     auto const orNull = [](char const* text) {
         return text != nullptr ? text : "(null)";
     };
-    auto const severity = type == QtDebugMsg ? std::format("Debug[{}]", orNull(context.category))
-                                             : std::string { severityName(type) };
-
-    std::println(stderr,
-                 "{}: {} ({}:{}, {})",
-                 severity,
+    // A GUI process can have an unavailable or closed stderr. Reporting a Qt warning must not throw
+    // an I/O exception through Qt's message handler (std::println does on a failed write).
+    auto const severity = severityName(type);
+    auto const category = type == QtDebugMsg ? orNull(context.category) : "";
+    // NOLINTNEXTLINE(modernize-use-std-print): std::println throws on an unavailable stderr.
+    std::fprintf(stderr,
+                 "%.*s%s%s%s: %s (%s:%d, %s)\n",
+                 static_cast<int>(severity.size()),
+                 severity.data(),
+                 type == QtDebugMsg ? "[" : "",
+                 category,
+                 type == QtDebugMsg ? "]" : "",
                  localMsg.constData(),
                  orNull(context.file),
                  context.line,
