@@ -638,6 +638,11 @@ TEST_CASE("TerminalSession: right-click opens the context menu exactly when a se
     // (TerminalSessionManager::contextMenuRequested, emitted before the routing that needs a window), and
     // the PTY is checked alongside it: together they distinguish "the menu took the click" from "the
     // application took it" from "nothing took it at all".
+    //
+    // The middle-click section pastes the primary selection, which belongs to the display server and
+    // outlives every case before this one, so start from an empty one rather than whatever they left.
+    QGuiApplication::clipboard()->clear(QClipboard::Selection);
+
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto const pixels = vtbackend::PixelCoordinate {};

@@ -209,22 +209,23 @@ TEST_CASE("display: a live session renders real frames and content changes pixel
 
 namespace
 {
-/// The bounding box of every pixel that differs between @p before and @p after.
+/// The bounding box of every pixel inside @p region that differs between @p before and @p after.
 ///
 /// What a selection paints is a background change, not ink, so it cannot be found by brightness.
 /// Comparing the two frames names exactly the region the selection touched and nothing else.
-[[nodiscard]] QRect changedBounds(QImage const& before, QImage const& after)
+[[nodiscard]] QRect changedBounds(QImage const& before, QImage const& after, QRect const& region)
 {
     if (before.size() != after.size())
         return {};
 
+    auto const area = region.intersected(before.rect());
     auto left = before.width();
     auto right = -1;
     auto top = before.height();
     auto bottom = -1;
 
-    for (auto y = 0; y < before.height(); ++y)
-        for (auto x = 0; x < before.width(); ++x)
+    for (auto const y: std::views::iota(area.top(), area.bottom() + 1))
+        for (auto const x: std::views::iota(area.left(), area.right() + 1))
             if (before.pixel(x, y) != after.pixel(x, y))
             {
                 left = std::min(left, x);
@@ -237,6 +238,43 @@ namespace
         return {};
     return { QPoint(left, top), QPoint(right, bottom) };
 }
+
+/// The bounding box of every pixel that differs between @p before and @p after, anywhere in the frame.
+[[nodiscard]] QRect changedBounds(QImage const& before, QImage const& after)
+{
+    return changedBounds(before, after, before.rect());
+}
+
+/// The part of the frame that holds the terminal grid, which excludes the status line beneath it.
+///
+/// The status line repaints on its own between frames, so a diff over the whole frame would count
+/// its changed pixels as part of whatever the test is measuring.
+[[nodiscard]] QRect pageArea(DisplayHarness const& h, QImage const& frame)
+{
+    auto const metrics = h.display->gridMetrics();
+    auto const pageHeight =
+        metrics.pageMargin.top
+        + (unbox<int>(h.session->terminal().pageSize().lines) * metrics.cellSize.height.as<int>());
+    return { QPoint(0, 0), QPoint(frame.width() - 1, pageHeight - 1) };
+}
+
+/// Puts the X11 primary selection back as it found it.
+///
+/// Completing a selection copies its text to the selection clipboard, which belongs to the display
+/// server and outlives the test. A later case that middle-clicks would paste what this one left behind.
+class SelectionClipboardRestorer
+{
+  public:
+    SelectionClipboardRestorer(): _saved { QGuiApplication::clipboard()->text(QClipboard::Selection) } {}
+    SelectionClipboardRestorer(SelectionClipboardRestorer const&) = delete;
+    SelectionClipboardRestorer(SelectionClipboardRestorer&&) = delete;
+    SelectionClipboardRestorer& operator=(SelectionClipboardRestorer const&) = delete;
+    SelectionClipboardRestorer& operator=(SelectionClipboardRestorer&&) = delete;
+    ~SelectionClipboardRestorer() { QGuiApplication::clipboard()->setText(_saved, QClipboard::Selection); }
+
+  private:
+    QString _saved;
+};
 } // namespace
 
 TEST_CASE("display: a scaled block draws at its full height", "[display][render][textsizing]")
@@ -283,26 +321,31 @@ TEST_CASE("display: a scaled block is selected over its whole height", "[display
 {
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness const h;
+    SelectionClipboardRestorer const restoreClipboard;
 
     h.feedAndSettle("\033[?25l\033[2J\033[999;1H"sv);
     auto const blank = h.pump();
     h.feedAndSettle("\033]66;s=2;X\a"sv);
     auto const unselected = h.pump();
-    auto const glyph = changedBounds(blank, unselected);
+    auto const glyph = changedBounds(blank, unselected, pageArea(h, blank));
     REQUIRE(glyph.isValid());
 
     // Select the block by dragging across its FIRST row only. A block is indivisible, so the
     // highlight must cover both of its rows -- and therefore reach below the glyph's own ink.
+    // The cursor was parked on the last line, so the two-row block ends at the bottom of the page and
+    // starts one row above it.
+    constexpr auto BlockRows = 2;
     h.session->terminal().markScreenDirty();
     {
         auto const _ = std::scoped_lock { h.session->terminal() };
+        auto const firstRow =
+            vtbackend::LineOffset(unbox<int>(h.session->terminal().pageSize().lines) - BlockRows);
         h.session->terminal().setSelector(std::make_unique<vtbackend::LinearSelection>(
             h.session->terminal().selectionHelper(),
-            vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
-                                      .column = vtbackend::ColumnOffset(0) },
+            vtbackend::CellLocation { .line = firstRow, .column = vtbackend::ColumnOffset(0) },
             [](auto&&...) {}));
-        (void) h.session->terminal().selector()->extend(vtbackend::CellLocation {
-            .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) });
+        (void) h.session->terminal().selector()->extend(
+            vtbackend::CellLocation { .line = firstRow, .column = vtbackend::ColumnOffset(1) });
         h.session->terminal().selector()->complete();
     }
 
