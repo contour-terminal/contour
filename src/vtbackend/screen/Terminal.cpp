@@ -1410,6 +1410,11 @@ void Terminal::updateIndicatorStatusLine()
                                   serializeToVT(*this, definitions.right, Styling::Enabled));
         }
     }
+
+    // What the template printed may reset its rendition -- a {Command}'s output is written as printed, SGR
+    // and all -- which leaves the default colours on the cells after it. Those are the indicator's, not
+    // the main page's.
+    _indicatorStatusScreen.grid().lineAt(LineOffset(0)).resolveDefaultColors(colors);
 }
 
 void Terminal::autoScrollToBottomIfEnabled()

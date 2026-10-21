@@ -190,6 +190,22 @@ std::string Line::toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const
     return str;
 }
 
+void Line::resolveDefaultColors(RGBColorPair colors) noexcept
+{
+    auto const resolve = [&](GraphicsAttributes& attributes) {
+        if (isDefaultColor(attributes.foregroundColor))
+            attributes.foregroundColor = colors.foreground;
+        if (isDefaultColor(attributes.backgroundColor))
+            attributes.backgroundColor = colors.background;
+    };
+    // A blank line's cells are its fill, which every cell written later starts from too. The same
+    // mapping keeps equal renditions equal, so the line's shape stays true.
+    resolve(_storage.fillAttrs);
+    for (auto& attributes: _storage.sgr)
+        resolve(attributes);
+    markDirty();
+}
+
 ColumnCount Line::trimmedColumns() const noexcept
 {
     // A blank line is uniformly its fill rendition, so it either trims away entirely or not at all —

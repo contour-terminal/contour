@@ -5085,6 +5085,36 @@ TEST_CASE("Terminal.statusLineCommandWithoutServicesRendersEmpty", "[terminal][s
         mock.terminal.statusLineCommandOutput(StatusLineDefinitions::Command { {}, "echo hi", 10s }).empty());
 }
 
+TEST_CASE("Terminal.statusLineCommandOutputThatResetsKeepsTheIndicatorColors", "[terminal][statusline]")
+{
+    // A command's output is written as it is printed, SGR included, and a reset in it leaves the cells
+    // after it in the default colours: those are the indicator's, not the main page's.
+    using namespace vtbackend;
+
+    auto capture = FakeCommandCapture {};
+    capture.answers.emplace_back("\033[1ma\033[0mb\033[39;49mc");
+    auto executor = core::async::testing::ManualExecutor {};
+    auto mock =
+        MockTerm { CommandPageSize, HistoryLimits {}, 1024, StatusLineCommandServices { capture, executor } };
+    auto& terminal = mock.terminal;
+    terminal.setStatusLineDefinition(parseStatusLineDefinition("{Command:Program=git branch}", "", ""));
+    terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    executor.drain();
+    terminal.refreshRenderBuffer();
+
+    auto const& row = terminal.indicatorStatusLineDisplay();
+    REQUIRE(row.grid().lineAt(LineOffset(0)).toUtf8Trimmed() == "abc");
+    auto const colors = terminal.focused() ? terminal.colorPalette().indicatorStatusLineInsertMode
+                                           : terminal.colorPalette().indicatorStatusLineInactive;
+    for (auto const column: { 0, 1, 2, 10 })
+    {
+        INFO("column " << column);
+        auto const cell = row.at(LineOffset(0), ColumnOffset(column));
+        CHECK(cell.foregroundColor() == Color(colors.foreground));
+        CHECK(cell.backgroundColor() == Color(colors.background));
+    }
+}
+
 TEST_CASE("Terminal.statusLineCommandItemRendersThroughTheVisitor", "[terminal][statusline]")
 {
     using namespace vtbackend;
