@@ -10,8 +10,6 @@
     #include <QtDBus/QDBusMessage>
     #include <QtGui/QGuiApplication>
 
-    #include <utility>
-
 namespace contour::platform
 {
 namespace
@@ -21,15 +19,18 @@ namespace
     class LauncherProgressSink final: public TaskbarProgressSink
     {
       public:
-        /// @param bus Session bus used to broadcast launcher updates.
-        explicit LauncherProgressSink(QDBusConnection bus): _bus(std::move(bus)) {}
+        /// Acquires the session bus only when desktop progress is needed.
+        using BusProvider = QDBusConnection (*)();
+
+        /// @param busProvider Session bus provider used to broadcast launcher updates.
+        explicit LauncherProgressSink(BusProvider busProvider): _busProvider(busProvider) {}
         ~LauncherProgressSink() override { setApplicationProgress({}); }
 
         [[nodiscard]] bool isSupported() const noexcept override
         {
             auto const platform = QGuiApplication::platformName();
-            return _bus.isConnected()
-                   && (platform == QStringLiteral("xcb") || platform == QStringLiteral("wayland"));
+            return (platform == QStringLiteral("xcb") || platform == QStringLiteral("wayland"))
+                   && _busProvider().isConnected();
         }
         [[nodiscard]] TaskbarProgressScope scope() const noexcept override
         {
@@ -50,18 +51,18 @@ namespace
                                            QStringLiteral("Update"));
             message.setArguments({ uri, launcherProgressProperties(progress) });
             // This protocol is a broadcast, not a request: a desktop without a listener simply ignores it.
-            if (!_bus.send(message))
+            if (!_busProvider().send(message))
                 taskbarLog()("Cannot send desktop launcher progress update");
         }
 
       private:
-        QDBusConnection _bus;
+        BusProvider _busProvider;
     };
 } // namespace
 
 std::unique_ptr<TaskbarProgressSink> makeTaskbarProgressSink()
 {
-    return std::make_unique<LauncherProgressSink>(QDBusConnection::sessionBus());
+    return std::make_unique<LauncherProgressSink>(&QDBusConnection::sessionBus);
 }
 } // namespace contour::platform
 #endif

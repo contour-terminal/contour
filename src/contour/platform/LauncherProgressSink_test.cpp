@@ -3,6 +3,7 @@
     #include <contour/platform/DBusSignalSubscription.hpp>
     #include <contour/platform/LauncherProgress.hpp>
     #include <contour/platform/TaskbarProgressSink.hpp>
+    #include <contour/test/NotificationFixtures.hpp>
 
     #include <QtCore/QObject>
     #include <QtCore/QScopeGuard>
@@ -15,6 +16,8 @@
 
     #include <QtTest/QTest>
 
+namespace
+{
 /// Captures the actual D-Bus wire payload, independently of the property builder.
 class LauncherProgressReceiver final: public QObject
 {
@@ -32,15 +35,31 @@ class LauncherProgressReceiver final: public QObject
         ++updates;
     }
 };
+} // namespace
+
+TEST_CASE("Launcher adapter stays disconnected offscreen", "[contour][taskbar-native]")
+{
+    if (QGuiApplication::platformName() != QStringLiteral("offscreen"))
+        SKIP("Requires the offscreen Qt platform.");
+    // The runner's session-bus guard checks construction, updates and destruction for transport access.
+    auto sink = contour::platform::makeTaskbarProgressSink();
+    CHECK_FALSE(sink->isSupported());
+    sink->setApplicationProgress({ .state = vtbackend::ProgressState::Normal, .percentage = 60 });
+}
 
 TEST_CASE("Launcher adapter broadcasts progress and clears it on destruction",
           "[contour][taskbar-native][display]")
 {
     using namespace contour::platform;
-    auto bus = QDBusConnection::sessionBus();
+    if (!contour::test::onPrivateSessionBus())
+        SKIP("Requires a private session bus.");
+    auto const platform = QGuiApplication::platformName();
+    if (platform != QStringLiteral("xcb") && platform != QStringLiteral("wayland"))
+        SKIP("Requires a desktop Qt platform (CONTOUR_TEST_DISPLAY=1).");
     auto sink = makeTaskbarProgressSink();
     if (!sink->isSupported())
         SKIP("Requires a desktop Qt platform and a session bus (CONTOUR_TEST_DISPLAY=1).");
+    auto bus = QDBusConnection::sessionBus();
     auto const previousName = QGuiApplication::desktopFileName();
     auto const restoreName = qScopeGuard([&] { QGuiApplication::setDesktopFileName(previousName); });
     QGuiApplication::setDesktopFileName(QStringLiteral("contour-progress-test"));
