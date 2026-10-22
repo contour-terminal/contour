@@ -10,8 +10,7 @@
 namespace vtrasterizer
 {
 
-BackgroundRenderer::BackgroundRenderer(GridMetrics const& gridMetrics,
-                                       vtbackend::RGBColor const& defaultColor):
+BackgroundRenderer::BackgroundRenderer(GridMetrics const& gridMetrics, vtbackend::RGBColor defaultColor):
     Renderable { gridMetrics }, _defaultColor { defaultColor }
 {
 }

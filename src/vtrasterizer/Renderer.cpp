@@ -717,6 +717,10 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
     }
     _lastObservedTotalPageSize = totalPageSize;
 
+    // The renderer survives tab changes; snapshot the active terminal palette before taking a render buffer.
+    _backgroundRenderer.setDefaultColor(
+        terminal.runUnderStateLock([&] { return terminal.colorPalette().defaultBackground; }));
+
     executeImageDiscards();
 
 #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE) // {{{

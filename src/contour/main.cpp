@@ -27,6 +27,7 @@
 #include <print>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #ifdef _WIN32
     #include <core/WideString.hpp>
@@ -152,16 +153,25 @@ void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QS
     auto const orNull = [](char const* text) {
         return text != nullptr ? text : "(null)";
     };
-    auto const severity = type == QtDebugMsg ? std::format("Debug[{}]", orNull(context.category))
-                                             : std::string { severityName(type) };
-
-    std::println(stderr,
-                 "{}: {} ({}:{}, {})",
-                 severity,
-                 localMsg.constData(),
-                 orNull(context.file),
-                 context.line,
-                 orNull(context.function));
+    try
+    {
+        auto const severity = type == QtDebugMsg ? std::format("Debug[{}]", orNull(context.category))
+                                                 : std::string { severityName(type) };
+        std::println(stderr,
+                     "{}: {} ({}:{}, {})",
+                     severity,
+                     localMsg.constData(),
+                     orNull(context.file),
+                     context.line,
+                     orNull(context.function));
+    }
+    catch (std::system_error const&)
+    {
+        // A GUI process can have an unavailable stderr. A failed diagnostic write must not
+        // propagate through Qt's message handler; there is no usable stream to report it to.
+        if (type != QtFatalMsg)
+            return;
+    }
 
     // Qt considers a fatal message terminal; keep aborting rather than returning into an undefined state.
     if (type == QtFatalMsg)
