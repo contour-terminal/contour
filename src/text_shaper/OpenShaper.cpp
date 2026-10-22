@@ -75,13 +75,15 @@ namespace
 struct FontInfo // NOLINT(readability-identifier-naming)
 {
     string path;
+    int collectionIndex = 0;
     text::FontSize size;
     text::FontWeight weight;
 };
 
 [[maybe_unused]] bool operator==(FontInfo const& a, FontInfo const& b) noexcept
 {
-    return a.path == b.path && a.size.pt == b.size.pt && a.weight == b.weight;
+    return a.path == b.path && a.collectionIndex == b.collectionIndex && a.size.pt == b.size.pt
+           && a.weight == b.weight;
 }
 
 } // namespace
@@ -235,9 +237,10 @@ struct hash<FontInfo>
     size_t operator()(FontInfo const& fd) const noexcept
     {
         auto fnv = core::FNV<char>();
-        return size_t(
-            fnv(fnv(fd.path), std::to_string(fd.size.pt), std::format("{}", fd.weight))); // SSO should
-                                                                                          // kick in.
+        return size_t(fnv(fnv(fd.path),
+                          std::to_string(fd.collectionIndex),
+                          std::to_string(fd.size.pt),
+                          std::format("{}", fd.weight))); // Short fields fit in SSO.
     }
 };
 
@@ -303,6 +306,15 @@ namespace
         if (holds_alternative<FontMemoryRef>(source))
             return get<FontMemoryRef>(source).identifier;
         throw invalid_argument("source");
+    }
+
+    // A collection file can contain unrelated families and several styles. Its path alone
+    // cannot identify a loaded face or a source whose loading has failed.
+    [[nodiscard]] int collectionIndexOf(FontSource const& source)
+    {
+        if (auto const* path = std::get_if<FontPath>(&source))
+            return path->collectionIndex;
+        return 0;
     }
 
     // clang-format off
@@ -693,10 +705,19 @@ struct OpenShaper::PrivateOpenShaper // {{{
     /// regardless of DPI or font size changes.
     unordered_map<FontDescription, FontSourceList> locateCache;
 
+    enum class CoverageSpacing : uint8_t
+    {
+        Unrestricted,
+        Monospace,
+        Proportional,
+    };
+
     /// One remembered answer from resolveByCoverage(), with the face parameters it was found for.
     ///
     /// The answer is a FontKey, and a FontKey encodes a point size and a weight as well as a file,
-    /// so an answer found at one size is wrong at another. A font-size-only change reloads the font
+    /// so an answer found at one size is wrong at another. Spacing policy also belongs to the
+    /// identity: a permissive positive or strict negative must not leak into another description.
+    /// A font-size-only change reloads the font
     /// keys WITHOUT clearing this cache (@see Renderer::applyPendingReconfig), which is how a
     /// coverage-resolved CJK glyph kept rasterizing at the pre-zoom size while the text around it
     /// scaled, and how a bold run reused the regular-weight fallback face.
@@ -709,6 +730,7 @@ struct OpenShaper::PrivateOpenShaper // {{{
     {
         FontSize size {};
         FontWeight weight = FontWeight::Normal;
+        CoverageSpacing spacing = CoverageSpacing::Unrestricted;
         optional<FontKey> resolved; ///< nullopt when no installed font covers the codepoint.
     };
 
@@ -741,11 +763,11 @@ struct OpenShaper::PrivateOpenShaper // {{{
     /// The ceiling on @c resizedFontCount. @see MaxResizedFonts, OpenShaper::setResizedFontLimit.
     size_t resizedFontLimit = MaxResizedFonts;
 
-    // Blacklisted font files as we tried them already and failed.
-    std::vector<std::string> blacklistedSources;
+    // Blacklisted font faces as we tried them already and failed.
+    std::vector<std::pair<std::string, int>> blacklistedSources;
 
     // The key (for caching) should be composed out of:
-    // (file_path, file_mtime, FontWeight, FontSlant, pixelSize)
+    // (file_path, collection_index, file_mtime, FontWeight, FontSlant, pixelSize)
 
     unordered_map<GlyphKey, RasterizedGlyph> glyphs;
     HbBufferPtr hbBuf;
@@ -771,8 +793,12 @@ struct OpenShaper::PrivateOpenShaper // {{{
                                                    FontSize fontSize,
                                                    FontWeight fontWeight) const
     {
-        auto const i = fontPathAndSizeToKeyMapping.find(
-            FontInfo { .path = identifierOf(source), .size = fontSize, .weight = fontWeight });
+        auto const i = fontPathAndSizeToKeyMapping.find(FontInfo {
+            .path = identifierOf(source),
+            .collectionIndex = collectionIndexOf(source),
+            .size = fontSize,
+            .weight = fontWeight,
+        });
         return i != fontPathAndSizeToKeyMapping.end() ? optional { i->second } : nullopt;
     }
 
@@ -784,7 +810,9 @@ struct OpenShaper::PrivateOpenShaper // {{{
             return existing;
 
         auto const sourceId = identifierOf(source);
-        if (std::ranges::any_of(blacklistedSources, [&](auto const& a) { return a == sourceId; }))
+        auto const sourceIndex = collectionIndexOf(source);
+        auto const sourceIdentity = std::pair { sourceId, sourceIndex };
+        if (std::ranges::find(blacklistedSources, sourceIdentity) != blacklistedSources.end())
             return nullopt;
 
         auto ftFacePtrOpt = loadFace(source, fontSize, dpi, ft);
@@ -795,10 +823,12 @@ struct OpenShaper::PrivateOpenShaper // {{{
             // only the strikes it ships, and `OSC 66` asks for arbitrary sizes -- so one scaled write
             // could otherwise retire the user's font for the rest of the session, including at the
             // size it was happily rendering at, since clearCache() does not clear this list.
-            auto const loadedAtAnotherSize = std::ranges::any_of(
-                fontPathAndSizeToKeyMapping, [&](auto const& entry) { return entry.first.path == sourceId; });
+            auto const loadedAtAnotherSize =
+                std::ranges::any_of(fontPathAndSizeToKeyMapping, [&](auto const& entry) {
+                    return entry.first.path == sourceId && entry.first.collectionIndex == sourceIndex;
+                });
             if (!loadedAtAnotherSize)
-                blacklistedSources.emplace_back(sourceId);
+                blacklistedSources.emplace_back(sourceIdentity);
             return nullopt;
         }
 
@@ -815,8 +845,13 @@ struct OpenShaper::PrivateOpenShaper // {{{
                                      .weight = fontWeight };
 
         auto key = createFontKey();
-        fontPathAndSizeToKeyMapping.emplace(
-            pair { FontInfo { .path = sourceId, .size = fontSize, .weight = fontWeight }, key });
+        fontPathAndSizeToKeyMapping.emplace(pair { FontInfo {
+                                                       .path = sourceId,
+                                                       .collectionIndex = sourceIndex,
+                                                       .size = fontSize,
+                                                       .weight = fontWeight,
+                                                   },
+                                                   key });
         fontKeyToHbFontInfoMapping.emplace(pair { key, std::move(fontInfo) });
         locatorLog()(
             "Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, fontSize, dpi, metrics(key));
@@ -930,6 +965,12 @@ struct OpenShaper::PrivateOpenShaper // {{{
         return spacingMatchesPrimary == (pass == FallbackPass::Preferred);
     }
 
+    [[nodiscard]] bool canFallback(HbFontInfo const& fontInfo) const noexcept
+    {
+        return fontFallbackLimit != 0
+               && !std::holds_alternative<FontFallbackNone>(fontInfo.description.fontFallback);
+    }
+
     /// Resolves the next usable fallback font, advancing @p cursor past it.
     ///
     /// The chain is walked once per spacing class: fonts matching the primary's spacing first, then --
@@ -943,6 +984,8 @@ struct OpenShaper::PrivateOpenShaper // {{{
     [[nodiscard]] optional<FontKey> nextFallbackFont(HbFontInfo& fontInfo, FallbackCursor& cursor)
     {
         ZoneScoped;
+        if (!canFallback(fontInfo))
+            return nullopt;
         for (;;)
         {
             if (cursor.index >= fontInfo.fallbacks.size() && !extendFallbacks(fontInfo))
@@ -1004,8 +1047,20 @@ struct OpenShaper::PrivateOpenShaper // {{{
     [[nodiscard]] optional<FontKey> resolveByCoverage(HbFontInfo const& fontInfo, u32string_view codepoints)
     {
         ZoneScoped;
-        if (codepoints.empty() || !locator)
+        if (codepoints.empty() || !locator || !canFallback(fontInfo))
             return nullopt;
+
+        auto spacing = CoverageSpacing::Unrestricted;
+        // Native coverage recovery can need a proportional symbol face even for a monospace
+        // description. This policy affects only the final substitute, never the configured chain.
+        if (fontInfo.description.strictSpacing
+            && locator->coverageFallbackSpacing() == CoverageFallbackSpacing::MatchDescription)
+            spacing = fontInfo.description.spacing == FontSpacing::Mono ? CoverageSpacing::Monospace
+                                                                        : CoverageSpacing::Proportional;
+        auto const acceptsSpacing = [&](HbFontInfo const& candidate) {
+            return spacing == CoverageSpacing::Unrestricted
+                   || admissibleInPass(fontInfo, FallbackPass::Preferred, candidate);
+        };
 
         // Keyed on the first codepoint: a run that reaches this path is overwhelmingly one script, and
         // a fontconfig charset query is far too expensive to repeat per run. Negative answers are cached
@@ -1017,9 +1072,9 @@ struct OpenShaper::PrivateOpenShaper // {{{
         // rather than sitting alongside a second one, which is what keeps this a guard as well as a
         // cache -- @see CoverageCacheEntry.
         auto const cacheKey = codepoints.front();
-        if (auto const i = coverageCache.find(cacheKey); i != coverageCache.end()
-                                                         && i->second.size.pt == fontInfo.size.pt
-                                                         && i->second.weight == fontInfo.weight)
+        if (auto const i = coverageCache.find(cacheKey);
+            i != coverageCache.end() && i->second.size.pt == fontInfo.size.pt
+            && i->second.weight == fontInfo.weight && i->second.spacing == spacing)
             return i->second.resolved;
 
         // A face resolved by coverage for a neighbouring codepoint almost always covers this one too,
@@ -1034,20 +1089,24 @@ struct OpenShaper::PrivateOpenShaper // {{{
             // rasterize this glyph at that size while the text around it scaled.
             if (i->second.size.pt != fontInfo.size.pt || i->second.weight != fontInfo.weight)
                 continue;
-            if (!coversAll(i->second.ftFace.get(), codepoints))
+            if (!acceptsSpacing(i->second) || !coversAll(i->second.ftFace.get(), codepoints))
                 continue;
-            coverageCache[cacheKey] = CoverageCacheEntry { .size = fontInfo.size,
-                                                           .weight = fontInfo.weight,
-                                                           .resolved = candidate };
+            coverageCache[cacheKey] = CoverageCacheEntry {
+                .size = fontInfo.size,
+                .weight = fontInfo.weight,
+                .spacing = spacing,
+                .resolved = candidate,
+            };
             return candidate;
         }
 
         auto resolved = optional<FontKey> { nullopt };
         for (auto const& source: locator->resolve(gsl::span(codepoints.data(), codepoints.size())))
         {
-            resolved = getOrCreateKeyForFont(source, fontInfo.size, fontInfo.weight);
-            if (resolved.has_value())
+            auto const candidate = getOrCreateKeyForFont(source, fontInfo.size, fontInfo.weight);
+            if (candidate && acceptsSpacing(fontKeyToHbFontInfoMapping.at(*candidate)))
             {
+                resolved = candidate;
                 textShapingLog()("Resolved U+{:04X} by coverage to font key:{}.",
                                  static_cast<uint32_t>(cacheKey),
                                  *resolved);
@@ -1055,8 +1114,12 @@ struct OpenShaper::PrivateOpenShaper // {{{
             }
         }
 
-        coverageCache[cacheKey] =
-            CoverageCacheEntry { .size = fontInfo.size, .weight = fontInfo.weight, .resolved = resolved };
+        coverageCache[cacheKey] = CoverageCacheEntry {
+            .size = fontInfo.size,
+            .weight = fontInfo.weight,
+            .spacing = spacing,
+            .resolved = resolved,
+        };
         if (resolved.has_value()
             && std::ranges::find(coverageResolvedFonts, *resolved) == coverageResolvedFonts.end())
             coverageResolvedFonts.push_back(*resolved);

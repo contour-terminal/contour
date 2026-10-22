@@ -109,6 +109,7 @@
         <ul>
           <li>Adds <code>remember_window_position</code> to restore the first window’s position and monitor at startup without saving its size (#2164).</li>
           <li>Fixes Windows font metrics after moving between monitors with different DPI scaling, maximized windows not filling the usable area, and resize handles remaining active while maximized or fullscreen (#2164).</li>
+          <li>Fixes macOS configured font fallback, collection-face selection, and recovery of missing glyphs, including statusline symbols that require a proportional system fallback.</li>
           <li>Adds built-in drawing for more Powerline separators, including inverse dividers, thin chevrons and diagonal lines (#2160).</li>
           <li>Adds the global option <code>snap_to_rows</code> to align window heights to complete terminal rows, avoiding unused space below a bottom status line. Available in Settings and disabled by default (#2158).</li>
           <li>Changes ending a shell within <code>early_exit_threshold</code> with a successful exit status — <code>exit</code> or Ctrl+D — to close the window as at any other time; the "Shell terminated too quickly" notice and its key press remain for a shell that fails, is killed, or whose exit status is unknown</li>
