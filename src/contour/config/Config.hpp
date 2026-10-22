@@ -649,8 +649,8 @@ struct HyperlinkDecorationConfig
 /// One screen group's switches, as YAML spells them (serialisation boundary: bool by design).
 struct ScreenLinkDetectionConfig
 {
-    bool urls = true;      ///< Whether URLs and custom patterns are detected.
-    bool filePaths = true; ///< Whether file paths are detected.
+    bool urls = true;      ///< Whether URLs and custom patterns are detected (not `file:` ones).
+    bool filePaths = true; ///< Whether file paths and `file:` URLs are detected.
 
     bool operator==(ScreenLinkDetectionConfig const&) const = default;
 };
@@ -2015,10 +2015,12 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, StatusLineConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, BackgroundConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HyperlinkDecorationConfig& where);
+    /// Reads link_detection: per screen group, which of urls and file_paths are detected; a key left out
+    /// keeps the value already in @p where.
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, LinkDetectionConfig& where);
     /// Reads file_opener as a command line, or as a map of `command` and `placement`, and validates the command
     /// (FileOpenerTemplate::parse()): one that cannot be used is reported and cleared, so files open with the
     /// system's default application.
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, LinkDetectionConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, FileOpenerConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, PermissionsConfig& where);
     void loadFromEntry(YAML::Node const& node,

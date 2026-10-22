@@ -7508,6 +7508,52 @@ TEST_CASE("Config: link_detection round-trips through the writer", "[config][lin
     CHECK(profile->linkDetection.value() == contour::config::LinkDetectionConfig {});
 }
 
+TEST_CASE("Config: a non-default link_detection round-trips through the writer", "[config][links]")
+{
+    // Order-sensitive on purpose: the screens differ, and so do a screen's two switches, so a writer or a
+    // reader that exchanges urls with file_paths, or primary_screen with other_screens, is caught.
+    constexpr auto Chosen =
+        contour::config::LinkDetectionConfig { .primaryScreen = { .urls = false, .filePaths = true },
+                                               .otherScreens = { .urls = true, .filePaths = false } };
+    QTemporaryDir dir;
+    auto configured = loadFromYaml(dir, "default_profile: main\n");
+    auto* const profile = configured.profile("main");
+    REQUIRE(profile != nullptr);
+    profile->linkDetection.value() = Chosen;
+    REQUIRE(profile->linkDetection.value() != contour::config::LinkDetectionConfig {});
+
+    auto const reloaded =
+        loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(configured));
+    auto const* const reloadedProfile = reloaded.profile("main");
+    REQUIRE(reloadedProfile != nullptr);
+    CHECK(reloadedProfile->linkDetection.value() == Chosen);
+}
+
+TEST_CASE("Config: a profile inherits link_detection keys it leaves out", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        link_detection:
+            primary_screen:
+                urls: false
+    alt:
+        link_detection:
+            other_screens:
+                file_paths: true
+)");
+    auto const* alt = config.profile("alt");
+    REQUIRE(alt != nullptr);
+    auto const value = alt->linkDetection.value();
+    CHECK_FALSE(value.primaryScreen.urls); // inherited from the default profile
+    CHECK(value.primaryScreen.filePaths);  // the default
+    CHECK(value.otherScreens.urls);        // the default
+    CHECK(value.otherScreens.filePaths);   // its own
+}
+
 TEST_CASE("Config: sessionSettings carries the link detection policy", "[config][links]")
 {
     QTemporaryDir dir;
