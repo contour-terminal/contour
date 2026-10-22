@@ -1381,6 +1381,15 @@ class Terminal
     /// @param patterns The compiled table; never null.
     void setLinkPatterns(std::shared_ptr<LinkPatterns const> patterns);
 
+    /// Applies a profile's link detection policy to a running terminal. The caller holds the terminal lock.
+    ///
+    /// A post-construction setter on purpose, as setLinkPatterns() is: live reconfiguration is the feature.
+    /// A new policy replaces the link detector, which fixes its policy for its lifetime; the links found so
+    /// far go with it until the next quiet time, and the hovered link is forgotten. An equal policy changes
+    /// nothing. A policy that detects nothing anywhere leaves no detector at all.
+    /// @param policy Which links detection finds on which screen.
+    void setLinkDetectionPolicy(LinkDetectionPolicy policy);
+
     /// The links detected on the page on display. Does NOT take the lock; callers hold it.
     /// @return The index; nullptr without detection, and while the index still describes another page, or
     ///         the rows of this one before a reflow or a reset renamed them: until the next frame after a
@@ -4034,9 +4043,16 @@ class Terminal
         mutable Memo _memo;
     };
 
-    /// A detector for the current pattern table. Not const: its redraw request reaches this terminal.
-    /// @return The detector; nullptr without detection services, or with no clickable pattern to detect.
+    /// A detector for the current pattern table and detection policy. Not const: its redraw request reaches
+    /// this terminal.
+    /// @return The detector; nullptr without detection services, with no clickable pattern to detect, or with
+    ///         a policy that detects nothing on any screen.
     [[nodiscard]] std::unique_ptr<LinkDetector> makeLinkDetector();
+
+    /// Replaces the link detector after its configuration changed. The jobs in flight finish against what
+    /// they started with, and their results find nobody to adopt them. The new detector's link ids start
+    /// over, so the hovered one, which would name another link or none, is forgotten.
+    void replaceLinkDetector();
 
     /// Selects from where @p selector starts through @p to, completed in Insert mode.
     /// @param selector The selection to install, started where it begins.
@@ -5285,8 +5301,9 @@ class Terminal
     /// before it are gone (runs still in flight keep their own state alive and merely find nobody to notify).
     std::unique_ptr<StatusLineCommandCache> _statusLineCommands;
 
-    /// Finds links in output once it goes quiet; null without detection services, or with no clickable
-    /// pattern. Replaced, never changed, by setLinkPatterns(), under the state lock. Keep this the LAST data
+    /// Finds links in output once it goes quiet; null without detection services, with no clickable pattern,
+    /// or with detection off on every screen. Replaced, never changed, by setLinkPatterns() and
+    /// setLinkDetectionPolicy(), under the state lock. Keep this the LAST data
     /// member, so that it is destroyed first: its redraw request reaches _eventListener, _pty, _changes and
     /// _renderBuffer, and ~LinkDetector cuts that request off before any of them goes (jobs still in flight
     /// keep their own state alive and merely find nobody to notify).

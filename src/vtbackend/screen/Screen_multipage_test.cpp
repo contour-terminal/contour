@@ -2,6 +2,7 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
+#include <vtbackend/links/LinkDetectionPolicy.hpp>
 #include <vtbackend/screen/Screen.hpp>
 #include <vtbackend/screen/ScreenTestFixtures.hpp>
 #include <vtbackend/screen/Viewport.hpp>
@@ -22,6 +23,7 @@
 #include <cstddef>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <set>
 #include <string>
@@ -686,6 +688,13 @@ TEST_CASE("MultiPage.DECPCCM_reset.thePathUnderThePointerIsOnThePageOnDisplay", 
 
     SECTION("page 3 on display")
     {
+        // Paths are not detected beyond the primary screen by default; this is about which page is read.
+        {
+            auto policy = LinkDetectionPolicy {};
+            policy.otherScreens.filePaths = DetectLinks::Yes;
+            auto const _ = std::scoped_lock { terminal };
+            terminal.setLinkDetectionPolicy(policy);
+        }
         showOnePageOfTwo(mock, "see notes.txt", "see other.txt", OnDisplay::Other);
         stampForeignBlockOnRow0(mock);
         pointAt(mock, 0, 6);

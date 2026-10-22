@@ -135,11 +135,13 @@ struct LinkDetector::State
 
     State(LinkDetectionServices services,
           std::shared_ptr<LinkPatterns const> patterns,
+          LinkDetectionPolicy policy,
           std::shared_ptr<PathProbe> probe,
           std::size_t maxScanCells,
           std::function<void()> requestRedraw):
         services { services },
         patterns { std::move(patterns) },
+        policy { policy },
         probe { std::move(probe) },
         maxScanCells { maxScanCells },
         requestRedraw { std::move(requestRedraw) }
@@ -149,6 +151,7 @@ struct LinkDetector::State
     // Fixed at construction; read by every job.
     LinkDetectionServices services;
     std::shared_ptr<LinkPatterns const> patterns;
+    LinkDetectionPolicy policy;
     std::shared_ptr<PathProbe> probe;
     std::size_t maxScanCells;
 
@@ -170,7 +173,8 @@ struct LinkDetector::State
 
 LinkDetector::LineResult LinkDetector::matchLine(State const& state,
                                                  LineJob const& line,
-                                                 LinkMachine const& machine)
+                                                 LinkMachine const& machine,
+                                                 ScreenLinkDetection screen)
 {
     auto result = LineResult { .scanned = line.scanned, .links = {}, .paths = {} };
     auto const firstLine = line.rows.front().line;
@@ -178,6 +182,9 @@ LinkDetector::LineResult LinkDetector::matchLine(State const& state,
         for (auto& candidate:
              findLinks(text, *state.patterns, PatternSelection::ClickableOnly, LinkOverlap::Merge))
         {
+            // Dropped before it is classified: a path this screen does not detect is never probed.
+            if (!screen.detects(linkCategoryOf(candidate.kind, candidate.target)))
+                continue;
             auto spans = spansOf(text, candidate, firstLine, line.scanned);
             auto link = DetectedLink {
                 .id = {},
@@ -213,7 +220,7 @@ core::async::DetachedTask LinkDetector::runMatch(std::shared_ptr<State> state, S
     auto result = ScanResult { .key = batch.key, .lines = {} };
     result.lines.reserve(batch.lines.size());
     for (auto const& line: batch.lines)
-        result.lines.push_back(matchLine(*state, line, batch.machine));
+        result.lines.push_back(matchLine(*state, line, batch.machine, batch.screen));
     auto const lock = std::scoped_lock { state->mutex };
     state->scanResult = std::move(result);
     state->isScanInFlight = false;
@@ -239,10 +246,12 @@ core::async::DetachedTask LinkDetector::runProbes(std::shared_ptr<State> state,
 
 LinkDetector::LinkDetector(LinkDetectionServices services,
                            std::shared_ptr<LinkPatterns const> patterns,
+                           LinkDetectionPolicy policy,
                            std::function<void()> requestRedraw):
     _state { std::make_shared<State>(
         services,
         std::move(patterns),
+        policy,
         std::make_shared<PathProbe>(services.fileSystem, services.clock, services.tuning.probeLimits),
         services.tuning.maxScanCells,
         std::move(requestRedraw)) },
@@ -390,6 +399,9 @@ LinkIndexChange LinkDetector::adoptFinished(LinkSource& source)
 ImmediateLinkScan LinkDetector::scanNow(LinkSource& source, LineOffset first, LineOffset last)
 {
     auto result = ImmediateLinkScan { .index = adoptFinished(source), .linesRead = 0 };
+    auto const screen = _state->policy.forPage(source.linkPage());
+    if (!screen.detectsAny())
+        return result; // nothing to find on this page: no row is read
     auto& grid = source.linkGrid();
     grid.finalizeRevisions();
     auto const extent = scanExtentOf(grid, first, last, _tuning.maxScanCells);
@@ -399,7 +411,7 @@ ImmediateLinkScan LinkDetector::scanNow(LinkSource& source, LineOffset first, Li
     result.linesRead = jobs.size();
     auto const machine = source.localMachine();
     for (auto const& job: jobs)
-        if (adoptLine(matchLine(*_state, job, machine), grid, {}) == LinkIndexChange::Changed)
+        if (adoptLine(matchLine(*_state, job, machine, screen), grid, {}) == LinkIndexChange::Changed)
             result.index = LinkIndexChange::Changed;
     submitProbes();
     return result;
@@ -551,14 +563,20 @@ void LinkDetector::collect(LinkSource& source)
     prunePendingPaths();
     _awaitingProbeLimit = awaitingProbeLimitFor(grid, extent);
 
+    _firstPending = NothingPending;
+    _lastChange = NothingPending;
+    // A page that detects nothing is not read, and no job is started for it; nothing stays pending either,
+    // so no frame is asked for on its account.
+    auto const screen = _state->policy.forPage(source.linkPage());
+    if (!screen.detectsAny())
+        return;
+
     auto batch = ScanBatch {
         .key = LinkIndexKey { .page = source.linkPage(), .generation = grid.stableIdGeneration() },
         .machine = source.localMachine(),
+        .screen = screen,
         .lines = collectLines(source, extent),
     };
-
-    _firstPending = NothingPending;
-    _lastChange = NothingPending;
     if (batch.lines.empty())
         return;
     _state->isScanInFlight = true;
@@ -593,6 +611,11 @@ std::shared_ptr<PathProbe> const& LinkDetector::pathProbe() const noexcept
 LinkPatterns const& LinkDetector::patterns() const noexcept
 {
     return *_state->patterns;
+}
+
+LinkDetectionPolicy const& LinkDetector::policy() const noexcept
+{
+    return _state->policy;
 }
 
 LinkDetectionServices const& LinkDetector::services() const noexcept

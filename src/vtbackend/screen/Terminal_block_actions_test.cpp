@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/input/vi/HintModeHandler.hpp>
+#include <vtbackend/links/LinkDetectionPolicy.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/DetectingTerm.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
@@ -17,6 +18,7 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -502,6 +504,13 @@ TEST_CASE("Terminal.pathUnderThePointer.resolvesAgainstTheDirectoryOfTheCommandT
 
     SECTION("a row of the alternate screen belongs to no block")
     {
+        // Paths are not detected on the alternate screen by default; this is about where they resolve.
+        {
+            auto policy = LinkDetectionPolicy {};
+            policy.otherScreens.filePaths = DetectLinks::Yes;
+            auto const _ = std::scoped_lock { mock.terminal };
+            mock.terminal.setLinkDetectionPolicy(policy);
+        }
         stampBlock(mock, 7, root / "a", ContextLocality::Foreign, 0);
         mock.writeToScreen("\033[?1049h\033[Hsee notes.txt"sv);
         mock.terminal.setCurrentWorkingDirectory(fileUrlOf(root / "a"));

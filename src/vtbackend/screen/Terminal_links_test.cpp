@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/links/LinkDetectionPolicy.hpp>
 #include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/links/LinkTypes.hpp>
@@ -18,6 +19,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1016,5 +1018,208 @@ TEST_CASE("Terminal.links.aPathTheProbeFoundMissingIsNoLink", "[terminal][links]
     CHECK_FALSE(lookup.target);
     CHECK_FALSE(lookup.pathToProbe);
 }
+
+// {{{ per-screen link detection
+namespace
+{
+/// @return @p yes as a detection switch.
+[[nodiscard]] constexpr DetectLinks detectIf(bool yes) noexcept
+{
+    return yes ? DetectLinks::Yes : DetectLinks::No;
+}
+
+/// Applies @p policy to @p term's terminal, under its lock, as a profile reload does.
+void applyPolicy(DetectingTerm& term, LinkDetectionPolicy const& policy)
+{
+    auto const _ = std::scoped_lock { term.mock.terminal };
+    term.mock.terminal.setLinkDetectionPolicy(policy);
+}
+
+/// Makes Work @p term's working directory, holding notes.txt.
+void provideNotes(DetectingTerm& term)
+{
+    term.files.addFile(core::pathFromTrustedUtf8(inWork("notes.txt")), "");
+    term.mock.terminal.setCurrentWorkingDirectory(test::fileUrlOf(core::pathFromTrustedUtf8(Work)));
+}
+
+/// Writes @p text and runs a detection cycle up to the match's adoption, the probe job not run yet.
+void printUpToTheProbe(DetectingTerm& term, std::string_view text)
+{
+    term.mock.writeToScreen(text);
+    term.frame();
+    term.mock.terminal.tick(term.mock.terminal.currentTime() + term.tuning.debounce);
+    term.frame();
+    term.match.drain();
+    term.frame();
+}
+
+/// What the tests below print: a path at column 0, a URL at column 10.
+constexpr auto PathAndUrl = std::string_view { "notes.txt https://x.y/" };
+
+/// The page the tests below print on.
+constexpr auto NotesPage = PageSize { LineCount(5), ColumnCount(60) };
+} // namespace
+
+TEST_CASE("Terminal.links.pathsAreNotDetectedOnTheAlternateScreenByDefault", "[terminal][links]")
+{
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    term.print(PathAndUrl);
+    CHECK(asPath(term.targetAt(0, 0)) == asPath(inWork("notes.txt")));
+    CHECK(term.targetAt(0, 10) == "https://x.y/");
+
+    term.mock.writeToScreen("\033[?1049h\033[H");
+    printUpToTheProbe(term, PathAndUrl);
+    CHECK(term.probe.pending() == 0); // nothing was queued for probing
+    term.probe.drain();
+    term.frame();
+    CHECK(term.targetAt(0, 0).empty());
+    CHECK(term.targetAt(0, 10) == "https://x.y/");
+}
+
+TEST_CASE("Terminal.links.otherScreensIncludeEveryNonPrimaryPage", "[terminal][links]")
+{
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    term.mock.writeToScreen("\033[3 P\033[H"); // PPA: page 3
+    REQUIRE(term.mock.terminal.displayedPageIndex() == PageIndex(2));
+    printUpToTheProbe(term, PathAndUrl);
+    CHECK(term.probe.pending() == 0); // the probe cache is cold: a path detected would be queued
+    term.probe.drain();
+    term.frame();
+    CHECK(term.targetAt(0, 0).empty());
+    CHECK(term.targetAt(0, 10) == "https://x.y/");
+}
+
+TEST_CASE("Terminal.links.eachSwitchGovernsItsScreenAndCategory", "[terminal][links]")
+{
+    auto const bits = GENERATE(range(0, 16));
+    CAPTURE(bits);
+    auto const policy = LinkDetectionPolicy {
+        .primaryScreen = { .urls = detectIf((bits & 1) != 0), .filePaths = detectIf((bits & 2) != 0) },
+        .otherScreens = { .urls = detectIf((bits & 4) != 0), .filePaths = detectIf((bits & 8) != 0) },
+    };
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    applyPolicy(term, policy);
+
+    auto const check = [&](ScreenLinkDetection screen) {
+        CHECK(term.targetAt(0, 0).empty() != screen.detects(LinkCategory::FilePath));
+        CHECK(term.targetAt(0, 10).empty() != screen.detects(LinkCategory::Url));
+    };
+    term.print(PathAndUrl);
+    check(policy.primaryScreen);
+    term.mock.writeToScreen("\033[?1049h\033[H");
+    term.print(PathAndUrl);
+    check(policy.otherScreens);
+}
+
+TEST_CASE("Terminal.links.aFileUrlFollowsTheFilePathSwitch", "[terminal][links]")
+{
+    // A `file://` URL names a file on this machine: as far as the switches go, it is a path.
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    auto const url = test::fileUrlOf(core::pathFromTrustedUtf8(inWork("notes.txt")));
+    term.print(url);
+    REQUIRE_FALSE(term.targetAt(0, 2).empty());
+
+    term.mock.writeToScreen("\033[?1049h\033[H");
+    term.print(url);
+    CHECK(term.targetAt(0, 2).empty());
+
+    auto policy = LinkDetectionPolicy {};
+    policy.otherScreens.filePaths = DetectLinks::Yes;
+    applyPolicy(term, policy);
+    term.cycle();
+    CHECK_FALSE(term.targetAt(0, 2).empty());
+}
+
+TEST_CASE("Terminal.links.aNewPolicyReplacesTheDetector", "[terminal][links]")
+{
+    // Review Focus 1: a live reload while the alternate screen is shown.
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    term.mock.writeToScreen("\033[?1049h\033[H");
+    term.print(PathAndUrl);
+    REQUIRE(term.targetAt(0, 0).empty());
+    test::pointAt(term.mock, 0, 12);
+    REQUIRE(term.mock.terminal.hoveringLinkId() != LinkId {});
+
+    auto policy = LinkDetectionPolicy {};
+    {
+        auto const _ = std::scoped_lock { term.mock.terminal };
+        auto const* const before = term.mock.terminal.linkDetector();
+        term.mock.terminal.setLinkDetectionPolicy(policy);
+        CHECK(term.mock.terminal.linkDetector() == before); // an equal policy keeps the detector
+        policy.otherScreens.filePaths = DetectLinks::Yes;
+        term.mock.terminal.setLinkDetectionPolicy(policy);
+        REQUIRE(term.mock.terminal.linkDetector() != nullptr);
+        CHECK(term.mock.terminal.linkDetector() != before);
+        CHECK(term.mock.terminal.linkDetector()->policy() == policy);
+        CHECK(term.mock.terminal.hoveringLinkId() == LinkId {}); // the new detector's ids start over
+    }
+    term.cycle();
+    CHECK(asPath(term.targetAt(0, 0)) == asPath(inWork("notes.txt")));
+    CHECK(term.targetAt(0, 10) == "https://x.y/");
+}
+
+TEST_CASE("Terminal.links.withEverythingOffOnlyOsc8LinksRemain", "[terminal][links]")
+{
+    // Review Focus 3.
+    auto term = DetectingTerm { NotesPage };
+    constexpr auto Off = ScreenLinkDetection { .urls = DetectLinks::No, .filePaths = DetectLinks::No };
+    applyPolicy(term, LinkDetectionPolicy { .primaryScreen = Off, .otherScreens = Off });
+    // The URL at columns 0-11, the OSC 8 link's one cell at 13.
+    term.print("https://x.y/ \033]8;;https://h/\033\\h\033]8;;\033\\");
+
+    auto const _ = std::scoped_lock { term.mock.terminal };
+    CHECK(term.mock.terminal.linkDetector() == nullptr);
+    auto const url =
+        term.mock.terminal.lookUpLinkAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
+    CHECK_FALSE(url.target);
+    CHECK_FALSE(url.hyperlink);
+    auto const osc8 =
+        term.mock.terminal.lookUpLinkAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(13) });
+    REQUIRE(osc8.hyperlink);
+    CHECK(osc8.hyperlink->uri == "https://h/");
+}
+
+TEST_CASE("Terminal.links.aLookupOnTheAlternateScreenFindsNoPathByDefault", "[terminal][links]")
+{
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    term.mock.writeToScreen("\033[?1049h\033[H");
+    term.mock.writeToScreen(PathAndUrl); // no scan: the lookup matches the row itself
+    auto const _ = std::scoped_lock { term.mock.terminal };
+    auto const path =
+        term.mock.terminal.lookUpLinkAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(2) });
+    CHECK_FALSE(path.target);
+    CHECK_FALSE(path.printedPath);
+    CHECK_FALSE(path.pathToProbe);
+    auto const url =
+        term.mock.terminal.lookUpLinkAt(CellLocation { .line = LineOffset(0), .column = ColumnOffset(12) });
+    REQUIRE(url.target);
+    CHECK(url.target->target == "https://x.y/");
+}
+
+TEST_CASE("Terminal.links.hintModeStillOffersPathsOnTheAlternateScreen", "[terminal][links][hintmode]")
+{
+    // Hint mode is the user asking: the detection switches do not govern it.
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    term.mock.writeToScreen("\033[?1049h\033[H");
+    term.print("see " + inWork("notes.txt"));
+    REQUIRE(term.targetAt(0, 5).empty()); // not detected, under the default policy
+
+    term.mock.terminal.flushInput();
+    term.mock.terminal.activateHintMode(HintModeRequest {
+        .patterns =
+            HintPatternSet { .table = LinkPatterns::builtins(), .names = { "filepath" }, .resolve = {} },
+        .action = HintAction::Copy });
+    CHECK(std::ranges::any_of(term.mock.terminal.hintMatches(), [](auto const& match) {
+        return asPath(match.matchedText) == asPath(inWork("notes.txt"));
+    }));
+}
+// }}}
 
 #endif
