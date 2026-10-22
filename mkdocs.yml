@@ -115,6 +115,7 @@ nav:
     - Line marks: demo/line-marks.md
     - Command blocks: demo/command-blocks.md
     - Status line: demo/statusline.md
+    - Status-line extensions: extensions.md
     - Hint mode: demo/hint-mode.md
     - Input modes: input-modes.md
     - Accessibility: accessibility.md
