@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <unordered_map>
 #include <utility>
@@ -15,9 +16,8 @@ namespace contour::platform
 
 /// What a taskbar backend should be told to show.
 ///
-/// Deliberately NOT vtbackend::Progress: this is what the WINDOW shows, aggregated across its
-/// sessions, whereas a Progress is what one session reports. The two coincide only when a window
-/// hosts a single session.
+/// Deliberately NOT vtbackend::Progress: this is what the desktop indicator shows, aggregated
+/// across a window's sessions on Windows or the application's sessions on other desktops.
 struct TaskbarProgress
 {
     vtbackend::ProgressState state = vtbackend::ProgressState::Inactive;
@@ -27,7 +27,7 @@ struct TaskbarProgress
 
 /// The dependency-free aggregation and staleness policy behind the OS taskbar progress indicator.
 ///
-/// It answers one question -- given what every session in a window has reported, and when -- what
+/// It answers one question -- given what the selected sessions have reported, and when -- what
 /// should the taskbar show right now? Keeping that here rather than in the platform backend is what
 /// makes it testable without a D-Bus session or a Windows shell: the decisions are
 /// resolve-across-sessions and expire-when-stale, and neither needs a taskbar to check.
@@ -78,6 +78,19 @@ class TaskbarProgressRouter
     [[nodiscard]] TaskbarProgress resolve(std::chrono::steady_clock::time_point now,
                                           std::chrono::milliseconds timeout = {}) const
     {
+        return resolveFor([](SessionKey) { return true; }, now, timeout);
+    }
+
+    /// Resolves the same policy for sessions belonging to one window, without copying their reports.
+    /// @param includes Selects the sessions hosted by that window.
+    /// @param now Current monotonic time.
+    /// @param timeout Staleness limit; zero disables expiry.
+    /// @return The selected sessions' aggregate.
+    template <typename Predicate>
+    [[nodiscard]] TaskbarProgress resolveFor(Predicate includes,
+                                             std::chrono::steady_clock::time_point now,
+                                             std::chrono::milliseconds timeout = {}) const
+    {
         // Ranked lexicographically on (severity, -percentage): higher severity wins, and among equals
         // the LEAST complete does -- so the bar reflects the work still outstanding rather than the
         // most nearly finished part of it, and a failure is never hidden by a sibling merely busy.
@@ -86,9 +99,9 @@ class TaskbarProgressRouter
         };
         auto winner = TaskbarProgress {};
         auto best = std::pair { -1, 0 }; // below every real rank, so the first live report takes it
-        for (auto const& report: _reports | std::views::values)
+        for (auto const& [session, report]: _reports)
         {
-            if (isStale(report, now, timeout))
+            if (!includes(session) || isStale(report, now, timeout))
                 continue;
             if (auto const rank = rankOf(report.progress); rank > best)
             {
@@ -98,6 +111,22 @@ class TaskbarProgressRouter
             }
         }
         return winner;
+    }
+
+    /// Earliest future expiry, for scheduling a single wakeup even while windows are minimized.
+    /// @param now Current monotonic time.
+    /// @param timeout Staleness limit; zero disables the timer.
+    /// @return Next expiry, or nullopt if no live report can expire.
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point> nextExpiry(
+        std::chrono::steady_clock::time_point now, std::chrono::milliseconds timeout) const
+    {
+        auto next = std::optional<std::chrono::steady_clock::time_point> {};
+        if (timeout.count() == 0)
+            return next;
+        for (auto const& report: _reports | std::views::values)
+            if (auto const expiry = report.at + timeout; expiry > now && (!next || expiry < *next))
+                next = expiry;
+        return next;
     }
 
   private:
