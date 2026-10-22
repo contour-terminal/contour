@@ -33,6 +33,7 @@ TEST_CASE("LinkDetectionPolicy.categories", "[links]")
 {
     CHECK(linkCategoryOf(LinkKind::Url, "https://x.y/") == LinkCategory::Url);
     CHECK(linkCategoryOf(LinkKind::Custom, "JIRA-1") == LinkCategory::Url);
+    CHECK(linkCategoryOf(LinkKind::Custom, "file:///x") == LinkCategory::FilePath);
     CHECK(linkCategoryOf(LinkKind::Path, "src/a.cpp") == LinkCategory::FilePath);
     CHECK(linkCategoryOf(LinkKind::Url, "file:///etc/hosts") == LinkCategory::FilePath);
     CHECK(linkCategoryOf(LinkKind::Url, "FILE://host/x") == LinkCategory::FilePath);

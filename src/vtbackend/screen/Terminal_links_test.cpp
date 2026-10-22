@@ -1163,6 +1163,37 @@ TEST_CASE("Terminal.links.aFileUrlFollowsTheFilePathSwitch", "[terminal][links]"
     CHECK_FALSE(term.targetAt(0, 2).empty());
 }
 
+TEST_CASE("Terminal.links.aCustomPatternOpeningAFileUrlFollowsTheFilePathSwitch", "[terminal][links]")
+{
+    // A user pattern whose `url:` expands to a `file:` URL opens a file on this machine: it is no URL as far
+    // as the switches go, and under the defaults it is never probed on the alternate screen.
+    auto term = DetectingTerm { NotesPage };
+    provideNotes(term);
+    auto const entries = std::array { LinkPatternSpec { .name = "note",
+                                                        .regex = "NOTE:([^ ]+)",
+                                                        .activation = LinkActivation::Clickable,
+                                                        .urlTemplate = "file://{1}" } };
+    auto const table = std::make_shared<LinkPatterns const>(LinkPatterns::compile(entries));
+    {
+        auto const _ = std::scoped_lock { term.mock.terminal };
+        term.mock.terminal.setLinkPatterns(table);
+    }
+    auto const printed = "NOTE:" + inWork("notes.txt");
+
+    term.mock.writeToScreen("\033[?1049h\033[H");
+    printUpToTheProbe(term, printed);
+    CHECK(term.probe.pending() == 0); // a path probed would be queued
+    term.probe.drain();
+    term.frame();
+    CHECK(term.targetAt(0, 2).empty());
+
+    auto policy = LinkDetectionPolicy {};
+    policy.otherScreens.filePaths = DetectLinks::Yes;
+    applyPolicy(term, policy);
+    term.cycle();
+    CHECK_FALSE(term.targetAt(0, 2).empty());
+}
+
 TEST_CASE("Terminal.links.aNewPolicyReplacesTheDetector", "[terminal][links]")
 {
     // Review Focus 1: a live reload while the alternate screen is shown.

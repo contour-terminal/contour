@@ -22,8 +22,8 @@ LinkCategory linkCategoryOf(LinkKind kind, std::string_view target) noexcept
     switch (kind)
     {
         case LinkKind::Path: return LinkCategory::FilePath;
-        case LinkKind::Url: return isFileUrl(target) ? LinkCategory::FilePath : LinkCategory::Url;
-        case LinkKind::Custom: return LinkCategory::Url;
+        case LinkKind::Url:
+        case LinkKind::Custom: return isFileUrl(target) ? LinkCategory::FilePath : LinkCategory::Url;
     }
     return LinkCategory::Url;
 }

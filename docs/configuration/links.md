@@ -71,7 +71,11 @@ of text found by scanning is affected.
 | `other_screens.file_paths`  | `false` | file paths on the alternate screen             |
 
 `other_screens` covers the alternate screen (vim, less, htop, ...) and every
-further page. A key you leave out keeps its default.
+further page. A key you leave out keeps its default, or the value it inherits
+from a parent profile.
+
+Your own patterns follow the `urls` switch, unless they open a `file:` URL,
+which follows the `file_paths` switch.
 
 ## When links are shown
 

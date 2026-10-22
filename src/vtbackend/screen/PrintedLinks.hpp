@@ -61,8 +61,8 @@ using PrintedLink = std::variant<LinkTarget, PathToProbe, RefusedPath, MissingPa
 
 /// The category of a link found in printed text, for the detection policy.
 /// @param kind How the link was found.
-/// @param target The link's target.
-/// @return FilePath for a path or a `file:` URL, Url for everything else.
+/// @param target The link's target: for a custom pattern, what its URL template expands to.
+/// @return FilePath for a path or a `file:` URL (a custom pattern's included), Url for everything else.
 [[nodiscard]] LinkCategory linkCategoryOf(LinkKind kind, std::string_view target) noexcept;
 
 /// Classifies a link found in printed text, without touching the filesystem.

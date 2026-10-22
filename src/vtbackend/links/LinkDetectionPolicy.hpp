@@ -11,8 +11,8 @@ namespace vtbackend
 /// What a detected link is, as far as switching its detection on or off is concerned.
 enum class LinkCategory : uint8_t
 {
-    Url = 0,  ///< Anything a browser or a user pattern opens: URLs and custom patterns.
-    FilePath, ///< A file on this machine: a path, or a `file:` URL.
+    Url = 0,  ///< Anything a browser or a user pattern opens: URLs and custom patterns, but for `file:` ones.
+    FilePath, ///< A file on this machine: a path, or a `file:` URL (a custom pattern's too).
 };
 
 /// Whether automatic link detection runs for one category on one screen.
@@ -25,7 +25,8 @@ enum class DetectLinks : uint8_t
 /// The detection switches of a single screen.
 struct ScreenLinkDetection
 {
-    DetectLinks urls = DetectLinks::Yes;      ///< Whether URLs and custom patterns are detected.
+    DetectLinks urls =
+        DetectLinks::Yes; ///< Whether URLs and custom patterns are detected (not `file:` ones).
     DetectLinks filePaths = DetectLinks::Yes; ///< Whether file paths and `file:` URLs are detected.
 
     /// Whether links of @p category are detected.
