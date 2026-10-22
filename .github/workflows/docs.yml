@@ -42,7 +42,8 @@ jobs:
         # not lean on a transitive dependency for a tool it invokes by name).
         run: sudo apt -y install gcc-14 g++-14
       - name: "install dependencies"
-        run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+        # CONTOUR_EXTENSIONS_BUNDLED=OFF: no Rust for the bundled extensions, which this job builds without.
+        run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON CONTOUR_EXTENSIONS_BUNDLED=OFF ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "create build directory"
@@ -56,6 +57,10 @@ jobs:
       # instead. CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so the build
       # cannot merely happen to pick up whichever Qt is lying around -- same assertion as the
       # "Ubuntu Linux (no GUI frontend)" job in build.yml.
+      #
+      # CONTOUR_EXTENSIONS_BUNDLED=OFF for the same reason: the bundled status-line extensions are Rust,
+      # nothing the documentation verbs print comes from them, and building them would take a Rust
+      # toolchain this job has no use for.
       #
       # The compiler is named rather than left to the default: this job installs g++-14, but that
       # does not make it the default -- Ubuntu 24.04's `g++` is 13.3, whose libstdc++ has no
@@ -72,6 +77,7 @@ jobs:
                 -D CMAKE_CXX_COMPILER=g++-14 \
                 -D CONTOUR_WAYLAND=OFF \
                 -D CONTOUR_FRONTEND_GUI=OFF \
+                -D CONTOUR_EXTENSIONS_BUNDLED=OFF \
                 -D CMAKE_DISABLE_FIND_PACKAGE_Qt6=ON
       - name: "build"
         run: cmake --build build --target contour

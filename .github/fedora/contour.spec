@@ -48,12 +48,16 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 
 
 %build
+# The bundled status-line extensions are not built: cargo fetches their crates (wit-bindgen) from
+# crates.io, and mock/koji build offline. Vendoring the crates into the SRPM is a packaging follow-up;
+# until then the package ships the extension runtime without the bundled modules.
 cmake . \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DPEDANTIC_COMPILER=ON \
     -DPEDANTIC_COMPILER_WERROR=ON \
     -DCONTOUR_TESTING=ON \
+    -DCONTOUR_EXTENSIONS_BUNDLED=OFF \
     -B build \
     -GNinja
 cd build

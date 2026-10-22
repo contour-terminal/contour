@@ -49,6 +49,10 @@ jobs:
         run: sudo env QTVER="5" SYSDEP_ASSUME_YES="ON" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
+      # The bundled status-line extensions are Rust, and the configuration fails without them; with them,
+      # the C++ that runs them in its tests is analysed too.
+      - name: "install Rust (wasm32-wasip1)"
+        run: ./scripts/install-rust-wasm.sh
       - name: "Prepare building Contour"
         # Note: Keep this in sync with that in build.yml!
         run: |

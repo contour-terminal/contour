@@ -334,6 +334,26 @@ install_deps_ubuntu() {
     # sudo snap install --classic powershell
 }
 
+# {{{ Rust, for the bundled status-line extensions
+# CONTOUR_EXTENSIONS_BUNDLED, on by default, builds Rust crates for wasm32-wasip1, and its configuration
+# fails without cargo and that target. Most distributions package a Rust too old for wit-bindgen (it needs
+# 1.88), or none with the target, so rustup provides it (see install-rust-wasm.sh), installed for the user
+# who builds -- the one sudo was run by, never root's own home. Fedora's packages suffice; they are
+# installed with the rest. CONTOUR_EXTENSIONS_BUNDLED=OFF in the environment skips this, as the option of
+# the same name does the extensions.
+install_rust_wasm() {
+    [ "$PREPARE_ONLY_EMBEDS" = ON ] && return
+    [ "${CONTOUR_EXTENSIONS_BUNDLED:-ON}" = OFF ] && return
+
+    rust_script="$(dirname "$0")/install-rust-wasm.sh"
+    if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" = 0 ]; then
+        sudo -u "$SUDO_USER" -H sh "$rust_script"
+    else
+        sh "$rust_script"
+    fi
+}
+# }}}
+
 install_deps_FreeBSD() {
     fetch_and_unpack_libunicode
     fetch_and_unpack_Catch2
@@ -493,8 +513,10 @@ install_deps_suse() {
 install_deps_fedora() {
     local os_version=$(grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"')
 
+    # cargo and rust-std-static-wasm32-wasip1: the bundled status-line extensions (CONTOUR_EXTENSIONS_BUNDLED).
     local packages="
         cairo-devel
+        cargo
         catch-devel
         cmake
         extra-cmake-modules
@@ -507,6 +529,7 @@ install_deps_fedora() {
         ninja-build
         openssl-devel
         pkgconf
+        rust-std-static-wasm32-wasip1
         systemd-devel
         libutempter-devel
         yaml-cpp-devel
@@ -608,30 +631,39 @@ main() {
     case "$ID" in
     arch | manjaro)
         install_deps_arch
+        install_rust_wasm
         ;;
     opensuse*)
         install_deps_suse
+        install_rust_wasm
         ;;
     fedora)
         install_deps_fedora
         ;;
     pop)
         install_deps_popos
+        install_rust_wasm
         ;;
     ubuntu | neon)
         install_deps_ubuntu
+        install_rust_wasm
         ;;
     debian)
         install_deps_ubuntu
+        install_rust_wasm
         ;;
     Darwin)
         install_deps_darwin
+        install_rust_wasm
         ;;
     FreeBSD | freebsd)
         install_deps_FreeBSD
+        install_rust_wasm
         ;;
     OpenBSD | openbsd)
         install_deps_OpenBSD
+        # rustup has no OpenBSD toolchain, nor OpenBSD's rust package the wasm32-wasip1 target.
+        echo "No Rust for wasm32-wasip1 on OpenBSD: configure with -DCONTOUR_EXTENSIONS_BUNDLED=OFF."
         ;;
     *)
         fetch_and_unpack_Catch2
@@ -642,6 +674,8 @@ main() {
         echo "OS $ID not supported."
         echo "Please install the remaining dependencies manually."
         echo "Most importantly: Qt, freetype, harfbuzz (including development headers)."
+        echo "And Rust with the wasm32-wasip1 target (scripts/install-rust-wasm.sh), or configure with"
+        echo "-DCONTOUR_EXTENSIONS_BUNDLED=OFF."
         ;;
     esac
 
