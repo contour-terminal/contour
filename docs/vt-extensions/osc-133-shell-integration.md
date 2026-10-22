@@ -260,4 +260,4 @@ printf "\033]133;D;0\033\\"
 ## Related Extensions
 
 * **SETMARK (`CSI > M`)**: a Contour-only extension that marked the current line, equivalent to
-`OSC 133 ; A`. Deprecated in favour of OSC 133 and **removed in 0.7.1** — use `OSC 133 ; A`.
+`OSC 133 ; A`. Deprecated in favour of OSC 133 and **removed in 0.8.0** — use `OSC 133 ; A`.

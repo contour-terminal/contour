@@ -17,7 +17,7 @@ printf "\033]133;A\033\\"
 !!! note
 
     Contour used to offer a dedicated `SETMARK` sequence (`CSI > M`) for this. It was deprecated in
-    favour of `OSC 133 ; A` and **removed in 0.7.1** — `OSC 133 ; A` does the same thing and, unlike
+    favour of `OSC 133 ; A` and **removed in 0.8.0** — `OSC 133 ; A` does the same thing and, unlike
     a Contour-only extension, is understood by other terminals too.
 
 You will usually not write this by hand: Contour's bundled
