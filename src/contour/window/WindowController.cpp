@@ -948,6 +948,7 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
         return;
 
     _osWindow = osWindow;
+    _manager.bindTaskbarWindow(_windowId, *osWindow);
 
     _resizeGrid = platform::makeWindowResizeGrid(
         *osWindow,

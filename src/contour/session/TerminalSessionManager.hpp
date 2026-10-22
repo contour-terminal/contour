@@ -6,6 +6,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/platform/SessionVisibility.hpp>
 #include <contour/platform/TaskbarProgressRouter.hpp>
+#include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/window/WindowController.hpp>
@@ -138,11 +139,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param homeDirectory The user's home directory, as the tab tooltip and the finish notification
     ///                write it as `~`. Read once, by the composition root, so nothing below it reads
     ///                the environment.
+    /// @param taskbarProgressSink Application-owned native progress adapter; must outlive the manager.
     TerminalSessionManager(ContourGuiApp& app,
                            SessionFactory& factory,
                            config::LayoutStore& layouts,
                            command::CommandHistoryStore& commands,
-                           std::string homeDirectory);
+                           std::string homeDirectory,
+                           platform::TaskbarProgressSink& taskbarProgressSink);
 
     /// The owning application (spawn context, app-wide services). For the window controllers.
     [[nodiscard]] ContourGuiApp& app() noexcept { return _app; }
@@ -592,6 +595,18 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     [[nodiscard]] platform::TaskbarProgress taskbarProgress(
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) const;
 
+    /// Resolves progress only from panes and tabs belonging to the requested OS window.
+    /// @param window Workspace window identity.
+    /// @param now Current monotonic time.
+    /// @return Window-scoped aggregate, including background tabs and panes.
+    [[nodiscard]] platform::TaskbarProgress taskbarProgress(vtworkspace::WindowId window,
+                                                            std::chrono::steady_clock::time_point now) const;
+
+    /// Attaches the native taskbar before the OS window is first shown.
+    /// @param window Workspace window identity.
+    /// @param nativeWindow The Qt window backing it.
+    void bindTaskbarWindow(vtworkspace::WindowId window, QWindow& nativeWindow);
+
     /// Records @p progress for @p session, for the taskbar aggregate above.
     ///
     /// @param session The reporting session.
@@ -602,6 +617,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now())
     {
         _taskbarProgress.onProgress(session.value, progress, now);
+        scheduleTaskbarProgress();
     }
 
     /// Sets an explicit @p title on the tab hosting @p session, through the authoritative SessionModel
@@ -1038,11 +1054,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Where the taskbar's progress answer comes from. It holds neither a clock nor a timeout of its
     /// own -- both are supplied per call -- so nothing here can drift from the configured value.
     platform::TaskbarProgressRouter _taskbarProgress {};
+    QTimer _taskbarProgressTimer;
+
+    /// Publishes current window aggregates and schedules the next expiry, using the injected clock.
+    void refreshTaskbarProgress();
+    void scheduleTaskbarProgress();
 
     ContourGuiApp& _app;
     SessionFactory& _sessionFactory;
     config::LayoutStore& _layoutStore;
     command::CommandHistoryStore& _commandHistoryStore;
+    platform::TaskbarProgressSink& _taskbarProgressSink;
     std::string _homeDirectory; ///< The user's home, read once by the composition root.
     /// The app-wide most-recently-used command list. Seeded from the store on the first palette open
     /// (see openCommandPalette()); every window's palette model reads it, and recordCommand() writes it

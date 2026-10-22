@@ -9,6 +9,7 @@
 #include <contour/display/Logging.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
+#include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -201,6 +202,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                       probe thread and fileSystem(). Borrowed: it must outlive the app.
     /// @param windowPositionStore Last-window location persistence; null uses the atomic file adapter.
     /// @param env            The process environment every part of the application reads through.
+    /// @param taskbarProgress Native taskbar adapter; null wires the production one.
     explicit ContourGuiApp(core::Environment const& env,
                            std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
                            std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
@@ -213,6 +215,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
                            core::platform::FileSystem const* fileSystem = nullptr,
                            std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr,
                            std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt,
+                           std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress = nullptr,
                            std::unique_ptr<window::WindowPositionStore> windowPositionStore = nullptr);
     ~ContourGuiApp() override;
 
@@ -516,6 +519,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     vtbackend::HostIdentity _hostIdentity;
     // Likewise; borrowed.
     core::platform::FileSystem const& _fileSystem;
+    std::unique_ptr<platform::TaskbarProgressSink> _taskbarProgressSink;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
