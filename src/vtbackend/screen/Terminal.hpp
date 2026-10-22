@@ -1397,7 +1397,8 @@ class Terminal
     [[nodiscard]] LinkIndex const* detectedLinks() const noexcept;
 
     /// The link detector, for the frontend's lookups. Does NOT take the lock; callers hold it.
-    /// @return The detector; nullptr without detection services, or with no clickable pattern.
+    /// @return The detector; nullptr without detection services, with no clickable pattern, or with a policy
+    ///         that detects nothing on any screen.
     [[nodiscard]] LinkDetector* linkDetector() noexcept { return _linkDetector.get(); }
 
     /// The detected link covering a cell of the page on display. The caller holds the lock.

@@ -362,6 +362,11 @@ class LinkDetector
     static core::async::DetachedTask runProbes(std::shared_ptr<State> state,
                                                std::vector<std::shared_ptr<PathQuery const>> queries);
 
+    /// What the policy detects on the page @p source shows.
+    [[nodiscard]] ScreenLinkDetection screenOf(LinkSource const& source) const;
+    /// Whether the policy detects anything on the page @p source shows. Where it does not, nothing is noted
+    /// pending, collected or read.
+    [[nodiscard]] bool detectsOnPageShown(LinkSource const& source) const;
     void notePending(std::chrono::steady_clock::time_point now) noexcept;
     [[nodiscard]] bool isDue(std::chrono::steady_clock::time_point now) const noexcept;
     /// Starts over when the page on display or its id generation is not what the index names: a reflow, a

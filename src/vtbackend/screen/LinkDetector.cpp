@@ -273,6 +273,16 @@ LinkDetector::~LinkDetector()
     }
 }
 
+ScreenLinkDetection LinkDetector::screenOf(LinkSource const& source) const
+{
+    return _state->policy.forPage(source.linkPage());
+}
+
+bool LinkDetector::detectsOnPageShown(LinkSource const& source) const
+{
+    return screenOf(source).detectsAny();
+}
+
 void LinkDetector::notePending(std::chrono::steady_clock::time_point now) noexcept
 {
     auto expected = NothingPending;
@@ -314,7 +324,8 @@ LinkIndexChange LinkDetector::onFrame(LinkSource& source,
     auto const indexChange = adoptAll(source, now);
 
     auto const top = source.viewportTop();
-    if (change == FrameChange::ScreenChanged || top != _lastViewportTop)
+    // A page that detects nothing schedules no collect: no wake-up is asked for on its account.
+    if ((change == FrameChange::ScreenChanged || top != _lastViewportTop) && detectsOnPageShown(source))
         notePending(now);
     _lastViewportTop = top;
 
@@ -354,7 +365,14 @@ LinkIndexChange LinkDetector::syncKey(LinkSource& source, std::chrono::steady_cl
     _dropped.clear();
     _indexKey = key;
     _indexKeyState = IndexKeyState::Set;
-    notePending(now);
+    if (detectsOnPageShown(source))
+        notePending(now);
+    else
+    {
+        // What the page left had pending is no collect of this one's.
+        _firstPending = NothingPending;
+        _lastChange = NothingPending;
+    }
     return changed;
 }
 
@@ -399,8 +417,7 @@ LinkIndexChange LinkDetector::adoptFinished(LinkSource& source)
 ImmediateLinkScan LinkDetector::scanNow(LinkSource& source, LineOffset first, LineOffset last)
 {
     auto result = ImmediateLinkScan { .index = adoptFinished(source), .linesRead = 0 };
-    auto const screen = _state->policy.forPage(source.linkPage());
-    if (!screen.detectsAny())
+    if (!detectsOnPageShown(source))
         return result; // nothing to find on this page: no row is read
     auto& grid = source.linkGrid();
     grid.finalizeRevisions();
@@ -410,6 +427,7 @@ ImmediateLinkScan LinkDetector::scanNow(LinkSource& source, LineOffset first, Li
     auto const jobs = collectLines(source, extent);
     result.linesRead = jobs.size();
     auto const machine = source.localMachine();
+    auto const screen = screenOf(source);
     for (auto const& job: jobs)
         if (adoptLine(matchLine(*_state, job, machine, screen), grid, {}) == LinkIndexChange::Changed)
             result.index = LinkIndexChange::Changed;
@@ -567,14 +585,13 @@ void LinkDetector::collect(LinkSource& source)
     _lastChange = NothingPending;
     // A page that detects nothing is not read, and no job is started for it; nothing stays pending either,
     // so no frame is asked for on its account.
-    auto const screen = _state->policy.forPage(source.linkPage());
-    if (!screen.detectsAny())
+    if (!detectsOnPageShown(source))
         return;
 
     auto batch = ScanBatch {
         .key = LinkIndexKey { .page = source.linkPage(), .generation = grid.stableIdGeneration() },
         .machine = source.localMachine(),
-        .screen = screen,
+        .screen = screenOf(source),
         .lines = collectLines(source, extent),
     };
     if (batch.lines.empty())

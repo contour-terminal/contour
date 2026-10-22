@@ -1114,6 +1114,29 @@ TEST_CASE("Terminal.links.eachSwitchGovernsItsScreenAndCategory", "[terminal][li
     check(policy.otherScreens);
 }
 
+TEST_CASE("Terminal.links.aScreenThatDetectsNothingAsksForNoWakeup", "[terminal][links]")
+{
+    // No collect is scheduled for a page with both switches off: output there arms no quiet-time wake-up.
+    auto term = DetectingTerm { NotesPage };
+    constexpr auto Off = ScreenLinkDetection { .urls = DetectLinks::No, .filePaths = DetectLinks::No };
+    applyPolicy(term, LinkDetectionPolicy { .primaryScreen = {}, .otherScreens = Off });
+    // The cursor hidden, so that neither its blink nor its motion asks for a frame: only detection may.
+    term.mock.writeToScreen("\033[?25l\033[?1049h\033[H");
+    term.cycle();
+    // Past the switch's crossfade, which asks for frames of its own.
+    term.mock.terminal.tick(term.mock.terminal.currentTime() + 1s);
+    term.frame();
+    REQUIRE(term.mock.terminal.nextRender() == std::nullopt);
+    term.mock.writeToScreen("see https://x.y/");
+    term.frame();
+    CHECK(term.mock.terminal.nextRender() == std::nullopt);
+
+    term.mock.writeToScreen("\033[?1049l"); // back to the primary screen, which detects
+    term.frame();
+    auto const _ = std::scoped_lock { term.mock.terminal };
+    CHECK(term.mock.terminal.linkDetector()->nextDue(term.mock.terminal.currentTime()) == 100ms);
+}
+
 TEST_CASE("Terminal.links.aFileUrlFollowsTheFilePathSwitch", "[terminal][links]")
 {
     // A `file://` URL names a file on this machine: as far as the switches go, it is a path.
@@ -1126,6 +1149,12 @@ TEST_CASE("Terminal.links.aFileUrlFollowsTheFilePathSwitch", "[terminal][links]"
     term.mock.writeToScreen("\033[?1049h\033[H");
     term.print(url);
     CHECK(term.targetAt(0, 2).empty());
+    {
+        // Explicitly: URLs on, paths off, and still no link.
+        auto const _ = std::scoped_lock { term.mock.terminal };
+        REQUIRE(term.mock.terminal.linkDetector()->policy().otherScreens
+                == ScreenLinkDetection { .urls = DetectLinks::Yes, .filePaths = DetectLinks::No });
+    }
 
     auto policy = LinkDetectionPolicy {};
     policy.otherScreens.filePaths = DetectLinks::Yes;

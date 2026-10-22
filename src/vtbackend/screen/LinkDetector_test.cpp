@@ -270,9 +270,19 @@ TEST_CASE("LinkDetector.aPageThatDetectsNothingIsNeitherReadNorMatched", "[links
     auto fx = Fixture { {},
                         PageSize { LineCount(5), ColumnCount(40) },
                         LinkDetectionPolicy { .otherScreens = Off } };
-    fx.source.page = AlternateScreenPageIndex;
+    // Output on the primary screen, and a switch before its quiet time: the switch drops what was pending.
     fx.mock.writeToScreen("see https://x.y/");
-    fx.detect();
+    (void) fx.frame(FrameChange::ScreenChanged);
+    REQUIRE(fx.detector->nextDue(fx.now).has_value());
+    fx.source.page = AlternateScreenPageIndex;
+    (void) fx.frame();
+    CHECK(fx.detector->nextDue(fx.now) == std::nullopt);
+    (void) fx.frame(FrameChange::ScreenChanged);
+    CHECK(fx.detector->nextDue(fx.now) == std::nullopt); // the output schedules no collect
+    fx.now += 100ms;
+    (void) fx.frame();
+    fx.match.drain();
+    (void) fx.frame();
     CHECK(fx.match.pending() == 0);
     CHECK(fx.targetAt(0, 4).empty());
     CHECK(fx.detector->nextDue(fx.now) == std::nullopt);
@@ -281,6 +291,8 @@ TEST_CASE("LinkDetector.aPageThatDetectsNothingIsNeitherReadNorMatched", "[links
     CHECK(fx.targetAt(0, 4).empty());
 
     fx.source.page = PageIndex(0); // the primary screen, which detects
+    (void) fx.frame();
+    CHECK(fx.detector->nextDue(fx.now).has_value()); // the switch alone schedules a scan
     fx.detect();
     CHECK(fx.targetAt(0, 4) == "https://x.y/");
 }
