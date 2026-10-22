@@ -60,7 +60,12 @@ namespace
 DecorationRenderer::DecorationRenderer(GridMetrics const& gridMetrics,
                                        Decorator hyperlinkNormal,
                                        Decorator hyperlinkHover):
-    Renderable { gridMetrics }, _hyperlinkNormal { hyperlinkNormal }, _hyperlinkHover { hyperlinkHover }
+    Renderable { gridMetrics },
+    _hyperlinkNormal { hyperlinkNormal },
+    _hyperlinkHover { hyperlinkHover },
+    _dottedGeometry { dottedUnderlineGeometry(unbox<int>(gridMetrics.cellSize.width),
+                                              gridMetrics.underline.position,
+                                              gridMetrics.underline.thickness) }
 {
 }
 
@@ -93,6 +98,10 @@ void DecorationRenderer::initializeDirectMapping()
     if (!SoftRequire(_textureAtlas))
         return;
 
+    // Before any tile is rasterized: the DottedUnderline case below is phase 0 of this geometry.
+    _dottedGeometry = dottedUnderlineGeometry(
+        unbox<int>(_gridMetrics.cellSize.width), underlinePosition(), underlineThickness());
+
     for (Decorator const decoration: eachElement<Decorator>())
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
@@ -102,9 +111,7 @@ void DecorationRenderer::initializeDirectMapping()
     }
 
     // Phase 0 was uploaded above as DottedUnderline's own tile.
-    auto const geometry = dottedUnderlineGeometry(
-        unbox<int>(_gridMetrics.cellSize.width), underlinePosition(), underlineThickness());
-    for (auto const phase: std::views::iota(1, geometry.phaseCount))
+    for (auto const phase: std::views::iota(1, _dottedGeometry.phaseCount))
     {
         auto const tileIndex = _directMapping.toTileIndex(dottedPhaseIndex(phase));
         _textureAtlas->setDirectMapping(tileIndex,
@@ -133,8 +140,9 @@ void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
     CONTOUR_TRACY_CELL_ZONE();
     auto const scale = cell.attributes.lineFlags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
-    // A double-width cell covers two grid columns, and the dotted underline's phase follows those.
-    auto const firstColumn = vtbackend::ColumnOffset(unbox(cell.position.column) * scale);
+    // Already a display column: RenderBufferBuilder::displayColumn() emits 2N for cell N of a
+    // double-width line, so it must not be scaled again.
+    auto const firstColumn = cell.position.column;
     for (auto const& mapping: CellFlagDecorationMappings)
         if (cell.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
@@ -335,7 +343,7 @@ auto DecorationRenderer::createDottedPhaseTile(int phase, atlas::TileLocation ti
     // top on row 0, and the tile's height is the underline position -- so the dot's top lands exactly
     // where a straight underline's does.
     auto const width = unbox<int>(_gridMetrics.cellSize.width);
-    auto const geometry = dottedUnderlineGeometry(width, underlinePosition(), underlineThickness());
+    auto const& geometry = _dottedGeometry;
     auto const imageSize =
         ImageSize { _gridMetrics.cellSize.width, vtbackend::Height::cast_from(geometry.tileHeight) };
     auto image = atlas::Buffer(imageSize.area(), 0);
@@ -358,13 +366,12 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
                                           vtbackend::ColumnCount columnCount,
                                           vtbackend::RGBColor const& color)
 {
-    auto const geometry = dottedUnderlineGeometry(
-        unbox<int>(_gridMetrics.cellSize.width), underlinePosition(), underlineThickness());
     for (auto const i: std::views::iota(0, unbox(columnCount)))
     {
-        auto const index = decoration == Decorator::DottedUnderline
-                               ? dottedPhaseIndex(dottedUnderlinePhaseOf(geometry, unbox(firstColumn) + i))
-                               : static_cast<uint32_t>(decoration);
+        auto const index =
+            decoration == Decorator::DottedUnderline
+                ? dottedPhaseIndex(dottedUnderlinePhaseOf(_dottedGeometry, unbox(firstColumn) + i))
+                : static_cast<uint32_t>(decoration);
         auto const tileIndex = _directMapping.toTileIndex(index);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
         auto tileAttributesCopy = tileAttributes;

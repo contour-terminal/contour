@@ -400,13 +400,18 @@ TEST_CASE("DecorationRenderer.dottedUnderlineContinuesAcrossCells", "[decoration
     // A pitch that does not divide the cell width used to restart at every cell, so the gap at a
     // cell boundary differed from the gap inside it. Laid side by side, column `c` drawing phase
     // `c % phaseCount`, the dots must instead march on one unbroken pitch.
-    auto const width = GENERATE(10, 9);
+    auto const [width, thickness, expectedPhaseCount] = GENERATE(table<int, int, int>({
+        { 10, 1, 2 }, // pitch 4
+        { 9, 1, 4 },  // pitch 4
+        { 10, 2, 3 }, // pitch 6
+        { 9, 2, 2 },  // pitch 6
+    }));
     auto const gridMetrics = gridMetricsFor(
-        ImageSize { Width(width), Height(20) }, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
-    auto const geometry = dottedUnderlineGeometry(width, NimbusUnderlinePosition, 1);
+        ImageSize { Width(width), Height(20) }, NimbusBaseline, NimbusUnderlinePosition, thickness);
+    auto const geometry = dottedUnderlineGeometry(width, NimbusUnderlinePosition, thickness);
     auto probe = DecorationProbe { gridMetrics };
 
-    CHECK(geometry.phaseCount == (width == 10 ? 2 : 4));
+    CHECK(geometry.phaseCount == expectedPhaseCount);
 
     auto tiles = std::vector<Rendered> {};
     for (auto const column: std::views::iota(0, 8))
@@ -447,8 +452,9 @@ TEST_CASE("DecorationRenderer.dottedUnderlineDotsAreAntialiased", "[decoration]"
 
 TEST_CASE("DecorationRenderer.dottedUnderlineContinuesOnADoubleWidthLine", "[decoration]")
 {
-    // A double-width line draws two grid columns per cell, so cell `c` covers columns `2c` and
-    // `2c + 1` -- and the phases must follow those columns, not the cell's own index.
+    // A double-width cell spans two display columns, and the phases must follow those display
+    // columns -- neither the grid cell's own index nor that index scaled a second time.
+    // RenderBufferBuilder::displayColumn() emits grid cell N of a DECDWL line at display column 2N.
     auto const gridMetrics = gridMetricsFor(
         ImageSize { Width(9), Height(20) }, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
     auto const geometry = dottedUnderlineGeometry(9, NimbusUnderlinePosition, 1);
@@ -456,18 +462,17 @@ TEST_CASE("DecorationRenderer.dottedUnderlineContinuesOnADoubleWidthLine", "[dec
     auto probe = DecorationProbe { gridMetrics };
 
     auto phases = std::vector<int> {};
-    for (auto const column: std::views::iota(0, 2))
+    for (auto const displayColumn: { 0, 2 })
     {
         auto cell = vtbackend::RenderCell {};
         cell.width = 1;
-        cell.position.column = ColumnOffset(column);
+        cell.position.column = ColumnOffset(displayColumn);
         cell.attributes.flags = vtbackend::CellFlags { vtbackend::CellFlag::DottedUnderline };
         cell.attributes.lineFlags = vtbackend::LineFlags { vtbackend::LineFlag::DoubleWidth };
         std::ranges::copy(probe.dottedPhasesDrawnFor(cell, geometry.phaseCount), std::back_inserter(phases));
     }
 
-    auto const n = geometry.phaseCount;
-    CHECK(phases == std::vector { (0 * 2) % n, ((0 * 2) + 1) % n, 2 % n, 3 % n });
+    CHECK(phases == std::vector { 0, 1, 2, 3 });
 }
 
 TEST_CASE("DecorationRenderer.doubleUnderlineIsTwoSeparatedStrokes", "[decoration]")
