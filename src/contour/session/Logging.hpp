@@ -8,5 +8,6 @@ namespace contour::session
 
 auto inline const sessionLog = core::log::Category("gui.session", "VT terminal session logs");
 auto inline const managerLog = core::log::Category("gui.session_manager", "Sessions manager logs");
+auto inline const extensionLog = core::log::Category("gui.extension", "Status-line extension logs");
 
 } // namespace contour::session

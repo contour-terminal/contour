@@ -114,6 +114,14 @@ TerminalSession* TerminalSessionManager::sessionForId(vtworkspace::SessionId id)
     return it != _sessionsById.end() ? it->second : nullptr;
 }
 
+TerminalSession* TerminalSessionManager::sessionForPty(vtpty::Pty const* pty) const noexcept
+{
+    auto const sessions = _sessionsById | std::views::values;
+    auto const found = std::ranges::find_if(
+        sessions, [pty](TerminalSession const* session) { return &session->terminal().device() == pty; });
+    return found != sessions.end() ? *found : nullptr;
+}
+
 vtpty::Pty const* TerminalSessionManager::actingPtyOfWindow(vtworkspace::WindowId window) const
 {
     auto* win = _model->window(window);
@@ -299,7 +307,8 @@ TerminalSession* TerminalSessionManager::createBackingSession(
                             pageSize,
                             std::move(launchedCommand),
                             _sessionFactory.createNotifier(),
-                            role);
+                            role,
+                            _sessionFactory.hosting());
     // The manager owns what it makes: removeSession() frees a session that has ended, and those still
     // running go with the manager, along with whatever they had queued for themselves.
     session->setParent(this);

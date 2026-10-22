@@ -49,6 +49,10 @@ target_link_libraries(contour_cli
     PUBLIC contour_config core::cli
     PRIVATE vthost
 )
+# `contour daemon` runs its profile's status-line extensions, built from contour::config's declarations.
+if(CONTOUR_EXTENSIONS)
+    target_link_libraries(contour_cli PRIVATE contour_extensions)
+endif()
 
 # The binary dir is PUBLIC so that ShellIntegration.cpp's <ShellIntegrationData.hpp> resolves, and
 # so it keeps resolving for any consumer that compiles this target's sources.

@@ -2697,6 +2697,12 @@ QVariantList SettingsController::parseIndicatorSegment(QString const& templateSt
                                                              ? toQString(ItemTraits<T>::Label)
                                                              : QString::fromStdString(v.command);
                 }
+                else if constexpr (std::same_as<T, Extension>)
+                {
+                    row[QStringLiteral("name")] = QString::fromStdString(v.name);
+                    row[QStringLiteral("displayName")] =
+                        v.name.empty() ? toQString(ItemTraits<T>::Label) : QString::fromStdString(v.name);
+                }
                 else if constexpr (std::same_as<T, Tabs>)
                 {
                     writeColorPair(
@@ -2760,6 +2766,9 @@ QString SettingsController::serializeIndicatorSegment(QVariantList const& items)
                     item.interval = std::chrono::seconds { seconds };
                 segment.emplace_back(std::move(item));
             }
+            else if constexpr (std::same_as<T, Extension>)
+                segment.emplace_back(
+                    Extension { styles, row.value(QStringLiteral("name")).toString().toStdString() });
             else if constexpr (std::same_as<T, Tabs>)
             {
                 auto const separator = row.value(QStringLiteral("separator")).toString();

@@ -16,6 +16,12 @@
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/session/CommandBlockTooltip.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
+#ifdef CONTOUR_EXTENSIONS
+    #include <contour/config/ExtensionDeclarations.hpp>
+
+    #include <vtextension/ExtensionConsent.hpp>
+    #include <vtextension/SessionExtensions.hpp>
+#endif
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/LocalFileAction.hpp>
@@ -68,7 +74,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -290,6 +298,61 @@ namespace
 
 } // namespace
 
+#ifdef CONTOUR_EXTENSIONS
+namespace
+{
+    /// Hands a finished extension build to the session's thread, through its post target: dropped once the
+    /// session is gone.
+    class SessionOwnerThread final: public vtextension::IOwnerThread
+    {
+      public:
+        explicit SessionOwnerThread(std::shared_ptr<platform::PostTarget> target):
+            _target { std::move(target) }
+        {
+        }
+
+        void post(std::function<void()> job) override { _target->post(std::move(job)); }
+
+      private:
+        std::shared_ptr<platform::PostTarget> _target;
+    };
+} // namespace
+
+struct TerminalSession::ExtensionState
+{
+    /// @param callbacks What the session hears from its extensions.
+    /// @param owner Where their builds are handed back to.
+    ExtensionState(vtextension::SessionExtensionCallbacks callbacks,
+                   std::shared_ptr<vtextension::IOwnerThread> owner):
+        extensions { std::move(callbacks), std::move(owner) }
+    {
+    }
+
+    /// What the profile declared when the extensions were last rebuilt; a reload that leaves it as it is
+    /// restarts nothing. Empty at first: nothing is built for a profile without extensions.
+    vtextension::DeclaredExtensions declared;
+
+    /// The running extensions, and what the terminal reaches them through; empty without any.
+    vtextension::SessionExtensions extensions;
+
+    /// The questions this session asks, one prompt at a time; made on the first question.
+    std::unique_ptr<vtextension::ExtensionConsentQueue> consent;
+
+    /// Asks the pty which program is in the foreground; exists only while an extension follows it.
+    std::unique_ptr<QTimer> foregroundProcessTimer;
+
+    /// Whether an extension follows the foreground process, as a worker last saw it: a published frame that
+    /// changes it has the poll (dis)armed on the GUI thread, and one that does not posts nothing.
+    vtbackend::StatusLineSubscriptionWatch foregroundProcessFollowing {
+        vtbackend::StatusLineEventKind::ForegroundProcess
+    };
+
+    /// The foreground program the extensions were last told of, so that each is told once; extensions that
+    /// load or subscribe later hear it from the terminal, which remembers it.
+    std::string foregroundProcessName;
+};
+#endif
+
 TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  unique_ptr<vtpty::Pty> pty,
                                  ContourGuiApp& app,
@@ -297,7 +360,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                                  std::optional<vtbackend::PageSize> initialPageSize,
                                  std::optional<vtpty::Process::ExecInfo> launchedCommand,
                                  std::unique_ptr<platform::Notifier> notifier,
-                                 SessionRole role):
+                                 SessionRole role,
+                                 SessionHosting hosting):
     _manager { manager },
     _id { createSessionId() },
     _startTime { steady_clock::now() },
@@ -306,6 +370,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _profileOverride { profileName.empty() ? std::optional<std::string> {} : std::optional { profileName } },
     _launchedCommand { std::move(launchedCommand) },
     _role { role },
+    _hosting { hosting },
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
@@ -314,6 +379,7 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _accumulatedAngleScroll {},
     // Asked of the terminal, for a pane bound to another machine's daemon names no path here.
     _hyperlinkHover { [this] { return _terminal.fileUrlLocalHost(); } },
+    _extensionState { createExtensionState() },
     _terminal { *this,
                 app.processEnvironment(),
                 app.fileSystem(),
@@ -322,7 +388,8 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 app.statusLineCommandServices(),
                 app.terminalClocks(),
                 vtbackend::randomSemanticBlockTokens(),
-                app.linkDetectionServices() },
+                app.linkDetectionServices(),
+                terminalExtensionServices() },
     _exitWatcherThread { std::make_unique<ExitWatcherThread>(*this) },
     // _config is declared before _desktopNotifier, so reading it here is well-defined. The delay is
     // fixed for the notifier's life: it decides how a backend that cannot observe a close behaves,
@@ -362,6 +429,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
 
     configureTerminal();
     connectFinishNoticeEvents();
+
+#ifdef CONTOUR_EXTENSIONS
+    // Once the terminal exists, which the build reports to. Without extensions this starts nothing (A2).
+    reloadExtensions();
+#endif
 }
 
 TerminalSession::~TerminalSession()
@@ -411,6 +483,13 @@ TerminalSession::~TerminalSession()
 
     if (_screenUpdateThread)
         _screenUpdateThread->join();
+
+#ifdef CONTOUR_EXTENSIONS
+    // The runners are destroyed with _extensionState, after this body; their lanes retire their engines a
+    // moment later, which only this (the owner's) thread may release.
+    if (_extensionState && !_extensionState->declared.extensions.empty())
+        scheduleRetiredRelease();
+#endif
 }
 
 void TerminalSession::detachDisplay(DisplaySurface& display)
@@ -433,6 +512,25 @@ display::ForcedFontDpiProvider* TerminalSession::forcedFontDpiProvider() noexcep
 input::KeyboardLayout const& TerminalSession::keyboardLayout() const noexcept
 {
     return _app.keyboardLayout();
+}
+
+vtbackend::StatusLineFontMetrics TerminalSession::displayFontMetrics()
+{
+    // The point size the display applied, and the cell size it published: device pixels, unlike what
+    // resizeScreen() is given, which a profile may report in logical ones.
+    return vtbackend::StatusLineFontMetrics { .pointSize = static_cast<float>(_display->getFontDef().size),
+                                              .cellPixelSize = _display->cellSize() };
+}
+
+void TerminalSession::updateStatusLineFontMetrics()
+{
+    // One lock-free question first: without extensions nothing is copied and no lock is taken (A2). Those a
+    // reload installs later are told by statusLineExtensionsReplaced().
+    if (!_display || !runsStatusLineExtensions())
+        return;
+    auto const metrics = displayFontMetrics();
+    // Telling never waits for an extension: it queues an event for each.
+    _terminal.runUnderStateLock([&] { _terminal.setStatusLineFontMetrics(metrics); });
 }
 
 void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
@@ -461,6 +559,13 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // cursorPositionChanged() early-return, freezing IME rectangle tracking and the a11y caret.
     _cursorMovedPostPending.clear(std::memory_order_release);
 
+#ifdef CONTOUR_EXTENSIONS
+    // A question asked while no display showed this session (a background tab) is shown now.
+    if (_extensionState && _extensionState->consent && _extensionState->consent->current())
+        QMetaObject::invokeMethod(
+            this, [this]() { emit requestPermissionForExtension(); }, Qt::QueuedConnection);
+#endif
+
     // A closed session has nothing to resize: its PTY is gone. Closing a pane makes QML re-run the
     // Loader binding for the surviving panes, which re-enters setSession() -> attachDisplay() while
     // onClosed() is still unwinding, so this path really is reached after the PTY has been closed.
@@ -484,6 +589,10 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // configureDisplay() only runs from createRenderer(), i.e. once for the first session, so the
     // ceiling has to be (re)derived here too. See updateImageCanvasCeiling() for the null-checks.
     updateImageCanvasCeiling();
+
+    // The font this display draws in, for the status-line extensions; later changes are told by the
+    // display once it has applied them.
+    updateStatusLineFontMetrics();
 
     {
         auto const _ = std::scoped_lock { _onClosedMutex };
@@ -904,6 +1013,248 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
         }
     }
 }
+
+// {{{ status-line extensions
+QString TerminalSession::pendingExtensionPermissionText() const
+{
+#ifdef CONTOUR_EXTENSIONS
+    if (_extensionState && _extensionState->consent)
+        if (auto const* const request = _extensionState->consent->current())
+            return QString::fromStdString(vtextension::consentText(*request));
+#endif
+    return {};
+}
+
+void TerminalSession::allowPendingExtension()
+{
+#ifdef CONTOUR_EXTENSIONS
+    answerExtensionConsent(vtextension::ConsentAnswer::Allowed);
+#endif
+}
+
+void TerminalSession::denyPendingExtension()
+{
+#ifdef CONTOUR_EXTENSIONS
+    answerExtensionConsent(vtextension::ConsentAnswer::Denied);
+#endif
+}
+
+void TerminalSession::dismissPendingExtension()
+{
+#ifdef CONTOUR_EXTENSIONS
+    answerExtensionConsent(vtextension::ConsentAnswer::Dismissed);
+#endif
+}
+
+vtextension::SessionExtensions const* TerminalSession::statusLineExtensions() const noexcept
+{
+#ifdef CONTOUR_EXTENSIONS
+    if (_extensionState)
+        return &_extensionState->extensions;
+#endif
+    return nullptr;
+}
+
+bool TerminalSession::pollsForegroundProcess() const noexcept
+{
+#ifdef CONTOUR_EXTENSIONS
+    return _extensionState && _extensionState->foregroundProcessTimer != nullptr;
+#else
+    return false;
+#endif
+}
+
+bool TerminalSession::runsStatusLineExtensions() const noexcept
+{
+#ifdef CONTOUR_EXTENSIONS
+    return _extensionState && !_extensionState->extensions.empty();
+#else
+    return false;
+#endif
+}
+
+std::optional<vtbackend::StatusLineExtensionServices> TerminalSession::terminalExtensionServices() noexcept
+{
+#ifdef CONTOUR_EXTENSIONS
+    if (_extensionState)
+        return _extensionState->extensions.terminalServices();
+#endif
+    return std::nullopt;
+}
+
+#ifdef CONTOUR_EXTENSIONS
+namespace
+{
+    /// What an extension logs, in Contour's log. Called on the extension's lane.
+    void logExtensionMessage(std::string_view name, vtextension::LogLevel level, std::string_view message)
+    {
+        // Asked first, so that a chatty guest costs nothing while nobody reads the category.
+        if (!extensionLog.isEnabled())
+            return;
+        extensionLog()("{}", vtextension::extensionLogLine(name, level, message));
+    }
+} // namespace
+
+TerminalSession::ExtensionStatePtr TerminalSession::createExtensionState()
+{
+    // Always, so that a reload can bring extensions to this pane: empty, it is a forwarder to nothing and a
+    // gate subscribed to nothing -- no runtime, no thread, no timer (A2).
+    auto state = std::make_unique<ExtensionState>(
+        vtextension::SessionExtensionCallbacks {
+            .onPermissionNeeded =
+                [this](std::string_view hostId, vtextension::Manifest const& manifest) {
+                    requestExtensionPermission(hostId, manifest);
+                },
+            .onLog = &logExtensionMessage,
+            .onReplaced = [this]() { statusLineExtensionsReplaced(); } },
+        std::make_shared<SessionOwnerThread>(_postTarget));
+    return { state.release(), [](ExtensionState* made) { std::default_delete<ExtensionState> {}(made); } };
+}
+
+void TerminalSession::reloadExtensions()
+{
+    auto& state = *_extensionState;
+    // A mirrored pane runs none here: its session's extensions run on the remote end, where its terminal
+    // is, and its own stays the empty forwarder -- no runtime, no thread, no timer.
+    auto declared = _hosting == SessionHosting::Remote ? vtextension::DeclaredExtensions {}
+                                                       : config::declaredExtensionsOf(_profile);
+    if (declared == state.declared)
+        return;
+    state.declared = declared;
+
+    if (declared.extensions.empty())
+    {
+        // Diagnosed even so, but nothing is started for it, and the poll stops.
+        if (auto const diagnostic = vtextension::undeclaredTakeOver(declared))
+            errorLog()("{}", *diagnostic);
+        state.extensions.rebuild(std::move(declared), {}, std::nullopt);
+        armForegroundProcessPoll();
+        return;
+    }
+
+    sessionLog()("Loading the status-line extensions.");
+    auto const cellPixelSize = _terminal.runUnderStateLock([this] { return _terminal.cellPixelSize(); });
+    // Found, read and loaded on the runtime's build thread; they replace the running ones once loaded.
+    state.extensions.rebuild(std::move(declared), cellPixelSize, _app.extensionRuntime().sessionServices());
+    // The poll is armed once they say they follow the foreground process: after they have loaded.
+}
+
+void TerminalSession::armForegroundProcessPoll()
+{
+    auto& state = *_extensionState;
+    if (!state.extensions.subscriptions().test(vtbackend::StatusLineEventKind::ForegroundProcess))
+    {
+        state.foregroundProcessTimer.reset();
+        return;
+    }
+    if (state.foregroundProcessTimer)
+        return;
+    state.foregroundProcessTimer = std::make_unique<QTimer>();
+    state.foregroundProcessTimer->setInterval(std::chrono::seconds { 1 });
+    connect(
+        state.foregroundProcessTimer.get(), &QTimer::timeout, this, &TerminalSession::pollForegroundProcess);
+    state.foregroundProcessTimer->start();
+}
+
+void TerminalSession::extensionFramePublished()
+{
+    // On an extension's worker, holding no lock: what the extensions follow is read lock-free, and only a
+    // change of it is handed to the GUI thread, which (dis)arms the poll.
+    auto& state = *_extensionState;
+    if (state.foregroundProcessFollowing.changed(state.extensions.subscriptions()))
+        _postTarget->post([this] { armForegroundProcessPoll(); });
+}
+
+void TerminalSession::statusLineExtensionsReplaced()
+{
+    {
+        auto const lock = scoped_lock { _terminal };
+        // Which tells the new ones the foreground process too: the poll tells each name once.
+        _terminal.statusLineExtensionsReplaced();
+        // And the font the display draws in, which the terminal was not told while there were no extensions;
+        // unchanged, it is not told twice.
+        if (_display && runsStatusLineExtensions())
+            _terminal.setStatusLineFontMetrics(displayFontMetrics());
+    }
+    // What the new ones follow is known once they have loaded, which a frame they publish tells: forgotten
+    // what the ones before them followed first, so that the frame counts as a change, and the poll
+    // re-checked.
+    _extensionState->foregroundProcessFollowing.reset();
+    armForegroundProcessPoll();
+    scheduleRetiredRelease();
+}
+
+void TerminalSession::requestExtensionPermission(std::string_view hostId,
+                                                 vtextension::Manifest const& manifest)
+{
+    // On the extension's lane: the question is handed to the GUI thread, and nothing waits for the answer.
+    _postTarget->post([this,
+                       request = vtextension::ExtensionConsentRequest { .hostId = std::string { hostId },
+                                                                        .manifest = manifest }]() mutable {
+        offerExtensionConsent(std::move(request), _app.extensionRuntime().grants());
+    });
+}
+
+void TerminalSession::askForHostedExtension(vtextension::ExtensionConsentRequest request,
+                                            vtextension::IGrantStore& answers)
+{
+    offerExtensionConsent(std::move(request), answers);
+}
+
+void TerminalSession::offerExtensionConsent(vtextension::ExtensionConsentRequest request,
+                                            vtextension::IGrantStore& answers)
+{
+    if (!_extensionState)
+        return;
+    auto& consent = _extensionState->consent;
+    if (!consent)
+        consent = std::make_unique<vtextension::ExtensionConsentQueue>();
+    sessionLog()("Status-line extension {} asks to run its declared commands.", request.hostId);
+    if (consent->offer(std::move(request), answers) == vtextension::ConsentPrompt::Due)
+        emit requestPermissionForExtension();
+}
+
+void TerminalSession::answerExtensionConsent(vtextension::ConsentAnswer answer)
+{
+    if (!_extensionState || !_extensionState->consent)
+        return;
+    // The next question opens once the dialog that answered this one has closed.
+    if (_extensionState->consent->answer(answer) == vtextension::ConsentPrompt::Due)
+        QMetaObject::invokeMethod(
+            this, [this]() { emit requestPermissionForExtension(); }, Qt::QueuedConnection);
+}
+
+void TerminalSession::pollForegroundProcess()
+{
+    auto& state = *_extensionState;
+    if (!state.extensions.subscriptions().test(vtbackend::StatusLineEventKind::ForegroundProcess))
+        return;
+    auto const* const process = dynamic_cast<vtpty::Process const*>(&_terminal.device());
+    if (process == nullptr)
+        return;
+    auto name = process->foregroundProcessName();
+    if (!name || *name == state.foregroundProcessName)
+        return;
+    state.foregroundProcessName = std::move(*name);
+    auto const lock = scoped_lock { _terminal };
+    _terminal.foregroundProcessChanged(state.foregroundProcessName);
+}
+
+void TerminalSession::scheduleRetiredRelease()
+{
+    _app.releaseRetiredExtensionsSoon();
+}
+#else
+TerminalSession::ExtensionStatePtr TerminalSession::createExtensionState()
+{
+    return { nullptr, nullptr };
+}
+
+void TerminalSession::extensionFramePublished()
+{
+}
+#endif
+// }}}
 
 void TerminalSession::updateColorPreference(vtbackend::ColorPreference preference)
 {
@@ -5432,6 +5783,9 @@ void TerminalSession::activateProfile(string const& newProfileName, ProfileWindo
     _profileName = newProfileName;
     _profile = *newProfile;
     configureTerminal();
+#ifdef CONTOUR_EXTENSIONS
+    reloadExtensions();
+#endif
 
     // A wider or narrower gutter, or other margins, put the grid somewhere else within the same pixels,
     // and no resize event is coming to say so: the page is refitted here, once for both, and with it the

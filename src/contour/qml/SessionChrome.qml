@@ -342,6 +342,21 @@ Item {
         onRejected: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
     }
 
+    // Asked when a status-line extension first runs one of the commands its manifest declares, with
+    // `run_command: ask`. The text names the extension, its module and every command it declares, made safe to
+    // show by the session. Every answer is remembered in the grants file, so "to all" means the same as the
+    // plain one; Abort, or closing the dialog, is no answer.
+    RequestPermission {
+        id: requestExtensionCommandsDialog
+        objectName: "extensionCommandsDialog"
+        title: qsTr("Allow this status-line extension to run commands?")
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.allowPendingExtension();
+        onYesClicked: if (chrome.session !== null) chrome.session.allowPendingExtension();
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.denyPendingExtension();
+        onNoClicked: if (chrome.session !== null) chrome.session.denyPendingExtension();
+        onRejected: if (chrome.session !== null) chrome.session.dismissPendingExtension();
+    }
+
     // The find bar (Ctrl+Shift+F, or `/` in Vi normal mode). Per pane, not per window: each session
     // keeps its own pattern, count and highlights, so a split shows the bar over the pane being
     // searched. Opened by the session's searchBarRequested signal, wired in Connections below.
@@ -471,6 +486,10 @@ Item {
         function onRequestPermissionForBufferCapture() { requestBufferCaptureDialog.open(); }
         function onRequestPermissionForShowHostWritableStatusLine() { requestShowHostWritableStatusLine.open(); }
         function onRequestPermissionForPasteLargeFile() { requestLargeFilePaste.open(); }
+        function onRequestPermissionForExtension() {
+            requestExtensionCommandsDialog.text = chrome.session.pendingExtensionPermissionText();
+            requestExtensionCommandsDialog.open();
+        }
         function onRequestPermissionForRerunCommand() {
             requestRerunCommandDialog.text = qsTr("It is typed at the prompt and entered:") + "\n\n"
                                              + chrome.session.pendingRerunCommandLine();

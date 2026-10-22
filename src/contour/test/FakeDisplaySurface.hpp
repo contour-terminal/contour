@@ -38,6 +38,7 @@ class FakeDisplaySurface final: public session::DisplaySurface
     double devicePixelRatioValue = 1.0;
     vtrasterizer::GridMetrics gridMetricsValue {};
     vtbackend::FontDef fontDefValue {};
+    int fontDefReads = 0; ///< How often getFontDef() was asked: copying the font descriptions is not free.
     /// What @ref setFontSize reports back — a test flips it to model a font that failed to load.
     bool fontSizeApplies = true;
     /// True once a test decides the surface is composited; @c configureDisplay() gates on it.
@@ -130,7 +131,11 @@ class FakeDisplaySurface final: public session::DisplaySurface
         pixelResizeRequests.emplace_back(width, height);
     }
 
-    [[nodiscard]] vtbackend::FontDef getFontDef() override { return fontDefValue; }
+    [[nodiscard]] vtbackend::FontDef getFontDef() override
+    {
+        ++fontDefReads;
+        return fontDefValue;
+    }
     void setFonts(vtrasterizer::FontDescriptions fontDescriptions) override
     {
         fontsSet.push_back(std::move(fontDescriptions));

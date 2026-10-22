@@ -54,6 +54,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
+#include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -144,7 +145,8 @@ struct DaemonFixture
     std::thread thread;
     bool cancelled = false; ///< Whether teardown unwound the accept loop.
 
-    DaemonFixture()
+    /// @param extensions The status-line extensions the hosted sessions run; none by default.
+    explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {})
     {
         host = std::make_unique<vthost::SessionHost>(
             loop,
@@ -153,7 +155,8 @@ struct DaemonFixture
             },
             vtbackend::Settings {},
             core::defaultEnvironment(),
-            vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual });
+            vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                        .extensions = std::move(extensions) });
         auto listener = core::net::listen(loop, "127.0.0.1", 0);
         REQUIRE(listener.has_value());
         port = (*listener)->boundPort();
@@ -434,6 +437,56 @@ TEST_CASE("attach controller mirrors a remote session over a real socket", "[att
     controller.stop();
     CHECK(pane.pty().isClosed());
     pane.terminal.reset(); // unbind (the controller outlives its ptys' registrations)
+}
+
+TEST_CASE("NativeController.extension.permission", "[attach][controller][extensions]")
+{
+    // A daemon's extension asked while no client was attached: the attaching client hands the question to
+    // the pane it is asked in, and sends the user's answer back, which the daemon records.
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto daemon = DaemonFixture { hosting };
+    std::ignore = daemon.seedSession("hello");
+    auto const asked = vthost::proto::PermissionRequest {
+        .session = 0,
+        .hostId = "git@/usr/share/contour/extensions/git.wasm",
+        .name = "git",
+        .version = 1,
+        .digest = "5f3c",
+        .commands = { vthost::proto::WireDeclaredCommand { .name = "status", .argv = { "git", "status" } } },
+    };
+    REQUIRE(daemon.onDaemon([&] {
+        hosting->sessions.front()->askPermission(asked);
+        return true;
+    }));
+
+    auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, nullptr };
+    requireConnected(controller);
+    auto route = AttachRoute { controller };
+    auto pty = route.router.createPty(std::nullopt);
+    REQUIRE(pty != nullptr);
+    auto pane = MirrorPane { route.router, std::move(pty) };
+
+    auto taken = std::vector<contour::remote::NativeController::HostedPermissionRequest> {};
+    REQUIRE(waitUntil([&] {
+        auto more = controller.takePermissionRequests();
+        taken.insert(taken.end(), more.begin(), more.end());
+        return !taken.empty();
+    }));
+    REQUIRE(taken.size() == 1);
+    CHECK(taken.front().pty == &pane.pty());
+    CHECK(taken.front().request.name == "git");
+    CHECK(taken.front().request.hostId == asked.hostId);
+    CHECK(taken.front().request.commands == asked.commands);
+
+    controller.answerPermission(asked.hostId, asked.digest, vthost::GrantState::Granted);
+    CHECK(waitUntil([&] {
+        return daemon.onDaemon([&] { return hosting->lookup(asked.hostId, asked.digest); })
+               == vthost::GrantState::Granted;
+    }));
+    CHECK(daemon.onDaemon([&] { return daemon.host->pendingPermissionRequests().empty(); }));
+
+    controller.stop();
+    pane.terminal.reset();
 }
 
 TEST_CASE("a GUI detach ends the daemon's TLS connection as a disconnect", "[attach][controller]")

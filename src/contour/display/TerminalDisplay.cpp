@@ -875,6 +875,12 @@ void TerminalDisplay::createRenderer()
     // of triggering a full redundant font reload + geometry recompute + spurious resizeScreen()/SIGWINCH.
     _lastFontDPI = fontDPI();
 
+    // The materialized change may have moved the cell size the session was attached with (a DPR correction,
+    // or a font change staged without a render target): the status-line extensions learn it here, as they
+    // do from the reconfig recompute -- the two places a font/DPI change is applied. Unchanged, nothing is
+    // told.
+    _session->updateStatusLineFontMetrics();
+
     // applyFontDPI()'s no-render-target branch already refreshed the WM hints — but against the
     // still-stale (pre-correction) cell size, because the staged DPI was only materialized just above.
     // Refresh them now that the corrected cell size is live.
@@ -1952,6 +1958,9 @@ void TerminalDisplay::recomputeGeometryAfterFontReconfig()
     // fully alive (live _session, _renderer and window()).
     Require(_session && _renderer && window());
     refitPage();
+    // Where a font or pixel-density change is applied -- here, and in createRenderer()'s setup-time
+    // materialization -- the status-line extensions are told; no action tells them on its own.
+    _session->updateStatusLineFontMetrics();
 }
 
 void TerminalDisplay::refitPage()

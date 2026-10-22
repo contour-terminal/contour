@@ -40,6 +40,7 @@
 #include <core/log/LogStore.hpp>
 #include <core/testing/EnvHelper.hpp>
 #include <core/testing/ScopedTempDir.hpp>
+#include <core/testing/ScopedWorkingDirectory.hpp>
 
 #include <yaml-cpp/yaml.h>
 
@@ -2250,6 +2251,328 @@ TEST_CASE("Config: a hint pattern's name survives a write and a read", "[config]
         CHECK(profile->hintPatterns.value().at(0).name == name);
     }
 }
+
+// {{{ extensions: and status_line.extension
+namespace
+{
+constexpr auto ExtensionsYaml = R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        extensions:
+            git:    { run_command: ask }
+            plasma: { config: { speed: "2" } }
+            mine:   { path: ~/wasm/mine.wasm, run_command: deny }
+        status_line:
+            extension: plasma
+            indicator:
+                right: "{Extension:git} │ {Clock:Bold}"
+)"sv;
+} // namespace
+
+TEST_CASE("Config: extensions load by name, with their config, path and permission", "[config][extensions]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, ExtensionsYaml);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+
+    auto const& extensions = profile->extensions.value();
+    REQUIRE(extensions.size() == 3);
+
+    CHECK(extensions[0].name == "git");
+    CHECK(extensions[0].path.empty());
+    CHECK(extensions[0].runCommand == contour::config::Permission::Ask);
+    CHECK(extensions[0].config.empty());
+
+    CHECK(extensions[1].name == "plasma");
+    CHECK(extensions[1].config == contour::config::ExtensionConfigMap { { "speed", "2" } });
+    CHECK(extensions[1].runCommand == contour::config::Permission::Ask);
+
+    CHECK(extensions[2].name == "mine");
+    CHECK(extensions[2].runCommand == contour::config::Permission::Deny);
+    // The leading ~ is the home directory, as for the other paths the file names.
+    CHECK(extensions[2].path.is_absolute());
+    CHECK(extensions[2].path.generic_string().ends_with("/wasm/mine.wasm"));
+
+    CHECK(profile->statusLine.value().extension == std::optional<std::string> { "plasma" });
+    CHECK(profile->statusLine.value().indicator.right == "{Extension:git} │ {Clock:Bold}");
+}
+
+TEST_CASE("Config: no extensions are configured unless the file names them", "[config][extensions]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, "profiles:\n  main:\n    shell: /bin/sh\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->extensions.value().empty());
+    CHECK_FALSE(profile->statusLine.value().extension.has_value());
+    CHECK(contour::config::Config {}.profile("main")->extensions.value().empty());
+}
+
+TEST_CASE("Config: extensions survive a write and a read", "[config][extensions]")
+{
+    QTemporaryDir dir;
+    auto const original = loadFromYaml(dir, ExtensionsYaml);
+
+    QTemporaryDir dir2;
+    auto const reloaded =
+        loadFromYaml(dir2, contour::config::createString<contour::config::YAMLConfigWriter>(original));
+    auto const* profile = reloaded.profile("main");
+    REQUIRE(profile != nullptr);
+
+    CHECK(profile->extensions.value() == original.profile("main")->extensions.value());
+    CHECK(profile->statusLine.value().extension == std::optional<std::string> { "plasma" });
+}
+
+TEST_CASE("Config: a profile without a take-over writes none and reads none back", "[config][extensions]")
+{
+    QTemporaryDir dir;
+    auto const reloaded = loadFromYaml(
+        dir, contour::config::createString<contour::config::YAMLConfigWriter>(contour::config::Config {}));
+    auto const* profile = reloaded.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK_FALSE(profile->statusLine.value().extension.has_value());
+    CHECK(profile->extensions.value().empty());
+}
+
+TEST_CASE("Config: an extension's awkward names and values survive a write and a read",
+          "[config][extensions]")
+{
+    // Written as plain scalars, ` #` would start a comment and `: ` a nested mapping.
+    QTemporaryDir dir;
+    // Absolute on every platform, so that reading it back resolves nothing.
+    auto const path = std::filesystem::path(dir.path().toStdU16String()) / "it's here.wasm";
+    auto config = contour::config::Config {};
+    config.profile("main")->extensions.value() = { contour::config::ExtensionConfig {
+        .name = "key: #1",
+        .path = path,
+        .config = { { "a: b", "c #d" }, { "quote", "'x'" } },
+        .runCommand = contour::config::Permission::Allow,
+    } };
+
+    auto const reloaded =
+        loadFromYaml(dir, contour::config::createString<contour::config::YAMLConfigWriter>(config));
+    auto const* profile = reloaded.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->extensions.value() == config.profile("main")->extensions.value());
+}
+
+TEST_CASE("Config: an unknown run_command is reported and the entry asks", "[config][extensions]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    extensions:\n      git: { run_command: maybe }\n"sv);
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("maybe"));
+    CHECK(capture.text().contains("git"));
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    REQUIRE(profile->extensions.value().size() == 1);
+    CHECK(profile->extensions.value()[0].runCommand == contour::config::Permission::Ask);
+}
+
+TEST_CASE("Config: a malformed extension entry costs that entry only", "[config][extensions]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    extensions:\n"
+                                     "      broken: [1, 2]\n"
+                                     "      nested: { config: { k: [1] } }\n"
+                                     "      fine: { run_command: allow }\n"sv);
+    INFO("captured error log:\n" << capture.text());
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& extensions = profile->extensions.value();
+    REQUIRE(extensions.size() == 2);
+    CHECK(extensions[0].name == "nested");
+    CHECK(extensions[0].config.empty());
+    CHECK(extensions[1].name == "fine");
+    CHECK(extensions[1].runCommand == contour::config::Permission::Allow);
+    CHECK(capture.text().contains("broken"));
+    CHECK(capture.text().contains("nested"));
+}
+
+TEST_CASE("Config: an extension named twice keeps the first", "[config][extensions]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    extensions:\n"
+                                     "      git: { run_command: deny }\n"
+                                     "      git: { run_command: allow }\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    REQUIRE(profile->extensions.value().size() == 1);
+    CHECK(profile->extensions.value()[0].runCommand == contour::config::Permission::Deny);
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("'git'"));
+    CHECK(capture.text().contains("twice"));
+}
+
+TEST_CASE("Config: a config key set twice keeps the later value and says so", "[config][extensions]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    extensions:\n"
+                                     "      plasma:\n"
+                                     "        config:\n"
+                                     "          speed: '1'\n"
+                                     "          other: x\n"
+                                     "          speed: '2'\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    REQUIRE(profile->extensions.value().size() == 1);
+    CHECK(profile->extensions.value()[0].config
+          == contour::config::ExtensionConfigMap { { "other", "x" }, { "speed", "2" } });
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("'speed'"));
+    CHECK(capture.text().contains("twice"));
+}
+
+TEST_CASE("Config: a path that names nothing skips the entry instead of falling back to the bundled one",
+          "[config][extensions]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    extensions:\n"
+                                     "      empty: { path: '' }\n"
+                                     "      nothing: { path: }\n"
+                                     "      list: { path: [a, b] }\n"
+                                     "      bundled: { run_command: allow }\n"sv);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const& extensions = profile->extensions.value();
+    REQUIRE(extensions.size() == 1);
+    CHECK(extensions[0].name == "bundled");
+    CHECK(extensions[0].path.empty());
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("'empty'"));
+    CHECK(capture.text().contains("'nothing'"));
+    CHECK(capture.text().contains("'list'"));
+}
+
+TEST_CASE("Config: a relative extension path is relative to the file declaring it", "[config][extensions]")
+{
+    QTemporaryDir dir;
+    auto const root = std::filesystem::path(dir.path().toStdU16String());
+    writeSideFile(dir,
+                  "profiles/work.yml",
+                  "extensions:\n"
+                  "  side: { path: side.wasm }\n"
+                  "  up: { path: ../up.wasm }\n"sv);
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    extensions:\n"
+                                     "      relative: { path: wasm/rel.wasm }\n"
+                                     "      absolute: { path: /opt/abs.wasm }\n"sv);
+
+    auto const* main = config.profile("main");
+    REQUIRE(main != nullptr);
+    auto const& mainExtensions = main->extensions.value();
+    REQUIRE(mainExtensions.size() == 2);
+    CHECK(mainExtensions[0].path == (root / "wasm" / "rel.wasm").lexically_normal());
+    // Rooted, so kept as written; on Windows it takes the declaring file's drive, as a rooted path does
+    // there.
+    CHECK(mainExtensions[1].path == root / std::filesystem::path { "/opt/abs.wasm" });
+
+    // The side file's own directory, not the directory of contour.yml.
+    auto const* work = config.profile("work");
+    REQUIRE(work != nullptr);
+    auto const& workExtensions = work->extensions.value();
+    REQUIRE(workExtensions.size() == 2);
+    CHECK(workExtensions[0].path == (root / "profiles" / "side.wasm").lexically_normal());
+    CHECK(workExtensions[1].path == (root / "up.wasm").lexically_normal());
+}
+
+TEST_CASE("Config: a relative extension path of a bare-filename config is made absolute",
+          "[config][extensions]")
+{
+    // `contour config contour.yml`: the config file has no directory part, yet the stored path must not
+    // depend on the working directory at the time the module is loaded.
+    QTemporaryDir dir;
+    (void) writeConfig(dir,
+                       "profiles:\n  main:\n    shell: /bin/sh\n"
+                       "    extensions:\n      relative: { path: wasm/rel.wasm }\n"sv);
+    auto const here =
+        core::testing::ScopedWorkingDirectory { std::filesystem::path(dir.path().toStdU16String()) };
+
+    auto config = contour::config::Config {};
+    contour::config::loadConfigFromFile(config, "contour.yml");
+
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    REQUIRE(profile->extensions.value().size() == 1);
+    auto const& path = profile->extensions.value()[0].path;
+    CHECK(path.is_absolute());
+    CHECK(path == (std::filesystem::current_path() / "wasm" / "rel.wasm"));
+}
+
+TEST_CASE("Config: extensions that are no map are ignored, and a null one clears the list",
+          "[config][extensions]")
+{
+    auto const capture = core::log::ScopedCapture { "error" };
+    QTemporaryDir dir;
+    writeSideFile(dir, "profiles/keeps.yml", "extensions: [1, 2]\n"sv);
+    writeSideFile(dir, "profiles/clears.yml", "extensions: ~\n"sv);
+    writeSideFile(dir, "profiles/untouched.yml", "mouse: { hide_while_typing: false }\n"sv);
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    extensions:\n      git: {}\n"sv);
+
+    for (auto const* name: { "main", "keeps", "untouched" })
+    {
+        CAPTURE(name);
+        auto const* profile = config.profile(name);
+        REQUIRE(profile != nullptr);
+        REQUIRE(profile->extensions.value().size() == 1);
+        CHECK(profile->extensions.value()[0].name == "git");
+    }
+    auto const* clears = config.profile("clears");
+    REQUIRE(clears != nullptr);
+    CHECK(clears->extensions.value().empty());
+
+    INFO("captured error log:\n" << capture.text());
+    CHECK(capture.text().contains("extensions"));
+    CHECK(capture.text().contains("expected a map"));
+}
+
+TEST_CASE("Config: a null or empty status_line.extension resets the take-over, an absent one keeps it",
+          "[config][extensions]")
+{
+    QTemporaryDir dir;
+    writeSideFile(dir, "profiles/null.yml", "status_line: { extension: null }\n"sv);
+    writeSideFile(dir, "profiles/empty.yml", "status_line: { extension: '' }\n"sv);
+    writeSideFile(dir, "profiles/absent.yml", "status_line: { position: top }\n"sv);
+    auto const config = loadFromYaml(dir,
+                                     "default_profile: main\n"
+                                     "profiles:\n  main:\n    shell: /bin/sh\n"
+                                     "    status_line:\n      extension: plasma\n"sv);
+
+    auto const takeOver = [&](char const* name) {
+        auto const* profile = config.profile(name);
+        REQUIRE(profile != nullptr);
+        return profile->statusLine.value().extension;
+    };
+    CHECK(takeOver("main") == std::optional<std::string> { "plasma" });
+    CHECK(takeOver("absent") == std::optional<std::string> { "plasma" });
+    CHECK_FALSE(takeOver("null").has_value());
+    CHECK_FALSE(takeOver("empty").has_value());
+}
+// }}}
 
 TEST_CASE("Config: dual (dark/light) color scheme selection loads both palettes", "[config]")
 {

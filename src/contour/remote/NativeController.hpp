@@ -178,6 +178,25 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// removed rather than left running headless.
     void requestClosePane(uint64_t session);
 
+    /// A status-line extension the daemon runs for a pane asks whether it may run its declared commands.
+    struct HostedPermissionRequest
+    {
+        vtpty::Pty const* pty = nullptr;          ///< The pty of the pane to ask in.
+        vthost::proto::PermissionRequest request; ///< What it asks, as the daemon sent it.
+    };
+
+    /// Takes the questions extensionPermissionRequested() announced, for the panes they are asked in. One
+    /// for a session not bound to a pane yet stays, and is announced again once it is. GUI thread.
+    /// @return The questions, oldest first.
+    [[nodiscard]] std::vector<HostedPermissionRequest> takePermissionRequests();
+
+    /// Answers a question takePermissionRequests() handed out: the daemon records the answer, for every
+    /// session. A no-op once detached.
+    /// @param hostId The installed extension that asked.
+    /// @param digest The manifest digest the answer is bound to.
+    /// @param answer The user's answer.
+    void answerPermission(std::string hostId, std::string digest, vthost::GrantState answer);
+
     /// @return The daemon window ids currently known, ascending. The daemon starts
     ///         with one window and grows via NewWindow; the GUI maps one OS window to
     ///         each (B4). A thread-safe snapshot.
@@ -291,6 +310,10 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// queued). The GUI reconstructs its tab/split tree from layout() (B2).
     void layoutChanged();
 
+    /// A daemon's status-line extension asks this client's user something (fires on the reactor thread;
+    /// connect queued). The GUI takes the questions with takePermissionRequests().
+    void extensionPermissionRequested();
+
   private:
     /// One discovered remote session awaiting a local tab.
     struct PendingSession
@@ -352,6 +375,9 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// Reactor-side: stores the daemon's latest tab/pane layout and signals the
     /// GUI to reconcile its own tree against it.
     void onLayout(vthost::proto::LayoutState const& layout);
+
+    /// Reactor-side: keeps a daemon extension's question for the GUI, and tells it.
+    void onPermissionRequest(vthost::proto::PermissionRequest const& request);
 
     /// Reactor-side: builds the mirror of a binding whose terminal arrived, judging once whether the
     /// daemon runs on the terminal's machine, and feeds it its full replay if the session's screen is
@@ -429,6 +455,8 @@ class NativeController final: public QObject, public contour::session::SessionFa
     /// empty set. The daemon's own removal notice arrives as a re-pushed `LayoutState`, which the
     /// reconciler acts on structurally rather than per id (@see applyRemoteLayout).
     std::unordered_set<uint64_t> _closedSessions;
+    /// The daemon extensions' questions the GUI has not taken yet, oldest first. Guarded by _mutex.
+    std::vector<vthost::proto::PermissionRequest> _permissionRequests;
     /// Guards the geometry bookkeeping below, and ONLY that.
     ///
     /// A lock of its own because the resize sink is reached from inside a `_mutex`-holding frame:
