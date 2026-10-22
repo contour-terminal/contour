@@ -59,6 +59,7 @@ set(vtbackend_HEADERS
     grid/LineSoA.hpp
     core/LinkDecoration.hpp
     screen/LinkDetector.hpp
+    links/LinkDetectionPolicy.hpp
     links/LinkIndex.hpp
     links/LinkMatcher.hpp
     links/LinkPatterns.hpp
@@ -291,6 +292,7 @@ if(LIBTERMINAL_TESTING)
         screen/Gutter_test.cpp
         shell/PromptRegion_test.cpp
         screen/LinkDetector_test.cpp
+        links/LinkDetectionPolicy_test.cpp
         links/LinkIndex_test.cpp
         links/LinkMatcher_test.cpp
         links/LinkPatterns_test.cpp
