@@ -437,7 +437,8 @@ TEST_CASE("Process.runsAProgramPathWithSpacesAsItIs", "[process]")
     auto const directory = core::testing::ScopedTempDir { "contour-process" };
     auto const program = directory.path() / "with space" / "sh";
     std::filesystem::create_directory(program.parent_path());
-    std::filesystem::copy_file("/bin/sh", program);
+    // Keep the system shell in place: macOS can kill a copied platform binary before it runs.
+    std::filesystem::create_symlink("/bin/sh", program);
 
     auto process = running(program.string(), { "-c", "printf 'ran as %s' it-is" });
     REQUIRE(process.start().has_value());
@@ -452,7 +453,7 @@ TEST_CASE("Process.runsARelativeProgramFromItsWorkingDirectory", "[process]")
     // into "./bin/my", which did not run.
     auto const directory = core::testing::ScopedTempDir { "contour-process" };
     std::filesystem::create_directory(directory.path() / "bin");
-    std::filesystem::copy_file("/bin/sh", directory.path() / "bin" / "my shell");
+    std::filesystem::create_symlink("/bin/sh", directory.path() / "bin" / "my shell");
 
     auto exec = execInfo("./bin/my shell", { "-c", "printf 'ran as %s' it-is" });
     exec.workingDirectory = directory.path();
