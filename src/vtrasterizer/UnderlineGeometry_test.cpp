@@ -7,7 +7,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <ranges>
+#include <vector>
 
 using namespace vtrasterizer;
 
@@ -129,4 +131,69 @@ TEST_CASE("UnderlineGeometry.everyBandFitsItsTile", "[underlinegeometry]")
             }
         }
     }
+}
+
+TEST_CASE("UnderlineGeometry.dottedSizes", "[underlinegeometry]")
+{
+    auto const a = dottedUnderlineGeometry(10, 9, 1);
+    CHECK(a.diameter == 2);
+    CHECK(a.pitch == 4);
+    auto const b = dottedUnderlineGeometry(10, 9, 2);
+    CHECK(b.diameter == 3);
+    CHECK(b.pitch == 6);
+    auto const c = dottedUnderlineGeometry(10, 9, 3);
+    CHECK(c.diameter == 5);
+    CHECK(c.pitch == 10);
+
+    CHECK(dottedUnderlineGeometry(9, 9, 1).phaseCount == 4);
+    CHECK(dottedUnderlineGeometry(10, 9, 1).phaseCount == 2);
+
+    auto const flat = dottedUnderlineGeometry(10, 1, 3);
+    CHECK(flat.diameter == 1);
+    CHECK(flat.tileHeight == 1);
+}
+
+TEST_CASE("UnderlineGeometry.dottedDotsAreEvenlySpacedAcrossCells", "[underlinegeometry]")
+{
+    for (auto const width: { 7, 8, 9, 10, 11, 17, 18, 20 })
+        for (auto const thickness: { 1, 2, 3 })
+        {
+            auto const g = dottedUnderlineGeometry(width, 9, thickness);
+            auto const row = g.diameter / 2;
+            auto starts = std::vector<int> {};
+            auto previous = uint8_t { 0 };
+            auto position = 0;
+            for (auto const column: std::views::iota(0, std::max(4, 2 * g.phaseCount)))
+            {
+                auto const phase = dottedUnderlinePhaseOf(g, column);
+                for (auto const x: std::views::iota(0, width))
+                {
+                    auto const coverage = dottedUnderlineCoverage(g, width, phase, x, row);
+                    if (previous == 0 && coverage > 0)
+                        starts.push_back(position);
+                    previous = coverage;
+                    ++position;
+                }
+            }
+            INFO("width " << width << " thickness " << thickness);
+            REQUIRE(starts.size() >= 3);
+            for (auto const i: std::views::iota(size_t { 1 }, starts.size()))
+                CHECK(starts[i] - starts[i - 1] == g.pitch);
+        }
+}
+
+TEST_CASE("UnderlineGeometry.dottedDotsStayInsideTheTile", "[underlinegeometry]")
+{
+    for (auto const width: std::views::iota(7, 21))
+        for (auto const thickness: { 1, 2, 3 })
+            for (auto const position: { 0, 1, 2, 5, 9 })
+            {
+                auto const g = dottedUnderlineGeometry(width, position, thickness);
+                INFO("width " << width << " thickness " << thickness << " position " << position);
+                CHECK(g.diameter >= 1);
+                CHECK(g.diameter <= g.tileHeight);
+                CHECK(g.pitch <= MaxDottedUnderlinePitch);
+                CHECK((g.phaseCount >= 1 && g.phaseCount <= g.pitch));
+                CHECK(dottedUnderlineCoverage(g, width, 0, g.diameter / 2, g.diameter / 2) > 0);
+            }
 }
