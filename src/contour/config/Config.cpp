@@ -871,6 +871,7 @@ vtbackend::Settings sessionSettings(Config const& config,
     settings.momentumScrolling = profile.momentumScrolling.value();
     settings.mouseProtocolBypassModifiers = config.bypassMouseProtocolModifiers.value();
     settings.linkPatterns = linkPatternsFor(profile);
+    settings.linkDetection = linkDetectionPolicyOf(profile.linkDetection.value());
     settings.linkDecorationMode = profile.hyperlinkDecoration.value().mode;
     settings.linkFollowModifiers = followHyperlinkModifiers(config);
     settings.statusDisplayType = profile.statusLine.value().initialType;
@@ -1634,6 +1635,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         }
 
         loadFromEntry(child, "hyperlink_decoration", where.hyperlinkDecoration);
+        loadFromEntry(child, "link_detection", where.linkDetection);
         loadFromEntry(child, "file_opener", where.fileOpener);
         loadFromEntry(child, "hint_patterns", where.hintPatterns);
         // Reported here, once, where the profile's own hint_patterns are read: a profile that merely inherits
@@ -2911,6 +2913,43 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         loadFromEntry(child, "mode", where.mode);
         loadFromEntry(child, "normal", where.normal);
         loadFromEntry(child, "hover", where.hover);
+    }
+}
+
+namespace
+{
+    vtbackend::ScreenLinkDetection screenLinkDetectionOf(ScreenLinkDetectionConfig const& config) noexcept
+    {
+        auto const toSwitch = [](bool on) noexcept {
+            return on ? vtbackend::DetectLinks::Yes : vtbackend::DetectLinks::No;
+        };
+        return vtbackend::ScreenLinkDetection { .urls = toSwitch(config.urls),
+                                                .filePaths = toSwitch(config.filePaths) };
+    }
+} // namespace
+
+vtbackend::LinkDetectionPolicy linkDetectionPolicyOf(LinkDetectionConfig const& config) noexcept
+{
+    return vtbackend::LinkDetectionPolicy { .primaryScreen = screenLinkDetectionOf(config.primaryScreen),
+                                            .otherScreens = screenLinkDetectionOf(config.otherScreens) };
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     LinkDetectionConfig& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    if (auto const group = child["primary_screen"]; group)
+    {
+        loadFromEntry(group, "urls", where.primaryScreen.urls);
+        loadFromEntry(group, "file_paths", where.primaryScreen.filePaths);
+    }
+    if (auto const group = child["other_screens"]; group)
+    {
+        loadFromEntry(group, "urls", where.otherScreens.urls);
+        loadFromEntry(group, "file_paths", where.otherScreens.filePaths);
     }
 }
 

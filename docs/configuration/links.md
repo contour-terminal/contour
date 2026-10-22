@@ -11,6 +11,9 @@ profiles:
       mode: always              # always | hover | modifier | never
       normal: dotted-underline
       hover: underline
+    link_detection:
+      primary_screen: { urls: true, file_paths: true }
+      other_screens:  { urls: true, file_paths: false }
     file_opener:
       command: 'code --goto {path}:{line}:{column}'
       placement: detached       # detached | split | tab
@@ -53,6 +56,22 @@ a container, names a file there and is never underlined, once Contour can tell:
 the remote shell reports the directory it runs in, with its host, through its own
 shell integration (OSC 7). Without that, everything an `ssh` session prints
 belongs to the local `ssh` command, and its paths are looked up on this machine.
+
+## Where links are detected
+
+`link_detection` switches the automatic detection per screen. OSC 8 hyperlinks
+are always links, and hint mode always offers everything; only the underlining
+of text found by scanning is affected.
+
+| Key                         | Default | Meaning                                        |
+|-----------------------------|---------|------------------------------------------------|
+| `primary_screen.urls`       | `true`  | URLs and your own patterns on the shell screen |
+| `primary_screen.file_paths` | `true`  | file paths on the shell screen                 |
+| `other_screens.urls`        | `true`  | URLs and patterns on the alternate screen      |
+| `other_screens.file_paths`  | `false` | file paths on the alternate screen             |
+
+`other_screens` covers the alternate screen (vim, less, htop, ...) and every
+further page. A key you leave out keeps its default.
 
 ## When links are shown
 

@@ -1431,6 +1431,21 @@ constexpr StringLiteral HyperlinkDecorationConfig {
     "    hover: {}\n"
 };
 
+constexpr StringLiteral LinkDetectionConfig {
+    "\n"
+    "{comment} Which links are found automatically in printed text, per screen. OSC 8 hyperlinks are\n"
+    "{comment} always links, and hint mode always offers everything.\n"
+    "{comment} primary_screen: the normal shell screen. other_screens: the alternate screen (vim, less,\n"
+    "{comment} htop, ...) and every further page.\n"
+    "link_detection:\n"
+    "    primary_screen:\n"
+    "        urls: {}\n"
+    "        file_paths: {}\n"
+    "    other_screens:\n"
+    "        urls: {}\n"
+    "        file_paths: {}\n"
+};
+
 constexpr StringLiteral FileOpenerConfig {
     "\n"
     "{comment} How a detected file path opens on Ctrl+click and with hint mode's Open.\n"
@@ -2961,6 +2976,26 @@ constexpr StringLiteral HyperlinkDecorationWeb {
 
 };
 
+constexpr StringLiteral LinkDetectionWeb {
+    "section decides which links are found automatically in printed text, per screen. OSC 8 hyperlinks "
+    "are always links, and hint mode always offers everything.\n"
+    "`primary_screen` is the normal shell screen; `other_screens` is the alternate screen (vim, less, "
+    "htop, ...) and every further page.\n"
+    "\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    link_detection:\n"
+    "      primary_screen:\n"
+    "        urls: true\n"
+    "        file_paths: true\n"
+    "      other_screens:\n"
+    "        urls: true\n"
+    "        file_paths: false\n"
+    "```\n"
+    "\n"
+};
+
 // Read through std::format like the configuration text, so a literal brace is doubled.
 constexpr StringLiteral FileOpenerWeb {
     "opens detected file paths on Ctrl+click and with hint mode's Open.\n"
@@ -3350,6 +3385,7 @@ using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
 using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;
 using DefaultColors = DocumentationEntry<DefaultColorsConfig, Dummy>;
 using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, HyperlinkDecorationWeb>;
+using LinkDetection = DocumentationEntry<LinkDetectionConfig, LinkDetectionWeb>;
 using FileOpener = DocumentationEntry<FileOpenerConfig, FileOpenerWeb>;
 using HyperlinkDecorationColors = DocumentationEntry<HyperlinkDecorationColorsConfig, Dummy>;
 using YankHighlight = DocumentationEntry<YankHighlightConfig, Dummy>;

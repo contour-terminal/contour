@@ -7434,6 +7434,103 @@ TEST_CASE("Config: the generated config and the reference docs carry every comma
 
 // }}}
 
+// {{{ link_detection
+
+namespace
+{
+/// Loads a main profile whose `link_detection` map is @p body (empty: the key is absent).
+[[nodiscard]] contour::config::LinkDetectionConfig linkDetectionOf(QTemporaryDir& dir, std::string_view body)
+{
+    auto const config = loadFromYaml(dir,
+                                     std::format(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+{}
+)",
+                                                 body));
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    return profile->linkDetection.value();
+}
+} // namespace
+
+TEST_CASE("Config: link_detection defaults to paths on the primary screen only", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const value = linkDetectionOf(dir, "");
+    CHECK(value == contour::config::LinkDetectionConfig {});
+    CHECK(contour::config::linkDetectionPolicyOf(value) == vtbackend::LinkDetectionPolicy {});
+}
+
+TEST_CASE("Config: link_detection reads every switch", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const value = linkDetectionOf(dir,
+                                       "        link_detection:\n"
+                                       "            primary_screen:\n"
+                                       "                urls: false\n"
+                                       "                file_paths: false\n"
+                                       "            other_screens:\n"
+                                       "                urls: false\n"
+                                       "                file_paths: true\n");
+    CHECK_FALSE(value.primaryScreen.urls);
+    CHECK_FALSE(value.primaryScreen.filePaths);
+    CHECK_FALSE(value.otherScreens.urls);
+    CHECK(value.otherScreens.filePaths);
+}
+
+TEST_CASE("Config: a partial link_detection keeps the other defaults", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const value = linkDetectionOf(dir,
+                                       "        link_detection:\n"
+                                       "            other_screens:\n"
+                                       "                file_paths: true\n");
+    CHECK(value.primaryScreen
+          == contour::config::ScreenLinkDetectionConfig { .urls = true, .filePaths = true });
+    CHECK(value.otherScreens.urls);
+    CHECK(value.otherScreens.filePaths);
+}
+
+TEST_CASE("Config: link_detection round-trips through the writer", "[config][links]")
+{
+    auto const generated = contour::config::defaultConfigString();
+    CHECK(generated.contains("link_detection:"));
+    CHECK(generated.contains("other_screens:"));
+    CHECK(generated.contains("file_paths: false"));
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, generated);
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    CHECK(profile->linkDetection.value() == contour::config::LinkDetectionConfig {});
+}
+
+TEST_CASE("Config: sessionSettings carries the link detection policy", "[config][links]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir,
+                                     R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+        link_detection:
+            primary_screen:
+                urls: false
+)");
+    auto const* profile = config.profile("main");
+    REQUIRE(profile != nullptr);
+    auto const settings =
+        contour::config::sessionSettings(config, *profile, vtbackend::ColorPreference::Dark);
+    CHECK(settings.linkDetection == contour::config::linkDetectionPolicyOf(profile->linkDetection.value()));
+    CHECK_FALSE(settings.linkDetection.primaryScreen.urls == vtbackend::DetectLinks::Yes);
+}
+
+// }}}
+
 // {{{ hyperlink_decoration
 
 namespace
