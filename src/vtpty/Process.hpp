@@ -149,6 +149,12 @@ class [[nodiscard]] Process: public Pty
 
     [[nodiscard]] std::string workingDirectory() const;
 
+    /// The name of the program leading the terminal's foreground process group: the shell at its prompt,
+    /// the program it runs otherwise. Linux and macOS only.
+    /// @return The name, as the operating system shortens it; none without a child, on another platform, or
+    ///         on a Pty that is not a UnixPty.
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const;
+
     /// How terminate() asks the child to end.
     enum class TerminationHint : uint8_t
     {

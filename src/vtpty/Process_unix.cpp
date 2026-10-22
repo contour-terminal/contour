@@ -27,7 +27,9 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -757,6 +759,36 @@ string Process::workingDirectory() const
 #else
     // e.g. FreeBSD
     return "."s;
+#endif
+}
+
+std::optional<std::string> Process::foregroundProcessName() const
+{
+#if defined(__linux__) || defined(__APPLE__)
+    if (_d->child() == NoChild)
+        return std::nullopt;
+    // A Process may run on any Pty, so ask before taking it for a UnixPty.
+    auto const* const unixPty = dynamic_cast<UnixPty const*>(_d->pty.get());
+    if (unixPty == nullptr)
+        return std::nullopt;
+    auto const group = tcgetpgrp(unbox<int>(unixPty->handle()));
+    if (group <= 0)
+        return std::nullopt;
+    #ifdef __linux__
+    // Streamed: /proc reports a size of zero, so a read sized by the file's length reads nothing.
+    auto in = std::ifstream { std::format("/proc/{}/comm", group) };
+    auto name = std::string {};
+    if (!std::getline(in, name) || name.empty())
+        return std::nullopt;
+    return name;
+    #else
+    auto name = std::array<char, 2 * MAXCOMLEN + 1> {};
+    if (proc_name(group, name.data(), static_cast<uint32_t>(name.size())) <= 0)
+        return std::nullopt;
+    return std::string { name.data() };
+    #endif
+#else
+    return std::nullopt;
 #endif
 }
 

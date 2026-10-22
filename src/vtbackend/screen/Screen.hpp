@@ -411,6 +411,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Answers `OSC 1337 ; Capabilities` with the features Contour actually has.
     void reportITerm2Capabilities();
 
+    /// Hands `OSC 1337 ; SetUserVar=<name>=<base64 value>` to the terminal.
+    /// @param argument What follows `SetUserVar=`.
+    void setITerm2UserVar(std::string_view argument);
+
     /// Draws an `OSC 1337 ; File=...` inline image.
     void renderITerm2InlineImage(std::string_view arguments);
 

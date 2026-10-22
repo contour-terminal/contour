@@ -41,6 +41,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -61,8 +62,29 @@
 #include <libtermbench/termbench.h>
 #include <tracy/Tracy.hpp>
 
+#ifdef CONTOUR_EXTENSIONS
+    #include <vtbackend/screen/LocalTime.hpp>
+    #include <vtbackend/screen/StatusLineExtensions.hpp>
+
+    #include <vtpty/CommandCapture.hpp>
+
+    #include <core/async/StopToken.hpp>
+
+    #include <vtextension/CommandPolicy.hpp>
+    #include <vtextension/ExtensionHost.hpp>
+    #include <vtextension/ExtensionLimits.hpp>
+    #include <vtextension/ExtensionWorkerPool.hpp>
+    #include <vtextension/Placement.hpp>
+    #include <vtextension/SessionExtensions.hpp>
+    #include <vtextension/StatusLineAdapter.hpp>
+#endif
+
 #ifdef _WIN32
     #include <Windows.h>
+#endif
+
+#ifdef __linux__
+    #include <unistd.h>
 #endif
 
 using namespace std;
@@ -868,10 +890,12 @@ class ChildSession
     /// @param env          The environment the terminal reads.
     /// @param linkServices What the terminal detects links with; none for no detection. Its filesystem
     ///                     must be the terminal's own, NativeFileSystem::instance().
+    /// @param extensionServices The status-line extensions beside the terminal; none for none.
     ChildSession(vtpty::Process::ExecInfo const& launch,
                  vtbackend::Settings const& settings,
                  core::Environment const& env,
-                 std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt):
+                 std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt,
+                 std::optional<vtbackend::StatusLineExtensionServices> extensionServices = std::nullopt):
         _terminal { _events,
                     env,
                     core::platform::NativeFileSystem::instance(),
@@ -885,7 +909,8 @@ class ChildSession
                     std::nullopt,
                     vtbackend::TerminalClocks::system(),
                     vtbackend::randomSemanticBlockTokens(),
-                    std::move(linkServices) }
+                    std::move(linkServices),
+                    extensionServices }
     {
     }
 
@@ -1375,6 +1400,327 @@ enum class ThroughputDevice : uint8_t
     std::unreachable();
 }
 
+#ifdef CONTOUR_EXTENSIONS
+/// Answers every question about a command with no: a benchmark's extensions run none.
+class NoGrants final: public vtextension::IGrantStore
+{
+  public:
+    [[nodiscard]] vtextension::GrantState lookup(std::string_view /*hostId*/,
+                                                 std::string_view /*digest*/) const override
+    {
+        return vtextension::GrantState::Denied;
+    }
+
+    void record(std::string_view /*hostId*/,
+                std::string_view /*digest*/,
+                vtextension::GrantState /*state*/) override
+    {
+    }
+};
+
+/// Runs no command: every one is denied before it gets here.
+class NoCommands final: public vtpty::CommandCapture
+{
+  public:
+    [[nodiscard]] std::expected<std::string, vtpty::CommandCaptureError> run(
+        std::string_view /*command*/,
+        std::chrono::milliseconds /*timeout*/,
+        core::async::StopToken /*stop*/) override
+    {
+        return std::unexpected(
+            vtpty::CommandCaptureError { .kind = vtpty::CommandCaptureError::Kind::Cancelled, .cause = {} });
+    }
+};
+
+/// @param list Comma-separated items; empty for none.
+/// @return The items, in order.
+[[nodiscard]] std::vector<std::string> splitList(std::string_view list)
+{
+    auto items = std::vector<std::string> {};
+    if (list.empty())
+        return items;
+    for (auto const item: std::views::split(list, ','))
+        items.emplace_back(std::string_view(item.begin(), item.end()));
+    return items;
+}
+
+/// One status-line extension a rig starts beside every terminal.
+struct RigModule
+{
+    std::string name;              ///< What the rig calls it: the module's file name, less its extension.
+    std::string hostId;            ///< Its identity: name and path.
+    std::vector<std::byte> module; ///< Its bytes.
+};
+
+/// @param paths Where the modules are.
+/// @return Each module, read; or why one could not be.
+[[nodiscard]] std::expected<std::vector<RigModule>, std::string> readRigModules(
+    std::span<std::filesystem::path const> paths)
+{
+    auto modules = std::vector<RigModule> {};
+    for (auto const& path: paths)
+    {
+        auto file = std::ifstream { path, std::ios::binary };
+        if (!file)
+            return std::unexpected(std::format("Cannot read the extension module {}.", path.string()));
+        auto const chars = std::vector<char> { std::istreambuf_iterator<char> { file }, {} };
+        auto bytes = std::vector<std::byte>(chars.size());
+        std::ranges::transform(chars, bytes.begin(), [](char c) { return static_cast<std::byte>(c); });
+        modules.push_back(RigModule { .name = path.stem().string(),
+                                      .hostId = std::format("{}@{}", path.stem().string(), path.string()),
+                                      .module = std::move(bytes) });
+    }
+    return modules;
+}
+
+class ExtensionRig;
+
+/// @return What each extension a rig runs may cost: the defaults, except that one that faults is restarted at
+///         once and never disabled, so that an extension misbehaving on purpose keeps misbehaving -- spinning
+///         to its deadline, call after call -- for the whole of every run, timed part and all.
+[[nodiscard]] vtextension::ExtensionLimits rigLimits() noexcept
+{
+    auto limits = vtextension::ExtensionLimits {};
+    limits.faultsBeforeDisable = std::numeric_limits<std::size_t>::max();
+    limits.initialBackoff = std::chrono::milliseconds { 0 };
+    return limits;
+}
+
+/// One terminal's status-line extensions, started: a pane's, as the GUI runs them. Outlives the terminal.
+class PaneExtensions
+{
+  public:
+    /// Starts @p rig's extensions for one more terminal, on the calling thread.
+    explicit PaneExtensions(ExtensionRig& rig);
+
+    /// @return What the terminal is built with.
+    [[nodiscard]] std::optional<vtbackend::StatusLineExtensionServices> services() noexcept
+    {
+        return vtbackend::StatusLineExtensionServices { .extensions = _hosted.extensions(),
+                                                        .published = _published,
+                                                        .maxUserVars =
+                                                            vtextension::ExtensionLimits {}.maxUserVars };
+    }
+
+  private:
+    vtbackend::StatusLinePublishSink _published; ///< Outlives the extensions, which publish through it.
+    vtextension::HostedExtensions _hosted;
+};
+
+/// Status-line extensions beside every measured terminal, as a GUI pane runs them: the production engine and
+/// worker pool, a host of its own per terminal, the first module taking the indicator status line over and
+/// the rest its segments, every command denied, and a faulting one never disabled (@see rigLimits). The rig
+/// outlives every terminal.
+class ExtensionRig
+{
+  public:
+    /// @param modules     The extensions.
+    /// @param config      The settings each of them is loaded with.
+    /// @param environment What their private terminals read; outlives the rig.
+    ExtensionRig(std::vector<RigModule> modules,
+                 vtextension::ConfigMap config,
+                 core::Environment const& environment):
+        _modules { std::move(modules) }, _config { std::move(config) }, _environment { environment }
+    {
+    }
+
+    /// @return The extensions of one terminal, loaded, which every run's terminal starts afresh.
+    [[nodiscard]] vtextension::PreparedExtensions prepare()
+    {
+        auto config = vtextension::ExtensionHostConfig {};
+        config.cellPixelSize = vtbackend::ImageSize { vtbackend::Width(10), vtbackend::Height(20) };
+        config.limits = rigLimits();
+        for (auto const& [index, module]: std::views::zip(std::views::iota(size_t { 0 }), _modules))
+            config.extensions.push_back(vtextension::ExtensionSpec {
+                .name = module.name,
+                .hostId = module.hostId,
+                .module = module.module,
+                .config = _config,
+                .placement = index == 0 ? vtextension::Placement::TakeOver : vtextension::Placement::Segment,
+                .runCommand = vtextension::CommandPermission::Deny });
+        return vtextension::prepareExtensions(std::move(config), _engines.acquire());
+    }
+
+    /// @param published Where the terminal hears of a published frame.
+    /// @return What one terminal's extensions reach.
+    [[nodiscard]] vtextension::ExtensionHostServices services(vtbackend::StatusLinePublishSink& published)
+    {
+        return vtextension::ExtensionHostServices {
+            .engines = _engines,
+            .runners = vtextension::RunnerServices {
+                .scheduler = _pool,
+                .grants = _grants,
+                .capture = _commands,
+                .wallClock = core::platform::defaultSystemWallClock(),
+                .localTime = _localTime,
+                .environment = _environment,
+                .fileSystem = core::platform::NativeFileSystem::instance(),
+                .retirement = _engines,
+                .onSnapshotPublished = vtextension::publisherFor(published),
+                .onPermissionNeeded = [](std::string_view, vtextension::Manifest const&) {},
+                .onLog = [](std::string_view, vtextension::LogLevel, std::string_view) {},
+            },
+        };
+    }
+
+  private:
+    std::vector<RigModule> _modules;
+    vtextension::ConfigMap _config;
+    core::Environment const& _environment;
+    vtbackend::LocalTimeConverter _localTime { &vtbackend::systemLocalTime };
+    NoGrants _grants;
+    NoCommands _commands;
+    vtextension::EngineProvider _engines { rigLimits() };
+    /// Last: destroyed first, running each runner's last job before what those jobs reach goes.
+    vtextension::ExtensionWorkerPool _pool { vtextension::extensionWorkerCount(
+        std::thread::hardware_concurrency()) };
+};
+
+PaneExtensions::PaneExtensions(ExtensionRig& rig): _hosted { rig.prepare(), rig.services(_published) }
+{
+}
+
+/// @param rig The extensions to run beside a terminal; null for none.
+/// @return Them, started for one more terminal; null for none.
+[[nodiscard]] std::unique_ptr<PaneExtensions> startPaneExtensions(ExtensionRig* rig)
+{
+    return rig ? std::make_unique<PaneExtensions>(*rig) : nullptr;
+}
+#else
+/// Without extensions compiled in, nothing runs beside a terminal.
+class ExtensionRig
+{
+};
+
+/// Without extensions compiled in, nothing runs beside a terminal.
+class PaneExtensions
+{
+  public:
+    [[nodiscard]] static std::optional<vtbackend::StatusLineExtensionServices> services() noexcept
+    {
+        return std::nullopt;
+    }
+};
+
+[[nodiscard]] std::unique_ptr<PaneExtensions> startPaneExtensions(ExtensionRig* /*rig*/)
+{
+    return nullptr;
+}
+#endif
+
+/// @return What a terminal is built with to run @p pane's extensions; none for none.
+[[nodiscard]] std::optional<vtbackend::StatusLineExtensionServices> servicesOf(
+    std::unique_ptr<PaneExtensions> const& pane)
+{
+    return pane ? pane->services() : std::nullopt;
+}
+
+/// Whether a throughput run's terminal shows the indicator status line, focused, as a GUI pane does.
+enum class IndicatorStatusLine : uint8_t
+{
+    Hidden,
+    Shown,
+};
+
+/// Shows @p terminal's indicator status line and gives it the focus, if @p indicator says so: what an
+/// extension draws there, and what it does only while its pane is focused (an animation), then happens.
+void present(vtbackend::Terminal& terminal, IndicatorStatusLine indicator)
+{
+    if (indicator == IndicatorStatusLine::Hidden)
+        return;
+    terminal.setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    terminal.sendFocusInEvent();
+}
+
+/// @return The process's resident set in bytes, as the kernel counts it now; none where it does not say.
+[[nodiscard]] std::optional<std::size_t> residentBytes()
+{
+#ifdef __linux__
+    auto statm = std::ifstream { "/proc/self/statm" };
+    auto pages = std::size_t {};
+    auto resident = std::size_t {};
+    if (!(statm >> pages >> resident))
+        return std::nullopt;
+    return resident * static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+#else
+    return std::nullopt;
+#endif
+}
+
+/// What `bench-headless memory` measures with.
+struct MemoryOptions
+{
+    unsigned panes = 1;                   ///< How many panes are open at once.
+    std::chrono::seconds settle { 3 };    ///< How long they run before the resident set is read.
+    ExtensionRig* extensionRig = nullptr; ///< Their status-line extensions; null for none.
+};
+
+/// The page of a pane `bench-headless memory` opens: a GUI window's, roughly.
+constexpr auto MemoryPageSize =
+    vtbackend::PageSize { .lines = vtbackend::LineCount(40), .columns = vtbackend::ColumnCount(120) };
+
+/// Opens @p options.panes panes, each with the indicator shown and focused and its own host of the rig's
+/// extensions, lets them run -- their render buffers refreshed at 60 Hz, as the render thread does -- and
+/// reports the resident set before and after, and per pane.
+/// @return EXIT_SUCCESS, or EXIT_FAILURE where the platform reports no resident set.
+int runMemoryBenchmark(MemoryOptions const& options)
+{
+    // The extensions outlive their terminal: declared first, destroyed last.
+    struct Pane
+    {
+        std::unique_ptr<PaneExtensions> extensions;
+        std::unique_ptr<vtbackend::MockTerm<vtpty::MockViewPty>> vt;
+    };
+
+    auto const before = residentBytes();
+    if (!before)
+    {
+        cerr << "This platform reports no resident set.\n";
+        return EXIT_FAILURE;
+    }
+    auto panes = std::vector<Pane> {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0U, options.panes))
+    {
+        auto pane = Pane { .extensions = startPaneExtensions(options.extensionRig), .vt = nullptr };
+        pane.vt = std::make_unique<vtbackend::MockTerm<vtpty::MockViewPty>>(
+            vtbackend::MockTerm<vtpty::MockViewPty>::createSettings(
+                MemoryPageSize,
+                vtbackend::HistoryLimits::plain(vtbackend::LineCount(1000)),
+                ContourPtyReadSize),
+            std::nullopt,
+            &vtbackend::fixedOffsetLocalTime<>,
+            std::nullopt,
+            servicesOf(pane.extensions));
+        present(pane.vt->terminal, IndicatorStatusLine::Shown);
+        panes.push_back(std::move(pane));
+    }
+    auto const deadline = std::chrono::steady_clock::now() + options.settle;
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        for (auto const& pane: panes)
+        {
+            pane.vt->terminal.tick(std::chrono::steady_clock::now());
+            pane.vt->terminal.refreshRenderBuffer();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds { 16 });
+    }
+    auto const after = residentBytes().value_or(*before);
+    auto const mebibytes = [](double bytes) {
+        return bytes / (1024.0 * 1024.0);
+    };
+    auto const grown = static_cast<double>(after) - static_cast<double>(*before);
+    cout << std::format(
+        "Resident set: {:.1f} MiB before, {:.1f} MiB with {} pane(s) after {} s{}: {:.2f} MiB "
+        "per pane\n",
+        mebibytes(static_cast<double>(*before)),
+        mebibytes(static_cast<double>(after)),
+        options.panes,
+        options.settle.count(),
+        options.extensionRig ? ", each with its extensions" : "",
+        mebibytes(grown / options.panes));
+    return EXIT_SUCCESS;
+}
+
 /// Whether a throughput run detects links in its output, as the GUI does.
 enum class LinkDetection : uint8_t
 {
@@ -1463,6 +1809,10 @@ struct ThroughputOptions
     /// What detection runs on: set exactly when linkDetection is On. Not owned, so that the options stay a
     /// literal type; the rig outlives every run.
     LinkDetectionRig* linkRig = nullptr;
+    /// Whether each terminal shows the indicator status line, focused.
+    IndicatorStatusLine indicator = IndicatorStatusLine::Hidden;
+    /// The status-line extensions beside each terminal; null for none. Not owned; outlives every run.
+    ExtensionRig* extensionRig = nullptr;
 };
 
 /// What one throughput run measured. Runs order by how long they took first, so the fastest of several is the
@@ -1484,9 +1834,17 @@ struct ThroughputRun
 ///         bytes per read, once an untimed pass of the same input had brought it to its steady state.
 [[nodiscard]] ThroughputRun measureFromMemory(std::string_view input,
                                               BenchScreen const& screen,
-                                              size_t ptyReadSize)
+                                              ThroughputOptions const& options)
 {
-    auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(BenchPageSize, BenchHistory, ptyReadSize);
+    auto const extensions = startPaneExtensions(options.extensionRig); // outlives the terminal
+    auto vt = vtbackend::MockTerm<vtpty::MockViewPty>(
+        vtbackend::MockTerm<vtpty::MockViewPty>::createSettings(
+            BenchPageSize, vtbackend::HistoryLimits::plain(BenchHistory), options.ptyReadSize),
+        std::nullopt,
+        &vtbackend::fixedOffsetLocalTime<>,
+        std::nullopt,
+        servicesOf(extensions));
+    present(vt.terminal, options.indicator);
     vt.terminal.setMode(vtbackend::DECMode::AutoWrap, true);
     feed(vt, screen.entrySequence);
     feed(vt, input); // fills the scrollback, @see BenchHistory
@@ -1573,13 +1931,16 @@ struct ThroughputRun
     settings.pageSize = BenchPageSize;
     settings.historyLimits = vtbackend::HistoryLimits::plain(BenchHistory);
     settings.ptyReadBufferSize = options.ptyReadSize;
+    auto const extensions = startPaneExtensions(options.extensionRig); // outlives the session
     auto session = ChildSession {
         writer,
         settings,
         env,
         options.linkRig ? std::optional { options.linkRig->services() } : std::nullopt,
+        servicesOf(extensions),
     };
     auto& terminal = session.terminal();
+    present(terminal, options.indicator);
     terminal.setMode(vtbackend::DECMode::AutoWrap, true);
     // Straight to the screen, before the writer exists: fills the scrollback, @see BenchHistory.
     terminal.writeToScreen(screen.entrySequence);
@@ -1722,8 +2083,7 @@ struct WriterStartupCost
     switch (options.device)
     {
         case ThroughputDevice::MockPty:
-            return fastestOf(options.runs,
-                             [&] { return measureFromMemory(input, screen, options.ptyReadSize); });
+            return fastestOf(options.runs, [&] { return measureFromMemory(input, screen, options); });
         case ThroughputDevice::RealPty:
             // The writer reads the workload from a file, which every run reuses.
             return ScratchFile::create("throughput", input).and_then([&](ScratchFile const& file) {
@@ -1770,6 +2130,10 @@ int runThroughputBenchmark(std::span<vtbackend::test::Workload const> workloads,
             })
             .value_or(""),
         options.linkRig ? ", link detection: on" : "");
+    if (options.indicator == IndicatorStatusLine::Shown)
+        cout << "The indicator status line is shown, and the terminal focused.\n";
+    if (options.extensionRig)
+        cout << "Status-line extensions run beside every terminal.\n";
     for (auto const& workload: workloads)
     {
         auto const input = vtbackend::test::makeWorkload(workload, options.bytesPerWorkload);
@@ -1918,6 +2282,7 @@ class ContourHeadlessBench: public core::cli::App
         link("bench-headless.keypress", bind(&ContourHeadlessBench::benchKeyPress, this));
         link("bench-headless.throughput", bind(&ContourHeadlessBench::benchThroughput, this));
         link("bench-headless.snapshot", bind(&ContourHeadlessBench::benchSnapshot, this));
+        link("bench-headless.memory", bind(&ContourHeadlessBench::benchMemory, this));
         link("bench-headless.pty-child", bind(&ContourHeadlessBench::playPtyChild, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
@@ -1971,7 +2336,7 @@ class ContourHeadlessBench: public core::cli::App
                 .name = "binary", .v = CLI::Value { false }, .helpText = "Enable binary stream test." },
         };
 
-        auto const throughputOptions = CLI::OptionList {
+        auto throughputOptions = CLI::OptionList {
             CLI::Option { .name = "size",
                           .v = CLI::Value { static_cast<unsigned>(ThroughputDefaults.bytesPerWorkload
                                                                   / (size_t { 1024 } * 1024)) },
@@ -2011,7 +2376,41 @@ class ContourHeadlessBench: public core::cli::App
                     "the "
                     "links indexed then. Under continuous output a scan waits at most a second, so a run "
                     "shorter than that cannot scan inside the measurement, and its row says so." },
+            CLI::Option { .name = "indicator",
+                          .v = CLI::Value { ThroughputDefaults.indicator == IndicatorStatusLine::Shown },
+                          .helpText = "Show the indicator status line, and focus the terminal, as a GUI pane "
+                                      "does: what status-line extensions draw on, and animate only while "
+                                      "focused." },
         };
+        auto memoryOptions = CLI::OptionList {
+            CLI::Option { .name = "panes",
+                          .v = CLI::Value { MemoryOptions {}.panes },
+                          .helpText = "How many panes are open at once." },
+            CLI::Option { .name = "seconds",
+                          .v = CLI::Value { static_cast<unsigned>(MemoryOptions {}.settle.count()) },
+                          .helpText =
+                              "How long they run, refreshed at 60 Hz, before the resident set is read." },
+        };
+#ifdef CONTOUR_EXTENSIONS
+        // The status-line extensions beside each terminal, which throughput and memory take alike.
+        auto const extensionOptions = CLI::OptionList {
+            CLI::Option { .name = "extensions",
+                          .v = CLI::Value { ""s },
+                          .helpText =
+                              "Comma-separated paths of status-line extension modules (.wasm) to run "
+                              "beside every terminal, a host of their own per terminal, on the worker "
+                              "pool the GUI runs them on. The first takes the indicator status line "
+                              "over; their commands are denied, and one that faults is restarted at "
+                              "once, never disabled.",
+                          .placeholder = "LIST" },
+            CLI::Option { .name = "extension-config",
+                          .v = CLI::Value { ""s },
+                          .helpText = "Comma-separated KEY=VALUE settings every extension is loaded with.",
+                          .placeholder = "LIST" },
+        };
+        throughputOptions.insert(throughputOptions.end(), extensionOptions.begin(), extensionOptions.end());
+        memoryOptions.insert(memoryOptions.end(), extensionOptions.begin(), extensionOptions.end());
+#endif
 
         auto const snapshotOptions = CLI::OptionList {
             CLI::Option { .name = "frames",
@@ -2070,6 +2469,13 @@ class ContourHeadlessBench: public core::cli::App
                             "filled the page, with no status line and with the indicator.",
                         .options = snapshotOptions },
                     CLI::Command {
+                        .name = "memory",
+                        .helpText =
+                            "Measures what panes cost in resident memory: opens them, each showing the "
+                            "indicator status line, focused, and running its own extensions if any are "
+                            "named, and reports the resident set before and after. Linux only.",
+                        .options = memoryOptions },
+                    CLI::Command {
                         .name = "keypress",
                         .helpText = "Measures how long a key press takes to reach the PTY while an "
                                     "application on a real PTY reads the keys and floods the terminal with "
@@ -2077,8 +2483,9 @@ class ContourHeadlessBench: public core::cli::App
                         .options =
                             CLI::OptionList {
                                 CLI::Option { .name = "seconds",
-                                              .v = CLI::Value { static_cast<unsigned>(
-                                                  KeyPressDefaults.duration.count()) },
+                                              .v =
+                                                  CLI::Value { static_cast<unsigned>(KeyPressDefaults.duration
+                                                                                         .count()) },
                                               .helpText = "How long to press keys for." },
                                 CLI::Option { .name = "rate",
                                               .v = CLI::Value { KeyPressDefaults.keyPressesPerSecond },
@@ -2098,52 +2505,55 @@ class ContourHeadlessBench: public core::cli::App
                                               .helpText = "The application only reads the keys and writes "
                                                           "no output." },
                             } },
-                    CLI::Command {
-                        .name = "pty-child",
-                        .helpText = "Windows only, and refused elsewhere: plays the application on the other "
-                                    "end of the PTY that throughput's pty and keypress run, where no POSIX "
-                                    "shell plays it. Puts the console into raw mode, then writes the file "
-                                    "once, only reads its input, or floods: reads its input while writing "
-                                    "the file over and over until killed.",
-                        .options =
-                            CLI::OptionList {
-                                CLI::Option { .name = "mode",
-                                              .v = CLI::Value { ""s },
-                                              .helpText = "write, idle or flood; an unknown name lists the "
-                                                          "known ones.",
-                                              .placeholder = "MODE",
-                                              .presence = CLI::Presence::Required },
-                                CLI::Option { .name = "file",
-                                              .v = CLI::Value { ""s },
-                                              .helpText = "What write and flood write.",
-                                              .placeholder = "PATH" },
-                            } },
-                    CLI::Command {
-                        .name = "sixel",
-                        .helpText = "Measures sixel decode throughput: VT parse, sixel decode and "
-                                    "placement into the grid, with no rendering.",
-                        .options =
-                            CLI::OptionList {
-                                CLI::Option { .name = "file",
-                                              .v = CLI::Value { ""s },
-                                              .helpText = "File holding one complete sixel sequence.",
-                                              .placeholder = "PATH" },
-                                CLI::Option { .name = "iterations",
-                                              .v = CLI::Value { 100u },
-                                              .helpText = "How many times to feed the frame." },
-                                CLI::Option { .name = "columns",
-                                              .v = CLI::Value { 240u },
-                                              .helpText = "Grid width in cells." },
-                                CLI::Option { .name = "lines",
-                                              .v = CLI::Value { 63u },
-                                              .helpText = "Grid height in cells." },
-                                CLI::Option { .name = "cell-width",
-                                              .v = CLI::Value { 8u },
-                                              .helpText = "Cell width in pixels." },
-                                CLI::Option { .name = "cell-height",
-                                              .v = CLI::Value { 17u },
-                                              .helpText = "Cell height in pixels." },
-                            } },
+                    CLI::Command { .name = "pty-child",
+                                   .helpText =
+                                       "Windows only, and refused elsewhere: plays the application on the "
+                                       "other "
+                                       "end of the PTY that throughput's pty and keypress run, where no "
+                                       "POSIX "
+                                       "shell plays it. Puts the console into raw mode, then writes the file "
+                                       "once, only reads its input, or floods: reads its input while writing "
+                                       "the file over and over until killed.",
+                                   .options =
+                                       CLI::OptionList {
+                                           CLI::Option { .name = "mode",
+                                                         .v = CLI::Value { ""s },
+                                                         .helpText = "write, idle or flood; an unknown name "
+                                                                     "lists the "
+                                                                     "known ones.",
+                                                         .placeholder = "MODE",
+                                                         .presence = CLI::Presence::Required },
+                                           CLI::Option { .name = "file",
+                                                         .v = CLI::Value { ""s },
+                                                         .helpText = "What write and flood write.",
+                                                         .placeholder = "PATH" },
+                                       } },
+                    CLI::Command { .name = "sixel",
+                                   .helpText = "Measures sixel decode throughput: VT parse, sixel decode and "
+                                               "placement into the grid, with no rendering.",
+                                   .options =
+                                       CLI::OptionList {
+                                           CLI::Option { .name = "file",
+                                                         .v = CLI::Value { ""s },
+                                                         .helpText = "File holding one complete sixel "
+                                                                     "sequence.",
+                                                         .placeholder = "PATH" },
+                                           CLI::Option { .name = "iterations",
+                                                         .v = CLI::Value { 100u },
+                                                         .helpText = "How many times to feed the frame." },
+                                           CLI::Option { .name = "columns",
+                                                         .v = CLI::Value { 240u },
+                                                         .helpText = "Grid width in cells." },
+                                           CLI::Option { .name = "lines",
+                                                         .v = CLI::Value { 63u },
+                                                         .helpText = "Grid height in cells." },
+                                           CLI::Option { .name = "cell-width",
+                                                         .v = CLI::Value { 8u },
+                                                         .helpText = "Cell width in pixels." },
+                                           CLI::Option { .name = "cell-height",
+                                                         .v = CLI::Value { 17u },
+                                                         .helpText = "Cell height in pixels." },
+                                       } },
                 }
         };
     }
@@ -2251,12 +2661,82 @@ class ContourHeadlessBench: public core::cli::App
             cerr << selection.error() << '\n';
             return EXIT_FAILURE;
         }
+        options.indicator = parameters().boolean("bench-headless.throughput.indicator")
+                                ? IndicatorStatusLine::Shown
+                                : IndicatorStatusLine::Hidden;
         // Before the first terminal and after the last: a terminal's detector does not wait for its jobs.
         auto rig = std::optional<LinkDetectionRig> {};
         if (options.linkDetection == LinkDetection::On)
             options.linkRig = &rig.emplace();
+        // Likewise: its pool runs each runner's last job before it goes.
+        auto extensionRig = std::optional<ExtensionRig> {};
+        auto const madeRig = extensionRigFor("throughput", extensionRig);
+        if (!madeRig)
+        {
+            cerr << madeRig.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        options.extensionRig = *madeRig;
         return runThroughputBenchmark(
             selection->workloads, selection->screens, options, processEnvironment());
+    }
+
+    /// Makes the extension rig @p command's `extensions` and `extension-config` options name, if any.
+    /// @param command The command whose options to read.
+    /// @param rig Where the rig is made; it must outlive every terminal.
+    /// @return The rig, null when no extension is named or the build has none; or why it cannot be made.
+    [[nodiscard]] std::expected<ExtensionRig*, std::string> extensionRigFor(std::string const& command,
+                                                                            std::optional<ExtensionRig>& rig)
+    {
+#ifdef CONTOUR_EXTENSIONS
+        auto const prefix = std::format("bench-headless.{}.", command);
+        auto const paths = splitList(parameters().str(prefix + "extensions"));
+        if (paths.empty())
+            return nullptr;
+        auto const modulePaths = std::vector<std::filesystem::path>(paths.begin(), paths.end());
+        auto modules = readRigModules(modulePaths);
+        if (!modules)
+            return std::unexpected(std::move(modules.error()));
+        auto config = vtextension::ConfigMap {};
+        for (auto const& setting: splitList(parameters().str(prefix + "extension-config")))
+        {
+            auto const equals = setting.find('=');
+            if (equals == std::string::npos)
+                return std::unexpected(std::format("A setting is KEY=VALUE, not '{}'.", setting));
+            config.emplace_back(setting.substr(0, equals), setting.substr(equals + 1));
+        }
+        return &rig.emplace(std::move(*modules), std::move(config), processEnvironment());
+#else
+        (void) command;
+        (void) rig;
+        return nullptr;
+#endif
+    }
+
+    /// Runs `bench-headless memory`: what panes cost in resident memory, with or without extensions.
+    /// @return EXIT_SUCCESS, or EXIT_FAILURE when an option is invalid or the platform reports nothing.
+    int benchMemory()
+    {
+        auto options = MemoryOptions {
+            .panes = parameters().uint("bench-headless.memory.panes"),
+            .settle = std::chrono::seconds { parameters().uint("bench-headless.memory.seconds") },
+            .extensionRig = nullptr,
+        };
+        if (options.panes == 0)
+        {
+            cerr << "panes must be at least 1.\n";
+            return EXIT_FAILURE;
+        }
+        // Before the first terminal and after the last.
+        auto extensionRig = std::optional<ExtensionRig> {};
+        auto const rig = extensionRigFor("memory", extensionRig);
+        if (!rig)
+        {
+            cerr << rig.error() << '\n';
+            return EXIT_FAILURE;
+        }
+        options.extensionRig = *rig;
+        return runMemoryBenchmark(options);
     }
 
     /// Runs `bench-headless snapshot`: what the render thread does per frame, once each picked workload has

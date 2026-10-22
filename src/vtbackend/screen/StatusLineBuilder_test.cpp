@@ -278,7 +278,7 @@ TEST_CASE("serializeStatusLineSegment.everyPlaceholderNameRoundTrips", "[statusl
         using T = decltype(tag)::type;
         auto const name = std::string(StatusLineDefinitions::ItemTraits<T>::Name);
 
-        // Text and Command need their payload attribute to be recognized at all.
+        // Text, Command and Extension need their payload attribute to be recognized at all.
         // Capture-default rather than naming `name`: the branch that uses it is discarded for Text and
         // Command, which would make an explicit capture unused for those instantiations.
         auto const templateText = [&] -> std::string {
@@ -286,6 +286,8 @@ TEST_CASE("serializeStatusLineSegment.everyPlaceholderNameRoundTrips", "[statusl
                 return "{Text:text=x}";
             else if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
                 return "{Command:Program=true}";
+            else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
+                return "{Extension:git}";
             else
                 return "{" + name + "}";
         }();
@@ -559,4 +561,64 @@ TEST_CASE("serializeToVT.clockReadsTheTerminalsWallClockInItsTimeZone", "[status
 
     mc.wallClock.advance(std::chrono::hours { 1 } + std::chrono::minutes { 2 });
     CHECK(serializeToVT(mc.terminal, clock, StatusLineStyling::Disabled) == "10:37");
+}
+
+TEST_CASE("StatusLineBuilder.extension.parse", "[statusline][extensions]")
+{
+    using StatusLineDefinitions::Extension;
+
+    SECTION("shorthand")
+    {
+        auto const segment = parseStatusLineSegment("{Extension:git}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<Extension>(segment[0]));
+        auto const& item = std::get<Extension>(segment[0]);
+        CHECK(item.name == "git");
+        CHECK_FALSE(item.foregroundColor.has_value());
+        CHECK_FALSE(item.flags.any());
+        CHECK(item.textLeft.empty());
+    }
+
+    SECTION("attributes keep their styles")
+    {
+        auto const segment = parseStatusLineSegment("{Extension:Name=git,Color=#ff0000,Left=[}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<Extension>(segment[0]));
+        auto const& item = std::get<Extension>(segment[0]);
+        CHECK(item.name == "git");
+        REQUIRE(item.foregroundColor.has_value());
+        CHECK(*item.foregroundColor == RGBColor { 0xFF, 0x00, 0x00 });
+        CHECK(item.textLeft == "[");
+    }
+
+    SECTION("a shorthand that spells a flag is the name, not a style")
+    {
+        auto const segment = parseStatusLineSegment("{Extension:Bold}"sv);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<Extension>(segment[0]));
+        CHECK(std::get<Extension>(segment[0]).name == "Bold");
+        CHECK_FALSE(std::get<Extension>(segment[0]).flags.any());
+    }
+
+    SECTION("without a name it is no item")
+    {
+        for (auto const text: { "{Extension}"sv, "{Extension:Color=#ff0000}"sv, "{Extension: }"sv })
+        {
+            INFO(text);
+            auto const segment = parseStatusLineSegment(text);
+            REQUIRE(segment.size() == 1);
+            REQUIRE(std::holds_alternative<StatusLineDefinitions::Text>(segment[0]));
+            CHECK(std::get<StatusLineDefinitions::Text>(segment[0]).text == text);
+        }
+    }
+
+    SECTION("both forms round-trip")
+    {
+        for (auto const text: { "{Extension:git}"sv, "{Extension:Name=git,Bold,Color=#FF0000,Left=[}"sv })
+        {
+            INFO(text);
+            auto const segment = parseStatusLineSegment(text);
+            CHECK(serializeStatusLineSegment(segment) == text);
+        }
+    }
 }

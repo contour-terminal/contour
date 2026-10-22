@@ -4988,6 +4988,18 @@ void Screen::processITerm2(std::string_view payload)
 
     if (payload.starts_with("File="))
         renderITerm2InlineImage(payload.substr(5));
+    else if (payload.starts_with("SetUserVar="))
+        setITerm2UserVar(payload.substr(11));
+}
+
+void Screen::setITerm2UserVar(std::string_view argument)
+{
+    // `SetUserVar=<name>=<base64 value>`: the value is base64 so that it may hold anything, ';' and BEL too.
+    auto const separator = argument.find('=');
+    if (separator == std::string_view::npos || separator == 0)
+        return;
+    // Passed encoded: the terminal decodes it only if an extension wants it.
+    _terminal->userVarChanged(argument.substr(0, separator), argument.substr(separator + 1));
 }
 
 void Screen::reportITerm2Capabilities()

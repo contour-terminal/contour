@@ -187,7 +187,7 @@ WarningsAsErrors: '*'
 UseColor: true
 # Both path separators: on Windows the header paths clang-tidy sees are backslashed, and a
 # forward-slash-only pattern would skip every first-party header there without a word.
-HeaderFilterRegex: 'src[/\\](contour|vthost|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtworkspace|vtconformance)[/\\]'
+HeaderFilterRegex: 'src[/\\](contour|vthost|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer|vtworkspace|vtconformance|vtextension)[/\\]'
 # Qt's AUTOMOC/AUTOUIC output lands under out/<preset>/src/<module>/..._autogen/, whose
 # path matches HeaderFilterRegex; it is generated code and not ours to lint.
 ExcludeHeaderFilterRegex: 'wayland-.*-protocol\.h|.*_autogen[/\\].*|.*\.moc$'

@@ -421,4 +421,10 @@ string Process::workingDirectory() const
     return "."s;
 }
 
+std::optional<std::string> Process::foregroundProcessName() const
+{
+    // A console has no foreground process group to ask.
+    return std::nullopt;
+}
+
 } // namespace vtpty

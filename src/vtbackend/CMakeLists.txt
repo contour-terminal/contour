@@ -16,6 +16,7 @@ set(vtbackend_HEADERS
     vt/Capabilities.hpp
     testing/CatchStringMakers.hpp
     testing/DetectingTerm.hpp
+    testing/FakeStatusLineExtensions.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
     grid/CellUtil.hpp
@@ -106,6 +107,7 @@ set(vtbackend_HEADERS
     shell/StickyHeader.hpp
     core/StickyHeaderKind.hpp
     screen/StatusLineCommandCache.hpp
+    screen/StatusLineExtensions.hpp
     screen/Terminal.hpp
     screen/TerminalClocks.hpp
     screen/TerminalTestFixtures.hpp
@@ -196,6 +198,7 @@ set(vtbackend_SOURCES
     graphics/regis/ReGISParser.cpp
     screen/StatusLineBuilder.cpp
     screen/StatusLineCommandCache.cpp
+    screen/StatusLineExtensions.cpp
     screen/Terminal.cpp
     vt/VTType.cpp
     vt/VTWriter.cpp
@@ -349,6 +352,7 @@ if(LIBTERMINAL_TESTING)
         screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp
         screen/Terminal_test.cpp
+        screen/Terminal_extensions_test.cpp
         screen/Terminal_scroll_test.cpp
         screen/Terminal_selection_test.cpp
         screen/Terminal_block_actions_test.cpp
@@ -396,6 +400,11 @@ if(LIBTERMINAL_TESTING)
             termbench::termbench
             vtbackend
         )
+        if(CONTOUR_EXTENSIONS)
+            # `throughput extensions LIST` runs status-line extensions beside the measured terminal. The tool
+            # links them; the vtbackend library does not.
+            target_link_libraries(bench-headless vtextension)
+        endif()
 
         # A short run of throughput, snapshot, keypress and pty each, so that a crash like the one
         # `bench-headless pty` had -- it used its PTY before opening it -- fails the suite.
@@ -406,6 +415,10 @@ if(LIBTERMINAL_TESTING)
         set_tests_properties(bench_headless_throughput_rejects_unknown_kind PROPERTIES PASS_REGULAR_EXPRESSION
                              "Unknown workload 'no-such-workload'\\. Known: ascii, colored, sgr, utf8, utf8sparse, tui, link-prose, link-line\\.")
         add_test(NAME bench_headless_snapshot_smoke COMMAND bench-headless snapshot frames 10 runs 1)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            # Reads the resident set from /proc; what it reports is not asserted.
+            add_test(NAME bench_headless_memory_smoke COMMAND bench-headless memory panes 2 seconds 0)
+        endif()
         # The benchmarks with an application on a real PTY: a script under /bin/sh on POSIX, and
         # `bench-headless pty-child` through ConPTY on Windows.
         add_test(NAME bench_headless_throughput_pty_smoke

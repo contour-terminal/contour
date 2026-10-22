@@ -27,6 +27,7 @@
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
+#include <vtbackend/screen/StatusLineExtensions.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/screen/Viewport.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
@@ -462,10 +463,14 @@ struct TabsInfo
     {
         std::optional<std::string> name;
         Color color;
+
+        bool operator==(Tab const&) const = default;
     };
 
     std::vector<Tab> tabs;
     size_t activeTabPosition = 1;
+
+    bool operator==(TabsInfo const&) const = default;
 };
 
 /// What lies at a cell for the follow gesture, found without touching the filesystem
@@ -497,7 +502,8 @@ struct LinkLookup
 /// whereas input to the process can be send high-level via the various
 /// send(...) member functions.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding) // TODO
-class Terminal
+/// The terminal is the IStatusLinePublishTarget its extensions' StatusLinePublishSink delivers to.
+class Terminal: public IStatusLinePublishTarget
 {
   public:
     class Events
@@ -517,6 +523,12 @@ class Terminal
         /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
+
+        /// A status-line extension published a frame. Called on the extension's worker, holding no lock,
+        /// under renderBufferUpdated()'s rules. For a host that renders nothing itself (the daemon), which
+        /// repaints the indicator status line on its own thread then (@see
+        /// Terminal::refreshIndicatorStatusLine).
+        virtual void extensionFramePublished() {}
 
         /// The page was resized, so any row may have moved: a change of width reflowed every row under
         /// new stable ids, and a change of height moved rows between the page and the history. What is
@@ -784,6 +796,9 @@ class Terminal
     ///                        The lifetime rules are LinkDetectionServices'. A ThreadPoolExecutor that was
     ///                        stopped runs what is submitted to it inline, so a scan or a probe started at
     ///                        shutdown may run on the render thread, under the terminal lock.
+    /// @param extensionServices The status-line extensions to show and to tell about state changes; absent,
+    ///                        `{Extension}` items render empty and every event hook is one untaken branch.
+    ///                        The lifetime rules are StatusLineExtensionServices'.
     Terminal(Events& eventListener,
              core::Environment const& env,
              core::platform::FileSystem const& fileSystem,
@@ -792,8 +807,17 @@ class Terminal
              std::optional<StatusLineCommandServices> commandServices,
              TerminalClocks clocks,
              SemanticBlockTokenSource sessionTokens,
-             std::optional<LinkDetectionServices> linkServices = std::nullopt);
-    ~Terminal() = default;
+             std::optional<LinkDetectionServices> linkServices = std::nullopt,
+             std::optional<StatusLineExtensionServices> extensionServices = std::nullopt);
+
+    /// Revokes the extensions' publish sink first, waiting for a delivery in flight, so that none reaches a
+    /// terminal whose members are being destroyed.
+    ~Terminal() override;
+
+    Terminal(Terminal const&) = delete;
+    Terminal(Terminal&&) = delete;
+    Terminal& operator=(Terminal const&) = delete;
+    Terminal& operator=(Terminal&&) = delete;
 
     void start();
 
@@ -1254,6 +1278,64 @@ class Terminal
     /// @return Its last displayed text; empty before the first result, or without command services.
     [[nodiscard]] std::string statusLineCommandOutput(StatusLineDefinitions::Command const& item) const;
 
+    /// The latest frame of an `{Extension}` status-line item, as text and SGR; never blocks. Within one
+    /// repaint of the indicator status line every item naming the same extension reads the same frame.
+    /// @param item The status-line extension item.
+    /// @return Its frame's text; empty before the first frame, or without extension services.
+    [[nodiscard]] std::string statusLineExtensionText(StatusLineDefinitions::Extension const& item) const;
+
+    /// Tells the terminal that an extension published a frame, or changed its subscriptions: refreshes the
+    /// cached subscriptions and asks for a repaint of the status line.
+    ///
+    /// Called on an extension worker, through the StatusLinePublishSink of the extension services. Takes no
+    /// lock (the state lock may be held by the thread that is waiting for the worker), and touches only
+    /// atomics and the cross-thread wake-up, as onStatusLineCommandCompleted() does.
+    void statusLineExtensionsPublished() noexcept override;
+
+    /// Tells the terminal that the IStatusLineExtensions it was constructed with now forwards to other
+    /// extensions (a configuration reload replaced them): reads the take-over name anew, drops the take-over
+    /// frame it cached, tells the new extensions the status line's size, and re-reads their subscriptions.
+    /// Call with the state lock held, on the thread that replaced them; a no-op without extension services.
+    void statusLineExtensionsReplaced();
+
+    /// Does for the status-line extensions what a frame refresh does, for a host that renders nothing itself
+    /// (the daemon): tells them the state they newly follow, and repaints the indicator status line while
+    /// they draw it (@see indicatorStatusLineDrivenByExtensions) -- whether this terminal shows it or not, as
+    /// its clients may -- so that its row can be read off indicatorStatusLineDisplay(). Call with the state
+    /// lock held.
+    void refreshIndicatorStatusLine();
+
+    /// @return Whether the indicator status line shows what only this terminal's extensions draw: a take-over
+    ///         extension, or an `{Extension}` item of its template. Call with the state lock held.
+    [[nodiscard]] bool indicatorStatusLineDrivenByExtensions() const noexcept;
+
+    /// Shows @p row as the indicator status line in place of its template and of any take-over, until told
+    /// none: what a mirror shows of the row its host drew. Call with the state lock held.
+    /// @param row The row to show, fitted to the status line; none for the terminal's own again.
+    void setMirroredIndicatorStatusLine(std::optional<Line> row);
+
+    /// Tells the status-line extensions the metrics of the font this terminal's cells are drawn in: on every
+    /// change of font size and of pixel density, and once its host first knows them. vtbackend draws no
+    /// font; its host does. Every extension is told, whether it follows the font or not, for its own
+    /// surface takes its cell size from it; the terminal remembers them, to tell extensions loaded or
+    /// subscribing later (@see statusLineExtensionsReplaced). Unchanged metrics are not told again. Call
+    /// with the state lock held; without extension services, one untaken branch.
+    /// @param metrics The font's size and the size of one cell in device pixels.
+    void setStatusLineFontMetrics(StatusLineFontMetrics metrics);
+
+    /// Tells the status-line extensions that the pane's foreground process changed. vtbackend does not
+    /// watch the process; its host does, and tells each name once: the terminal remembers it, to tell
+    /// extensions that follow it later (@see statusLineExtensionsReplaced). Call with the state lock held.
+    /// @param name The process's name.
+    void foregroundProcessChanged(std::string_view name);
+
+    /// Tells the status-line extensions that a program set a user variable (OSC 1337 ; SetUserVar), and
+    /// remembers its latest value to tell extensions that follow them later -- for the first
+    /// StatusLineExtensionServices::maxUserVars names only. Call with the state lock held.
+    /// @param name The variable's name.
+    /// @param base64Value Its value, as the program sent it: decoded only if an extension subscribed.
+    void userVarChanged(std::string_view name, std::string_view base64Value);
+
     /// @p when in local civil time, through the converter the terminal was constructed with.
     /// @see TerminalClocks::localTime
     [[nodiscard]] std::chrono::local_seconds localTimeOf(
@@ -1542,7 +1624,7 @@ class Terminal
     void sendPasteFromClipboard(unsigned count, bool strip);
     void sendRawInput(std::string_view text);
 
-    void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
+    void inputModeChanged(ViMode mode);
 
     /// Asks the frontend to open its search prompt. @see Events::searchPromptRequested.
     void requestSearchPrompt() { _eventListener.searchPromptRequested(); }
@@ -3674,15 +3756,51 @@ class Terminal
         auto const l = std::lock_guard { _guiTabInfoMutex };
         return _guiTabInfoForStatusLine;
     }
-    void setGuiTabInfoForStatusLine(TabsInfo&& info)
-    {
-        auto const l = std::lock_guard { _guiTabInfoMutex };
-        _guiTabInfoForStatusLine = std::move(info);
-    }
+    /// Stores what the `{Tabs}` item shows, and tells the status-line extensions when it changed.
+    /// @param info The window's tabs.
+    void setGuiTabInfoForStatusLine(TabsInfo&& info);
 
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
 
   private:
+    /// The frames one repaint of the indicator status line reads, at most one per extension name: what
+    /// statusLineExtensionText() reads while updateIndicatorStatusLine() runs.
+    struct StatusLineExtensionFrame
+    {
+        std::vector<std::pair<std::string_view, std::shared_ptr<StatusLineExtensionSnapshot const>>>
+            snapshots;
+    };
+
+    /// The take-over extension's frame @p snapshot, as the indicator row shows it: its top row with every
+    /// image re-created in this terminal's image pool and no hyperlink. Default colours are resolved per
+    /// repaint, as they follow the input mode and focus.
+    /// @param snapshot A frame of the take-over extension; null before its first.
+    /// @return The row; a blank one for no frame.
+    [[nodiscard]] Line takeOverRowOf(StatusLineExtensionSnapshot const* snapshot);
+
+    /// Tells the status-line extensions the indicator status line's size, if it changed since they were
+    /// last told.
+    void resizeStatusLineExtensions();
+
+    /// Tells the extensions the current state of each of @p kinds that has one: the working directory, the
+    /// title, the input mode, the tabs, the focus, the progress indicator, the foreground process and the
+    /// user variables. With the state lock held.
+    /// @param kinds The kinds to replay.
+    void replayStatusLineState(StatusLineEventKinds kinds);
+
+    /// @param kind An event kind.
+    /// @return The events that tell the terminal's current state of @p kind, in the order to tell them: none
+    ///         if it has none to tell, one per remembered variable for user variables, one otherwise.
+    [[nodiscard]] std::vector<StatusLineEvent> currentStatusLineEvents(StatusLineEventKind kind) const;
+
+    /// Remembers @p name's latest value for the replay, if it is known already or the bound has room.
+    /// @param name The variable's name.
+    /// @param base64Value Its value, as the program sent it.
+    void rememberUserVar(std::string_view name, std::string_view base64Value);
+
+    /// Replays what statusLineExtensionsPublished() found newly subscribed, if anything. With the state lock.
+    void drainStatusLineReplay();
+
     /// Reacts to a finished status-line command run; called from an executor thread.
     /// @param output Whether the displayed text changed.
     void onStatusLineCommandCompleted(StatusLineCommandOutput output);
@@ -5295,6 +5413,61 @@ class Terminal
     // }}}
 
     DesktopNotificationManager _desktopNotificationManager;
+
+    /// The status-line extensions; null without extension services. Fixed at construction; what it forwards
+    /// to may change, which statusLineExtensionsReplaced() is told of.
+    IStatusLineExtensions* _extensions;
+
+    /// Where the extensions' workers tell of a published frame; null without extension services. Attached
+    /// to this terminal in the constructor, revoked in the destructor.
+    StatusLinePublishSink* _publishSink;
+
+    /// The event kinds newly subscribed to whose current state the extensions are yet to be told. Set by
+    /// statusLineExtensionsPublished() on an extension worker, which reads no terminal state; drained by the
+    /// next frame refresh, under the state lock (@see replayStatusLineState).
+    std::atomic<StatusLineEventKinds::value_type> _extensionReplay = 0;
+
+    /// What every hook posts through. Refreshed by statusLineExtensionsPublished(), on an extension worker;
+    /// subscribed to nothing, forever, without extension services.
+    StatusLineEventGate _extensionEvents;
+
+    /// A user variable a program set, and its latest value as the program sent it (base64).
+    using RememberedUserVar = std::pair<std::string, std::string>;
+
+    /// What the extensions are told again when they newly follow it, since no host repeats it: the latest
+    /// value of each user variable a program set, in the order first set, and the foreground process its
+    /// host last told of (empty for none). Kept only with extension services -- without them each hook
+    /// skips it in one untaken branch. Guarded by the state lock; no worker reads it.
+    std::vector<RememberedUserVar> _userVars;
+    std::string _foregroundProcessName;
+
+    /// The font metrics the extensions were last told; empty until the host first tells them. Guarded by
+    /// the state lock.
+    StatusLineFontMetrics _statusLineFont {};
+
+    /// How many distinct names _userVars holds at most: StatusLineExtensionServices::maxUserVars; 0
+    /// without extension services. Fixed at construction.
+    std::size_t _maxRememberedUserVars;
+
+    /// The extension drawing the whole indicator row instead of its template; read at construction and by
+    /// statusLineExtensionsReplaced(). Guarded by the state lock once constructed.
+    std::optional<std::string> _takeOverName;
+
+    /// The take-over frame the indicator row was last built from, and that row: an unchanged frame is not
+    /// re-created in the image pool on every repaint. Guarded by the state lock.
+    std::shared_ptr<StatusLineExtensionSnapshot const> _takeOverSource;
+    Line _takeOverRow;
+
+    /// The status-line size the extensions were last told. Guarded by the state lock.
+    PageSize _extensionSurfaceSize {};
+
+    /// The row a mirror's host drew, shown as the indicator status line instead of this terminal's own;
+    /// none but in a mirror. Guarded by the state lock. @see setMirroredIndicatorStatusLine()
+    std::optional<Line> _mirroredIndicatorRow;
+
+    /// The frames of the repaint in progress; null outside updateIndicatorStatusLine(). Guarded by the state
+    /// lock; mutable because statusLineExtensionText() is a const read that fills it.
+    mutable StatusLineExtensionFrame* _extensionFrame = nullptr;
 
     /// Runs the indicator's `{Command}` items off thread; null without command services. Keep this the last
     /// data member but _linkDetector: its refresh callback touches _eventListener, _pty, _changes and

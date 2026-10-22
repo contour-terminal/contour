@@ -1,0 +1,161 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// The production scheduler: lazily started, lanes pinned to one thread each, timers, and a destructor
+// that runs what was posted and joins.
+#include <catch2/catch_test_macros.hpp>
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <future>
+#include <mutex>
+#include <set>
+#include <thread>
+#include <vector>
+
+#include <vtextension/Engine.hpp>
+#include <vtextension/ExtensionLimits.hpp>
+#include <vtextension/ExtensionWorkerPool.hpp>
+
+using namespace vtextension;
+using namespace std::chrono_literals;
+
+namespace
+{
+
+/// How long a test waits for something that must happen, far beyond any scheduler's latency: the
+/// bound proves only that it happened at all.
+constexpr auto Eventually = 30s;
+
+} // namespace
+
+TEST_CASE("ExtensionWorkerPool.workerCount", "[vtextension]")
+{
+    CHECK(extensionWorkerCount(0) == 1);
+    CHECK(extensionWorkerCount(1) == 1);
+    CHECK(extensionWorkerCount(3) == 3);
+    CHECK(extensionWorkerCount(64) == MaxExtensionWorkers);
+}
+
+TEST_CASE("ExtensionWorkerPool.lazy", "[vtextension][threading]")
+{
+    auto pool = ExtensionWorkerPool(2);
+    CHECK(pool.runningWorkers() == 0);
+    [[maybe_unused]] auto const lane = pool.assignLane();
+    CHECK(pool.runningWorkers() == 2);
+}
+
+TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
+{
+    // A lane is prepared for the runtime an engine keeps up, as a runner's engine does while its jobs run.
+    auto const engine = Engine::create(ExtensionLimits {});
+    REQUIRE(engine.has_value());
+    auto pool = ExtensionWorkerPool(2);
+    auto const first = pool.assignLane();
+    auto const second = pool.assignLane();
+    CHECK(first != second);
+    CHECK(pool.assignLane() == first); // round-robin
+
+    // Every job of one lane runs on one thread, prepared to call into instances.
+    auto mutex = std::mutex {};
+    auto threads = std::set<std::thread::id> {};
+    auto prepared = std::size_t { 0 };
+    auto done = std::promise<void> {};
+    constexpr auto Jobs = 20;
+    for (auto const index: std::views::iota(0, Jobs))
+        pool.post(first, [&, index] {
+            auto const lock = std::scoped_lock { mutex };
+            threads.insert(std::this_thread::get_id());
+            prepared += Engine::ThreadEnv::isCurrentThreadPrepared() ? 1 : 0;
+            if (index == Jobs - 1)
+                done.set_value();
+        });
+    REQUIRE(done.get_future().wait_for(Eventually) == std::future_status::ready);
+    auto const lock = std::scoped_lock { mutex };
+    CHECK(threads.size() == 1);
+    CHECK(prepared == Jobs);
+    CHECK_FALSE(threads.contains(std::this_thread::get_id()));
+}
+
+TEST_CASE("ExtensionWorkerPool.timers", "[vtextension][threading]")
+{
+    auto pool = ExtensionWorkerPool(1);
+    auto const lane = pool.assignLane();
+    auto mutex = std::mutex {};
+    auto fired = std::vector<int> {};
+    auto done = std::promise<void> {};
+
+    auto const cancelled = pool.schedule(lane, 1ms, [&] {
+        auto const lock = std::scoped_lock { mutex };
+        fired.push_back(0);
+    });
+    pool.cancel(cancelled);
+    [[maybe_unused]] auto const timer = pool.schedule(lane, 1ms, [&] {
+        auto const lock = std::scoped_lock { mutex };
+        fired.push_back(1);
+        done.set_value();
+    });
+    REQUIRE(done.get_future().wait_for(Eventually) == std::future_status::ready);
+    auto const lock = std::scoped_lock { mutex };
+    CHECK(fired == std::vector { 1 });
+}
+
+TEST_CASE("ExtensionWorkerPool.destructionRunsPostedJobs", "[vtextension][threading]")
+{
+    auto ran = std::vector<int> {};
+    auto timerRan = false;
+    auto blocker = std::promise<void> {};
+    {
+        auto pool = ExtensionWorkerPool(1);
+        auto const lane = pool.assignLane();
+        // The worker is held up, so that the jobs below are still queued when the pool is destroyed.
+        pool.post(lane, [future = blocker.get_future().share()] { future.wait(); });
+        pool.post(lane, [&] { ran.push_back(1); });
+        pool.post(lane, [&] { ran.push_back(2); });
+        [[maybe_unused]] auto const timer =
+            pool.schedule(lane, std::chrono::hours { 1 }, [&] { timerRan = true; });
+        blocker.set_value();
+    }
+    CHECK(ran == std::vector { 1, 2 });
+    CHECK_FALSE(timerRan);
+}
+
+TEST_CASE("ExtensionWorkerPool.reprepareForNewRuntime", "[vtextension][threading]")
+{
+    // A lane prepared for one runtime is prepared again once the last engine went and a new one brought
+    // the runtime up anew: on Windows the old preparation would have no state under the new runtime.
+    auto pool = ExtensionWorkerPool(1);
+    auto const lane = pool.assignLane();
+    struct Report
+    {
+        uint64_t prepared = 0; ///< The generation the lane's state was set up for.
+        bool ready = false;    ///< Whether the lane may call into instances.
+    };
+    auto const reportFromLane = [&] {
+        auto report = std::promise<Report> {};
+        auto future = report.get_future();
+        pool.post(lane, [&report] {
+            report.set_value(Report { .prepared = Engine::ThreadEnv::preparedGeneration(),
+                                      .ready = Engine::ThreadEnv::isCurrentThreadPrepared() });
+        });
+        REQUIRE(future.wait_for(Eventually) == std::future_status::ready);
+        return future.get();
+    };
+
+    auto first = Engine::create(ExtensionLimits {});
+    REQUIRE(first.has_value());
+    auto const firstGeneration = Engine::runtimeGeneration();
+    auto const before = reportFromLane();
+    CHECK(before.prepared == firstGeneration);
+    CHECK(before.ready);
+
+    first->reset(); // The last engine: the runtime goes down.
+    auto second = Engine::create(ExtensionLimits {});
+    REQUIRE(second.has_value());
+    auto const secondGeneration = Engine::runtimeGeneration();
+    REQUIRE(secondGeneration != firstGeneration);
+
+    auto const after = reportFromLane();
+    CHECK(after.prepared == secondGeneration);
+    CHECK(after.ready);
+}

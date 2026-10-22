@@ -84,6 +84,24 @@ namespace vtbackend
 
 namespace // {{{ helpers
 {
+    /// @param info The window's tabs, as the host reports them.
+    /// @return The same, as the status-line extensions are told them.
+    [[nodiscard]] StatusLineEvents::TabsChanged statusLineTabsOf(TabsInfo const& info)
+    {
+        auto event = StatusLineEvents::TabsChanged {};
+        event.tabs.reserve(info.tabs.size());
+        for (auto const index: std::views::iota(size_t { 0 }, info.tabs.size()))
+            event.tabs.push_back(StatusLineTab { .title = info.tabs[index].name.value_or(std::string {}),
+                                                 // activeTabPosition counts from one.
+                                                 .activity = index + 1 == info.activeTabPosition
+                                                                 ? StatusLineTabActivity::Active
+                                                                 : StatusLineTabActivity::Inactive });
+        return event;
+    }
+} // namespace
+
+namespace
+{
     /// Non-zero while this thread is inside VTParser::parseFragment().
     ///
     /// The parser is a state machine that is not safe to re-enter. A sequence handler that replies
@@ -266,7 +284,8 @@ Terminal::Terminal(Events& eventListener,
                    optional<StatusLineCommandServices> commandServices,
                    TerminalClocks clocks,
                    SemanticBlockTokenSource sessionTokens,
-                   std::optional<LinkDetectionServices> linkServices):
+                   std::optional<LinkDetectionServices> linkServices,
+                   std::optional<StatusLineExtensionServices> extensionServices):
     _eventListener { eventListener },
     _homeDirectory { env.get("HOME").value_or("") },
     _fileSystem { fileSystem },
@@ -332,6 +351,11 @@ Terminal::Terminal(Events& eventListener,
     _viCommands { *this },
     _inputHandler { _viCommands, ViMode::Insert },
     _semanticBlockTracker { std::move(sessionTokens) },
+    _extensions { extensionServices ? &extensionServices->extensions : nullptr },
+    _publishSink { extensionServices ? &extensionServices->published : nullptr },
+    _extensionEvents { _extensions },
+    _maxRememberedUserVars { extensionServices ? extensionServices->maxUserVars : 0 },
+    _takeOverName { _extensions ? _extensions->takeOverName() : std::nullopt },
     _statusLineCommands { commandServices ? std::make_unique<StatusLineCommandCache>(
                                                 *commandServices,
                                                 [this](StatusLineCommandOutput output) {
@@ -347,6 +371,9 @@ Terminal::Terminal(Events& eventListener,
     // afterwards — a daemon-hosted VT220 session refused the VT420 modes and answered DA1 as a
     // VT220, yet still executed DECFRA/DECCRA off the full VT525 table.
     setTerminalId(_settings.terminalId);
+
+    // A surface has no size until it is told one, and renders nothing before.
+    resizeStatusLineExtensions();
 
     // Populate the 16-page array: page 0 (primary) gets scrollback/reflow, pages 1-15 do not.
     _pages.reserve(MaxPageCount);
@@ -402,6 +429,11 @@ Terminal::Terminal(Events& eventListener,
     _extendedSelectionHelper.wordDelimited = [this](CellLocation const& pos) {
         return wordDelimited(pos, _settings.extendedWordDelimiters);
     };
+
+    // Last, once nothing in this constructor can throw any more: a terminal that failed to construct runs
+    // no destructor, so it must never have been attached, or the sink would keep a dangling target.
+    if (_publishSink)
+        _publishSink->attach(*this);
 }
 
 void Terminal::onViewportChanged()
@@ -776,6 +808,247 @@ std::string Terminal::statusLineCommandOutput(StatusLineDefinitions::Command con
                                : std::string {};
 }
 
+Terminal::~Terminal()
+{
+    // Before any member goes: a delivery in flight reaches _eventListener and _pty.
+    if (_publishSink)
+        _publishSink->revoke();
+}
+
+void Terminal::statusLineExtensionsPublished() noexcept
+{
+    // On an extension worker, without the state lock: the same contract as onStatusLineCommandCompleted().
+    // _extensions is fixed at construction, and subscriptions() is a lock-free read on the host side.
+    if (!_extensions) [[unlikely]]
+        return;
+    // What they newly follow is replayed by the next frame, under the lock: this worker reads no state.
+    if (auto const newly = _extensionEvents.refresh(); newly.any())
+        _extensionReplay.fetch_or(newly.value(), std::memory_order_release);
+    onStatusLineCommandCompleted(StatusLineCommandOutput::Changed);
+    _eventListener.extensionFramePublished();
+}
+
+void Terminal::refreshIndicatorStatusLine()
+{
+    drainStatusLineReplay();
+    // Whether this terminal shows it or not: a daemon's terminals show no indicator, and their clients do.
+    if (_activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine
+        && indicatorStatusLineDrivenByExtensions())
+        updateIndicatorStatusLine();
+}
+
+bool Terminal::indicatorStatusLineDrivenByExtensions() const noexcept
+{
+    if (!_extensions)
+        return false;
+    if (_takeOverName)
+        return true;
+    auto const namesAnExtension = [](StatusLineSegment const& segment) {
+        return std::ranges::any_of(segment, [](StatusLineDefinitions::Item const& item) {
+            return std::holds_alternative<StatusLineDefinitions::Extension>(item);
+        });
+    };
+    auto const& definition = _indicatorStatusLineDefinition;
+    return namesAnExtension(definition.left) || namesAnExtension(definition.middle)
+           || namesAnExtension(definition.right);
+}
+
+void Terminal::setMirroredIndicatorStatusLine(std::optional<Line> row)
+{
+    _mirroredIndicatorRow = std::move(row);
+}
+
+void Terminal::statusLineExtensionsReplaced()
+{
+    if (!_extensions)
+        return;
+    _takeOverName = _extensions->takeOverName();
+    _takeOverSource.reset();
+    _takeOverRow = Line {};
+    // Told again even at an unchanged size: the new extensions were never told it.
+    _extensionSurfaceSize = {};
+    resizeStatusLineExtensions();
+    // Nor the font, which every one of them takes its surface's cell size from, followed or not: told here,
+    // so not replayed below as well.
+    if (_statusLineFont != StatusLineFontMetrics {})
+        _extensions->post(StatusLineEvents::FontChanged { .metrics = _statusLineFont });
+    // Nor any state: everything they follow already is replayed, and what they follow once loaded later.
+    _extensionEvents.refresh();
+    auto replay = _extensionEvents.subscriptions()
+                  | StatusLineEventKinds::fromValue(_extensionReplay.exchange(0, std::memory_order_acquire));
+    replay.disable(StatusLineEventKind::Font);
+    replayStatusLineState(replay);
+    breakLoopAndRefreshRenderBuffer();
+}
+
+std::vector<StatusLineEvent> Terminal::currentStatusLineEvents(StatusLineEventKind kind) const
+{
+    using namespace StatusLineEvents;
+    auto events = std::vector<StatusLineEvent> {};
+    switch (kind)
+    {
+        case StatusLineEventKind::Title:
+            if (!_windowTitle.empty())
+                events.emplace_back(TitleChanged { .title = _windowTitle });
+            break;
+        case StatusLineEventKind::Cwd:
+            if (!_currentWorkingDirectory.path.empty())
+                events.emplace_back(CwdChanged { .cwd = _currentWorkingDirectory.path });
+            break;
+        case StatusLineEventKind::InputMode:
+            events.emplace_back(InputModeChanged { .mode = _inputHandler.mode() });
+            break;
+        case StatusLineEventKind::Tabs: {
+            auto const lock = std::lock_guard { _guiTabInfoMutex };
+            if (!_guiTabInfoForStatusLine.tabs.empty())
+                events.emplace_back(statusLineTabsOf(_guiTabInfoForStatusLine));
+            break;
+        }
+        case StatusLineEventKind::Focus:
+            events.emplace_back(
+                FocusChanged { .state = _focused ? StatusLineFocus::Focused : StatusLineFocus::Unfocused });
+            break;
+        case StatusLineEventKind::Progress:
+            if (_progress.state != ProgressState::Inactive)
+                events.emplace_back(ProgressChanged { .progress = _progress });
+            break;
+        case StatusLineEventKind::ForegroundProcess:
+            if (!_foregroundProcessName.empty())
+                events.emplace_back(ForegroundProcessChanged { .name = _foregroundProcessName });
+            break;
+        case StatusLineEventKind::Font:
+            if (_statusLineFont != StatusLineFontMetrics {})
+                events.emplace_back(FontChanged { .metrics = _statusLineFont });
+            break;
+        case StatusLineEventKind::UserVar:
+            // Decoded here, as the live hook decodes; the adapter makes both valid UTF-8 alike.
+            for (auto const& [name, base64Value]: _userVars)
+                events.emplace_back(
+                    UserVarChanged { .name = name, .value = core::base64::decode(base64Value) });
+            break;
+    }
+    return events;
+}
+
+void Terminal::replayStatusLineState(StatusLineEventKinds kinds)
+{
+    if (!_extensions || kinds.none())
+        return;
+    for (auto const kind: StatusLineEventKindList)
+        if (kinds.test(kind))
+            for (auto& event: currentStatusLineEvents(kind))
+                _extensions->post(std::move(event));
+}
+
+void Terminal::drainStatusLineReplay()
+{
+    // One relaxed load per frame while nothing is pending.
+    if (!_extensions || _extensionReplay.load(std::memory_order_relaxed) == 0) [[likely]]
+        return;
+    replayStatusLineState(
+        StatusLineEventKinds::fromValue(_extensionReplay.exchange(0, std::memory_order_acquire)));
+}
+
+Line Terminal::takeOverRowOf(StatusLineExtensionSnapshot const* snapshot)
+{
+    if (!snapshot || snapshot->lines.empty())
+        return Line {};
+    auto row = snapshot->lines.front();
+    // Its own ids and its own remover: the frame's images belong to no terminal, and an id another pool
+    // handed out may be one this pool has given a different image.
+    rehomeImageFragments(row, [this](Image const& image) {
+        return _imagePool.create(image.format(), image.size(), Image::Data(image.data()));
+    });
+    clearHyperlinks(row);
+    return row;
+}
+
+std::string Terminal::statusLineExtensionText(StatusLineDefinitions::Extension const& item) const
+{
+    if (!_extensions)
+        return {};
+
+    // Outside a repaint, the latest frame; within one, the frame the repaint first read for this name.
+    auto snapshot = std::shared_ptr<StatusLineExtensionSnapshot const> {};
+    if (!_extensionFrame)
+        snapshot = _extensions->snapshot(item.name);
+    else if (auto const read = std::ranges::find(_extensionFrame->snapshots,
+                                                 std::string_view { item.name },
+                                                 [](auto const& entry) { return entry.first; });
+             read != _extensionFrame->snapshots.end())
+        snapshot = read->second;
+    else
+        snapshot =
+            _extensionFrame->snapshots.emplace_back(item.name, _extensions->snapshot(item.name)).second;
+
+    return snapshot ? snapshot->sgrText : std::string {};
+}
+
+void Terminal::resizeStatusLineExtensions()
+{
+    if (!_extensions)
+        return;
+    if (auto const size = indicatorStatusLinePageSize(); size != _extensionSurfaceSize)
+    {
+        _extensionSurfaceSize = size;
+        _extensions->resize(size);
+    }
+}
+
+void Terminal::setStatusLineFontMetrics(StatusLineFontMetrics metrics)
+{
+    if (!_extensions || metrics == _statusLineFont)
+        return;
+    _statusLineFont = metrics;
+    // Not through the subscription gate: every extension's surface takes its cell size from it.
+    _extensions->post(StatusLineEvents::FontChanged { .metrics = metrics });
+}
+
+void Terminal::foregroundProcessChanged(std::string_view name)
+{
+    // Remembered for extensions that follow it later: its host tells a name only once.
+    if (_extensions) [[unlikely]]
+        _foregroundProcessName = name;
+    _extensionEvents.post(
+        [&] { return StatusLineEvents::ForegroundProcessChanged { .name = std::string { name } }; });
+}
+
+void Terminal::userVarChanged(std::string_view name, std::string_view base64Value)
+{
+    if (_extensions) [[unlikely]]
+        rememberUserVar(name, base64Value);
+    // Decoded inside the event's builder, which runs only if an extension subscribed.
+    _extensionEvents.post([&] {
+        return StatusLineEvents::UserVarChanged { .name = std::string { name },
+                                                  .value = core::base64::decode(base64Value) };
+    });
+}
+
+void Terminal::rememberUserVar(std::string_view name, std::string_view base64Value)
+{
+    if (auto const known = std::ranges::find(_userVars, name, &RememberedUserVar::first);
+        known != _userVars.end())
+        known->second = base64Value;
+    else if (_userVars.size() < _maxRememberedUserVars)
+        _userVars.emplace_back(std::string { name }, std::string { base64Value });
+}
+
+void Terminal::inputModeChanged(ViMode mode)
+{
+    _eventListener.inputModeChanged(mode);
+    _extensionEvents.post([&] { return StatusLineEvents::InputModeChanged { .mode = mode }; });
+}
+
+void Terminal::setGuiTabInfoForStatusLine(TabsInfo&& info)
+{
+    auto const l = std::lock_guard { _guiTabInfoMutex };
+    // The host refreshes the tabs far more often than they change; an unchanged set is no event.
+    if (_extensionEvents.isSubscribedTo(StatusLineEventKind::Tabs) && info != _guiTabInfoForStatusLine)
+        [[unlikely]]
+        _extensions->post(statusLineTabsOf(info));
+    _guiTabInfoForStatusLine = std::move(info);
+}
+
 bool Terminal::refreshRenderBuffer(bool locked)
 {
     _renderBuffer.state = RenderBufferState::RefreshBuffersAndTrySwap;
@@ -903,6 +1176,7 @@ void Terminal::fillRenderBuffer(RenderBuffer& output, bool includeSelection)
 
 void Terminal::fillRenderFrame(RenderBuffer& output, bool includeSelection)
 {
+    drainStatusLineReplay();
     // The fill reads _screenDirty anyway; link detection takes its signal of new output from here, so that
     // the parser's path gains no instruction. Before the build, so that its hover query sees what detection
     // adopts.
@@ -1343,6 +1617,7 @@ void Terminal::updateIndicatorStatusLine()
     // reload changes without the page necessarily changing size.
     if (auto const wanted = indicatorStatusLinePageSize(); _indicatorStatusScreen.pageSize() != wanted)
         _indicatorStatusScreen.applyPageSizeToMainDisplay(wanted);
+    resizeStatusLineExtensions();
 
     auto const colors = indicatorStatusLineColors();
 
@@ -1363,6 +1638,41 @@ void Terminal::updateIndicatorStatusLine()
     _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
     _indicatorStatusScreen.cursor().graphicsRendition.backgroundColor = colors.background;
     _indicatorStatusScreen.clearLine();
+
+    if (_mirroredIndicatorRow) [[unlikely]]
+    {
+        // A mirror shows what its host drew, extensions and all, and runs neither the template nor them.
+        auto& row = _indicatorStatusScreen.grid().lineAt(LineOffset(0));
+        row = *_mirroredIndicatorRow;
+        row.resize(_indicatorStatusScreen.pageSize().columns);
+        row.resolveDefaultColors(colors);
+        return;
+    }
+
+    if (_takeOverName) [[unlikely]]
+    {
+        // A take-over extension draws the whole row, graphics and all, in place of the template; until its
+        // first frame the row stays empty.
+        if (auto snapshot = _extensions->snapshot(*_takeOverName); snapshot != _takeOverSource)
+        {
+            _takeOverRow = takeOverRowOf(snapshot.get());
+            _takeOverSource = std::move(snapshot);
+        }
+        if (_takeOverSource)
+        {
+            auto& row = _indicatorStatusScreen.grid().lineAt(LineOffset(0));
+            row = _takeOverRow;
+            row.resize(_indicatorStatusScreen.pageSize().columns);
+            row.resolveDefaultColors(colors);
+        }
+        return;
+    }
+
+    // Every {Extension} item of this repaint reads one frame per name, so that two slots, and the measuring
+    // of a slot, cannot see two generations.
+    auto extensionFrame = StatusLineExtensionFrame {};
+    _extensionFrame = &extensionFrame;
+    auto const closeExtensionFrame = core::Finally { [&]() { _extensionFrame = nullptr; } };
 
     using Styling = StatusLineStyling;
     auto const& definitions = _indicatorStatusLineDefinition;
@@ -1411,9 +1721,9 @@ void Terminal::updateIndicatorStatusLine()
         }
     }
 
-    // What the template printed may reset its rendition -- a {Command}'s output is written as printed, SGR
-    // and all -- which leaves the default colours on the cells after it. Those are the indicator's, not
-    // the main page's.
+    // What the template printed may reset its rendition -- a {Command}'s output and an {Extension}'s text are
+    // written as printed, SGR and all -- which leaves the default colours on the cells after it. Those are
+    // the indicator's, not the main page's.
     _indicatorStatusScreen.grid().lineAt(LineOffset(0)).resolveDefaultColors(colors);
 }
 
@@ -2090,6 +2400,8 @@ bool Terminal::sendFocusInEvent()
 {
     _focused = true;
     breakLoopAndRefreshRenderBuffer();
+    _extensionEvents.post(
+        [] { return StatusLineEvents::FocusChanged { .state = StatusLineFocus::Focused }; });
 
     if (core::locked(_inputMutex, [&] { return _inputGenerator.generateFocusInEvent(); }))
     {
@@ -2104,6 +2416,8 @@ bool Terminal::sendFocusOutEvent()
 {
     _focused = false;
     breakLoopAndRefreshRenderBuffer();
+    _extensionEvents.post(
+        [] { return StatusLineEvents::FocusChanged { .state = StatusLineFocus::Unfocused }; });
 
     if (core::locked(_inputMutex, [&] { return _inputGenerator.generateFocusOutEvent(); }))
     {
@@ -3098,6 +3412,7 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
         _eventListener.pageResized();
 
     reportInBandWindowResize();
+    resizeStatusLineExtensions();
 
     verifyState();
 }
@@ -5601,6 +5916,7 @@ void Terminal::setWindowTitle(string_view title)
     // self-deadlock. GUI-thread readers must use resolvedWindowTitle(), which locks and copies.
     _windowTitle = title;
     _eventListener.setWindowTitle(title);
+    _extensionEvents.post([&] { return StatusLineEvents::TitleChanged { .title = std::string { title } }; });
 }
 
 std::string const& Terminal::windowTitle() const noexcept
@@ -5614,6 +5930,7 @@ void Terminal::setProgress(Progress progress)
     // this from inside writeToScreen()'s _stateMutex hold, and _stateMutex is not recursive.
     _progress = progress;
     _eventListener.progressChanged(progress);
+    _extensionEvents.post([&] { return StatusLineEvents::ProgressChanged { .progress = progress }; });
 }
 
 ContextTransition Terminal::applyContextCommand(ContextCommand const& command)
@@ -6290,6 +6607,8 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
     }
     _currentWorkingDirectory = *std::move(parsed);
     recordForeignDirectory();
+    _extensionEvents.post(
+        [&] { return StatusLineEvents::CwdChanged { .cwd = _currentWorkingDirectory.path }; });
 }
 
 optional<ResolvedWorkingDirectory> Terminal::resolveWorkingDirectory(CwdPurpose purpose) const

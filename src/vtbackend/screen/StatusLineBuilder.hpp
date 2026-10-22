@@ -45,6 +45,13 @@ namespace StatusLineDefinitions
         std::string command;                                    ///< Shell command line, UTF-8.
         std::chrono::seconds interval = DefaultCommandInterval; ///< How often it re-runs.
     };
+    /// The latest frame of the status-line extension the configuration calls @ref name, as text and SGR.
+    struct Extension: Styles
+    {
+        /// What the configuration calls the extension. Defaulted, so that `Extension { styles }` builds,
+        /// as the settings editor builds every item it does not special-case.
+        std::string name {};
+    };
     struct HistoryLineCount: Styles {};
     struct Hyperlink: Styles {};
     struct InputMode: Styles {};
@@ -128,6 +135,7 @@ namespace StatusLineDefinitions
         CellTextUtf8,
         Clock,
         Command,
+        Extension,
         HistoryLineCount,
         Hyperlink,
         InputMode,
@@ -237,6 +245,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<Command>
     { static constexpr std::string_view Name = "Command", Label = "Shell command output", Sample = "(output)"; };
+
+    template <> struct ItemTraits<Extension>
+    { static constexpr std::string_view Name = "Extension", Label = "Extension", Sample = "(extension)"; };
 
     template <> struct ItemTraits<CellSGR>
     { static constexpr std::string_view Name = "CellSGR", Label = "Cell SGR at cursor", Sample = "1;38:2::255:0:0"; };
