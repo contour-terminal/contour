@@ -5,19 +5,22 @@
 // These drive the real DecorationRenderer headlessly: setTextureAtlas() triggers
 // initializeDirectMapping(), which rasterizes every Decorator once and uploads it. The uploads land
 // in eachElement<Decorator>() order, so the enumerator is the index, and what the GPU would receive
-// is exactly what these tests read back.
+// is exactly what these tests read back. The dotted underline's further phase tiles follow them.
 
 #include <vtrasterizer/DecorationRenderer.hpp>
 #include <vtrasterizer/GridMetrics.hpp>
 #include <vtrasterizer/RendererTestHelpers.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
+#include <vtrasterizer/UnderlineGeometry.hpp>
 
 #include <core/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -81,8 +84,47 @@ class DecorationProbe
     [[nodiscard]] atlas::UploadTile const& upload(Decorator decoration)
     {
         auto const& uploads = _renderTarget.getMockBackend().uploadCommands;
-        REQUIRE(uploads.size() == std::numeric_limits<Decorator>::count());
+        REQUIRE(uploads.size() >= std::numeric_limits<Decorator>::count());
         return uploads[static_cast<size_t>(decoration)];
+    }
+
+    /// The dotted underline's tile for @p phase, as it was handed to the backend.
+    ///
+    /// Phase 0 is the DottedUnderline tile itself; phase `p >= 1` was uploaded after every
+    /// Decorator's own tile, at `count + p - 1`.
+    ///
+    /// @param phase The phase, in `[0, phaseCount)`.
+    [[nodiscard]] atlas::UploadTile const& uploadDottedPhase(int phase)
+    {
+        if (phase == 0)
+            return upload(Decorator::DottedUnderline);
+        auto const& uploads = _renderTarget.getMockBackend().uploadCommands;
+        auto const index = std::numeric_limits<Decorator>::count() + static_cast<size_t>(phase) - 1;
+        REQUIRE(uploads.size() > index);
+        return uploads[index];
+    }
+
+    /// Draws @p cell and names the dotted underline phase tiles that reached the backend for it.
+    ///
+    /// @param cell The cell to draw.
+    /// @param phaseCount How many phase tiles the dotted underline has.
+    /// @return One phase per drawn column that sampled a dotted underline tile, in the order drawn.
+    [[nodiscard]] std::vector<int> dottedPhasesDrawnFor(vtbackend::RenderCell const& cell, int phaseCount)
+    {
+        auto const& drawn = _renderTarget.getMockBackend().renderCommands;
+        auto const before = drawn.size();
+        _renderer.renderCell(cell);
+
+        auto phases = std::vector<int> {};
+        for (auto const& command: std::span(drawn).subspan(before))
+            for (auto const phase: std::views::iota(0, phaseCount))
+            {
+                auto const& tile = uploadDottedPhase(phase).location;
+                if (tile.x.value == command.tileLocation.x.value
+                    && tile.y.value == command.tileLocation.y.value)
+                    phases.push_back(phase);
+            }
+        return phases;
     }
 
     /// Draws @p cell and names the decorations that reached the backend for it, in the order drawn.
@@ -155,17 +197,45 @@ using Rendered = std::vector<std::string>;
     return static_cast<int>(std::ranges::count_if(rows, [](auto const& row) { return row.contains('#'); }));
 }
 
-/// How many columns of the LEFT half carry any ink -- the width of a dotted underline's first dot,
-/// the second one starting at the half-way mark.
-[[nodiscard]] int inkedColumnsInFirstHalf(Rendered const& rows)
+/// Whether any row carries ink in column @p x.
+[[nodiscard]] bool columnIsInked(Rendered const& rows, size_t x)
+{
+    return std::ranges::any_of(rows, [x](auto const& row) { return x < row.size() && row[x] == '#'; });
+}
+
+/// How many columns the first contiguous run of inked columns spans -- the width of a dotted
+/// underline's first dot.
+[[nodiscard]] int firstInkedColumnRun(Rendered const& rows)
 {
     if (rows.empty())
         return 0;
-    auto count = 0;
-    for (auto const x: std::views::iota(0uz, rows.front().size() / 2))
-        if (std::ranges::any_of(rows, [x](auto const& row) { return row[x] == '#'; }))
-            ++count;
-    return count;
+    auto const columns = std::views::iota(0uz, rows.front().size());
+    auto const isInked = [&rows](size_t x) {
+        return columnIsInked(rows, x);
+    };
+    auto const first = std::ranges::find_if(columns, isInked);
+    auto const end = std::ranges::find_if_not(std::ranges::subrange(first, columns.end()), isInked);
+    return static_cast<int>(std::ranges::distance(first, end));
+}
+
+/// The columns at which a run of ink starts in @p row.
+[[nodiscard]] std::vector<int> inkRunStarts(std::string const& row)
+{
+    auto starts = std::vector<int> {};
+    for (auto const x: std::views::iota(0uz, row.size()))
+        if (row[x] == '#' && (x == 0 || row[x - 1] != '#'))
+            starts.push_back(static_cast<int>(x));
+    return starts;
+}
+
+/// The rows of several tiles of equal height, laid side by side.
+[[nodiscard]] Rendered joinedSideBySide(std::span<Rendered const> tiles)
+{
+    auto joined = Rendered(tiles.empty() ? 0 : tiles.front().size());
+    for (auto const& tile: tiles)
+        for (auto const y: std::views::iota(0uz, std::min(joined.size(), tile.size())))
+            joined[y] += tile[y];
+    return joined;
 }
 
 [[nodiscard]] int litPixels(Rendered const& rows)
@@ -293,8 +363,8 @@ TEST_CASE("DecorationRenderer.dottedUnderlineSurvivesAShallowUnderlinePosition",
     // as the thickness asked but only as tall as whatever survived -- a dash, not a dot. At
     // position 0 nothing survived at all.
     //
-    // Squareness is therefore the assertion, not mere presence: a test that only counted lit pixels
-    // would pass on either side of the fix.
+    // Roundness -- as tall as it is wide -- is therefore the assertion, not mere presence: a test
+    // that only counted lit pixels would pass on either side of the fix.
     SECTION("underline closer to the cell bottom than one thickness")
     {
         auto const gridMetrics = gridMetricsFor(
@@ -306,7 +376,7 @@ TEST_CASE("DecorationRenderer.dottedUnderlineSurvivesAShallowUnderlinePosition",
             UNSCOPED_INFO(row);
 
         CHECK(litPixels(rows) > 0);
-        CHECK(inkedRows(rows) == inkedColumnsInFirstHalf(rows)); // the dot is square
+        CHECK(inkedRows(rows) == firstInkedColumnRun(rows)); // the first dot is as tall as it is wide
         // The dot shrinks to the room it has rather than overhanging it, so the anchor still holds.
         CHECK(topmostInkOffset(rows) == gridMetrics.underline.position);
     }
@@ -323,6 +393,81 @@ TEST_CASE("DecorationRenderer.dottedUnderlineSurvivesAShallowUnderlinePosition",
 
         CHECK(litPixels(rows) > 0); // drew nothing whatsoever before the fix
     }
+}
+
+TEST_CASE("DecorationRenderer.dottedUnderlineContinuesAcrossCells", "[decoration]")
+{
+    // A pitch that does not divide the cell width used to restart at every cell, so the gap at a
+    // cell boundary differed from the gap inside it. Laid side by side, column `c` drawing phase
+    // `c % phaseCount`, the dots must instead march on one unbroken pitch.
+    auto const width = GENERATE(10, 9);
+    auto const gridMetrics = gridMetricsFor(
+        ImageSize { Width(width), Height(20) }, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
+    auto const geometry = dottedUnderlineGeometry(width, NimbusUnderlinePosition, 1);
+    auto probe = DecorationProbe { gridMetrics };
+
+    CHECK(geometry.phaseCount == (width == 10 ? 2 : 4));
+
+    auto tiles = std::vector<Rendered> {};
+    for (auto const column: std::views::iota(0, 8))
+        tiles.push_back(bitmapRows(probe.uploadDottedPhase(column % geometry.phaseCount)));
+    auto const joined = joinedSideBySide(tiles);
+
+    for (auto const& row: joined)
+        UNSCOPED_INFO(row);
+    INFO(std::format("cell width {}, pitch {}, {} phases", width, geometry.pitch, geometry.phaseCount));
+
+    REQUIRE_FALSE(joined.empty());
+    auto const& darkest = *std::ranges::max_element(
+        joined, {}, [](std::string const& row) { return std::ranges::count(row, '#'); });
+    auto const starts = inkRunStarts(darkest);
+    INFO(std::format("darkest row '{}'", darkest));
+
+    REQUIRE(starts.size() >= 2);
+    CHECK(starts.front() == 0);
+    for (auto const i: std::views::iota(1uz, starts.size()))
+        CHECK(starts[i] - starts[i - 1] == geometry.pitch);
+}
+
+TEST_CASE("DecorationRenderer.dottedUnderlineDotsAreAntialiased", "[decoration]")
+{
+    // Round dots need partial coverage at their rim; a tile of only 0 and 255 is a square stamp.
+    auto const gridMetrics =
+        gridMetricsFor(NimbusCellSize, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 2);
+    auto probe = DecorationProbe { gridMetrics };
+    auto const& tile = probe.upload(Decorator::DottedUnderline);
+
+    for (auto const& row: bitmapRows(tile))
+        UNSCOPED_INFO(row);
+
+    // The raw bitmap, not bitmapRows: the latter folds every non-zero coverage into '#'.
+    CHECK(std::ranges::any_of(tile.bitmap, [](auto value) { return value > 0 && value < 255; }));
+    CHECK(topmostInkOffset(bitmapRows(tile)) == gridMetrics.underline.position);
+}
+
+TEST_CASE("DecorationRenderer.dottedUnderlineContinuesOnADoubleWidthLine", "[decoration]")
+{
+    // A double-width line draws two grid columns per cell, so cell `c` covers columns `2c` and
+    // `2c + 1` -- and the phases must follow those columns, not the cell's own index.
+    auto const gridMetrics = gridMetricsFor(
+        ImageSize { Width(9), Height(20) }, NimbusBaseline, NimbusUnderlinePosition, /*thickness*/ 1);
+    auto const geometry = dottedUnderlineGeometry(9, NimbusUnderlinePosition, 1);
+    REQUIRE(geometry.phaseCount == 4);
+    auto probe = DecorationProbe { gridMetrics };
+
+    auto phases = std::vector<int> {};
+    for (auto const column: std::views::iota(0, 2))
+    {
+        auto cell = vtbackend::RenderCell {};
+        cell.width = 1;
+        cell.position.column = ColumnOffset(column);
+        cell.attributes.flags = vtbackend::CellFlags { vtbackend::CellFlag::DottedUnderline };
+        cell.attributes.lineFlags = vtbackend::LineFlags { vtbackend::LineFlag::DoubleWidth };
+        std::ranges::copy(probe.dottedPhasesDrawnFor(cell, geometry.phaseCount), std::back_inserter(phases));
+    }
+
+    auto const n = geometry.phaseCount;
+    CHECK(phases == std::vector { (0 * 2) % n, ((0 * 2) + 1) % n, 2 % n, 3 % n });
 }
 
 TEST_CASE("DecorationRenderer.doubleUnderlineIsTwoSeparatedStrokes", "[decoration]")
