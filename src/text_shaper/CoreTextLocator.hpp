@@ -9,7 +9,15 @@ namespace text
 class CoreTextLocator: public FontLocator
 {
   public:
+    /// Creates a native locator with a thread-safe, file-identity-checked collection cache.
     CoreTextLocator();
+
+    /// CoreText's final coverage substitute may be proportional (e.g. mathematical symbols).
+    /// Preserve the terminal grid while accepting that native substitute, as DirectWrite does.
+    [[nodiscard]] CoverageFallbackSpacing coverageFallbackSpacing() const noexcept override
+    {
+        return CoverageFallbackSpacing::Unrestricted;
+    }
 
     [[nodiscard]] FontSourceList locate(FontDescription const& description) override;
     [[nodiscard]] FontSourceList all() override;

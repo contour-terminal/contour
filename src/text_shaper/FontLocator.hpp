@@ -6,6 +6,7 @@
 #include <gsl/span>
 #include <gsl/span_ext>
 
+#include <cstdint>
 #include <format>
 #include <optional>
 #include <variant>
@@ -40,6 +41,14 @@ using FontSource = std::variant<FontPath, FontMemoryRef>;
 /// Holds a list of fonts.
 using FontSourceList = std::vector<FontSource>;
 
+/// Spacing eligibility for a locator's last-resort, character-specific fallback.
+/// Configured fallback chains continue to follow FontDescription::strictSpacing.
+enum class CoverageFallbackSpacing : uint8_t
+{
+    MatchDescription,
+    Unrestricted,
+};
+
 /**
  * Font location API.
  *
@@ -50,6 +59,13 @@ class FontLocator
 {
   public:
     virtual ~FontLocator() = default;
+
+    /// Returns the spacing policy for character-specific recovery after the configured chain fails.
+    /// The default preserves strict-spacing behavior for existing locators.
+    [[nodiscard]] virtual CoverageFallbackSpacing coverageFallbackSpacing() const noexcept
+    {
+        return CoverageFallbackSpacing::MatchDescription;
+    }
 
     /**
      * Enumerates all available fonts.

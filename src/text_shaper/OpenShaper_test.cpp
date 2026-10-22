@@ -718,3 +718,122 @@ TEST_CASE("OpenShaper.resizeFont.a_size_the_face_lacks_does_not_retire_the_font"
     // And the font still loads at its own size, which the blacklist would have prevented.
     CHECK(env.key("primary") == primary);
 }
+
+TEST_CASE("OpenShaper.coverage.respects_disabled_fallback", "[OpenShaper][fallback]")
+{
+    auto coverage = BDFFont { "coverage", Monospaced, { { Snowman, 8 } } };
+    auto env = FallbackEnv { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+    } };
+    MockFontLocator::configureCoverage({ coverage.source() });
+    auto description = descriptionFor("primary");
+    SECTION("none policy")
+    {
+        description.fontFallback = FontFallbackNone {};
+    }
+    SECTION("zero limit")
+    {
+        env.shaper().setFontFallbackLimit(0);
+    }
+    SECTION("zero limit after successful coverage lookup")
+    {
+        auto const enabled = env.key("primary");
+        REQUIRE(shapeCells(env.shaper(), enabled, u32string { Snowman }).front().glyph.font != enabled);
+        env.shaper().setFontFallbackLimit(0);
+    }
+    auto const primary = env.shaper().loadFont(description, BDFFont::Size);
+    REQUIRE(primary);
+    auto const replacement = env.shaper().shape(*primary, Replacement);
+    REQUIRE(replacement);
+    auto const result = shapeCells(env.shaper(), *primary, u32string { U'A', Snowman });
+    REQUIRE(result.size() == 2);
+    CHECK(result[0].glyph.font == *primary);
+    CHECK(result[1].glyph.font == *primary);
+    CHECK(result[1].glyph.index.value == replacement->glyph.index.value);
+}
+
+TEST_CASE("OpenShaper.coverage.respects_spacing", "[OpenShaper][fallback]")
+{
+    auto proportional = BDFFont { "proportional", Proportional, { { Snowman, 3 } } };
+    auto monospaced = BDFFont { "monospaced", Monospaced, { { Snowman, 8 } } };
+    auto env = FallbackEnv { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+    } };
+    auto description = descriptionFor("primary");
+    description.strictSpacing = true;
+    MockFontLocator::configureCoverage({ proportional.source() });
+    auto expected = FontSpacing::Proportional;
+    SECTION("reject proportional coverage")
+    {
+    }
+    SECTION("continue past incompatible coverage")
+    {
+        MockFontLocator::configureCoverage({ proportional.source(), monospaced.source() });
+        expected = FontSpacing::Mono;
+    }
+    auto const primary = env.shaper().loadFont(description, BDFFont::Size);
+    REQUIRE(primary);
+    auto const result = shapeCells(env.shaper(), *primary, u32string { Snowman });
+    REQUIRE(result.size() == 1);
+    if (expected == FontSpacing::Mono)
+    {
+        CHECK(result[0].glyph.font != *primary);
+        CHECK(result[0].glyph.index.value != 0);
+    }
+    else
+    {
+        auto const replacement = env.shaper().shape(*primary, Replacement);
+        REQUIRE(replacement);
+        CHECK(result[0].glyph.font == *primary);
+        CHECK(result[0].glyph.index.value == replacement->glyph.index.value);
+    }
+}
+
+TEST_CASE("OpenShaper.coverage.cache_isolated_by_spacing_policy", "[OpenShaper][fallback]")
+{
+    auto coverage = BDFFont { "coverage", Proportional, { { Snowman, 3 } } };
+    auto env = FallbackEnv { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+    } };
+    MockFontLocator::configureCoverage({ coverage.source() });
+    auto description = descriptionFor("primary");
+    SECTION("permissive before strict")
+    {
+    }
+    SECTION("strict before permissive")
+    {
+        description.strictSpacing = true;
+    }
+    // Reusing one primary face/key must not let a permissive cached answer leak into a strict
+    // description, or a strict negative answer suppress later permissive recovery.
+    for (auto const iteration: std::views::iota(0, 3))
+    {
+        auto const primary = env.shaper().loadFont(description, BDFFont::Size);
+        REQUIRE(primary);
+        auto const result = shapeCells(env.shaper(), *primary, u32string { Snowman });
+        REQUIRE(result.size() == 1);
+        CAPTURE(iteration, description.strictSpacing);
+        CHECK((result[0].glyph.font == *primary) == description.strictSpacing);
+        description.strictSpacing = !description.strictSpacing;
+    }
+}
+
+TEST_CASE("OpenShaper.fallback.zero_limit_stops_an_already_loaded_chain", "[OpenShaper][fallback]")
+{
+    auto env = FallbackEnv { {
+        { .name = "primary", .monospace = Monospaced, .glyphs = { { U'A', 8 }, { Replacement, 8 } } },
+        { .name = "fallback", .monospace = Monospaced, .glyphs = { { Snowman, 8 } } },
+    } };
+    auto const primary = env.key("primary");
+    auto const enabled = shapeCells(env.shaper(), primary, u32string { Snowman });
+    REQUIRE(enabled.size() == 1);
+    CHECK(enabled.front().glyph.font != primary);
+    env.shaper().setFontFallbackLimit(0);
+    auto const disabled = shapeCells(env.shaper(), primary, u32string { Snowman });
+    REQUIRE(disabled.size() == 1);
+    CHECK(disabled.front().glyph.font == primary);
+    env.shaper().setFontFallbackLimit(16);
+    auto const restored = shapeCells(env.shaper(), primary, u32string { Snowman });
+    REQUIRE(restored.size() == 1);
+    CHECK(restored.front().glyph.font == enabled.front().glyph.font);
+}
