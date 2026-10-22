@@ -771,7 +771,24 @@ void ScreenMirror::syncInputEncoding(RemoteScreen const& screen)
 
 void ScreenMirror::applyStatusLines(RemoteScreen const& screen)
 {
-    if (screen.statusLines.empty())
+    // Validated rather than cast, as the status display's own bytes are (@see vthost/StatusWire.hpp): rows
+    // for a display no enumerator names are not painted anywhere.
+    auto const display = statusDisplayTypeOf(screen.statusLinesDisplay);
+    if (display == vtbackend::StatusDisplayType::Indicator)
+    {
+        if (screen.statusLines.empty())
+        {
+            _terminal->setMirroredIndicatorStatusLine(std::nullopt);
+            return;
+        }
+        auto row = vtbackend::Line(_terminal->indicatorStatusLineDisplay().pageSize().columns);
+        applyWireLine(row, screen.statusLines.front(), _linkIds, _contextIds);
+        _terminal->setMirroredIndicatorStatusLine(std::move(row));
+        return;
+    }
+    // The host's indicator row is not what the host shows any more: the application's status line is.
+    _terminal->setMirroredIndicatorStatusLine(std::nullopt);
+    if (display != vtbackend::StatusDisplayType::HostWritable || screen.statusLines.empty())
         return;
     auto& page = _terminal->hostWritableStatusLineDisplay();
     auto const lines = unbox<std::size_t>(page.pageSize().lines);

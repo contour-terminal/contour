@@ -141,6 +141,11 @@ class NativeSession final: public SessionStreamEvents
                        std::optional<vtbackend::DisplayOccasion> occasion) override;
     void sessionCopyToClipboard(vtworkspace::SessionId session, std::string const& data) override;
 
+    /// Asks this client's user, whose GUI shows the prompt in @p session's pane. Sent as the question opens;
+    /// a client attaching later is asked from SessionHost::pendingPermissionRequests() instead.
+    void sessionPermissionRequested(vtworkspace::SessionId session,
+                                    proto::PermissionRequest const& request) override;
+
     /// Adapts the host's model-change fan-out into a single "layout changed"
     /// callback: every structural change re-pushes the whole LayoutState. It is a
     /// `vtworkspace::ModelEvents` the caller subscribes to the host (see @ref
@@ -274,9 +279,11 @@ class NativeSession final: public SessionStreamEvents
         /// so a DECSSDT/DECSASD change carries (and forces) a delta only on change.
         int lastStatusDisplayType = -1;
         int lastActiveStatusDisplay = -1;
-        /// The host-writable status-line rows last sent, so the (tiny) status page
-        /// re-ships only when its content changed.
+        /// The status-line rows last sent, and the display they were for (StatusDisplayType; 0 for none
+        /// sent), so the (tiny) status page re-ships only when its content changed, and a mirror showing
+        /// the host's indicator row is told when that stops.
         std::vector<proto::WireLine> lastStatusLines;
+        uint8_t lastStatusLinesDisplay = 0;
         /// The Kitty keyboard protocol flags last sent (-1 until the first snapshot),
         /// so a change carries (and forces) a delta only when it actually changed.
         int lastKittyKeyboardFlags = -1;

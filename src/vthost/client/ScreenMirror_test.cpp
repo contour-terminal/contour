@@ -50,6 +50,7 @@
 #include <vthost/TimeWire.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/client/ScreenMirror.hpp>
+#include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/GridParity.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -164,17 +165,27 @@ struct MirrorHarness
     ///        and its NativeClient's tables likewise, as a GUI configures both.
     /// @param serverHistory The hosted sessions' scrollback limits.
     /// @param mirrorHistory The mirror terminal's scrollback depth.
+    /// @param extensions The status-line extensions the hosted sessions run; none by default.
+    /// @param adjustServer What the hosted sessions' settings differ in; nothing by default.
     explicit MirrorHarness(
         vtbackend::CommandBlockStoreLimits mirrorBlockLimits = {},
         vtbackend::HistoryLimits serverHistory = vtbackend::HistoryLimits::plain(ServerHistoryLines),
-        vtbackend::LineCount mirrorHistory = MirrorHistoryLines):
+        vtbackend::LineCount mirrorHistory = MirrorHistoryLines,
+        std::shared_ptr<vthost::IExtensionHosting> extensions = {},
+        std::function<void(vtbackend::Settings&)> const& adjustServer = {}):
         host { loop,
                [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
                    return std::make_unique<vtpty::MockPty>(size);
                },
-               gipSettings(serverHistory),
+               [&] {
+                   auto settings = gipSettings(serverHistory);
+                   if (adjustServer)
+                       adjustServer(settings);
+                   return settings;
+               }(),
                core::defaultEnvironment(),
-               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } }
+               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                           .extensions = std::move(extensions) } }
     {
         auto settings = gipSettings(mirrorHistory);
         settings.commandBlockLimits = mirrorBlockLimits;
@@ -2158,6 +2169,73 @@ TEST_CASE("a pushed then popped status display round-trips through the mirror", 
     }(&h, session);
 
     h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+TEST_CASE("ScreenMirror.extension.applied", "[vthost][mirror][extensions]")
+{
+    // The indicator row the daemon's extensions draw is shown on the mirror in place of the mirror's own
+    // template, which knows of no extension; once they stop drawing it, the mirror draws its own again.
+    auto hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    hosting->prepare = [](vtbackend::FakeStatusLineExtensions& fake) {
+        fake.takeOver("plasma");
+        fake.publish("plasma", vthost::testing::frameOf("\033[1mPLASMA\033[m"));
+    };
+    auto h = MirrorHarness { {},
+                             vtbackend::HistoryLimits::plain(ServerHistoryLines),
+                             MirrorHistoryLines,
+                             hosting,
+                             [](vtbackend::Settings& settings) {
+                                 settings.indicatorStatusLine.left = "template";
+                                 settings.indicatorStatusLine.middle.clear();
+                                 settings.indicatorStatusLine.right.clear();
+                             } };
+    // The mirror shows its indicator, as a client whose profile asks for it does: shown before the mirror
+    // binds to it, which takes the terminal's own display as the least it shows.
+    h.mirror->setStatusDisplay(vtbackend::StatusDisplayType::Indicator);
+    h.populator = std::make_unique<ScreenMirror>(*h.mirror, MirrorHarness::Daemon);
+    auto const session = newSession(h.host);
+    REQUIRE(hosting->sessions.size() == 1);
+
+    auto scenario = [](MirrorHarness* h, vthost::testing::FakeExtensionHosting* hosting) -> Task<void> {
+        auto const indicatorText = [h] {
+            // What the next frame paints, as a frontend's render would.
+            h->mirror->refreshRenderBuffer();
+            return h->mirror->indicatorStatusLineDisplay()
+                .grid()
+                .lineAt(vtbackend::LineOffset(0))
+                .toUtf8Trimmed();
+        };
+        co_await waitUntil(&h->loop, [&] { return indicatorText() == "PLASMA"; });
+        CHECK(indicatorText() == "PLASMA");
+        // Cell by cell, attributes and all.
+        CHECK(h->mirror->indicatorStatusLineDisplay()
+                  .at(vtbackend::LineOffset(0), vtbackend::ColumnOffset(0))
+                  .isFlagEnabled(vtbackend::CellFlag::Bold));
+        CHECK(h->mirror->indicatorStatusLineDisplay().grid().lineAt(vtbackend::LineOffset(0)).size()
+              == h->mirror->indicatorStatusLineDisplay().pageSize().columns);
+
+        hosting->sessions.front()->publish("plasma", vthost::testing::frameOf("NEXT", 2));
+        co_await waitUntil(&h->loop, [&] { return indicatorText() == "NEXT"; });
+        CHECK(indicatorText() == "NEXT");
+
+        // Nothing takes the row over any more: the mirror's own template is back.
+        hosting->sessions.front()->fake.takeOver(std::nullopt);
+        auto& server =
+            *h->host.terminal(h->host.model().window(h->host.windowId())->activeTab()->rootPane()->session());
+        {
+            auto const guard = std::lock_guard { server };
+            server.statusLineExtensionsReplaced();
+        }
+        h->server->sessionScreenUpdated(
+            h->host.model().window(h->host.windowId())->activeTab()->rootPane()->session());
+        co_await waitUntil(&h->loop, [&] { return indicatorText() != "NEXT"; });
+        CHECK(indicatorText() != "NEXT");
+        CHECK_FALSE(indicatorText().empty());
+
+        h->client->detach();
+    }(&h, hosting.get());
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+    std::ignore = session;
 }
 
 TEST_CASE("host-writable status-line content reaches the mirror", "[vthost][mirror]")

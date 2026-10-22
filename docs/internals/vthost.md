@@ -116,12 +116,16 @@ token and no session settings, and a refusing `ServerHello` is the version alone
 release reads. `vthost/testing/ShippedCodec.hpp` holds both hellos to that release's reader.
 
 **The protocol is experimental since 0.7.0**, which shipped `CodecVersion` 1. Experimental means no
-compatibility across revisions beyond that handshake. The version moves once per release whose wire
-differs from the previous release's, not once per change: no peer outside this source tree speaks the
-revision in flight, and a per-change counter had once reached 13 above a changelog of twelve revisions
-no reader could ever have observed. The price — two builds from between releases that pass the
-handshake and then disagree about the bytes — is paid by rebuilding the daemon and its clients
-together.
+compatibility across revisions beyond that handshake. The version moves with **every change to the
+wire**: a released peer exists — a 0.7.0 daemon keeps running across an upgrade — so two builds whose
+bytes differ must refuse each other at the handshake rather than pass it and then mis-read every PDU
+after it. The revisions so far:
+
+- 1: contour 0.7.0.
+- 2: command blocks (#1010) — each row's block id and birth time, the block records and their id
+  epochs, the daemon's machine in the `ServerHello`, and engine operations.
+- 3: status-line extensions — a `Delta`'s status rows name the display they are for, and the
+  `PermissionRequest` and `PermissionReply` PDUs.
 
 The same reasoning applies to `PduType`: the catalog is kept **contiguous** and may be renumbered with
 a version bump, so a retired PDU leaves no gap. A gap exists to keep a tag from being reused while a
@@ -133,6 +137,16 @@ Two limits ride here as well, both applying in BOTH directions: `MaxFrameSize` b
 payload, and `MaxGridExtent` bounds an announced or proposed grid — an announced one because the
 client sizes a repaint buffer from it. Integral fields are decoded with a range check rather than a
 narrowing cast, so an out-of-range value is a `MalformedPdu` instead of a plausible small one.
+
+### Status-line extensions and the font
+
+A daemon-hosted session runs its status-line extensions in the daemon, which draws in no font: its
+clients do, each in its own. The native protocol carries no pixel sizes — `ResizeRequest` and the
+hellos are cells only — so the daemon cannot tell an extension the font a client draws its cells in.
+Its terminals are therefore never told any (`Terminal::setStatusLineFontMetrics` is a GUI-side call),
+their extensions receive no `font-changed` event, and `state`'s `font` is all zeros, which the
+statusline world documents as unknown. A take-over's images are cut into cells of the extension's
+default size; a client draws whatever cell geometry it has.
 
 ### Why there is no `CloseSession`/`Unfollow` verb
 

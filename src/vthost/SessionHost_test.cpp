@@ -3,6 +3,7 @@
 #include <vtbackend/screen/LocalTime.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/MockPty.hpp>
@@ -17,9 +18,11 @@
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/testing/CoroTestSupport.hpp>
 #include <core/net/testing/ScriptedBackend.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,9 +30,12 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -40,8 +46,13 @@
 #include <tuple>
 #include <vector>
 
+#ifdef CONTOUR_EXTENSIONS
+    #include <vthost/DaemonExtensions.hpp>
+    #include <vthost/testing/GatedFileSystem.hpp>
+#endif
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -1332,7 +1343,7 @@ TEST_CASE("a hosted session's terminal reads the clocks the host was given", "[v
                                                    .clocks = vtbackend::TerminalClocks {
                                                        .steady = steadyClock,
                                                        .wall = wallClock,
-                                                       .localTime = &vtbackend::systemLocalTime } } };
+                                                       .localTime = &vtbackend::fixedOffsetLocalTime<> } } };
 
     auto const* tab = host.createTab();
     REQUIRE(tab != nullptr);
@@ -1343,3 +1354,593 @@ TEST_CASE("a hosted session's terminal reads the clocks the host was given", "[v
     wallClock.advance(std::chrono::minutes { 3 });
     CHECK(terminal->wallTimeNow() == start + std::chrono::minutes { 3 });
 }
+
+TEST_CASE("SessionHost.extension.foregroundPoll", "[vthost][host][extensions]")
+{
+    // The hosted programs are asked who runs in the foreground once a second -- and only while an extension
+    // follows it: a host whose extensions do not wakes no loop for it. Time is the loop's injected clock,
+    // advanced by the case, and the loop turned a turn at a time.
+    auto clock = core::platform::ManualClock {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source, clock };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+    REQUIRE(host.createTab() != nullptr);
+    auto& extensions = *hosting->sessions.front();
+    CHECK_FALSE(host.pollsForegroundProcesses());
+
+    // What a build that landed with an extension following the foreground process does.
+    extensions.fake.subscribe(
+        vtbackend::StatusLineEventKinds { vtbackend::StatusLineEventKind::ForegroundProcess });
+    extensions.replaced();
+    CHECK(host.pollsForegroundProcesses());
+
+    // A tick while it still does re-arms.
+    clock.advance(std::chrono::milliseconds { 1100 });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 3))
+        std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    CHECK(host.pollsForegroundProcesses());
+
+    // And after one that no longer does, the next tick does not.
+    extensions.fake.subscribe(vtbackend::StatusLineEventKinds {});
+    extensions.replaced();
+    clock.advance(std::chrono::milliseconds { 1100 });
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, 3))
+        std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    CHECK_FALSE(host.pollsForegroundProcesses());
+}
+
+TEST_CASE("SessionHost.extension.repaintsOnlyForClients", "[vthost][host][extensions]")
+{
+    // The indicator row a session's extensions draw is repainted for a client to be sent: not while none is
+    // attached, however much output arrives, and a client attaching is handed it as it is now.
+    struct Watcher final: vthost::SessionStreamEvents
+    {
+        [[nodiscard]] bool mirrorsScreens() const noexcept override { return false; }
+    };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    hosting->prepare = [](vtbackend::FakeStatusLineExtensions& fake) {
+        fake.takeOver("plasma");
+        fake.publish("plasma", vthost::testing::frameOf("FIRST"));
+    };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+    auto const* tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto* terminal = host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+    auto& extensions = *hosting->sessions.front();
+    auto const turn = [&] {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+    auto const row = [&] {
+        auto const _ = std::lock_guard { *terminal };
+        return terminal->indicatorStatusLineDisplay().grid().lineAt(vtbackend::LineOffset(0)).toUtf8Trimmed();
+    };
+    turn();
+    REQUIRE(row() == "FIRST");
+
+    // Detached -- the daemon's own observers show no screen: a new frame, and output, repaint nothing.
+    auto watcher = Watcher {};
+    host.subscribeStream(&watcher);
+    extensions.publish("plasma", vthost::testing::frameOf("SECOND", 2));
+    for (auto const i: std::views::iota(0, 5))
+        terminal->writeToScreen(std::format("line {}\r\n", i));
+    turn();
+    CHECK(row() == "FIRST");
+
+    // A client attaching is handed the row as it is now ...
+    auto mirror = vthost::SessionStreamEvents {};
+    host.subscribeStream(&mirror);
+    CHECK(row() == "SECOND");
+
+    // ... and, while it is attached, the row follows the frames.
+    extensions.publish("plasma", vthost::testing::frameOf("THIRD", 3));
+    terminal->writeToScreen("more\r\n");
+    turn();
+    CHECK(row() == "THIRD");
+
+    host.unsubscribeStream(&mirror);
+    host.unsubscribeStream(&watcher);
+}
+
+TEST_CASE("SessionHost.extension.foregroundPollFollowsLoadedSubscriptions", "[vthost][host][extensions]")
+{
+    // What an extension follows is known only once it has loaded on its lane -- after its build was swapped
+    // in and the replace was told. The frame it publishes then is what arms the poll, and one published after
+    // it stopped following disarms it at the next tick.
+    auto clock = core::platform::ManualClock {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source, clock };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+    REQUIRE(host.createTab() != nullptr);
+    auto& extensions = *hosting->sessions.front();
+    auto const turn = [&] {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+
+    // The build lands: replaced while nothing is loaded, so nothing is followed yet.
+    extensions.replaced();
+    turn();
+    REQUIRE_FALSE(host.pollsForegroundProcesses());
+
+    // Loaded, it follows the foreground process, and publishes its first frame.
+    extensions.fake.subscribe(
+        vtbackend::StatusLineEventKinds { vtbackend::StatusLineEventKind::ForegroundProcess });
+    extensions.publish("echo", vthost::testing::frameOf("loaded"));
+    turn();
+    CHECK(host.pollsForegroundProcesses());
+
+    // A frame published after it stopped following: the next tick does not re-arm.
+    extensions.fake.subscribe(vtbackend::StatusLineEventKinds {});
+    extensions.publish("echo", vthost::testing::frameOf("idle", 2));
+    clock.advance(std::chrono::milliseconds { 1100 });
+    turn();
+    CHECK_FALSE(host.pollsForegroundProcesses());
+}
+
+TEST_CASE("SessionHost.extension.foregroundPollAfterReplace", "[vthost][host][extensions]")
+{
+    // A replace tells of extensions that have not loaded yet: what they follow is not what the ones before
+    // them did, so the next frame that says they follow the foreground process arms the poll again.
+    auto clock = core::platform::ManualClock {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source, clock };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+    REQUIRE(host.createTab() != nullptr);
+    auto& extensions = *hosting->sessions.front();
+    auto const turn = [&] {
+        clock.advance(std::chrono::milliseconds { 1100 });
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+    auto const following =
+        vtbackend::StatusLineEventKinds { vtbackend::StatusLineEventKind::ForegroundProcess };
+    // A set that has loaded and follows the foreground process.
+    auto const loadFollowing = [&](int generation) {
+        extensions.fake.subscribe(following);
+        extensions.publish("echo", vthost::testing::frameOf("loaded", static_cast<uint64_t>(generation)));
+        turn();
+    };
+    // A replace: the new set has not loaded, so it follows nothing yet.
+    auto const replaceUnloaded = [&] {
+        extensions.fake.subscribe(vtbackend::StatusLineEventKinds {});
+        extensions.replaced();
+        turn();
+    };
+
+    extensions.replaced();
+    loadFollowing(1);
+    REQUIRE(host.pollsForegroundProcesses());
+
+    SECTION("a follower replaced by another follower")
+    {
+        replaceUnloaded();
+        CHECK_FALSE(host.pollsForegroundProcesses());
+        loadFollowing(2);
+        CHECK(host.pollsForegroundProcesses());
+    }
+
+    SECTION("a follower replaced by none, then by a follower")
+    {
+        replaceUnloaded();
+        CHECK_FALSE(host.pollsForegroundProcesses());
+        replaceUnloaded();
+        loadFollowing(2);
+        CHECK(host.pollsForegroundProcesses());
+    }
+}
+
+TEST_CASE("SessionHost.extension.questionOutlivesTheAskingSession", "[vthost][host][extensions]")
+{
+    // Two panes run the same extension, and both ask; the question is asked once, in the first. That pane
+    // exits before anyone answers: a runner asks only once, so the question must not go with it. It moves to
+    // the other pane whose extensions run, and is told again there.
+    struct Asked final: vthost::SessionStreamEvents
+    {
+        void sessionPermissionRequested(vtworkspace::SessionId session,
+                                        vthost::proto::PermissionRequest const& request) override
+        {
+            asked.emplace_back(session.value, request.session);
+        }
+        std::vector<std::pair<uint64_t, uint64_t>> asked; ///< The session told of, and the one it names.
+    };
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+    auto const* first = host.createTab();
+    REQUIRE(first != nullptr);
+    auto const firstSession = first->rootPane()->session();
+    auto const* second = host.createTab();
+    REQUIRE(second != nullptr);
+    auto const secondSession = second->rootPane()->session();
+    REQUIRE(hosting->sessions.size() == 2);
+    auto observer = Asked {};
+    host.subscribeStream(&observer);
+    auto const turn = [&] {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 3))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+
+    auto const question = vthost::proto::PermissionRequest { .session = 0,
+                                                             .hostId = "git@/ext/git.wasm",
+                                                             .name = "git",
+                                                             .version = 1,
+                                                             .digest = "d1",
+                                                             .commands = {} };
+    hosting->sessions[0]->askPermission(question);
+    hosting->sessions[1]->askPermission(question);
+    turn();
+    REQUIRE(host.pendingPermissionRequests().size() == 1);
+    REQUIRE(host.pendingPermissionRequests().front().session == firstSession.value);
+
+    SECTION("the asking pane exits: another pane with extensions inherits the question")
+    {
+        host.handleSessionExit(firstSession);
+        REQUIRE(host.pendingPermissionRequests().size() == 1);
+        CHECK(host.pendingPermissionRequests().front().session == secondSession.value);
+        REQUIRE_FALSE(observer.asked.empty());
+        CHECK(observer.asked.back() == std::pair { secondSession.value, secondSession.value });
+    }
+
+    SECTION("no pane with extensions remains: the question goes")
+    {
+        host.handleSessionExit(firstSession);
+        host.handleSessionExit(secondSession);
+        CHECK(host.pendingPermissionRequests().empty());
+    }
+    host.unsubscribeStream(&observer);
+}
+
+TEST_CASE("SessionHost.extension.replacedHearTheForegroundProcess", "[vthost][host][extensions]")
+{
+    // The poll tells each program once, so the extensions a reload brings, while the same program keeps
+    // running, hear it from the terminal: what extensionsReplaced() has it replay.
+    using vtbackend::StatusLineEvent;
+    using vtbackend::StatusLineEvents::ForegroundProcessChanged;
+    // A real backend: a replace that leaves an extension following the foreground process arms the poll.
+    auto clock = core::platform::ManualClock {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source, clock };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+    auto const* const tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto& extensions = *hosting->sessions.front();
+    auto* const terminal = host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+    extensions.fake.subscribe(
+        vtbackend::StatusLineEventKinds { vtbackend::StatusLineEventKind::ForegroundProcess });
+    extensions.replaced();
+    {
+        // What the poll does once it saw vim: tells it, under the lock, and never again while it runs.
+        auto const guard = std::lock_guard { *terminal };
+        terminal->foregroundProcessChanged("vim");
+    }
+    auto const vim = StatusLineEvent { ForegroundProcessChanged { .name = "vim" } };
+    REQUIRE(std::ranges::count(extensions.fake.posted(), vim) == 1);
+
+    extensions.replaced();
+    CHECK(std::ranges::count(extensions.fake.posted(), vim) == 2);
+}
+
+#ifdef CONTOUR_EXTENSIONS
+
+namespace
+{
+
+/// A command capture that runs nothing: it counts the runs, and holds each until the daemon's command
+/// shutdown is requested or the run's own timeout passes -- a command that would run for its timeout. A
+/// run's own stop is not heeded: the case pins that the daemon's shutdown alone ends it.
+class HoldingCapture final: public vtpty::CommandCapture
+{
+  public:
+    explicit HoldingCapture(core::async::StopToken shutdown): _shutdown { std::move(shutdown) } {}
+
+    [[nodiscard]] std::expected<std::string, vtpty::CommandCaptureError> run(
+        std::string_view /*command*/,
+        std::chrono::milliseconds timeout,
+        core::async::StopToken /*stop*/) override
+    {
+        runs.fetch_add(1);
+        lastTimeout.store(timeout);
+        auto const until = std::chrono::steady_clock::now() + timeout;
+        while (!_shutdown.stop_requested() && std::chrono::steady_clock::now() < until)
+            std::this_thread::yield();
+        return std::unexpected(
+            vtpty::CommandCaptureError { .kind = vtpty::CommandCaptureError::Kind::Cancelled, .cause = {} });
+    }
+
+    std::atomic<int> runs = 0;
+    std::atomic<std::chrono::milliseconds> lastTimeout {};
+
+  private:
+    core::async::StopToken _shutdown;
+};
+
+/// What a stream observer saw of a session's status-line extensions, and when.
+struct ExtensionTimeline final: vthost::SessionStreamEvents
+{
+    std::function<bool()> rowShowsPending;
+    std::optional<std::chrono::steady_clock::time_point> asked;
+    std::optional<std::chrono::steady_clock::time_point> shown;
+
+    void sessionPermissionRequested(vtworkspace::SessionId, vthost::proto::PermissionRequest const&) override
+    {
+        if (!asked)
+            asked = std::chrono::steady_clock::now();
+    }
+    void sessionScreenUpdated(vtworkspace::SessionId) override
+    {
+        if (!shown && rowShowsPending && rowShowsPending())
+            shown = std::chrono::steady_clock::now();
+    }
+};
+
+/// A daemon's extensions, on the real runtime, and a host running one session that shows them in its
+/// indicator row. Declared in the order they must go: the host first, then the extensions it owns, before
+/// the loop they post to.
+struct DaemonExtensionsHarness
+{
+    /// @param module The extension's module bytes.
+    /// @param permission What the user allows its commands.
+    /// @param config The extension's settings.
+    DaemonExtensionsHarness(std::string const& module,
+                            vtextension::CommandPermission permission,
+                            vtextension::ConfigMap config = {})
+    {
+        REQUIRE(fileSystem.files.writeFile(modulePath, module).has_value());
+        auto made = std::make_shared<vthost::DaemonExtensions>(
+            vthost::DaemonExtensionsConfig {
+                .declared = vtextension::DeclaredExtensions { .extensions = { vtextension::DeclaredExtension {
+                                                                  .name = "spawner",
+                                                                  .path = modulePath,
+                                                                  .config = std::move(config),
+                                                                  .runCommand = permission } },
+                                                              .takeOver = std::nullopt },
+                .runtime =
+                    vtextension::ExtensionRuntimeConfig { .grantsFile = "/config/extension-grants.daemon.txt",
+                                                          .bundledDirectories = {},
+                                                          .workerCount = 1,
+                                                          .limits = limits } },
+            vthost::DaemonExtensionServices {
+                .runtime = vtextension::ExtensionRuntimeServices { .capture = capture,
+                                                                   .wallClock = wallClock,
+                                                                   .localTime = localTime,
+                                                                   .environment = core::defaultEnvironment(),
+                                                                   .fileSystem = fileSystem },
+                .commandShutdown = commandShutdown });
+        extensions = made.get();
+        auto settings = vtbackend::Settings {};
+        settings.indicatorStatusLine.left = "[{Extension:spawner}]";
+        settings.indicatorStatusLine.middle.clear();
+        settings.indicatorStatusLine.right.clear();
+        // The host is the extensions' only owner, as in a daemon: they go with it.
+        host = std::make_unique<SessionHost>(
+            loop,
+            [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                return std::make_unique<vtpty::MockPty>(size);
+            },
+            std::move(settings),
+            core::defaultEnvironment(),
+            vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                        .extensions = std::move(made) });
+    }
+
+    /// @return The session's indicator row.
+    [[nodiscard]] std::string indicatorText(vtworkspace::SessionId session) const
+    {
+        auto* const terminal = host->terminal(session);
+        auto const guard = std::lock_guard { *terminal };
+        return terminal->indicatorStatusLineDisplay().grid().lineAt(vtbackend::LineOffset(0)).toUtf8Trimmed();
+    }
+
+    /// Turns the loop until @p done holds, or for @p bound at most.
+    void turnUntil(std::function<bool()> const& done,
+                   std::chrono::milliseconds bound = std::chrono::seconds { 20 })
+    {
+        auto const deadline = std::chrono::steady_clock::now() + bound;
+        loop.blockOn(core::net::pollUntil(
+            &loop, [&] { return done() || std::chrono::steady_clock::now() > deadline; }));
+    }
+
+    std::filesystem::path modulePath { "/extensions/spawner.wasm" };
+    vthost::testing::GatedFileSystem fileSystem;
+    core::async::StopSource commandShutdown;
+    HoldingCapture capture { commandShutdown.get_token() };
+    core::platform::SystemWallClock wallClock;
+    vtbackend::LocalTimeConverter localTime { &vtbackend::fixedOffsetLocalTime<> };
+    vtextension::ExtensionLimits limits {};
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
+    vthost::DaemonExtensions* extensions = nullptr; ///< Owned by the host.
+    std::unique_ptr<SessionHost> host;
+};
+
+} // namespace
+
+TEST_CASE("SessionHost.extension.buildInFlightAtTeardown", "[vthost][host][extensions]")
+{
+    // A build still loading as the host goes finishes on the build thread and posts its result to the loop.
+    // That result holds the engine, which must be released to the runtime that is still alive -- on the
+    // loop, with no host it could reach. ASan is the judge.
+    auto h = DaemonExtensionsHarness { "not a module", vtextension::CommandPermission::Deny };
+    REQUIRE(h.host->createTab() != nullptr);
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 20 };
+    while (!h.fileSystem.entered() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    REQUIRE(h.fileSystem.entered());
+
+    // The loader is let go only while the host is being destroyed, which joins the build thread.
+    auto opener = std::thread { [&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds { 100 });
+        h.fileSystem.open();
+    } };
+    h.host.reset();
+    opener.join();
+    // What a daemon's loop does after its host: it turns once more, then goes.
+    std::ignore = h.loop.runOnce(std::chrono::milliseconds { 0 });
+    SUCCEED("the build's result was released while the runtime lived");
+}
+
+    #ifdef VTHOST_TEST_ECHO_WASM
+TEST_CASE("SessionHost.extension.noFont", "[vthost][host][extensions][guest]")
+{
+    // A daemon draws in no font, and the native protocol carries no client's: its terminals are never told
+    // one, so an extension's `state` reports the font as zeros, which the world documents as unknown. The
+    // echo guest, as the harness's one extension, renders the state it read at load.
+    auto in = std::ifstream { VTHOST_TEST_ECHO_WASM, std::ios::binary };
+    REQUIRE(in.good());
+    auto const module =
+        std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} };
+    auto h =
+        DaemonExtensionsHarness { module, vtextension::CommandPermission::Deny, { { "state", "describe" } } };
+    h.fileSystem.open();
+    REQUIRE(h.host->createTab() != nullptr);
+    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    // A client is attached: the daemon repaints the row only for one to be sent.
+    auto client = vthost::SessionStreamEvents {};
+    h.host->subscribeStream(&client);
+
+    h.turnUntil([&] { return h.indicatorText(session).contains("pt "); });
+    INFO(h.indicatorText(session));
+    CHECK(h.indicatorText(session).ends_with(";0pt 0x0]"));
+    h.host->unsubscribeStream(&client);
+}
+    #else
+TEST_CASE("SessionHost.extension.noFont", "[vthost][host][extensions][guest]")
+{
+    SKIP("the echo test guest is not built (CONTOUR_EXTENSIONS_BUNDLED=OFF)");
+}
+    #endif
+
+    #ifdef VTHOST_TEST_SPAWNER_WASM
+
+namespace
+{
+
+/// @return The bytes of the `spawner` test guest, which runs `echo {word}` and renders the outcome.
+[[nodiscard]] std::string spawnerModule()
+{
+    auto in = std::ifstream { VTHOST_TEST_SPAWNER_WASM, std::ios::binary };
+    REQUIRE(in.good());
+    return std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} };
+}
+
+} // namespace
+
+TEST_CASE("SessionHost.extension.askNoClient", "[vthost][host][extensions][guest]")
+{
+    // With no client attached nobody can answer the extension's question: its command call fails as pending,
+    // at once, the question waits for a client, and nothing blocks -- neither its worker nor the loop.
+    auto h = DaemonExtensionsHarness { spawnerModule(), vtextension::CommandPermission::Ask };
+    h.fileSystem.open();
+    auto timeline = ExtensionTimeline {};
+    h.host->subscribeStream(&timeline);
+    REQUIRE(h.host->createTab() != nullptr);
+    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    timeline.rowShowsPending = [&] {
+        return h.indicatorText(session) == "[err:pending]";
+    };
+
+    h.turnUntil([&] { return timeline.shown.has_value(); });
+    h.host->unsubscribeStream(&timeline);
+
+    CHECK(h.indicatorText(session) == "[err:pending]");
+    REQUIRE(timeline.asked.has_value());
+    REQUIRE(timeline.shown.has_value());
+    // The question opened while the call ran, and the frame it rendered followed within the call's own
+    // deadline: a call that waited for an answer would never have rendered at all.
+    CHECK(*timeline.shown - *timeline.asked < h.limits.callDeadline + std::chrono::milliseconds { 250 });
+    CHECK(h.capture.runs.load() == 0);
+    REQUIRE(h.host->pendingPermissionRequests().size() == 1);
+    auto const& request = h.host->pendingPermissionRequests().front();
+    CHECK(request.session == session.value);
+    CHECK(request.name == "spawner");
+    CHECK(request.hostId == "spawner@/extensions/spawner.wasm");
+    REQUIRE(request.commands.size() == 1);
+    CHECK(request.commands.front().argv == std::vector<std::string> { "echo", "{word}" });
+    CHECK(h.extensions->lookup(request.hostId, request.digest) == vthost::GrantState::Pending);
+    CHECK(h.extensions->runningWorkers() == 1);
+}
+
+TEST_CASE("SessionHost.extension.commandInFlightAtTeardown", "[vthost][host][extensions][guest]")
+{
+    // A command an extension runs as the host goes is cancelled, not waited out for its timeout: the
+    // daemon exits when asked to.
+    auto h = DaemonExtensionsHarness { spawnerModule(), vtextension::CommandPermission::Allow };
+    h.fileSystem.open();
+    REQUIRE(h.host->createTab() != nullptr);
+    h.turnUntil([&] { return h.capture.runs.load() > 0; });
+    REQUIRE(h.capture.runs.load() > 0);
+    REQUIRE(h.capture.lastTimeout.load() >= std::chrono::seconds { 1 });
+
+    auto const started = std::chrono::steady_clock::now();
+    h.host.reset();
+    CHECK(std::chrono::steady_clock::now() - started < h.capture.lastTimeout.load() / 2);
+}
+
+    #else
+
+TEST_CASE("SessionHost.extension.askNoClient", "[vthost][host][extensions][guest]")
+{
+    SKIP("the spawner test guest is not built (CONTOUR_EXTENSIONS_BUNDLED=OFF)");
+}
+
+TEST_CASE("SessionHost.extension.commandInFlightAtTeardown", "[vthost][host][extensions][guest]")
+{
+    SKIP("the spawner test guest is not built (CONTOUR_EXTENSIONS_BUNDLED=OFF)");
+}
+
+    #endif
+#endif

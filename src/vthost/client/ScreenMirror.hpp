@@ -214,7 +214,9 @@ class ScreenMirror
     /// how a row that scrolled by on the server gets into the mirror's own scrollback.
     void scrollInRow(vtbackend::Screen& page, RemoteScreen const& screen, int64_t stableId);
 
-    /// Rebuilds the host-writable status page from @p screen's status rows.
+    /// Paints @p screen's status rows on the display they are for: the host-writable status page, or the
+    /// indicator row the host's status-line extensions drew, which the mirror then shows in place of its own
+    /// template -- until an indicator page with no rows gives it its own back.
     void applyStatusLines(RemoteScreen const& screen);
 
     /// (Re)builds every image placement whose anchor sits in the current viewport, and drops the

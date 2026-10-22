@@ -177,7 +177,7 @@ class ServiceBackend
 ///
 /// Labels already distinguish daemon instances, so they distinguish their registrations too;
 /// without that, installing a second labelled daemon would silently overwrite the first.
-/// @param label The socket label ("default" for the unnamed one).
+/// @param label The socket label (DefaultSocketLabel for the unnamed one).
 /// @return The registration name.
 [[nodiscard]] std::string serviceNameForLabel(std::string_view label);
 

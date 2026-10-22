@@ -218,7 +218,10 @@ void RemoteScreen::apply(proto::Delta const& delta)
         activeStatusDisplay = delta.activeStatusDisplay;
     }
     if (delta.statusLinesChanged != 0)
+    {
         statusLines = delta.statusLines;
+        statusLinesDisplay = delta.statusLinesDisplay;
+    }
     if (delta.kittyKeyboardChanged != 0)
         kittyKeyboardFlags = delta.kittyKeyboardFlags;
     if (delta.modifyOtherKeysChanged != 0)
@@ -352,7 +355,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            UpdateHandler onUpdate,
                            ImageHandler onImage,
                            SessionEventHandler onSessionEvent,
-                           LayoutHandler onLayout):
+                           LayoutHandler onLayout,
+                           PermissionHandler onPermissionRequest):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -362,7 +366,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onUpdate(std::move(onUpdate)),
     _onImage(std::move(onImage)),
     _onSessionEvent(std::move(onSessionEvent)),
-    _onLayout(std::move(onLayout))
+    _onLayout(std::move(onLayout)),
+    _onPermissionRequest(std::move(onPermissionRequest))
 {
 }
 
@@ -479,6 +484,13 @@ void NativeClient::performOperation(proto::PerformOperation request)
     send(proto::DecodedPdu { std::move(request) });
 }
 
+void NativeClient::answerPermission(std::string hostId, std::string digest, GrantState answer)
+{
+    send(proto::DecodedPdu { proto::PermissionReply { .hostId = std::move(hostId),
+                                                      .digest = std::move(digest),
+                                                      .grantState = std::to_underlying(answer) } });
+}
+
 void NativeClient::detach()
 {
     _detached = true;
@@ -589,6 +601,12 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     {
         if (_onLayout)
             _onLayout(*layout);
+        return;
+    }
+    if (auto const* request = std::get_if<proto::PermissionRequest>(&pdu))
+    {
+        if (_onPermissionRequest)
+            _onPermissionRequest(*request);
         return;
     }
     // Unknown PDUs are ignored for forward compatibility — but recorded, so a mirror that is

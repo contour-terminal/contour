@@ -22,6 +22,9 @@
 namespace vthost
 {
 
+/// The socket label a daemon serves, and a client dials, when given none: the one source of it.
+inline constexpr auto DefaultSocketLabel = std::string_view { "default" };
+
 /// The inputs a control-socket path is derived from.
 ///
 /// A struct rather than six positional parameters: `sandboxAppId` and `user` are both
@@ -34,8 +37,8 @@ namespace vthost
 /// partial designated initializer a build error and cost the form its whole point.
 struct MuxSocketPathInputs
 {
-    /// The socket label (tmux's `-L`); "default" for the unnamed one.
-    std::string_view label = "default";
+    /// The socket label (tmux's `-L`); DefaultSocketLabel for the unnamed one.
+    std::string_view label = DefaultSocketLabel;
 
     /// A user-supplied path override (the `--socket PATH` flag), or empty.
     std::string_view explicitPath = {};
@@ -108,9 +111,20 @@ struct MuxSocketPathInputs
            / fromUtf8(inputs.label);
 }
 
+namespace detail
+{
+    /// muxSocketPath() from an environment, with `$CONTOUR_MUX` read by the caller.
+    /// @param contourMux The value of `$CONTOUR_MUX` to honour; none to ignore it.
+    [[nodiscard]] inline std::filesystem::path muxSocketPathOf(std::string_view label,
+                                                               std::string_view explicitPath,
+                                                               std::optional<std::string> const& contourMux,
+                                                               core::Environment const& env,
+                                                               vtpty::SandboxInfo const& sandbox);
+} // namespace detail
+
 /// Production entry point: derives the path from a process environment and the sandbox this process
 /// runs in.
-/// @param label The socket label; "default" for the unnamed one.
+/// @param label The socket label; DefaultSocketLabel for the unnamed one.
 /// @param explicitPath A user-supplied path override, or empty.
 /// @param env The environment to read `$CONTOUR_MUX`, `$XDG_RUNTIME_DIR` and (on
 ///            Windows) `$USERNAME` from.
@@ -119,13 +133,36 @@ struct MuxSocketPathInputs
 ///                environment variable can be trusted to reflect.
 /// @return The resolved socket file path.
 [[nodiscard]] inline std::filesystem::path muxSocketPath(
-    std::string_view label = "default",
+    std::string_view label = DefaultSocketLabel,
     std::string_view explicitPath = {},
     core::Environment const& env = core::defaultEnvironment(),
     vtpty::SandboxInfo const& sandbox = vtpty::currentSandbox())
 {
+    return detail::muxSocketPathOf(label, explicitPath, env.get("CONTOUR_MUX"), env, sandbox);
+}
+
+/// Where a daemon serving @p label listens when nothing names its socket: neither `--socket` nor
+/// `$CONTOUR_MUX`. What tells a daemon at a socket of its own apart from the one its label would run.
+/// @param label The socket label.
+/// @param env The environment to read `$XDG_RUNTIME_DIR` and (on Windows) `$USERNAME` from.
+/// @param sandbox Where this process runs.
+/// @return The label's own socket path.
+[[nodiscard]] inline std::filesystem::path labelSocketPath(
+    std::string_view label,
+    core::Environment const& env = core::defaultEnvironment(),
+    vtpty::SandboxInfo const& sandbox = vtpty::currentSandbox())
+{
+    return detail::muxSocketPathOf(label, {}, std::nullopt, env, sandbox);
+}
+
+[[nodiscard]] inline std::filesystem::path detail::muxSocketPathOf(
+    std::string_view label,
+    std::string_view explicitPath,
+    std::optional<std::string> const& contourMux,
+    core::Environment const& env,
+    vtpty::SandboxInfo const& sandbox)
+{
     // Held in named locals, because the pure core above views them rather than owning them.
-    auto const contourMux = env.get("CONTOUR_MUX");
     auto const xdgRuntimeDir = env.get("XDG_RUNTIME_DIR");
     auto const asView = [](std::string const& value) {
         return std::string_view { value };

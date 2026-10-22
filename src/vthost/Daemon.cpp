@@ -496,15 +496,17 @@ int runDaemon(DaemonConfig const& config)
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
 
-    auto host = SessionHost { loop,
-                              makeShellPtyFactory(
-                                  config.shell, config.escapeSandbox, config.socketPath, config.placement),
-                              config.settings,
-                              core::defaultEnvironment(),
-                              SessionHostConfig { .pumping = SessionPumping::Threaded,
-                                                  .sizePolicy = config.sizePolicy,
-                                                  .startupLayout = config.startupLayout,
-                                                  .identity = thisHostIdentity() } };
+    auto host = SessionHost {
+        loop,
+        makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, config.placement),
+        config.settings,
+        core::defaultEnvironment(),
+        SessionHostConfig { .pumping = SessionPumping::Threaded,
+                            .sizePolicy = config.sizePolicy,
+                            .startupLayout = config.startupLayout,
+                            .identity = thisHostIdentity(),
+                            .extensions = config.extensions ? config.extensions() : nullptr }
+    };
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
@@ -691,15 +693,17 @@ int runDaemon(DaemonConfig const& config)
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
 
-    auto host = SessionHost { loop,
-                              makeShellPtyFactory(
-                                  config.shell, config.escapeSandbox, config.socketPath, config.placement),
-                              config.settings,
-                              core::defaultEnvironment(),
-                              SessionHostConfig { .pumping = SessionPumping::Threaded,
-                                                  .sizePolicy = config.sizePolicy,
-                                                  .startupLayout = config.startupLayout,
-                                                  .identity = thisHostIdentity() } };
+    auto host = SessionHost {
+        loop,
+        makeShellPtyFactory(config.shell, config.escapeSandbox, config.socketPath, config.placement),
+        config.settings,
+        core::defaultEnvironment(),
+        SessionHostConfig { .pumping = SessionPumping::Threaded,
+                            .sizePolicy = config.sizePolicy,
+                            .startupLayout = config.startupLayout,
+                            .identity = thisHostIdentity(),
+                            .extensions = config.extensions ? config.extensions() : nullptr }
+    };
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };

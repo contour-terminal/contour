@@ -23,6 +23,7 @@
 #include <vtpty/Pty.hpp>
 
 #include <core/Environment.hpp>
+#include <core/net/DeadlineTimer.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/platform/FileSystem.hpp>
 #include <core/platform/NativeFileSystem.hpp>
@@ -34,6 +35,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -42,6 +44,8 @@
 // Part of this header's contract, not an implementation detail: the settings a host is constructed
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
 #include <vthost/ClientSizePolicy.hpp>
+#include <vthost/ExtensionHosting.hpp>
+#include <vthost/PermissionWire.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/LayoutTree.hpp>
@@ -102,6 +106,13 @@ class SessionStreamEvents
   public:
     virtual ~SessionStreamEvents() = default;
 
+    /// @return Whether the observer shows sessions' screens, as a client does: only while one does is the
+    ///         indicator row that sessions' extensions draw repainted, and one subscribing is handed it
+    ///         current.
+    ///         A tmux control-mode observer (tmux::ControlSession) keeps the default, so counts as a client
+    ///         for repaints although it shows no indicator row.
+    [[nodiscard]] virtual bool mirrorsScreens() const noexcept { return true; }
+
     /// @p session processed new output — the delta/notification trigger.
     virtual void sessionScreenUpdated(vtworkspace::SessionId /*session*/) {}
 
@@ -142,12 +153,34 @@ class SessionStreamEvents
     /// The daemon forwards it unconditionally — the CLIENT applies its own
     /// clipboard-write permission.
     virtual void sessionCopyToClipboard(vtworkspace::SessionId /*session*/, std::string const& /*data*/) {}
+
+    /// A status-line extension of @p session asks whether it may run its declared commands. Fires once per
+    /// question while it stays open: a client attaching later is asked through
+    /// SessionHost::pendingPermissionRequests() instead.
+    virtual void sessionPermissionRequested(vtworkspace::SessionId /*session*/,
+                                            proto::PermissionRequest const& /*request*/)
+    {
+    }
 };
 
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
 /// an OSC 99 notification stated -- nullopt for OSC 9 / OSC 777, which state none.
 using SessionNotifyCallback =
     std::function<void(std::string, std::string, std::optional<vtbackend::DisplayOccasion>)>;
+
+/// A hosted session's status-line extensions, as its host hands them to it.
+struct HostedSessionExtensions
+{
+    /// The session's extensions; null for none, which builds its terminal without any.
+    std::unique_ptr<ISessionExtensions> extensions {};
+    /// An extension published a frame. Invoked on the extension's WORKER, holding no lock: it must not
+    /// block, and touches no session state (the host marshals it onto the loop).
+    std::function<void()> onPublished {};
+    /// The extensions began or stopped following the foreground process, as a frame they published shows --
+    /// what they follow is known only once they have loaded. Invoked on the extension's WORKER, holding no
+    /// lock, and only on such a change: it must not block (the host marshals it onto the loop).
+    std::function<void()> onForegroundFollowingChanged {};
+};
 
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
 /// feeding it, mirroring the GUI's TerminalSession::mainLoop.
@@ -166,6 +199,8 @@ class HostedSession
     /// @param onClosed Invoked on the PUMP thread once the PTY closed and the
     ///        pump loop ended (the host marshals it onto the loop).
     /// @param env The process environment the hosted terminal reads through.
+    /// @param extensions The session's status-line extensions, started once the terminal exists; none by
+    ///        default.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -177,7 +212,8 @@ class HostedSession
                   std::function<void()> onBell,
                   SessionNotifyCallback onNotify,
                   std::function<void(std::string)> onCopyToClipboard,
-                  std::function<void()> onClosed);
+                  std::function<void()> onClosed,
+                  HostedSessionExtensions extensions = {});
 
     /// Joins the pump thread; the PTY must have been closed first (terminate()).
     ~HostedSession();
@@ -215,6 +251,33 @@ class HostedSession
     [[nodiscard]] vtworkspace::SessionId id() const noexcept { return _id; }
     [[nodiscard]] vtbackend::Terminal& terminal() noexcept { return _terminal; }
 
+    /// @return Whether the session runs status-line extensions.
+    [[nodiscard]] bool hasExtensions() const noexcept { return _extensions != nullptr; }
+
+    /// @return Whether the session's extensions follow its foreground program.
+    [[nodiscard]] bool followsForegroundProcess() const noexcept
+    {
+        return _extensions != nullptr
+               && _extensions->subscriptions().test(vtbackend::StatusLineEventKind::ForegroundProcess);
+    }
+
+    /// Has the indicator row its extensions draw repainted on the loop, once for however many requests arrive
+    /// before it is: through the same pending flag a published frame goes through. Without extensions,
+    /// nothing. Any thread.
+    void requestStatusLineRepaint() const
+    {
+        if (_events.onStatusLineExtensionPublished)
+            _events.onStatusLineExtensionPublished();
+    }
+
+    /// Forgets what the session's extensions followed: they were replaced by ones that have not loaded yet,
+    /// whose first frame that follows the foreground process must count as the change it is. Loop thread.
+    void forgetForegroundFollowing() noexcept { _foregroundFollowing.reset(); }
+
+    /// Tells the session's extensions of a new foreground program, when they follow it and it changed. Asks
+    /// the PTY, so it reads `/proc` (or its platform's equivalent): loop thread, at most once a second.
+    void pollForegroundProcess();
+
   private:
     /// The Terminal::Events glue: forwards the terminal events the daemon
     /// mirrors — the per-batch screen update, the bell, desktop notifications
@@ -228,12 +291,14 @@ class HostedSession
                std::function<void()> screenUpdated,
                std::function<void()> bell,
                SessionNotifyCallback notify,
-               std::function<void(std::string)> copyToClipboard):
+               std::function<void(std::string)> copyToClipboard,
+               std::function<void()> extensionPublished):
             identity(std::move(hostIdentity)),
             onScreenUpdated(std::move(screenUpdated)),
             onBell(std::move(bell)),
             onNotify(std::move(notify)),
-            onCopyToClipboard(std::move(copyToClipboard))
+            onCopyToClipboard(std::move(copyToClipboard)),
+            onStatusLineExtensionPublished(std::move(extensionPublished))
         {
         }
 
@@ -244,6 +309,9 @@ class HostedSession
         std::function<void()> onBell;
         SessionNotifyCallback onNotify;
         std::function<void(std::string)> onCopyToClipboard;
+        /// A status-line extension published a frame: invoked on its worker. Fixed at construction, as the
+        /// worker reads it without a lock.
+        std::function<void()> onStatusLineExtensionPublished;
         /// The app asked to show the host-writable status line (DECSSDT 2); the
         /// daemon honors it by switching the terminal's status display on (the
         /// frontend decision the GUI makes too).
@@ -280,6 +348,11 @@ class HostedSession
             if (onShowHostWritableStatusLine)
                 onShowHostWritableStatusLine();
         }
+        void extensionFramePublished() override
+        {
+            if (onStatusLineExtensionPublished)
+                onStatusLineExtensionPublished();
+        }
         /// The host's identity, as TerminalSession reports the GUI's: a record's working directory is
         /// local when it names the machine the daemon runs on.
         [[nodiscard]] vtbackend::LocalIdentity localIdentity() const noexcept override
@@ -301,8 +374,19 @@ class HostedSession
     void deliverPending();
 
     vtworkspace::SessionId _id;
+    /// The session's status-line extensions; null without any. Declared before _terminal, which it outlives:
+    /// ~Terminal revokes the sink their workers publish through before they are destroyed.
+    std::unique_ptr<ISessionExtensions> _extensions;
+    /// Whether the extensions follow the foreground process, as a worker last saw it. Before _events, whose
+    /// published-frame callback reads it.
+    vtbackend::StatusLineSubscriptionWatch _foregroundFollowing {
+        vtbackend::StatusLineEventKind::ForegroundProcess
+    };
     Events _events; ///< Must outlive _terminal (referenced by it).
     vtbackend::Terminal _terminal;
+    /// The foreground program the extensions were last told of, so that each is told once; extensions that
+    /// load or subscribe later hear it from the terminal, which remembers it. Loop thread only.
+    std::string _foregroundProcessName;
     std::function<void()> _onClosed;
     std::unique_ptr<std::thread> _pumpThread;
     /// Guards _pending and _pendingBytes: the loop thread queues, the pump thread delivers.
@@ -384,6 +468,10 @@ struct SessionHostConfig
         core::platform::NativeFileSystem::instance();
     /// Where a connection's reads pause while its input backs up in a session, and resume.
     InputWatermarks inputWatermarks {};
+    /// The status-line extensions every session it spawns runs; null for none, which constructs, polls and
+    /// wakes nothing of them (A2). Shared only so that a test can keep a handle on a fake: the host destroys
+    /// its share after its sessions, and nobody else is to hold one past the host. @see IExtensionHosting
+    std::shared_ptr<IExtensionHosting> extensions {};
 };
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
@@ -405,6 +493,13 @@ class SessionHost final: public vtworkspace::ModelEvents
                 vtbackend::Settings settings,
                 core::Environment const& env,
                 SessionHostConfig config = {});
+
+    /// Ends every session. With extensions, in the order nothing they started can outlive what it reaches:
+    /// the sessions go first (every runner posts its last job), then IExtensionHosting::stop() cancels the
+    /// commands in flight and joins the extension threads, then one turn of the loop drops what they posted
+    /// for sessions that are gone, while what those jobs hold can still be released; the extensions go
+    /// last, with the members. Not while the loop runs a turn, on any thread: with extensions that is a
+    /// precondition, checked.
     ~SessionHost() override;
 
     SessionHost(SessionHost const&) = delete;
@@ -522,8 +617,36 @@ class SessionHost final: public vtworkspace::ModelEvents
     [[nodiscard]] std::expected<void, OperationError> performOperation(
         proto::PerformOperation const& request);
 
+    /// Closes an open status-line extension's permission request with a client's answer, which is recorded
+    /// for every session: from now on the extension's commands run, or are refused. A dismissed prompt
+    /// (Pending) closes it and records nothing; the question is asked again when an extension next asks. An
+    /// answer to no open request is ignored: only a question the host asked is a client's to answer.
+    /// @param hostId The installed extension that asked.
+    /// @param digest The manifest digest the answer is bound to.
+    /// @param answer The answer.
+    void answerPermission(std::string_view hostId, std::string_view digest, GrantState answer);
+
+    /// @return Whether the hosted programs are asked who runs in the foreground: only while a session's
+    ///         extensions follow it.
+    [[nodiscard]] bool pollsForegroundProcesses() const noexcept
+    {
+        return _foregroundPoll.has_value() && !_foregroundPoll->settled();
+    }
+
+    /// @return The permission requests no client has answered yet, oldest first: what a client attaching now
+    ///         is to be asked. Valid until the host next changes them.
+    [[nodiscard]] std::span<proto::PermissionRequest const> pendingPermissionRequests() const noexcept
+    {
+        return _pendingPermissions;
+    }
+
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
+
+    /// @return Whether a subscribed observer shows sessions' screens (@see
+    /// SessionStreamEvents::mirrorsScreens):
+    ///         whether a client is attached.
+    [[nodiscard]] bool hasScreenMirrors() const noexcept;
 
     /// Registers @p observer for every completed model change. Not owned.
     void subscribe(vtworkspace::ModelEvents* observer);
@@ -636,6 +759,49 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// to be some size.
     void resolveAuthoritativeArea();
 
+    /// The session hooks a new session's status-line extensions reach the host through, every one of which
+    /// does nothing once the session is gone.
+    /// @param session The session about to be spawned.
+    /// @return Its extensions; none without IExtensionHosting.
+    [[nodiscard]] HostedSessionExtensions makeSessionExtensions(vtworkspace::SessionId session);
+
+    /// Repaints @p session's indicator status line from its extensions and tells them what they newly follow,
+    /// as a frame would: the daemon renders none, and its clients mirror the row. Takes the terminal lock.
+    void refreshStatusLine(HostedSession& session);
+
+    /// A frame of @p session's extensions was published: repaints the row its clients mirror, and tells them.
+    void extensionFramePublished(vtworkspace::SessionId session);
+
+    /// Other extensions run in @p session now: its terminal is told, and its clients the row they draw.
+    void extensionsReplaced(vtworkspace::SessionId session);
+
+    /// Opens @p request for every client to answer, unless it is answered or open already.
+    void offerPermission(vtworkspace::SessionId session, proto::PermissionRequest request);
+
+    /// Arms the once-a-second poll of the hosted programs, unless it is armed or no session's extensions
+    /// follow the foreground process. Asked again whenever a session's extensions are replaced.
+    void armForegroundPoll();
+
+    /// Moves the open permission questions @p gone asked to another session whose extensions run, or closes
+    /// them when none is left. Loop thread.
+    /// @param gone The session that exited, no longer hosted.
+    /// @return The questions moved, as they read now, for the observers to be told of.
+    [[nodiscard]] std::vector<proto::PermissionRequest> rehomePermissionRequests(vtworkspace::SessionId gone);
+
+    /// @return Whether some session's extensions follow the foreground process.
+    [[nodiscard]] bool followsForegroundProcess() const noexcept;
+
+    /// What the poll does: tells every session's extensions of its foreground program, and re-arms while
+    /// any session runs extensions. @param host The SessionHost.
+    static void pollForegroundProcesses(void* host);
+
+    /// Releases what the runners of a session just destroyed retire, a second from now: a runner retires
+    /// its engine only once its lane ran its last job. Only with extensions.
+    void scheduleRetiredRelease();
+
+    /// What the release timer does. @param host The SessionHost.
+    static void releaseRetired(void* host);
+
     /// Reprojects PTY sizes onto the new layout, THEN fans the event out — the
     /// required order for every layout-shape change, so shells never see a size
     /// that lags what observers are about to advertise. Spelling the reproject at
@@ -650,7 +816,15 @@ class SessionHost final: public vtworkspace::ModelEvents
         fanOut(method, args...);
     }
 
+    /// What a job another thread posts reaches the host through: revoked, on the loop thread, as the host
+    /// goes, so that a job run or destroyed later finds no host rather than a dead one.
+    struct HostGate
+    {
+        SessionHost* host = nullptr; ///< Null once the host is gone. Loop thread only.
+    };
+
     core::net::EventLoop& _loop;
+    std::shared_ptr<HostGate> _gate;
     PtyFactory _ptyFactory;
     vtbackend::Settings _settings;
     core::Environment const& _environment;
@@ -672,7 +846,19 @@ class SessionHost final: public vtworkspace::ModelEvents
 
     uint64_t _nextSessionId = 1;
     std::optional<vtworkspace::SessionId> _pendingSessionId; ///< Consumed by the model's allocator.
+    /// The extensions every session runs; null for none. Declared before _sessions, so that it is destroyed
+    /// after every session's extensions: its runtime joins the threads their runners lived on.
+    std::shared_ptr<IExtensionHosting> _extensions;
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
+    /// Every permission request no client answered yet, oldest first; one per installed extension and
+    /// manifest digest.
+    std::vector<proto::PermissionRequest> _pendingPermissions;
+    /// Asks the hosted programs who runs in the foreground, once a second; armed only while a session runs
+    /// extensions.
+    std::optional<core::net::DeadlineTimer> _foregroundPoll;
+    /// Releases what runners retired, a while after a session with extensions went. @see
+    /// scheduleRetiredRelease
+    std::optional<core::net::DeadlineTimer> _retiredRelease;
     std::vector<vtworkspace::ModelEvents*> _subscribers;
     std::vector<SessionStreamEvents*> _streamSubscribers;
 
