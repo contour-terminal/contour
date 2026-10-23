@@ -294,7 +294,9 @@ void Engine::watchdogLoop()
             continue;
         }
 
-        _wakeup.wait_until(lock, _deadlines.front().expiry);
+        // A copy: while the watchdog waits, arming may reallocate the heap from under a reference.
+        auto const earliest = _deadlines.front().expiry;
+        _wakeup.wait_until(lock, earliest);
 
         // Terminating under the lock is what makes disarm() final: once it has removed a deadline,
         // no terminate for it can still be on its way.

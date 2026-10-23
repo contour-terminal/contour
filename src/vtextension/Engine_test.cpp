@@ -6,11 +6,13 @@
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -70,7 +72,7 @@ class RawInstance
     {
         auto* const function = wasm_runtime_lookup_function(_instance.get(), name);
         REQUIRE(function);
-        auto const token = WatchToken { .instance = _instance.get() };
+        auto const token = this->token();
         engine.armDeadline(token, engine.limits().callDeadline);
         auto const succeeded = wasm_runtime_call_wasm(_execEnv.get(), function, 0, nullptr);
         engine.disarm(token);
@@ -80,6 +82,9 @@ class RawInstance
             return std::unexpected(ExtensionError::DeadlineExceeded);
         return std::unexpected(ExtensionError::Trapped);
     }
+
+    /// @return The token naming this instance to the watchdog.
+    [[nodiscard]] WatchToken token() const noexcept { return WatchToken { .instance = _instance.get() }; }
 
     /// @return The exception the instance carries; empty if none.
     [[nodiscard]] std::string_view exception() const
@@ -209,6 +214,29 @@ TEST_CASE("Engine.disarm")
     std::this_thread::sleep_for(4 * limits.callDeadline);
     CHECK(instance->exception().empty());
     CHECK(instance->call(**engine, "idle").has_value());
+}
+
+TEST_CASE("Engine.armWhileWatching")
+{
+    // The watchdog sleeps towards the earliest deadline while another thread arms more: arming may move the
+    // deadlines in memory, and the watchdog must not be left holding on to where the earliest one was
+    // (ASan checks that it is not).
+    auto const engine = Engine::create(ExtensionLimits {});
+    REQUIRE(engine.has_value());
+    auto instances = std::vector<std::unique_ptr<RawInstance>>(256);
+    std::ranges::generate(instances, [] { return RawInstance::create(hostOnlyModule()); });
+
+    (*engine)->armDeadline(instances.front()->token(), std::chrono::hours { 1 });
+    auto arming = std::thread([&] {
+        for (auto const& instance: instances | std::views::drop(1))
+            (*engine)->armDeadline(instance->token(), std::chrono::hours { 1 });
+    });
+    arming.join();
+    for (auto const& instance: instances)
+        (*engine)->disarm(instance->token());
+
+    // No deadline expired: every instance is untouched.
+    CHECK(std::ranges::all_of(instances, [](auto const& instance) { return instance->exception().empty(); }));
 }
 
 TEST_CASE("Engine.errorText")
