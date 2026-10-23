@@ -141,9 +141,11 @@ void ExtensionWorkerPool::work(Worker& worker)
             worker.wakeup.wait(lock);
             continue;
         }
-        if (worker.timers.front().due > _clock.now())
+        if (auto const due = worker.timers.front().due; due > _clock.now())
         {
-            worker.wakeup.wait_until(lock, worker.timers.front().due);
+            // A copy: the wait releases the lock, and a timer scheduled meanwhile may move the heap's
+            // elements, which the wait reads again on waking.
+            worker.wakeup.wait_until(lock, due);
             continue;
         }
         std::ranges::pop_heap(worker.timers, dueLater);

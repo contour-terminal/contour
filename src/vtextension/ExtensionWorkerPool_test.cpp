@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <future>
 #include <mutex>
+#include <ranges>
 #include <set>
 #include <thread>
 #include <vector>
@@ -98,6 +99,31 @@ TEST_CASE("ExtensionWorkerPool.timers", "[vtextension][threading]")
     REQUIRE(done.get_future().wait_for(Eventually) == std::future_status::ready);
     auto const lock = std::scoped_lock { mutex };
     CHECK(fired == std::vector { 1 });
+}
+
+TEST_CASE("ExtensionWorkerPool.scheduleWhileWaiting", "[vtextension][threading]")
+{
+    // The worker sleeps towards its earliest timer while another thread schedules more: scheduling may move
+    // the timers in memory, and the worker must not be left holding on to where the earliest one was
+    // (ASan checks that it is not).
+    auto pool = ExtensionWorkerPool(1);
+    auto const lane = pool.assignLane();
+    auto timers = std::vector<TimerId> {};
+    timers.push_back(pool.schedule(lane, std::chrono::hours { 1 }, [] {}));
+
+    constexpr auto Timers = 256;
+    auto scheduler = std::thread([&] {
+        for (auto const index: std::views::iota(1, Timers))
+            timers.push_back(pool.schedule(lane, std::chrono::hours { 1 + index }, [] {}));
+    });
+    scheduler.join();
+    for (auto const timer: timers)
+        pool.cancel(timer);
+
+    // The worker is still alive and well: a job posted now runs.
+    auto ran = std::promise<void> {};
+    pool.post(lane, [&ran] { ran.set_value(); });
+    CHECK(ran.get_future().wait_for(Eventually) == std::future_status::ready);
 }
 
 TEST_CASE("ExtensionWorkerPool.destructionRunsPostedJobs", "[vtextension][threading]")
