@@ -413,6 +413,16 @@ class MockSession: public QObject
     Q_INVOKABLE void executePendingBufferCapture(bool, bool) {}
     Q_INVOKABLE void executeShowHostWritableStatusLine(bool, bool) {}
 
+    // The extension prompt: what it shows, and each answer, counted.
+    [[nodiscard]] Q_INVOKABLE QString pendingExtensionPermissionText() const { return extensionQuestion; }
+    Q_INVOKABLE void allowPendingExtension() { ++extensionAllowed; }
+    Q_INVOKABLE void denyPendingExtension() { ++extensionDenied; }
+    Q_INVOKABLE void dismissPendingExtension() { ++extensionDismissed; }
+    QString extensionQuestion;  ///< What pendingExtensionPermissionText() answers.
+    int extensionAllowed = 0;   ///< How often the chrome allowed.
+    int extensionDenied = 0;    ///< How often it denied.
+    int extensionDismissed = 0; ///< How often it closed the prompt unanswered.
+
   signals:
     void lineCountChanged();
     void columnsCountChanged();
@@ -432,6 +442,7 @@ class MockSession: public QObject
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
     void requestPermissionForPasteLargeFile();
+    void requestPermissionForExtension();
 
   private:
     int _columns = 80;
@@ -1741,6 +1752,100 @@ TEST_CASE("SessionChrome instantiates and wires a (null) session without errors 
     chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(nullptr)));
     QCoreApplication::processEvents();
     CHECK(chrome != nullptr);
+}
+
+TEST_CASE("SessionChrome asks an extension's question and hands the answer back (offscreen)",
+          "[contour][gui][qml][extensions]")
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    REQUIRE(component.isReady());
+
+    MockSession session;
+    session.extensionQuestion = QStringLiteral("status: git -C {dir} status --porcelain=v2 --branch");
+    QVariantMap initial;
+    initial.insert("session", QVariant::fromValue(static_cast<QObject*>(&session)));
+    std::unique_ptr<QObject> chrome(component.createWithInitialProperties(initial));
+    REQUIRE(chrome != nullptr);
+    auto* const dialog = chrome->findChild<QObject*>(QStringLiteral("extensionCommandsDialog"));
+    REQUIRE(dialog != nullptr);
+
+    // The question is shown as the session words it.
+    emit session.requestPermissionForExtension();
+    QCoreApplication::processEvents();
+    CHECK(dialog->property("text").toString() == session.extensionQuestion);
+
+    SECTION("Yes allows, and so does Yes to All: every answer is remembered anyway")
+    {
+        REQUIRE(QMetaObject::invokeMethod(dialog, "yesClicked"));
+        REQUIRE(QMetaObject::invokeMethod(dialog, "yesToAllClicked"));
+        CHECK(session.extensionAllowed == 2);
+    }
+
+    SECTION("No denies")
+    {
+        REQUIRE(QMetaObject::invokeMethod(dialog, "noClicked"));
+        REQUIRE(QMetaObject::invokeMethod(dialog, "noToAllClicked"));
+        CHECK(session.extensionDenied == 2);
+    }
+
+    SECTION("closing it is no answer")
+    {
+        REQUIRE(QMetaObject::invokeMethod(dialog, "rejected"));
+        CHECK(session.extensionDismissed == 1);
+        CHECK(session.extensionAllowed == 0);
+        CHECK(session.extensionDenied == 0);
+    }
+}
+
+TEST_CASE("StatusLineItemDialog edits which extension an Extension item shows (offscreen)",
+          "[contour][gui][qml][extensions]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+import Contour.Ui
+ApplicationWindow {
+    width: 480
+    height: 480
+    property var appliedItem: null
+    property alias dialog: dialog
+    StatusLineItemDialog {
+        id: dialog
+        onApplied: (segmentIndex, itemIndex, item) => appliedItem = item
+    }
+})",
+                      QUrl());
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO(component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> window(component.create());
+    REQUIRE(window != nullptr);
+    auto* const dialog = window->property("dialog").value<QObject*>();
+    REQUIRE(dialog != nullptr);
+
+    auto const item = QVariantMap { { "type", "Extension" }, { "label", "Extension" }, { "name", "git" } };
+    REQUIRE(QMetaObject::invokeMethod(
+        dialog, "edit", Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, 1), Q_ARG(QVariant, item)));
+    QCoreApplication::processEvents();
+    auto* const field = dialog->findChild<QObject*>(QStringLiteral("indicatorItemTextField"));
+    REQUIRE(field != nullptr);
+    CHECK(field->property("text").toString() == "git");
+
+    field->setProperty("text", QStringLiteral("clock"));
+    REQUIRE(QMetaObject::invokeMethod(dialog, "apply"));
+    auto const applied = window->property("appliedItem").toMap();
+    CHECK(applied.value("name").toString() == "clock");
+    CHECK(applied.value("displayName").toString() == "clock");
 }
 
 TEST_CASE("SessionChrome scrollbar renders as a styled grabbable overlay (offscreen)", "[contour][gui][qml]")

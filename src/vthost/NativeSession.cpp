@@ -37,6 +37,7 @@
 #include <vthost/MouseWire.hpp>
 #include <vthost/NotifyWire.hpp>
 #include <vthost/PduPump.hpp>
+#include <vthost/PermissionWire.hpp>
 #include <vthost/TimeWire.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -338,6 +339,13 @@ void NativeSession::sessionCopyToClipboard(SessionId session, std::string const&
 {
     // "c" = the CLIPBOARD selection; the client applies its own write permission.
     emitSessionEvent(proto::SessionClipboard { .session = session.value, .selection = "c", .data = data });
+}
+
+void NativeSession::sessionPermissionRequested(SessionId /*session*/, proto::PermissionRequest const& request)
+{
+    if (!_handshaken || _closed)
+        return;
+    send(0, proto::DecodedPdu { request });
 }
 
 void NativeSession::emitSessionEvent(proto::SessionEventPdu const& event)
@@ -644,22 +652,47 @@ void NativeSession::collectLiveState(vtbackend::Terminal& terminal,
         follow.lastActiveStatusDisplay = activeStatus;
     }
 
-    // Host-writable status-line CONTENT (a separate page): when that page is
-    // shown, carry its whole (tiny) grid so the client paints the app's custom
-    // status line. Full resend on change — no stable-id delta for one row.
-    if (terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable)
+    // Status-line CONTENT the client cannot draw itself (a separate page), its whole (tiny) grid so the
+    // client paints it. Full resend on change — no stable-id delta for one row.
+    //  - The host-writable status line, when shown: the application's custom status line.
+    //  - The indicator row, when the session's status-line extensions draw it: they run here, and the
+    //    client has no frame of theirs. The host repaints that row as their frames arrive and output does.
+    //    Once they stop drawing it, the client is told so by an empty indicator page, and draws its own.
+    //    Whether the host's terminal shows its indicator or not: a client decides that for itself.
+    auto const statusRows =
+        [&]() -> std::optional<std::pair<vtbackend::StatusDisplayType, vtbackend::Screen const*>> {
+        if (terminal.statusDisplayType() == vtbackend::StatusDisplayType::HostWritable)
+            return std::pair { vtbackend::StatusDisplayType::HostWritable,
+                               &terminal.hostWritableStatusLineDisplay() };
+        if (terminal.indicatorStatusLineDrivenByExtensions())
+            return std::pair { vtbackend::StatusDisplayType::Indicator,
+                               &terminal.indicatorStatusLineDisplay() };
+        return std::nullopt;
+    }();
+    if (statusRows)
     {
-        auto const& statusGrid = terminal.hostWritableStatusLineDisplay().grid();
+        auto const [type, statusScreen] = *statusRows;
+        auto const display = static_cast<uint8_t>(std::to_underlying(type));
+        auto const& statusGrid = statusScreen->grid();
         auto rows = std::vector<proto::WireLine> {};
         for (auto const i: std::views::iota(0, unbox<int>(statusGrid.pageSize().lines)))
             rows.push_back(toWireLine(
                 statusGrid, vtbackend::LineOffset(i), statusGrid.lineAt(vtbackend::LineOffset(i))));
-        if (snapshot || rows != follow.lastStatusLines)
+        if (snapshot || display != follow.lastStatusLinesDisplay || rows != follow.lastStatusLines)
         {
             delta.statusLinesChanged = 1;
+            delta.statusLinesDisplay = display;
             delta.statusLines = rows;
         }
         follow.lastStatusLines = std::move(rows);
+        follow.lastStatusLinesDisplay = display;
+    }
+    else if (follow.lastStatusLinesDisplay == std::to_underlying(vtbackend::StatusDisplayType::Indicator))
+    {
+        delta.statusLinesChanged = 1;
+        delta.statusLinesDisplay = follow.lastStatusLinesDisplay;
+        follow.lastStatusLines.clear();
+        follow.lastStatusLinesDisplay = 0;
     }
 
     // Live Kitty keyboard protocol flags (pull+diff): the top of the app's
@@ -1360,6 +1393,15 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         _host.handleSessionExit(vtworkspace::SessionId { close->session });
         return;
     }
+    if (auto const* reply = std::get_if<proto::PermissionReply>(&frame.pdu))
+    {
+        // Read, never cast: a byte no answer has records nothing, and leaves the question open.
+        if (auto const answer = grantStateOf(reply->grantState))
+            _host.answerPermission(reply->hostId, reply->digest, *answer);
+        else
+            errorLog()("{}: ignoring a permission reply with answer {}", _id, reply->grantState);
+        return;
+    }
     // Unknown/unexpected PDUs are ignored: forward compatibility with a newer peer. Recorded
     // all the same — "the daemon ignored what I sent" is otherwise indistinguishable from "the
     // daemon never received it".
@@ -1444,6 +1486,12 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
                 requestSnapshot(pane.session());
         });
     });
+
+    // The questions still open: asked while no client was attached, or left unanswered by one that was --
+    // a dismissed prompt sends nothing. A status-line extension waits for an answer, its command calls
+    // failing as pending meanwhile. A client is sent each once, as it opens or as the client attaches.
+    for (auto const& request: _host.pendingPermissionRequests())
+        send(0, proto::DecodedPdu { request });
     return true;
 }
 

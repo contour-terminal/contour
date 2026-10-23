@@ -1,0 +1,13 @@
+[package]
+name = "sleeper"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Test guest for the statusline world that sleeps, which the host must refuse to load."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen.workspace = true

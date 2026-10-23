@@ -49,6 +49,10 @@
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
+#ifdef CONTOUR_EXTENSIONS
+    #include <vthost/client/DaemonGrantReplies.hpp>
+#endif
+#include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -1430,3 +1434,92 @@ TEST_CASE("an attached client knows the daemon's machine before it mirrors a ses
     CHECK(*seenAtFirstUpdate == vthost::appSpecificIdentity(daemon.view()));
     CHECK(client.daemonIdentity() == *seenAtFirstUpdate);
 }
+
+TEST_CASE("NativeClient.extension.permission", "[vthost][attach][extensions]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                                          .extensions = hosting } };
+    auto const sessionId = newSession(host);
+    hosting->sessions.front()->askPermission(proto::PermissionRequest {
+        .session = 0,
+        .hostId = "git@/x/git.wasm",
+        .name = "git",
+        .version = 1,
+        .digest = "5f3c",
+        .commands = { proto::WireDeclaredCommand { .name = "status", .argv = { "git", "status" } } } });
+
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto server = std::make_unique<NativeSession>(
+        loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first));
+    auto const subscription = makeScopedStreamSubscription(host, *server);
+    auto asked = std::vector<proto::PermissionRequest> {};
+    auto client = std::unique_ptr<NativeClient> {};
+    client = std::make_unique<NativeClient>(
+        loop,
+        std::move(pair.second),
+        NativeClient::HandshakeOptions {},
+        vtbackend::CommandBlockStoreLimits {},
+        NativeClient::UpdateHandler {},
+        NativeClient::ImageHandler {},
+        NativeClient::SessionEventHandler {},
+        NativeClient::LayoutHandler {},
+        NativeClient::PermissionHandler { [&](proto::PermissionRequest const& request) {
+            asked.push_back(request);
+            client->answerPermission(request.hostId, request.digest, vthost::GrantState::Denied);
+        } });
+
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       vthost::testing::FakeExtensionHosting* hosting) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return !hosting->answers.empty(); });
+        client->detach();
+    }(&loop, client.get(), hosting.get());
+    loop.blockOn(core::net::testing::allOf(server->run(), client->run(), std::move(scenario)));
+
+    REQUIRE(asked.size() == 1);
+    CHECK(asked.front().session == sessionId.value);
+    CHECK(asked.front().name == "git");
+    CHECK(hosting->lookup("git@/x/git.wasm", "5f3c") == vthost::GrantState::Denied);
+    CHECK(host.pendingPermissionRequests().empty());
+}
+
+#ifdef CONTOUR_EXTENSIONS
+TEST_CASE("DaemonGrantReplies sends each answer, and remembers it", "[vthost][attach][extensions]")
+{
+    struct Sent
+    {
+        std::string hostId;
+        std::string digest;
+        vthost::GrantState answer;
+    };
+    auto sent = std::vector<Sent> {};
+    auto replies = vthost::client::DaemonGrantReplies {
+        [&](std::string_view hostId, std::string_view digest, vthost::GrantState answer) {
+            sent.push_back(Sent {
+                .hostId = std::string { hostId }, .digest = std::string { digest }, .answer = answer });
+        }
+    };
+    CHECK(replies.lookup("git@/x.wasm", "d1") == vtextension::GrantState::Pending);
+
+    replies.record("git@/x.wasm", "d1", vtextension::GrantState::Granted);
+    REQUIRE(sent.size() == 1);
+    CHECK(sent.back().hostId == "git@/x.wasm");
+    CHECK(sent.back().digest == "d1");
+    CHECK(sent.back().answer == vthost::GrantState::Granted);
+    CHECK(replies.lookup("git@/x.wasm", "d1") == vtextension::GrantState::Granted);
+    CHECK(replies.lookup("git@/x.wasm", "d2") == vtextension::GrantState::Pending);
+
+    replies.record("git@/x.wasm", "d2", vtextension::GrantState::Denied);
+    CHECK(sent.back().answer == vthost::GrantState::Denied);
+    CHECK(replies.lookup("git@/x.wasm", "d2") == vtextension::GrantState::Denied);
+}
+#endif

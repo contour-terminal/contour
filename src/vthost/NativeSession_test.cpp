@@ -43,6 +43,7 @@
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/PduTrace.hpp>
+#include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
@@ -297,7 +298,21 @@ struct HarnessOptions
     vthost::PtyFactory ptyFactory {};
     /// Where a connection's input reads pause and resume.
     vthost::InputWatermarks inputWatermarks {};
+    /// The status-line extensions the hosted sessions run; none by default.
+    std::shared_ptr<vthost::IExtensionHosting> extensions {};
+    /// What the hosted terminals' settings differ in from hostSettings()'s; nothing by default.
+    std::function<void(vtbackend::Settings&)> adjustSettings {};
 };
+
+/// @param options What the harness is built with.
+/// @return The settings its host's sessions are built with.
+[[nodiscard]] vtbackend::Settings harnessSettings(HarnessOptions const& options)
+{
+    auto settings = hostSettings(options.history, options.blockLimits);
+    if (options.adjustSettings)
+        options.adjustSettings(settings);
+    return settings;
+}
 
 /// @param loop The loop a real pair is driven by.
 /// @param pipeBytes HarnessOptions::pipeBytes.
@@ -343,13 +358,14 @@ struct NativeHarness
                            ? options.ptyFactory
                            : [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&)
                            -> std::unique_ptr<vtpty::Pty> { return std::make_unique<vtpty::MockPty>(size); },
-                       hostSettings(options.history, options.blockLimits),
+                       harnessSettings(options),
                        core::defaultEnvironment(),
                        vthost::SessionHostConfig { .pumping = options.pumping,
                                                    .sizePolicy = vthost::ClientSizePolicy::Latest,
                                                    .startupLayout = options.startupLayout,
                                                    .identity = options.identity,
-                                                   .inputWatermarks = options.inputWatermarks } };
+                                                   .inputWatermarks = options.inputWatermarks,
+                                                   .extensions = options.extensions } };
     core::net::testing::SocketPair pair = makeConnection(loop, options.pipeBytes);
     std::unique_ptr<NativeSession> session =
         std::make_unique<NativeSession>(loop,
@@ -2296,6 +2312,23 @@ TEST_CASE("a codec-version mismatch is reported with both versions", "[vthost][n
     CHECK(capture.contains(std::format("v{}", proto::CodecVersion)));
 }
 
+TEST_CASE("a peer of the command-block revision is refused", "[vthost][native][handshake]")
+{
+    // Revision 2 (#1010) lays a Delta out without the status rows' display byte, and knows neither
+    // permission PDU: past a handshake it would mis-read every Delta, so the handshake must refuse it.
+    constexpr auto CommandBlockRevision = uint32_t { 2 };
+    auto capture = core::log::ScopedCapture {};
+    auto harness = NativeHarness {};
+    auto const received = harness.exchange(
+        { proto::DecodedPdu { proto::ClientHello { .codecVersion = CommandBlockRevision } } }, 1);
+
+    REQUIRE(received.size() == 1);
+    auto const* hello = std::get_if<proto::ServerHello>(&received[0].pdu);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->machineId.empty()); // a refusal names no machine
+    CHECK(capture.contains("handshake rejected"));
+}
+
 namespace
 {
 /// Collects every byte the server writes until it closes the connection, or CollectBudget runs out.
@@ -3141,4 +3174,307 @@ TEST_CASE("a host reset retires every record the client held", "[vthost][native]
     CHECK(heldBlockIds(client) == after);
     CHECK_FALSE(std::ranges::contains(before, after.front()));
     CHECK(drainIncrements(h, sessionId, client).empty());
+}
+
+// ---------------------------------------------------------------------------
+// Status-line extensions. They run where the session's terminal is -- here, in the daemon -- so the row
+// they draw travels to the clients, which have no frame of theirs.
+
+namespace
+{
+
+/// @param left The indicator status line's only segment.
+/// @return What a harness's settings take to show the indicator status line.
+[[nodiscard]] std::function<void(vtbackend::Settings&)> showingIndicator(std::string left)
+{
+    return [left = std::move(left)](vtbackend::Settings& settings) {
+        settings.statusDisplayType = vtbackend::StatusDisplayType::Indicator;
+        settings.indicatorStatusLine.left = left;
+        settings.indicatorStatusLine.middle.clear();
+        settings.indicatorStatusLine.right.clear();
+    };
+}
+
+/// @return The indicator row @p frame carries, as text; none if it carries none.
+[[nodiscard]] std::optional<std::string> indicatorRowOf(proto::DecodedFrame const& frame)
+{
+    auto const* delta = std::get_if<proto::Delta>(&frame.pdu);
+    if (delta == nullptr || delta->statusLinesChanged == 0
+        || delta->statusLinesDisplay != std::to_underlying(vtbackend::StatusDisplayType::Indicator)
+        || delta->statusLines.empty())
+        return std::nullopt;
+    return textOf(delta->statusLines.front());
+}
+
+/// @return A collector's stop condition: a frame carrying an indicator row of @p text has arrived.
+[[nodiscard]] CollectDone carriesIndicatorRow(std::string text)
+{
+    return [text = std::move(text)](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(got, [&](auto const& frame) { return indicatorRowOf(frame) == text; });
+    };
+}
+
+/// Once @p gate holds: publishes @p vt as @p name's next frame, as the extension's worker does.
+Task<void> publishOnce(NativeHarness* h,
+                       vthost::testing::FakeSessionExtensions* extensions,
+                       std::string name,
+                       std::string vt,
+                       StepGate gate)
+{
+    co_await awaitGate(&h->loop, std::move(gate));
+    extensions->publish(name, vthost::testing::frameOf(vt, 2));
+}
+
+/// @return A host's extensions whose sessions' indicator row @p name takes over, its frame @p vt.
+[[nodiscard]] std::shared_ptr<vthost::testing::FakeExtensionHosting> takingOver(std::string name,
+                                                                                std::string vt)
+{
+    auto hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    hosting->prepare = [name = std::move(name),
+                        vt = std::move(vt)](vtbackend::FakeStatusLineExtensions& fake) {
+        fake.takeOver(name);
+        fake.publish(name, vthost::testing::frameOf(vt));
+    };
+    return hosting;
+}
+
+/// Attaches a second client to @p h's host, as a client attaching after the first detached does, and
+/// collects what it receives until @p done holds.
+[[nodiscard]] std::vector<proto::DecodedFrame> attachAnother(NativeHarness& h, CollectDone done)
+{
+    auto pair = makeConnection(h.loop, std::nullopt);
+    auto session = std::make_unique<NativeSession>(
+        h.loop, h.host, vthost::ConnectionId { .endpoint = "test", .index = 2 }, std::move(pair.first));
+    auto const subscription = makeScopedStreamSubscription(h.host, *session);
+    auto const bytes = encodeRequest({ proto::ClientHello {} });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(
+        core::net::testing::allOf(session->run(),
+                                  feedBytes(pair.second.get(), &bytes),
+                                  collectUntil(&h.loop, pair.second.get(), std::move(done), &received)));
+    return received;
+}
+
+} // namespace
+
+TEST_CASE("NativeSession.extension.statusRowsMirrored", "[vthost][native][extensions]")
+{
+    SECTION("a take-over's frame is the indicator row the client is sent")
+    {
+        auto const hosting = takingOver("plasma", "PLASMA");
+        auto h = NativeHarness { HarnessOptions { .extensions = hosting,
+                                                  .adjustSettings = showingIndicator("template") } };
+        auto const session = newSession(h.host);
+        REQUIRE(hosting->sessions.size() == 1);
+
+        auto const received = h.exchangeUntil({ proto::ClientHello {} },
+                                              carriesIndicatorRow("NEXT"),
+                                              publishOnce(&h,
+                                                          hosting->sessions.front(),
+                                                          "plasma",
+                                                          "NEXT",
+                                                          holdsFrames(&h.received, AttachSnapshotFrames)));
+
+        // The attach snapshot carries the row the extension drew, not the template the client would draw.
+        REQUIRE(received.size() > AttachSnapshotFrames);
+        auto const* snapshot = std::get_if<proto::Delta>(&received[AttachSnapshotFrames - 1].pdu);
+        REQUIRE(snapshot != nullptr);
+        CHECK(snapshot->snapshot == 1);
+        CHECK(snapshot->statusLinesChanged == 1);
+        CHECK(indicatorRowOf(received[AttachSnapshotFrames - 1]) == "PLASMA");
+        // Its next frame follows as an increment.
+        auto const* increment = std::get_if<proto::Delta>(&received.back().pdu);
+        REQUIRE(increment != nullptr);
+        CHECK(increment->snapshot == 0);
+        CHECK(increment->statusLinesChanged == 1);
+        CHECK(indicatorRowOf(received.back()) == "NEXT");
+        CHECK(session.value == increment->session);
+    }
+
+    SECTION("an {Extension} segment of the indicator template comes through its row's text")
+    {
+        auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+        hosting->prepare = [](vtbackend::FakeStatusLineExtensions& fake) {
+            fake.publish("git", vthost::testing::frameOf("main"));
+        };
+        auto h = NativeHarness { HarnessOptions { .extensions = hosting,
+                                                  .adjustSettings = showingIndicator("[{Extension:git}]") } };
+        std::ignore = newSession(h.host);
+
+        auto const received = h.exchangeUntil(
+            { proto::ClientHello {} },
+            carriesIndicatorRow("[dev]"),
+            publishOnce(
+                &h, hosting->sessions.front(), "git", "dev", holdsFrames(&h.received, AttachSnapshotFrames)));
+        REQUIRE(received.size() > AttachSnapshotFrames);
+        CHECK(indicatorRowOf(received[AttachSnapshotFrames - 1]) == "[main]");
+        CHECK(indicatorRowOf(received.back()) == "[dev]");
+    }
+
+    SECTION("an indicator no extension draws is the client's own to draw")
+    {
+        auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+        auto h = NativeHarness { HarnessOptions { .extensions = hosting,
+                                                  .adjustSettings = showingIndicator("{VTType}") } };
+        std::ignore = newSession(h.host);
+
+        auto const received = h.attach(AttachSnapshotFrames);
+        REQUIRE(received.size() == AttachSnapshotFrames);
+        auto const* snapshot = std::get_if<proto::Delta>(&received.back().pdu);
+        REQUIRE(snapshot != nullptr);
+        CHECK(snapshot->statusLinesChanged == 0);
+    }
+}
+
+TEST_CASE("NativeSession.extension.reattachSnapshot", "[vthost][native][extensions]")
+{
+    // A client that detaches and attaches again is sent the row as it is now, by extensions that kept
+    // running all along: the daemon's session -- and so its extensions -- outlives every client.
+    auto const hosting = takingOver("plasma", "PLASMA");
+    auto h = NativeHarness { HarnessOptions { .extensions = hosting,
+                                              .adjustSettings = showingIndicator("template") } };
+    std::ignore = newSession(h.host);
+    REQUIRE(hosting->sessions.size() == 1);
+    auto* const extensions = hosting->sessions.front();
+
+    auto const first = h.exchangeUntil({ proto::ClientHello {} }, carriesIndicatorRow("PLASMA"));
+    REQUIRE(std::ranges::any_of(first, [](auto const& frame) { return indicatorRowOf(frame) == "PLASMA"; }));
+
+    // Drawn while no client is attached.
+    extensions->publish("plasma", vthost::testing::frameOf("WHILE AWAY", 2));
+
+    auto const second = attachAnother(h, carriesIndicatorRow("WHILE AWAY"));
+    REQUIRE(second.size() >= AttachSnapshotFrames);
+    auto const* snapshot = std::get_if<proto::Delta>(&second[AttachSnapshotFrames - 1].pdu);
+    REQUIRE(snapshot != nullptr);
+    CHECK(snapshot->snapshot == 1);
+    CHECK(indicatorRowOf(second[AttachSnapshotFrames - 1]) == "WHILE AWAY");
+
+    // The same extensions, never made anew for a client, and started once.
+    CHECK(hosting->sessions.size() == 1);
+    CHECK(extensions->starts == 1);
+}
+
+TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
+{
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
+    auto const session = newSession(h.host);
+    auto const asked = proto::PermissionRequest {
+        .session = 0,
+        .hostId = "git@/usr/share/contour/extensions/git.wasm",
+        .name = "git",
+        .version = 1,
+        .digest = "5f3c",
+        .commands = { proto::WireDeclaredCommand { .name = "status", .argv = { "git", "status" } } },
+    };
+    auto const isRequest = [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::PermissionRequest>(frame.pdu);
+    };
+
+    // Asked while no client is attached: the question waits, and is asked of the client that attaches.
+    hosting->sessions.front()->askPermission(asked);
+    hosting->sessions.front()->askPermission(asked); // a second call into the same question asks nothing more
+    // Bounded, as every wait here is: a question that never opens fails the case instead of hanging the run.
+    auto const asking = std::chrono::steady_clock::now();
+    h.loop.blockOn(core::net::pollUntil(&h.loop, [&] {
+        return !h.host.pendingPermissionRequests().empty()
+               || std::chrono::steady_clock::now() - asking > CollectBudget;
+    }));
+    REQUIRE(h.host.pendingPermissionRequests().size() == 1);
+
+    SECTION("an attaching client is asked, and its answer is recorded for every session")
+    {
+        auto const received = h.exchangeUntil(
+            { proto::ClientHello {},
+              proto::PermissionReply { .hostId = asked.hostId,
+                                       .digest = asked.digest,
+                                       .grantState = std::to_underlying(vthost::GrantState::Granted) } },
+            [&](auto const& got) {
+                return std::ranges::any_of(got, isRequest) && hosting->answers.size() == 1;
+            });
+        auto const request = std::ranges::find_if(received, isRequest);
+        REQUIRE(request != received.end());
+        auto expected = asked;
+        expected.session = session.value;
+        CHECK(std::get<proto::PermissionRequest>(request->pdu) == expected);
+        CHECK(hosting->lookup(asked.hostId, asked.digest) == vthost::GrantState::Granted);
+        CHECK(h.host.pendingPermissionRequests().empty());
+    }
+
+    // A second question, which the sections below answer or ask after what they test: once its answer or its
+    // question has landed, so has everything sent before it.
+    auto sentinel = asked;
+    sentinel.digest = "sentinel";
+    auto const sentinelReply =
+        proto::PermissionReply { .hostId = sentinel.hostId,
+                                 .digest = sentinel.digest,
+                                 .grantState = std::to_underlying(vthost::GrantState::Granted) };
+    auto const sentinelAnswered = [&](auto const&) {
+        return hosting->lookup(sentinel.hostId, sentinel.digest) == vthost::GrantState::Granted;
+    };
+
+    SECTION("an answer byte no GrantState has records nothing, and the question stays open")
+    {
+        hosting->sessions.front()->askPermission(sentinel);
+        std::ignore = h.exchangeUntil(
+            { proto::ClientHello {},
+              proto::PermissionReply { .hostId = asked.hostId, .digest = asked.digest, .grantState = 7 },
+              sentinelReply },
+            sentinelAnswered);
+        REQUIRE(sentinelAnswered(0));
+        CHECK(hosting->lookup(asked.hostId, asked.digest) == vthost::GrantState::Pending);
+        CHECK(hosting->answered.size() == 1); // the sentinel's alone
+        REQUIRE(h.host.pendingPermissionRequests().size() == 1);
+        CHECK(h.host.pendingPermissionRequests().front().digest == asked.digest);
+    }
+
+    SECTION("an answer to a question nobody asked records nothing")
+    {
+        // A client is a peer: it may name any extension and digest, and only an open question is its to
+        // close.
+        hosting->sessions.front()->askPermission(sentinel);
+        std::ignore = h.exchangeUntil(
+            { proto::ClientHello {},
+              proto::PermissionReply { .hostId = "other@/x.wasm",
+                                       .digest = "never-asked",
+                                       .grantState = std::to_underlying(vthost::GrantState::Granted) },
+              sentinelReply },
+            sentinelAnswered);
+        REQUIRE(sentinelAnswered(0));
+        CHECK(hosting->lookup("other@/x.wasm", "never-asked") == vthost::GrantState::Pending);
+        CHECK(hosting->answered.size() == 1);
+    }
+
+    SECTION("a dismissal (no answer) closes the question, and records nothing")
+    {
+        hosting->sessions.front()->askPermission(sentinel);
+        std::ignore = h.exchangeUntil(
+            { proto::ClientHello {},
+              proto::PermissionReply { .hostId = asked.hostId,
+                                       .digest = asked.digest,
+                                       .grantState = std::to_underlying(vthost::GrantState::Pending) },
+              sentinelReply },
+            sentinelAnswered);
+        REQUIRE(sentinelAnswered(0));
+        CHECK(hosting->answered.size() == 1);
+        CHECK(h.host.pendingPermissionRequests().empty());
+    }
+
+    SECTION("a question answered meanwhile is not asked")
+    {
+        // Answered through another client: this closes the question the setup opened, and records the answer.
+        h.host.answerPermission(asked.hostId, asked.digest, vthost::GrantState::Denied);
+        REQUIRE(hosting->lookup(asked.hostId, asked.digest) == vthost::GrantState::Denied);
+        hosting->sessions.front()->askPermission(asked);
+        // Asked after it, so it opens only once the one before it was turned away.
+        hosting->sessions.front()->askPermission(sentinel);
+        auto const asking = std::chrono::steady_clock::now();
+        h.loop.blockOn(core::net::pollUntil(&h.loop, [&] {
+            return !h.host.pendingPermissionRequests().empty()
+                   || std::chrono::steady_clock::now() - asking > CollectBudget;
+        }));
+        REQUIRE(h.host.pendingPermissionRequests().size() == 1);
+        CHECK(h.host.pendingPermissionRequests().front().digest == sentinel.digest);
+    }
 }

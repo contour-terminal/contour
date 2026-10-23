@@ -101,7 +101,10 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
             [this](RemoteScreen const& screen, vthost::proto::SessionEventPdu const& event) {
                 onSessionEvent(screen, event);
             } },
-        NativeClient::LayoutHandler { [this](vthost::proto::LayoutState const& layout) { onLayout(layout); } }
+        NativeClient::LayoutHandler {
+            [this](vthost::proto::LayoutState const& layout) { onLayout(layout); } },
+        NativeClient::PermissionHandler {
+            [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } }
     };
     {
         auto const lock = std::lock_guard { _mutex };
@@ -333,6 +336,41 @@ void NativeController::requestClosePane(uint64_t session)
     });
 }
 
+void NativeController::onPermissionRequest(vthost::proto::PermissionRequest const& request)
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _permissionRequests.push_back(request);
+    }
+    emit extensionPermissionRequested();
+}
+
+std::vector<NativeController::HostedPermissionRequest> NativeController::takePermissionRequests()
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto taken = std::vector<HostedPermissionRequest> {};
+    // A question for a session the user closed is nobody's to answer here; one for a session not bound
+    // yet waits for its pane.
+    std::erase_if(_permissionRequests, [&](vthost::proto::PermissionRequest const& request) {
+        if (_closedSessions.contains(request.session))
+            return true;
+        auto const binding = _bindings.find(request.session);
+        if (binding == _bindings.end() || binding->second.pty == nullptr)
+            return false;
+        taken.push_back(HostedPermissionRequest { .pty = binding->second.pty, .request = request });
+        return true;
+    });
+    return taken;
+}
+
+void NativeController::answerPermission(std::string hostId, std::string digest, vthost::GrantState answer)
+{
+    _reactor.post([this, hostId = std::move(hostId), digest = std::move(digest), answer]() mutable {
+        if (_client != nullptr)
+            _client->answerPermission(std::move(hostId), std::move(digest), answer);
+    });
+}
+
 void NativeController::reportPaneGeometry(uint64_t session, vtpty::PageSize cells)
 {
     {
@@ -452,15 +490,21 @@ void NativeController::bindTerminal(vtpty::Pty const* pty, vtbackend::Terminal& 
     if (!session)
         return; // not one of ours (a local session, or already unbound)
 
+    auto asked = false;
     {
         auto const lock = std::lock_guard { _mutex };
         auto const binding = _bindings.find(*session);
         if (binding == _bindings.end())
             return;
         binding->second.terminal = &terminal;
+        asked = std::ranges::any_of(_permissionRequests,
+                                    [&](auto const& request) { return request.session == *session; });
     }
     // The mirror is built and primed on the reactor, where _client lives, rather than from here.
     _reactor.post([this, id = *session] { primeBinding(id); });
+    // A question asked before the pane was bound is the pane's to ask now.
+    if (asked)
+        emit extensionPermissionRequested();
 }
 
 void NativeController::onImage(RemoteScreen const& screen, uint32_t imageId)

@@ -246,6 +246,35 @@ TEST_CASE("Process.withChild", "[process]")
     CHECK_FALSE(process.alive());
 }
 
+    #ifdef __linux__
+TEST_CASE("Process.foregroundProcessName", "[process]")
+{
+    // The program in the terminal's foreground process group, by its name: what the status line's
+    // extensions are told when it changes.
+    SECTION("no child, no name")
+    {
+        auto process = shellOn(std::make_unique<vtpty::MockPty>(PageSize));
+        CHECK_FALSE(process.foregroundProcessName().has_value());
+    }
+
+    SECTION("the child that leads the foreground")
+    {
+        auto process = shellRunning({ "-c", "exec sleep 30" }, std::make_shared<vtpty::NoPlacement>());
+        REQUIRE(process.start().has_value());
+        // The shell execs sleep; until it has, the name is the shell's.
+        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 5 };
+        auto name = process.foregroundProcessName();
+        while (name != "sleep" && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+            name = process.foregroundProcessName();
+        }
+        CHECK(name == "sleep");
+        CHECK(endedByHangup(hangUp(process)));
+    }
+}
+    #endif
+
 TEST_CASE("Process.killEndsAChildThatRefusesToEnd", "[process]")
 {
     // A child that ignores a hangup and a termination alike -- as a shell does under `trap '' HUP`, an

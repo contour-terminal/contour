@@ -1,0 +1,14 @@
+[package]
+name = "plasma"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Bundled status-line extension: an animated plasma background, drawn with Sixel, with text on top."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen.workspace = true
+manifest = { path = "../../manifest" }

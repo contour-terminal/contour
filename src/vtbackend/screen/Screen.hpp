@@ -165,6 +165,26 @@ enum class ApplyResult : uint8_t
     Invalid,
     Unsupported,
 };
+
+/// Where the text cursor goes once an image has been placed on the grid. Each image protocol defines
+/// its own answer, so the protocol's handler picks one rather than the renderer guessing from the image.
+enum class ImageCursorPolicy : uint8_t
+{
+    /// The cursor stays where it was (kitty `C=1`, ReGIS, GIP without `u`).
+    Stay,
+    /// The cursor moves to the image's left column, on the line below it (Sixel, GIP `u`, iTerm2).
+    BelowImage,
+    /// The cursor moves right past the image, on its last row (kitty without `C=1`), walking down by
+    /// index so a DECSTBM region scrolls at its bottom margin. The right edge is the one text wraps at:
+    /// the right margin inside a DECLRMM band, else the last page column. The spec leaves a cursor pushed
+    /// off the screen to the implementation:
+    /// - DECAWM set: it wraps once to the next line's first column (the band's left margin), scrolling at
+    ///   the bottom margin, as kitty's screen.c and ghostty do.
+    /// - DECAWM reset: it is clamped to the edge column and adds no wrap row, so it never scrolls the
+    ///   image away. A deliberate divergence from kitty and ghostty, which wrap regardless of DECAWM:
+    ///   with autowrap off nothing else in Contour moves the cursor onto the next line either.
+    AdvancePastImage,
+};
 // }}}
 
 /**
@@ -266,6 +286,11 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Places @p image at the cursor, sized per the command's `c=`/`r=` or derived from its pixels.
     void renderKittyImage(kitty_graphics::Command const& command, std::shared_ptr<Image const> const& image);
+
+    /// Moves the cursor past a placed image as ImageCursorPolicy::AdvancePastImage describes.
+    /// @param topLeft the image's top-left cell, where the cursor was when it was placed.
+    /// @param rendered the extent of the image that is on the page.
+    void advanceCursorPastImage(CellLocation topLeft, GridSize rendered);
 
     /// Builds or edits one animation frame (`a=f`), compositing the transmitted rectangle onto a copy
     /// of the base frame the command names.
@@ -385,6 +410,10 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
 
     /// Answers `OSC 1337 ; Capabilities` with the features Contour actually has.
     void reportITerm2Capabilities();
+
+    /// Hands `OSC 1337 ; SetUserVar=<name>=<base64 value>` to the terminal.
+    /// @param argument What follows `SetUserVar=`.
+    void setITerm2UserVar(std::string_view argument);
 
     /// Draws an `OSC 1337 ; File=...` inline image.
     void renderITerm2InlineImage(std::string_view arguments);
@@ -623,15 +652,19 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /**
      * Renders an image onto the screen.
      *
-     * @p imageId ID to the image to be rendered.
+     * @p image the image to be rendered.
      * @p topLeft Screen coordinate to start rendering the top/left corner of the image.
      * @p gridSize Screen grid size to span the image into.
-     * @p imageOffset Offset into the image in screen grid coordinate to start rendering from.
-     * @p imageSize Size of the full image in Screen grid coordinates.
+     * @p imageOffset Offset into the image, in pixels, to start rendering from.
+     * @p imageSize the source image's pixel size, or zero. A non-zero size selects the VT340 sixel-band
+     * math for where ImageCursorPolicy::BelowImage puts the cursor.
      * @p alignmentPolicy render the image using the given image alignment policy.
      * @p resizePolicy render the image using the given image resize policy.
-     * @p autoScroll Boolean indicating whether or not the screen should scroll if the image cannot be fully
-     * displayed otherwise.
+     * @p autoScroll whether the screen scrolls to draw the rows that do not fit below @p topLeft. This
+     * is independent of @p cursorPolicy: the scroll happens with any policy (it leaves the cursor on
+     * the page's last line), and only the final placement of the cursor depends on the policy.
+     * @p cursorPolicy where the text cursor goes once the image is placed.
+     * @p layer whether the image is drawn below, above, or in place of the cells' text.
      */
     void renderImage(std::shared_ptr<Image const> image,
                      CellLocation topLeft,
@@ -641,7 +674,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                      ImageAlignment alignmentPolicy,
                      ImageResize resizePolicy,
                      bool autoScroll,
-                     bool updateCursor = true,
+                     ImageCursorPolicy cursorPolicy,
                      ImageLayer layer = ImageLayer::Replace);
 
     /// Renders a previously uploaded named image onto the grid at the current cursor position.
@@ -653,7 +686,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                            ImageResize resizePolicy,
                            bool autoScroll,
                            bool requestStatus,
-                           bool updateCursor = false,
+                           ImageCursorPolicy cursorPolicy,
                            ImageLayer layer = ImageLayer::Replace);
 
     /// Renders an image from raw pixel data (upload + render in one step).
@@ -665,7 +698,7 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                                    ImageAlignment alignmentPolicy,
                                    ImageResize resizePolicy,
                                    bool autoScroll,
-                                   bool updateCursor = false,
+                                   ImageCursorPolicy cursorPolicy,
                                    ImageLayer layer = ImageLayer::Replace);
 
     /// Removes a named image from the image pool.

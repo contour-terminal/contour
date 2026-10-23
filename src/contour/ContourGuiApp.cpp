@@ -35,6 +35,15 @@
 #include <vtpty/Process.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
+#ifdef CONTOUR_EXTENSIONS
+    #include <vtextension/BundledExtensions.hpp>
+    #include <vtextension/ExtensionConsent.hpp>
+    #include <vtextension/SessionExtensions.hpp>
+    #include <vtextension/wasm/DefaultBackend.hpp>
+    #include <vtextension/wasm/WasmRuntime.hpp>
+    #include <vthost/client/DaemonGrantReplies.hpp>
+#endif
+
 #include <text_shaper/FontLocator.hpp>
 
 #include <crispy/ScopedTimer.hpp>
@@ -52,6 +61,7 @@
 #include <QtCore/QEventLoop>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
+#include <QtCore/QTimer>
 #include <QtNetwork/QHostInfo>
 #include <QtQml/qqmlextensionplugin.h>
 
@@ -349,6 +359,71 @@ ContourGuiApp::~ContourGuiApp()
     // command pool joins without waiting out their timeouts.
     _commandShutdown.request_stop();
 }
+
+#ifdef CONTOUR_EXTENSIONS
+vtextension::ExtensionRuntime& ContourGuiApp::extensionRuntime()
+{
+    if (!_extensionRuntime)
+    {
+        if (!_extensionBackend)
+            _extensionBackend = { vtextension::wasm::makeDefaultBackend().release(),
+                                  [](vtextension::wasm::IWasmBackend* made) {
+                                      std::default_delete<vtextension::wasm::IWasmBackend> {}(made);
+                                  } };
+        auto const executableDirectory =
+            std::filesystem::path { QCoreApplication::applicationDirPath().toStdU16String() };
+        auto runtime = std::make_unique<vtextension::ExtensionRuntime>(
+            vtextension::ExtensionRuntimeConfig {
+                .grantsFile = _config.configFile.parent_path() / vtextension::ExtensionGrantsFileName,
+                .bundledDirectories = vtextension::bundledExtensionDirectories(
+                    vtextension::nativeBundledExtensionPlatform(), processEnvironment(), executableDirectory),
+                .workerCount = vtextension::extensionWorkerCount(std::thread::hardware_concurrency()),
+                .limits = {} },
+            vtextension::ExtensionRuntimeServices { .backend = *_extensionBackend,
+                                                    .capture = _commandCapture,
+                                                    .wallClock = _terminalClocks.wall.get(),
+                                                    .localTime = _terminalClocks.localTime,
+                                                    .environment = processEnvironment(),
+                                                    .fileSystem = _fileSystem });
+        _extensionRuntime = { runtime.release(), [](vtextension::ExtensionRuntime* made) {
+                                 std::default_delete<vtextension::ExtensionRuntime> {}(made);
+                             } };
+    }
+    return *_extensionRuntime;
+}
+
+void ContourGuiApp::releaseRetiredExtensionsSoon()
+{
+    // A grace long enough for a lane to run a runner's last job, which a command in flight on the same lane
+    // can delay; whatever retires later is released by the next host, or with the runtime.
+    constexpr auto RetiredExtensionGrace = std::chrono::seconds { 1 };
+    QTimer::singleShot(RetiredExtensionGrace, this, [this]() {
+        if (_extensionRuntime)
+            _extensionRuntime->releaseRetired();
+    });
+}
+
+void ContourGuiApp::askHostedExtensions()
+{
+    if (!_nativeController)
+        return;
+    if (!_daemonGrants)
+    {
+        auto replies = std::make_unique<vthost::client::DaemonGrantReplies>(
+            [this](std::string_view hostId, std::string_view digest, vthost::GrantState answer) {
+                if (_nativeController)
+                    _nativeController->answerPermission(
+                        std::string { hostId }, std::string { digest }, answer);
+            });
+        _daemonGrants = { replies.release(), [](vtextension::IGrantStore* made) {
+                             std::default_delete<vtextension::IGrantStore> {}(made);
+                         } };
+    }
+    for (auto& [pty, request]: _nativeController->takePermissionRequests())
+        if (auto* session = _sessionManager.sessionForPty(pty))
+            session->askForHostedExtension(vthost::client::consentRequestOf(request), *_daemonGrants);
+}
+#endif
 
 void ContourGuiApp::applyGraphicsDevice(QQuickWindow& window)
 {
@@ -787,6 +862,14 @@ int ContourGuiApp::clientAction()
                 _nativeController->stop();
             },
             Qt::QueuedConnection);
+#ifdef CONTOUR_EXTENSIONS
+        connect(
+            _nativeController.get(),
+            &remote::NativeController::extensionPermissionRequested,
+            this,
+            [this] { askHostedExtensions(); },
+            Qt::QueuedConnection);
+#endif
     }
 
     // Boot the GUI under the terminal verb's parameter surface: re-parse a
@@ -852,7 +935,7 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
                               "PATH" },
                 CLI::Option { "label",
-                              CLI::Value { "default"s },
+                              CLI::Value { std::string { vthost::DefaultSocketLabel } },
                               "Socket label distinguishing daemon instances.",
                               "NAME" },
                 CLI::Option { "tmux",

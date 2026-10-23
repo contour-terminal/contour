@@ -12,12 +12,15 @@
 
 #include <libunicode/convert.h>
 
+#include <algorithm>
 #include <chrono>
 #include <concepts>
 #include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 using namespace std::string_view_literals;
@@ -27,6 +30,27 @@ namespace vtbackend
 
 namespace // helper functions
 {
+    /// @p text with its SGR sequences (`ESC [ ... m`, the only escapes an extension's text holds) removed.
+    [[nodiscard]] std::string withoutSgr(std::string_view text)
+    {
+        auto result = std::string {};
+        result.reserve(text.size());
+        while (!text.empty())
+        {
+            auto const escape = text.find("\033[");
+            result += text.substr(0, escape);
+            if (escape == std::string_view::npos)
+                break;
+            // A CSI sequence ends at its final byte, the first in '@'..'~' after the introducer.
+            auto const parameters = text.substr(escape + 2);
+            auto const final = std::ranges::find_if(parameters, [](char c) { return c >= '@' && c <= '~'; });
+            if (final == parameters.end())
+                break;
+            text = std::string_view { std::next(final), parameters.end() };
+        }
+        return result;
+    }
+
     std::string_view modeString(ViMode mode) noexcept
     {
         switch (mode)
@@ -63,7 +87,7 @@ static std::optional<std::string> tryParseStringAttribute(crispy::StringInterpol
 
 /// The raw text after "<Name>:" in a closed placeholder, e.g. "git status" for "{Command:git status}";
 /// empty for a placeholder without a colon, an unterminated one, or one built without its source slice.
-static std::string_view commandShorthandOf(crispy::StringInterpolation const& interpolation)
+static std::string_view shorthandOf(crispy::StringInterpolation const& interpolation)
 {
     auto text = interpolation.whole;
     if (!text.starts_with('{') || !text.ends_with('}'))
@@ -75,11 +99,20 @@ static std::string_view commandShorthandOf(crispy::StringInterpolation const& in
     return text.substr(colon + 1);
 }
 
+/// Whether @p raw, the text of a `{Extension:<raw>}` shorthand, is an extension's name: not blank, and
+/// holding no attribute, since a ',' or '=' means the user wrote attributes and forgot `Name=`.
+[[nodiscard]] static bool isExtensionShorthand(std::string_view raw) noexcept
+{
+    return raw.find_first_not_of(" \t") != std::string_view::npos
+           && raw.find_first_of(",={}") == std::string_view::npos;
+}
+
 /// Builds the item of type @p T that @p interpolation describes, given its already-parsed @p styles.
 ///
-/// The alternatives carrying payload beyond `Styles` (Text, Command, Context and Tabs) are the only ones
-/// that need saying here; every other placeholder is exactly its styles. Returns nullopt when a required
-/// attribute is missing, which makes the placeholder unrecognized and so echoed verbatim by the caller.
+/// The alternatives carrying payload beyond `Styles` (Text, Command, Extension, Context and Tabs) are the
+/// only ones that need saying here; every other placeholder is exactly its styles. Returns nullopt when a
+/// required attribute is missing, which makes the placeholder unrecognized and so echoed verbatim by the
+/// caller.
 template <typename T>
 static std::optional<StatusLineDefinitions::Item> makeItemOfType(
     StatusLineDefinitions::Styles const& styles, crispy::StringInterpolation const& interpolation)
@@ -99,11 +132,22 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
         // Shorthand {Command:<raw>}: with neither attribute, everything after "Command:" is the command,
         // verbatim, commas and '=' included. A styled item needs the Program= form.
         if (!interval)
-            if (auto const raw = commandShorthandOf(interpolation);
+            if (auto const raw = shorthandOf(interpolation);
                 raw.find_first_not_of(" \t") != std::string_view::npos)
                 return StatusLineDefinitions::Command { StatusLineDefinitions::Styles {},
                                                         std::string { raw } };
         // Without a program there is nothing to run, so this is not a usable {Command}.
+        return std::nullopt;
+    }
+    else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
+    {
+        if (auto name = tryParseStringAttribute(interpolation, "Name"); name && !name->empty())
+            return StatusLineDefinitions::Extension { styles, std::move(*name) };
+        // Shorthand {Extension:<name>}: everything after "Extension:" is the name, unstyled, exactly as the
+        // {Command:<raw>} shorthand is -- so "{Extension:Bold}" names an extension rather than a style.
+        if (auto const raw = shorthandOf(interpolation); isExtensionShorthand(raw))
+            return StatusLineDefinitions::Extension { StatusLineDefinitions::Styles {}, std::string { raw } };
+        // Without a name there is nothing to show, so this is not a usable {Extension}.
         return std::nullopt;
     }
     else if constexpr (std::same_as<T, StatusLineDefinitions::Text>)
@@ -469,6 +513,15 @@ namespace
             return vt.statusLineCommandOutput(item);
         }
 
+        std::string visit(StatusLineDefinitions::Extension const& item)
+        {
+            // Measured unstyled: the extension's own SGR takes no columns.
+            auto text = vt.statusLineExtensionText(item);
+            if (styling == StatusLineStyling::Disabled)
+                return withoutSgr(text);
+            return text;
+        }
+
         std::string visit(StatusLineDefinitions::Text const& item)
         {
             core::ignoreUnused(this);
@@ -807,6 +860,30 @@ namespace
                && isUnstyled(item);
     }
 
+    /// The payload @p item is written with in its `{<Name>:<payload>}` shorthand, or nullopt when it has
+    /// none or the shorthand would not read back as @p item.
+    template <typename T>
+    [[nodiscard]] std::optional<std::string_view> shorthandPayloadOf(T const& item)
+    {
+        // A comma or brace cannot survive the Program= form, so an unstyled default-interval command that
+        // needs one is written as the shorthand, which carries it verbatim. A styled or non-default-interval
+        // command with a comma stays on the Program= form and is lossy, as it always was; the shorthand
+        // cannot carry styles or an interval.
+        if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
+        {
+            if (isUnstyled(item) && item.interval == StatusLineDefinitions::DefaultCommandInterval
+                && !isAttributeSafe(item.command) && shorthandRoundTrips(item.command))
+                return item.command;
+        }
+        // The shorthand is what a user writes for an extension; kept wherever it reads back the same.
+        else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
+        {
+            if (isUnstyled(item) && isExtensionShorthand(item.name))
+                return item.name;
+        }
+        return std::nullopt;
+    }
+
     /// Appends the attributes every item shares: its flags, colors and side adornments.
     void appendStyles(AttributeWriter& attributes, StatusLineDefinitions::Styles const& styles)
     {
@@ -853,20 +930,14 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                     }
                 }
 
-                if constexpr (std::same_as<T, StatusLineDefinitions::Command>)
+                if (auto const shorthand = shorthandPayloadOf(v))
                 {
-                    // A comma or brace cannot survive the Program= form, so an unstyled default-interval
-                    // command that needs one is written as the shorthand, which carries it verbatim.
-                    // A styled or non-default-interval command with a comma stays on the Program= form and
-                    // is lossy, as it always was; the shorthand cannot carry styles or an interval.
-                    if (isUnstyled(v) && v.interval == StatusLineDefinitions::DefaultCommandInterval
-                        && !isAttributeSafe(v.command) && shorthandRoundTrips(v.command))
-                    {
-                        result += "{Command:";
-                        result += v.command;
-                        result += '}';
-                        return;
-                    }
+                    result += '{';
+                    result += StatusLineDefinitions::ItemTraits<T>::Name;
+                    result += ':';
+                    result += *shorthand;
+                    result += '}';
+                    return;
                 }
 
                 result += '{';
@@ -881,6 +952,8 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                     if (v.interval != StatusLineDefinitions::DefaultCommandInterval)
                         attributes.add("Interval", std::to_string(v.interval.count()));
                 }
+                else if constexpr (std::same_as<T, StatusLineDefinitions::Extension>)
+                    attributes.add("Name", v.name);
 
                 appendStyles(attributes, v);
 

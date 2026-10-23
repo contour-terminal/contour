@@ -99,6 +99,17 @@ namespace
         { PduType::PerformOperation,
           DecodedPdu { PerformOperation {
               .session = 4, .operation = EngineOperation::WriteScreen, .text = "secret-screen-text" } } },
+        { PduType::PermissionRequest,
+          DecodedPdu { PermissionRequest { .session = 4,
+                                           .hostId = "secret-key@/home/user/secret.wasm",
+                                           .name = "secret-name",
+                                           .version = 1,
+                                           .digest = "5f3c",
+                                           .commands = { WireDeclaredCommand {
+                                               .name = "secret-command", .argv = { "secret-argv" } } } } } },
+        { PduType::PermissionReply,
+          DecodedPdu { PermissionReply {
+              .hostId = "secret-key@/home/user/secret.wasm", .digest = "5f3c", .grantState = 1 } } },
     };
 }
 } // namespace

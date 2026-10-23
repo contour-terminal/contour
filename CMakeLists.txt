@@ -159,6 +159,20 @@ option(CONTOUR_WITH_SYSTEMD "Build with systemd support: each session runs in a 
 option(CONTOUR_USE_CPM "Use CPM to fetch dependencies [default: ON]" ON)
 option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
 option(CONTOUR_BUILD_NATIVE "Build for native architecture [default: OFF]" OFF)
+option(CONTOUR_EXTENSIONS "Enables WebAssembly status-line extensions [default: ON]" ON)
+include(CMakeDependentOption)
+cmake_dependent_option(CONTOUR_EXTENSIONS_BUNDLED "Builds the bundled status-line extensions; needs cargo and the wasm32-wasip1 Rust target [default: ON]" ON "CONTOUR_EXTENSIONS" OFF)
+# The WebAssembly runtime behind src/vtextension/wasm/WasmRuntime.hpp. Each value names a backend directory,
+# src/vtextension/wasm/<value>/, whose target vtextension_<value> defines makeDefaultBackend(); adding a runtime
+# is adding that directory and a value here. Checked only when extensions are built: nothing reads it otherwise.
+set(CONTOUR_WASM_RUNTIME "wamr" CACHE STRING "WebAssembly runtime backing status-line extensions")
+set(_CONTOUR_WASM_RUNTIMES wamr)
+set_property(CACHE CONTOUR_WASM_RUNTIME PROPERTY STRINGS ${_CONTOUR_WASM_RUNTIMES})
+if(CONTOUR_EXTENSIONS AND NOT CONTOUR_WASM_RUNTIME IN_LIST _CONTOUR_WASM_RUNTIMES)
+    message(FATAL_ERROR "CONTOUR_WASM_RUNTIME is \"${CONTOUR_WASM_RUNTIME}\", which is not a WebAssembly runtime "
+                        "Contour has a backend for. Known: ${_CONTOUR_WASM_RUNTIMES}.")
+endif()
+option(CONTOUR_CARGO_OFFLINE "Runs cargo with --offline, for builds from vendored crates [default: OFF]" OFF)
 option(CONTOUR_TRACY "Compiles Tracy profiler instrumentation into contour [default: OFF]" OFF)
 option(CONTOUR_TRACY_TOOLS "Builds Tracy's capture and csvexport CLI tools [default: OFF]" OFF)
 option(CONTOUR_TRACY_GUI "Builds the Tracy profiler GUI [default: OFF]" OFF)
@@ -251,13 +265,21 @@ if(CONTOUR_TESTING)
         # gate above skips.
         contour_add_lint_gate(check_spelling_selftest check-spelling.py --self-test)
 
+        # WAMR is reached only from its backend: no WAMR C header outside src/vtextension/wasm/wamr/, no
+        # backend header outside it either, and no contour::wamr in vtextension's or vthost's
+        # build. The self-test checks the patterns themselves, so a pattern that matches nothing cannot pass
+        # as a clean tree.
+        contour_add_lint_gate(check_wasm_runtime_containment check-wasm-runtime-containment.py)
+        contour_add_lint_gate(check_wasm_runtime_containment_selftest check-wasm-runtime-containment.py --self-test)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
     else()
         # A warning, not a status line: losing both lint gates is exactly the silent gap this
         # change set out to close, and it must not scroll past in a wall of configure output.
-        message(WARNING "Python 3 not found: the lint gates (check_spelling, check_workflows) "
+        message(WARNING "Python 3 not found: the lint gates (check_spelling, check_workflows, "
+                        "check_wasm_runtime_containment) "
                         "are not registered.")
     endif()
 endif()
@@ -294,7 +316,13 @@ set(_CONTOUR_SAVED_CLANG_TIDY "${CMAKE_CXX_CLANG_TIDY}")
 unset(CMAKE_CXX_CLANG_TIDY)
 include(ContourThirdParties)
 include(Tracy)
+if(CONTOUR_EXTENSIONS)
+    include(ContourCargo)
+endif()
 set(CMAKE_CXX_CLANG_TIDY "${_CONTOUR_SAVED_CLANG_TIDY}")
+if(CONTOUR_WASM_GUESTS)
+    add_subdirectory(extensions)
+endif()
 add_subdirectory(src)
 add_subdirectory(examples)
 
@@ -336,6 +364,10 @@ macro(ContourConfigurationSummary)
     message(STATUS "Verify terminal state invariants:                   ${CONTOUR_VERIFY_STATE}")
     message(STATUS "Enable with code coverage:                          ${CONTOUR_CODE_COVERAGE_ENABLED}")
     message(STATUS "Build contour frontend GUI:                         ${CONTOUR_FRONTEND_GUI}")
+    message(STATUS "WebAssembly status-line extensions:                 ${CONTOUR_EXTENSIONS}")
+    if(CONTOUR_EXTENSIONS)
+        message(STATUS "|> WebAssembly runtime:                             ${CONTOUR_WASM_RUNTIME}")
+    endif()
     message(STATUS "Build contour using mimalloc:                       ${CONTOUR_BUILD_WITH_MIMALLOC}")
     message(STATUS "Clang Tidy:                                         ${USING_TIDY_STRING}")
     message(STATUS "|> Enable performance metrics:                      ${CONTOUR_PERF_STATS}")

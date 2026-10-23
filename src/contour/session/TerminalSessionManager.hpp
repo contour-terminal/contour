@@ -446,6 +446,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// The TerminalSession backing @p id, or nullptr. (Public for PaneProxy.)
     [[nodiscard]] TerminalSession* sessionForId(vtworkspace::SessionId id) const noexcept;
 
+    /// @param pty A pty, as a session factory handed it out.
+    /// @return The live session @p pty backs; null if none does.
+    [[nodiscard]] TerminalSession* sessionForPty(vtpty::Pty const* pty) const noexcept;
+
     /// The pty backing @p window's active pane, or nullptr when the window has no live pane.
     ///
     /// How a WINDOW is named to a remote session factory: window ids are minted per model, so the

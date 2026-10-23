@@ -158,6 +158,19 @@ TEST_CASE("the production overload reads its inputs from the injected environmen
     }
 }
 
+TEST_CASE("a label's own socket is what neither --socket nor $CONTOUR_MUX names", "[vthost][socketpath]")
+{
+    // What a daemon at a socket of its own is told apart from: where its label would serve otherwise.
+    auto const overridden = core::testing::FakeEnvironment { {
+        { "CONTOUR_MUX", "/env/mux.sock" },
+        { "XDG_RUNTIME_DIR", "/run/user/4242" },
+    } };
+    CHECK(vthost::labelSocketPath("work", overridden) == "/run/user/4242/contour/work");
+    CHECK(vthost::labelSocketPath(vthost::DefaultSocketLabel, overridden)
+          == "/run/user/4242/contour/default");
+    CHECK(muxSocketPath("work", "", overridden) == "/env/mux.sock");
+}
+
 TEST_CASE("the production overload takes the sandbox from where it is injected too", "[vthost][socketpath]")
 {
     // The sandbox is a parameter for the same reason the environment is: without one, this case

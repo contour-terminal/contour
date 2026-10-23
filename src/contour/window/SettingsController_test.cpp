@@ -1629,6 +1629,20 @@ TEST_CASE("SettingsController: the indicator bridge keeps a Command's Interval a
     CHECK(fx.controller->serializeIndicatorSegment(again) == once);
 }
 
+TEST_CASE("SettingsController: an extension item keeps its name and styles through an edit", "[settings]")
+{
+    // The name is the item's payload: a reader that dropped it would make the writer delete the segment.
+    auto fx = Fixture(BasicConfig);
+    for (auto const& text: { QString("{Extension:git}"), QString("{Extension:Name=git,Bold,Left=[}") })
+    {
+        INFO(text.toStdString());
+        auto const items = fx.controller->parseIndicatorSegment(text);
+        REQUIRE(items.size() == 1);
+        CHECK(items.first().toMap().value("name").toString() == "git");
+        CHECK(fx.controller->serializeIndicatorSegment(items) == text);
+    }
+}
+
 TEST_CASE("SettingsController: the indicator placeholder catalog matches what parsing produces", "[settings]")
 {
     auto fx = Fixture(BasicConfig);
@@ -1643,12 +1657,15 @@ TEST_CASE("SettingsController: the indicator placeholder catalog matches what pa
         CHECK(!entry.value("label").toString().isEmpty());
         CHECK(!entry.value("sample").toString().isEmpty());
 
-        // Text and Command need their payload attribute to be recognized at all; the rest stand alone.
+        // Text, Command and Extension need their payload attribute to be recognized at all; the rest stand
+        // alone.
         auto const templateText = [&type] {
             if (type == "Text")
                 return QString("{Text:text=x}");
             if (type == "Command")
                 return QString("{Command:Program=true}");
+            if (type == "Extension")
+                return QString("{Extension:git}");
             return QString("{%1}").arg(type);
         }();
         auto const items = fx.controller->parseIndicatorSegment(templateText);

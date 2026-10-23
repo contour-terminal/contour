@@ -47,6 +47,8 @@ Popup {
     property string itemLabel: ""
     property string itemText: ""
     property string itemCommand: ""
+    // The extension an Extension item shows: its key under the profile's `extensions:`.
+    property string itemName: ""
     // Seconds between runs of a Command item. No control edits it yet; it is carried so that applying
     // the dialog does not reset a hand-written Interval= to the default.
     property int itemInterval: 0
@@ -65,6 +67,7 @@ Popup {
 
     readonly property bool isText: root.itemType === "Text"
     readonly property bool isCommand: root.itemType === "Command"
+    readonly property bool isExtension: root.itemType === "Extension"
     readonly property bool isTabs: root.itemType === "Tabs"
 
     /// A template has no escaping, so these characters cannot survive inside an attribute value. Rejecting
@@ -94,6 +97,7 @@ Popup {
         root.itemLabel = item.label !== undefined ? item.label : root.itemType
         root.itemText = item.text !== undefined ? item.text : ""
         root.itemCommand = item.command !== undefined ? item.command : ""
+        root.itemName = item.name !== undefined ? item.name : ""
         root.itemInterval = item.interval !== undefined ? item.interval : 0
         root.hasColor = item.hasColor === true
         root.colorHex = item.color !== undefined ? item.color : ""
@@ -132,7 +136,7 @@ Popup {
             "textLeft": root.textLeft,
             "textRight": root.textRight
         }
-        // A Text or Command item is named by its own content, the way parseIndicatorSegment names it.
+        // A Text, Command or Extension item is named by its own content, the way parseIndicatorSegment names it.
         if (root.isText) {
             item.text = root.itemText
             item.displayName = root.itemText.length > 0 ? root.itemText : root.itemLabel
@@ -141,6 +145,10 @@ Popup {
             item.command = root.itemCommand
             item.interval = root.itemInterval
             item.displayName = root.itemCommand.length > 0 ? root.itemCommand : root.itemLabel
+        }
+        if (root.isExtension) {
+            item.name = root.itemName
+            item.displayName = root.itemName.length > 0 ? root.itemName : root.itemLabel
         }
         if (root.isTabs) {
             item.hasActiveColor = root.hasActiveColor
@@ -187,7 +195,7 @@ Popup {
 
         // Text content, for the placeholders that carry some.
         ColumnLayout {
-            visible: root.isText || root.isCommand
+            visible: root.isText || root.isCommand || root.isExtension
             Layout.fillWidth: true
             spacing: 2
 
@@ -195,18 +203,20 @@ Popup {
                 Layout.fillWidth: true
                 spacing: 8
                 Label {
-                    text: root.isCommand ? qsTr("Program") : qsTr("Text")
+                    text: root.isCommand ? qsTr("Program") : root.isExtension ? qsTr("Extension") : qsTr("Text")
                     color: sys.windowText
                     Layout.preferredWidth: 130
                 }
                 TextField {
                     objectName: "indicatorItemTextField"
                     Layout.fillWidth: true
-                    text: root.isCommand ? root.itemCommand : root.itemText
+                    text: root.isCommand ? root.itemCommand : root.isExtension ? root.itemName : root.itemText
                     selectByMouse: true
                     onTextChanged: {
                         if (root.isCommand)
                             root.itemCommand = text
+                        else if (root.isExtension)
+                            root.itemName = text
                         else
                             root.itemText = text
                     }

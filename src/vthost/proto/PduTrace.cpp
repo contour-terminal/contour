@@ -223,6 +223,22 @@ namespace
                                           value.row.stableId,
                                           value.row.generation);
                    } },
+        TraceRow { PduType::PermissionRequest,
+                   "PermissionRequest",
+                   +[](DecodedPdu const& pdu) {
+                       // The manifest is counted, never transcribed: its text is the guest's own.
+                       auto const& value = std::get<PermissionRequest>(pdu);
+                       return std::format("session={} digest={} commands={}",
+                                          value.session,
+                                          value.digest,
+                                          value.commands.size());
+                   } },
+        TraceRow { PduType::PermissionReply,
+                   "PermissionReply",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<PermissionReply>(pdu);
+                       return std::format("digest={} grant={}", value.digest, value.grantState);
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

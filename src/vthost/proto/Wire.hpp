@@ -34,15 +34,17 @@ namespace vthost::proto
 /// @see ClientHello
 /// @see ServerHello
 ///
-/// It moves once per release whose wire differs from the release before, not once per change: no
-/// peer outside this tree speaks the revision in flight. Two builds from between releases can pass
-/// the handshake and then disagree about the bytes, so rebuild the daemon and its clients together
-/// while developing.
+/// It moves with every change to the wire. A released peer exists -- a 0.7.0 daemon keeps running
+/// across an upgrade -- so two builds that differ in their bytes must refuse each other at the
+/// handshake, never pass it and then mis-read every PDU after it.
 ///
 /// - 1: contour 0.7.0.
-/// - 2: every wire change since 0.7.0 -- OSC 3008 contexts, command blocks, the daemon's machine
-///   and engine operations among them -- and the hello layout 0.7.0 reads.
-constexpr uint32_t CodecVersion = 2;
+/// - 2: command blocks (#1010): each row's block id and birth time, the block records and the epochs
+///   their ids count in, the daemon's machine in the ServerHello, and engine operations; and the hello
+///   layout 0.7.0 reads.
+/// - 3: status-line extensions: a Delta's status rows name the display they are for, and the
+///   PermissionRequest and PermissionReply PDUs.
+constexpr uint32_t CodecVersion = 3;
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as

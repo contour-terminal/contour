@@ -70,10 +70,22 @@ class MockTerm: public Terminal::NullEvents
     /// @param linkServices Where passive link detection runs; nullopt detects nothing. Its filesystem is then
     ///                     the terminal's own too, so that the paths detection finds and the path under the
     ///                     pointer are looked up in the same place, as Terminal() asks.
+    /// @param extensionServices The status-line extensions; nullopt shows none.
     explicit MockTerm(vtbackend::Settings settings,
                       std::optional<StatusLineCommandServices> commandServices = std::nullopt,
                       LocalTimeConverter localTime = &fixedOffsetLocalTime<>,
-                      std::optional<LinkDetectionServices> linkServices = std::nullopt);
+                      std::optional<LinkDetectionServices> linkServices = std::nullopt,
+                      std::optional<StatusLineExtensionServices> extensionServices = std::nullopt);
+
+    /// A terminal showing the status-line extensions @p extensionServices names.
+    MockTerm(PageSize size, StatusLineExtensionServices extensionServices):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   extensionServices }
+    {
+    }
 
     /// A scrollback with no headroom, which is what a bare line count has always meant here.
     MockTerm(PageSize size,
@@ -442,7 +454,8 @@ template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      std::optional<StatusLineCommandServices> commandServices,
                                      LocalTimeConverter localTime,
-                                     std::optional<LinkDetectionServices> linkServices):
+                                     std::optional<LinkDetectionServices> linkServices,
+                                     std::optional<StatusLineExtensionServices> extensionServices):
     terminal { *this,
                core::defaultEnvironment(),
                linkServices ? linkServices->fileSystem : core::platform::NativeFileSystem::instance(),
@@ -455,7 +468,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                    ++nextSemanticBlockToken.back();
                    return token;
                },
-               std::move(linkServices) }
+               std::move(linkServices),
+               extensionServices }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {

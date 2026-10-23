@@ -73,6 +73,7 @@
 #include <format>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -137,6 +138,20 @@ enum class Permission : uint8_t
     Allow,
     Ask
 };
+
+/// How a permission is spelled in the configuration file.
+/// @param value The permission.
+/// @return `allow`, `deny` or `ask`.
+[[nodiscard]] constexpr std::string_view permissionToken(Permission value) noexcept
+{
+    switch (value)
+    {
+        case Permission::Allow: return "allow";
+        case Permission::Deny: return "deny";
+        case Permission::Ask: return "ask";
+    }
+    return "ask";
+}
 
 enum class SelectionAction : uint8_t
 {
@@ -630,6 +645,26 @@ struct StatusLineConfig
     vtbackend::StatusDisplayPosition position { vtbackend::StatusDisplayPosition::Bottom };
     bool syncWindowTitleWithHostWritableStatusDisplay { false };
     IndicatorConfig indicator;
+    /// The name of the extension (see ExtensionConfig) that takes the whole status line over; unset keeps the
+    /// template-driven line, where `{Extension:<name>}` segments may still draw extensions.
+    std::optional<std::string> extension;
+};
+
+/// An extension's configuration values, which the extension reads by key. Keys and values are text (the YAML
+/// boundary); an extension parses its own numbers.
+using ExtensionConfigMap = std::map<std::string, std::string>;
+
+/// One entry of a profile's `extensions:` map: a WebAssembly status-line extension, by name.
+struct ExtensionConfig
+{
+    std::string name;           ///< The key under `extensions:`; what `{Extension:<name>}` refers to.
+    std::filesystem::path path; ///< The module on disk; empty names a bundled extension, found by @ref name.
+    ExtensionConfigMap config;  ///< Values the extension reads through its host `config` call.
+    Permission runCommand {
+        Permission::Ask
+    }; ///< Whether the extension may run the commands its manifest declares.
+
+    bool operator==(ExtensionConfig const&) const = default;
 };
 
 struct BackgroundConfig
@@ -1006,6 +1041,7 @@ struct TerminalProfile
         vtbackend::LineCount { 8 }
     };
     ConfigEntry<StatusLineConfig, documentation::StatusLine> statusLine {};
+    ConfigEntry<std::vector<ExtensionConfig>, documentation::Extensions> extensions {};
     ConfigEntry<BackgroundConfig, documentation::Background> background {};
     ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
     ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
@@ -1680,6 +1716,11 @@ struct YAMLConfigReader
     /// Expands `${VAR}` tokens then resolves `~` to the home directory.
     [[nodiscard]] std::filesystem::path resolvedPath(std::string const& input) const;
 
+    /// The directory a relative path in the document being read is relative to: the one holding the file
+    /// that declares it -- the side file inside readSideFile(), else the configuration file.
+    /// @return That directory, made absolute.
+    [[nodiscard]] std::filesystem::path declaringDirectory() const;
+
     /// Parses a single pane node. A node is a LEAF unless it carries a `split:` mapping.
     void parseLayoutPane(YAML::Node const& node, LayoutPane& where);
 
@@ -2030,6 +2071,27 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
                        std::vector<HintPatternConfig>& where) const;
+    /// Reads `extensions:` -- a map from an extension's name to its `path`, `config` and `run_command`.
+    ///
+    /// A relative `path` is relative to the directory of the file that declares it. A malformed entry costs
+    /// that entry, not the map, and so does a `path` that is empty or names nothing: the entry never falls
+    /// back to the bundled extension of its name. An unknown `run_command` is reported and the entry asks.
+    /// A name declared twice keeps the first, a `config` key set twice the later.
+    /// @param node The mapping that holds @p entry.
+    /// @param entry The key to read (`extensions`).
+    /// @param where Receives the entries in file order; replaced when the key is present.
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::vector<ExtensionConfig>& where) const;
+
+    /// Reads one entry of `extensions:`.
+    /// @param name The entry's key.
+    /// @param settings The entry's value: a map, or null for a bundled extension with the defaults.
+    /// @param keyPath Where `extensions` is declared, for the diagnostics.
+    /// @return The extension, or no value when the entry is skipped, with the reason reported.
+    [[nodiscard]] std::optional<ExtensionConfig> readExtension(std::string name,
+                                                               YAML::Node const& settings,
+                                                               std::string_view keyPath) const;
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::ArcStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, vtrasterizer::BoxDrawingRenderer::BrailleStyle& where);
@@ -2283,6 +2345,41 @@ struct Writer
         return result;
     }
 
+    /// Serializes extensions: the doc template (pure comment) followed by the entries, if any.
+    /// @param doc The documentation, already indented.
+    /// @param extensions The profile's extensions, written in order.
+    /// @return @p doc, then an `extensions:` map when @p extensions holds an entry.
+    [[nodiscard]] std::string format(std::string_view doc, std::vector<ExtensionConfig> const& extensions)
+    {
+        auto result = format(doc);
+        if (extensions.empty())
+            return result;
+
+        // The doc is indented to where the key goes: derive that from its last line.
+        auto const indent = [&] {
+            auto const lastLine = doc.substr(doc.rfind('\n', doc.size() > 1 ? doc.size() - 2 : 0) + 1);
+            return std::string(std::min(lastLine.find_first_not_of(' '), lastLine.size()), ' ');
+        }();
+        result += indent + "extensions:\n";
+        for (auto const& extension: extensions)
+        {
+            result += std::format("{}    {}:\n", indent, SingleQuoted { extension.name });
+            if (!extension.path.empty())
+                result += std::format(
+                    "{}        path: {}\n", indent, SingleQuoted { core::pathToUtf8(extension.path) });
+            if (!extension.config.empty())
+            {
+                result += std::format("{}        config:\n", indent);
+                for (auto const& [key, value]: extension.config)
+                    result += std::format(
+                        "{}            {}: {}\n", indent, SingleQuoted { key }, SingleQuoted { value });
+            }
+            result +=
+                std::format("{}        run_command: {}\n", indent, permissionToken(extension.runCommand));
+        }
+        return result;
+    }
+
     [[nodiscard]] std::string static format(vtbackend::CellRGBColor const& v)
     {
         if (auto const* const color = std::get_if<vtbackend::RGBColor>(&v))
@@ -2451,7 +2548,9 @@ struct Writer
                       v.syncWindowTitleWithHostWritableStatusDisplay,
                       v.indicator.left,
                       v.indicator.middle,
-                      v.indicator.right);
+                      v.indicator.right,
+                      v.extension ? std::format("{}", SingleQuoted { *v.extension })
+                                  : std::string { "null" });
     }
 
     [[nodiscard]] std::string format(std::string_view doc, BackgroundConfig const& v)
@@ -2826,6 +2925,12 @@ struct ResolvedSessionConfig
     /// single default tab, exactly like a local session's `TerminalSessionManager::findLayout`
     /// miss does.
     vtworkspace::Layout startupLayout {};
+    /// The configuration file the profile was read from: what a daemon keeps its own side files beside.
+    std::filesystem::path configFile {};
+    /// The profile's status-line extensions (`extensions:`), resolved on the daemon's side.
+    std::vector<ExtensionConfig> extensions {};
+    /// `status_line.extension`: the one of @ref extensions that takes the indicator status line over.
+    std::optional<std::string> statusLineExtension {};
 };
 
 /// Resolves @p profile's presentation half: @ref emulationSettings plus the fields that decide how
@@ -2993,14 +3098,7 @@ struct std::formatter<contour::config::Permission>: formatter<std::string_view>
 {
     auto format(contour::config::Permission value, auto& ctx) const
     {
-        string_view name;
-        switch (value)
-        {
-            case contour::config::Permission::Allow: name = "allow"; break;
-            case contour::config::Permission::Deny: name = "deny"; break;
-            case contour::config::Permission::Ask: name = "ask"; break;
-        }
-        return formatter<string_view>::format(name, ctx);
+        return formatter<string_view>::format(contour::config::permissionToken(value), ctx);
     }
 };
 

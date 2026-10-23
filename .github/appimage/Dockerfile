@@ -1,13 +1,17 @@
 FROM ubuntu:24.04
 
 RUN apt-get update
-RUN apt-get install -y sudo clang wget
+RUN apt-get install -y sudo clang wget curl
 
 WORKDIR /
 COPY . /contour
 WORKDIR /contour
 
 RUN SYSDEP_ASSUME_YES=ON sh ./scripts/install-deps.sh
+# The bundled status-line extensions are Rust; the install below puts them in AppDir/share/contour/extensions,
+# beside AppDir/bin, where the AppImage's contour finds them.
+RUN sh ./scripts/install-rust-wasm.sh
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN cmake -S . -B build -G Ninja  \
     -D CMAKE_BUILD_TYPE=RelWithDebInfo \

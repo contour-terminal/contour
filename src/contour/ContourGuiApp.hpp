@@ -50,6 +50,17 @@
 
 class QQuickWindow;
 
+namespace vtextension
+{
+class ExtensionRuntime;
+class IGrantStore;
+} // namespace vtextension
+
+namespace vtextension::wasm
+{
+class IWasmBackend;
+} // namespace vtextension::wasm
+
 namespace contour
 {
 
@@ -329,6 +340,27 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         return { .capture = _commandCapture, .executor = _commandExecutor };
     }
 
+    /// What every session's status-line extensions share: the grants, the engine and the worker pool.
+    /// Created on the first call, from the GUI thread, by the first session whose profile has extensions; a
+    /// run without any never creates it, so it reads no grants file and starts no runtime and no thread.
+    /// @return The runtime, valid for the app's lifetime.
+    [[nodiscard]] vtextension::ExtensionRuntime& extensionRuntime();
+
+    /// @return The extension runtime if a session has created it; null in a run without extensions.
+    [[nodiscard]] vtextension::ExtensionRuntime* startedExtensionRuntime() noexcept
+    {
+        return _extensionRuntime.get();
+    }
+
+    /// Has the extension runtime release, a moment from now and on the GUI thread, the engines and modules
+    /// that runners retired: a runner destroyed now retires its engine only once its lane ran its last job.
+    void releaseRetiredExtensionsSoon();
+
+    /// Asks the questions the attached daemon's status-line extensions ask, each in the pane its extension
+    /// runs for and through the prompt that pane's own extensions ask through; the answers go back to the
+    /// daemon, which keeps them. GUI thread; a no-op unless attached.
+    void askHostedExtensions();
+
     /// What every session's link detection runs on: the status-line pool for matching, a thread of its own
     /// for existence checks (a hung mount stalls it alone), fileSystem(), and the steady clock of
     /// terminalClocks().
@@ -520,6 +552,23 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // Likewise; borrowed.
     core::platform::FileSystem const& _fileSystem;
     std::unique_ptr<platform::TaskbarProgressSink> _taskbarProgressSink;
+    // The WebAssembly backend the extension runtime's engines are created from and its lanes prepared with;
+    // created with the runtime (@see extensionRuntime()). Declared before _extensionRuntime, which borrows it
+    // and so must go first. Opaque for the reason _extensionRuntime is.
+    std::unique_ptr<vtextension::wasm::IWasmBackend, void (*)(vtextension::wasm::IWasmBackend*)>
+        _extensionBackend { nullptr, nullptr };
+    // Created on first use (@see extensionRuntime()). Declared after what it borrows -- _extensionBackend,
+    // _commandCapture, _terminalClocks, _fileSystem and the environment -- and before _sessionManager, whose
+    // sessions, and so every runner, are destroyed first. Its own pool is joined before the grants and the
+    // capture it reaches. Its deleter is chosen where it is made, so that this class is laid out the same in
+    // a translation unit without CONTOUR_EXTENSIONS, which never makes one.
+    std::unique_ptr<vtextension::ExtensionRuntime, void (*)(vtextension::ExtensionRuntime*)>
+        _extensionRuntime { nullptr, nullptr };
+    // Where the answers to the attached daemon's extensions are recorded, and so sent; made with the first
+    // question. Declared before _sessionManager, whose sessions' prompts hold it, and after
+    // _nativeController, which it sends through. Opaque for the reason _extensionRuntime is.
+    std::unique_ptr<vtextension::IGrantStore, void (*)(vtextension::IGrantStore*)> _daemonGrants { nullptr,
+                                                                                                   nullptr };
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

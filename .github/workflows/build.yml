@@ -151,6 +151,10 @@ jobs:
     # rather than letting them silently no-op through a full tidy build.
     - name: "Verify clang-tidy configuration"
       run: CLANG_TIDY=clang-tidy-${LLVM_VERSION} ./scripts/check-clang-tidy-config.sh
+    # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+    # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+    - name: "install Rust (wasm32-wasip1)"
+      run: ./scripts/install-rust-wasm.sh
     - name: "cmake"
       run: |
         cmake \
@@ -192,6 +196,10 @@ jobs:
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh ${LLVM_VERSION}
+    # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+    # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+    - name: "install Rust (wasm32-wasip1)"
+      run: ./scripts/install-rust-wasm.sh
     # CMAKE_DISABLE_FIND_PACKAGE_Qt6 makes every find_package(Qt6 ...) fail, so this configuration
     # cannot merely happen to build against a Qt that is lying around -- it has to want none. The
     # step above installed Qt, which is what makes the assertion worth anything: the point is not
@@ -243,6 +251,65 @@ jobs:
         cmake --install build --prefix "$RUNNER_TEMP/contour-headless" --component contour
         test -x "$RUNNER_TEMP/contour-headless/bin/contour"
         test -f "$RUNNER_TEMP/contour-headless/share/contour/shell-integration/shell-integration.zsh"
+        # The daemon runs extensions too, so the GUI-less configuration ships the bundled ones.
+        for extension in agent-status clock git plasma sysload; do
+          test -f "$RUNNER_TEMP/contour-headless/share/contour/extensions/$extension.wasm"
+        done
+
+  # CONTOUR_EXTENSIONS=OFF compiles the status-line extensions out, and with them every type the code that
+  # drives them names: whatever reaches for one outside its #ifdef breaks this configuration alone, which no
+  # other job builds -- a break in TerminalSession went unnoticed that way. Build-only, GUI included: what it
+  # guards is that the sources compile and link without the feature; the suites run in the jobs with it.
+  build_no_extensions:
+    name: "Ubuntu Linux (no status-line extensions)"
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: "ccache-ubuntu2404-no-extensions"
+        max-size: 256M
+    - name: "update APT database"
+      run: sudo ./scripts/apt-update.sh
+    - name: "install dependencies"
+      run: sudo env QTVER=6 ./scripts/install-deps.sh
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
+    # The distro Qt (6.4.2) lacks the private CMake packages the GUI needs; the same modern Qt as the
+    # job above, and the same retry past a bad mirror.
+    - name: "Install Qt (GuiPrivate-capable)"
+      id: install_qt
+      continue-on-error: true
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.11.1"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: "Install Qt (GuiPrivate-capable) -- retry past a bad mirror"
+      if: steps.install_qt.outcome == 'failure'
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: "6.11.1"
+        modules: qtmultimedia qt5compat qtshadertools qtspeech
+    - name: Install clang
+      run: |
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh ${LLVM_VERSION}
+    # No Rust: without extensions there are no WebAssembly guests to build (CONTOUR_EXTENSIONS_BUNDLED
+    # follows CONTOUR_EXTENSIONS).
+    - name: "cmake"
+      run: |
+        cmake \
+              --preset clang-debug \
+              -B build \
+              -G Ninja \
+              -D CONTOUR_WAYLAND=OFF \
+              -D CONTOUR_EXTENSIONS=OFF \
+              -D CONTOUR_TESTING=ON \
+              -D CMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}"
+    - name: "build"
+      run: cmake --build build
 
   # The macOS half of the same guard. A .app bundle, macdeployqt and a signed .dmg all serve a
   # window; a GUI-less build has none, so it must install a plain bin/contour like any other Unix
@@ -264,6 +331,10 @@ jobs:
     # the Linux job: a Qt that is present and still untouched is the assertion worth making.
     - name: "install dependencies"
       run: env CONTOUR_INSTALL_BREW_QT=ON QTVER=6 ./scripts/install-deps.sh
+    # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+    # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+    - name: "install Rust (wasm32-wasip1)"
+      run: ./scripts/install-rust-wasm.sh
     - name: "cmake"
       run: |
         cmake \
@@ -285,6 +356,13 @@ jobs:
         # gone missing with the bundle they used to live next to.
         if ! grep -q 'CMAKE_INSTALL_PREFIX}/bin" TYPE EXECUTABLE' build/src/contour/cmake_install.cmake; then
           echo "::error::GUI-less macOS build installs no executable into bin/"
+          exit 1
+        fi
+        # The bundled extensions go beside bin/, into share/contour/extensions: with no app bundle, that is
+        # where bundledExtensionDirectories() looks on macOS (BundledExtensions_test pins it), after the
+        # bundle's Resources it does not have.
+        if ! grep -q 'share/contour/extensions" TYPE FILE' build/src/contour/cmake_install.cmake; then
+          echo "::error::GUI-less macOS build installs no bundled extensions into share/contour/extensions"
           exit 1
         fi
 
@@ -472,7 +550,7 @@ jobs:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
           copyback: false
-          prepare: pkg install -y wget
+          prepare: pkg install -y wget curl
           run: |
             set -ex
             pwd
@@ -481,6 +559,9 @@ jobs:
             env
             freebsd-version
             SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+            # rustup installs into ~/.cargo of this one shell session's user, so PATH is extended here.
+            ./scripts/install-rust-wasm.sh
+            export PATH="$HOME/.cargo/bin:$PATH"
             cmake -S . -B build -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
             cmake --build build/ -j2
             # ctest, not a hand-written list: that list predated src/coro, src/net, src/vthost and
@@ -524,7 +605,9 @@ jobs:
             env
             ./scripts/install-deps.sh
             mkdir build
-            cmake -S . -B build -DCMAKE_CXX_COMPILER=clang++ -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF
+            # CONTOUR_EXTENSIONS_BUNDLED=OFF: rustup has no OpenBSD host toolchain, and OpenBSD's own rust
+            # package carries no wasm32-wasip1 standard library, so the bundled extensions cannot be built.
+            cmake -S . -B build -DCMAKE_CXX_COMPILER=clang++ -D CMAKE_CXX_FLAGS=-I/home/runner/work/contour/contour/_deps/sources/yaml-cpp-0.8.0/include -DCONTOUR_TESTING=ON -DLIBUNICODE_USE_STD_SIMD=OFF -DCONTOUR_EXTENSIONS_BUNDLED=OFF
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
@@ -744,6 +827,10 @@ jobs:
           zsh --version
           tcsh --version
           pwsh --version
+      # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+      # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+      - name: "install Rust (wasm32-wasip1)"
+        run: ./scripts/install-rust-wasm.sh
       - name: "Generate build files"
         run: |
           # The `macos-package` preset IS the definition of a shippable macOS build --
@@ -877,6 +964,10 @@ jobs:
           # developer benchmark tool shipping inside a user-facing release.
           test "$(ls "$MOUNT" | sort | tr '\n' ' ')" = "Applications contour.app "
           test "$(ls "$MOUNT/contour.app/Contents/MacOS")" = "contour"
+          # ...and the bundled status-line extensions, where the app looks for them.
+          for extension in agent-status clock git plasma sysload; do
+            test -f "$MOUNT/contour.app/Contents/Resources/extensions/$extension.wasm"
+          done
 
           if [[ "${{ steps.set_vars.outputs.NOTARIZE }}" != 'ON' ]]; then
             echo "::notice::unsigned build (no secrets); skipping Gatekeeper assertions"
@@ -1030,6 +1121,10 @@ jobs:
       - name: "Check cmake version"
         run: cmake --version
       - uses: ilammy/msvc-dev-cmd@v1
+      - name: "install Rust (wasm32-wasip1)"
+        # @see the same step on Linux: the bundled extensions and the test guests are Rust.
+        shell: bash
+        run: ./scripts/install-rust-wasm.sh
       - name: "Generate build files"
         shell: pwsh
         run: |
@@ -1149,6 +1244,14 @@ jobs:
             Write-Host "::error::the zip ships $($shipped -join ', ')"
             exit 1
           }
+          # The bundled status-line extensions ship in share/contour/extensions, beside bin/, which is
+          # where contour.exe looks for them.
+          foreach ($extension in 'agent-status', 'clock', 'git', 'plasma', 'sysload') {
+            if (-not ($entries | Where-Object { $_ -like "*share/contour/extensions/$extension.wasm" })) {
+              Write-Host "::error::the zip holds no share/contour/extensions/$extension.wasm"
+              exit 1
+            }
+          }
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v4
         with:
@@ -1263,6 +1366,10 @@ jobs:
           pwsh --version
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
+      # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+      # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+      - name: "install Rust (wasm32-wasip1)"
+        run: ./scripts/install-rust-wasm.sh
       # Ubuntu 24.04's distro Qt is 6.4.2, which does not provide the Qt6::GuiPrivate CMake package
       # the RHI renderer needs (rhi/qrhi.h). Install a modern Qt6 over it; install-qt-action prepends
       # its Qt to CMAKE_PREFIX_PATH via the Qt6_DIR/QT_ROOT_DIR env vars it exports, so find_package
@@ -1408,6 +1515,25 @@ jobs:
             echo "::error::$binary [shells] reported SKIPPED; a shell the integration scripts target is not being exercised"
             exit 1
           fi
+      - name: "verify the WebAssembly guest tests actually ran"
+        # @see "verify the tmux oracles actually ran": the cases that run a Rust guest -- the bundled
+        # extensions, and the spawner's end-to-end permission tests in the GUI and the daemon -- compile
+        # out without the guests and leave a SKIP in their place, which exits 0. A filter that matches
+        # nothing fails too, so a case that vanished is caught as well as one that skipped.
+        run: |
+          set -o pipefail
+          for binary in \
+              out/gcc-debug/src/vtextension/vtextension_test \
+              out/gcc-debug/src/vthost/vthost_test \
+              out/gcc-debug/src/contour/contour_gui_test; do
+            echo "--- $binary [guest]"
+            output=$("$binary" '[guest]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+            printf '%s\n' "$output"
+            if printf '%s' "$output" | grep -q 'skipped'; then
+              echo "::error::$binary [guest] reported SKIPPED; the WebAssembly guest tests are not being exercised"
+              exit 1
+            fi
+          done
       - name: "session OOM isolation under a real systemd user manager"
         # The suite above SKIPs this test -- exit 77, which ctest counts as passing -- because a
         # runner has no systemd user manager until a lingering user session starts one. Start one,
@@ -1528,6 +1654,10 @@ jobs:
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
+      # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+      # wasm32-wasip1 target: the bundled status-line extensions, and the test guests, are Rust.
+      - name: "install Rust (wasm32-wasip1)"
+        run: ./scripts/install-rust-wasm.sh
       - name: "create build directory"
         run: mkdir build
       - name: Install CMake
@@ -1584,6 +1714,10 @@ jobs:
       - name: "Verify installation"
         run: |
           contour version
+          # The bundled status-line extensions, where an installation under /usr looks for them.
+          for extension in agent-status clock git plasma sysload; do
+            test -f "/usr/share/contour/extensions/$extension.wasm"
+          done
   # }}}
   # {{{ Ubuntu 24.04: test via valgrind
   test_ubuntu2404_valgrind:
@@ -1627,7 +1761,11 @@ jobs:
         # timeout. Under valgrind the child runs at full speed while our side crawls, so those
         # budgets expire and the failure says nothing about memory. The Linux matrix runs them
         # natively and asserts they ran.
-        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vthost/vthost_test '~[oracle]'
+        #
+        # ~[guest]: the extension cases read the spawner guest from the build tree of the job that
+        # built them, which this artifact does not carry, and measure a command's teardown against its
+        # timeout. The Linux matrix runs them natively and asserts they ran.
+        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vthost/vthost_test '~[oracle]' '~[guest]'
   # }}}
   # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
   test_ubuntu2404_conformance:

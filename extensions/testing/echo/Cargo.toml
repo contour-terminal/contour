@@ -1,0 +1,14 @@
+[package]
+name = "echo"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Test guest for the statusline world: renders its `text` setting, and any reply as hex."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen.workspace = true
+manifest = { path = "../../manifest" }

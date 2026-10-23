@@ -53,6 +53,10 @@ auto inline const clientLog = core::log::Category("vthost.client",
                                                   "Native-protocol CLIENT engine: connect, "
                                                   "handshake, disconnect, failures.");
 
+auto inline const extensionLog = core::log::Category("vthost.extension",
+                                                     "Status-line extensions of the hosted sessions: what "
+                                                     "they log.");
+
 auto inline const protocolTraceLog =
     core::log::Category("vthost.trace.proto", "Traces every native PDU sent and received.");
 

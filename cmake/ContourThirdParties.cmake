@@ -99,6 +99,7 @@ set(HARFBUZZ_VERSION "8.4.0")
 set(GSL_VERSION "3.1.0")
 set(REFLECTION_CPP_VERSION "0.4.0")
 set(FREETYPE_VERSION "2.10.0")
+set(WAMR_MINIMAL_VERSION "2.4.5")
 
 
 if(TARGET GSL)
@@ -169,6 +170,147 @@ else()
         message(FATAL_ERROR "Could not find libunicode >= ${LIBUNICODE_MINIMAL_VERSION}. "
             "Run install-deps.sh, install system packages, or set CONTOUR_USE_CPM=ON.")
     endif()
+endif()
+
+# WAMR (WebAssembly Micro Runtime) hosts the status-line extensions, interpreted only: fast
+# interpreter on, every JIT and AOT off, so no executable memory is ever mapped. libc-wasi is on
+# (guests are wasm32-wasip1), the libc-builtin shim is off. The thread manager is required although
+# guests get no threads: without it the interpreter never polls for wasm_runtime_terminate(), so the
+# watchdog could not stop a call that loops. Hardware bounds checks are off (memory and native
+# stack): they install a process-wide SIGSEGV handler, which is not a library's to take, and keep
+# process-wide signal state that every worker thread's setup writes; the interpreter checks bounds in
+# software instead. Waking blocked WASI calls is off as well: it installs a process-wide SIGUSR1
+# handler, and guests cannot block (poll_oneoff is refused). An installed WAMR does not say how it was
+# built, so a system package is accepted only once cmake/WamrTerminateProbe.cpp has shown that
+# terminating works and that initializing the runtime leaves SIGSEGV and SIGUSR1 alone; otherwise WAMR
+# is built from source.
+#
+# First-party code links contour::wamr, whichever WAMR it resolves to.
+
+# ContourThirdParties_WamrTerminates(<target> <result-variable>)
+#
+# Sets <result-variable> to TRUE if a program linked against <target> stops a looping guest call
+# when another thread calls wasm_runtime_terminate() and its runtime initialization installs no
+# SIGSEGV or SIGUSR1 handler, FALSE otherwise (including when the probe cannot run, as when cross-compiling).
+# Sets <result-variable>_REASON to why a WAMR was rejected.
+function(ContourThirdParties_WamrTerminates target resultVar)
+    set(${resultVar} FALSE PARENT_SCOPE)
+    set(${resultVar}_REASON "wasm_runtime_terminate() did not stop a call (built without WAMR_BUILD_THREAD_MGR?)" PARENT_SCOPE)
+    if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+        return()
+    endif()
+    find_package(Threads QUIET)
+    try_run(_wamr_probe_run _wamr_probe_compile
+        SOURCES "${PROJECT_SOURCE_DIR}/cmake/WamrTerminateProbe.cpp"
+        LINK_LIBRARIES ${target} Threads::Threads
+        CXX_STANDARD 20
+        NO_CACHE
+    )
+    if(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "0")
+        set(${resultVar} TRUE PARENT_SCOPE)
+    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "8")
+        set(${resultVar}_REASON "it installs a SIGSEGV handler (built with hardware bounds checks)" PARENT_SCOPE)
+    elseif(_wamr_probe_compile AND "${_wamr_probe_run}" STREQUAL "9")
+        set(${resultVar}_REASON "it installs a SIGUSR1 handler (built with wakeup of blocking operations)" PARENT_SCOPE)
+    endif()
+endfunction()
+
+if(CONTOUR_EXTENSIONS)
+    add_library(contour_wamr INTERFACE)
+    add_library(contour::wamr ALIAS contour_wamr)
+
+    set(_wamr_target "")
+    set(_wamr_rejected "")
+    if(TARGET iwasm::vmlib)
+        set(_wamr_target iwasm::vmlib)
+        set(THIRDPARTY_BUILTIN_wamr "embedded")
+    elseif(NOT CONTOUR_BUILD_STATIC)
+        find_package(iwasm ${WAMR_MINIMAL_VERSION} QUIET)
+        set(_wamr_candidate "")
+        if(TARGET iwasm::vmlib)
+            set(_wamr_candidate iwasm::vmlib)
+        else()
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(PC_WAMR QUIET IMPORTED_TARGET GLOBAL iwasm>=${WAMR_MINIMAL_VERSION})
+                if(TARGET PkgConfig::PC_WAMR)
+                    set(_wamr_candidate PkgConfig::PC_WAMR)
+                endif()
+            endif()
+        endif()
+        if(_wamr_candidate)
+            ContourThirdParties_WamrTerminates(${_wamr_candidate} _wamr_terminates)
+            if(_wamr_terminates)
+                set(_wamr_target ${_wamr_candidate})
+                set(THIRDPARTY_BUILTIN_wamr "system package (wasm_runtime_terminate verified)")
+            else()
+                set(_wamr_rejected "; system WAMR rejected: ${_wamr_terminates_REASON}")
+                message(STATUS "System WAMR rejected (${_wamr_terminates_REASON}); building WAMR from source instead.")
+            endif()
+        endif()
+    endif()
+
+    if(NOT _wamr_target)
+        if(NOT CONTOUR_USE_CPM)
+            message(FATAL_ERROR "Could not find a WAMR >= ${WAMR_MINIMAL_VERSION} built with WAMR_BUILD_THREAD_MGR=1 "
+                "and without hardware bounds checks. "
+                "Install one, set CONTOUR_USE_CPM=ON, or configure with -DCONTOUR_EXTENSIONS=OFF.")
+        endif()
+        message(STATUS "Using CPM to fetch WAMR")
+        CPMAddPackage(
+            NAME wamr
+            VERSION ${WAMR_MINIMAL_VERSION}
+            GITHUB_REPOSITORY bytecodealliance/wasm-micro-runtime
+            GIT_TAG 25bd7eb63e828e4bd242cc9b38d260b4b31c6605 # WAMR-${WAMR_MINIMAL_VERSION}
+            OPTIONS
+                "WAMR_BUILD_INTERP 1"
+                "WAMR_BUILD_FAST_INTERP 1"
+                "WAMR_BUILD_AOT 0"
+                "WAMR_BUILD_JIT 0"
+                "WAMR_BUILD_FAST_JIT 0"
+                "WAMR_BUILD_LIBC_WASI 1"
+                "WAMR_BUILD_LIBC_BUILTIN 0"
+                "WAMR_BUILD_THREAD_MGR 1"
+                "WAMR_BUILD_LIB_PTHREAD 0"
+                "WAMR_BUILD_LIB_WASI_THREADS 0"
+                "WAMR_BUILD_MULTI_MODULE 0"
+                "WAMR_DISABLE_HW_BOUND_CHECK 1"
+                "WAMR_DISABLE_STACK_HW_BOUND_CHECK 1"
+                "WAMR_DISABLE_WAKEUP_BLOCKING_OP 1"
+                "BUILD_SHARED_LIBS OFF"
+            EXCLUDE_FROM_ALL YES
+            SYSTEM YES
+        )
+        if(NOT CONTOUR_SANITIZE STREQUAL "OFF")
+            # The fast interpreter reads its pre-decoded operands unaligned on purpose, on CPUs that
+            # allow it (WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS); UBSan would report every one.
+            target_compile_options(vmlib PRIVATE -fno-sanitize=alignment)
+        endif()
+        if(WIN32)
+            # Winsock is the host's: WAMR's own deinit calls WSACleanup on every runtime teardown but
+            # starts Winsock only on the first init, so each later teardown takes Winsock away from
+            # the process's live sockets. Extensions get no sockets, so WAMR needs none of it.
+            target_compile_definitions(vmlib PRIVATE WASM_ENABLE_HOST_SOCKET_INIT=1)
+        endif()
+        if(MSVC)
+            # WAMR's headers use C11 alignof in static assertions; MSVC compiles C without a C11
+            # standard unless one is requested.
+            set_target_properties(vmlib PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+            # wasm_export.h marks the API __declspec(dllimport) under MSVC unless told otherwise, which
+            # is right only for a WAMR DLL; this one is linked statically.
+            target_compile_definitions(contour_wamr INTERFACE WASM_RUNTIME_API_EXTERN=)
+        endif()
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+            # The native-call trampoline is a plain .s file, which the driver assembles without
+            # preprocessing; Clang then warns about every -D and dependency flag the build passes.
+            target_compile_options(vmlib PRIVATE $<$<COMPILE_LANGUAGE:ASM>:-Wno-unused-command-line-argument>)
+        endif()
+        set(_wamr_target vmlib)
+        set(THIRDPARTY_BUILTIN_wamr "CPM (WAMR-${WAMR_MINIMAL_VERSION}, static, fast interpreter)${_wamr_rejected}")
+    endif()
+    target_link_libraries(contour_wamr INTERFACE ${_wamr_target})
+else()
+    set(THIRDPARTY_BUILTIN_wamr "(extensions disabled)")
 endif()
 
 if(LIBTERMINAL_BUILD_BENCH_HEADLESS)
@@ -295,6 +437,7 @@ macro(ContourThirdPartiesSummary2)
     endif()
     message(STATUS "boxed-cpp           ${THIRDPARTY_BUILTIN_boxed-cpp}")
     message(STATUS "core-cpp            ${THIRDPARTY_BUILTIN_core-cpp}")
+    message(STATUS "WAMR                ${THIRDPARTY_BUILTIN_wamr}")
     message(STATUS "Tracy               ${THIRDPARTY_BUILTIN_Tracy}")
     message(STATUS "------------------------------------------------------------------------------")
 endmacro()

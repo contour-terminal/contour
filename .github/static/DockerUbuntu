@@ -35,6 +35,10 @@ WORKDIR /contour
 # CONTOUR_WITH_SYSTEMD=OFF -- systemd session scopes need libsystemd, which this image does not carry, and a
 # binary meant to run on any distribution cannot count on a systemd user manager to place sessions in. The
 # configure step fails outright without it. Off, as utempter is.
+#
+# CONTOUR_EXTENSIONS_BUNDLED=OFF -- what this image ships is the one executable, copied out of it, and the
+# bundled status-line extensions are files beside an installation, which a lone binary has none of. Building
+# them would only add a Rust toolchain to the image. Extensions configured by path still load.
 RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
     -D CMAKE_C_COMPILER=gcc-14 \
     -D CMAKE_CXX_COMPILER=g++-14 \
@@ -42,6 +46,7 @@ RUN LD_LIBRARY_PATH=/usr/local/lib cmake -S . -B build -G Ninja \
     -D CONTOUR_USE_CPM=ON \
     -D CONTOUR_WITH_UTEMPTER=OFF \
     -D CONTOUR_WITH_SYSTEMD=OFF \
+    -D CONTOUR_EXTENSIONS_BUNDLED=OFF \
     -D CONTOUR_WAYLAND=OFF \
     -D CMAKE_CXX_FLAGS="-I/contour/build/_deps/yaml-cpp-src/include" \
     -D Qt6_DIR=/opt/qt/lib/cmake/Qt6

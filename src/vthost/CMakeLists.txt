@@ -1,6 +1,8 @@
 add_library(vthost STATIC
     ClientSizePolicy.hpp
     CommandBlockWire.hpp
+    ExtensionHosting.hpp
+    PermissionWire.hpp
     ImageWire.hpp
     TimeWire.hpp
     MouseWire.hpp
@@ -86,6 +88,17 @@ target_include_directories(vthost PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
+# The status-line extensions of the hosted sessions. Without them nothing of vtextension is linked, and
+# vthost's own types keep one layout in both builds (@see ExtensionHosting.hpp).
+if(CONTOUR_EXTENSIONS)
+    target_sources(vthost PRIVATE
+        DaemonExtensions.cpp
+        DaemonExtensions.hpp
+        client/DaemonGrantReplies.cpp
+        client/DaemonGrantReplies.hpp
+    )
+    target_link_libraries(vthost PUBLIC vtextension)
+endif()
 
 option(VTHOST_TESTING "Enables building of unittests for vthost [default: ON]" ${CONTOUR_TESTING})
 if(VTHOST_TESTING)
@@ -113,6 +126,8 @@ if(VTHOST_TESTING)
         testing/GridParity.cpp
         testing/GridParity.hpp
         testing/ShippedCodec.hpp
+        testing/FakeExtensionHosting.hpp
+        testing/GatedFileSystem.hpp
         testing/TestHelpers.hpp
         client/NativeClient_test.cpp
         client/LayoutReconstruction_test.cpp
@@ -131,6 +146,22 @@ if(VTHOST_TESTING)
         tmux/TmuxGateway_test.cpp
     )
     target_link_libraries(vthost_test vthost core::net_tls core::testing Catch2::Catch2)
+    # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
+    if(CONTOUR_EXTENSIONS)
+        target_link_libraries(vthost_test vtextension_runtime)
+    endif()
+    # The daemon's extensions are tested end to end with a guest that runs a command, where guests are built.
+    if(CONTOUR_EXTENSIONS AND TARGET spawner_wasm)
+        target_compile_definitions(vthost_test PRIVATE
+            VTHOST_TEST_SPAWNER_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/spawner.wasm")
+        add_dependencies(vthost_test spawner_wasm)
+    endif()
+    # The daemon's font behaviour is checked with the echo guest, which renders the state it reads.
+    if(CONTOUR_EXTENSIONS AND TARGET echo_wasm)
+        target_compile_definitions(vthost_test PRIVATE
+            VTHOST_TEST_ECHO_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/echo.wasm")
+        add_dependencies(vthost_test echo_wasm)
+    endif()
     add_test(NAME vthost_test COMMAND $<TARGET_FILE:vthost_test>)
     # `ctest -L daemon` selects everything daemon mode must pass to be trusted -- see the same
     # label on vtworkspace, a layer it is built on. The other two, core::async and core::net, are

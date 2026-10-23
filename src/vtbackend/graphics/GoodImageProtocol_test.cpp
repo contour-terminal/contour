@@ -511,6 +511,26 @@ TEST_CASE("GoodImageProtocol.Render.UpdateCursorTrue", "[GIP]")
     CHECK(afterPos.line == LineOffset(3));
 }
 
+TEST_CASE("GoodImageProtocol.Render.AutoScrollWithoutUpdateCursor", "[GIP]")
+{
+    // `l` scrolls for the rows that do not fit; `u` only decides where the cursor goes afterwards. An
+    // image taller than the rest of the page must still be drawn in full without `u`.
+    auto mock = MockTerm { PageSize { LineCount(4), ColumnCount(20) } };
+    auto const pixels = makeRGBA(2, 2, 0xFF, 0x00, 0x00, 0xFF);
+    mock.writeToScreen(gipUpload("n=as,f=3,w=2,h=2", pixels));
+
+    mock.writeToScreen("\033[4;1H"); // the last line: one row fits, two must be scrolled in
+    mock.writeToScreen(gipRender("n=as,c=4,r=3,l"));
+
+    auto const& screen = mock.terminal.primaryScreen();
+    for (auto const line: std::views::iota(1, 4))
+    {
+        auto const fragment = screen.at(LineOffset(line), ColumnOffset(0)).imageFragment();
+        REQUIRE(fragment != nullptr);
+        CHECK(fragment->offset().line == LineOffset(line - 1));
+    }
+}
+
 // ==================== Upload Status Response Tests ====================
 
 TEST_CASE("GoodImageProtocol.Upload.StatusSuccess", "[GIP]")

@@ -503,6 +503,21 @@ target_link_libraries(contour_local_file PUBLIC core::base core::platform)
 target_include_directories(contour_local_file PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 # }}}
 
+# {{{ contour_extensions: a profile's status-line extensions, as the extension runtime takes them
+# Qt-free, and tested in contour_test: the configuration-to-declaration mapping, which both the GUI's
+# sessions and `contour daemon` build their extensions from. The runtime itself is vtextension's, below
+# both. Exists only with CONTOUR_EXTENSIONS; vtextension's PUBLIC CONTOUR_EXTENSIONS definition is what the
+# sessions test for.
+if(CONTOUR_EXTENSIONS)
+    add_library(contour_extensions STATIC
+        config/ExtensionDeclarations.cpp
+        config/ExtensionDeclarations.hpp
+    )
+    target_link_libraries(contour_extensions PUBLIC contour_config vtextension)
+    target_include_directories(contour_extensions PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+endif()
+# }}}
+
 # {{{ contour_core: the reusable object library (everything but main.cpp)
 add_library(contour_core OBJECT)
 target_sources(contour_core PRIVATE ${_core_source_files} ${_header_files} ${_qt_resources})
@@ -650,6 +665,13 @@ target_link_libraries(contour_core
     PRIVATE
     vthost
 )
+if(CONTOUR_EXTENSIONS)
+    target_link_libraries(contour_core PUBLIC contour_extensions)
+endif()
+# ContourGuiApp is a composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()).
+if(CONTOUR_EXTENSIONS AND CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour_core PRIVATE vtextension_runtime)
+endif()
 
 # The GUI-only layers beneath the frontend. Guarded for the same reason they are only added as
 # subdirectories under it: without a frontend there is no Qt event to translate and no compositor,
@@ -799,7 +821,22 @@ if(CONTOUR_FRONTEND_GUI)
             window/UiStyleProvider_test.cpp
             window/WindowSizing_test.cpp
         )
+        if(CONTOUR_EXTENSIONS)
+            list(APPEND contour_gui_test_heavy_sources session/TerminalSessionExtensions_test.cpp)
+        endif()
         add_library(contour_gui_test_heavy OBJECT ${contour_gui_test_heavy_sources})
+        # The end-to-end permission test runs a guest that runs a command; it exists where guests are built.
+        if(CONTOUR_EXTENSIONS AND TARGET spawner_wasm)
+            target_compile_definitions(contour_gui_test_heavy PRIVATE
+                CONTOUR_TEST_SPAWNER_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/spawner.wasm")
+            add_dependencies(contour_gui_test_heavy spawner_wasm)
+        endif()
+        # The font test runs the echo guest, which describes the events it follows.
+        if(CONTOUR_EXTENSIONS AND TARGET echo_wasm)
+            target_compile_definitions(contour_gui_test_heavy PRIVATE
+                CONTOUR_TEST_ECHO_WASM="${CONTOUR_CARGO_TARGET_DIR}/${CONTOUR_WASM_TARGET}/release/echo.wasm")
+            add_dependencies(contour_gui_test_heavy echo_wasm)
+        endif()
         if(CMAKE_GENERATOR MATCHES "Ninja")
             set_target_properties(contour_gui_test_heavy PROPERTIES JOB_POOL_COMPILE contour_heavy_compile_pool)
         endif()
@@ -1075,6 +1112,12 @@ if(CONTOUR_TESTING)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
     endif()
+    if(CONTOUR_EXTENSIONS)
+        target_sources(contour_test PRIVATE
+            config/ExtensionDeclarations_test.cpp
+        )
+        target_link_libraries(contour_test PRIVATE contour_extensions)
+    endif()
     add_test(NAME contour_test COMMAND $<TARGET_FILE:contour_test>)
 endif()
 # }}}
@@ -1303,6 +1346,21 @@ if(CONTOUR_MACOS_APP_BUNDLE AND CONTOUR_MACOS_DEPLOY)
 endif()
 # }}}
 
+# {{{ Bundled status-line extensions
+# Installs each bundled extension as <destination>/<name>.wasm, which is where
+# vtextension::bundledExtensionDirectories() looks for it on the platform. Nothing is loaded for being
+# installed: a profile names the extensions it runs.
+function(contour_install_bundled_extensions destination)
+    foreach(_name _module IN ZIP_LISTS CONTOUR_BUNDLED_EXTENSIONS CONTOUR_BUNDLED_EXTENSION_MODULES)
+        install(FILES "${_module}" DESTINATION "${destination}" RENAME "${_name}.wasm")
+    endforeach()
+endfunction()
+if(TARGET contour_bundled_extensions)
+    # Building contour builds what installing it installs, also when only the contour target is built.
+    add_dependencies(contour contour_bundled_extensions)
+endif()
+# }}}
+
 # {{{ Qt bundle installation helpers
 set(INSTALLED_QT_VERSION 6)
 function(_qt_get_plugin_name_with_version target out_var)
@@ -1317,6 +1375,7 @@ endfunction()
 
 if(WIN32)
     install(TARGETS contour DESTINATION bin)
+    contour_install_bundled_extensions("share/contour/extensions")
     # windeployqt stages the Qt runtime beside the executable, and the directory install below exists
     # to pick that staging up. Both are gated, because a GUI-less build links no Qt: there would be
     # nothing to deploy, DeployQt.cmake's find_package(Qt6Core REQUIRED) would put Qt back in the way
@@ -1354,6 +1413,8 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
     install(DIRECTORY "cli/shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
+    # Before the deployment step below, which signs the bundle with them inside.
+    contour_install_bundled_extensions("${INSTALL_CMAKE_DIR}/extensions")
 
     # add_custom_target(Docs SOURCES README.md LICENSE.txt)
     # TODO: install(TARGETS Docs ...)
@@ -1449,6 +1510,7 @@ else()
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
     install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    contour_install_bundled_extensions("${CMAKE_INSTALL_DATADIR}/contour/extensions")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")

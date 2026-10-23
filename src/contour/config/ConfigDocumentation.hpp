@@ -865,6 +865,11 @@ constexpr StringLiteral StatusLineConfig {
     "        left: \"{}\"\n"
     "        middle: \"{}\"\n"
     "        right: \"{}\"\n"
+    "    {comment} Name of an entry of `extensions` that takes the whole status line over, or null to keep "
+    "the\n"
+    "    {comment} template above. Segments of the template may still draw other extensions with\n"
+    "    {comment} {{Extension:<name>}}.\n"
+    "    extension: {}\n"
     "\n"
 };
 
@@ -1630,6 +1635,24 @@ constexpr StringLiteral HintPatternsConfig {
     "{comment}       regex: '\\b[A-Z][A-Z0-9]+-\\d+\\b'\n"
     "{comment}       clickable: true\n"
     "{comment}       url: 'https://jira.example.com/browse/{{0}}'\n"
+};
+
+constexpr StringLiteral ExtensionsConfig {
+    "\n"
+    "{comment} WebAssembly extensions for the status line. Each runs sandboxed, one instance per pane, and\n"
+    "{comment} none is configured by default. Name one in a status line template with {{Extension:<name>}}, "
+    "or\n"
+    "{comment} let it take the whole line over with `status_line.extension`.\n"
+    "{comment}   path:        The module to load; a leading ~ is the home directory. Without it the name\n"
+    "{comment}                selects an extension bundled with Contour.\n"
+    "{comment}   config:      Text values the extension reads by key.\n"
+    "{comment}   run_command: Whether the extension may run the commands its manifest declares:\n"
+    "{comment}                allow, deny or ask (default: ask).\n"
+    "{comment} Example:\n"
+    "{comment} extensions:\n"
+    "{comment}     git:    {{ run_command: ask }}\n"
+    "{comment}     plasma: {{ config: {{ speed: \"2\" }} }}\n"
+    "{comment}     mine:   {{ path: ~/wasm/mine.wasm, run_command: deny }}\n"
 };
 
 constexpr StringLiteral HintScrollbackLinesConfig {
@@ -2900,6 +2923,36 @@ constexpr StringLiteral StatusLineWeb {
     ":octicons-horizontal-rule-16: ==sync_to_window_title== controls whether the window title should be "
     "synchronized with the Host Writable status line. If the Host Writable status line is denied, enabling "
     "this option will update the window title accordingly. By default, this option is set to false. <br/>\n"
+    ":octicons-horizontal-rule-16: ==extension== names an entry of the profile's `extensions` section that "
+    "takes the whole status line over. By default it is null, which keeps the template-driven status line. "
+    "<br/>\n"
+    "\n"
+};
+
+constexpr StringLiteral ExtensionsWeb {
+    "section in the configuration file declares the WebAssembly extensions that may draw into the status "
+    "line "
+    "of a profile. None is configured by default.\n"
+    "``` yaml\n"
+    "profiles:\n"
+    "  profile_name:\n"
+    "    extensions:\n"
+    "      git:    {{ run_command: ask }}\n"
+    "      plasma: {{ config: {{ speed: \"2\" }} }}\n"
+    "      mine:   {{ path: ~/wasm/mine.wasm, run_command: deny }}\n"
+    "    status_line:\n"
+    "      extension: plasma\n"
+    "      indicator:\n"
+    "        right: \"{{Extension:git}} | {{Clock:Bold}}\"\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==path== is the module to load; a leading `~` is the home directory. "
+    "Without it, the entry's name selects an extension bundled with Contour. <br/>\n"
+    ":octicons-horizontal-rule-16: ==config== holds text values the extension reads by key. <br/>\n"
+    ":octicons-horizontal-rule-16: ==run_command== decides whether the extension may run the commands its "
+    "manifest declares: `allow`, `deny` or `ask`. The default is `ask`. <br/>\n"
+    "\n"
+    "An extension is used by naming it in a status line template as `{{Extension:name}}`, or, with "
+    "`status_line.extension`, by letting it take the whole line over.\n"
     "\n"
 };
 
@@ -3401,6 +3454,7 @@ using WordHighlight = DocumentationEntry<WordHighlightConfig, Dummy>;
 using HintLabel = DocumentationEntry<HintLabelConfig, Dummy>;
 using HintMatch = DocumentationEntry<HintMatchConfig, Dummy>;
 using HintPatterns = DocumentationEntry<HintPatternsConfig, Dummy>;
+using Extensions = DocumentationEntry<ExtensionsConfig, ExtensionsWeb>;
 using HintScrollbackLines = DocumentationEntry<HintScrollbackLinesConfig, Dummy>;
 using IndicatorStatusLine = DocumentationEntry<IndicatorStatusLineConfig, Dummy>;
 using FoldMarker = DocumentationEntry<FoldMarkerConfig, Dummy>;

@@ -1,0 +1,9 @@
+[package]
+name = "manifest"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Embeds the terminal-extension manifest of a guest module in its custom section."
+
+[lib]

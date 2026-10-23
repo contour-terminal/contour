@@ -204,6 +204,14 @@ namespace
     {
         return std::to_underlying(PduType::PerformOperation);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(PermissionRequest const&) noexcept
+    {
+        return std::to_underlying(PduType::PermissionRequest);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(PermissionReply const&) noexcept
+    {
+        return std::to_underlying(PduType::PermissionReply);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -547,6 +555,7 @@ namespace
         out.u8(pdu.statusDisplayType);
         out.u8(pdu.activeStatusDisplay);
         out.u8(pdu.statusLinesChanged);
+        out.u8(pdu.statusLinesDisplay);
         out.varint(pdu.statusLines.size());
         for (auto const& line: pdu.statusLines)
             encodeLine(out, line);
@@ -622,6 +631,30 @@ namespace
         out.string(pdu.text);
         out.svarint(pdu.row.stableId);
         out.varint(pdu.row.generation);
+    }
+
+    void encodeBody(Writer& out, PermissionRequest const& pdu)
+    {
+        out.varint(pdu.session);
+        out.string(pdu.hostId);
+        out.string(pdu.name);
+        out.u32(pdu.version);
+        out.string(pdu.digest);
+        out.varint(pdu.commands.size());
+        for (auto const& command: pdu.commands)
+        {
+            out.string(command.name);
+            out.varint(command.argv.size());
+            for (auto const& element: command.argv)
+                out.string(element);
+        }
+    }
+
+    void encodeBody(Writer& out, PermissionReply const& pdu)
+    {
+        out.string(pdu.hostId);
+        out.string(pdu.digest);
+        out.u8(pdu.grantState);
     }
 
     void encodeBody(Writer& out, ResizeSplit const& pdu)
@@ -1063,7 +1096,8 @@ namespace
             || !assign(in.u32(), pdu.defaultBackground, error) || !assign(in.u8(), pdu.statusChanged, error)
             || !assign(in.u8(), pdu.statusDisplayType, error)
             || !assign(in.u8(), pdu.activeStatusDisplay, error)
-            || !assign(in.u8(), pdu.statusLinesChanged, error))
+            || !assign(in.u8(), pdu.statusLinesChanged, error)
+            || !assign(in.u8(), pdu.statusLinesDisplay, error))
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.statusLines, decodeLine); !decoded)
             return std::unexpected(decoded.error());
@@ -1176,6 +1210,44 @@ namespace
         return pdu;
     }
 
+    [[nodiscard]] std::expected<WireDeclaredCommand, DecodeError> decodeDeclaredCommand(Reader& in)
+    {
+        auto command = WireDeclaredCommand {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), command.name, error))
+            return std::unexpected(error);
+        if (auto const decoded =
+                decodeVector(in, command.argv, [](Reader& reader) { return reader.string(); });
+            !decoded)
+            return std::unexpected(decoded.error());
+        return command;
+    }
+
+    DecodeResult decodePermissionRequest(Reader& in)
+    {
+        auto pdu = PermissionRequest {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.string(), pdu.hostId, error)
+            || !assign(in.string(), pdu.name, error) || !assign(in.u32(), pdu.version, error)
+            || !assign(in.string(), pdu.digest, error))
+            return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.commands, decodeDeclaredCommand); !decoded)
+            return std::unexpected(decoded.error());
+        return pdu;
+    }
+
+    DecodeResult decodePermissionReply(Reader& in)
+    {
+        auto pdu = PermissionReply {};
+        auto error = DecodeError {};
+        // The answer byte is carried, not judged: vthost::grantStateOf() reads one no enumerator has as no
+        // answer, rather than this ending the connection over it.
+        if (!assign(in.string(), pdu.hostId, error) || !assign(in.string(), pdu.digest, error)
+            || !assign(in.u8(), pdu.grantState, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeResizeSplit(Reader& in)
     {
         auto pdu = ResizeSplit {};
@@ -1280,6 +1352,8 @@ namespace
         DecodeRow { PduType::ResizeSplit, decodeResizeSplit },
         DecodeRow { PduType::SessionSettingsChanged, decodeSessionSettingsChanged },
         DecodeRow { PduType::PerformOperation, decodePerformOperation },
+        DecodeRow { PduType::PermissionRequest, decodePermissionRequest },
+        DecodeRow { PduType::PermissionReply, decodePermissionReply },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

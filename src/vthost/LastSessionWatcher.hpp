@@ -57,6 +57,9 @@ class LastSessionWatcher final: public SessionStreamEvents
     {
     }
 
+    /// The daemon's own observer, which shows no screen: it keeps no indicator row repainted.
+    [[nodiscard]] bool mirrorsScreens() const noexcept override { return false; }
+
     void sessionClosed(vtworkspace::SessionId /*session*/) override
     {
         // At most one close can be the last one, so this arms at most once per zero-transition —

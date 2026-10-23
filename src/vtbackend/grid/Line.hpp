@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/ContextId.hpp>
 #include <vtbackend/core/GraphicsAttributes.hpp>
@@ -587,6 +588,12 @@ class Line
     /// @param end One past the last column to render; clamped to the line.
     /// @return The columns as UTF-8 with interleaved SGR.
     [[nodiscard]] std::string toUtf8WithSgr(ColumnOffset begin, ColumnOffset end) const;
+
+    /// Gives every cell that wears the default foreground or background @p colors instead, blank cells
+    /// included: what a row drawn in colours of its own, such as the indicator status line, shows where
+    /// something it printed reset its rendition.
+    /// @param colors The colours the row's default stands for.
+    void resolveDefaultColors(RGBColorPair colors) noexcept;
 
     /// How many leading columns survive a trailing-space trim — tmux's `grid_line_length`, which
     /// `capture-pane` applies to every row unless the caller asked for `-J`/`-N`.

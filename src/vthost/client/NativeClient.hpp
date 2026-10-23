@@ -32,6 +32,7 @@
 #include <vector>
 
 #include <vthost/PduPump.hpp>
+#include <vthost/PermissionWire.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost::client
@@ -87,9 +88,13 @@ struct RemoteScreen
     /// The RESOLVED mouse-reporting state, applied to the mirror's input generator directly rather
     /// than through DEC modes. @see proto::MouseState.
     proto::MouseState mouse {};
-    uint8_t progressState = 0;                ///< ProgressState (OSC 9;4), applied to the mirror's terminal.
-    uint8_t progressPercentage = 0;           ///< The progress percentage, 0..100.
-    std::vector<proto::WireLine> statusLines; ///< Host-writable status-line rows, painted on the status page.
+    uint8_t progressState = 0;      ///< ProgressState (OSC 9;4), applied to the mirror's terminal.
+    uint8_t progressPercentage = 0; ///< The progress percentage, 0..100.
+    /// Status-line rows the host drew, painted on the status display @ref statusLinesDisplay names.
+    std::vector<proto::WireLine> statusLines;
+    /// Which display @ref statusLines are for: a StatusDisplayType, as the wire spells it.
+    /// @see proto::Delta::statusLinesDisplay
+    uint8_t statusLinesDisplay = 0;
 
     uint64_t generation = 0;
     /// The stable-id generation the host's row ids count in.
@@ -237,6 +242,9 @@ class NativeClient final
     using SessionEventHandler = std::function<void(RemoteScreen const&, proto::SessionEventPdu const&)>;
     /// Handler invoked when the daemon's tab/pane layout arrives.
     using LayoutHandler = std::function<void(proto::LayoutState const&)>;
+    /// Handler invoked when a status-line extension the daemon runs asks this client's user whether it may
+    /// run its declared commands; answered with answerPermission().
+    using PermissionHandler = std::function<void(proto::PermissionRequest const&)>;
 
     /// Everything this client states about itself in its ClientHello.
     ///
@@ -263,6 +271,8 @@ class NativeClient final
     /// @param onSessionEvent Invoked when a transient session event (bell /
     ///        desktop notification / OSC 52 clipboard write) arrives.
     /// @param onLayout Invoked when the daemon's tab/pane layout arrives.
+    /// @param onPermissionRequest Invoked when a daemon's extension asks this client's user; none for a
+    ///        client that shows no prompt, whose questions wait for another.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -270,7 +280,8 @@ class NativeClient final
                  UpdateHandler onUpdate,
                  ImageHandler onImage,
                  SessionEventHandler onSessionEvent,
-                 LayoutHandler onLayout);
+                 LayoutHandler onLayout,
+                 PermissionHandler onPermissionRequest = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -328,6 +339,12 @@ class NativeClient final
     /// mirror follows through the deltas that change produces.
     /// @param request The session, the operation, and what it acts with.
     void performOperation(proto::PerformOperation request);
+
+    /// Answers a status-line extension's PermissionRequest: the daemon records it for every session.
+    /// @param hostId PermissionRequest::hostId.
+    /// @param digest PermissionRequest::digest.
+    /// @param answer The user's answer; Pending for a dismissed prompt, which records nothing.
+    void answerPermission(std::string hostId, std::string digest, GrantState answer);
 
     /// Restates the emulation settings to ask for the sessions this client creates from now on, when
     /// the client's configuration changed; the sessions that exist keep theirs. Sends nothing when
@@ -398,6 +415,7 @@ class NativeClient final
     ImageHandler _onImage;
     SessionEventHandler _onSessionEvent;
     LayoutHandler _onLayout;
+    PermissionHandler _onPermissionRequest;
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.

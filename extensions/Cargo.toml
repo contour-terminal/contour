@@ -1,0 +1,31 @@
+# One workspace for every guest crate under extensions/, so that a single committed Cargo.lock pins
+# the whole dependency graph and a packager can vendor it once (`cargo vendor`).
+[workspace]
+resolver = "2"
+members = [
+    "manifest",
+    "bundled/agent-status",
+    "bundled/clock",
+    "bundled/git",
+    "bundled/plasma",
+    "bundled/sysload",
+    "testing/echo",
+    "testing/hostile",
+    "testing/sleeper",
+    "testing/spawner",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

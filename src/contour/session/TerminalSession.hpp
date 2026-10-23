@@ -16,6 +16,7 @@
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/SearchStatus.hpp>
+#include <contour/session/SessionFactory.hpp>
 
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
@@ -74,6 +75,15 @@ namespace platform
 class ContourGuiApp;
 
 } // namespace contour
+
+namespace vtextension
+{
+struct Manifest;
+class IGrantStore;
+class SessionExtensions;
+struct ExtensionConsentRequest;
+enum class ConsentAnswer : uint8_t;
+} // namespace vtextension
 
 namespace contour::session
 {
@@ -602,7 +612,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
                     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt,
                     std::optional<vtpty::Process::ExecInfo> launchedCommand = std::nullopt,
                     std::unique_ptr<platform::Notifier> notifier = nullptr,
-                    SessionRole role = SessionRole::Shell);
+                    SessionRole role = SessionRole::Shell,
+                    SessionHosting hosting = SessionHosting::Local);
     ~TerminalSession() override;
 
     int id() const noexcept { return _id; }
@@ -772,6 +783,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void attachDisplay(DisplaySurface& display);
     void detachDisplay(DisplaySurface& display);
 
+    /// Tells the terminal's status-line extensions the font the attached display now draws in: its point
+    /// size and its cell size in device pixels. The display calls it wherever a font or pixel-density change
+    /// is applied -- the reconfig recompute (TerminalDisplay::recomputeGeometryAfterFontReconfig) and the
+    /// setup-time materialization (TerminalDisplay::createRenderer) -- and attachDisplay() once for the
+    /// display's current font. Without a display, or without extensions, it returns after one lock-free
+    /// test; extensions a reload installs later are told when they are (statusLineExtensionsReplaced).
+    void updateStatusLineFontMetrics();
+
     TerminalSessionManager* getTerminalManager() const noexcept { return _manager; }
 
     /// The app-wide forced-font-DPI provider (see display/ContentScale.h), for injection into the
@@ -801,6 +820,51 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] Q_INVOKABLE QString pendingRerunCommandLine() const;
     Q_INVOKABLE void resizeTerminalToDisplaySize();
 
+    /// What the prompt asking requestPermissionForExtension() says: which extension asks, from which module,
+    /// and every command its manifest declares, made safe to show. Empty while nothing is asked, and always
+    /// in a build without extensions.
+    /// @return The prompt's text.
+    [[nodiscard]] Q_INVOKABLE QString pendingExtensionPermissionText() const;
+
+    /// Answers the extension prompt: Allow is remembered (in the grants file) for that extension's manifest.
+    Q_INVOKABLE void allowPendingExtension();
+
+    /// Answers the extension prompt: Deny is remembered too.
+    Q_INVOKABLE void denyPendingExtension();
+
+    /// Closes the extension prompt unanswered: nothing is remembered, and a new pane asks again.
+    Q_INVOKABLE void dismissPendingExtension();
+
+    // The extension members below are declared, and the class laid out, the same with and without
+    // CONTOUR_EXTENSIONS: translation units that see no such definition (ContourTerminalDisplay's) include
+    // this header too. Only a build with extensions defines and calls them.
+
+    /// Asks the user whether an extension may run its declared commands. Callable from any thread -- it is
+    /// what an extension's lane calls -- and never waits: the question is posted to the GUI thread, where
+    /// requestPermissionForExtension() is emitted once it is the one to show.
+    /// @param hostId Which installed extension asks.
+    /// @param manifest What it declares.
+    void requestExtensionPermission(std::string_view hostId, vtextension::Manifest const& manifest);
+
+    /// Asks the user whether an extension a daemon runs for this pane may run its declared commands: through
+    /// the prompt this pane's own extensions ask through, its answer recorded in @p answers -- which sends it
+    /// to the daemon. GUI thread.
+    /// @param request The question, as the daemon asked it.
+    /// @param answers Where its answer goes; it must outlive the session.
+    void askForHostedExtension(vtextension::ExtensionConsentRequest request,
+                               vtextension::IGrantStore& answers);
+
+    /// @return The pane's status-line extensions, empty while the profile declares none; null only in a build
+    ///         without extensions.
+    [[nodiscard]] vtextension::SessionExtensions const* statusLineExtensions() const noexcept;
+
+    /// @return Whether any status-line extension runs in the pane; false in a build without extensions.
+    [[nodiscard]] bool runsStatusLineExtensions() const noexcept;
+
+    /// @return Whether the pane polls which program is in its foreground: only while one of its status-line
+    ///         extensions follows it. GUI thread.
+    [[nodiscard]] bool pollsForegroundProcess() const noexcept;
+
     void updateColorPreference(vtbackend::ColorPreference preference);
 
     // vtbackend::Events
@@ -809,6 +873,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void bell() override;
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
+    void extensionFramePublished() override;
     void screenUpdated() override;
     void pageResized() override;
 
@@ -1213,6 +1278,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void requestPermissionForBufferCapture();
     void requestPermissionForShowHostWritableStatusLine();
     void requestPermissionForRerunCommand();
+    /// A status-line extension asks to run its commands; pendingExtensionPermissionText() says what to show.
+    void requestPermissionForExtension();
     void showNotification(QString const& title, QString const& content);
     void fontSizeChanged();
 
@@ -1503,6 +1570,52 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     void setDefaultCursor();
     void configureTerminal();
+
+    /// @return What the terminal shows status-line extensions through; none without extensions.
+    [[nodiscard]] std::optional<vtbackend::StatusLineExtensionServices> terminalExtensionServices() noexcept;
+
+    /// What a pane with status-line extensions keeps for them. Defined, with the extensions, in
+    /// TerminalSession.cpp.
+    struct ExtensionState;
+
+    /// Owns an ExtensionState through the deleter chosen where it is made, so that this header needs it
+    /// complete nowhere: the class is the same in a translation unit without CONTOUR_EXTENSIONS.
+    using ExtensionStatePtr = std::unique_ptr<ExtensionState, void (*)(ExtensionState*)>;
+
+    /// @return What the session keeps for status-line extensions, with none running yet; null without
+    ///         CONTOUR_EXTENSIONS.
+    [[nodiscard]] ExtensionStatePtr createExtensionState();
+
+    /// Rebuilds the extensions when the profile now declares others (construction, a reload, a profile
+    /// switch). Returns at once: they are loaded off this thread.
+    void reloadExtensions();
+
+    /// Tells the terminal that other extensions run now. On the GUI thread, holding no lock.
+    void statusLineExtensionsReplaced();
+
+    /// @return The font the attached display draws in, for the status-line extensions. Requires a display.
+    [[nodiscard]] vtbackend::StatusLineFontMetrics displayFontMetrics();
+
+    /// Queues an extension's question, and asks it if it is the one to show. GUI thread.
+    /// @param request The question.
+    /// @param answers Where its answer goes.
+    void offerExtensionConsent(vtextension::ExtensionConsentRequest request,
+                               vtextension::IGrantStore& answers);
+
+    /// Records the answer to the extension prompt, and asks the next question, if any.
+    void answerExtensionConsent(vtextension::ConsentAnswer answer);
+
+    /// Tells the extensions when the program in the foreground changed. Ticks only while one follows it.
+    void pollForegroundProcess();
+
+    /// Starts the foreground poll if an extension follows the foreground process, and stops it if none does.
+    /// GUI thread.
+    void armForegroundProcessPoll();
+
+    /// Has the engines and modules that runners retired released a moment from now, once their lanes ran
+    /// their last jobs.
+    void scheduleRetiredRelease();
+
     void configureCursor(config::CursorConfig const& cursorConfig);
 
     /// Scrolls up by @p lineCount lines, using smooth pixel scrolling if enabled, otherwise line-based.
@@ -1567,6 +1680,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::optional<std::string> _profileOverride;
     std::optional<vtpty::Process::ExecInfo> _launchedCommand;
     SessionRole _role;
+    /// Where the session's program runs: here, or on a daemon or tmux server the pane mirrors. A mirrored
+    /// pane runs no status-line extension of its own -- they run where its terminal does, on the remote end.
+    SessionHosting _hosting;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
@@ -1651,6 +1767,20 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Where a job on another thread (a follow gesture's path probe) hands its result back to this session,
     /// shared with the job: ~TerminalSession() withdraws it first, so a job that answers later posts nothing.
     std::shared_ptr<platform::PostTarget> _postTarget = std::make_shared<platform::PostTarget>(*this);
+
+    /// The pane's status-line extensions, and what it keeps for them; null only without CONTOUR_EXTENSIONS.
+    /// Made eagerly, with the session (R47), because the forwarder and the sink inside it must exist when the
+    /// terminal is built; what costs is lazy: the runtime, its build thread, the engine, the workers and the
+    /// foreground-process timer come only once the profile declares extensions. Until then it forwards to
+    /// nothing, and every event hook of the terminal stays one untaken branch. A reload that declares some
+    /// starts them here.
+    ///
+    /// Declared after _postTarget, which its callbacks post through, and before _terminal, which borrows its
+    /// forwarder and sink: ~Terminal revokes the sink (no delivery reaches a dying terminal), then this
+    /// destroys the runners -- none waits for its extension -- and the sink. ~TerminalSession holds no lock
+    /// while the terminal goes (it releases _renderNotifyMutex in its body), so the revoke cannot deadlock on
+    /// a delivery that takes it.
+    ExtensionStatePtr _extensionState;
 
     vtbackend::Terminal _terminal;
     /// A notice is on screen and the pane is alive only to be dismissed: the shell exited too early,

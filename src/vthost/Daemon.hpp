@@ -31,6 +31,7 @@
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
 // needs them too and sits BELOW this header — a lower layer must not reach up for them.
 #include <vthost/ClientSizePolicy.hpp>
+#include <vthost/ExtensionHosting.hpp>
 #include <vthost/SessionSettings.hpp>
 
 namespace core::net
@@ -109,6 +110,11 @@ struct DaemonConfig
     /// different ones. `Latest` by default, matching tmux's `window-size` — the window you just
     /// resized is the one you are looking at.
     ClientSizePolicy sizePolicy = ClientSizePolicy::Latest;
+    /// Makes the status-line extensions every hosted session runs; unset for none, which constructs, polls
+    /// and wakes nothing of them. A factory rather than the extensions themselves, because they post to the
+    /// daemon's event loop: runDaemon() makes them once that exists, and its session host destroys them
+    /// before it goes. `contour daemon` sets it from the profile, which `src/vthost` cannot reach.
+    std::function<std::shared_ptr<IExtensionHosting>()> extensions {};
 };
 
 /// Runs the daemon: binds the hardened control socket, serves connections until

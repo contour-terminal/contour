@@ -60,6 +60,8 @@ enum class PduType : uint8_t
     ResizeSplit = 19,
     SessionSettingsChanged = 20,
     PerformOperation = 21,
+    PermissionRequest = 22,
+    PermissionReply = 23,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -646,10 +648,15 @@ struct Delta
     uint8_t statusChanged = 0;
     uint8_t statusDisplayType = 0;
     uint8_t activeStatusDisplay = 0;
-    /// Set (1) when the host-writable status line's content changed this batch;
-    /// `statusLines` then holds its whole (tiny) grid, painted onto the mirror's
-    /// status page. A separate page from the main grid — the multi-page carrier.
+    /// Set (1) when a status line's content the mirror cannot draw itself changed this batch;
+    /// `statusLines` then holds its whole (tiny) grid, painted onto the mirror's status display
+    /// `statusLinesDisplay` names. A separate page from the main grid — the multi-page carrier.
     uint8_t statusLinesChanged = 0;
+    /// Which display `statusLines` are for, a StatusDisplayType read through vthost::statusDisplayTypeOf():
+    /// 2 (host-writable) the application's own status line; 1 (indicator) the indicator row the host's
+    /// status-line extensions drew, which the mirror shows in place of its own template -- and no rows there
+    /// give the mirror its own back.
+    uint8_t statusLinesDisplay = 0;
     std::vector<WireLine> statusLines;
     /// Set (1) when the Kitty keyboard flags changed in this batch;
     /// `kittyKeyboardFlags` then holds the new flag set to re-emit (CSI = flags ; 1 u).
@@ -971,6 +978,45 @@ struct PerformOperation
     bool operator==(PerformOperation const&) const = default;
 };
 
+/// One command a status-line extension's manifest declares, as a permission request carries it.
+struct WireDeclaredCommand
+{
+    std::string name = {};              ///< The name the extension runs it by.
+    std::vector<std::string> argv = {}; ///< Its argv template, each element verbatim.
+    bool operator==(WireDeclaredCommand const&) const = default;
+};
+
+/// Server→client: a status-line extension of @p session asks whether it may run the commands its manifest
+/// declares. The daemon runs extensions; a client with a GUI asks its user, and answers with a
+/// PermissionReply. Sent when an extension asks, and again to each client that attaches while the question
+/// is still open: one with no client attached stays unanswered, and its command calls fail as pending.
+///
+/// Everything but @ref session and @ref hostId is the extension's own manifest, and so guest-chosen text:
+/// a client shows it only as the consent prompt shows a local extension's.
+struct PermissionRequest
+{
+    uint64_t session = 0;    ///< The session whose extension asks; where the prompt belongs.
+    std::string hostId = {}; ///< Which installed extension asks: its config key and its module, as the
+                             ///< daemon assigned it.
+    std::string name = {};   ///< The manifest's name.
+    uint32_t version = 0;    ///< The manifest's format revision.
+    std::string digest = {}; ///< The manifest's digest, which the answer is bound to.
+    std::vector<WireDeclaredCommand> commands = {}; ///< What it may run, if allowed.
+    bool operator==(PermissionRequest const&) const = default;
+};
+
+/// Client→server: the user's answer to a PermissionRequest. Keyed as a grant is, by the installed extension
+/// and the manifest digest; the daemon records it in its own grant store, for every session.
+struct PermissionReply
+{
+    std::string hostId = {}; ///< PermissionRequest::hostId.
+    std::string digest = {}; ///< PermissionRequest::digest.
+    /// vthost::GrantState as the wire spells it; read through vthost::grantStateOf(), which answers nothing
+    /// for a byte no enumerator has.
+    uint8_t grantState = 0;
+    bool operator==(PermissionReply const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -992,7 +1038,9 @@ using DecodedPdu = std::variant<Invalid,
                                 ResizePane,
                                 ResizeSplit,
                                 SessionSettingsChanged,
-                                PerformOperation>;
+                                PerformOperation,
+                                PermissionRequest,
+                                PermissionReply>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

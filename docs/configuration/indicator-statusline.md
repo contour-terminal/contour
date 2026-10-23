@@ -26,6 +26,7 @@ Variable             | Description
 ---------------------|--------------------------------------------------------------------
 `{Clock}`            | current clock in HH:MM format
 `{Command}`          | yields the output of the given command, as specified via parameter `Program=...` (or the `{Command:<command>}` shorthand), re-run every `Interval=...` seconds
+`{Extension}`        | what the [status-line extension](../extensions.md) named by parameter `Name=...` (or the `{Extension:<name>}` shorthand) draws
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
 `{Hyperlink}`        | reveals the hyperlink at the given mouse location
 `{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)

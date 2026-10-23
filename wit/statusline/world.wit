@@ -1,0 +1,214 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/// The contract between a terminal and an extension that draws a status line.
+///
+/// The package is terminal-neutral: any terminal can implement the host side, and any language with
+/// a wit-bindgen generator can implement the extension side. README.md describes the lifecycle, the
+/// guarantees a host gives, and the binary contract.
+package terminal-extensions:statusline@0.1.0;
+
+/// The vocabulary shared by the host and the extension.
+///
+/// `bool` fields (`tab.active`, `event.focus`, and `state-snapshot.focused` in `host`) are the wire
+/// representation of a yes/no; a host is free to convert them to its own types at the boundary.
+interface types {
+    /// What an extension answers to `update`: whether the host should call `render` next.
+    enum render-request {
+        /// The event changed nothing the extension shows.
+        none,
+        /// The extension's output is stale; call `render`.
+        render,
+    }
+
+    /// The input mode of the terminal's pane.
+    enum input-mode {
+        insert,
+        normal,
+        visual,
+        visual-line,
+        visual-block,
+        hint,
+    }
+
+    /// The state of a progress indicator.
+    enum progress-state {
+        /// No progress is shown.
+        hidden,
+        /// Progress is under way; `percent` says how far.
+        normal,
+        /// The tracked operation failed.
+        error,
+        /// Progress is under way, but its extent is unknown.
+        indeterminate,
+        /// The tracked operation needs attention.
+        warning,
+    }
+
+    /// One tab of the window the pane lives in.
+    record tab {
+        title: string,
+        active: bool,
+    }
+
+    /// A progress indicator as the running program reports it.
+    record progress {
+        state: progress-state,
+        /// 0 to 100; meaningful for `normal`, `error` and `warning`.
+        percent: u8,
+    }
+
+    /// The font the terminal draws its cells in.
+    record font-metrics {
+        /// The font's size in points; 0 where the host draws in no font of its own (a session served to
+        /// remote clients, say), which tells the extension nothing about it.
+        size-pt: f32,
+        /// One cell's width, in the device px a cell is a whole number of: what `CSI 16 t` reports. 0
+        /// while unknown.
+        cell-width-px: u32,
+        /// One cell's height, likewise; 0 while unknown.
+        cell-height-px: u32,
+    }
+
+    /// The size of the extension's own surface, in character cells.
+    record size {
+        cols: u32,
+        rows: u32,
+    }
+
+    /// The kinds of event an extension subscribes to. `resized`, `timer` and `reply` are always
+    /// delivered and have no flag.
+    flags event-kinds {
+        title,
+        cwd,
+        foreground-process,
+        input-mode,
+        tabs,
+        user-var,
+        progress,
+        focus,
+        font,
+    }
+
+    /// Something the host tells the extension about.
+    variant event {
+        /// The title of the pane or window changed.
+        title(string),
+        /// The working directory changed.
+        cwd(string),
+        /// The foreground process of the pane changed; its name.
+        foreground-process(string),
+        /// The input mode changed.
+        input-mode(input-mode),
+        /// The set of tabs, or which one is active, changed.
+        tabs(list<tab>),
+        /// A program set a user variable: its name and value.
+        user-var(tuple<string, string>),
+        /// The progress indicator changed.
+        progress(progress),
+        /// The pane gained (true) or lost (false) focus.
+        focus(bool),
+        /// The font's size, or a cell's size in px, changed: a zoom, a configuration reload, or a move to
+        /// a screen of another density.
+        font-changed(font-metrics),
+        /// The extension's own surface changed size.
+        resized(size),
+        /// The delay the extension asked for with `request-frame` has elapsed.
+        timer,
+        /// The terminal's answer to a query the extension wrote in its own previous output.
+        reply(list<u8>),
+    }
+}
+
+/// What the host offers the extension.
+interface host {
+    use types.{font-metrics, input-mode, progress, size, tab};
+
+    /// How loud a log message is.
+    enum log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    /// The current values of everything an event can announce, so that an extension can read them
+    /// at `load` instead of waiting for the first event.
+    record state-snapshot {
+        title: string,
+        cwd: string,
+        foreground-process: string,
+        input-mode: input-mode,
+        tabs: list<tab>,
+        /// Every user variable that is set, as name and value pairs.
+        user-vars: list<tuple<string, string>>,
+        progress: progress,
+        focused: bool,
+        /// The extension's own surface.
+        size: size,
+        /// Wall-clock time, in milliseconds since the Unix epoch. This is the only clock an
+        /// extension has.
+        unix-time-ms: u64,
+        /// How far the terminal's local time is ahead of UTC at `unix-time-ms`, in minutes (negative
+        /// west of Greenwich). It follows daylight saving: local time is `unix-time-ms / 60000 +
+        /// utc-offset-minutes` minutes since the epoch, read as UTC.
+        utc-offset-minutes: s32,
+        /// The font the terminal draws in; all zeros while the host does not know it.
+        font: font-metrics,
+    }
+
+    /// What a command that ran to completion left behind. A host that cannot tell may report an
+    /// exit code of 0 and an empty `stderr`; an extension must not rely on either.
+    record command-output {
+        exit-code: s32,
+        stdout: list<u8>,
+        stderr: list<u8>,
+    }
+
+    /// Why a command did not produce output.
+    enum command-error {
+        /// The extension's manifest does not declare this command with these arguments.
+        not-declared,
+        /// The user has not decided yet whether to allow the extension's commands. The call does
+        /// not wait; try again later.
+        pending,
+        /// The user refused the extension's commands.
+        denied,
+        /// The command could not be started or did not exit normally.
+        failed,
+        /// The command ran longer than the host allows.
+        timed-out,
+    }
+
+    /// Asks for a `timer` event after at least `after-ms` milliseconds. The host may deliver it later
+    /// than asked, never earlier, and may cap how often it delivers one.
+    request-frame: func(after-ms: u32);
+
+    /// Writes a message to the host's log.
+    log: func(level: log-level, message: string);
+
+    /// Reads the current state.
+    state: func() -> state-snapshot;
+
+    /// Runs a command that the extension's manifest declares, with the given arguments, and waits for
+    /// it. There is no shell: `name` is a declared command, and `args` are its arguments as name and
+    /// value pairs, each filling the placeholder of that name in the command's declared argv.
+    run-command: func(name: string, args: list<tuple<string, string>>) -> result<command-output, command-error>;
+}
+
+/// An extension that draws a status line.
+world statusline {
+    use types.{event, event-kinds, render-request};
+
+    import host;
+
+    /// Called once, first, with the extension's configuration. Returns the event kinds it wants.
+    export load: func(config: list<tuple<string, string>>) -> event-kinds;
+
+    /// Called for each event the extension subscribed to, and for the always-delivered ones.
+    export update: func(ev: event) -> render-request;
+
+    /// Returns VT bytes that draw the status line on a surface of `cols` by `rows` cells. Called
+    /// once after `load`, and after each `update` that answered `render`.
+    export render: func(cols: u32, rows: u32) -> list<u8>;
+}

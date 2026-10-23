@@ -962,6 +962,9 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
         .shell = std::move(shell),
         .escapeSandbox = profile.escapeSandbox.value(),
         .startupLayout = std::move(startupLayout),
+        .configFile = config.configFile,
+        .extensions = profile.extensions.value(),
+        .statusLineExtension = profile.statusLine.value().extension,
     };
 }
 
@@ -1318,6 +1321,19 @@ std::string YAMLConfigReader::resolveVariables(std::string const& input) const
     return replaceVariables(input, variableReplacer);
 }
 
+std::filesystem::path YAMLConfigReader::declaringDirectory() const
+{
+    auto file = configFile;
+    // Inside a side file the file is the one being read, not the configuration file it belongs to.
+    if (!_keyPath.empty() && _keyPath.front().kind == KeyStepKind::File)
+        if (auto sideFile = core::pathFromUtf8(_keyPath.front().entry))
+            file = *std::move(sideFile);
+    // The file first, then its parent: a bare file name has an empty parent, which has no absolute form.
+    auto error = std::error_code {};
+    auto absolute = fs::absolute(file, error);
+    return error ? file.parent_path() : absolute.parent_path();
+}
+
 std::filesystem::path YAMLConfigReader::resolvedPath(std::string const& input) const
 {
     auto const text = resolveVariables(input);
@@ -1638,6 +1654,7 @@ void YAMLConfigReader::loadProfileBody(YAML::Node const& child,
         loadFromEntry(child, "link_detection", where.linkDetection);
         loadFromEntry(child, "file_opener", where.fileOpener);
         loadFromEntry(child, "hint_patterns", where.hintPatterns);
+        loadFromEntry(child, "extensions", where.extensions);
         // Reported here, once, where the profile's own hint_patterns are read: a profile that merely inherits
         // another's patterns does not repeat that profile's report, and the table itself is compiled again,
         // silently, whenever the profile is applied.
@@ -2134,10 +2151,14 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     }
 }
 
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Permission& where)
+namespace
 {
-    auto parseModifierKey = [](std::string const& key) -> std::optional<Permission> {
-        auto const literal = core::toLower(key);
+    /// Reads a permission's spelling, ignoring case.
+    /// @param token One of `allow`, `deny` and `ask`.
+    /// @return The permission, or no value for any other spelling.
+    [[nodiscard]] std::optional<Permission> permissionFromToken(std::string_view token)
+    {
+        auto const literal = core::toLower(token);
         if (literal == "allow")
             return Permission::Allow;
         if (literal == "deny")
@@ -2145,11 +2166,14 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         if (literal == "ask")
             return Permission::Ask;
         return std::nullopt;
-    };
+    }
+} // namespace
 
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Permission& where)
+{
     if (auto const child = node[entry]; child)
     {
-        if (auto const opt = parseModifierKey(child.as<std::string>()); opt.has_value())
+        if (auto const opt = permissionFromToken(child.as<std::string>()); opt.has_value())
             where = opt.value();
     }
 }
@@ -2790,6 +2814,137 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     }
 }
 
+namespace
+{
+    /// Reads an extension's `config:` map into @p extension: a key holding what it cannot take costs that
+    /// key, and a key set twice keeps the later value.
+    /// @param values The `config` node, a map or null.
+    /// @param extension Receives the keys and values.
+    /// @param keyPath Where the extension is declared, for the diagnostics.
+    void readExtensionConfigValues(YAML::Node const& values,
+                                   ExtensionConfig& extension,
+                                   std::string_view keyPath)
+    {
+        if (values.IsNull())
+            return;
+        if (!values.IsMap())
+        {
+            errorLog()("Ignoring 'config' of extension '{}' of {}: expected a map of keys to values.",
+                       extension.name,
+                       keyPath);
+            return;
+        }
+        for (auto const& item: values)
+        {
+            if (!item.first.IsScalar() || !item.second.IsScalar())
+            {
+                errorLog()("Ignoring a 'config' key of extension '{}' of {}: keys and values must be text.",
+                           extension.name,
+                           keyPath);
+                continue;
+            }
+            auto key = item.first.as<std::string>();
+            if (extension.config.contains(key))
+                errorLog()("Extension '{}' of {} sets 'config' key '{}' twice; the later one stands.",
+                           extension.name,
+                           keyPath,
+                           key);
+            extension.config.insert_or_assign(std::move(key), item.second.as<std::string>());
+        }
+    }
+} // namespace
+
+std::optional<ExtensionConfig> YAMLConfigReader::readExtension(std::string name,
+                                                               YAML::Node const& settings,
+                                                               std::string_view keyPath) const
+{
+    auto extension = ExtensionConfig {};
+    extension.name = std::move(name);
+    if (settings.IsNull()) // `git:` alone: a bundled extension, with the defaults.
+        return extension;
+    if (!settings.IsMap())
+    {
+        errorLog()("Skipping extension '{}' of {}: expected a map of path, config and run_command.",
+                   extension.name,
+                   keyPath);
+        return std::nullopt;
+    }
+
+    // A path that is given must name a module: falling back to the bundled extension of the same name
+    // would run something else than the file asked for.
+    if (auto const path = settings["path"]; path)
+    {
+        auto const text = path.IsScalar() ? path.as<std::string>() : std::string {};
+        extension.path = text.empty() ? std::filesystem::path {} : resolvedPath(text);
+        if (extension.path.empty())
+        {
+            errorLog()(
+                "Skipping extension '{}' of {}: its 'path' must be a file name.", extension.name, keyPath);
+            return std::nullopt;
+        }
+        if (extension.path.is_relative())
+            extension.path = (declaringDirectory() / extension.path).lexically_normal();
+    }
+
+    if (auto const values = settings["config"]; values)
+        readExtensionConfigValues(values, extension, keyPath);
+
+    if (auto const runCommand = settings["run_command"]; runCommand)
+    {
+        auto const token = runCommand.IsScalar() ? runCommand.as<std::string>() : std::string {};
+        if (auto const permission = permissionFromToken(token))
+            extension.runCommand = *permission;
+        else
+            errorLog()(
+                "Unknown run_command '{}' of extension '{}' of {}; expected allow, deny or ask. Asking.",
+                token,
+                extension.name,
+                keyPath);
+    }
+    return extension;
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::vector<ExtensionConfig>& where) const
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+    if (child.IsNull()) // `extensions:` with nothing under it: none.
+    {
+        where.clear();
+        return;
+    }
+    auto const keyPath = keyPathTo(node, entry);
+    if (!child.IsMap()) // Ignored whole: what the profile inherited stays.
+    {
+        errorLog()("Ignoring {}: expected a map from an extension's name to its settings.", keyPath);
+        return;
+    }
+    where.clear();
+
+    for (auto const& item: child)
+    {
+        if (!item.first.IsScalar() || item.first.as<std::string>().empty())
+        {
+            errorLog()("Skipping an extension of {}: its name must be a non-empty text.", keyPath);
+            continue;
+        }
+
+        auto name = item.first.as<std::string>();
+        if (std::ranges::any_of(where, [&](ExtensionConfig const& known) { return known.name == name; }))
+        {
+            errorLog()(
+                "Skipping extension '{}' of {}: it is declared twice; the first one stands.", name, keyPath);
+            continue;
+        }
+
+        if (auto extension = readExtension(std::move(name), item.second, keyPath))
+            where.push_back(*std::move(extension));
+    }
+}
+
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, MouseConfig& where)
 {
     auto const child = node[entry];
@@ -2814,6 +2969,18 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             loadFromEntry(child["indicator"], "left", where.indicator.left);
             loadFromEntry(child["indicator"], "middle", where.indicator.middle);
             loadFromEntry(child["indicator"], "right", where.indicator.right);
+        }
+        // An absent key leaves the value as it is, a null or empty one resets it: the template-driven line.
+        if (auto const extension = child["extension"]; extension)
+        {
+            if (extension.IsNull())
+                where.extension.reset();
+            else if (!extension.IsScalar())
+                errorLog()("Ignoring {}: expected the name of an extension.", keyPathTo(child, "extension"));
+            else if (auto name = extension.as<std::string>(); !name.empty())
+                where.extension = std::move(name);
+            else
+                where.extension.reset();
         }
     }
 }

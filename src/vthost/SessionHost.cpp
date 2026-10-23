@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/SessionHost.hpp>
 
+#include <vtpty/Process.hpp>
+
+#include <core/Assert.hpp>
 #include <core/Overloaded.hpp>
 
 #include <algorithm>
@@ -44,21 +47,38 @@ HostedSession::HostedSession(SessionId id,
                              std::function<void()> onBell,
                              SessionNotifyCallback onNotify,
                              std::function<void(std::string)> onCopyToClipboard,
-                             std::function<void()> onClosed):
+                             std::function<void()> onClosed,
+                             HostedSessionExtensions extensions):
     _id(id),
+    _extensions(std::move(extensions.extensions)),
     _events(std::move(identity),
             std::move(onScreenUpdated),
             std::move(onBell),
             std::move(onNotify),
-            std::move(onCopyToClipboard)),
+            std::move(onCopyToClipboard),
+            // A published frame repaints the indicator, and tells the host when what the extensions follow
+            // changed: the worker reads that lock-free, and hands the loop only the change.
+            [this,
+             published = std::move(extensions.onPublished),
+             followingChanged = std::move(extensions.onForegroundFollowingChanged)] {
+                if (published)
+                    published();
+                if (_extensions && followingChanged
+                    && _foregroundFollowing.changed(_extensions->subscriptions()))
+                    followingChanged();
+            }),
     _terminal(_events,
               env,
               fileSystem,
               std::move(pty),
               std::move(settings),
-              std::nullopt, // the daemon never renders an indicator, so it runs no status-line commands
+              // The daemon runs no {Command} items: commands an extension declares run in its runtime, under
+              // the user's permission.
+              std::nullopt,
               clocks,
-              vtbackend::randomSemanticBlockTokens()),
+              vtbackend::randomSemanticBlockTokens(),
+              std::nullopt,
+              _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt),
     _onClosed(std::move(onClosed))
 {
     // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.
@@ -66,6 +86,26 @@ HostedSession::HostedSession(SessionId id,
     _events.onShowHostWritableStatusLine = [this] {
         _terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
     };
+    // Once the terminal they reach exists; they are built on another thread, and run once handed back.
+    if (_extensions)
+        _extensions->start();
+}
+
+void HostedSession::pollForegroundProcess()
+{
+    if (!followsForegroundProcess())
+        return;
+    auto const* const tapped = dynamic_cast<TappingPty const*>(&_terminal.device());
+    auto const* const process =
+        dynamic_cast<vtpty::Process const*>(tapped != nullptr ? &tapped->inner() : &_terminal.device());
+    if (process == nullptr)
+        return;
+    auto name = process->foregroundProcessName();
+    if (!name || *name == _foregroundProcessName)
+        return;
+    _foregroundProcessName = std::move(*name);
+    auto const guard = std::lock_guard { _terminal };
+    _terminal.foregroundProcessChanged(_foregroundProcessName);
 }
 
 HostedSession::~HostedSession()
@@ -194,6 +234,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
                          core::Environment const& env,
                          SessionHostConfig config):
     _loop(loop),
+    _gate(std::make_shared<HostGate>(HostGate { .host = this })),
     _ptyFactory(std::move(ptyFactory)),
     // Normalized once, here, so _pageSize and every session that does not override it are derived
     // from settings a host can actually serve.
@@ -206,6 +247,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _inputWatermarks(config.inputWatermarks),
     _sizePolicy(config.sizePolicy),
     _fileSystem(config.fileSystem.get()),
+    _extensions(std::move(config.extensions)),
     _model(*this,
            [this]() -> SessionId {
                // The allocator hand-back half of the pre-mint handshake (the GUI's
@@ -232,6 +274,18 @@ SessionHost::~SessionHost()
     // Close every PTY first so all pump threads unblock and join promptly.
     for (auto& [id, session]: _sessions)
         session->terminate();
+    if (_extensions)
+    {
+        // The drain below turns the loop: from inside a turn -- or beside one on another thread -- it would
+        // re-enter it, or race it.
+        Require(!_loop.running());
+        // Every runner is destroyed with its session, and posts its last job to its lane; a build in flight
+        // still holds the engine. Only then are the threads stopped, and what they posted dropped.
+        _sessions.clear();
+        _extensions->stop();
+        std::ignore = _loop.runOnce(std::chrono::milliseconds { 0 });
+    }
+    _gate->host = nullptr;
 }
 
 std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& request)
@@ -283,8 +337,14 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
             // Pump thread -> loop thread; the host may already be gone at
             // drain time only if the loop is too, so `this` stays valid.
             _loop.post([this, id] {
-                if (!_sessions.contains(id.value))
+                auto const hosted = _sessions.find(id.value);
+                if (hosted == _sessions.end())
                     return;
+                // What the output changed of the indicator's other items, as a frame would repaint it: for a
+                // client to be sent, so not while none is attached, and once per loop turn however many
+                // batches arrived meanwhile.
+                if (hosted->second->hasExtensions() && hasScreenMirrors())
+                    hosted->second->requestStatusLineRepaint();
                 for (auto* observer: _streamSubscribers)
                     observer->sessionScreenUpdated(id);
             });
@@ -317,10 +377,17 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
             });
         },
         /*onClosed=*/
-        [this, id] { _loop.post([this, id] { handleSessionExit(id); }); });
+        [this, id] { _loop.post([this, id] { handleSessionExit(id); }); },
+        makeSessionExtensions(id));
 
     if (_pumping == SessionPumping::Threaded)
         session->start();
+    if (session->hasExtensions())
+    {
+        // The row a client attaching now mirrors: the daemon renders no frame that would paint it. Nothing is
+        // polled yet: what the extensions follow is known once their build lands (extensionsReplaced).
+        refreshStatusLine(*session);
+    }
 
     _sessions.emplace(id.value, std::move(session));
     _pendingSessionId = id;
@@ -680,6 +747,18 @@ void SessionHost::unsubscribe(vtworkspace::ModelEvents* observer)
 void SessionHost::subscribeStream(SessionStreamEvents* observer)
 {
     _streamSubscribers.push_back(observer);
+    // Nothing repainted the rows while no client was attached: one attaching is handed them current.
+    if (!observer->mirrorsScreens())
+        return;
+    for (auto const& [id, session]: _sessions)
+        if (session->hasExtensions())
+            refreshStatusLine(*session);
+}
+
+bool SessionHost::hasScreenMirrors() const noexcept
+{
+    return std::ranges::any_of(
+        _streamSubscribers, [](SessionStreamEvents const* observer) { return observer->mirrorsScreens(); });
 }
 
 void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
@@ -711,15 +790,230 @@ void SessionHost::handleSessionExit(SessionId session)
     if (auto const [window, tab, leaf] = _model.findSessionLeaf(session); leaf != nullptr)
         _model.closePane(window->id(), tab->id(), leaf->id());
 
+    auto const hadExtensions = it->second->hasExtensions();
     _sessions.erase(it);
     // Reached from the pump thread's posted completion, so this runs on the loop thread like
     // every other line in this file.
     sessionLog()("session {} exited ({} live)", session.value, _sessions.size());
+    auto rehomed = std::vector<proto::PermissionRequest> {};
+    if (hadExtensions)
+    {
+        rehomed = rehomePermissionRequests(session);
+        scheduleRetiredRelease();
+    }
 
     // The session is gone: tell stream observers so they drop any per-session
     // state (delta cursors, sent-hyperlink sets) instead of accumulating it.
     for (auto* observer: _streamSubscribers)
         observer->sessionClosed(session);
+
+    // Told after the close, which drops what observers kept of the questions in the pane that is gone.
+    for (auto const& request: rehomed)
+        for (auto* observer: _streamSubscribers)
+            observer->sessionPermissionRequested(SessionId { request.session }, request);
+}
+
+std::vector<proto::PermissionRequest> SessionHost::rehomePermissionRequests(SessionId gone)
+{
+    // A runner asks only once, and a question the same extension asked in another pane was not kept: dropped
+    // here, it would never be asked again. So it moves to another pane whose extensions run; it goes only
+    // when none is left, as no client could show it.
+    auto const heir =
+        std::ranges::find_if(_sessions, [](auto const& entry) { return entry.second->hasExtensions(); });
+    if (heir == _sessions.end())
+    {
+        std::erase_if(_pendingPermissions,
+                      [&](proto::PermissionRequest const& request) { return request.session == gone.value; });
+        return {};
+    }
+    auto rehomed = std::vector<proto::PermissionRequest> {};
+    for (auto& request: _pendingPermissions)
+    {
+        if (request.session != gone.value)
+            continue;
+        request.session = heir->first;
+        rehomed.push_back(request);
+    }
+    if (!rehomed.empty())
+        sessionLog()("session {} exited with {} open extension question(s): asked in session {} now",
+                     gone.value,
+                     rehomed.size(),
+                     heir->first);
+    return rehomed;
+}
+
+// ---------------------------------------------------------------------------
+// Status-line extensions
+
+HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
+{
+    if (!_extensions)
+        return {};
+    // Every hook marshals onto the loop, and does nothing there once the session or the host is gone: session
+    // ids are never reused, so one no longer hosted is this one, destroyed; the gate is revoked as the host
+    // goes. A job dropped that way is destroyed on the loop, which is where a dropped build must release
+    // what it holds -- and ~SessionHost drains the loop before the extensions it would release to go.
+    auto const hosted = [gate = _gate, session] {
+        return gate->host != nullptr && gate->host->_sessions.contains(session.value);
+    };
+    auto post = OwnerPost { [&loop = _loop, hosted](std::function<void()> job) {
+        loop.post([hosted, job = std::move(job)] {
+            if (hosted())
+                job();
+        });
+    } };
+    auto events = SessionExtensionEvents {
+        .onPermissionNeeded =
+            [&loop = _loop, gate = _gate, hosted, session](proto::PermissionRequest request) {
+                loop.post([gate, hosted, session, request = std::move(request)]() mutable {
+                    if (hosted())
+                        gate->host->offerPermission(session, std::move(request));
+                });
+            },
+        // Runs from a job `post` hands to the loop, so only while the session is hosted.
+        .onReplaced = [this, session] { extensionsReplaced(session); },
+    };
+    // A burst of frames costs the loop one repaint, not one per frame: the worker posts only while none is
+    // pending, and the loop takes the flag down before it repaints, so a frame published meanwhile posts
+    // again.
+    auto pending = std::make_shared<std::atomic<bool>>(false);
+    auto onPublished = [&loop = _loop, gate = _gate, hosted, session, pending] {
+        if (pending->exchange(true, std::memory_order_acq_rel))
+            return;
+        loop.post([gate, hosted, session, pending] {
+            pending->store(false, std::memory_order_release);
+            if (hosted())
+                gate->host->extensionFramePublished(session);
+        });
+    };
+    // What the extensions follow is known once they have loaded: the poll is re-checked as a frame shows it
+    // changed, not only on a replace, which comes before they load.
+    auto onForegroundFollowingChanged = [&loop = _loop, gate = _gate] {
+        loop.post([gate] {
+            if (gate->host != nullptr)
+                gate->host->armForegroundPoll();
+        });
+    };
+    return HostedSessionExtensions { .extensions =
+                                         _extensions->createSession(std::move(events), std::move(post)),
+                                     .onPublished = std::move(onPublished),
+                                     .onForegroundFollowingChanged =
+                                         std::move(onForegroundFollowingChanged) };
+}
+
+void SessionHost::refreshStatusLine(HostedSession& session)
+{
+    auto& terminal = session.terminal();
+    auto const guard = std::lock_guard { terminal };
+    terminal.refreshIndicatorStatusLine();
+}
+
+void SessionHost::extensionFramePublished(SessionId session)
+{
+    auto const hosted = _sessions.find(session.value);
+    // Repainted for a client to be sent; one attaching later is handed the row current (subscribeStream).
+    if (hosted == _sessions.end() || !hasScreenMirrors())
+        return;
+    refreshStatusLine(*hosted->second);
+    fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
+}
+
+void SessionHost::extensionsReplaced(SessionId session)
+{
+    auto const hosted = _sessions.find(session.value);
+    if (hosted == _sessions.end())
+        return;
+    hosted->second->forgetForegroundFollowing();
+    {
+        auto& terminal = hosted->second->terminal();
+        auto const guard = std::lock_guard { terminal };
+        terminal.statusLineExtensionsReplaced();
+        terminal.refreshIndicatorStatusLine();
+    }
+    // The extensions replaced retire their engines from their lanes.
+    scheduleRetiredRelease();
+    // What the new ones follow decides whether the hosted programs are asked who runs in the foreground.
+    armForegroundPoll();
+    fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
+}
+
+void SessionHost::offerPermission(SessionId session, proto::PermissionRequest request)
+{
+    // Asked once per installed extension and manifest, however many of its calls, panes or clients run
+    // into it; and not at all once answered, which another session's prompt may have done meanwhile.
+    auto const sameQuestion = [&](proto::PermissionRequest const& open) {
+        return open.hostId == request.hostId && open.digest == request.digest;
+    };
+    if (_extensions->lookup(request.hostId, request.digest) != GrantState::Pending
+        || std::ranges::any_of(_pendingPermissions, sameQuestion))
+        return;
+    request.session = session.value;
+    sessionLog()("session {}: an extension asks to run its commands ({} declared)",
+                 session.value,
+                 request.commands.size());
+    _pendingPermissions.push_back(request);
+    // Announced from the copy this keeps in hand rather than the one kept open: an observer may close the
+    // question as it is told of it, and the list holding it with it.
+    for (auto* observer: _streamSubscribers)
+        observer->sessionPermissionRequested(session, request);
+}
+
+void SessionHost::answerPermission(std::string_view hostId, std::string_view digest, GrantState answer)
+{
+    if (!_extensions)
+        return;
+    // Only an open question is a client's to close: a peer may name any extension and digest.
+    if (std::erase_if(_pendingPermissions,
+                      [&](proto::PermissionRequest const& request) {
+                          return request.hostId == hostId && request.digest == digest;
+                      })
+        == 0)
+    {
+        sessionLog()("ignoring an answer to no open permission request");
+        return;
+    }
+    // A dismissal closes it as well, and records nothing: it is asked again when an extension next asks.
+    if (answer != GrantState::Pending)
+        _extensions->answer(hostId, digest, answer);
+}
+
+bool SessionHost::followsForegroundProcess() const noexcept
+{
+    return std::ranges::any_of(_sessions,
+                               [](auto const& entry) { return entry.second->followsForegroundProcess(); });
+}
+
+void SessionHost::armForegroundPoll()
+{
+    if ((_foregroundPoll && !_foregroundPoll->settled()) || !followsForegroundProcess())
+        return;
+    _foregroundPoll.reset();
+    _foregroundPoll.emplace(
+        _loop, _loop.clock().now() + std::chrono::seconds { 1 }, &pollForegroundProcesses, this);
+}
+
+void SessionHost::pollForegroundProcesses(void* host)
+{
+    auto& self = *static_cast<SessionHost*>(host);
+    for (auto const& [id, session]: self._sessions)
+        session->pollForegroundProcess();
+    // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
+    // Not while no extension follows the foreground process any more: a build that subscribes re-arms it.
+    self._foregroundPoll.reset();
+    self.armForegroundPoll();
+}
+
+void SessionHost::scheduleRetiredRelease()
+{
+    if (!_extensions || (_retiredRelease && !_retiredRelease->settled()))
+        return;
+    _retiredRelease.reset();
+    _retiredRelease.emplace(_loop, _loop.clock().now() + std::chrono::seconds { 1 }, &releaseRetired, this);
+}
+
+void SessionHost::releaseRetired(void* host)
+{
+    static_cast<SessionHost*>(host)->_extensions->releaseRetired();
 }
 
 // ---------------------------------------------------------------------------

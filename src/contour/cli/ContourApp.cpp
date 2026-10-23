@@ -5,6 +5,7 @@
 #include <contour/cli/ShellIntegration.hpp>
 #include <contour/config/Config.hpp>
 
+#include <vtbackend/screen/LocalTime.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/vt/Capabilities.hpp>
 #include <vtbackend/vt/Functions.hpp>
@@ -34,6 +35,25 @@
 #include <memory>
 #include <utility>
 
+#ifdef CONTOUR_EXTENSIONS
+    #include <contour/config/ExtensionDeclarations.hpp>
+
+    #include <vtpty/CommandCapture.hpp>
+
+    #include <core/async/StopToken.hpp>
+    #include <core/platform/Clock.hpp>
+    #include <core/platform/NativeFileSystem.hpp>
+
+    #include <filesystem>
+    #include <thread>
+
+    #include <vtextension/BundledExtensions.hpp>
+    #include <vtextension/ExtensionGrantStore.hpp>
+    #include <vtextension/ExtensionWorkerPool.hpp>
+    #include <vtextension/wasm/DefaultBackend.hpp>
+    #include <vtextension/wasm/WasmRuntime.hpp>
+    #include <vthost/DaemonExtensions.hpp>
+#endif
 #include <vthost/Daemon.hpp>
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SocketPath.hpp>
@@ -173,7 +193,10 @@ namespace
         namespace CLI = core::cli;
 
         auto options = CLI::OptionList {
-            CLI::Option { "label", CLI::Value { "default"s }, "Socket label the daemon serves.", "NAME" },
+            CLI::Option { "label",
+                          CLI::Value { std::string { vthost::DefaultSocketLabel } },
+                          "Socket label the daemon serves.",
+                          "NAME" },
         };
         if (!full)
             return options;
@@ -714,6 +737,66 @@ namespace
         cout.flush();
     }
 
+#ifdef CONTOUR_EXTENSIONS
+    /// What a daemon's status-line extensions borrow. Made before the daemon runs, so that it outlives the
+    /// extensions the daemon's session host owns.
+    struct DaemonExtensionResources
+    {
+        /// What the extensions' engines are created from. First: it outlives everything made from it, and
+        /// only a reference to it travels with the services.
+        std::unique_ptr<vtextension::wasm::IWasmBackend> backend = vtextension::wasm::makeDefaultBackend();
+        core::async::StopSource commandShutdown;
+        vtpty::SystemCommandCapture capture {
+            vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()), commandShutdown.get_token()
+        };
+        core::platform::SystemWallClock wallClock;
+        vtbackend::LocalTimeConverter localTime { &vtbackend::systemLocalTime };
+    };
+
+    /// @param resolved The daemon's profile, resolved.
+    /// @param daemon The socket the daemon serves, which names its grants file.
+    /// @param executableDirectory Where the running executable is, beside which bundled extensions may be.
+    /// @param services What the extensions borrow.
+    /// @return What makes the profile's status-line extensions; unset when it declares none.
+    [[nodiscard]] std::function<std::shared_ptr<vthost::IExtensionHosting>()> daemonExtensionsOf(
+        config::ResolvedSessionConfig const& resolved,
+        vtextension::DaemonIdentity const& daemon,
+        std::filesystem::path const& executableDirectory,
+        DaemonExtensionResources& services)
+    {
+        auto declared = config::declaredExtensionsOf(resolved.extensions, resolved.statusLineExtension);
+        if (auto const diagnostic = vtextension::undeclaredTakeOver(declared))
+            errorLog()("{}", *diagnostic);
+        if (declared.extensions.empty())
+            return {};
+        auto runtime = vtextension::ExtensionRuntimeConfig {
+            // The daemon's own side file, beside the configuration it was started with, never the GUI's.
+            .grantsFile =
+                resolved.configFile.parent_path() / vtextension::daemonExtensionGrantsFileName(daemon),
+            .bundledDirectories =
+                vtextension::bundledExtensionDirectories(vtextension::nativeBundledExtensionPlatform(),
+                                                         core::defaultEnvironment(),
+                                                         executableDirectory),
+            .workerCount = vtextension::extensionWorkerCount(std::thread::hardware_concurrency()),
+            .limits = {},
+        };
+        return [&services, declared = std::move(declared), runtime = std::move(runtime)] {
+            return std::shared_ptr<vthost::IExtensionHosting> { std::make_shared<vthost::DaemonExtensions>(
+                vthost::DaemonExtensionsConfig { .declared = declared, .runtime = runtime },
+                vthost::DaemonExtensionServices {
+                    .runtime =
+                        vtextension::ExtensionRuntimeServices {
+                            .backend = *services.backend,
+                            .capture = services.capture,
+                            .wallClock = services.wallClock,
+                            .localTime = services.localTime,
+                            .environment = core::defaultEnvironment(),
+                            .fileSystem = core::platform::NativeFileSystem::instance() },
+                    .commandShutdown = services.commandShutdown }) };
+        };
+    }
+#endif
+
 } // namespace
 
 int ContourApp::daemonAction()
@@ -749,6 +832,24 @@ int ContourApp::daemonAction()
     config.escapeSandbox = resolved->escapeSandbox;
     config.placement = vtpty::makeDefaultProcessPlacement();
     config.startupLayout = resolved->startupLayout;
+#ifdef CONTOUR_EXTENSIONS
+    // The extensions' modules and configuration are resolved here, on the daemon's side, as its sessions'
+    // shells are; they run in the daemon, where each session's terminal is.
+    auto extensionServices = DaemonExtensionResources {};
+    auto const label = parameters().get<string>("contour.daemon.label");
+    auto const& fileSystem = core::platform::NativeFileSystem::instance();
+    config.extensions = daemonExtensionsOf(
+        *resolved,
+        vtextension::DaemonIdentity { .label = label,
+                                      .defaultLabel = vthost::DefaultSocketLabel,
+                                      .socketPath = fileSystem.weaklyCanonical(config.socketPath),
+                                      .labelSocketPath =
+                                          fileSystem.weaklyCanonical(vthost::labelSocketPath(label)) },
+        std::filesystem::absolute(
+            core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}))
+            .parent_path(),
+        extensionServices);
+#endif
 
     if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
         config.tmuxCompatLabel = std::move(label);
@@ -1188,7 +1289,7 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
                                   "PATH" },
                     CLI::Option { "label",
-                                  CLI::Value { "default"s },
+                                  CLI::Value { std::string { vthost::DefaultSocketLabel } },
                                   "Socket label distinguishing daemon instances.",
                                   "NAME" },
                     CLI::Option { "config",

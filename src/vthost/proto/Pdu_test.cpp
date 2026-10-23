@@ -12,6 +12,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/PermissionWire.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 
@@ -228,6 +229,7 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                     .statusDisplayType = 2,
                     .activeStatusDisplay = 1,
                     .statusLinesChanged = 1,
+                    .statusLinesDisplay = 1,
                     .statusLines = { line },
                     .kittyKeyboardChanged = 1,
                     .kittyKeyboardFlags = 11,
@@ -278,6 +280,16 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                                .operation = EngineOperation::SetUserMark,
                                .row = RowAddress { .stableId = -12, .generation = 0x1'0000'0003 } },
             NewWindow {},
+            PermissionRequest { .session = 4,
+                                .hostId = "git@/usr/share/contour/extensions/git.wasm",
+                                .name = "git",
+                                .version = 1,
+                                .digest = "5f3c",
+                                .commands = { WireDeclaredCommand { .name = "status",
+                                                                    .argv = { "git", "status" } } } },
+            PermissionReply { .hostId = "git@/usr/share/contour/extensions/git.wasm",
+                              .digest = "5f3c",
+                              .grantState = 1 },
             SessionSettingsChanged {}, // back to the daemon's own
             SessionSettingsChanged { .sessionSettings = WireSessionSettings {
                                          .historyLineCount = -1,
@@ -409,6 +421,54 @@ TEST_CASE("a notification occasion this build does not know is carried, not refu
     REQUIRE(notify != nullptr);
     CHECK(std::to_underlying(notify->occasion) == 200);
     CHECK(notify->body == "b");
+}
+
+TEST_CASE("Proto.permissionPdu.roundtrip", "[vthost][proto][extensions]")
+{
+    SECTION("a request carries who asks, the digest the answer binds to, and every argv template whole")
+    {
+        // Elements the prompt must still tell apart: an empty one, one holding a space, a placeholder.
+        auto const request = DecodedPdu { PermissionRequest {
+            .session = 7,
+            .hostId = "git@/usr/share/contour/extensions/git.wasm",
+            .name = "git",
+            .version = 1,
+            .digest = "9b74c9897bac770ffc029102a200c5de",
+            .commands = {
+                WireDeclaredCommand { .name = "status",
+                                      .argv = { "git", "-C", "{dir}", "status", "--porcelain=v2" } },
+                WireDeclaredCommand { .name = "odd", .argv = { "", "a b" } },
+                WireDeclaredCommand { .name = "none", .argv = {} } } } };
+        CHECK(roundTrip(request) == request);
+    }
+
+    SECTION("a reply carries each answer")
+    {
+        for (auto const state:
+             { vthost::GrantState::Pending, vthost::GrantState::Granted, vthost::GrantState::Denied })
+        {
+            auto const reply = DecodedPdu { PermissionReply {
+                .hostId = "git@/x.wasm", .digest = "d1", .grantState = std::to_underlying(state) } };
+            auto const decoded = roundTrip(reply);
+            CHECK(decoded == reply);
+            CHECK(vthost::grantStateOf(std::get<PermissionReply>(decoded).grantState) == state);
+        }
+    }
+
+    SECTION("an answer byte no GrantState has decodes to none: total, as the status-display bytes are")
+    {
+        // Carried rather than refused, so that a newer client's answer does not end the connection; the
+        // host then records nothing for it.
+        for (auto const wire: { uint8_t { 3 }, uint8_t { 0x80 }, uint8_t { 0xFF } })
+        {
+            auto const decoded = roundTrip(
+                DecodedPdu { PermissionReply { .hostId = "h", .digest = "d", .grantState = wire } });
+            auto const* const reply = std::get_if<PermissionReply>(&decoded);
+            REQUIRE(reply != nullptr);
+            CHECK(reply->grantState == wire);
+            CHECK_FALSE(vthost::grantStateOf(reply->grantState).has_value());
+        }
+    }
 }
 
 // A split ratio crosses the wire quantized to 1/10000, and a client decides whether to report a

@@ -49,12 +49,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <ranges>
@@ -209,22 +212,23 @@ TEST_CASE("display: a live session renders real frames and content changes pixel
 
 namespace
 {
-/// The bounding box of every pixel that differs between @p before and @p after.
+/// The bounding box of every pixel inside @p region that differs between @p before and @p after.
 ///
 /// What a selection paints is a background change, not ink, so it cannot be found by brightness.
 /// Comparing the two frames names exactly the region the selection touched and nothing else.
-[[nodiscard]] QRect changedBounds(QImage const& before, QImage const& after)
+[[nodiscard]] QRect changedBounds(QImage const& before, QImage const& after, QRect const& region)
 {
     if (before.size() != after.size())
         return {};
 
+    auto const area = region.intersected(before.rect());
     auto left = before.width();
     auto right = -1;
     auto top = before.height();
     auto bottom = -1;
 
-    for (auto y = 0; y < before.height(); ++y)
-        for (auto x = 0; x < before.width(); ++x)
+    for (auto const y: std::views::iota(area.top(), area.bottom() + 1))
+        for (auto const x: std::views::iota(area.left(), area.right() + 1))
             if (before.pixel(x, y) != after.pixel(x, y))
             {
                 left = std::min(left, x);
@@ -237,7 +241,103 @@ namespace
         return {};
     return { QPoint(left, top), QPoint(right, bottom) };
 }
+
+/// The bounding box of every pixel that differs between @p before and @p after, anywhere in the frame.
+[[nodiscard]] QRect changedBounds(QImage const& before, QImage const& after)
+{
+    return changedBounds(before, after, before.rect());
+}
+
+/// The part of the frame that holds the terminal grid, which excludes the status line beneath it.
+///
+/// The status line repaints on its own between frames, so a diff over the whole frame would count
+/// its changed pixels as part of whatever the test is measuring.
+[[nodiscard]] QRect pageArea(DisplayHarness const& h, QImage const& frame)
+{
+    auto const metrics = h.display->gridMetrics();
+    auto const pageHeight =
+        metrics.pageMargin.top
+        + (unbox<int>(h.session->terminal().pageSize().lines) * metrics.cellSize.height.as<int>());
+    return { QPoint(0, 0), QPoint(frame.width() - 1, pageHeight - 1) };
+}
+
+/// Puts the X11 primary selection back as it found it.
+///
+/// Completing a selection copies its text to the selection clipboard, which belongs to the display
+/// server and outlives the test. A later case that middle-clicks would paste what this one left behind.
+class SelectionClipboardRestorer
+{
+  public:
+    SelectionClipboardRestorer(): _saved { QGuiApplication::clipboard()->text(QClipboard::Selection) } {}
+    SelectionClipboardRestorer(SelectionClipboardRestorer const&) = delete;
+    SelectionClipboardRestorer(SelectionClipboardRestorer&&) = delete;
+    SelectionClipboardRestorer& operator=(SelectionClipboardRestorer const&) = delete;
+    SelectionClipboardRestorer& operator=(SelectionClipboardRestorer&&) = delete;
+    ~SelectionClipboardRestorer() { QGuiApplication::clipboard()->setText(_saved, QClipboard::Selection); }
+
+  private:
+    QString _saved;
+};
 } // namespace
+
+#ifdef CONTOUR_EXTENSIONS
+namespace
+{
+/// One frame of a live session whose indicator status line is empty, after @p adjust had its say on the
+/// profile.
+[[nodiscard]] QImage statusLineFrame(std::function<void(contour::config::TerminalProfile&)> const& adjust)
+{
+    DisplayHarness const h { HarnessWindow::Shown, [&](contour::config::Config& config) {
+                                auto& profile = config.profiles.value().at("main");
+                                profile.statusLine.value().indicator = contour::config::IndicatorConfig {
+                                    .left = "", .middle = "", .right = ""
+                                };
+                                adjust(profile);
+                            } };
+    return h.pump();
+}
+} // namespace
+
+TEST_CASE("display: an extension that takes the status line over draws in the indicator's colours",
+          "[display][render][extensions]")
+{
+    // R38: the take-over row is copied from the extension's own terminal, whose default colours are not the
+    // indicator's. The status bar paints the row's background whatever the cells say, so it is the text that
+    // shows the copy took the indicator's colours: the notice's ink is the indicator's foreground (#FFFFFF),
+    // not the terminal's default one (#D0D0D0).
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto const indicator = statusLineFrame([](contour::config::TerminalProfile&) {});
+    auto const hidden = statusLineFrame([](contour::config::TerminalProfile& profile) {
+        profile.statusLine.value().initialType = vtbackend::StatusDisplayType::None;
+    });
+    // The module is not there (the harness's filesystem is in memory), so the take-over shows the notice.
+    auto const takenOver = statusLineFrame([](contour::config::TerminalProfile& profile) {
+        profile.extensions.value() = { contour::config::ExtensionConfig {
+            .name = "gone",
+            .path = "/ext/gone.wasm",
+            .config = {},
+            .runCommand = contour::config::Permission::Deny } };
+        profile.statusLine.value().extension = "gone";
+    });
+
+    // Where the status line is drawn: what hiding it changes.
+    auto const row = changedBounds(indicator, hidden);
+    REQUIRE(row.isValid());
+    // The notice drew something...
+    CHECK(changedBounds(indicator, takenOver).isValid());
+    // ...on the indicator's background: the far right of the row, past the notice's text.
+    auto const probe = QPoint { row.right() - 2, row.center().y() };
+    CHECK(takenOver.pixel(probe) == indicator.pixel(probe));
+    // ...in the indicator's foreground: the brightest ink of "extension module not found", a quarter to half
+    // way along the row (past the warning sign, which a colour font may draw), reaches white.
+    auto brightest = 0;
+    for (auto const y: std::views::iota(row.top(), row.bottom() + 1))
+        for (auto const x: std::views::iota(row.left() + (row.width() / 4), row.left() + (row.width() / 2)))
+            brightest = std::max(brightest, qRed(takenOver.pixel(x, y)));
+    INFO("brightest ink red " << brightest);
+    CHECK(brightest > 0xE8);
+}
+#endif
 
 TEST_CASE("display: a scaled block draws at its full height", "[display][render][textsizing]")
 {
@@ -283,26 +383,31 @@ TEST_CASE("display: a scaled block is selected over its whole height", "[display
 {
     REQUIRE_DISPLAY_OR_SKIP();
     DisplayHarness const h;
+    SelectionClipboardRestorer const restoreClipboard;
 
     h.feedAndSettle("\033[?25l\033[2J\033[999;1H"sv);
     auto const blank = h.pump();
     h.feedAndSettle("\033]66;s=2;X\a"sv);
     auto const unselected = h.pump();
-    auto const glyph = changedBounds(blank, unselected);
+    auto const glyph = changedBounds(blank, unselected, pageArea(h, blank));
     REQUIRE(glyph.isValid());
 
     // Select the block by dragging across its FIRST row only. A block is indivisible, so the
     // highlight must cover both of its rows -- and therefore reach below the glyph's own ink.
+    // The cursor was parked on the last line, so the two-row block ends at the bottom of the page and
+    // starts one row above it.
+    constexpr auto BlockRows = 2;
     h.session->terminal().markScreenDirty();
     {
         auto const _ = std::scoped_lock { h.session->terminal() };
+        auto const firstRow =
+            vtbackend::LineOffset(unbox<int>(h.session->terminal().pageSize().lines) - BlockRows);
         h.session->terminal().setSelector(std::make_unique<vtbackend::LinearSelection>(
             h.session->terminal().selectionHelper(),
-            vtbackend::CellLocation { .line = vtbackend::LineOffset(0),
-                                      .column = vtbackend::ColumnOffset(0) },
+            vtbackend::CellLocation { .line = firstRow, .column = vtbackend::ColumnOffset(0) },
             [](auto&&...) {}));
-        (void) h.session->terminal().selector()->extend(vtbackend::CellLocation {
-            .line = vtbackend::LineOffset(0), .column = vtbackend::ColumnOffset(1) });
+        (void) h.session->terminal().selector()->extend(
+            vtbackend::CellLocation { .line = firstRow, .column = vtbackend::ColumnOffset(1) });
         h.session->terminal().selector()->complete();
     }
 
@@ -690,6 +795,79 @@ TEST_CASE("display: font-size changes re-render without crashing and publish new
     h.pump();
     h.pump();
 }
+
+#ifdef CONTOUR_TEST_ECHO_WASM
+TEST_CASE("display: a font change staged without a render target reaches the status-line extensions",
+          "[display][fonts][extensions][guest]")
+{
+    // Without a render target -- a scene graph invalidated, or none yet -- a font change is only staged, and
+    // the next frame's createRenderer() materializes it. The extensions must learn the cell size that leaves,
+    // not keep the one they were told before. echo describes the font-changed events it follows in the
+    // indicator row.
+    REQUIRE_DISPLAY_OR_SKIP();
+    auto h = DisplayHarness { HarnessWindow::Shown, [](contour::config::Config& config) {
+                                 auto withEcho = config.profiles.value().at("main");
+                                 auto echo =
+                                     contour::config::ExtensionConfig { .name = "echo",
+                                                                        .path = "/ext/echo.wasm",
+                                                                        .config = { { "events", "describe" },
+                                                                                    { "subscribe", "font" } },
+                                                                        .runCommand = {} };
+                                 withEcho.extensions.value() = { std::move(echo) };
+                                 withEcho.statusLine.value().indicator.left = "[{Extension:echo}]";
+                                 config.profiles.value().insert_or_assign("echo", std::move(withEcho));
+                             } };
+    auto in = std::ifstream { CONTOUR_TEST_ECHO_WASM, std::ios::binary };
+    REQUIRE(in.good());
+    auto const module =
+        std::string { std::istreambuf_iterator<char> { in }, std::istreambuf_iterator<char> {} };
+    REQUIRE(h.testApp.fileSystem().createDirectories("/ext").has_value());
+    REQUIRE(h.testApp.fileSystem().writeFile("/ext/echo.wasm", module).has_value());
+    REQUIRE((*h.session)(contour::actions::ChangeProfile { .name = "echo" }));
+
+    auto const indicator = [&] {
+        h.session->terminal().refreshRenderBuffer();
+        return h.session->terminal().indicatorStatusLineDisplay().renderMainPageText();
+    };
+    auto const toldCellSize = [&](vtbackend::ImageSize cell) {
+        return std::format("pt {}x{}]", cell.width.as<int>(), cell.height.as<int>());
+    };
+    h.pump();
+    REQUIRE(h.display->hasRenderTarget());
+    auto const before = h.display->cellSize();
+    REQUIRE(QTest::qWaitFor([&] { return indicator().contains(toldCellSize(before)); }, 20'000));
+
+    // Gone the way a scene-graph invalidation takes it: on the render thread.
+    QSemaphore released;
+    h.window->scheduleRenderJob(QRunnable::create([display = h.display.get(), &released]() {
+                                    display->releaseRenderResources();
+                                    released.release();
+                                }),
+                                QQuickWindow::NoStage);
+    released.acquire();
+    REQUIRE_FALSE(h.display->hasRenderTarget());
+
+    // Asked for and approved while there is no render target: staged only. The next sync re-enters
+    // createRenderer(), which materializes it.
+    REQUIRE(h.display->fontSize().pt < RequestedFontSize);
+    h.session->setFontDef(fontRequest(RequestedFontSize));
+    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false);
+    REQUIRE(QTest::qWaitFor([&] {
+        h.pump();
+        return h.display->hasRenderTarget() && h.display->fontSize().pt == RequestedFontSize;
+    }));
+    REQUIRE(h.display->cellSize() != before);
+    auto const after = h.display->cellSize();
+    INFO("indicator: " << indicator());
+    CHECK(QTest::qWaitFor([&] { return indicator().contains(toldCellSize(after)); }, 20'000));
+}
+#else
+TEST_CASE("display: a font change staged without a render target reaches the status-line extensions",
+          "[display][fonts][extensions][guest]")
+{
+    SKIP("the echo test guest is not built (CONTOUR_EXTENSIONS_BUNDLED=OFF)");
+}
+#endif
 
 TEST_CASE("display: font zoom keeps the window fixed and changes the page size instead", "[display][fonts]")
 {
