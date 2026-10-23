@@ -1,23 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <type_traits>
 
 #include <vtextension/ExtensionError.hpp>
 
-// WAMR's opaque module-instance type (wasm_module_inst_t), named here so that this header does not
-// pull wasm_export.h into every consumer.
-struct WASMModuleInstanceCommon;
-
 namespace vtextension
 {
 
-/// Names the module instance a deadline guards: the instance the watchdog terminates on expiry.
+namespace wasm
+{
+    class IWasmInstance;
+} // namespace wasm
+
+/// Whether the deadline guarding an instance's calls has expired. Written by the watchdog, read by the
+/// instance: it is how the instance tells an overrun apart from any other failure, without asking the
+/// runtime.
+enum class DeadlineState : uint8_t
+{
+    Running, ///< Not expired: the instance may be running towards the deadline, or be idle.
+    Expired, ///< The watchdog found the deadline passed, and interrupted the instance. Final.
+};
+
+/// Names what a deadline guards: the instance the watchdog interrupts on expiry, and where it marks the
+/// deadline expired before it does.
 struct WatchToken
 {
-    WASMModuleInstanceCommon* instance = nullptr; ///< The guarded WAMR module instance.
+    wasm::IWasmInstance* instance = nullptr;     ///< The guarded instance.
+    std::atomic<DeadlineState>* state = nullptr; ///< Set to Expired on expiry, before the interrupt.
 
     [[nodiscard]] constexpr bool operator==(WatchToken const&) const noexcept = default;
 };
@@ -33,14 +47,15 @@ class IDeadlineWatchdog
     IDeadlineWatchdog& operator=(IDeadlineWatchdog&&) = delete;
     virtual ~IDeadlineWatchdog() = default;
 
-    /// Arms a deadline: unless disarmed first, the token's instance is terminated after @p timeout.
-    /// Arming a token that is already armed replaces its deadline.
-    /// @param token The instance to guard; its instance must not be null.
+    /// Arms a deadline: unless disarmed first, the token's deadline is marked expired after
+    /// @p timeout, and its instance interrupted. Arming a token that is already armed replaces its
+    /// deadline.
+    /// @param token The instance to guard; neither its instance nor its state may be null.
     /// @param timeout How long from now the instance may keep running.
     virtual void armDeadline(WatchToken token, std::chrono::milliseconds timeout) = 0;
 
-    /// Disarms the token's deadline. Once this returns, the instance is not terminated on that
-    /// deadline's account.
+    /// Disarms the token's deadline. Once this returns, neither the instance nor the state is touched
+    /// on that deadline's account.
     /// @param token The instance whose deadline to drop; a token not armed is ignored.
     virtual void disarm(WatchToken token) = 0;
 };

@@ -668,6 +668,10 @@ target_link_libraries(contour_core
 if(CONTOUR_EXTENSIONS)
     target_link_libraries(contour_core PUBLIC contour_extensions)
 endif()
+# ContourGuiApp is a composition root: it creates the WebAssembly runtime backend (makeDefaultBackend()).
+if(CONTOUR_EXTENSIONS AND CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour_core PRIVATE vtextension_runtime)
+endif()
 
 # The GUI-only layers beneath the frontend. Guarded for the same reason they are only added as
 # subdirectories under it: without a frontend there is no Qt event to translate and no compositor,

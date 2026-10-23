@@ -4,19 +4,24 @@
 // extensions that cannot be loaded.
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <expected>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include <vtextension/ExtensionHost.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
+#include <vtextension/testing/LaneReport.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
 #include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/DefaultBackend.hpp>
 
 using namespace vtextension;
 using vtextension::testing::CountingEngineProvider;
+using vtextension::testing::reportFromLane;
 using vtextension::testing::RunnerHarness;
 using vtextension::testing::toModule;
 
@@ -52,7 +57,7 @@ TEST_CASE("ExtensionHost.lazyEngine", "[vtextension]")
 {
     // No extensions, no cost: no engine, no lane (so no worker thread), nothing to subscribe to.
     auto harness = RunnerHarness {};
-    auto engines = CountingEngineProvider {};
+    auto engines = CountingEngineProvider { *harness.backend };
     auto host =
         ExtensionHost(ExtensionHostConfig {},
                       ExtensionHostServices { .engines = engines,
@@ -67,7 +72,7 @@ TEST_CASE("ExtensionHost.lazyEngine", "[vtextension]")
     CHECK(host.snapshot("anything") == nullptr);
 
     // On the production pool, that means no worker thread either.
-    auto pool = ExtensionWorkerPool(1);
+    auto pool = ExtensionWorkerPool(*harness.backend, 1);
     {
         auto const idle = ExtensionHost(
             ExtensionHostConfig {},
@@ -81,7 +86,7 @@ TEST_CASE("ExtensionHost.lazyEngine", "[vtextension]")
 TEST_CASE("ExtensionHost.runners", "[vtextension]")
 {
     auto harness = RunnerHarness {};
-    auto engines = CountingEngineProvider {};
+    auto engines = CountingEngineProvider { *harness.backend };
     auto config = ExtensionHostConfig {};
     config.extensions.push_back(minimal("one"));
     config.extensions.push_back(minimal("two"));
@@ -105,7 +110,7 @@ TEST_CASE("ExtensionHost.unloadable", "[vtextension]")
 {
     // A module that does not load shows why, in its place; it gets no runner and no lane.
     auto harness = RunnerHarness {};
-    auto engines = CountingEngineProvider {};
+    auto engines = CountingEngineProvider { *harness.backend };
     auto config = ExtensionHostConfig {};
     auto broken = minimal("broken");
     broken.module = { std::byte { 0 }, std::byte { 1 } };
@@ -125,7 +130,7 @@ TEST_CASE("ExtensionHost.moduleUnavailable", "[vtextension]")
 {
     // No bytes at all: the host found no module to load. It says so, and starts no runtime for it.
     auto harness = RunnerHarness {};
-    auto engines = CountingEngineProvider {};
+    auto engines = CountingEngineProvider { *harness.backend };
     auto config = ExtensionHostConfig {};
     auto missing = minimal("git");
     missing.module.clear();
@@ -169,7 +174,7 @@ TEST_CASE("ExtensionHost.preparedElsewhere", "[vtextension]")
 {
     // Loaded elsewhere, started on the owner's thread.
     auto harness = RunnerHarness {};
-    auto engines = CountingEngineProvider {};
+    auto engines = CountingEngineProvider { *harness.backend };
     auto engine = engines.acquire();
     REQUIRE(engine.has_value());
     {
@@ -187,7 +192,8 @@ TEST_CASE("ExtensionHost.preparedElsewhere", "[vtextension]")
 TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
 {
     // Loaded but never started: retired, and released by the owner.
-    auto engines = CountingEngineProvider {};
+    auto const backend = wasm::makeDefaultBackend();
+    auto engines = CountingEngineProvider { *backend };
     auto engine = engines.acquire();
     REQUIRE(engine.has_value());
     auto prepared = preparedOnAnotherThread(*engine);
@@ -203,7 +209,8 @@ TEST_CASE("ExtensionHost.preparedRetired", "[vtextension]")
 
 TEST_CASE("EngineProvider.shares", "[vtextension]")
 {
-    auto provider = EngineProvider { ExtensionLimits {} };
+    auto const backend = wasm::makeDefaultBackend();
+    auto provider = EngineProvider { *backend, ExtensionLimits {} };
     auto first = provider.acquire();
     auto second = provider.acquire();
     REQUIRE(first.has_value());
@@ -223,7 +230,8 @@ TEST_CASE("EngineProvider.shares", "[vtextension]")
 TEST_CASE("EngineProvider.retirement", "[vtextension]")
 {
     // What a runner retires lives in the provider until an owner thread releases it.
-    auto provider = EngineProvider { ExtensionLimits {} };
+    auto const backend = wasm::makeDefaultBackend();
+    auto provider = EngineProvider { *backend, ExtensionLimits {} };
     auto engine = provider.acquire();
     REQUIRE(engine.has_value());
     auto const weak = std::weak_ptr<Engine>(*engine);
@@ -247,7 +255,7 @@ TEST_CASE("EngineProvider.retirement", "[vtextension]")
 TEST_CASE("ExtensionHost.unloadableNoticeIsDrawn", "[vtextension]")
 {
     auto harness = RunnerHarness {};
-    auto engines = CountingEngineProvider {};
+    auto engines = CountingEngineProvider { *harness.backend };
     auto config = ExtensionHostConfig {};
     auto broken = minimal("broken");
     broken.module = { std::byte { 0 } };
@@ -260,4 +268,62 @@ TEST_CASE("ExtensionHost.unloadableNoticeIsDrawn", "[vtextension]")
     REQUIRE(notice != nullptr);
     REQUIRE(notice->lines.size() == 1);
     CHECK(notice->lines.front().toUtf8Trimmed().starts_with("\u26A0 broken disabled"));
+}
+
+TEST_CASE("ExtensionHost.loadAcrossRuntimeGenerations", "[vtextension][threading]")
+{
+    // A module loaded on a build thread, then its runtime torn down (the last pane closed) and brought up
+    // again (a new pane opened) before a lane instantiates: the lane's worker must enter the new
+    // generation, never run on a guard of the old one, and the new pane's extension must run.
+    using namespace std::chrono_literals;
+    auto harness = RunnerHarness {};
+    auto& backend = *harness.backend;
+    auto provider = EngineProvider { backend, ExtensionLimits {} };
+    auto pool = ExtensionWorkerPool(backend, 1);
+    auto const lane = pool.assignLane();
+
+    // Generation one: loaded on a build thread; the lane is prepared for it.
+    auto first = provider.acquire();
+    REQUIRE(first.has_value());
+    auto const firstGeneration = backend.runtimeGeneration();
+    auto const weakFirst = std::weak_ptr<Engine>(*first);
+    auto preparedFirst = preparedOnAnotherThread(*first);
+    REQUIRE(preparedFirst.extensions.front().compiled.has_value());
+    auto const before = reportFromLane(pool, lane, backend);
+    CHECK(before.prepared == firstGeneration);
+    CHECK(before.ready);
+
+    // Every reference goes, released on this (owner) thread: the runtime goes down.
+    first->reset();
+    provider.retire(retirementOf(std::move(preparedFirst)));
+    provider.releaseRetired();
+    REQUIRE(weakFirst.expired());
+
+    // Generation two: loaded on another build thread, started on the lane prepared for generation one.
+    auto second = provider.acquire();
+    REQUIRE(second.has_value());
+    auto const secondGeneration = backend.runtimeGeneration();
+    REQUIRE(secondGeneration != firstGeneration);
+    auto preparedSecond = preparedOnAnotherThread(*second);
+    REQUIRE(preparedSecond.extensions.front().compiled.has_value());
+    second->reset();
+    {
+        auto host = ExtensionHost(
+            std::move(preparedSecond),
+            ExtensionHostServices { .engines = provider, .runners = harness.services(pool, provider) });
+        host.resize(statusLine(80));
+        auto const deadline = std::chrono::steady_clock::now() + 5s;
+        while (host.snapshot("clock") == nullptr && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::yield();
+        auto const rendered = host.snapshot("clock");
+        REQUIRE(rendered != nullptr); // Running: a runner renders only once its instance is up.
+        CHECK_FALSE(rendered->sgrText.contains("disabled"));
+
+        // The worker renewed its guard for the new generation before running the runner's jobs.
+        auto const after = reportFromLane(pool, lane, backend);
+        CHECK(after.prepared == secondGeneration);
+        CHECK(after.ready);
+    }
+    pool.stop();
+    provider.releaseRetired();
 }

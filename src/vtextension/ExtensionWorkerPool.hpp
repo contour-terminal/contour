@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <vtextension/ExtensionScheduler.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
@@ -35,10 +36,10 @@ inline constexpr std::size_t MaxExtensionWorkers = 4;
 
 /// The production IExtensionScheduler: a fixed number of worker threads, each one a lane.
 ///
-/// Nothing runs until the first runner is assigned a lane; then all workers start. Each holds an
-/// Engine::ThreadEnv for its whole life, so that it may call into instances, and renews it before a job
-/// whenever the runtime has been brought up anew since (@see Engine::runtimeGeneration). Lanes are handed out
-/// round-robin. Timers run in real time, by a steady clock (which clock() returns).
+/// Nothing runs until the first runner is assigned a lane; then all workers start. Each holds a thread
+/// guard of the backend for its whole life, so that it may call into instances, and renews it before a job
+/// whenever the runtime has been brought up anew since (@see wasm::IWasmBackend::runtimeGeneration). Lanes
+/// are handed out round-robin. Timers run in real time, by a steady clock (which clock() returns).
 ///
 /// Destruction stops the workers: each runs the jobs already posted to it (a runner's last job destroys
 /// its instance on its own lane), discards its timers unrun, and is joined. Whatever those jobs reach
@@ -46,9 +47,10 @@ inline constexpr std::size_t MaxExtensionWorkers = 4;
 class ExtensionWorkerPool final: public IExtensionScheduler
 {
   public:
+    /// @param backend What the workers prepare their threads with; must outlive the pool.
     /// @param workerCount How many workers (and lanes) to run once started; at least one.
     ///        @see extensionWorkerCount
-    explicit ExtensionWorkerPool(std::size_t workerCount);
+    ExtensionWorkerPool(wasm::IWasmBackend& backend, std::size_t workerCount);
     ~ExtensionWorkerPool() override;
 
     ExtensionWorkerPool(ExtensionWorkerPool const&) = delete;
@@ -114,6 +116,7 @@ class ExtensionWorkerPool final: public IExtensionScheduler
     /// @return The worker behind a lane.
     [[nodiscard]] Worker& workerOf(LaneId lane) const;
 
+    wasm::IWasmBackend& _backend;
     core::platform::SteadyClock _clock;
     std::vector<std::unique_ptr<Worker>> _workers; ///< Fixed at construction; started lazily.
     std::once_flag _started;

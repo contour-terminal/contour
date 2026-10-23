@@ -32,47 +32,33 @@
     #include <csignal>
 #endif
 
+#include <core/Utils.hpp>
+
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/testing/StandardStreamsCapture.hpp>
 #include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/WasiAllowList.hpp>
 #include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension::wasm::testing::contract
 {
 
-/// The import module the contract's host function is provided under.
+/// The import module the contract's host functions are provided under.
 inline constexpr auto HostModule = std::string_view { "contract:test/host@0" };
 
-/// The host functions every contract runtime is created with: `ping`, taking one i32.
+/// The host functions every contract runtime is created with: `ping`, taking one i32, and `pair`,
+/// taking two.
 inline constexpr auto HostFunctions = std::array {
     HostFunction { .module = HostModule, .name = "ping", .parameterCount = 1 },
+    HostFunction { .module = HostModule, .name = "pair", .parameterCount = 2 },
 };
 
 /// The limits every contract runtime is created with.
 inline constexpr auto Limits =
     RuntimeLimits { .memoryBytes = std::size_t { 4 } * 1024 * 1024, .stackBytes = std::size_t { 64 } * 1024 };
 
-/// The WASI preview 1 module name.
-inline constexpr auto WasiModule = std::string_view { "wasi_snapshot_preview1" };
-
-/// The WASI preview 1 functions the extension host allows, which every backend must provide.
-inline constexpr auto AllowedWasiFunctions = std::to_array<std::string_view>({
-    "args_get",
-    "args_sizes_get",
-    "environ_get",
-    "environ_sizes_get",
-    "clock_time_get",
-    "clock_res_get",
-    "fd_write",
-    "fd_close",
-    "fd_fdstat_get",
-    "fd_prestat_get",
-    "fd_prestat_dir_name",
-    "fd_seek",
-    "random_get",
-    "proc_exit",
-    "sched_yield",
-});
+// Every backend must provide each WASI function the extension host allows: wasm::AllowedWasiFunctions,
+// under wasm::WasiModule (WasiAllowList.hpp), the very list the world check applies.
 
 /// Imports the host function and a WASI function, exports a memory and a function.
 ///
@@ -211,6 +197,21 @@ inline constexpr auto InstanceModule = std::to_array<uint8_t>({
     0x01, 0x0b, 0x0b, 0x0b, 0x01, 0x00, 0x41, 0x10, 0x0b, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
 });
 
+/// Passes its two parameters on to the two-parameter host function, in order.
+///
+///     (module
+///       (import "contract:test/host@0" "pair" (func $pair (param i32 i32)))
+///       (memory (export "memory") 1)
+///       (func (export "pair") (param i32 i32) (call $pair (local.get 0) (local.get 1))))
+inline constexpr auto PairModule = std::to_array<uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x60, 0x02, 0x7f, 0x7f,
+    0x00, 0x02, 0x1d, 0x01, 0x14, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x61, 0x63, 0x74, 0x3a, 0x74,
+    0x65, 0x73, 0x74, 0x2f, 0x68, 0x6f, 0x73, 0x74, 0x40, 0x30, 0x04, 0x70, 0x61, 0x69, 0x72,
+    0x00, 0x00, 0x03, 0x02, 0x01, 0x00, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x11, 0x02, 0x06,
+    0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00, 0x04, 0x70, 0x61, 0x69, 0x72, 0x00, 0x01,
+    0x0a, 0x0a, 0x01, 0x08, 0x00, 0x20, 0x00, 0x20, 0x01, 0x10, 0x00, 0x0b,
+});
+
 /// The WebAssembly page size, in bytes.
 inline constexpr auto PageBytes = uint32_t { 64 } * 1024;
 
@@ -315,7 +316,7 @@ template <typename Body>
     auto const view = instance.memory(address, 4);
     REQUIRE(view.has_value());
     auto word = uint32_t { 0 };
-    for (auto const [index, byte]: std::views::enumerate(*view))
+    for (auto const [index, byte]: core::views::enumerate(*view))
         word |= std::to_integer<uint32_t>(byte) << (static_cast<uint32_t>(index) * 8);
     return word;
 }
@@ -501,13 +502,14 @@ void generationFollowsBringUp()
     auto runtime = createRuntime(*backend);
     auto const firstGeneration = backend->runtimeGeneration();
 
-    // Nothing between starting the worker and joining it may throw (as a failed REQUIRE does): the
-    // worker would wait for the bring-up forever. The jthread joins on every way out regardless.
+    // The promise that resumes the worker is declared after the jthread, so that on any way out (a
+    // throw included) it is destroyed first: that wakes the worker, as a broken promise, before the
+    // jthread joins it, rather than leaving the join waiting for a bring-up that never comes.
     auto entered = std::promise<void> {};
-    auto broughtUpAgain = std::promise<void> {};
     auto enteredFuture = entered.get_future();
+    auto resumeLater = std::promise<void> {};
     auto report = Report {};
-    auto worker = std::jthread([&, resume = broughtUpAgain.get_future()] {
+    auto worker = std::jthread([&, resume = resumeLater.get_future()] {
         auto const guard = backend->enterThread();
         if (guard)
             report.enteredGeneration = (*guard)->generation();
@@ -515,6 +517,7 @@ void generationFollowsBringUp()
         resume.wait();
         report.preparedAfterBringUp = backend->isCurrentThreadPrepared();
     });
+    auto broughtUpAgain = std::move(resumeLater);
     enteredFuture.wait();
     runtime.reset();
     auto broughtUp = backend->createRuntime(Limits, HostFunctions);
@@ -634,6 +637,26 @@ void hostCallbackReceivesArguments()
     CHECK(wordAt(*instance, 0) == 1);
 }
 
+/// A host function taking several parameters receives them in the order the guest passed them, under
+/// its own index in the runtime's table.
+template <typename T>
+void hostCallbackReceivesArgumentsInOrder()
+{
+    auto const backend = T::make();
+    auto const runtime = createRuntime(*backend);
+    auto const guard = enterThread(*backend);
+    auto const module = load(*runtime, PairModule);
+    CHECK(importOf(*module, HostModule, "pair").linkage == Linkage::Satisfied);
+    auto context = RecordingHostContext {};
+    auto const instance = instantiate(*module, context);
+
+    auto argv = std::array<uint32_t, 2> { 7, 9 };
+    CHECK(instance->call(functionOf(*instance, "pair"), argv).has_value());
+    CHECK(context.calls()
+          == std::vector {
+              HostCall { .functionIndex = 1, .arguments = { 7, 9 }, .thread = std::this_thread::get_id() } });
+}
+
 /// A host function that fails stops the guest: the call fails as a host failure, and nothing the
 /// guest would have done after the host call happens.
 template <typename T>
@@ -653,27 +676,44 @@ void hostCallbackErrorFails()
     CHECK(wordAt(*instance, 0) == 0);
 }
 
-/// Two runtimes with the same host functions are alive at once, and the older one goes: the newer
-/// one's host imports keep linking and calling.
+/// Which of two runtimes alive at once goes first.
+enum class FirstToGo : uint8_t
+{
+    Older, ///< The one created first.
+    Newer, ///< The one created second.
+};
+
+/// Two runtimes with the same host functions are alive at once, and @p firstToGo goes: what was loaded
+/// on the other keeps linking and calling.
 template <typename T>
-void twoRuntimesShareHostImports()
+void survivorKeepsHostImports(FirstToGo firstToGo)
 {
     auto const backend = T::make();
     auto older = createRuntime(*backend);
-    auto const newer = createRuntime(*backend);
+    auto newer = createRuntime(*backend);
+    auto& gone = firstToGo == FirstToGo::Older ? older : newer;
+    auto const& survivor = firstToGo == FirstToGo::Older ? newer : older;
     auto const guard = enterThread(*backend);
-    auto const module = load(*newer, InstanceModule);
+    auto const module = load(*survivor, InstanceModule);
     auto context = RecordingHostContext {};
     auto const instance = instantiate(*module, context);
 
-    older.reset();
+    gone.reset();
 
     CHECK(instance->call(functionOf(*instance, "ping-then-store"), {}).has_value());
     REQUIRE(context.calls().size() == 1);
     CHECK(context.calls().front().functionIndex == 0);
     CHECK(context.calls().front().arguments == std::vector<uint32_t> { 42 });
-    auto const later = load(*newer, InstanceModule);
+    auto const later = load(*survivor, InstanceModule);
     CHECK(importOf(*later, HostModule, "ping").linkage == Linkage::Satisfied);
+}
+
+/// Two runtimes with the same host functions are alive at once, and the older one goes: the newer
+/// one's host imports keep linking and calling.
+template <typename T>
+void twoRuntimesShareHostImports()
+{
+    survivorKeepsHostImports<T>(FirstToGo::Older);
 }
 
 /// Two runtimes with the same host functions are alive at once, and the newer one goes: what was
@@ -681,21 +721,7 @@ void twoRuntimesShareHostImports()
 template <typename T>
 void olderRuntimeOutlivesNewer()
 {
-    auto const backend = T::make();
-    auto const older = createRuntime(*backend);
-    auto newer = createRuntime(*backend);
-    auto const guard = enterThread(*backend);
-    auto const module = load(*older, InstanceModule);
-    auto context = RecordingHostContext {};
-    auto const instance = instantiate(*module, context);
-
-    newer.reset();
-
-    CHECK(instance->call(functionOf(*instance, "ping-then-store"), {}).has_value());
-    REQUIRE(context.calls().size() == 1);
-    CHECK(context.calls().front().arguments == std::vector<uint32_t> { 42 });
-    auto const later = load(*older, InstanceModule);
-    CHECK(importOf(*later, HostModule, "ping").linkage == Linkage::Satisfied);
+    survivorKeepsHostImports<T>(FirstToGo::Newer);
 }
 
 /// Memory refuses to grow past the runtime's cap, and the guest's trap fails the call.
@@ -893,6 +919,7 @@ void wasiStdioGoesNowhere()
     auto const captured = capture.finish();
 
     CHECK(called.has_value());
+    CHECK(argv[0] == 0); // fd_write's errno: the write succeeded.
     INFO("captured: " << captured);
     CHECK(captured.empty());
 }
@@ -915,27 +942,28 @@ void wasiStdioGoesNowhere()
     }
 
 /// Instantiates the whole contract suite against the backend @p Traits::make() creates.
-#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied) \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)        \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                  \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)          \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                  \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)              \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                       \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)     \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)       \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)         \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)            \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)       \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)           \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                  \
-    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)            \
+#define CONTOUR_WASM_BACKEND_CONTRACT(Traits)                                        \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, loadRejectsNonModule)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, describesImportsAndExports)           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unknownImportIsUnsatisfied)           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, wrongSignatureImportIsUnsatisfied)    \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, allowListedWasiIsSatisfied)           \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNeedsARuntime)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, threadGuardNests)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, generationFollowsBringUp)             \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoBackendsAgree)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, moduleCrossesThreads)                 \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, callsExport)                          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryViewIsBoundsChecked)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArguments)        \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackReceivesArgumentsInOrder) \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, hostCallbackErrorFails)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, twoRuntimesShareHostImports)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, olderRuntimeOutlivesNewer)            \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesGrowth)               \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, memoryCapRefusesInitialSize)          \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, unboundedRecursionTraps)              \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptStopsLoop)                   \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, interruptIsFinal)                     \
+    CONTOUR_WASM_BACKEND_CONTRACT_CASE(Traits, instanceCrossesThreads)               \
     CONTOUR_WASM_BACKEND_CONTRACT_POSIX(Traits)

@@ -7,57 +7,39 @@
 #include <system_error>
 #include <utility>
 
-#include <wasm_export.h>
-
 #include <vtextension/HostBindings.hpp>
-#include <vtextension/wasm/wamr/WamrHandles.hpp>
 
 namespace vtextension
 {
 
-std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(ExtensionLimits limits)
+std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(wasm::IWasmBackend& backend,
+                                                                      ExtensionLimits limits)
 {
-    if (auto acquired = wasm::wamr::acquireRuntime(); !acquired)
-        return std::unexpected(acquired.error());
-
-    auto const fail = [] {
-        wasm::wamr::releaseRuntime();
+    auto runtime = backend.createRuntime(
+        wasm::RuntimeLimits { .memoryBytes = limits.memoryBytes, .stackBytes = limits.stackBytes },
+        detail::statuslineHostFunctions());
+    if (!runtime)
         return std::unexpected(ExtensionError::RuntimeUnavailable);
-    };
-
-    auto hostRegistration = detail::registerHostFunctions();
-    if (!hostRegistration)
-        return fail();
-    auto const nullDevice = wasm::wamr::detail::openNullDevice();
-    if (!nullDevice)
-        return fail();
 
     try
     {
-        return std::make_shared<Engine>(PrivateTag {}, limits, *nullDevice, std::move(hostRegistration));
+        return std::make_shared<Engine>(PrivateTag {}, backend, limits, std::move(*runtime));
     }
     catch (std::system_error const&)
     {
-        // The watchdog thread could not be started: without it no deadline would hold. The engine's
-        // constructor did not complete, so what it was handed is released here.
-        wasm::wamr::detail::closeNullDevice(*nullDevice);
-        return fail();
-    }
-    catch (...)
-    {
-        wasm::wamr::detail::closeNullDevice(*nullDevice);
-        wasm::wamr::releaseRuntime();
-        throw;
+        // The watchdog thread could not be started: without it no deadline would hold. The runtime goes
+        // with the engine that never was.
+        return std::unexpected(ExtensionError::RuntimeUnavailable);
     }
 }
 
 Engine::Engine(PrivateTag /*unused*/,
+               wasm::IWasmBackend& backend,
                ExtensionLimits limits,
-               int64_t nullDevice,
-               std::unique_ptr<detail::HostRegistration> hostRegistration):
+               std::shared_ptr<wasm::IWasmRuntime> runtime):
+    _backend { backend },
     _limits { limits },
-    _nullDevice { nullDevice },
-    _hostRegistration { std::move(hostRegistration) },
+    _runtime { std::move(runtime) },
     _watchdog { [this] { watchdogLoop(); } }
 {
 }
@@ -70,9 +52,6 @@ Engine::~Engine()
     }
     _wakeup.notify_one();
     _watchdog.join();
-    _hostRegistration.reset();
-    wasm::wamr::detail::closeNullDevice(_nullDevice);
-    wasm::wamr::releaseRuntime();
 }
 
 bool Engine::expiresLater(Deadline const& a, Deadline const& b) noexcept
@@ -88,7 +67,7 @@ void Engine::removeDeadline(WatchToken token)
 
 void Engine::armDeadline(WatchToken token, std::chrono::milliseconds timeout)
 {
-    Require(token.instance != nullptr);
+    Require(token.instance != nullptr && token.state != nullptr);
     auto const expiry = std::chrono::steady_clock::now() + timeout;
     {
         auto const lock = std::scoped_lock { _mutex };
@@ -122,14 +101,17 @@ void Engine::watchdogLoop()
         auto const earliest = _deadlines.front().expiry;
         _wakeup.wait_until(lock, earliest);
 
-        // Terminating under the lock is what makes disarm() final: once it has removed a deadline,
-        // no terminate for it can still be on its way.
+        // Interrupting under the lock is what makes disarm() final: once it has removed a deadline,
+        // no interrupt for it can still be on its way. The deadline is marked expired first, so that
+        // whoever sees the call fail finds out why.
         auto const now = std::chrono::steady_clock::now();
         while (!_deadlines.empty() && _deadlines.front().expiry <= now)
         {
             std::ranges::pop_heap(_deadlines, expiresLater);
-            wasm_runtime_terminate(_deadlines.back().token.instance);
+            auto const token = _deadlines.back().token;
             _deadlines.pop_back();
+            token.state->store(DeadlineState::Expired, std::memory_order_release);
+            token.instance->interrupt();
         }
     }
 }

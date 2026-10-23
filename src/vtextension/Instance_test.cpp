@@ -12,6 +12,8 @@
 #include <expected>
 #include <memory>
 #include <mutex>
+#include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,9 +24,12 @@
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/Engine.hpp>
 #include <vtextension/Instance.hpp>
+#include <vtextension/testing/FakeWasmBackend.hpp>
 #include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/StandardStreamsCapture.hpp>
 #include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/DefaultBackend.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 using namespace std::string_view_literals;
 using namespace vtextension;
@@ -36,11 +41,11 @@ using vtextension::testing::toModule;
 namespace
 {
 
-/// Loads @p module on a fresh engine and returns how that went.
+/// Loads @p module on a fresh engine of @p backend and returns how that went.
 [[nodiscard]] std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> loadModule(
-    std::vector<std::byte> module)
+    wasm::IWasmBackend& backend, std::vector<std::byte> module)
 {
-    auto const engine = Engine::create(ExtensionLimits {});
+    auto const engine = Engine::create(backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
     return CompiledExtension::load(**engine, std::move(module));
 }
@@ -49,7 +54,8 @@ namespace
 
 TEST_CASE("CompiledExtension.load", "[vtextension]")
 {
-    auto const compiled = loadModule(toModule(vtextension::testing::MinimalModule));
+    auto const backend = wasm::makeDefaultBackend();
+    auto const compiled = loadModule(*backend, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
     // A module without a manifest loads; it declares no commands.
     CHECK_FALSE((*compiled)->manifest().has_value());
@@ -57,43 +63,45 @@ TEST_CASE("CompiledExtension.load", "[vtextension]")
 
 TEST_CASE("CompiledExtension.invalid", "[vtextension]")
 {
-    CHECK(errorOf(loadModule({})) == ExtensionError::InvalidComponent);
+    auto const backend = wasm::makeDefaultBackend();
+    CHECK(errorOf(loadModule(*backend, {})) == ExtensionError::InvalidComponent);
     auto truncated = toModule(vtextension::testing::MinimalModule);
     truncated.resize(truncated.size() / 2);
-    CHECK(errorOf(loadModule(truncated)) == ExtensionError::InvalidComponent);
+    CHECK(errorOf(loadModule(*backend, truncated)) == ExtensionError::InvalidComponent);
 }
 
 TEST_CASE("CompiledExtension.worldMismatch", "[vtextension]")
 {
+    auto const backend = wasm::makeDefaultBackend();
     // The runtime links imports lazily, so each of these would load and fail only when called.
     SECTION("an unknown host function")
     {
-        CHECK(errorOf(loadModule(toModule(vtextension::testing::UnknownImportModule)))
+        CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::UnknownImportModule)))
               == ExtensionError::WorldMismatch);
     }
     SECTION("a host function with the wrong signature")
     {
-        CHECK(errorOf(loadModule(toModule(vtextension::testing::WrongImportSignatureModule)))
+        CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WrongImportSignatureModule)))
               == ExtensionError::WorldMismatch);
     }
     SECTION("an import from a module that is neither the host nor WASI")
     {
-        CHECK(errorOf(loadModule(toModule(vtextension::testing::ForeignImportModuleModule)))
+        CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::ForeignImportModuleModule)))
               == ExtensionError::WorldMismatch);
     }
     SECTION("a missing export")
     {
-        CHECK(errorOf(loadModule(toModule(vtextension::testing::MissingExportModule)))
+        CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::MissingExportModule)))
               == ExtensionError::WorldMismatch);
     }
     SECTION("a start function, which would run where no deadline guards it")
     {
-        CHECK(errorOf(loadModule(toModule(vtextension::testing::StartFunctionModule)))
+        CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::StartFunctionModule)))
               == ExtensionError::WorldMismatch);
     }
     SECTION("an export with the wrong signature")
     {
-        CHECK(errorOf(loadModule(toModule(vtextension::testing::WrongExportSignatureModule)))
+        CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WrongExportSignatureModule)))
               == ExtensionError::WorldMismatch);
     }
 }
@@ -111,7 +119,8 @@ TEST_CASE("Instance.memoryCap.atInstantiation", "[vtextension]")
     // The minimal module asks for one 64 KiB page up front; a cap below that refuses it.
     auto limits = ExtensionLimits {};
     limits.memoryBytes = std::size_t { 32 } * 1024;
-    auto const engine = Engine::create(limits);
+    auto const backend = wasm::makeDefaultBackend();
+    auto const engine = Engine::create(*backend, limits);
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
     REQUIRE(compiled.has_value());
@@ -225,7 +234,8 @@ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
 {
     // When the call's deadline is spent by the time the guest asks for a command, the command does
     // not run, and the call fails as overrun.
-    auto const engine = Engine::create(ExtensionLimits {});
+    auto const backend = wasm::makeDefaultBackend();
+    auto const engine = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
     auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MaliciousModule));
     REQUIRE(compiled.has_value());
@@ -237,6 +247,126 @@ TEST_CASE("Instance.deadlineSpentBeforeCommand", "[vtextension]")
 
     CHECK(errorOf((*instance)->render(surface(80, 10))) == ExtensionError::DeadlineExceeded);
     CHECK(services.commands.empty());
+}
+
+TEST_CASE("Instance.expiredBetweenCalls", "[vtextension]")
+{
+    // One guarded body makes several export calls, and the watchdog fires a deadline only once. A
+    // deadline that expires between two of them -- here while the host lifts render's result, between the
+    // export and its post-return -- must still stop the next one from entering the guest: the call fails
+    // as overrun, and the instance with it.
+    auto backend = vtextension::testing::FakeWasmBackend {};
+    auto renders = 0;
+    auto postRenders = 0;
+    auto memoryAccesses = 0;
+    backend.guest.exports["render"] =
+        [&](std::span<uint32_t> argv) -> std::expected<void, wasm::CallFailure> {
+        ++renders;
+        // The result at 16: the list's address (24) and length (2), then at 24 the list, "ok".
+        auto& memory = backend.lastInstance->linearMemory;
+        auto const put = [&](std::size_t at, uint32_t value) {
+            for (auto const index: std::views::iota(std::size_t { 0 }, sizeof(value)))
+                memory.at(at + index) = static_cast<std::byte>(value >> (8 * index));
+        };
+        put(16, 24);
+        put(20, 2);
+        memory.at(24) = std::byte { 'o' };
+        memory.at(25) = std::byte { 'k' };
+        argv.front() = 16;
+        return {};
+    };
+    backend.guest.exports["cabi_post_render"] =
+        [&](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
+        ++postRenders;
+        return {};
+    };
+    // The host's first look at the result lasts until the deadline has expired: it waits for the watchdog's
+    // interrupt, however slow the machine (bounded, so that a watchdog that never fires fails the checks
+    // below rather than hanging the test).
+    backend.guest.onMemoryAccess = [&] {
+        if (memoryAccesses++ != 0)
+            return;
+        auto const giveUp = std::chrono::steady_clock::now() + std::chrono::seconds { 5 };
+        while (backend.lastInstance->interrupts.load() == 0 && std::chrono::steady_clock::now() < giveUp)
+            std::this_thread::sleep_for(std::chrono::milliseconds { 1 });
+    };
+
+    auto limits = ExtensionLimits {};
+    limits.callDeadline = std::chrono::milliseconds { 20 };
+    auto const engine = Engine::create(backend, limits);
+    REQUIRE(engine.has_value());
+    auto const compiled = CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
+    REQUIRE(compiled.has_value());
+    auto services = vtextension::testing::FakeHostServices {};
+    auto clock = core::platform::ManualClock {};
+    auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+    REQUIRE(instance.has_value());
+
+    CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::DeadlineExceeded);
+    CHECK(postRenders == 0);
+    REQUIRE(backend.lastInstance != nullptr);
+    CHECK(backend.lastInstance->interrupts.load() == 1);
+
+    // The instance is done: the next call fails the same way, without entering the guest.
+    CHECK(errorOf((*instance)->render(surface(80, 1))) == ExtensionError::DeadlineExceeded);
+    CHECK(renders == 1);
+}
+
+TEST_CASE("Instance.growthRefusedInHostCallAllocation", "[vtextension]")
+{
+    // A host call whose allocation in the guest fails because memory refused to grow faults the call as
+    // out of memory: render asks for the state, the host's store of it allocates through cabi_realloc,
+    // which fails with refused growth, and the host call's error (OutOfMemory) is what the render fails
+    // with, though the guest trapped afterwards. (An allocation that failed for another reason is a trap.)
+    struct Case
+    {
+        std::string_view what;
+        wasm::CallFailure reallocFailure;
+        ExtensionError error;
+    };
+    auto const cases = std::to_array<Case>({
+        { .what = "growth refused",
+          .reallocFailure = wasm::CallFailure::MemoryGrowthRefused,
+          .error = ExtensionError::OutOfMemory },
+        { .what = "another trap",
+          .reallocFailure = wasm::CallFailure::Trap,
+          .error = ExtensionError::Trapped },
+    });
+    for (auto const& testCase: cases)
+    {
+        INFO(testCase.what);
+        auto backend = vtextension::testing::FakeWasmBackend {};
+        auto reallocs = 0;
+        backend.guest.exports["cabi_realloc"] =
+            [&](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
+            ++reallocs;
+            return std::unexpected(testCase.reallocFailure);
+        };
+        backend.guest.exports["render"] =
+            [&](std::span<uint32_t> /*argv*/) -> std::expected<void, wasm::CallFailure> {
+            constexpr auto StateFunction = std::size_t { 2 }; // `state`, in the world's host table
+            auto const resultAddress = std::array { uint32_t { 64 } };
+            if (!backend.lastInstance->callHost(StateFunction, resultAddress))
+                return std::unexpected(wasm::CallFailure::Trap); // the guest traps on its own afterwards
+            return {};
+        };
+
+        auto const limits = ExtensionLimits {};
+        auto const engine = Engine::create(backend, limits);
+        REQUIRE(engine.has_value());
+        auto const compiled =
+            CompiledExtension::load(**engine, toModule(vtextension::testing::MinimalModule));
+        REQUIRE(compiled.has_value());
+        auto services = vtextension::testing::FakeHostServices {};
+        services.snapshot.title = "a title the host must allocate for";
+        auto clock = core::platform::ManualClock {};
+        auto const instance = Instance::create(**engine, **compiled, services, clock, limits);
+        REQUIRE(instance.has_value());
+
+        CHECK(errorOf((*instance)->render(surface(80, 1))) == testCase.error);
+        CHECK(reallocs == 1);
+        CHECK((*instance)->fault() == testCase.error);
+    }
 }
 
 TEST_CASE("Instance.reentrantHostCall", "[vtextension]")
@@ -266,13 +396,14 @@ TEST_CASE("Instance.stackOverflow", "[vtextension]")
 
 TEST_CASE("CompiledExtension.wasi", "[vtextension]")
 {
+    auto const backend = wasm::makeDefaultBackend();
     // Only WASI functions that return at once and reach nothing outside the module are provided.
-    CHECK(loadModule(toModule(vtextension::testing::WasiAllowedModule)).has_value());
-    CHECK(errorOf(loadModule(toModule(vtextension::testing::WasiPollOneoffModule)))
+    CHECK(loadModule(*backend, toModule(vtextension::testing::WasiAllowedModule)).has_value());
+    CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiPollOneoffModule)))
           == ExtensionError::WorldMismatch);
-    CHECK(errorOf(loadModule(toModule(vtextension::testing::WasiSockOpenModule)))
+    CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiSockOpenModule)))
           == ExtensionError::WorldMismatch);
-    CHECK(errorOf(loadModule(toModule(vtextension::testing::WasiPathOpenModule)))
+    CHECK(errorOf(loadModule(*backend, toModule(vtextension::testing::WasiPathOpenModule)))
           == ExtensionError::WorldMismatch);
 }
 
@@ -296,8 +427,8 @@ TEST_CASE("Instance.threadEnv", "[vtextension]")
     auto entered = std::expected<void, ExtensionError> {};
     auto rendered = std::expected<std::string, ExtensionError> {};
     auto worker = std::thread([&] {
-        auto const threadEnv = Engine::ThreadEnv::enter();
-        auto const nested = Engine::ThreadEnv::enter(); // guards nest
+        auto const threadEnv = guest.backend().enterThread();
+        auto const nested = guest.backend().enterThread(); // guards nest
         if (!threadEnv || !nested)
         {
             entered = std::unexpected(ExtensionError::RuntimeUnavailable);
@@ -311,7 +442,7 @@ TEST_CASE("Instance.threadEnv", "[vtextension]")
 
     // ... and a guard on the bringing-up thread leaves that thread's state alone when it ends.
     {
-        auto const threadEnv = Engine::ThreadEnv::enter();
+        auto const threadEnv = guest.backend().enterThread();
         REQUIRE(threadEnv.has_value());
     }
     CHECK(guest.instance().render(surface(80, 1)).has_value());
@@ -341,8 +472,9 @@ namespace
 
 TEST_CASE("CompiledExtension.sleeper", "[vtextension][guest]")
 {
+    auto const backend = wasm::makeDefaultBackend();
     // A Rust guest that sleeps imports WASI's poll_oneoff, a wait no deadline can interrupt.
-    CHECK(errorOf(loadModule(readTestModule("sleeper.wasm"))) == ExtensionError::WorldMismatch);
+    CHECK(errorOf(loadModule(*backend, readTestModule("sleeper.wasm"))) == ExtensionError::WorldMismatch);
 }
 
 TEST_CASE("Instance.echo.render", "[vtextension][guest]")
@@ -411,7 +543,13 @@ TEST_CASE("Instance.hostile.alloc", "[vtextension][guest]")
     auto const result = guest->instance().render(surface(80, 1));
     REQUIRE_FALSE(result.has_value());
     INFO(errorText(result.error()));
-    CHECK(result.error() == ExtensionError::OutOfMemory);
+    // A backend that reports refused growth fails the call as out of memory; one that cannot tell it
+    // from any other trap fails it as a trap (see the contract's memoryCapRefusesGrowth).
+    auto const expected =
+        guest->backend().capabilities().memoryGrowth == wasm::MemoryGrowthReporting::Reported
+            ? ExtensionError::OutOfMemory
+            : ExtensionError::Trapped;
+    CHECK(result.error() == expected);
 }
 
 TEST_CASE("Instance.hostile.hugeOutput", "[vtextension][guest]")

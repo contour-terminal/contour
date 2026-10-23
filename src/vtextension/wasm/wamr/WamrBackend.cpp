@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtextension/wasm/wamr/WamrBackend.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +20,7 @@
 
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
 #include <vtextension/wasm/wamr/WamrRuntime.hpp>
+#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
 
 #ifdef _WIN32
     #include <Windows.h>
@@ -76,9 +79,9 @@ class HostRegistrations
         std::span<HostFunction const> hostFunctions)
     {
         auto registrations = std::make_unique<HostRegistrations>();
-        for (auto const [index, function]: std::views::enumerate(hostFunctions))
+        for (auto const [index, function]: core::views::enumerate(hostFunctions))
         {
-            auto const native = hostNative(function.parameterCount, static_cast<std::size_t>(index));
+            auto const native = hostNative(function.parameterCount, index);
             if (!native)
                 return std::unexpected(ExtensionError::RuntimeUnavailable);
             registrations->groupOf(function.module)

@@ -13,7 +13,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <numeric>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -74,7 +73,7 @@ namespace
     ///
     /// The execution environment's user data points back here: that is how a host function trampoline and
     /// the memory-growth handler find the instance. The module instance's custom data is left alone (and
-    /// null), so that what reads it elsewhere never mistakes this for something else.
+    /// null).
     class WamrInstance final: public IWasmInstance
     {
         struct PrivateTag
@@ -312,21 +311,22 @@ namespace
     }
 
     /// The raw native WAMR calls a host function taking @p Arity i32s through: in WAMR's raw calling
-    /// convention, each argument occupies one 64-bit slot.
+    /// convention, each argument occupies one 64-bit slot. The slots are mutable, as WAMR declares them
+    /// (they receive a result); host functions return none, so the trampolines only read them. The type
+    /// must be WAMR's exactly: calling through a pointer of another function type is undefined.
     template <std::size_t Arity>
-    void hostTrampoline(wasm_exec_env_t execEnv, uint64_t const* rawArguments) noexcept
+    void hostTrampoline(wasm_exec_env_t execEnv, uint64_t* rawArguments) noexcept
     {
+        uint64_t* const first = rawArguments; // WAMR's slots, of WAMR's type: see above.
+        auto const slots = std::span<uint64_t, Arity> { first, Arity };
         auto arguments = std::array<uint32_t, Arity> {};
-        if constexpr (Arity > 0)
-            std::ranges::transform(std::span<uint64_t const, Arity> { rawArguments, Arity },
-                                   arguments.begin(),
-                                   [](uint64_t slot) { return static_cast<uint32_t>(slot); });
+        std::ranges::transform(
+            slots, arguments.begin(), [](uint64_t slot) { return static_cast<uint32_t>(slot); });
         dispatchHostCall(execEnv, arguments);
     }
 
-    /// A raw native, as WAMR calls it. WAMR hands it a mutable slot array, which receives a result;
-    /// host functions return none, so the trampolines only read it.
-    using RawNative = void (*)(wasm_exec_env_t, uint64_t const*);
+    /// A raw native, of the very type WAMR calls it through.
+    using RawNative = void (*)(wasm_exec_env_t, uint64_t*);
 
     /// @return The trampolines for 0 to MaxHostParameters parameters, indexed by parameter count.
     template <std::size_t... Arities>
@@ -348,32 +348,23 @@ namespace
     {
         static auto indices = [] {
             auto values = std::array<std::size_t, MaxHostFunctions> {};
-            std::ranges::iota(values, std::size_t { 0 });
+            std::ranges::copy(std::views::iota(std::size_t { 0 }, MaxHostFunctions), values.begin());
             return values;
         }();
         return indices;
     }
 
-    /// @return The handler forwardForeignMemoryGrowth() set; null until it is.
-    [[nodiscard]] std::atomic<enlarge_memory_error_callback_t>& foreignMemoryGrowthHandler() noexcept
-    {
-        static auto handler = std::atomic<enlarge_memory_error_callback_t> { nullptr };
-        return handler;
-    }
-
     /// The handler of WAMR's memory-growth callback.
-    void onMemoryGrowthRefused(uint32_t pages,
-                               uint64_t currentBytes,
-                               uint32_t memoryIndex,
-                               enlarge_memory_error_reason_t reason,
-                               wasm_module_inst_t moduleInstance,
+    void onMemoryGrowthRefused(uint32_t /*pages*/,
+                               uint64_t /*currentBytes*/,
+                               uint32_t /*memoryIndex*/,
+                               enlarge_memory_error_reason_t /*reason*/,
+                               wasm_module_inst_t /*moduleInstance*/,
                                wasm_exec_env_t execEnv,
-                               void* userData)
+                               void* /*userData*/)
     {
         if (auto* const instance = instanceOf(execEnv))
             instance->refuseGrowth();
-        else if (auto const foreign = foreignMemoryGrowthHandler().load(std::memory_order_acquire))
-            foreign(pages, currentBytes, memoryIndex, reason, moduleInstance, execEnv, userData);
     }
 } // namespace
 
@@ -393,12 +384,6 @@ namespace detail
         static auto once = std::once_flag {};
         std::call_once(once,
                        [] { wasm_runtime_set_enlarge_mem_error_callback(&onMemoryGrowthRefused, nullptr); });
-    }
-
-    void forwardForeignMemoryGrowth(enlarge_memory_error_callback_t handler)
-    {
-        foreignMemoryGrowthHandler().store(handler, std::memory_order_release);
-        installMemoryGrowthHandler();
     }
 } // namespace detail
 

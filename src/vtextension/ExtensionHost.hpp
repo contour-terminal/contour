@@ -22,6 +22,7 @@
 #include <vtextension/Instance.hpp>
 #include <vtextension/Placement.hpp>
 #include <vtextension/Runner.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
@@ -55,8 +56,14 @@ class IEngineProvider
 class EngineProvider final: public IEngineProvider, public IRetirementSink
 {
   public:
-    /// @param limits What engines are created with.
-    explicit EngineProvider(ExtensionLimits limits): _limits { limits } {}
+    /// @param backend What engines are created from; must outlive the provider and every engine it hands
+    ///        out.
+    /// @param limits What engines are created with: the limits every pane's extensions are configured
+    ///        with too (ExtensionHostConfig::limits), which instances must match.
+    EngineProvider(wasm::IWasmBackend& backend, ExtensionLimits limits):
+        _backend { backend }, _limits { limits }
+    {
+    }
 
     /// Releases what is still retired, on the destroying thread.
     ~EngineProvider() override;
@@ -78,6 +85,7 @@ class EngineProvider final: public IEngineProvider, public IRetirementSink
     /// Releases a list of retired extensions, one by one.
     static void release(std::unique_ptr<RetiredExtension> list) noexcept;
 
+    wasm::IWasmBackend& _backend;
     ExtensionLimits _limits;
     std::mutex _mutex;
     std::weak_ptr<Engine> _engine;              ///< Guarded by _mutex.

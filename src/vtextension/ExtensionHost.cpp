@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <vtextension/Surface.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
@@ -63,7 +64,7 @@ std::expected<std::shared_ptr<Engine>, ExtensionError> EngineProvider::acquire()
         auto const lock = std::scoped_lock { _mutex };
         if (auto cached = _engine.lock())
             return std::expected<std::shared_ptr<Engine>, ExtensionError> { std::move(cached) };
-        return Engine::create(_limits).transform([&](std::shared_ptr<Engine> created) {
+        return Engine::create(_backend, _limits).transform([&](std::shared_ptr<Engine> created) {
             _engine = created;
             return created;
         });
@@ -81,7 +82,7 @@ PreparedExtensions prepareExtensions(ExtensionHostConfig config,
                                          .limits = config.limits };
     // Entered only if a module is to be loaded, and so only on a thread that may: the thread that brought
     // the runtime up already is, and a guard there does nothing.
-    auto threadEnv = std::optional<std::expected<Engine::ThreadEnv, ExtensionError>> {};
+    auto threadGuard = std::optional<std::expected<std::unique_ptr<wasm::IThreadGuard>, ExtensionError>> {};
     prepared.extensions.reserve(config.extensions.size());
     for (auto& spec: config.extensions)
     {
@@ -90,10 +91,10 @@ PreparedExtensions prepareExtensions(ExtensionHostConfig config,
                 return std::unexpected(spec.moduleError);
             if (!engine)
                 return std::unexpected(engine.error());
-            if (!threadEnv)
-                threadEnv.emplace(Engine::ThreadEnv::enter());
-            if (!*threadEnv)
-                return std::unexpected(threadEnv->error());
+            if (!threadGuard)
+                threadGuard.emplace((*engine)->backend().enterThread());
+            if (!*threadGuard)
+                return std::unexpected(threadGuard->error());
             return CompiledExtension::load(**engine, std::move(spec.module));
         }();
         spec.module.clear();

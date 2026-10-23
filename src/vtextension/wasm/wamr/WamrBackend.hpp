@@ -6,7 +6,6 @@
 #include <memory>
 
 #include <vtextension/wasm/WasmRuntime.hpp>
-#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
 
 namespace vtextension::wasm::wamr
 {

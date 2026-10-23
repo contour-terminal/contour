@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -15,12 +14,9 @@
 #include <utility>
 #include <vector>
 
-#include <wasm_export.h>
-
 #include <vtextension/CanonicalAbi.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/StatuslineWorld.hpp>
-#include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
 namespace vtextension
 {
@@ -28,10 +24,7 @@ namespace vtextension
 namespace
 {
     /// The bytes of one WebAssembly page.
-    constexpr auto WasmPageBytes = std::size_t { 64 } * 1024;
-
-    /// What the runtime's exception says when the watchdog terminated the instance.
-    constexpr auto TerminatedException = std::string_view { "terminated by user" };
+    constexpr auto WasmPageBytes = uint64_t { 64 } * 1024;
 
     /// The Canonical ABI's limit on flat parameters; a call with more passes them through memory.
     constexpr auto MaxFlatParameters = std::size_t { 16 };
@@ -39,18 +32,30 @@ namespace
     static_assert(abi::Codec<Event>::FlatCount <= MaxFlatParameters, "update takes its event flat");
     static_assert(abi::Codec<ConfigMap>::FlatCount <= MaxFlatParameters, "load takes its config flat");
 
-    /// @return The Instance a runtime call is running in; null if the instance is not one of ours.
-    [[nodiscard]] Instance* instanceOf(wasm_module_inst_t moduleInstance) noexcept
-    {
-        return static_cast<Instance*>(wasm_runtime_get_custom_data(moduleInstance));
-    }
-
     /// @return @p extent as a cell count of the world's `u32`; negative extents count as zero.
     [[nodiscard]] uint32_t cellCount(int extent) noexcept
     {
         return static_cast<uint32_t>(std::max(extent, 0));
     }
+
+    /// The world's host functions, as every runtime is created with them: the index of each row is
+    /// what the runtime calls it by, and the row of Instance's handler table that runs it.
+    constexpr auto HostFunctions = std::array {
+        wasm::HostFunction {
+            .module = detail::HostImportModule, .name = "request-frame", .parameterCount = 1 },
+        wasm::HostFunction { .module = detail::HostImportModule, .name = "log", .parameterCount = 3 },
+        wasm::HostFunction { .module = detail::HostImportModule, .name = "state", .parameterCount = 1 },
+        wasm::HostFunction { .module = detail::HostImportModule, .name = "run-command", .parameterCount = 5 },
+    };
 } // namespace
+
+namespace detail
+{
+    std::span<wasm::HostFunction const> statuslineHostFunctions() noexcept
+    {
+        return HostFunctions;
+    }
+} // namespace detail
 
 /// The guest's linear memory as the codec reaches it: every view is bounds-checked by the runtime,
 /// allocations go through the guest's `cabi_realloc` and are checked as well, and what lifting may
@@ -65,14 +70,10 @@ class Instance::GuestMemory final: public abi::IGuestMemory
 
     [[nodiscard]] abi::Result<std::span<std::byte>> view(abi::Address address, uint32_t size) override
     {
-        if (size == 0)
-            return std::span<std::byte> {};
-        auto* const moduleInstance = _instance._instance.get();
-        if (!wasm_runtime_validate_app_addr(moduleInstance, address, size))
+        auto const bytes = _instance._instance->memory(address, size);
+        if (!bytes)
             return std::unexpected(ExtensionError::Trapped);
-        auto* const native =
-            static_cast<std::byte*>(wasm_runtime_addr_app_to_native(moduleInstance, address));
-        return std::span<std::byte> { native, size };
+        return *bytes;
     }
 
     [[nodiscard]] abi::Result<abi::Address> allocate(uint32_t size, uint32_t alignment) override
@@ -100,107 +101,56 @@ class Instance::GuestMemory final: public abi::IGuestMemory
     uint64_t _liftBudget = 0; ///< What lifting may still spend in the current host call.
 };
 
-/// The world's host functions, as the runtime calls them: each receives the core-wasm parameters
-/// the Canonical ABI flattens its WIT signature to, lifts them, calls the IHostServices, and lowers
-/// the answer. A guest that breaks the ABI (an address outside its memory, a string that is not
-/// UTF-8, an unknown enum case) traps.
+/// The world's host functions: each receives the core-wasm parameters the Canonical ABI flattens its
+/// WIT signature to, lifts them, calls the IHostServices, and lowers the answer. A guest that breaks
+/// the ABI (an address outside its memory, a string that is not UTF-8, an unknown enum case) traps.
 struct Instance::HostCalls
 {
-    /// Runs @p body for the Instance the call came from, or traps the guest if there is none.
-    ///
-    /// This is called by the interpreter, which is C: no exception may leave it. One that @p body
-    /// throws (the host could not allocate, a host service failed) faults the call instead, and so
-    /// does a host call made while another is in progress.
-    template <typename Body>
-    static void dispatch(wasm_exec_env_t execEnv, Body const& body) noexcept
-    {
-        auto* const moduleInstance = wasm_runtime_get_module_inst(execEnv);
-        auto* const instance = instanceOf(moduleInstance);
-        if (!instance)
-        {
-            wasm_runtime_set_exception(moduleInstance, "host function called outside an extension instance");
-            return;
-        }
-        // Host calls do not nest. The only way into one from inside another is the guest's
-        // `cabi_realloc`, which the host calls while it stores a result; a guest that makes a host
-        // call from there would run host code against a half-stored result.
-        if (instance->_hostCall == HostCallState::InProgress)
-        {
-            instance->failHostCall(ExtensionError::Trapped);
-            return;
-        }
-        instance->_hostCall = HostCallState::InProgress;
-        auto result = abi::Result<void> {};
-        try
-        {
-            instance->_memory->resetLiftBudget();
-            result = body(*instance);
-        }
-        catch (...)
-        {
-            result = std::unexpected(ExtensionError::Trapped);
-        }
-        instance->_hostCall = HostCallState::Idle;
-        if (!result)
-            instance->failHostCall(result.error());
-    }
+    /// What runs one host function, given its flat arguments (as many as its row in HostFunctions says).
+    using Handler = abi::Result<void> (*)(Instance& instance, std::span<uint32_t const> arguments);
 
     /// `request-frame: func(after-ms: u32)`.
-    static void requestFrame(wasm_exec_env_t execEnv, uint32_t afterMs)
+    static abi::Result<void> requestFrame(Instance& instance, std::span<uint32_t const> arguments)
     {
-        dispatch(execEnv, [&](Instance& instance) -> abi::Result<void> {
-            instance._services.requestFrame(std::chrono::milliseconds { afterMs });
-            return {};
-        });
+        instance._services.requestFrame(std::chrono::milliseconds { arguments[0] });
+        return {};
     }
 
     /// `log: func(level: log-level, message: string)`.
-    static void log(wasm_exec_env_t execEnv, uint32_t level, uint32_t pointer, uint32_t length)
+    static abi::Result<void> log(Instance& instance, std::span<uint32_t const> arguments)
     {
-        dispatch(execEnv, [&](Instance& instance) -> abi::Result<void> {
-            auto const flat = std::array { level, pointer, length };
-            auto reader = abi::FlatReader(flat);
-            auto const lifted = abi::Codec<LogLevel>::liftFlat(*instance._memory, reader);
-            if (!lifted)
-                return std::unexpected(lifted.error());
-            return abi::Codec<std::string>::liftFlat(*instance._memory, reader)
-                .transform([&](std::string const& message) { instance._services.log(*lifted, message); });
-        });
+        auto reader = abi::FlatReader(arguments);
+        auto const lifted = abi::Codec<LogLevel>::liftFlat(*instance._memory, reader);
+        if (!lifted)
+            return std::unexpected(lifted.error());
+        return abi::Codec<std::string>::liftFlat(*instance._memory, reader)
+            .transform([&](std::string const& message) { instance._services.log(*lifted, message); });
     }
 
-    /// `state: func() -> state-snapshot`, whose result the guest receives at @p resultAddress.
-    static void state(wasm_exec_env_t execEnv, uint32_t resultAddress)
+    /// `state: func() -> state-snapshot`, whose result the guest receives at the address it passes.
+    static abi::Result<void> state(Instance& instance, std::span<uint32_t const> arguments)
     {
-        dispatch(execEnv, [&](Instance& instance) {
-            return abi::Codec<StateSnapshot>::store(
-                *instance._memory, resultAddress, instance._services.state());
-        });
+        return abi::Codec<StateSnapshot>::store(*instance._memory, arguments[0], instance._services.state());
     }
 
     /// `run-command: func(name: string, args: list<tuple<string, string>>) ->
-    /// result<command-output, command-error>`, whose result the guest receives at @p resultAddress.
-    static void runCommand(wasm_exec_env_t execEnv,
-                           uint32_t namePointer,
-                           uint32_t nameLength,
-                           uint32_t argsPointer,
-                           uint32_t argsLength,
-                           uint32_t resultAddress)
+    /// result<command-output, command-error>`, whose result the guest receives at the address it passes
+    /// last.
+    static abi::Result<void> runCommand(Instance& instance, std::span<uint32_t const> arguments)
     {
-        dispatch(execEnv, [&](Instance& instance) -> abi::Result<void> {
-            auto& memory = *instance._memory;
-            auto const flat = std::array { namePointer, nameLength, argsPointer, argsLength };
-            auto reader = abi::FlatReader(flat);
-            auto const name = abi::Codec<std::string>::liftFlat(memory, reader);
-            if (!name)
-                return std::unexpected(name.error());
-            auto const args = abi::Codec<ConfigMap>::liftFlat(memory, reader);
-            if (!args)
-                return std::unexpected(args.error());
-            auto const result = run(instance, *name, *args);
-            if (!result)
-                return std::unexpected(result.error());
-            return abi::Codec<abi::CommandResult>::store(memory, resultAddress, *result);
-        });
+        auto& memory = *instance._memory;
+        auto reader = abi::FlatReader(arguments.first(4));
+        auto const resultAddress = arguments[4];
+        auto const name = abi::Codec<std::string>::liftFlat(memory, reader);
+        if (!name)
+            return std::unexpected(name.error());
+        auto const args = abi::Codec<ConfigMap>::liftFlat(memory, reader);
+        if (!args)
+            return std::unexpected(args.error());
+        auto const result = run(instance, *name, *args);
+        if (!result)
+            return std::unexpected(result.error());
+        return abi::Codec<abi::CommandResult>::store(memory, resultAddress, *result);
     }
 
     /// Runs the command a `run-command` call names, with the guest's deadline standing still: the
@@ -212,13 +162,12 @@ struct Instance::HostCalls
                                                              std::string const& name,
                                                              ConfigMap const& args)
     {
-        auto const token = WatchToken { .instance = instance._instance.get() };
+        auto const token = instance.watchToken();
         auto const remaining = instance._deadline - instance._clock.now();
         instance._engine->disarm(token);
         // Once disarmed, the watchdog cannot fire any more; it may have already, or the deadline may
         // be spent all the same.
-        if (wasm_runtime_get_exception(instance._instance.get())
-            || remaining <= core::platform::SteadyDuration::zero())
+        if (instance.isDeadlineExpired() || remaining <= core::platform::SteadyDuration::zero())
             return std::unexpected(ExtensionError::DeadlineExceeded);
 
         auto output = instance._services.runCommand(name, args);
@@ -237,109 +186,10 @@ struct Instance::HostCalls
             .transform_error([](ExtensionError error) { return abi::commandErrorFor(error); });
     }
 
-    /// The runtime's callback for a memory that could not grow.
-    static void onMemoryGrowthRefused(uint32_t /*pages*/,
-                                      uint64_t /*currentBytes*/,
-                                      uint32_t /*memoryIndex*/,
-                                      enlarge_memory_error_reason_t /*reason*/,
-                                      wasm_module_inst_t moduleInstance,
-                                      wasm_exec_env_t /*execEnv*/,
-                                      void* /*userData*/)
-    {
-        if (auto* const instance = instanceOf(moduleInstance))
-            instance->_memoryPressure = MemoryPressure::GrowthRefused;
-    }
+    /// What runs each host function, by its index in HostFunctions.
+    static constexpr auto Handlers = std::array<Handler, 4> { &requestFrame, &log, &state, &runCommand };
+    static_assert(Handlers.size() == HostFunctions.size(), "a handler for every host function");
 };
-
-namespace detail
-{
-    namespace
-    {
-        /// One host function, as the runtime registers it.
-        struct HostFunction
-        {
-            char const* name;      ///< The import's function name.
-            void* function;        ///< Its implementation.
-            char const* signature; ///< Its core signature, in the runtime's notation: `i` is an i32.
-        };
-
-        /// A registration of the host functions. The runtime keeps (and sorts) the very array it is
-        /// given, so each registration owns its own until it unregisters it.
-        class NativeRegistration final: public HostRegistration
-        {
-          public:
-            explicit NativeRegistration(std::array<HostFunction, 4> const& functions)
-            {
-                std::ranges::transform(functions, _symbols.begin(), [](HostFunction const& function) {
-                    return NativeSymbol { .symbol = function.name,
-                                          .func_ptr = function.function,
-                                          .signature = function.signature,
-                                          .attachment = nullptr };
-                });
-            }
-
-            NativeRegistration(NativeRegistration const&) = delete;
-            NativeRegistration(NativeRegistration&&) = delete;
-            NativeRegistration& operator=(NativeRegistration const&) = delete;
-            NativeRegistration& operator=(NativeRegistration&&) = delete;
-
-            ~NativeRegistration() override
-            {
-                if (_state == State::Registered)
-                    wasm_runtime_unregister_natives(HostImportModule, _symbols.data());
-            }
-
-            /// Registers the array with the runtime, which may refuse it.
-            void registerSymbols()
-            {
-                if (wasm_runtime_register_natives(
-                        HostImportModule, _symbols.data(), static_cast<uint32_t>(_symbols.size())))
-                    _state = State::Registered;
-            }
-
-            /// @return Whether the runtime holds the array.
-            [[nodiscard]] bool isRegistered() const noexcept { return _state == State::Registered; }
-
-          private:
-            /// Whether the runtime holds _symbols, which it must then be asked to give back.
-            enum class State : uint8_t
-            {
-                Unregistered,
-                Registered,
-            };
-
-            std::array<NativeSymbol, 4> _symbols {};
-            State _state = State::Unregistered;
-        };
-    } // namespace
-
-    std::unique_ptr<HostRegistration> registerHostFunctions()
-    {
-        // The callback is the runtime's one global, which the WAMR backend owns: it hands the failures
-        // of module instances it did not create (these) on to this handler.
-        wasm::wamr::detail::forwardForeignMemoryGrowth(&Instance::HostCalls::onMemoryGrowthRefused);
-        // The world's host functions.
-        auto const functions = std::array {
-            HostFunction { .name = "request-frame",
-                           .function = reinterpret_cast<void*>(&Instance::HostCalls::requestFrame),
-                           .signature = "(i)" },
-            HostFunction { .name = "log",
-                           .function = reinterpret_cast<void*>(&Instance::HostCalls::log),
-                           .signature = "(iii)" },
-            HostFunction { .name = "state",
-                           .function = reinterpret_cast<void*>(&Instance::HostCalls::state),
-                           .signature = "(i)" },
-            HostFunction { .name = "run-command",
-                           .function = reinterpret_cast<void*>(&Instance::HostCalls::runCommand),
-                           .signature = "(iiiii)" },
-        };
-        auto registration = std::make_unique<NativeRegistration>(functions);
-        registration->registerSymbols();
-        if (!registration->isRegistered())
-            return nullptr;
-        return registration;
-    }
-} // namespace detail
 
 Instance::Instance(PrivateTag /*unused*/,
                    std::shared_ptr<CompiledExtension const> compiled,
@@ -364,6 +214,9 @@ std::expected<std::unique_ptr<Instance>, ExtensionError> Instance::create(Engine
                                                                           ExtensionLimits limits)
 {
     Require(&engine == &compiled.engine());
+    // The memory and stack caps are the engine's runtime's: an instance cannot be held to others.
+    Require(limits.memoryBytes == engine.limits().memoryBytes
+            && limits.stackBytes == engine.limits().stackBytes);
     auto instance =
         std::make_unique<Instance>(PrivateTag {}, compiled.shared_from_this(), services, clock, limits);
     return instance->instantiate().transform([&] { return std::move(instance); });
@@ -371,78 +224,72 @@ std::expected<std::unique_ptr<Instance>, ExtensionError> Instance::create(Engine
 
 std::expected<void, ExtensionError> Instance::instantiate()
 {
-    auto* const module = _compiled->module();
+    auto& module = _compiled->module();
 
-    auto memoryExport = wasm_export_t {};
-    for (auto const index:
-         std::views::iota(int32_t { 0 }, std::max(wasm_runtime_get_export_count(module), 0)))
-    {
-        wasm_runtime_get_export_type(module, index, &memoryExport);
-        if (memoryExport.kind == WASM_IMPORT_EXPORT_KIND_MEMORY)
-            break;
-    }
-    auto const capPages = _limits.memoryBytes / WasmPageBytes;
-    if (wasm_memory_type_get_init_page_count(memoryExport.u.memory_type) > capPages)
+    auto const exceedsCap = [&](wasm::ExportDescription const& entry) {
+        return entry.kind == wasm::ExternKind::Memory
+               && uint64_t { entry.initialPages } * WasmPageBytes > _limits.memoryBytes;
+    };
+    if (std::ranges::any_of(module.exports(), exceedsCap))
         return std::unexpected(ExtensionError::OutOfMemory);
 
-    auto* rawArgs = static_cast<InstantiationArgs2*>(nullptr);
-    if (!wasm_runtime_instantiation_args_create(&rawArgs))
-        return std::unexpected(ExtensionError::RuntimeUnavailable);
-    auto const args = std::unique_ptr<InstantiationArgs2, decltype(&wasm_runtime_instantiation_args_destroy)>(
-        rawArgs, &wasm_runtime_instantiation_args_destroy);
-    auto const stackBytes = static_cast<uint32_t>(
-        std::min<std::size_t>(_limits.stackBytes, std::numeric_limits<uint32_t>::max()));
-    wasm_runtime_instantiation_args_set_default_stack_size(args.get(), stackBytes);
-    wasm_runtime_instantiation_args_set_host_managed_heap_size(args.get(), 0);
-    wasm_runtime_instantiation_args_set_max_memory_pages(args.get(), static_cast<uint32_t>(capPages));
+    auto instance = module.instantiate(*this);
+    if (!instance)
+        return std::unexpected(instance.error());
+    _instance = std::move(*instance);
 
-    auto errorBuffer = std::array<char, 128> {};
-    _instance.reset(wasm_runtime_instantiate_ex2(
-        module, args.get(), errorBuffer.data(), static_cast<uint32_t>(errorBuffer.size())));
-    if (!_instance)
-        return std::unexpected(ExtensionError::InvalidComponent);
-    wasm_runtime_set_custom_data(_instance.get(), this);
-
-    _execEnv.reset(wasm_runtime_create_exec_env(_instance.get(), stackBytes));
-    if (!_execEnv)
-        return std::unexpected(ExtensionError::RuntimeUnavailable);
-
-    auto const lookup = [&](char const* name) {
-        return wasm_runtime_lookup_function(_instance.get(), name);
+    auto const lookup = [&](std::string_view name) {
+        return _instance->function(name);
     };
-    _exports = Exports { .load = lookup("load"),
-                         .update = lookup("update"),
-                         .render = lookup("render"),
-                         .realloc = lookup("cabi_realloc"),
+    auto const load = lookup("load");
+    auto const update = lookup("update");
+    auto const render = lookup("render");
+    auto const realloc = lookup("cabi_realloc");
+    // The world check found them; a runtime that cannot is one that cannot instantiate the module.
+    if (!load || !update || !render || !realloc)
+        return std::unexpected(ExtensionError::InvalidComponent);
+    _exports = Exports { .load = *load,
+                         .update = *update,
+                         .render = *render,
+                         .realloc = *realloc,
                          .postLoad = lookup("cabi_post_load"),
                          .postUpdate = lookup("cabi_post_update"),
                          .postRender = lookup("cabi_post_render"),
                          .initialize = lookup("_initialize") };
     if (!_exports.initialize)
         return {};
-    return guarded(_limits.loadDeadline, [&] { return callExport(_exports.initialize, {}); });
+    return guarded(_limits.loadDeadline, [&] { return callExport(*_exports.initialize, {}); });
+}
+
+WatchToken Instance::watchToken() noexcept
+{
+    return WatchToken { .instance = _instance.get(), .state = &_deadlineState };
+}
+
+bool Instance::isDeadlineExpired() const noexcept
+{
+    return _deadlineState.load(std::memory_order_acquire) == DeadlineState::Expired;
 }
 
 template <typename Body>
 auto Instance::guarded(std::chrono::milliseconds timeout, Body const& body) -> decltype(body())
 {
-    Require(Engine::ThreadEnv::isCurrentThreadPrepared());
+    Require(_engine->backend().isCurrentThreadPrepared());
     if (_fault)
         return std::unexpected(*_fault);
 
     _hostCallError.reset();
     _memory->resetLiftBudget();
-    _memoryPressure = MemoryPressure::None;
     _deadline = _clock.now() + timeout;
     // Disarmed on every way out of the body, an exception included, which becomes a fault: no
-    // deadline may outlive the call, or the watchdog could later terminate a destroyed instance.
-    auto result = runGuarded(*_engine, WatchToken { .instance = _instance.get() }, timeout, body);
+    // deadline may outlive the call, or the watchdog could later interrupt a destroyed instance.
+    auto result = runGuarded(*_engine, watchToken(), timeout, body);
 
     if (!result)
         _fault = result.error();
-    else if (wasm_runtime_get_exception(_instance.get()))
+    else if (isDeadlineExpired())
         // The deadline expired after the guest returned, while the host was still lifting the result:
-        // the call overran all the same, and the instance is terminated.
+        // the call overran all the same, and the instance is interrupted.
         _fault = ExtensionError::DeadlineExceeded;
 
     if (_fault)
@@ -450,47 +297,76 @@ auto Instance::guarded(std::chrono::milliseconds timeout, Body const& body) -> d
     return result;
 }
 
-std::expected<void, ExtensionError> Instance::callExport(Function function, std::span<uint32_t> argv)
+std::expected<void, ExtensionError> Instance::callExport(wasm::ExportFunction function,
+                                                         std::span<uint32_t> argv)
 {
-    if (wasm_runtime_call_wasm(_execEnv.get(), function, static_cast<uint32_t>(argv.size()), argv.data()))
-        return {};
-    return std::unexpected(guestFailure());
+    return _instance->call(function, argv).transform_error([this](wasm::CallFailure failure) {
+        return guestFailure(failure);
+    });
 }
 
-std::expected<void, ExtensionError> Instance::callPostReturn(Function function, uint32_t result)
+std::expected<void, ExtensionError> Instance::callPostReturn(OptionalFunction function, uint32_t result)
 {
     if (!function)
         return {};
     auto argv = std::array { result };
-    return callExport(function, argv);
+    return callExport(*function, argv);
 }
 
-ExtensionError Instance::guestFailure() const
+ExtensionError Instance::guestFailure(wasm::CallFailure failure) const noexcept
 {
     if (_hostCallError)
         return *_hostCallError;
-    auto const* const exception = wasm_runtime_get_exception(_instance.get());
-    if (exception && std::string_view { exception }.contains(TerminatedException))
+    if (isDeadlineExpired())
         return ExtensionError::DeadlineExceeded;
-    if (_memoryPressure == MemoryPressure::GrowthRefused)
+    // Refused growth is seen only as the reason this very call failed. Growth refused in a call that
+    // returned (a guest allocator that copes with `memory.grow` failing) is not reported by the runtime
+    // interface, so a later failure in the same guarded body is `Trapped`, where WAMR driven directly
+    // once said `OutOfMemory` -- a documented deviation, in the label only. Refusal inside a host call's
+    // allocation does reach here as `OutOfMemory`: the host call records it as its error, which ranks first.
+    if (failure == wasm::CallFailure::MemoryGrowthRefused)
         return ExtensionError::OutOfMemory;
     return ExtensionError::Trapped;
 }
 
-void Instance::failHostCall(ExtensionError error) noexcept
+std::unexpected<ExtensionError> Instance::failHostCall(ExtensionError error) noexcept
 {
     if (!_hostCallError)
         _hostCallError = error;
-    // Called on the interpreter's side of a host call, so nothing may escape; the runtime copies
-    // the message.
+    return std::unexpected(error);
+}
+
+std::expected<void, ExtensionError> Instance::callHost(std::size_t functionIndex,
+                                                       std::span<uint32_t const> arguments) noexcept
+{
+    // The runtime calls only what it was created with, each with its arity; anything else is a guest
+    // the host cannot serve.
+    if (functionIndex >= HostCalls::Handlers.size()
+        || arguments.size() != HostFunctions[functionIndex].parameterCount)
+        return failHostCall(ExtensionError::Trapped);
+    // Host calls do not nest. The only way into one from inside another is the guest's `cabi_realloc`,
+    // which the host calls while it stores a result; a guest that makes a host call from there would
+    // run host code against a half-stored result.
+    if (_hostCall == HostCallState::InProgress)
+        return failHostCall(ExtensionError::Trapped);
+
+    // Called from inside the runtime: no exception may leave. One that a host function throws (the host
+    // could not allocate, a host service failed) faults the call instead.
+    _hostCall = HostCallState::InProgress;
+    auto result = abi::Result<void> {};
     try
     {
-        wasm_runtime_set_exception(_instance.get(), std::string(errorText(error)).c_str());
+        _memory->resetLiftBudget();
+        result = HostCalls::Handlers[functionIndex](*this, arguments);
     }
     catch (...)
     {
-        wasm_runtime_set_exception(_instance.get(), "extension host call failed");
+        result = std::unexpected(ExtensionError::Trapped);
     }
+    _hostCall = HostCallState::Idle;
+    if (!result)
+        return failHostCall(result.error());
+    return {};
 }
 
 std::expected<EventKinds, ExtensionError> Instance::load(ConfigMap const& config)

@@ -146,6 +146,10 @@ if(VTHOST_TESTING)
         tmux/TmuxGateway_test.cpp
     )
     target_link_libraries(vthost_test vthost core::net_tls core::testing Catch2::Catch2)
+    # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
+    if(CONTOUR_EXTENSIONS)
+        target_link_libraries(vthost_test vtextension_runtime)
+    endif()
     # The daemon's extensions are tested end to end with a guest that runs a command, where guests are built.
     if(CONTOUR_EXTENSIONS AND TARGET spawner_wasm)
         target_compile_definitions(vthost_test PRIVATE

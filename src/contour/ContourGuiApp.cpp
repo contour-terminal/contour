@@ -39,6 +39,8 @@
     #include <vtextension/BundledExtensions.hpp>
     #include <vtextension/ExtensionConsent.hpp>
     #include <vtextension/SessionExtensions.hpp>
+    #include <vtextension/wasm/DefaultBackend.hpp>
+    #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/client/DaemonGrantReplies.hpp>
 #endif
 
@@ -363,6 +365,11 @@ vtextension::ExtensionRuntime& ContourGuiApp::extensionRuntime()
 {
     if (!_extensionRuntime)
     {
+        if (!_extensionBackend)
+            _extensionBackend = { vtextension::wasm::makeDefaultBackend().release(),
+                                  [](vtextension::wasm::IWasmBackend* made) {
+                                      std::default_delete<vtextension::wasm::IWasmBackend> {}(made);
+                                  } };
         auto const executableDirectory =
             std::filesystem::path { QCoreApplication::applicationDirPath().toStdU16String() };
         auto runtime = std::make_unique<vtextension::ExtensionRuntime>(
@@ -372,7 +379,8 @@ vtextension::ExtensionRuntime& ContourGuiApp::extensionRuntime()
                     vtextension::nativeBundledExtensionPlatform(), processEnvironment(), executableDirectory),
                 .workerCount = vtextension::extensionWorkerCount(std::thread::hardware_concurrency()),
                 .limits = {} },
-            vtextension::ExtensionRuntimeServices { .capture = _commandCapture,
+            vtextension::ExtensionRuntimeServices { .backend = *_extensionBackend,
+                                                    .capture = _commandCapture,
                                                     .wallClock = _terminalClocks.wall.get(),
                                                     .localTime = _terminalClocks.localTime,
                                                     .environment = processEnvironment(),

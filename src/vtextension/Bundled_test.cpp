@@ -29,6 +29,7 @@
 #include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/RunnerHarness.hpp>
 #include <vtextension/testing/TestModules.hpp>
+#include <vtextension/wasm/DefaultBackend.hpp>
 
 using namespace std::chrono_literals;
 using namespace vtextension;
@@ -107,7 +108,7 @@ constexpr auto CellPixelSize = vtbackend::ImageSize { vtbackend::Width(8), vtbac
                                                  ConfigMap config = {},
                                                  CommandPermission runCommand = CommandPermission::Allow)
 {
-    auto module = loadModule(readTestModule(artifact));
+    auto module = loadModule(*harness.backend, readTestModule(artifact));
     return std::make_unique<Runner>(std::move(module.engine),
                                     std::move(module.compiled),
                                     RunnerConfig { .name = std::string(artifact),
@@ -187,10 +188,11 @@ constexpr auto DirtyMain = std::string_view { "# branch.oid 0123456789abcdef\n"
 
 TEST_CASE("Bundled: every module declares what it is", "[vtextension][bundled][guest]")
 {
+    auto const backend = vtextension::wasm::makeDefaultBackend();
     for (auto const& extension: bundledExtensions())
     {
         INFO(extension.name);
-        auto const module = loadModule(readTestModule(extension.artifact));
+        auto const module = loadModule(*backend, readTestModule(extension.artifact));
         auto const& manifest = module.compiled->manifest();
         REQUIRE(manifest.has_value());
         CHECK(manifest->name == extension.name);
@@ -206,9 +208,10 @@ TEST_CASE("Bundled: every declared command can be written for both shells", "[vt
     // A command runs through the platform shell (CommandCapture takes one command line), and an argument the
     // shell would interpret is refused rather than quoted: cmd.exe's metacharacters cannot be. So a declared
     // argv must survive both dialects, or the command can never run on that platform.
+    auto const backend = vtextension::wasm::makeDefaultBackend();
     for (auto const& extension: bundledExtensions())
     {
-        auto const module = loadModule(readTestModule(extension.artifact));
+        auto const module = loadModule(*backend, readTestModule(extension.artifact));
         auto const& manifest = module.compiled->manifest();
         REQUIRE(manifest.has_value());
         for (auto const& command: manifest->commands)

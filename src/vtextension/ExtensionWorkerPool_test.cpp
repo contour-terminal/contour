@@ -6,7 +6,6 @@
 
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <future>
 #include <mutex>
 #include <ranges>
@@ -17,18 +16,13 @@
 #include <vtextension/Engine.hpp>
 #include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/ExtensionWorkerPool.hpp>
+#include <vtextension/testing/LaneReport.hpp>
+#include <vtextension/wasm/DefaultBackend.hpp>
 
 using namespace vtextension;
 using namespace std::chrono_literals;
-
-namespace
-{
-
-/// How long a test waits for something that must happen, far beyond any scheduler's latency: the
-/// bound proves only that it happened at all.
-constexpr auto Eventually = 30s;
-
-} // namespace
+using vtextension::testing::Eventually;
+using vtextension::testing::reportFromLane;
 
 TEST_CASE("ExtensionWorkerPool.workerCount", "[vtextension]")
 {
@@ -40,7 +34,8 @@ TEST_CASE("ExtensionWorkerPool.workerCount", "[vtextension]")
 
 TEST_CASE("ExtensionWorkerPool.lazy", "[vtextension][threading]")
 {
-    auto pool = ExtensionWorkerPool(2);
+    auto const backend = wasm::makeDefaultBackend();
+    auto pool = ExtensionWorkerPool(*backend, 2);
     CHECK(pool.runningWorkers() == 0);
     [[maybe_unused]] auto const lane = pool.assignLane();
     CHECK(pool.runningWorkers() == 2);
@@ -49,9 +44,10 @@ TEST_CASE("ExtensionWorkerPool.lazy", "[vtextension][threading]")
 TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
 {
     // A lane is prepared for the runtime an engine keeps up, as a runner's engine does while its jobs run.
-    auto const engine = Engine::create(ExtensionLimits {});
+    auto const backend = wasm::makeDefaultBackend();
+    auto const engine = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(engine.has_value());
-    auto pool = ExtensionWorkerPool(2);
+    auto pool = ExtensionWorkerPool(*backend, 2);
     auto const first = pool.assignLane();
     auto const second = pool.assignLane();
     CHECK(first != second);
@@ -67,7 +63,7 @@ TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
         pool.post(first, [&, index] {
             auto const lock = std::scoped_lock { mutex };
             threads.insert(std::this_thread::get_id());
-            prepared += Engine::ThreadEnv::isCurrentThreadPrepared() ? 1 : 0;
+            prepared += backend->isCurrentThreadPrepared() ? 1 : 0;
             if (index == Jobs - 1)
                 done.set_value();
         });
@@ -80,7 +76,8 @@ TEST_CASE("ExtensionWorkerPool.lanesArePinned", "[vtextension][threading]")
 
 TEST_CASE("ExtensionWorkerPool.timers", "[vtextension][threading]")
 {
-    auto pool = ExtensionWorkerPool(1);
+    auto const backend = wasm::makeDefaultBackend();
+    auto pool = ExtensionWorkerPool(*backend, 1);
     auto const lane = pool.assignLane();
     auto mutex = std::mutex {};
     auto fired = std::vector<int> {};
@@ -106,7 +103,8 @@ TEST_CASE("ExtensionWorkerPool.scheduleWhileWaiting", "[vtextension][threading]"
     // The worker sleeps towards its earliest timer while another thread schedules more: scheduling may move
     // the timers in memory, and the worker must not be left holding on to where the earliest one was
     // (ASan checks that it is not).
-    auto pool = ExtensionWorkerPool(1);
+    auto const backend = wasm::makeDefaultBackend();
+    auto pool = ExtensionWorkerPool(*backend, 1);
     auto const lane = pool.assignLane();
     auto timers = std::vector<TimerId> {};
     timers.push_back(pool.schedule(lane, std::chrono::hours { 1 }, [] {}));
@@ -131,8 +129,9 @@ TEST_CASE("ExtensionWorkerPool.destructionRunsPostedJobs", "[vtextension][thread
     auto ran = std::vector<int> {};
     auto timerRan = false;
     auto blocker = std::promise<void> {};
+    auto const backend = wasm::makeDefaultBackend();
     {
-        auto pool = ExtensionWorkerPool(1);
+        auto pool = ExtensionWorkerPool(*backend, 1);
         auto const lane = pool.assignLane();
         // The worker is held up, so that the jobs below are still queued when the pool is destroyed.
         pool.post(lane, [future = blocker.get_future().share()] { future.wait(); });
@@ -150,38 +149,24 @@ TEST_CASE("ExtensionWorkerPool.reprepareForNewRuntime", "[vtextension][threading
 {
     // A lane prepared for one runtime is prepared again once the last engine went and a new one brought
     // the runtime up anew: on Windows the old preparation would have no state under the new runtime.
-    auto pool = ExtensionWorkerPool(1);
+    auto const backend = wasm::makeDefaultBackend();
+    auto pool = ExtensionWorkerPool(*backend, 1);
     auto const lane = pool.assignLane();
-    struct Report
-    {
-        uint64_t prepared = 0; ///< The generation the lane's state was set up for.
-        bool ready = false;    ///< Whether the lane may call into instances.
-    };
-    auto const reportFromLane = [&] {
-        auto report = std::promise<Report> {};
-        auto future = report.get_future();
-        pool.post(lane, [&report] {
-            report.set_value(Report { .prepared = Engine::ThreadEnv::preparedGeneration(),
-                                      .ready = Engine::ThreadEnv::isCurrentThreadPrepared() });
-        });
-        REQUIRE(future.wait_for(Eventually) == std::future_status::ready);
-        return future.get();
-    };
 
-    auto first = Engine::create(ExtensionLimits {});
+    auto first = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(first.has_value());
-    auto const firstGeneration = Engine::runtimeGeneration();
-    auto const before = reportFromLane();
+    auto const firstGeneration = backend->runtimeGeneration();
+    auto const before = reportFromLane(pool, lane, *backend);
     CHECK(before.prepared == firstGeneration);
     CHECK(before.ready);
 
     first->reset(); // The last engine: the runtime goes down.
-    auto second = Engine::create(ExtensionLimits {});
+    auto second = Engine::create(*backend, ExtensionLimits {});
     REQUIRE(second.has_value());
-    auto const secondGeneration = Engine::runtimeGeneration();
+    auto const secondGeneration = backend->runtimeGeneration();
     REQUIRE(secondGeneration != firstGeneration);
 
-    auto const after = reportFromLane();
+    auto const after = reportFromLane(pool, lane, *backend);
     CHECK(after.prepared == secondGeneration);
     CHECK(after.ready);
 }

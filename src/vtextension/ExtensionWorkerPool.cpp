@@ -4,15 +4,13 @@
 #include <core/Assert.hpp>
 
 #include <algorithm>
-#include <optional>
 #include <utility>
-
-#include <vtextension/Engine.hpp>
 
 namespace vtextension
 {
 
-ExtensionWorkerPool::ExtensionWorkerPool(std::size_t workerCount)
+ExtensionWorkerPool::ExtensionWorkerPool(wasm::IWasmBackend& backend, std::size_t workerCount):
+    _backend { backend }
 {
     Require(workerCount > 0);
     _workers.reserve(workerCount);
@@ -108,15 +106,15 @@ void ExtensionWorkerPool::work(Worker& worker)
 {
     // Held for the thread's whole life, and renewed whenever the runtime it was entered for has been
     // replaced by a new one (the last engine went, another came). A worker the runtime cannot prepare
-    // still runs its jobs; a runner finds out from Engine::ThreadEnv::isCurrentThreadPrepared() that it
+    // still runs its jobs; a runner finds out from the backend's isCurrentThreadPrepared() that it
     // cannot instantiate.
-    auto threadEnv = std::optional<Engine::ThreadEnv> {};
+    auto guard = std::unique_ptr<wasm::IThreadGuard> {};
     auto const prepare = [&] {
-        if (threadEnv && threadEnv->generation() == Engine::runtimeGeneration())
+        if (guard && guard->generation() == _backend.runtimeGeneration())
             return;
-        threadEnv.reset(); // Ended first: the new guard must not nest in the stale one.
-        if (auto entered = Engine::ThreadEnv::enter())
-            threadEnv.emplace(std::move(*entered));
+        guard.reset(); // Ended first: the new guard must not nest in the stale one.
+        if (auto entered = _backend.enterThread())
+            guard = std::move(*entered);
     };
     prepare();
 

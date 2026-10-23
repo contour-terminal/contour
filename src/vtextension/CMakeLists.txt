@@ -1,5 +1,7 @@
-# vtextension: hosts WebAssembly status-line extensions on WAMR. Qt-free, so that both the GUI
-# (src/contour) and the daemon (src/vthost) can link it.
+# vtextension: hosts WebAssembly status-line extensions on a runtime-neutral interface (wasm/WasmRuntime.hpp).
+# Qt-free, so that both the GUI (src/contour) and the daemon (src/vthost) can link it. It links no WebAssembly
+# runtime: the backend selected by CONTOUR_WASM_RUNTIME is its own target (wasm/<runtime>/), and a program
+# links it through vtextension_runtime, defined at the bottom.
 
 set(vtextension_SOURCES
     BundledExtensions.cpp
@@ -21,10 +23,6 @@ set(vtextension_SOURCES
     SessionExtensions.cpp
     StatusLineAdapter.cpp
     Surface.cpp
-    wasm/wamr/WamrBackend.cpp
-    wasm/wamr/WamrInstance.cpp
-    wasm/wamr/WamrModule.cpp
-    wasm/wamr/WamrThreadEnv.cpp
 )
 
 set(vtextension_HEADERS
@@ -58,11 +56,9 @@ set(vtextension_HEADERS
     StatuslineWorld.hpp
     Surface.hpp
     Utf8.hpp
+    wasm/DefaultBackend.hpp
+    wasm/WasiAllowList.hpp
     wasm/WasmRuntime.hpp
-    wasm/wamr/WamrBackend.hpp
-    wasm/wamr/WamrHandles.hpp
-    wasm/wamr/WamrRuntime.hpp
-    wasm/wamr/WamrThreadEnv.hpp
 )
 
 add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
@@ -73,7 +69,7 @@ target_include_directories(vtextension PUBLIC
 )
 # vtpty for PageSize, the render call's surface size, and the CommandCapture extensions run commands through;
 # vtbackend for the Surface's private terminal; core::async for the thread a session's modules are loaded on.
-target_link_libraries(vtextension PUBLIC vtbackend vtpty core::async core::base core::log core::platform PRIVATE contour::wamr)
+target_link_libraries(vtextension PUBLIC vtbackend vtpty core::async core::base core::log core::platform)
 
 option(VTEXTENSION_TESTING "Enables building of unittests for vtextension [default: ON]" ${CONTOUR_TESTING})
 if(VTEXTENSION_TESTING)
@@ -103,13 +99,16 @@ if(VTEXTENSION_TESTING)
         StatusLineAdapter_test.cpp
         Surface_test.cpp
         Wit_test.cpp
-        wasm/wamr/WamrBackend_test.cpp
+        testing/FakeWasmBackend.hpp
+        testing/Harness.hpp
+        testing/LaneReport.hpp
         testing/ManualScheduler.hpp
         testing/QueuedOwner.hpp
         testing/RunnerHarness.hpp
         testing/StandardStreamsCapture.hpp
         testing/TestModules.hpp
         wasm/testing/BackendContract.hpp
+        wasm/testing/PreparedGeneration.hpp
     )
     # The WIT package is the normative spec of the extension ABI; the tests read it from the source tree.
     target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/statusline")
@@ -139,8 +138,8 @@ if(VTEXTENSION_TESTING)
     else()
         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
     endif()
-    # The engine's own tests drive WAMR's C API directly, so the test links it too.
-    target_link_libraries(vtextension_test vtextension contour::wamr core::testing Catch2::Catch2)
+    # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
+    target_link_libraries(vtextension_test PRIVATE vtextension_runtime core::testing Catch2::Catch2)
     add_test(NAME vtextension_test COMMAND $<TARGET_FILE:vtextension_test>)
 
     if(NOT WIN32)
@@ -148,3 +147,10 @@ if(VTEXTENSION_TESTING)
         target_compile_options(vtextension_test PRIVATE -Wno-c2y-extensions)
     endif()
 endif()
+
+# The backend this build selected (CONTOUR_WASM_RUNTIME, validated in the top-level CMakeLists.txt), and the one
+# name everything that composes a program links: the GUI, contour_cli (`contour daemon`), bench-headless and the
+# test executables. vtextension and vthost do not. Its target defines vtextension::wasm::makeDefaultBackend().
+add_subdirectory(wasm/${CONTOUR_WASM_RUNTIME})
+add_library(vtextension_runtime INTERFACE)
+target_link_libraries(vtextension_runtime INTERFACE vtextension_${CONTOUR_WASM_RUNTIME})

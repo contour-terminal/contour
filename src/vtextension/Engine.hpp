@@ -13,29 +13,22 @@
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/ExtensionLimits.hpp>
-#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
 
-namespace detail
-{
-    class HostRegistration;
-} // namespace detail
-
-/// The process's handle on the WebAssembly runtime (WAMR, fast interpreter) and the watchdog that
-/// enforces per-call deadlines on the instances created from it.
+/// The process's handle on a WebAssembly runtime, and the watchdog that enforces per-call deadlines on
+/// the instances created from it.
 ///
-/// The runtime is initialized when the first Engine is created and destroyed with the last one
-/// (WAMR reference-counts wasm_runtime_init / wasm_runtime_destroy itself). The watchdog thread
-/// lives exactly as long as its Engine, so a process with no extensions pays for neither.
+/// The runtime is created from the backend the engine is given, with the statusline world's host
+/// functions (so that every module it loads links against them) and with the engine's memory and stack
+/// limits. The backend brings its engine up with the first runtime alive and down with the last; the
+/// watchdog thread lives exactly as long as its Engine, so a process with no extensions pays for
+/// neither.
 ///
 /// The watchdog measures real time on purpose: it bounds a real interpreter running on a real
 /// thread, which no injected clock could advance.
-///
-/// The engine also registers the statusline world's host functions with the runtime, so that every
-/// module loaded while it lives links against them, and holds the null device that the guests' WASI
-/// standard input, output and error are bound to: a guest's prints reach nobody.
 class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatchdog
 {
     struct PrivateTag
@@ -43,29 +36,21 @@ class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatch
     };
 
   public:
-    /// Prepares the calling thread to call into instances, for as long as it lives.
-    /// @see wasm::wamr::ThreadEnv
-    using ThreadEnv = wasm::wamr::ThreadEnv;
-
-    /// @return Which runtime is up, or was last: it counts up each time an engine brings the runtime up
-    ///         (none being alive). 0 before the first.
-    [[nodiscard]] static uint64_t runtimeGeneration() noexcept { return wasm::wamr::runtimeGeneration(); }
-
-    /// Initializes (or joins) the WebAssembly runtime and starts the watchdog thread.
+    /// Creates a runtime on @p backend and starts the watchdog thread.
+    /// @param backend What the runtime is created from; must outlive the engine.
     /// @param limits The limits every instance created on this engine is held to.
-    /// @return The engine, or ExtensionError::RuntimeUnavailable if WAMR could not initialize or
+    /// @return The engine, or ExtensionError::RuntimeUnavailable if the runtime could not be created or
     ///         the watchdog thread could not be started.
     [[nodiscard]] static std::expected<std::shared_ptr<Engine>, ExtensionError> create(
-        ExtensionLimits limits);
+        wasm::IWasmBackend& backend, ExtensionLimits limits);
 
     /// Use create(); public only so that std::make_shared can reach it.
     Engine(PrivateTag,
+           wasm::IWasmBackend& backend,
            ExtensionLimits limits,
-           int64_t nullDevice,
-           std::unique_ptr<detail::HostRegistration> hostRegistration);
+           std::shared_ptr<wasm::IWasmRuntime> runtime);
 
-    /// Stops and joins the watchdog, unregisters the host functions, then releases this engine's
-    /// hold on the runtime.
+    /// Stops and joins the watchdog, then releases this engine's runtime.
     ~Engine() override;
 
     Engine(Engine const&) = delete;
@@ -76,21 +61,22 @@ class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatch
     /// @return The limits this engine was created with.
     [[nodiscard]] ExtensionLimits const& limits() const noexcept { return _limits; }
 
-    /// @return The raw handle of the null device (a file descriptor, or a HANDLE on Windows) that
-    ///         guests' WASI standard streams are bound to.
-    [[nodiscard]] int64_t nullDeviceHandle() const noexcept { return _nullDevice; }
+    /// @return The backend the engine's runtime was created from.
+    [[nodiscard]] wasm::IWasmBackend& backend() const noexcept { return _backend; }
 
-    /// Arms a deadline: unless disarmed first, the watchdog terminates the token's instance after
-    /// @p timeout, which makes the call running in it fail as though it trapped. Arming a token that
-    /// is already armed replaces its deadline. The instance must outlive the deadline: disarm
-    /// before destroying it.
-    /// @param token The instance to guard; its instance must not be null.
+    /// @return The runtime modules are loaded on.
+    [[nodiscard]] wasm::IWasmRuntime& runtime() const noexcept { return *_runtime; }
+
+    /// Arms a deadline: unless disarmed first, the watchdog marks the token's deadline expired after
+    /// @p timeout, then interrupts its instance, which makes the call running in it (and every later
+    /// one) fail. Arming a token that is already armed replaces its deadline. The instance and the
+    /// state must outlive the deadline: disarm before destroying them.
+    /// @param token The instance to guard; neither its instance nor its state may be null.
     /// @param timeout How long from now the instance may keep running.
     void armDeadline(WatchToken token, std::chrono::milliseconds timeout) override;
 
-    /// Disarms the token's deadline. Once this returns, the watchdog will not terminate the
-    /// instance on that deadline's account; it may already have, which the instance's exception
-    /// tells.
+    /// Disarms the token's deadline. Once this returns, the watchdog will not touch the instance or
+    /// the state on that deadline's account; it may already have, which the state tells.
     /// @param token The instance whose deadline to drop; a token not armed is ignored.
     void disarm(WatchToken token) override;
 
@@ -98,8 +84,8 @@ class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatch
     /// One armed deadline.
     struct Deadline
     {
-        std::chrono::steady_clock::time_point expiry; ///< When the instance is terminated.
-        WatchToken token;                             ///< The instance to terminate.
+        std::chrono::steady_clock::time_point expiry; ///< When the instance is interrupted.
+        WatchToken token;                             ///< The instance to interrupt.
     };
 
     /// Whether the watchdog thread keeps running.
@@ -115,12 +101,12 @@ class Engine: public std::enable_shared_from_this<Engine>, public IDeadlineWatch
     /// Drops the token's deadline, if armed, keeping the heap a heap. Expects _mutex held.
     void removeDeadline(WatchToken token);
 
-    /// The watchdog thread's body: sleeps until the earliest deadline, terminates what expired.
+    /// The watchdog thread's body: sleeps until the earliest deadline, interrupts what expired.
     void watchdogLoop();
 
+    wasm::IWasmBackend& _backend;
     ExtensionLimits _limits;
-    int64_t _nullDevice;                                         ///< Owned; closed on destruction.
-    std::unique_ptr<detail::HostRegistration> _hostRegistration; ///< Released before the runtime.
+    std::shared_ptr<wasm::IWasmRuntime> _runtime; ///< Released after the watchdog has stopped.
     std::mutex _mutex;
     std::condition_variable _wakeup;
     std::vector<Deadline> _deadlines; ///< A min-heap on expiry, guarded by _mutex.

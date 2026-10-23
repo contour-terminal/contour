@@ -3,6 +3,7 @@
 // runGuarded: every way out of a guarded call disarms its deadline, and no exception escapes it.
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <expected>
@@ -10,6 +11,7 @@
 #include <vector>
 
 #include <vtextension/DeadlineGuard.hpp>
+#include <vtextension/testing/FakeWasmBackend.hpp>
 
 using namespace vtextension;
 
@@ -34,11 +36,12 @@ class RecordingWatchdog final: public IDeadlineWatchdog
     bool failArming = false;
 };
 
-/// A token for a made-up instance, never dereferenced.
+/// A token for an instance that is never called, whose deadline never expires.
 [[nodiscard]] WatchToken someToken()
 {
-    static auto storage = std::byte {};
-    return WatchToken { .instance = reinterpret_cast<WASMModuleInstanceCommon*>(&storage) };
+    static auto instance = vtextension::testing::FakeWasmInstance {};
+    static auto state = std::atomic<DeadlineState> { DeadlineState::Running };
+    return WatchToken { .instance = &instance, .state = &state };
 }
 
 constexpr auto Timeout = std::chrono::milliseconds { 50 };

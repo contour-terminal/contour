@@ -205,8 +205,8 @@ ExtensionRuntime::ExtensionRuntime(ExtensionRuntimeConfig config, ExtensionRunti
     _bundledDirectories { std::move(config.bundledDirectories) },
     _limits { config.limits },
     _grants { services.fileSystem, std::move(config.grantsFile) },
-    _engines { config.limits },
-    _pool { config.workerCount },
+    _engines { services.backend, config.limits },
+    _pool { services.backend, config.workerCount },
     _builds { std::make_unique<core::async::ThreadPoolExecutor>(1) }
 {
 }

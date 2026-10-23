@@ -10,7 +10,7 @@
 #include <vtextension/Engine.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/Manifest.hpp>
-#include <vtextension/wasm/wamr/WamrHandles.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
@@ -34,8 +34,9 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
 
   public:
     /// Loads and checks a module.
-    /// @param engine The engine the module's instances run on; the module keeps it alive.
-    /// @param bytes The module's bytes; the module keeps them, as the runtime refers into them.
+    /// @param engine The engine the module is loaded on and its instances run on; the module keeps it
+    ///        alive.
+    /// @param bytes The module's bytes; the runtime's module keeps them.
     /// @return The loaded module; `InvalidComponent` if it is not a valid core module,
     ///         `ManifestInvalid` if its manifest does not parse, `WorldMismatch` if it imports
     ///         something the host does not provide or lacks an export the world requires.
@@ -45,9 +46,8 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
     /// Use load(); public only so that std::make_shared can reach it.
     CompiledExtension(PrivateTag,
                       std::shared_ptr<Engine> engine,
-                      std::vector<std::byte> bytes,
                       std::optional<Manifest> manifest,
-                      wasm::wamr::detail::ModuleHandle module);
+                      std::shared_ptr<wasm::IWasmModule> module);
 
     ~CompiledExtension() = default;
 
@@ -63,13 +63,12 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
     [[nodiscard]] Engine& engine() const noexcept { return *_engine; }
 
     /// @return The loaded runtime module, for instantiation.
-    [[nodiscard]] WASMModuleCommon* module() const noexcept { return _module.get(); }
+    [[nodiscard]] wasm::IWasmModule& module() const noexcept { return *_module; }
 
   private:
     std::shared_ptr<Engine> _engine;
-    std::vector<std::byte> _bytes; ///< Must outlive the module, which refers into it.
     std::optional<Manifest> _manifest;
-    wasm::wamr::detail::ModuleHandle _module; ///< Declared last: unloaded before the bytes it refers into.
+    std::shared_ptr<wasm::IWasmModule> _module;
 };
 
 } // namespace vtextension

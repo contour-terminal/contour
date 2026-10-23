@@ -202,8 +202,8 @@ TEST_CASE("Isolation.hookNeverBlocks", "[vtextension][isolation][threading]")
     constexpr auto HookCalls = 100'000;
 
     auto harness = RunnerHarness {};
-    auto engines = EngineProvider { ExtensionLimits {} };
-    auto pool = ExtensionWorkerPool(1); // one worker: parking it parks every lane
+    auto engines = EngineProvider { *harness.backend, ExtensionLimits {} };
+    auto pool = ExtensionWorkerPool(*harness.backend, 1); // one worker: parking it parks every lane
     auto sink = vtbackend::StatusLinePublishSink {};
     auto services = harness.services(pool, engines);
     services.onSnapshotPublished = publisherFor(sink);
@@ -248,8 +248,8 @@ TEST_CASE("Isolation.noEngineWhenUnused", "[vtextension][isolation]")
     // and is told everything a session tells it. With no extension declared, nothing is built, no engine is
     // created, no lane assigned and no worker thread started -- even with every service at hand.
     auto harness = RunnerHarness {};
-    auto counting = CountingEngineProvider {};
-    auto pool = ExtensionWorkerPool(2);
+    auto counting = CountingEngineProvider { *harness.backend };
+    auto pool = ExtensionWorkerPool(*harness.backend, 2);
     auto scheduler = CountingScheduler { pool };
     auto builds = core::async::testing::ManualExecutor {};
     auto owner = std::make_shared<QueuedOwner>();
@@ -311,8 +311,8 @@ TEST_CASE("Isolation.renderNotOnParserThread", "[vtextension][isolation][threadi
     // by the host's `log` call -- and every frame published happen off the thread that parses the output
     // which caused them, and off the thread that set the pane up.
     auto harness = RunnerHarness {};
-    auto engines = EngineProvider { ExtensionLimits {} };
-    auto pool = ExtensionWorkerPool(1);
+    auto engines = EngineProvider { *harness.backend, ExtensionLimits {} };
+    auto pool = ExtensionWorkerPool(*harness.backend, 1);
     auto sink = vtbackend::StatusLinePublishSink {};
     auto renders = ThreadIds {};
     auto publishes = ThreadIds {};

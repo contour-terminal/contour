@@ -56,6 +56,11 @@ class ExtensionRuntime;
 class IGrantStore;
 } // namespace vtextension
 
+namespace vtextension::wasm
+{
+class IWasmBackend;
+} // namespace vtextension::wasm
+
 namespace contour
 {
 
@@ -547,11 +552,16 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // Likewise; borrowed.
     core::platform::FileSystem const& _fileSystem;
     std::unique_ptr<platform::TaskbarProgressSink> _taskbarProgressSink;
-    // Created on first use (@see extensionRuntime()). Declared after what it borrows -- _commandCapture,
-    // _terminalClocks, _fileSystem and the environment -- and before _sessionManager, whose sessions, and so
-    // every runner, are destroyed first. Its own pool is joined before the grants and the capture it reaches.
-    // Its deleter is chosen where it is made, so that this class is laid out the same in a translation unit
-    // without CONTOUR_EXTENSIONS, which never makes one.
+    // The WebAssembly backend the extension runtime's engines are created from and its lanes prepared with;
+    // created with the runtime (@see extensionRuntime()). Declared before _extensionRuntime, which borrows it
+    // and so must go first. Opaque for the reason _extensionRuntime is.
+    std::unique_ptr<vtextension::wasm::IWasmBackend, void (*)(vtextension::wasm::IWasmBackend*)>
+        _extensionBackend { nullptr, nullptr };
+    // Created on first use (@see extensionRuntime()). Declared after what it borrows -- _extensionBackend,
+    // _commandCapture, _terminalClocks, _fileSystem and the environment -- and before _sessionManager, whose
+    // sessions, and so every runner, are destroyed first. Its own pool is joined before the grants and the
+    // capture it reaches. Its deleter is chosen where it is made, so that this class is laid out the same in
+    // a translation unit without CONTOUR_EXTENSIONS, which never makes one.
     std::unique_ptr<vtextension::ExtensionRuntime, void (*)(vtextension::ExtensionRuntime*)>
         _extensionRuntime { nullptr, nullptr };
     // Where the answers to the attached daemon's extensions are recorded, and so sent; made with the first

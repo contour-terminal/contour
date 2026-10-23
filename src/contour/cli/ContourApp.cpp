@@ -50,6 +50,8 @@
     #include <vtextension/BundledExtensions.hpp>
     #include <vtextension/ExtensionGrantStore.hpp>
     #include <vtextension/ExtensionWorkerPool.hpp>
+    #include <vtextension/wasm/DefaultBackend.hpp>
+    #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
 #endif
 #include <vthost/Daemon.hpp>
@@ -740,6 +742,9 @@ namespace
     /// extensions the daemon's session host owns.
     struct DaemonExtensionResources
     {
+        /// What the extensions' engines are created from. First: it outlives everything made from it, and
+        /// only a reference to it travels with the services.
+        std::unique_ptr<vtextension::wasm::IWasmBackend> backend = vtextension::wasm::makeDefaultBackend();
         core::async::StopSource commandShutdown;
         vtpty::SystemCommandCapture capture {
             vtpty::SystemCommandCapture::defaultShell(core::defaultEnvironment()), commandShutdown.get_token()
@@ -781,6 +786,7 @@ namespace
                 vthost::DaemonExtensionServices {
                     .runtime =
                         vtextension::ExtensionRuntimeServices {
+                            .backend = *services.backend,
                             .capture = services.capture,
                             .wallClock = services.wallClock,
                             .localTime = services.localTime,

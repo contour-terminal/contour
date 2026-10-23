@@ -25,6 +25,8 @@
 #include <vtextension/Engine.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Instance.hpp>
+#include <vtextension/wasm/DefaultBackend.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension::testing
 {
@@ -93,14 +95,16 @@ class FakeHostServices final: public IHostServices
     return vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(columns) };
 }
 
-/// A guest module loaded on its own engine, with one instance of it running on a FakeHostServices.
+/// A guest module loaded on its own engine, of its own default backend, with one instance of it running
+/// on a FakeHostServices.
 class RunningGuest
 {
   public:
     /// Loads @p module and instantiates it under @p limits.
-    explicit RunningGuest(std::vector<std::byte> module, ExtensionLimits limits = {}): _limits { limits }
+    explicit RunningGuest(std::vector<std::byte> module, ExtensionLimits limits = {}):
+        _backend { wasm::makeDefaultBackend() }, _limits { limits }
     {
-        auto engine = Engine::create(limits);
+        auto engine = Engine::create(*_backend, limits);
         REQUIRE(engine.has_value());
         _engine = std::move(*engine);
         auto compiled = CompiledExtension::load(*_engine, std::move(module));
@@ -117,6 +121,9 @@ class RunningGuest
         REQUIRE(instance.has_value());
         _instance = std::move(*instance);
     }
+
+    /// @return The backend the engine was created from.
+    [[nodiscard]] wasm::IWasmBackend& backend() const { return *_backend; }
 
     /// @return The running instance.
     [[nodiscard]] Instance& instance() const { return *_instance; }
@@ -140,6 +147,7 @@ class RunningGuest
     core::platform::ManualClock clock; ///< What the instance measures its deadlines' use by.
 
   private:
+    std::unique_ptr<wasm::IWasmBackend> _backend; ///< Outlives the engine created from it.
     ExtensionLimits _limits;
     std::shared_ptr<Engine> _engine;
     std::shared_ptr<CompiledExtension> _compiled;

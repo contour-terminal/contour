@@ -56,11 +56,11 @@ namespace
 struct Fixture
 {
     RunnerHarness harness;
-    vtextension::EngineProvider engines { vtextension::ExtensionLimits {} };
+    vtextension::ExtensionLimits limits {}; ///< What the engines are created with, and each extension costs.
+    vtextension::EngineProvider engines { *harness.backend, limits };
     core::async::testing::ManualExecutor builds;
     core::platform::testing::InMemoryFileSystem fileSystem;
     std::shared_ptr<QueuedOwner> owner = std::make_shared<QueuedOwner>();
-    vtextension::ExtensionLimits limits {};
     int replaced = 0;
 
     [[nodiscard]] SessionExtensionServices services()
@@ -276,7 +276,8 @@ TEST_CASE("ExtensionRuntime: nothing runs until an extension does", "[vtextensio
                                                                .bundledDirectories = {},
                                                                .workerCount = 2,
                                                                .limits = {} },
-                                      ExtensionRuntimeServices { .capture = harness.capture,
+                                      ExtensionRuntimeServices { .backend = *harness.backend,
+                                                                 .capture = harness.capture,
                                                                  .wallClock = harness.wallClock,
                                                                  .localTime = harness.localTime,
                                                                  .environment = harness.environment,

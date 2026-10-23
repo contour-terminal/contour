@@ -31,6 +31,7 @@
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/Manifest.hpp>
 #include <vtextension/Runner.hpp>
+#include <vtextension/testing/Harness.hpp>
 #include <vtextension/testing/ManualScheduler.hpp>
 
 namespace vtextension::testing
@@ -44,12 +45,15 @@ struct LoadedModule
 };
 
 /// Loads @p bytes on an engine of their own, which must succeed.
+/// @param backend What the engine is created from; must outlive the engine and the module.
 /// @param bytes The module.
 /// @param limits What the engine allows.
 /// @return The engine and the module loaded on it.
-[[nodiscard]] inline LoadedModule loadModule(std::vector<std::byte> bytes, ExtensionLimits const& limits = {})
+[[nodiscard]] inline LoadedModule loadModule(wasm::IWasmBackend& backend,
+                                             std::vector<std::byte> bytes,
+                                             ExtensionLimits const& limits = {})
 {
-    auto engine = Engine::create(limits);
+    auto engine = Engine::create(backend, limits);
     REQUIRE(engine.has_value());
     auto compiled = CompiledExtension::load(**engine, std::move(bytes));
     REQUIRE(compiled.has_value());
@@ -145,6 +149,9 @@ struct PermissionRequest
 class CountingEngineProvider final: public IEngineProvider, public IRetirementSink
 {
   public:
+    /// @param backend What engines are created from; must outlive the provider.
+    explicit CountingEngineProvider(wasm::IWasmBackend& backend): _provider { backend, ExtensionLimits {} } {}
+
     [[nodiscard]] std::expected<std::shared_ptr<Engine>, ExtensionError> acquire() override
     {
         ++acquired;
@@ -160,7 +167,7 @@ class CountingEngineProvider final: public IEngineProvider, public IRetirementSi
     std::size_t acquired = 0;
 
   private:
-    EngineProvider _provider { ExtensionLimits {} };
+    EngineProvider _provider;
 };
 
 /// Every service a runner reaches, single-threaded on a ManualScheduler, recording the callbacks.
@@ -204,6 +211,8 @@ class RunnerHarness
         };
     }
 
+    /// What the harness's engines are created from. First: it outlives every engine its tests retire here.
+    std::unique_ptr<wasm::IWasmBackend> backend = wasm::makeDefaultBackend();
     ManualScheduler scheduler;
     RetirementCollector retirement;
     InMemoryGrantStore grants;

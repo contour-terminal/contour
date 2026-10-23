@@ -123,7 +123,7 @@ TEST_CASE("StatusLineAdapter.kinds", "[vtextension]")
 TEST_CASE("StatusLineAdapter.forwards", "[vtextension]")
 {
     auto harness = RunnerHarness {};
-    auto engines = EngineProvider { ExtensionLimits {} };
+    auto engines = EngineProvider { *harness.backend, ExtensionLimits {} };
     auto config = ExtensionHostConfig {};
     config.extensions.push_back(
         spec("git", Placement::Segment, toModule(vtextension::testing::MinimalModule)));
@@ -197,7 +197,7 @@ TEST_CASE("StatusLineAdapter.publisher", "[vtextension]")
     sink.attach(target);
 
     auto harness = RunnerHarness {};
-    auto engines = EngineProvider { ExtensionLimits {} };
+    auto engines = EngineProvider { *harness.backend, ExtensionLimits {} };
     auto runners = harness.services(harness.scheduler, engines);
     runners.onSnapshotPublished = publisherFor(sink);
     auto config = ExtensionHostConfig {};

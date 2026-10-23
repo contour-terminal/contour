@@ -116,17 +116,9 @@ struct HostNative
 namespace detail
 {
     /// Installs the backend's handler of WAMR's one process-wide memory-growth callback, once per
-    /// process. It marks the failing call of an instance of this backend as MemoryGrowthRefused, and
-    /// hands every other module instance's failure to the handler forwardForeignMemoryGrowth() set.
+    /// process. It marks the failing call of an instance of this backend as MemoryGrowthRefused; the
+    /// backend is the callback's only user.
     void installMemoryGrowthHandler();
-
-    /// Hands the memory-growth failures of module instances this backend did not create to @p handler.
-    ///
-    /// WAMR has one callback per process, so two users of it must share it rather than take turns
-    /// replacing it. The extension host's own Instance still drives WAMR directly and needs the
-    /// callback too; it registers through here until it is built on this backend.
-    /// @param handler Called for the failures of module instances not created by this backend.
-    void forwardForeignMemoryGrowth(enlarge_memory_error_callback_t handler);
 } // namespace detail
 
 } // namespace vtextension::wasm::wamr

@@ -115,11 +115,15 @@ struct RuntimeLimits
 };
 
 /// One host import. Every world host function takes only i32s and returns nothing.
+///
+/// A host function may take no parameter at all. A backend may cap how many it can take (the WAMR
+/// backend's cap is `wamr::MaxHostParameters`, five); createRuntime() refuses a table holding one above
+/// the cap with `RuntimeUnavailable`.
 struct HostFunction
 {
     std::string_view module;     ///< The import module name it is provided under.
     std::string_view name;       ///< The import field name it is provided under.
-    uint32_t parameterCount = 0; ///< How many i32 parameters it takes.
+    uint32_t parameterCount = 0; ///< How many i32 parameters it takes; zero is allowed.
 };
 
 /// A function export looked up on an instance, to be called through it.
@@ -300,6 +304,11 @@ class IThreadGuard
 /// **WASI.** A backend provides at least every WASI preview 1 function the extension host allows,
 /// with no arguments, no environment, no preopened directory, and standard streams whose writes reach
 /// nobody. Providing more is harmless: the host refuses modules importing what it does not allow.
+///
+/// **Bring-ups and guards, for every backend.** The generation increases on each bring-up of the
+/// engine, and enterThread() fails `RuntimeUnavailable` while no runtime is up. Neither is optional: a
+/// backend with no per-thread state still counts its bring-ups and refuses a guard with no runtime up,
+/// and while one is up returns a trivial guard that remembers the generation it was entered for.
 class IWasmBackend
 {
   public:
@@ -325,15 +334,16 @@ class IWasmBackend
     /// Prepares the calling thread to call into instances, for as long as the guard lives. Guards
     /// nest: an inner one on a prepared thread does nothing. A guard must be destroyed on the thread
     /// that entered it. A guard entered for an earlier generation no longer prepares its thread.
-    /// @return The guard; `RuntimeUnavailable` when no runtime is up, or the thread cannot be prepared.
+    /// @return The guard; `RuntimeUnavailable` when no runtime is up (always, in every backend), or the
+    ///         thread cannot be prepared.
     [[nodiscard]] virtual std::expected<std::unique_ptr<IThreadGuard>, ExtensionError> enterThread() = 0;
 
     /// @return Whether the calling thread may call into instances of the current generation's runtimes.
     [[nodiscard]] virtual bool isCurrentThreadPrepared() const = 0;
 
     /// @return Which bring-up of the engine is current: it counts up each time the engine is brought up
-    ///         anew (no runtime being alive); 0 before the first. A backend needing no thread
-    ///         preparation may keep it constant.
+    ///         anew (no runtime being alive); 0 before the first. Every backend increases it on each
+    ///         bring-up, one needing no thread preparation included.
     [[nodiscard]] virtual uint64_t runtimeGeneration() const noexcept = 0;
 
     /// @return What the backend can do beyond the contract.

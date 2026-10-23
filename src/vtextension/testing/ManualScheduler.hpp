@@ -23,7 +23,7 @@ namespace vtextension::testing
 {
 
 /// Runs posted jobs when the test says so, and fires timers as the test advances the clock. Every lane
-/// is the test's thread, so this is deterministic and needs no Engine::ThreadEnv.
+/// is the test's thread, so this is deterministic and needs no thread guard.
 class ManualScheduler final: public IExtensionScheduler
 {
   public:

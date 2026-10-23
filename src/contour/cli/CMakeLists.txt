@@ -49,9 +49,10 @@ target_link_libraries(contour_cli
     PUBLIC contour_config core::cli
     PRIVATE vthost
 )
-# `contour daemon` runs its profile's status-line extensions, built from contour::config's declarations.
+# `contour daemon` runs its profile's status-line extensions, built from contour::config's declarations. As a
+# composition root it also links the WebAssembly runtime backend it creates (makeDefaultBackend()).
 if(CONTOUR_EXTENSIONS)
-    target_link_libraries(contour_cli PRIVATE contour_extensions)
+    target_link_libraries(contour_cli PRIVATE contour_extensions vtextension_runtime)
 endif()
 
 # The binary dir is PUBLIC so that ShellIntegration.cpp's <ShellIntegrationData.hpp> resolves, and

@@ -188,7 +188,7 @@ class Runner::Core final: public IHostServices, public std::enable_shared_from_t
         if (isClosed())
             return;
         setState(RunnerState::Starting);
-        if (!Engine::ThreadEnv::isCurrentThreadPrepared())
+        if (!_engine->backend().isCurrentThreadPrepared())
         {
             fault(ExtensionError::RuntimeUnavailable);
             return;

@@ -1,32 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Internal to vtextension: the statusline world's host functions as the runtime links them.
+// Internal to vtextension: the statusline world's host functions, as every runtime is created with them.
 #pragma once
 
-#include <memory>
+#include <span>
+#include <string_view>
+
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension::detail
 {
 
 /// The import module name the world's host functions live under: `<package>/<interface>@<version>`.
-inline constexpr char const* HostImportModule = "terminal-extensions:statusline/host@0.1.0";
+inline constexpr auto HostImportModule = std::string_view { "terminal-extensions:statusline/host@0.1.0" };
 
-/// Keeps the host functions registered with the runtime for as long as it lives, and the callback
-/// that tells an instance its memory could not grow. Each live Engine holds one; the runtime looks
-/// imports up in every registration, so any one suffices.
-class HostRegistration
-{
-  public:
-    HostRegistration() = default;
-    HostRegistration(HostRegistration const&) = delete;
-    HostRegistration(HostRegistration&&) = delete;
-    HostRegistration& operator=(HostRegistration const&) = delete;
-    HostRegistration& operator=(HostRegistration&&) = delete;
-    virtual ~HostRegistration() = default;
-};
-
-/// Registers the host functions with the running runtime.
-/// @return The registration; null if the runtime refused it.
-[[nodiscard]] std::unique_ptr<HostRegistration> registerHostFunctions();
+/// The world's host functions, in the order Instance dispatches them by: `request-frame`, `log`,
+/// `state`, `run-command`, each with the i32 parameter count the Canonical ABI flattens it to.
+///
+/// Every runtime is created from this one table. A backend's registry of host functions may be
+/// process-wide (WAMR's is), so runtimes alive at once must agree on every function's index and arity:
+/// a second table, however alike, would be a second chance to disagree.
+/// @return The table; it lives as long as the process.
+[[nodiscard]] std::span<wasm::HostFunction const> statuslineHostFunctions() noexcept;
 
 } // namespace vtextension::detail

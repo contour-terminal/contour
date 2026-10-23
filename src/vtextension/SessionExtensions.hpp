@@ -31,6 +31,7 @@
 #include <vtextension/ExtensionWorkerPool.hpp>
 #include <vtextension/IHostServices.hpp>
 #include <vtextension/StatusLineAdapter.hpp>
+#include <vtextension/wasm/WasmRuntime.hpp>
 
 namespace vtextension
 {
@@ -226,6 +227,7 @@ struct ExtensionRuntimeConfig
 /// What the application's extension runtime borrows; each must outlive it.
 struct ExtensionRuntimeServices
 {
+    wasm::IWasmBackend& backend;                    ///< Where engines and lane guards come from.
     vtpty::CommandCapture& capture;                 ///< Runs the commands extensions ask for.
     core::platform::IWallClock const& wallClock;    ///< The time `state` answers with.
     vtbackend::LocalTimeConverter const& localTime; ///< The time zone `state`'s UTC offset is read in.
@@ -237,12 +239,12 @@ struct ExtensionRuntimeServices
 /// extensions run on, and the thread their modules are read and loaded on. Created the first time a pane has
 /// extensions, so that a process without any reads no grants file, starts no runtime and no thread.
 ///
-/// **Lifetime.** Owned by the application, declared after what it borrows (the capture, the environment,
-/// the filesystem) and before the session manager, whose sessions -- and so every runner -- are destroyed
-/// first. Its own members are declared so that the build thread is joined first (a build blocked on a hung
-/// filesystem delays that), then the pool, whose workers run the jobs still posted (each runner's last job
-/// destroys its instance on its lane and retires the engine), before the engine provider releases what was
-/// retired, on this thread, and before the grants go.
+/// **Lifetime.** Owned by the application, declared after what it borrows (the backend, the capture, the
+/// environment, the filesystem) and before the session manager, whose sessions -- and so every runner -- are
+/// destroyed first. Its own members are declared so that the build thread is joined first (a build blocked on
+/// a hung filesystem delays that), then the pool, whose workers run the jobs still posted (each runner's last
+/// job destroys its instance on its lane and retires the engine), before the engine provider releases what
+/// was retired, on this thread, and before the grants go.
 class ExtensionRuntime
 {
   public:

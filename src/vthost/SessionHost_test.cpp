@@ -47,6 +47,8 @@
 #include <vector>
 
 #ifdef CONTOUR_EXTENSIONS
+    #include <vtextension/wasm/DefaultBackend.hpp>
+    #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
     #include <vthost/testing/GatedFileSystem.hpp>
 #endif
@@ -1754,7 +1756,8 @@ struct DaemonExtensionsHarness
                                                           .workerCount = 1,
                                                           .limits = limits } },
             vthost::DaemonExtensionServices {
-                .runtime = vtextension::ExtensionRuntimeServices { .capture = capture,
+                .runtime = vtextension::ExtensionRuntimeServices { .backend = *wasmBackend,
+                                                                   .capture = capture,
                                                                    .wallClock = wallClock,
                                                                    .localTime = localTime,
                                                                    .environment = core::defaultEnvironment(),
@@ -1794,6 +1797,8 @@ struct DaemonExtensionsHarness
             &loop, [&] { return done() || std::chrono::steady_clock::now() > deadline; }));
     }
 
+    /// What the extensions' engines are created from; first, so that it outlives them.
+    std::unique_ptr<vtextension::wasm::IWasmBackend> wasmBackend = vtextension::wasm::makeDefaultBackend();
     std::filesystem::path modulePath { "/extensions/spawner.wasm" };
     vthost::testing::GatedFileSystem fileSystem;
     core::async::StopSource commandShutdown;

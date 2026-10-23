@@ -57,7 +57,7 @@ namespace
                                                  ExtensionLimits limits = {},
                                                  CommandPermission runCommand = CommandPermission::Deny)
 {
-    auto module = loadModule(std::move(bytes), limits);
+    auto module = loadModule(*harness.backend, std::move(bytes), limits);
     return std::make_unique<Runner>(std::move(module.engine),
                                     std::move(module.compiled),
                                     configFor(std::move(name), std::move(config), limits, runCommand),
@@ -231,7 +231,7 @@ TEST_CASE("Runner.retiresOnTeardown", "[vtextension][runner]")
     auto harness = RunnerHarness {};
     auto weakEngine = std::weak_ptr<Engine> {};
     {
-        auto module = loadModule(toModule(vtextension::testing::MinimalModule));
+        auto module = loadModule(*harness.backend, toModule(vtextension::testing::MinimalModule));
         weakEngine = module.engine;
         auto const runner = Runner(
             std::move(module.engine), std::move(module.compiled), configFor("minimal"), harness.services());
@@ -249,7 +249,7 @@ TEST_CASE("Runner.threading.engineReleasedByTheOwner", "[vtextension][runner][th
     // A runner on the real pool is destroyed and its engine released on this thread; a new engine and
     // runner on the same lane then run normally.
     auto harness = RunnerHarness {};
-    auto pool = ExtensionWorkerPool(1);
+    auto pool = ExtensionWorkerPool(*harness.backend, 1);
     auto const waitFor = [](auto const& condition) {
         auto const deadline = std::chrono::steady_clock::now() + 30s;
         while (!condition() && std::chrono::steady_clock::now() < deadline)
@@ -259,7 +259,7 @@ TEST_CASE("Runner.threading.engineReleasedByTheOwner", "[vtextension][runner][th
 
     auto weakEngine = std::weak_ptr<Engine> {};
     {
-        auto module = loadModule(toModule(vtextension::testing::MinimalModule));
+        auto module = loadModule(*harness.backend, toModule(vtextension::testing::MinimalModule));
         weakEngine = module.engine;
         auto runner = Runner(
             std::move(module.engine), std::move(module.compiled), configFor("first"), harness.services(pool));
@@ -271,7 +271,7 @@ TEST_CASE("Runner.threading.engineReleasedByTheOwner", "[vtextension][runner][th
     static_cast<void>(harness.retirement.take());
     CHECK(weakEngine.expired()); // This thread did.
 
-    auto module = loadModule(toModule(vtextension::testing::MinimalModule));
+    auto module = loadModule(*harness.backend, toModule(vtextension::testing::MinimalModule));
     auto runner = Runner(
         std::move(module.engine), std::move(module.compiled), configFor("second"), harness.services(pool));
     runner.post(surfaceOf(10, 1));
@@ -284,8 +284,9 @@ TEST_CASE("Runner.threading.pool", "[vtextension][runner][threading]")
     // On the production pool: events posted from several threads while the lane renders; the runner
     // publishes and is torn down cleanly. Asserts structure, never durations.
     auto harness = RunnerHarness {};
-    auto pool = ExtensionWorkerPool(2); // Destroyed (joined) before the services its jobs reach.
-    auto module = loadModule(toModule(vtextension::testing::MinimalModule));
+    auto pool =
+        ExtensionWorkerPool(*harness.backend, 2); // Destroyed (joined) before the services its jobs reach.
+    auto module = loadModule(*harness.backend, toModule(vtextension::testing::MinimalModule));
     {
         auto runner = Runner(std::move(module.engine),
                              std::move(module.compiled),
@@ -573,8 +574,8 @@ TEST_CASE("Runner.threading.spinNeverBlocksThePoster", "[vtextension][runner][th
     // A guest that spins in every render is cut off by its deadline, backed off, and disabled; the
     // thread posting to it is never held up meanwhile, and its events are dropped once the queue is full.
     auto harness = RunnerHarness {};
-    auto pool = ExtensionWorkerPool(1);
-    auto module = loadModule(readTestModule("hostile.wasm"));
+    auto pool = ExtensionWorkerPool(*harness.backend, 1);
+    auto module = loadModule(*harness.backend, readTestModule("hostile.wasm"));
     auto runner = Runner(std::move(module.engine),
                          std::move(module.compiled),
                          configFor("hostile", { { "mode", "spin" } }),

@@ -21,6 +21,8 @@
 #include <vtextension/wasm/testing/BackendContract.hpp>
 #include <vtextension/wasm/wamr/WamrBackend.hpp>
 #include <vtextension/wasm/wamr/WamrHandles.hpp>
+#include <vtextension/wasm/wamr/WamrRuntime.hpp>
+#include <vtextension/wasm/wamr/WamrThreadEnv.hpp>
 
 using vtextension::ExtensionError;
 using vtextension::wasm::CallFailure;
@@ -49,6 +51,17 @@ constexpr auto IdleModule = std::to_array<std::uint8_t>({
     0x03, 0x02, 0x01, 0x00,                                     // func 0: type 0
     0x07, 0x08, 0x01, 0x04, 'i',  'd',  'l',  'e',  0x00, 0x00, // export "idle" = 0
     0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b,                         // 0: (empty)
+});
+
+/// Calls a host function taking no parameter at all:
+/// (module (import "arity" "nop" (func)) (func (export "call-nop") (call 0))).
+constexpr auto ZeroArityModule = std::to_array<std::uint8_t>({
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                                        // magic, version
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                                                    // type 0: () -> ()
+    0x02, 0x0d, 0x01, 0x05, 'a',  'r',  'i',  't',  'y', 0x03, 'n', 'o', 'p',  0x00, 0x00, // import 0: type 0
+    0x03, 0x02, 0x01, 0x00,                                                                // func 1: type 0
+    0x07, 0x0c, 0x01, 0x08, 'c',  'a',  'l',  'l',  '-', 'n',  'o', 'p', 0x00, 0x01, // export "call-nop" = 1
+    0x0a, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0b,                                  // 1: call 0
 });
 
 /// Loads, instantiates and calls the "idle" export of IdleModule with nothing but WAMR's C API.
@@ -96,11 +109,12 @@ constexpr auto GreedyWorldModule = std::to_array<std::uint8_t>({
 
 CONTOUR_WASM_BACKEND_CONTRACT(WamrTraits)
 
-TEST_CASE("Wamr.memoryGrowthCallbackIsShared")
+TEST_CASE("Wamr.memoryGrowthLabelsEachInstance")
 {
-    // WAMR has one memory-growth callback per process. The backend owns it, and hands what is not its
-    // own on to the extension host's Instance, which still drives WAMR directly: whichever of the two
-    // registers last, each still learns of its own refused growth.
+    // WAMR has one memory-growth callback per process, which the backend owns. With two runtimes alive,
+    // an instance of each still learns of its own refused growth: the extension host's Instance (as
+    // OutOfMemory) and a bare backend instance (as MemoryGrowthRefused). Without the Rust guests, this is
+    // also what shows that a guest whose memory refused to grow fails the Instance as OutOfMemory.
     namespace contract = vtextension::wasm::testing::contract;
     auto const capped = RuntimeLimits { .memoryBytes = std::size_t { 2 } * contract::PageBytes,
                                         .stackBytes = contract::Limits.stackBytes };
@@ -162,4 +176,41 @@ TEST_CASE("Wamr.threadEnvNeedsARuntime")
     auto const refused = enterOnAnotherThread();
     REQUIRE_FALSE(refused.has_value());
     CHECK(refused.error() == ExtensionError::RuntimeUnavailable);
+}
+
+TEST_CASE("Wamr.hostFunctionArities")
+{
+    // A host function takes from none up to MaxHostParameters i32s: a trampoline exists for each count.
+    // One taking more cannot be provided, and the runtime is refused.
+    namespace contract = vtextension::wasm::testing::contract;
+    using vtextension::wasm::HostFunction;
+    auto const backend = makeWamrBackend();
+
+    SECTION("none")
+    {
+        auto const hostFunctions =
+            std::array { HostFunction { .module = "arity", .name = "nop", .parameterCount = 0 } };
+        auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
+        REQUIRE(runtime.has_value());
+        auto const guard = contract::enterThread(*backend);
+        auto const module = contract::load(**runtime, ZeroArityModule);
+        auto context = contract::RecordingHostContext {};
+        auto const instance = contract::instantiate(*module, context);
+
+        CHECK(instance->call(contract::functionOf(*instance, "call-nop"), {}).has_value());
+        CHECK(context.calls()
+              == std::vector { contract::HostCall {
+                  .functionIndex = 0, .arguments = {}, .thread = std::this_thread::get_id() } });
+    }
+
+    SECTION("too many")
+    {
+        auto const hostFunctions =
+            std::array { HostFunction { .module = "arity",
+                                        .name = "wide",
+                                        .parameterCount = vtextension::wasm::wamr::MaxHostParameters + 1 } };
+        auto const runtime = backend->createRuntime(contract::Limits, hostFunctions);
+        REQUIRE_FALSE(runtime.has_value());
+        CHECK(runtime.error() == ExtensionError::RuntimeUnavailable);
+    }
 }
