@@ -5,6 +5,7 @@
 #include <contour/config/BlockActionEnums.hpp>
 #include <contour/config/ConfigDocumentation.hpp>
 #include <contour/config/ConfigEnum.hpp>
+#include <contour/config/ConfigEnumReader.hpp>
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
 #include <contour/config/SingleQuoted.hpp>
@@ -1793,7 +1794,10 @@ struct YAMLConfigReader
     /// @param entry The key within @p node.
     /// @param where Receives the value.
     template <ConfigEnumConcept Enum>
-    void loadFromEntry(YAML::Node const& node, std::string const& entry, Enum& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, Enum& where)
+    {
+        (void) detail::loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger);
+    }
 
     template <typename V, typename T>
     void loadFromEntry(YAML::Node const& node, std::string const& entry, boxed::boxed<V, T>& where)

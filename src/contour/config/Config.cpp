@@ -2388,76 +2388,6 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
 
 namespace
 {
-    /// Where @p node stands in its file, as yaml-cpp's own errors say it: one-based.
-    /// @param node A node parsed from a file.
-    /// @return `line L, column C`.
-    [[nodiscard]] std::string placeOf(YAML::Node const& node)
-    {
-        auto const mark = node.Mark();
-        return std::format("line {}, column {}", mark.line + 1, mark.column + 1);
-    }
-
-    /// Reads a configuration enum spelled as one of the tokens its parser accepts.
-    ///
-    /// Case-insensitive, and an unrecognized value is reported rather than silently accepted -- a typo
-    /// in a visible appearance setting should not pass unnoticed. It still leaves @p where at its
-    /// default, so a bad value costs a log line rather than a failed startup. Mirrors the GuiTheme
-    /// reader below.
-    ///
-    /// @param node   The mapping to read from.
-    /// @param entry  The key within @p node.
-    /// @param shownAs What a diagnostic calls @p entry: its key path from the document's root.
-    /// @param where  Receives the value, and is left untouched when it is not recognized.
-    /// @param logger The reader's trace category, passed in because it is a member of the reader.
-    /// @param parse  Maps a spelling to a value. Defaults to the ConfigEnum.hpp token table; the
-    ///               text_shaper enums pass their own `make*()`, since a `contour::config` table
-    ///               cannot be hung off a type owned by a lower layer.
-    /// @param accepted The spellings to name in the diagnostic of an unknown value, already
-    ///               formatted as a list; empty when the set is too large or too open to enumerate.
-    /// @return Whether @p entry was present and recognized, so a caller can add a fallback (a
-    ///         deprecated spelling, say) without duplicating the reading and the reporting.
-    template <typename Enum, typename Parser = decltype(&configEnumFromToken<Enum>)>
-    bool loadConfigEnum(YAML::Node const& node,
-                        std::string const& entry,
-                        std::string const& shownAs,
-                        Enum& where,
-                        core::log::Category const& logger,
-                        Parser parse = configEnumFromToken<Enum>,
-                        std::string_view accepted = {})
-    {
-        auto const child = node[entry];
-        if (!child)
-            return false;
-
-        // Diagnosed here rather than left to as<std::string>() to throw, so that only this value is
-        // lost and not the siblings read after it.
-        if (child.IsSequence() || child.IsMap())
-        {
-            errorLog()("{} ({}) takes a single word, not a {}; keeping {}.",
-                       shownAs,
-                       placeOf(child),
-                       child.IsMap() ? "map" : "list",
-                       where);
-            return false;
-        }
-
-        auto const rawValue = child.as<std::string>();
-        logger()("Loading entry: {}, value {}", entry, rawValue);
-        if (auto const value = parse(rawValue))
-        {
-            where = *value;
-            return true;
-        }
-        errorLog()("Unknown value for {} ({}): '{}'; keeping {}.{}{}",
-                   shownAs,
-                   placeOf(child),
-                   rawValue,
-                   where,
-                   accepted.empty() ? "" : " Accepted values: ",
-                   accepted);
-        return false;
-    }
-
     /// The decorator names a configuration file may use, comma separated, for a diagnostic.
     [[nodiscard]] std::string acceptedDecoratorNames()
     {
@@ -2472,19 +2402,13 @@ namespace
     }
 } // namespace
 
-template <ConfigEnumConcept Enum>
-void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, Enum& where)
-{
-    (void) loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger);
-}
-
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      vtrasterizer::Decorator& where)
 {
     // The spellings are vtrasterizer::DecoratorNames' (and its aliases'), the table the writer and the
     // settings page read too; a miss is reported and keeps the value `where` already holds.
-    (void) loadConfigEnum(
+    (void) detail::loadConfigEnum(
         node,
         entry,
         keyPathTo(node, entry),
@@ -2527,14 +2451,14 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         return;
     }
 
-    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeFontSlant);
+    detail::loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeFontSlant);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      text::FontWeight& where)
 {
-    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeFontWeight);
+    detail::loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeFontWeight);
 }
 // NOLINTEND(readability-convert-member-functions-to-static)
 
@@ -2771,7 +2695,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     {
         errorLog()("{} ({}) takes a list, such as {}; keeping {}.",
                    keyPathTo(node, entry),
-                   placeOf(child),
+                   detail::placeOf(child),
                    Writer::format(vtbackend::AllScrollbarMarkSources),
                    Writer::format(where));
         return;
@@ -2782,8 +2706,9 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
     {
         if (!item.IsScalar())
         {
-            errorLog()(
-                "{} ({}) lists something other than a word; ignored.", keyPathTo(node, entry), placeOf(item));
+            errorLog()("{} ({}) lists something other than a word; ignored.",
+                       keyPathTo(node, entry),
+                       detail::placeOf(item));
             continue;
         }
 
@@ -2793,8 +2718,10 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         if (auto const source = configEnumFromToken<vtbackend::ScrollbarMarkSource>(token))
             sources.enable(*source);
         else
-            errorLog()(
-                "Unknown value in {} ({}): '{}'; ignored.", keyPathTo(node, entry), placeOf(item), token);
+            errorLog()("Unknown value in {} ({}): '{}'; ignored.",
+                       keyPathTo(node, entry),
+                       detail::placeOf(item),
+                       token);
     }
     where = sources;
 }
@@ -3052,7 +2979,7 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         return std::nullopt;
     };
 
-    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, parseEngine);
+    detail::loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, parseEngine);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -3077,14 +3004,14 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
         return std::nullopt;
     };
 
-    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, parseLocator);
+    detail::loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, parseLocator);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
                                      text::RenderMode& where)
 {
-    loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeRenderMode);
+    detail::loadConfigEnum(node, entry, keyPathTo(node, entry), where, logger, text::makeRenderMode);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
