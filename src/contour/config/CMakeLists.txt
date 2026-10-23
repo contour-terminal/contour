@@ -12,6 +12,7 @@ add_library(contour_config STATIC
     ConfigDocumentation.hpp
     ConfigEnum.hpp
     ConfigEnumInfo.hpp
+    ConfigEnumReader.hpp
     FileOpenerTemplate.cpp FileOpenerTemplate.hpp
     FinishNotificationConfig.hpp
     GlobalOverrides.cpp GlobalOverrides.hpp
