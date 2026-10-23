@@ -5524,6 +5524,7 @@ void TerminalSession::configureTerminal()
         _terminal.setExtendedWordDelimiters(_config.extendedWordDelimiters.value());
         _terminal.setMouseProtocolBypassModifiers(configured.mouseProtocolBypassModifiers);
         _terminal.setLinkPatterns(configured.linkPatterns);
+        _terminal.setLinkDetectionPolicy(configured.linkDetection);
         // A new table means a new detector, whose link ids start over.
         _detectedLinkTooltip = {};
         _terminal.setLinkDecorationMode(configured.linkDecorationMode);

@@ -4847,8 +4847,11 @@ LinkLookup Terminal::lookUpLinkAt(CellLocation gridPosition) const
         return lookup;
     auto const candidates =
         findLinks(scan->text, *_settings.linkPatterns, PatternSelection::ClickableOnly, LinkOverlap::Merge);
+    // What detection would not find on this page is no link here either.
+    auto const screen = _settings.linkDetection.forPage(_displayedPage);
     auto const candidate = std::ranges::find_if(candidates, [&](LinkCandidate const& found) {
-        return found.first <= scan->position && scan->position <= found.last;
+        return found.first <= scan->position && scan->position <= found.last
+               && screen.detects(linkCategoryOf(found.kind, found.target));
     });
     if (candidate == candidates.end())
         return lookup;
@@ -5431,8 +5434,22 @@ void Terminal::setLinkPatterns(std::shared_ptr<LinkPatterns const> patterns)
     if (patterns == _settings.linkPatterns)
         return;
     _settings.linkPatterns = std::move(patterns);
-    // Replaced, not changed: the jobs in flight finish against the table they started with, and their results
-    // find nobody to adopt them.
+    replaceLinkDetector();
+}
+
+void Terminal::setLinkDetectionPolicy(LinkDetectionPolicy policy)
+{
+    // The policy in use: a reload that leaves it as it was keeps the index and the probe cache.
+    if (policy == _settings.linkDetection)
+        return;
+    _settings.linkDetection = policy;
+    replaceLinkDetector();
+}
+
+void Terminal::replaceLinkDetector()
+{
+    // Replaced, not changed: the jobs in flight finish against the configuration they started with, and their
+    // results find nobody to adopt them.
     _linkDetector = makeLinkDetector();
     _linkScanDue.store(chrono::steady_clock::time_point::max(), std::memory_order_relaxed);
     // The new detector's ids start over: the hovered one would name another link, or none.
@@ -5441,12 +5458,15 @@ void Terminal::setLinkPatterns(std::shared_ptr<LinkPatterns const> patterns)
 
 std::unique_ptr<LinkDetector> Terminal::makeLinkDetector()
 {
-    if (!_linkServices || !_settings.linkPatterns->hasClickable())
+    if (!_linkServices || !_settings.linkPatterns->hasClickable()
+        || !_settings.linkDetection.detectsAnywhere())
         return nullptr;
     // breakLoopAndRefreshRenderBuffer() touches atomics and the any-thread notifications only, so a job
     // thread may call it, as the status line's commands do.
-    return std::make_unique<LinkDetector>(
-        *_linkServices, _settings.linkPatterns, [this] { breakLoopAndRefreshRenderBuffer(); });
+    return std::make_unique<LinkDetector>(*_linkServices,
+                                          _settings.linkPatterns,
+                                          _settings.linkDetection,
+                                          [this] { breakLoopAndRefreshRenderBuffer(); });
 }
 
 LinkIndex const* Terminal::detectedLinks() const noexcept

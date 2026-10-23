@@ -646,6 +646,26 @@ struct HyperlinkDecorationConfig
     vtrasterizer::Decorator hover { vtrasterizer::Decorator::Underline };
 };
 
+/// One screen group's switches, as YAML spells them (serialisation boundary: bool by design).
+struct ScreenLinkDetectionConfig
+{
+    bool urls = true;      ///< Whether URLs and custom patterns are detected (not `file:` ones).
+    bool filePaths = true; ///< Whether file paths and `file:` URLs are detected.
+
+    bool operator==(ScreenLinkDetectionConfig const&) const = default;
+};
+
+/// The profile's link_detection: which links are found automatically in printed text, per screen.
+struct LinkDetectionConfig
+{
+    /// The normal shell screen.
+    ScreenLinkDetectionConfig primaryScreen { .urls = true, .filePaths = true };
+    /// The alternate screen and every further page.
+    ScreenLinkDetectionConfig otherScreens { .urls = true, .filePaths = false };
+
+    bool operator==(LinkDetectionConfig const&) const = default;
+};
+
 /// How a detected file path opens (file_opener, §7.4).
 struct FileOpenerConfig
 {
@@ -988,6 +1008,7 @@ struct TerminalProfile
     ConfigEntry<BackgroundConfig, documentation::Background> background {};
     ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
     ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
+    ConfigEntry<LinkDetectionConfig, documentation::LinkDetection> linkDetection {};
     ConfigEntry<FileOpenerConfig, documentation::FileOpener> fileOpener {};
     ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
     ConfigEntry<vtbackend::LineCount, documentation::HintScrollbackLines> hintScrollbackLines {
@@ -1994,6 +2015,9 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, StatusLineConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, BackgroundConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HyperlinkDecorationConfig& where);
+    /// Reads link_detection: per screen group, which of urls and file_paths are detected; a key left out
+    /// keeps the value already in @p where.
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, LinkDetectionConfig& where);
     /// Reads file_opener as a command line, or as a map of `command` and `placement`, and validates the command
     /// (FileOpenerTemplate::parse()): one that cannot be used is reported and cleared, so files open with the
     /// system's default application.
@@ -2436,6 +2460,15 @@ struct Writer
         return format(doc, v.mode, v.normal, v.hover);
     }
 
+    [[nodiscard]] std::string format(std::string_view doc, LinkDetectionConfig const& v)
+    {
+        return format(doc,
+                      v.primaryScreen.urls,
+                      v.primaryScreen.filePaths,
+                      v.otherScreens.urls,
+                      v.otherScreens.filePaths);
+    }
+
     [[nodiscard]] std::string format(std::string_view doc, FileOpenerConfig const& v)
     {
         return format(doc, SingleQuoted { v.command }, v.placement);
@@ -2815,6 +2848,12 @@ struct ResolvedSessionConfig
 /// @param pattern The entry as read.
 /// @return What is wrong with it, or nullopt for an entry the reader keeps.
 [[nodiscard]] std::optional<std::string> skippedHintPatternReason(HintPatternConfig const& pattern);
+
+/// The profile's link_detection as the engine's policy.
+/// @param config The profile's link_detection.
+/// @return The same switches, as the engine spells them.
+[[nodiscard]] vtbackend::LinkDetectionPolicy linkDetectionPolicyOf(
+    LinkDetectionConfig const& config) noexcept;
 
 /// The profile's hint_patterns as link pattern entries.
 /// @param profile The profile.

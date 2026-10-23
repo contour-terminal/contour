@@ -8,6 +8,7 @@
 #include <vtrasterizer/Decorator.hpp>
 #include <vtrasterizer/RenderTarget.hpp>
 #include <vtrasterizer/TextureAtlas.hpp>
+#include <vtrasterizer/UnderlineGeometry.hpp>
 
 #include <optional>
 
@@ -59,8 +60,21 @@ class DecorationRenderer: public Renderable
     void renderCell(vtbackend::RenderCell const& cell);
     void renderLine(vtbackend::RenderLine const& line);
 
+    /// Draws @p decoration across @p columnCount grid columns, one atlas tile per column.
+    ///
+    /// The dotted underline's pattern runs on one pitch across the whole line, so column `i` draws the
+    /// phase tile of display column `firstColumn + i` (@see dottedUnderlinePhaseOf); every other decorator
+    /// draws its single tile in every column.
+    ///
+    /// @param decoration The decoration to draw.
+    /// @param pos The bottom-left corner of the first column, in pixels.
+    /// @param firstColumn The display column, counted from the line's start, that @p pos is the left
+    ///                    edge of -- on a double-width line already twice the grid column.
+    /// @param columnCount How many columns to draw.
+    /// @param color The decoration's color.
     void renderDecoration(Decorator decoration,
                           crispy::Point pos,
+                          vtbackend::ColumnOffset firstColumn,
                           vtbackend::ColumnCount columnCount,
                           vtbackend::RGBColor const& color);
 
@@ -79,11 +93,22 @@ class DecorationRenderer: public Renderable
     using Renderable::createTileData;
     TextureAtlas::TileCreateData createTileData(Decorator decoration, atlas::TileLocation tileLocation);
 
+    /// Rasterizes the dotted underline's tile for @p phase.
+    /// @param phase The phase, in `[0, phaseCount)`; phase 0 is the DottedUnderline tile itself.
+    /// @param tileLocation Where the tile lives in the atlas.
+    /// @return The tile's antialiased coverage, top-origin.
+    [[nodiscard]] TextureAtlas::TileCreateData createDottedPhaseTile(int phase,
+                                                                     atlas::TileLocation tileLocation);
+
     // private data members
     //
     DirectMapping _directMapping;
     Decorator _hyperlinkNormal = Decorator::DottedUnderline;
     Decorator _hyperlinkHover = Decorator::Underline;
+
+    /// The dotted underline's geometry the phase tiles were rasterized with; refreshed by
+    /// initializeDirectMapping(), so the phase picked at render time always names an uploaded tile.
+    DottedUnderlineGeometry _dottedGeometry;
 };
 
 } // namespace vtrasterizer

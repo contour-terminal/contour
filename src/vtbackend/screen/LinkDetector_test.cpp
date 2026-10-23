@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/links/LinkDetectionPolicy.hpp>
 #include <vtbackend/links/LinkMatcher.hpp>
 #include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
@@ -84,13 +85,16 @@ struct Fixture
 {
     /// @param chosen The detector's tuning.
     /// @param page The page; the history holds four of them.
+    /// @param detection Which links are detected on which screen.
     explicit Fixture(LinkDetectorTuning chosen = {},
-                     PageSize page = PageSize { LineCount(5), ColumnCount(40) }):
-        tuning { chosen }, mock { page, LineCount(unbox(page.lines) * 4) }
+                     PageSize page = PageSize { LineCount(5), ColumnCount(40) },
+                     LinkDetectionPolicy detection = {}):
+        tuning { chosen }, policy { detection }, mock { page, LineCount(unbox(page.lines) * 4) }
     {
     }
 
     LinkDetectorTuning tuning;
+    LinkDetectionPolicy policy;
     core::async::testing::ManualExecutor match;
     core::async::testing::ManualExecutor probe;
     core::platform::testing::InMemoryFileSystem files;
@@ -105,6 +109,7 @@ struct Fixture
                                                                .clock = clock,
                                                                .tuning = tuning },
                                        LinkPatterns::builtins(),
+                                       policy,
                                        [this] { ++redraws; });
     std::chrono::steady_clock::time_point now {};
 
@@ -255,6 +260,41 @@ TEST_CASE("LinkDetector.everyPageHasAnIndexOfItsOwn", "[links]")
         (void) fx.frame();
         CHECK(fx.detector->index().empty());
     }
+}
+
+TEST_CASE("LinkDetector.aPageThatDetectsNothingIsNeitherReadNorMatched", "[links]")
+{
+    // The primary screen detects, every other page nothing: a collect there reads no row and starts no job,
+    // and leaves nothing pending, so that no frame is asked for on its account.
+    constexpr auto Off = ScreenLinkDetection { .urls = DetectLinks::No, .filePaths = DetectLinks::No };
+    auto fx = Fixture { {},
+                        PageSize { LineCount(5), ColumnCount(40) },
+                        LinkDetectionPolicy { .otherScreens = Off } };
+    // Output on the primary screen, and a switch before its quiet time: the switch drops what was pending.
+    fx.mock.writeToScreen("see https://x.y/");
+    (void) fx.frame(FrameChange::ScreenChanged);
+    REQUIRE(fx.detector->nextDue(fx.now).has_value());
+    fx.source.page = AlternateScreenPageIndex;
+    (void) fx.frame();
+    CHECK(fx.detector->nextDue(fx.now) == std::nullopt);
+    (void) fx.frame(FrameChange::ScreenChanged);
+    CHECK(fx.detector->nextDue(fx.now) == std::nullopt); // the output schedules no collect
+    fx.now += 100ms;
+    (void) fx.frame();
+    fx.match.drain();
+    (void) fx.frame();
+    CHECK(fx.match.pending() == 0);
+    CHECK(fx.targetAt(0, 4).empty());
+    CHECK(fx.detector->nextDue(fx.now) == std::nullopt);
+    auto const scan = fx.detector->scanNow(fx.source, LineOffset(0), LineOffset(4));
+    CHECK(scan.linesRead == 0);
+    CHECK(fx.targetAt(0, 4).empty());
+
+    fx.source.page = PageIndex(0); // the primary screen, which detects
+    (void) fx.frame();
+    CHECK(fx.detector->nextDue(fx.now).has_value()); // the switch alone schedules a scan
+    fx.detect();
+    CHECK(fx.targetAt(0, 4) == "https://x.y/");
 }
 
 TEST_CASE("LinkDetector.pathsAreDecoratedOnceTheProbeConfirmsThem", "[links]")

@@ -18,7 +18,7 @@ starts a new command block; to mark a line without that, see
 [Bookmarking a line in Vi normal mode](#bookmarking-a-line-in-vi-normal-mode).
 
 `OSC 133 ; A` is the shell-integration sequence for "a new prompt starts here". Contour also
-accepted a dedicated `SETMARK` sequence (`CSI > M`) for this until 0.7.1, when it was removed in
+accepted a dedicated `SETMARK` sequence (`CSI > M`) for this until 0.8.0, when it was removed in
 favour of this one.
 
 ## Jump via shortcut

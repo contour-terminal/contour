@@ -5,6 +5,7 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/input/InputGenerator.hpp> // Modifier
+#include <vtbackend/links/LinkDetectionPolicy.hpp>
 #include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
 #include <vtbackend/shell/CommandBlock.hpp> // CommandBlockStoreLimits
@@ -303,6 +304,9 @@ struct Settings
     /// The link pattern table hint mode and link detection scan with: the built-ins merged with the profile's
     /// hint_patterns, compiled once when the profile is applied.
     std::shared_ptr<LinkPatterns const> linkPatterns = LinkPatterns::builtins();
+    /// Which links automatic detection finds on which screen (link_detection). Hint mode and OSC 8 links are
+    /// not governed by it.
+    LinkDetectionPolicy linkDetection {};
     LinkDecorationMode linkDecorationMode = LinkDecorationMode::Always; ///< hyperlink_decoration.mode.
     /// The modifiers of the FollowHyperlink mouse binding; none when there is no such binding.
     std::optional<Modifiers> linkFollowModifiers = Modifiers { Modifier::Control };

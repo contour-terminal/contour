@@ -17,6 +17,17 @@ bool isFileUrl(std::string_view url) noexcept
     return hasUrlScheme(url, "file");
 }
 
+LinkCategory linkCategoryOf(LinkKind kind, std::string_view target) noexcept
+{
+    switch (kind)
+    {
+        case LinkKind::Path: return LinkCategory::FilePath;
+        case LinkKind::Url:
+        case LinkKind::Custom: return isFileUrl(target) ? LinkCategory::FilePath : LinkCategory::Url;
+    }
+    return LinkCategory::Url;
+}
+
 PrintedLink classifyPrintedLink(LinkTarget printed,
                                 std::expected<PathBases, PathRefusal> const& bases,
                                 LinkMachine const& machine,

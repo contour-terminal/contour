@@ -44,16 +44,36 @@ namespace
         pair { vtbackend::CellFlag::Framed, Decorator::Framed },
         pair { vtbackend::CellFlag::Encircled, Decorator::Encircle },
     };
-}
+
+    /// The direct-mapping index of the dotted underline's tile for @p phase.
+    ///
+    /// Phase 0 is DottedUnderline's own tile, so a line that needs only one phase costs nothing extra;
+    /// phase `p >= 1` lives after every Decorator's own tile, at `count + p - 1`.
+    [[nodiscard]] constexpr uint32_t dottedPhaseIndex(int phase) noexcept
+    {
+        if (phase == 0)
+            return static_cast<uint32_t>(Decorator::DottedUnderline);
+        return std::numeric_limits<Decorator>::count() + static_cast<uint32_t>(phase) - 1;
+    }
+} // namespace
 
 DecorationRenderer::DecorationRenderer(GridMetrics const& gridMetrics,
                                        Decorator hyperlinkNormal,
                                        Decorator hyperlinkHover):
-    Renderable { gridMetrics }, _hyperlinkNormal { hyperlinkNormal }, _hyperlinkHover { hyperlinkHover }
+    Renderable { gridMetrics },
+    _hyperlinkNormal { hyperlinkNormal },
+    _hyperlinkHover { hyperlinkHover },
+    _dottedGeometry { dottedUnderlineGeometry(unbox<int>(gridMetrics.cellSize.width),
+                                              gridMetrics.underline.position,
+                                              gridMetrics.underline.thickness) }
 {
 }
 
-constexpr inline uint32_t DirectMappedDecorationCount = std::numeric_limits<Decorator>::count();
+/// One tile per Decorator, plus the dotted underline's phases beyond phase 0 -- reserved for the
+/// largest pitch, since the phase count depends on the cell width, which may change without the
+/// direct mapping being reallocated.
+constexpr inline uint32_t DirectMappedDecorationCount =
+    std::numeric_limits<Decorator>::count() + MaxDottedUnderlinePitch - 1;
 
 void DecorationRenderer::setRenderTarget(RenderTarget& renderTarget,
                                          DirectMappingAllocator& directMappingAllocator)
@@ -78,12 +98,24 @@ void DecorationRenderer::initializeDirectMapping()
     if (!SoftRequire(_textureAtlas))
         return;
 
+    // Before any tile is rasterized: the DottedUnderline case below is phase 0 of this geometry.
+    _dottedGeometry = dottedUnderlineGeometry(
+        unbox<int>(_gridMetrics.cellSize.width), underlinePosition(), underlineThickness());
+
     for (Decorator const decoration: eachElement<Decorator>())
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
         TextureAtlas::TileCreateData tileData = createTileData(decoration, tileLocation);
         _textureAtlas->setDirectMapping(tileIndex, std::move(tileData));
+    }
+
+    // Phase 0 was uploaded above as DottedUnderline's own tile.
+    for (auto const phase: std::views::iota(1, _dottedGeometry.phaseCount))
+    {
+        auto const tileIndex = _directMapping.toTileIndex(dottedPhaseIndex(phase));
+        _textureAtlas->setDirectMapping(tileIndex,
+                                        createDottedPhaseTile(phase, _textureAtlas->tileLocation(tileIndex)));
     }
 }
 
@@ -99,6 +131,7 @@ void DecorationRenderer::renderLine(vtbackend::RenderLine const& line)
             renderDecoration(mapping.second,
                              _gridMetrics.mapBottomLeft(vtbackend::CellLocation { .line = line.lineOffset },
                                                         _smoothScrollYOffset),
+                             vtbackend::ColumnOffset(0),
                              line.usedColumns * scale,
                              line.textAttributes.decorationColor);
 }
@@ -107,16 +140,21 @@ void DecorationRenderer::renderCell(vtbackend::RenderCell const& cell)
 {
     CONTOUR_TRACY_CELL_ZONE();
     auto const scale = cell.attributes.lineFlags.test(vtbackend::LineFlag::DoubleWidth) ? 2 : 1;
+    // Already a display column: RenderBufferBuilder::displayColumn() emits 2N for cell N of a
+    // double-width line, so it must not be scaled again.
+    auto const firstColumn = cell.position.column;
     for (auto const& mapping: CellFlagDecorationMappings)
         if (cell.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
                              _gridMetrics.mapBottomLeft(cell.position, _smoothScrollYOffset),
+                             firstColumn,
                              vtbackend::ColumnCount(cell.width * scale),
                              cell.attributes.decorationColor);
 
     if (auto const decorator = decoratorFor(cell.linkRole, _hyperlinkNormal, _hyperlinkHover))
         renderDecoration(*decorator,
                          _gridMetrics.mapBottomLeft(cell.position, _smoothScrollYOffset),
+                         firstColumn,
                          vtbackend::ColumnCount(cell.width * scale),
                          cell.attributes.decorationColor);
 }
@@ -223,29 +261,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 return block.take();
             });
         }
-        case Decorator::DottedUnderline: {
-            // Signed throughout, and the dot shrinks to the room it has: computing the origin as
-            // `(unsigned) position - thickness` wrapped whenever a font put its underline within
-            // one thickness of the cell bottom, and Pixmap::paint then clipped every dot away --
-            // the decoration vanished silently rather than merely looking cramped.
-            auto const dotSize = std::clamp(underlineThickness(), 1, max(1, underlinePosition()));
-            auto const y0 = max(0, underlinePosition() - dotSize);
-            auto const height = vtbackend::Height::cast_from(y0 + dotSize);
-            // Two dots per cell: one flush with the left edge, one at the half-way mark.
-            auto const x1 = unbox<int>(width) / 2;
-            auto block = blockElement(ImageSize { width, height });
-            return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                for (auto const y: std::views::iota(0, dotSize))
-                {
-                    for (auto const x: std::views::iota(0, dotSize))
-                    {
-                        block.paint(x, y + y0);
-                        block.paint(x + x1, y + y0);
-                    }
-                }
-                return block.take();
-            });
-        }
+        case Decorator::DottedUnderline: return createDottedPhaseTile(0, tileLocation);
         case Decorator::DashedUnderline: {
             // Divides a grid cell's underline in three sub-ranges and only renders first and third one,
             // whereas the middle one is being skipped.
@@ -320,20 +336,47 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
     return {};
 }
 
+auto DecorationRenderer::createDottedPhaseTile(int phase, atlas::TileLocation tileLocation)
+    -> TextureAtlas::TileCreateData
+{
+    // Painted straight into a top-origin buffer: the coverage function is top-origin, with the dot's
+    // top on row 0, and the tile's height is the underline position -- so the dot's top lands exactly
+    // where a straight underline's does.
+    auto const width = unbox<int>(_gridMetrics.cellSize.width);
+    auto const& geometry = _dottedGeometry;
+    auto const imageSize =
+        ImageSize { _gridMetrics.cellSize.width, vtbackend::Height::cast_from(geometry.tileHeight) };
+    auto image = atlas::Buffer(imageSize.area(), 0);
+    for (auto const y: std::views::iota(0, geometry.tileHeight))
+        for (auto const x: std::views::iota(0, width))
+            image[(static_cast<size_t>(y) * static_cast<size_t>(width)) + static_cast<size_t>(x)] =
+                dottedUnderlineCoverage(geometry, width, phase, x, y);
+    return createTileData(tileLocation,
+                          std::move(image),
+                          atlas::Format::Red,
+                          imageSize,
+                          RenderTileAttributes::X { 0 },
+                          RenderTileAttributes::Y { 0 },
+                          FRAGMENT_SELECTOR_GLYPH_ALPHA);
+}
+
 void DecorationRenderer::renderDecoration(Decorator decoration,
                                           crispy::Point pos,
+                                          vtbackend::ColumnOffset firstColumn,
                                           vtbackend::ColumnCount columnCount,
                                           vtbackend::RGBColor const& color)
 {
-    for (auto i = vtbackend::ColumnCount(0); i < columnCount; ++i)
+    for (auto const i: std::views::iota(0, unbox(columnCount)))
     {
-        auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
-        // auto const tileLocation = _textureAtlas->tileLocation(tileIndex); // unused
-        // auto const tileData = createTileData(decoration, tileLocation); // unused?
+        auto const index =
+            decoration == Decorator::DottedUnderline
+                ? dottedPhaseIndex(dottedUnderlinePhaseOf(_dottedGeometry, unbox(firstColumn) + i))
+                : static_cast<uint32_t>(decoration);
+        auto const tileIndex = _directMapping.toTileIndex(index);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
         auto tileAttributesCopy = tileAttributes;
 
-        renderTile({ pos.x + (unbox(i) * unbox<int>(_gridMetrics.cellSize.width)) },
+        renderTile({ pos.x + (i * unbox<int>(_gridMetrics.cellSize.width)) },
                    { pos.y - unbox<int>(tileAttributes.bitmapSize.height) },
                    color,
                    tileAttributesCopy);

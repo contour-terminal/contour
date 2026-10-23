@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/links/LinkDetectionPolicy.hpp>
 #include <vtbackend/links/LinkTypes.hpp>
 #include <vtbackend/links/PathProbe.hpp>
 #include <vtbackend/shell/CommandBlockPaths.hpp>
@@ -57,6 +58,12 @@ using PrintedLink = std::variant<LinkTarget, PathToProbe, RefusedPath, MissingPa
 /// @param url A link's target.
 /// @return Whether it names a file, rather than what a browser opens.
 [[nodiscard]] bool isFileUrl(std::string_view url) noexcept;
+
+/// The category of a link found in printed text, for the detection policy.
+/// @param kind How the link was found.
+/// @param target The link's target: for a custom pattern, what its URL template expands to.
+/// @return FilePath for a path or a `file:` URL (a custom pattern's included), Url for everything else.
+[[nodiscard]] LinkCategory linkCategoryOf(LinkKind kind, std::string_view target) noexcept;
 
 /// Classifies a link found in printed text, without touching the filesystem.
 ///

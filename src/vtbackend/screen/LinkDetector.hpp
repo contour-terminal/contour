@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/links/LinkDetectionPolicy.hpp>
 #include <vtbackend/links/LinkIndex.hpp>
 #include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/links/PathProbe.hpp>
@@ -197,12 +198,15 @@ class LinkDetector
     /// @param services Where matching and probing run, the filesystem probes look at, and the timing and
     ///        bounds.
     /// @param patterns The profile's table.
+    /// @param policy Which links are detected on which screen; fixed for the detector's lifetime. A category
+    ///        a screen does not detect is dropped as it is matched, before it is classified or probed.
     /// @param requestRedraw Asks the display for a frame. Called on job threads with the mailbox mutex
     ///        held, so it follows Terminal::Events::renderBufferUpdated()'s contract: it takes no terminal
     ///        lock, reads no terminal state, and calls neither nextRender() nor refreshRenderBuffer().
     ///        Terminal::breakLoopAndRefreshRenderBuffer() qualifies.
     LinkDetector(LinkDetectionServices services,
                  std::shared_ptr<LinkPatterns const> patterns,
+                 LinkDetectionPolicy policy,
                  std::function<void()> requestRedraw);
     ~LinkDetector();
     LinkDetector(LinkDetector const&) = delete;
@@ -291,6 +295,9 @@ class LinkDetector
     /// The pattern table detection matches with.
     /// @return The table.
     [[nodiscard]] LinkPatterns const& patterns() const noexcept;
+    /// Which links detection finds on which screen.
+    /// @return The policy given at construction.
+    [[nodiscard]] LinkDetectionPolicy const& policy() const noexcept;
     /// What detection runs on.
     /// @return The services given at construction.
     [[nodiscard]] LinkDetectionServices const& services() const noexcept;
@@ -317,8 +324,9 @@ class LinkDetector
     /// What one collect hands the match job.
     struct ScanBatch
     {
-        LinkIndexKey key;    ///< The page collected from, and its id generation then.
-        LinkMachine machine; ///< This machine, as its paths and `file://` URLs are named.
+        LinkIndexKey key;           ///< The page collected from, and its id generation then.
+        LinkMachine machine;        ///< This machine, as its paths and `file://` URLs are named.
+        ScreenLinkDetection screen; ///< What the policy detects on the page collected from.
         std::vector<LineJob> lines;
     };
 
@@ -344,13 +352,21 @@ class LinkDetector
         ResolvedPath answer;
     };
 
+    /// Matches one logical line, dropping every candidate of a category @p screen does not detect before it
+    /// is classified, so that no path of a screen without path detection reaches the probe.
     [[nodiscard]] static LineResult matchLine(State const& state,
                                               LineJob const& line,
-                                              LinkMachine const& machine);
+                                              LinkMachine const& machine,
+                                              ScreenLinkDetection screen);
     static core::async::DetachedTask runMatch(std::shared_ptr<State> state, ScanBatch batch);
     static core::async::DetachedTask runProbes(std::shared_ptr<State> state,
                                                std::vector<std::shared_ptr<PathQuery const>> queries);
 
+    /// What the policy detects on the page @p source shows.
+    [[nodiscard]] ScreenLinkDetection screenOf(LinkSource const& source) const;
+    /// Whether the policy detects anything on the page @p source shows. Where it does not, nothing is noted
+    /// pending, collected or read.
+    [[nodiscard]] bool detectsOnPageShown(LinkSource const& source) const;
     void notePending(std::chrono::steady_clock::time_point now) noexcept;
     [[nodiscard]] bool isDue(std::chrono::steady_clock::time_point now) const noexcept;
     /// Starts over when the page on display or its id generation is not what the index names: a reflow, a

@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -1191,5 +1193,30 @@ TEST_CASE("vi.link: ]x and [x stay put without link detection", "[vi][links]")
     auto const end = mock.terminal.normalModeCursorPosition();
     mock.sendCharSequence("[x");
     CHECK(mock.terminal.normalModeCursorPosition() == end);
+}
+
+TEST_CASE("vi.link: ]x skips paths on the alternate screen unless enabled", "[vi][links]")
+{
+    auto term = DetectingTerm { LinkPage };
+    term.files.addFile(std::format("{}/notes.txt", Work), "");
+    term.mock.terminal.setCurrentWorkingDirectory(vtbackend::test::fileUrlOf(std::filesystem::path { Work }));
+    // The path at columns 2-10, the URL from column 14 on.
+    showInNormalMode(term, "\033[?1049h\033[Ha notes.txt b https://x.y/");
+
+    term.mock.sendCharSequence("]x");
+    CHECK(viCursor(term) == at(0, 14)); // the path is not even probed: no probe answer would change this
+    CHECK(term.probe.pending() == 0);
+
+    auto policy = vtbackend::LinkDetectionPolicy {};
+    policy.otherScreens.filePaths = vtbackend::DetectLinks::Yes;
+    {
+        auto const _ = std::scoped_lock { term.mock.terminal };
+        term.mock.terminal.setLinkDetectionPolicy(policy);
+    }
+    term.mock.sendCharSequence("gg0]x");
+    REQUIRE(term.probe.pending() == 1); // a path counts once its probe has confirmed it
+    term.probe.drain();
+    term.mock.sendCharSequence("gg0]x");
+    CHECK(viCursor(term) == at(0, 2));
 }
 // }}}

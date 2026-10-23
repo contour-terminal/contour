@@ -1741,6 +1741,43 @@ TEST_CASE("SettingsController: Show links edits hyperlink_decoration.mode", "[se
     CHECK(row.value("options").toStringList() == QStringList { "always", "hover", "modifier", "never" });
 }
 
+TEST_CASE("SettingsController: link detection switches edit link_detection", "[settings][links]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newProfile("main");
+    auto const field = [&](QString const& key) {
+        return rowWithKey(fx.controller->profileFields(), key);
+    };
+
+    struct Expected
+    {
+        QString key;
+        bool value;
+        QString labelPart;
+    };
+    auto const expected = std::array {
+        Expected { "link_detection_primary_urls", true, "URLs" },
+        Expected { "link_detection_primary_file_paths", true, "file paths" },
+        Expected { "link_detection_other_urls", true, "URLs" },
+        Expected { "link_detection_other_file_paths", false, "file paths" },
+    };
+    for (auto const& row: expected)
+    {
+        INFO(row.key.toStdString());
+        REQUIRE_FALSE(field(row.key).isEmpty());
+        CHECK(field(row.key).value("group").toString() == "Links");
+        CHECK(field(row.key).value("type").toString() == "bool");
+        CHECK(field(row.key).value("value").toBool() == row.value);
+        // The settings search (QML) matches on label, help text and key.
+        CHECK(field(row.key).value("label").toString().contains(row.labelPart));
+        CHECK(field(row.key).value("help").toString().endsWith("OSC 8 hyperlinks are always links."));
+    }
+
+    fx.controller->setProfileField("link_detection_other_file_paths", true);
+    CHECK(field("link_detection_other_file_paths").value("value").toBool());
+    CHECK(field("link_detection_primary_file_paths").value("value").toBool());
+}
+
 TEST_CASE("SettingsController: Open files with validates its placeholders inline", "[settings][links]")
 {
     auto fx = Fixture(BasicConfig);

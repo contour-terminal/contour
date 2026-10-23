@@ -933,6 +933,28 @@ namespace
                           hd.hover = v;
                           p.hyperlinkDecoration = hd;
                       }),
+                  boolField("link_detection_primary_urls",
+                            "Detect URLs on the primary screen",
+                            "URLs are detected on the primary screen, where the shell prompt and its output "
+                            "live. OSC 8 hyperlinks are always links.",
+                            [](auto& p) -> auto& { return p.linkDetection.value().primaryScreen.urls; }),
+                  boolField("link_detection_primary_file_paths",
+                            "Detect file paths on the primary screen",
+                            "File paths are detected on the primary screen, where the shell prompt and its "
+                            "output live. OSC 8 hyperlinks are always links.",
+                            [](auto& p) -> auto& { return p.linkDetection.value().primaryScreen.filePaths; }),
+                  boolField("link_detection_other_urls",
+                            "Detect URLs on other screens",
+                            "URLs are detected on other screens. Other screens are the alternate screen used "
+                            "by full-screen programs (vim, less, htop) and any further page. OSC 8 "
+                            "hyperlinks are always links.",
+                            [](auto& p) -> auto& { return p.linkDetection.value().otherScreens.urls; }),
+                  boolField("link_detection_other_file_paths",
+                            "Detect file paths on other screens",
+                            "File paths are detected on other screens. Other screens are the alternate "
+                            "screen used by full-screen programs (vim, less, htop) and any further page. OSC "
+                            "8 hyperlinks are always links.",
+                            [](auto& p) -> auto& { return p.linkDetection.value().otherScreens.filePaths; }),
                   ProfileFieldDescriptor {
                       .key = "file_opener_command",
                       .label = "Open files with",
