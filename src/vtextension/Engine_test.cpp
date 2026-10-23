@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// The engine on its own: the runtime's lifetime, and the watchdog that stops a runaway call. The
-// module here is driven through WAMR's C API directly, below the Instance; the Instance's own tests
-// cover guests that speak the statusline world.
+// The engine on its own: the watchdog that stops a runaway call. The runtime's lifetime and thread
+// preparation are the WAMR backend's, tested with it. The module here is driven through WAMR's C API
+// directly, below the Instance; the Instance's own tests cover guests that speak the statusline world.
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,10 +20,6 @@
 #include <vector>
 
 #include <wasm_export.h>
-
-#ifndef _WIN32
-    #include <csignal>
-#endif
 
 #include <vtextension/Engine.hpp>
 
@@ -156,47 +152,6 @@ TEST_CASE("Engine.create")
     CHECK((*engine)->limits().callDeadline == ExtensionLimits {}.callDeadline);
 }
 
-TEST_CASE("Engine.create.twice")
-{
-    // The runtime is shared: a second engine joins it, and the first one's end does not end it.
-    auto first = Engine::create(ExtensionLimits {});
-    REQUIRE(first.has_value());
-    auto const second = Engine::create(ExtensionLimits {});
-    REQUIRE(second.has_value());
-    first->reset();
-
-    auto const instance = RawInstance::create(hostOnlyModule());
-    CHECK(instance->call(**second, "idle").has_value());
-}
-
-TEST_CASE("Engine.threadEnvNeedsARuntime")
-{
-    // Without an engine no runtime is up, and a thread is not prepared for one: on Windows WAMR's thread
-    // state would land in a thread-local slot no runtime holds. (Catch2's assertions are not thread-safe:
-    // the worker records, the test thread checks.)
-    auto const enterOnAnotherThread = [] {
-        auto result = std::expected<void, ExtensionError> {};
-        auto worker = std::thread([&] {
-            auto const threadEnv = Engine::ThreadEnv::enter();
-            if (!threadEnv)
-                result = std::unexpected(threadEnv.error());
-            else if (!Engine::ThreadEnv::isCurrentThreadPrepared())
-                result = std::unexpected(ExtensionError::RuntimeUnavailable);
-        });
-        worker.join();
-        return result;
-    };
-
-    {
-        auto const engine = Engine::create(ExtensionLimits {});
-        REQUIRE(engine.has_value());
-        CHECK(enterOnAnotherThread().has_value());
-    }
-    auto const refused = enterOnAnotherThread();
-    REQUIRE_FALSE(refused.has_value());
-    CHECK(refused.error() == ExtensionError::RuntimeUnavailable);
-}
-
 TEST_CASE("Engine.deadline")
 {
     requireDeadlineStops(hostOnlyModule());
@@ -245,28 +200,3 @@ TEST_CASE("Engine.errorText")
           == "extension call exceeded its deadline"sv);
     CHECK(vtextension::errorText(ExtensionError::OutputTooLarge) == "extension output too large"sv);
 }
-
-#ifndef _WIN32
-TEST_CASE("Engine.leavesSignalsAlone")
-{
-    // The runtime is built without hardware bounds checks and without waking blocked calls by signal:
-    // bringing it up, and preparing a thread to run guests, installs no SIGSEGV or SIGUSR1 handler (the
-    // process's, or a sanitizer's, stays in charge).
-    for (auto const signal: { SIGSEGV, SIGUSR1 })
-    {
-        INFO("signal " << signal);
-        struct sigaction before {};
-        REQUIRE(sigaction(signal, nullptr, &before) == 0);
-        auto const engine = Engine::create(ExtensionLimits {});
-        REQUIRE(engine.has_value());
-        auto prepared = false;
-        auto worker = std::thread([&] { prepared = Engine::ThreadEnv::enter().has_value(); });
-        worker.join();
-        struct sigaction after {};
-        REQUIRE(sigaction(signal, nullptr, &after) == 0);
-        CHECK(prepared);
-        CHECK(after.sa_sigaction == before.sa_sigaction);
-        CHECK(after.sa_flags == before.sa_flags);
-    }
-}
-#endif

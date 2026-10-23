@@ -20,22 +20,10 @@
 #include <vtextension/CanonicalAbi.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/StatuslineWorld.hpp>
+#include <vtextension/wasm/wamr/WamrRuntime.hpp>
 
 namespace vtextension
 {
-
-namespace detail
-{
-    void InstanceDeinstantiator::operator()(WASMModuleInstanceCommon* instance) const noexcept
-    {
-        wasm_runtime_deinstantiate(instance);
-    }
-
-    void ExecEnvDestroyer::operator()(WASMExecEnv* execEnv) const noexcept
-    {
-        wasm_runtime_destroy_exec_env(execEnv);
-    }
-} // namespace detail
 
 namespace
 {
@@ -327,8 +315,9 @@ namespace detail
 
     std::unique_ptr<HostRegistration> registerHostFunctions()
     {
-        // The callback is the runtime's one global; setting it again sets the same function.
-        wasm_runtime_set_enlarge_mem_error_callback(&Instance::HostCalls::onMemoryGrowthRefused, nullptr);
+        // The callback is the runtime's one global, which the WAMR backend owns: it hands the failures
+        // of module instances it did not create (these) on to this handler.
+        wasm::wamr::detail::forwardForeignMemoryGrowth(&Instance::HostCalls::onMemoryGrowthRefused);
         // The world's host functions.
         auto const functions = std::array {
             HostFunction { .name = "request-frame",

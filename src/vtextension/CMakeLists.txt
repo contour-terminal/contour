@@ -21,6 +21,10 @@ set(vtextension_SOURCES
     SessionExtensions.cpp
     StatusLineAdapter.cpp
     Surface.cpp
+    wasm/wamr/WamrBackend.cpp
+    wasm/wamr/WamrInstance.cpp
+    wasm/wamr/WamrModule.cpp
+    wasm/wamr/WamrThreadEnv.cpp
 )
 
 set(vtextension_HEADERS
@@ -51,10 +55,14 @@ set(vtextension_HEADERS
     Runner.hpp
     SessionExtensions.hpp
     StatusLineAdapter.hpp
-    RuntimeHandles.hpp
     StatuslineWorld.hpp
     Surface.hpp
     Utf8.hpp
+    wasm/WasmRuntime.hpp
+    wasm/wamr/WamrBackend.hpp
+    wasm/wamr/WamrHandles.hpp
+    wasm/wamr/WamrRuntime.hpp
+    wasm/wamr/WamrThreadEnv.hpp
 )
 
 add_library(vtextension STATIC ${vtextension_SOURCES} ${vtextension_HEADERS})
@@ -95,10 +103,13 @@ if(VTEXTENSION_TESTING)
         StatusLineAdapter_test.cpp
         Surface_test.cpp
         Wit_test.cpp
+        wasm/wamr/WamrBackend_test.cpp
         testing/ManualScheduler.hpp
         testing/QueuedOwner.hpp
         testing/RunnerHarness.hpp
+        testing/StandardStreamsCapture.hpp
         testing/TestModules.hpp
+        wasm/testing/BackendContract.hpp
     )
     # The WIT package is the normative spec of the extension ABI; the tests read it from the source tree.
     target_compile_definitions(vtextension_test PRIVATE VTEXTENSION_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/statusline")

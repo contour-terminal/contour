@@ -19,7 +19,7 @@
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/ExtensionLimits.hpp>
 #include <vtextension/IHostServices.hpp>
-#include <vtextension/RuntimeHandles.hpp>
+#include <vtextension/wasm/wamr/WamrHandles.hpp>
 
 namespace vtextension
 {
@@ -175,8 +175,9 @@ class Instance
     IHostServices& _services;
     core::platform::IClock& _clock;
     ExtensionLimits _limits;
-    detail::InstanceHandle _instance; ///< Outlived by the module, outlives its execution environment.
-    detail::ExecEnvHandle _execEnv;
+    /// Outlived by the module, outlives its execution environment.
+    wasm::wamr::detail::InstanceHandle _instance;
+    wasm::wamr::detail::ExecEnvHandle _execEnv;
     Exports _exports;
     std::unique_ptr<GuestMemory> _memory;
     std::optional<ExtensionError> _fault;

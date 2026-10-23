@@ -18,14 +18,6 @@
 namespace vtextension
 {
 
-namespace detail
-{
-    void ModuleUnloader::operator()(WASMModuleCommon* module) const noexcept
-    {
-        wasm_runtime_unload(module);
-    }
-} // namespace detail
-
 namespace
 {
     /// The module name of WASI preview 1, the one import module besides the world's own.
@@ -164,7 +156,7 @@ CompiledExtension::CompiledExtension(PrivateTag /*unused*/,
                                      std::shared_ptr<Engine> engine,
                                      std::vector<std::byte> bytes,
                                      std::optional<Manifest> manifest,
-                                     detail::ModuleHandle module):
+                                     wasm::wamr::detail::ModuleHandle module):
     _engine { std::move(engine) },
     _bytes { std::move(bytes) },
     _manifest { std::move(manifest) },
@@ -183,10 +175,11 @@ std::expected<std::shared_ptr<CompiledExtension>, ExtensionError> CompiledExtens
         return std::unexpected(ExtensionError::InvalidComponent);
     auto errorBuffer = std::array<char, 128> {};
     // The vector's buffer stays where it is when the vector moves into the CompiledExtension.
-    auto module = detail::ModuleHandle { wasm_runtime_load(reinterpret_cast<uint8_t*>(bytes.data()),
-                                                           static_cast<uint32_t>(bytes.size()),
-                                                           errorBuffer.data(),
-                                                           static_cast<uint32_t>(errorBuffer.size())) };
+    auto module =
+        wasm::wamr::detail::ModuleHandle { wasm_runtime_load(reinterpret_cast<uint8_t*>(bytes.data()),
+                                                             static_cast<uint32_t>(bytes.size()),
+                                                             errorBuffer.data(),
+                                                             static_cast<uint32_t>(errorBuffer.size())) };
     if (!module)
         return std::unexpected(ExtensionError::InvalidComponent);
 

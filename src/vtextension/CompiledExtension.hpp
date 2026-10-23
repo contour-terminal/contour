@@ -10,7 +10,7 @@
 #include <vtextension/Engine.hpp>
 #include <vtextension/ExtensionError.hpp>
 #include <vtextension/Manifest.hpp>
-#include <vtextension/RuntimeHandles.hpp>
+#include <vtextension/wasm/wamr/WamrHandles.hpp>
 
 namespace vtextension
 {
@@ -47,7 +47,7 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
                       std::shared_ptr<Engine> engine,
                       std::vector<std::byte> bytes,
                       std::optional<Manifest> manifest,
-                      detail::ModuleHandle module);
+                      wasm::wamr::detail::ModuleHandle module);
 
     ~CompiledExtension() = default;
 
@@ -69,7 +69,7 @@ class CompiledExtension: public std::enable_shared_from_this<CompiledExtension>
     std::shared_ptr<Engine> _engine;
     std::vector<std::byte> _bytes; ///< Must outlive the module, which refers into it.
     std::optional<Manifest> _manifest;
-    detail::ModuleHandle _module; ///< Declared last: unloaded before the bytes it refers into.
+    wasm::wamr::detail::ModuleHandle _module; ///< Declared last: unloaded before the bytes it refers into.
 };
 
 } // namespace vtextension
