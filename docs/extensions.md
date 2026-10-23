@@ -334,3 +334,43 @@ Shared by all panes, once, are the runtime and its workers: well under 1 MiB.
 A build without extensions compiled in runs within the same few percent: its parser executes the same
 number of instructions (Callgrind) as one with them. An idle Contour with no extensions configured wakes
 up exactly as often as one built without them (measured on Qt's offscreen platform).
+
+## The WebAssembly runtime
+
+Extensions run on [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime)'s fast interpreter, but
+nothing in Contour that hosts them names it. They are loaded, instantiated and called through a
+runtime-neutral interface (`src/vtextension/wasm/WasmRuntime.hpp`), and the runtime behind it is a backend
+chosen when Contour is built: the CMake cache variable `CONTOUR_WASM_RUNTIME` (today its one value is
+`wamr`) selects the target `vtextension_<runtime>`. Only what composes a program links that backend, through
+`vtextension_runtime`, and creates it with `vtextension::wasm::makeDefaultBackend()`: the GUI,
+`contour daemon`, `bench-headless` and the test suites. The extension engine and the daemon's session host
+see only the interface. The `check_wasm_runtime_containment` lint gate (`ctest -L lint`) holds them to
+it: it fails when a file under `src/` outside the backend directory includes WAMR's C headers or the
+backend's own headers, or when the `vtextension` or `vthost` library links WAMR. Bringing in another runtime is adding a backend directory
+beside `src/vtextension/wasm/wamr/` and a value of `CONTOUR_WASM_RUNTIME`; the behaviour an extension sees is
+pinned by the backend contract tests every backend must pass.
+
+### Adding a backend
+
+A backend for a runtime `<runtime>` is the directory `src/vtextension/wasm/<runtime>/`, and it must provide
+all of the following; `src/vtextension/wasm/wamr/` is the one to copy from.
+
+- **A `CMakeLists.txt` defining the target `vtextension_<runtime>`**, which links `vtextension` publicly and the
+  runtime itself privately. `src/vtextension/CMakeLists.txt` adds the directory named by
+  `CONTOUR_WASM_RUNTIME` and links its target into `vtextension_runtime`; nothing else may link the runtime.
+- **A value of `CONTOUR_WASM_RUNTIME`**: `<runtime>` added to `_CONTOUR_WASM_RUNTIMES` in the top-level
+  `CMakeLists.txt`, which refuses any value not on that list.
+- **`vtextension::wasm::makeDefaultBackend()`** (declared in `src/vtextension/wasm/DefaultBackend.hpp`),
+  defined in the backend's target and returning its `IWasmBackend` (WAMR: `DefaultBackend.cpp`).
+- **`vtextension::wasm::testing::preparedGeneration()`** (declared in
+  `src/vtextension/wasm/testing/PreparedGeneration.hpp`), defined in a `PreparedGeneration.cpp` added to
+  `vtextension_test` only: the runtime generation the calling thread was prepared for, 0 if none.
+- **The contract suite, instantiated in `vtextension_test`**: a `*_test.cpp` the directory adds to
+  `vtextension_test`, holding a traits struct whose `make()` returns a new backend and the line
+  `CONTOUR_WASM_BACKEND_CONTRACT(Traits)` (from `src/vtextension/wasm/testing/BackendContract.hpp`). Every
+  case tagged `[wasm-contract]` must pass, among them the two rules no backend is exempt from: the runtime
+  generation increases on each bring-up, and entering a thread guard fails `RuntimeUnavailable` while no
+  runtime is up.
+- **A passing containment gate**: `ctest -L lint` (`check_wasm_runtime_containment`) must pass. The gate
+  knows WAMR's C headers, backend directory and link target by name (`scripts/check-wasm-runtime-containment.py`); teach it the
+  new runtime's alongside, so that they too stay inside the backend directory.
