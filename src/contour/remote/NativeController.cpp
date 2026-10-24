@@ -7,6 +7,7 @@
 #include <core/net/Sockets.hpp>
 
 #include <algorithm>
+#include <format>
 #include <ranges>
 #include <utility>
 
@@ -23,12 +24,20 @@ namespace
     auto const attachLog = core::log::Category("gui.attach", "GUI native-attach controller.");
 } // namespace
 
-NativeController::NativeController(vthost::AttachEndpoint endpoint,
+NativeController::NativeController(std::shared_ptr<vthost::ITransportFactory> transport,
+                                   vthost::proto::AttachIntent intent,
+                                   std::string profileName,
                                    std::optional<vtbackend::Settings> attachSettings,
-                                   SessionSettingsSource sessionSettings):
-    _endpoint(std::move(endpoint)),
+                                   SessionSettingsSource sessionSettings,
+                                   core::platform::IClock const& clock,
+                                   vthost::latency::StartupTimeline& timeline):
+    RemoteController(clock),
+    _transport(std::move(transport)),
+    _intent(std::move(intent)),
+    _profileName(std::move(profileName)),
     _attachSettings(std::move(attachSettings)),
-    _sessionSettings(std::move(sessionSettings))
+    _sessionSettings(std::move(sessionSettings)),
+    _timeline(timeline)
 {
 }
 
@@ -59,37 +68,45 @@ NativeController::~NativeController()
     stop();
 }
 
-// connectAndWait() and stop() are provided by RemoteController; this controller supplies runClient()
-// and the detach / binding-teardown / message hooks (see NativeController.h).
+// startConnecting(), awaitConnected() and stop() are provided by RemoteController; this controller supplies
+// runClient() and the detach / binding-teardown / message hooks (see NativeController.h).
 
-core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
+std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop& loop,
+                                                           std::unique_ptr<vthost::Connection> connection,
+                                                           vthost::proto::AttachIntent intent)
 {
-    auto const token = vthost::endpointToken(_endpoint);
-    auto socket = co_await vthost::connectAttach(loop, _endpoint);
-    if (!socket)
-    {
-        {
-            auto const lock = std::lock_guard { _mutex };
-            _state = State::Failed;
-            _failure = socket.error();
-        }
-        _connected.notify_all();
-        emit connectionClosed();
-        co_return;
-    }
-
-    auto client = NativeClient {
-        *loop,
-        std::move(*socket),
+    if (_acceptedConnections == 0)
+        _timeline.mark(vthost::latency::StartupMark::Connected);
+    return std::make_unique<NativeClient>(
+        loop,
+        std::move(connection->socket),
         NativeClient::HandshakeOptions {
-            .token = token,
+            .token = connection->token,
             // The daemon applies it to the sessions THIS connection goes on to create, and to nothing
             // that already exists; postSessionCreation() restates it when the configuration changed.
             .sessionSettings =
                 _attachSettings.transform([](auto const& s) { return vthost::toWireSessionSettings(s); }),
-            // Offered because this client passes a PermissionHandler below: its panes ask the user.
+            // ExtensionPermissions is offered because this client passes a PermissionHandler below: its
+            // panes ask the user. InitialClientArea because the hello states the area below. AttachIntent so
+            // that the daemon names the windows a reconnect resumes, Heartbeat so that a connection gone
+            // half-open is noticed and replaced. ProfileByName because the hello and every spawning verb
+            // name a profile for the daemon to resolve in its own configuration. TabEdits because the user's
+            // changes to a tab's presentation are reported (reportTabPresentation).
             .capabilities =
-                vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions }),
+                vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
+                                                   vthost::proto::Capability::InitialClientArea,
+                                                   vthost::proto::Capability::AttachIntent,
+                                                   vthost::proto::Capability::Heartbeat,
+                                                   vthost::proto::Capability::ProfileByName,
+                                                   vthost::proto::Capability::TabEdits }),
+            // The profile's terminal size, so the first session spawns at it rather than at the daemon's
+            // default; the ResizeRequest sent once the window is realized corrects any difference.
+            .clientArea = _attachSettings.transform([](auto const& s) {
+                return vthost::proto::WireClientArea { .columns = unbox<uint32_t>(s.pageSize.columns),
+                                                       .lines = unbox<uint32_t>(s.pageSize.lines) };
+            }),
+            .attachIntent = std::move(intent),
+            .profileName = _profileName,
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.
@@ -107,23 +124,40 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
         NativeClient::LayoutHandler {
             [this](vthost::proto::LayoutState const& layout) { onLayout(layout); } },
         NativeClient::PermissionHandler {
-            [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } }
+            [this](vthost::proto::PermissionRequest const& request) { onPermissionRequest(request); } });
+}
+
+core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
+{
+    _timeline.mark(vthost::latency::StartupMark::ConnectBegin);
+    auto supervisor = vthost::client::ClientSupervisor {
+        *loop,
+        _transport,
+        [this, loop](std::unique_ptr<vthost::Connection> connection, vthost::proto::AttachIntent intent) {
+            return makeClient(*loop, std::move(connection), std::move(intent));
+        },
+        _intent,
+        vthost::client::BackoffSchedule {},
+        [this](vthost::client::ConnectionState state, std::string const& reason) {
+            onConnectionState(state, reason);
+        }
     };
     {
         auto const lock = std::lock_guard { _mutex };
-        _client = &client;
+        _supervisor = &supervisor;
     }
     // Forgotten on EVERY exit, not only the epilogue's. An exception other than cancellation
-    // unwinds straight past that epilogue (the reactor thread catches it), and `client` is a local
-    // — _client would then point at a destroyed object for as long as the controller lives.
-    auto const forgetClient = core::Finally { [this] {
+    // unwinds straight past that epilogue (the reactor thread catches it), and `supervisor` is a local
+    // — the pointers would then name a destroyed object for as long as the controller lives.
+    auto const forgetSupervisor = core::Finally { [this] {
         auto const lock = std::lock_guard { _mutex };
+        _supervisor = nullptr;
         _client = nullptr;
     } };
 
     try
     {
-        co_await client.run();
+        co_await supervisor.run();
     }
     catch (core::async::OperationCancelled const&)
     {
@@ -132,23 +166,150 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
         attachLog()("Attach serve loop cancelled by stop().");
     }
 
+    // A cancelled loop ends the supervisor without its final state: settle it here.
+    auto settled = false;
     {
-        // _client is cleared by `forgetClient` above, on this path and on every other.
         auto const lock = std::lock_guard { _mutex };
-        captureHandshake();
-        if (_state == State::Connecting || _state == State::Ready)
+        settled = _connection == vthost::client::ConnectionState::Failed
+                  || _connection == vthost::client::ConnectionState::Refused
+                  || _connection == vthost::client::ConnectionState::Stopped;
+    }
+    if (!settled)
+        onConnectionState(vthost::client::ConnectionState::Stopped, {});
+}
+
+void NativeController::onConnectionState(vthost::client::ConnectionState state, std::string const& reason)
+{
+    using vthost::client::ConnectionState;
+    auto const where = _transport->describe();
+    auto closed = false;
+    auto missingWindows = false;
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _connection = state;
+        switch (state)
         {
-            if (auto const& refusal = client.refusal())
-            {
-                _state = State::Failed;
-                _failure = vthost::proto::describe(*refusal, vthost::proto::PeerRole::Daemon);
-            }
-            else
-                _state = State::Closed;
+            case ConnectionState::Connecting: break;
+            case ConnectionState::Connected:
+                _client = _supervisor != nullptr ? _supervisor->current() : nullptr;
+                captureHandshake();
+                if (_acceptedConnections != 0)
+                    adoptReconnect();
+                else if (_client != nullptr)
+                {
+                    _daemonInstance = _client->daemonInstance();
+                    // Asked for windows the daemon does not have, a first attach would wait out its budget
+                    // for a session that never comes: it ends now, saying which.
+                    missingWindows = _intent.kind == vthost::proto::AttachIntentKind::Windows
+                                     && _client->followedWindows().empty();
+                }
+                ++_acceptedConnections;
+                _inputConnection = _acceptedConnections;
+                attachLog()("Attached to {}.", where);
+                break;
+            case ConnectionState::Reconnecting:
+                _client = nullptr;
+                _inputConnection = 0;
+                // Before the first session arrived the attach still waits; awaitConnected() sees it through.
+                if (_state == State::Ready)
+                    _state = State::Reconnecting;
+                attachLog()("Lost the connection to {} ({}); reconnecting.", where, reason);
+                break;
+            case ConnectionState::Failed:
+            case ConnectionState::Refused:
+            case ConnectionState::Stopped:
+                _client = nullptr;
+                _inputConnection = 0;
+                if (state == ConnectionState::Stopped)
+                {
+                    if (_state == State::Connecting || _state == State::Ready
+                        || _state == State::Reconnecting)
+                        _state = State::Closed;
+                }
+                else
+                {
+                    _state = State::Failed;
+                    _failure = std::format("{} ({})", reason, where);
+                    errorLog()("attach: {}", _failure);
+                }
+                closed = true;
+                break;
         }
     }
     _connected.notify_all();
-    emit connectionClosed();
+    if (missingWindows)
+        failConnect(std::format("the daemon has no window {}", core::joinHumanReadable(_intent.windows)));
+    emit connectionStateChanged();
+    if (closed)
+        emit connectionClosed();
+}
+
+void NativeController::adoptReconnect()
+{
+    auto const* client = _client;
+    if (client == nullptr)
+        return;
+    auto const mapped = std::ranges::to<std::vector>(_layouts | std::views::keys);
+    // Window and session ids count from 1 in every run of a daemon: once it restarted, the ids this client
+    // holds name nothing of the new run, however many of them it reuses.
+    auto const restarted =
+        _daemonInstance != 0 && client->daemonInstance() != 0 && _daemonInstance != client->daemonInstance();
+    _daemonInstance = client->daemonInstance();
+    if (restarted)
+    {
+        _lostWindows = mapped;
+        // Every binding is detached, its pty left to the window closing it: a new session with the same id
+        // must not reach the old pane, nor the old pane's input the new session.
+        _bindings.clear();
+        _closedSessions.clear();
+        _pending.clear();
+    }
+    else
+    {
+        // A daemon that predates attach intents names no windows, and every window is followed.
+        if (client->negotiated()
+            && client->negotiated()->shared.contains(vthost::proto::Capability::AttachIntent))
+            _lostWindows = mapped | std::views::filter([&](uint64_t window) {
+                               return !std::ranges::contains(client->followedWindows(), window);
+                           })
+                           | std::ranges::to<std::vector>();
+        // The same sessions, re-snapshotted: each mirror takes the new connection's first snapshot as a
+        // first.
+        for (auto& binding: _bindings | std::views::values)
+            if (binding.mirror)
+                binding.mirror->restart();
+    }
+    // Replaced by what the new connection pushes; what was reported against them was told another daemon,
+    // or a connection that may not have delivered it.
+    _layouts.clear();
+    _reportedPresentations.clear();
+    {
+        auto const geometryLock = std::lock_guard { _geometryMutex };
+        _lastReportedArea.reset();
+        _lastReportedPaneSizes.clear();
+        if (restarted)
+        {
+            _paneSizes.clear();
+            _paneSerials.clear();
+            _geometryAnchor.reset();
+        }
+    }
+    // Up again. One lost before its first session arrived is still being waited for, as a first attach is.
+    if (_state == State::Reconnecting)
+        _state = State::Ready;
+    if (auto const dropped = _droppedInputBytes.exchange(0); dropped != 0)
+        attachLog()("Dropped {} bytes of input typed while the connection to {} was down.",
+                    dropped,
+                    _transport->describe());
+    if (!_lostWindows.empty())
+        attachLog()(
+            "{} window(s) of {} are gone after the reconnect.", _lostWindows.size(), _transport->describe());
+}
+
+vthost::client::ConnectionState NativeController::connectionState() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _connection;
 }
 
 void NativeController::captureHandshake()
@@ -201,6 +362,7 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
         return;
     }
 
+    _timeline.mark(vthost::latency::StartupMark::FirstSessionDiscovered);
     _pending.push_back(
         PendingSession { .session = screen.session, .columns = screen.columns, .lines = screen.lines });
     if (_state == State::Connecting)
@@ -213,10 +375,18 @@ void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta
 
 void NativeController::onLayout(vthost::proto::LayoutState const& layout)
 {
+    _timeline.mark(vthost::latency::StartupMark::LayoutReceived);
+    auto lost = std::vector<uint64_t> {};
     {
         auto const lock = std::lock_guard { _mutex };
+        // Announced with the first window that came instead, so the GUI has a window to show before it
+        // closes the lost ones -- closing the last one first would end the application.
+        lost = std::exchange(_lostWindows, {});
         captureHandshake();
         _layouts[layout.window] = layout;
+        // The daemon's word on these tabs is newer than what was reported for them.
+        for (auto const& tab: layout.tabs)
+            _reportedPresentations.erase(tab.tabId);
         // A layout push follows a daemon-side re-projection, which discards the per-pane grids this
         // client reported (@see vthost::SessionHost::applyPaneSize). Forget what was sent, so the
         // next report re-asserts all of it instead of being filtered out as "unchanged" — otherwise
@@ -230,6 +400,8 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
     }
+    if (!lost.empty())
+        emit windowsLost(std::move(lost));
     // The GUI (on its own thread, via a queued connection) reconciles each daemon
     // window's tab/split tree against wireLayout(window) — the authoritative
     // structure — mapping one OS window to each (B4). (The per-session snapshot
@@ -305,22 +477,29 @@ std::optional<uint64_t> NativeController::sessionForPty(vtpty::Pty const* pty) c
     return std::nullopt;
 }
 
-void NativeController::requestCreateTab(vtpty::Pty const* actingPty)
+void NativeController::requestCreateTab(vtpty::Pty const* actingPty,
+                                        contour::session::RemoteSpawn const& spawn)
 {
     // The acting pane names the WINDOW: the daemon hosts several (B4), and a request naming none
     // lands in its first one — so a "+" clicked in a second window opened a tab in the first. An
     // unbound (or null) pty resolves to 0, which is exactly that fallback.
     auto const beside = actingPty != nullptr ? sessionForPty(actingPty).value_or(0) : 0;
     // The client's send verbs must run on the reactor thread that owns it.
-    postSessionCreation([beside](NativeClient& client) { client.createTab(beside); });
+    postSessionCreation([beside, profile = spawn.profileName](NativeClient& client) mutable {
+        client.createTab(beside, std::move(profile));
+    });
 }
 
-void NativeController::requestCreateWindow()
+void NativeController::requestCreateWindow(contour::session::RemoteSpawn const& spawn)
 {
-    postSessionCreation([](NativeClient& client) { client.createWindow(); });
+    postSessionCreation([profile = spawn.profileName](NativeClient& client) mutable {
+        client.createWindow(std::move(profile));
+    });
 }
 
-void NativeController::requestSplitPane(vtpty::Pty const* actingPty, bool vertical)
+void NativeController::requestSplitPane(vtpty::Pty const* actingPty,
+                                        bool vertical,
+                                        contour::session::RemoteSpawn const& spawn)
 {
     auto const session = sessionForPty(actingPty);
     if (!session)
@@ -332,9 +511,11 @@ void NativeController::requestSplitPane(vtpty::Pty const* actingPty, bool vertic
     // the only ones carrying a ratio — return above without reaching here. A divider the user then
     // MOVES is a separate verb (ResizeSplit); thread a ratio through here only once a caller varies it.
     constexpr uint16_t EvenSplitRatio = 5000;
-    postSessionCreation([session = *session, orientation, ratio = EvenSplitRatio](NativeClient& client) {
-        client.splitPane(session, orientation, ratio);
-    });
+    postSessionCreation(
+        [session = *session, orientation, ratio = EvenSplitRatio, profile = spawn.profileName](
+            NativeClient& client) mutable {
+            client.splitPane(session, orientation, ratio, std::move(profile));
+        });
 }
 
 void NativeController::reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio)
@@ -351,6 +532,52 @@ void NativeController::reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty c
     _reactor.post([this, first = *first, second = *second, wireRatio] {
         if (_client != nullptr)
             _client->resizeSplit(first, second, wireRatio);
+    });
+}
+
+void NativeController::reportTabPresentation(contour::session::LocalTabPresentation const& presentation)
+{
+    // What the reconciler applies came FROM the daemon, as for a ratio (@see reportSplitRatio).
+    if (isRealizingLayout())
+        return;
+    auto const active = sessionForPty(presentation.activePty);
+    if (!active)
+        return;
+    auto const local = vthost::client::TabPresentation {
+        .activeSession = *active,
+        .zoomedSession =
+            presentation.zoomedPty != nullptr ? sessionForPty(presentation.zoomedPty).value_or(0) : 0,
+        .title = presentation.title,
+        .color = presentation.color,
+        .activity = presentation.activity,
+    };
+    auto edits = [&] {
+        auto const lock = std::lock_guard { _mutex };
+        for (auto const& layout: _layouts | std::views::values)
+            for (auto const [index, tab]: core::views::enumerate(layout.tabs))
+                if (vthost::client::paneTreeHosts(tab.root, *active))
+                {
+                    auto const [reported, fresh] = _reportedPresentations.try_emplace(
+                        tab.tabId,
+                        vthost::client::presentationOf(tab,
+                                                       std::cmp_equal(index, layout.activeTab)
+                                                           ? vthost::client::TabActivity::Active
+                                                           : vthost::client::TabActivity::Inactive));
+                    std::ignore = fresh;
+                    auto found = vthost::client::tabEditsToReport(local, reported->second);
+                    reported->second = local;
+                    return found;
+                }
+        // A tab the daemon has not pushed yet, or no longer has: nothing to compare with.
+        return std::vector<vthost::proto::EditTab> {};
+    }();
+    if (edits.empty())
+        return;
+    _reactor.post([this, edits = std::move(edits)] {
+        if (_client == nullptr)
+            return;
+        for (auto const& edit: edits)
+            std::ignore = _client->editTab(edit);
     });
 }
 
@@ -397,12 +624,16 @@ void NativeController::answerPermission(std::string hostId, std::string digest, 
     });
 }
 
-void NativeController::reportPaneGeometry(uint64_t session, vtpty::PageSize cells)
+void NativeController::reportPaneGeometry(uint64_t session, uint64_t serial, vtpty::PageSize cells)
 {
     {
         // _geometryMutex alone: this runs from the pty's resize sink, which the mirror reaches while
         // _mutex is held. Taking _mutex here would deadlock the reactor against itself.
         auto const lock = std::lock_guard { _geometryMutex };
+        // A detached binding's pane: the session id is a new session's now, if anyone's.
+        if (auto const owner = _paneSerials.find(session);
+            owner == _paneSerials.end() || owner->second != serial)
+            return;
         _paneSizes.insert_or_assign(session, cells);
         _geometryAnchor = session;
         if (_geometryFlushScheduled)
@@ -610,15 +841,27 @@ std::optional<vthost::proto::RowAddress> NativeController::hostRowOf(uint64_t se
     return binding->second.mirror->hostRowOf(row.stableId, row.generation);
 }
 
-void NativeController::unbind(uint64_t session)
+bool NativeController::isBinding(uint64_t session, uint64_t serial) const
 {
     auto const lock = std::lock_guard { _mutex };
-    _bindings.erase(session);
+    auto const binding = _bindings.find(session);
+    return binding != _bindings.end() && binding->second.serial == serial;
+}
+
+void NativeController::unbind(uint64_t session, uint64_t serial)
+{
+    auto const lock = std::lock_guard { _mutex };
+    auto const binding = _bindings.find(session);
+    // A detached binding's pty: the session id, if bound at all, is a new session's now.
+    if (binding == _bindings.end() || binding->second.serial != serial)
+        return;
+    _bindings.erase(binding);
     // The pane is gone: its grid must not keep contributing to a composed client area, and the
     // sent-size bookkeeping for it is meaningless (a session id is never reused).
     {
         auto const geometryLock = std::lock_guard { _geometryMutex };
         _paneSizes.erase(session);
+        _paneSerials.erase(session);
         _lastReportedPaneSizes.erase(session);
         // The anchor is the third thing this pane owned: it selects WHICH tab the client area is
         // composed from, and a session id is never reused, so once the pane is gone the anchor can
@@ -720,22 +963,36 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
     auto const columns = taken ? static_cast<int>(taken->columns) : sizeField(fallback.columns, 80);
     auto const lines = taken ? static_cast<int>(taken->lines) : sizeField(fallback.lines, 25);
 
+    auto const serial = _nextBindingSerial++;
     auto pty = std::make_unique<SelfUnbindingChannelPty>(
         vtpty::PageSize { vtpty::LineCount(lines), vtpty::ColumnCount(columns) },
-        [this, session](std::string_view bytes) {
-            _reactor.post([this, session, copy = std::string { bytes }] {
-                if (_client != nullptr)
-                    _client->sendInput(session, copy);
+        [this, session, serial](std::string_view bytes) {
+            // Typed while no connection is up: dropped here, never queued for whatever answers next.
+            auto const connection = _inputConnection.load();
+            if (connection == 0)
+            {
+                _droppedInputBytes += bytes.size();
+                return;
+            }
+            _reactor.post([this, session, serial, connection, copy = std::string { bytes }] {
+                // Lost meanwhile, or this pane's binding was detached and its session id is another's now.
+                if (_client == nullptr || _inputConnection.load() != connection
+                    || !isBinding(session, serial))
+                {
+                    _droppedInputBytes += copy.size();
+                    return;
+                }
+                _client->sendInput(session, copy);
             });
         },
         // A pane's grid is NOT the client area: reporting it as one made the daemon project the
         // whole tab into a single pane's width, halving every pane on every split. The report is
         // composed from all panes instead — see reportPaneGeometry.
-        [this, session](vtpty::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
-            reportPaneGeometry(session, cells);
+        [this, session, serial](vtpty::PageSize cells, std::optional<vtpty::ImageSize> /*pixels*/) {
+            reportPaneGeometry(session, serial, cells);
         },
-        [this, session] { unbind(session); });
-    _bindings[session].pty = pty.get();
+        [this, session, serial] { unbind(session, serial); });
+    _bindings[session] = Binding { .serial = serial, .pty = pty.get(), .terminal = nullptr, .mirror = {} };
     // The birth size is this pane's first known grid, so the composition is complete from the
     // moment the pane exists rather than only once something resizes it.
     {
@@ -743,6 +1000,7 @@ std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::strin
         _paneSizes.insert_or_assign(
             session,
             vtpty::PageSize { .lines = vtpty::LineCount(lines), .columns = vtpty::ColumnCount(columns) });
+        _paneSerials.insert_or_assign(session, serial);
     }
     lock.unlock();
 

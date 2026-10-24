@@ -38,6 +38,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 #include <QtTest/QTest>
 #include <vtworkspace/PaneLayout.hpp>
@@ -105,6 +106,8 @@ class MockMainController: public contour::test::MainWindowControllerMock
     // Ditto for the title bar's own menu surface, which Main.qml instantiates alongside it.
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
+    // Mirrors WindowController's hosting notice; writable here so a test can raise it before the load.
+    Q_PROPERTY(QString hostingNotice READ hostingNotice WRITE setHostingNotice NOTIFY hostingNoticeChanged)
 
   public:
     enum class Roles : std::uint16_t
@@ -122,6 +125,17 @@ class MockMainController: public contour::test::MainWindowControllerMock
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
+    [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
+    void setHostingNotice(QString notice)
+    {
+        if (_hostingNotice != notice)
+        {
+            _hostingNotice = std::move(notice);
+            emit hostingNoticeChanged();
+        }
+    }
+    /// Mirrors WindowController::dismissHostingNotice(): what the bar's Dismiss button calls.
+    Q_INVOKABLE void dismissHostingNotice() { setHostingNotice({}); }
     [[nodiscard]] bool multimediaReady() const noexcept { return _multimediaReady; }
     void setMultimediaReady(bool ready)
     {
@@ -284,6 +298,7 @@ class MockMainController: public contour::test::MainWindowControllerMock
     void tabBarShouldShowChanged();
     void chromeHeightChanged();
     void multimediaReadyChanged();
+    void hostingNoticeChanged();
     void tabTitleEditRequested(int /*index*/);
     // Matches TabItem's Connections handler; a missing signal here is a QML warning, not a silent no-op.
     void tabColorPickRequested(int /*index*/);
@@ -293,6 +308,7 @@ class MockMainController: public contour::test::MainWindowControllerMock
     int _tabBarPosition = 0;       // 0 = Top (default), 1 = Bottom
     bool _tabBarShouldShow = true; // strip shown by default
     bool _multimediaReady = false; // the background probe has not finished
+    QString _hostingNotice;
 };
 
 /// Loads Main.qml offscreen against @p controller and returns the created root object: registers the
@@ -625,6 +641,41 @@ TEST_CASE("Main.qml tooltips: every attached tooltip shows its text as written (
     INFO("error: " << expression.error().toString().toStdString());
     REQUIRE_FALSE(expression.hasError());
     CHECK(textFormat.toInt() == Qt::PlainText);
+}
+
+TEST_CASE("Main.qml hosting notice: shown while the window runs its shells itself (offscreen)",
+          "[contour][gui][qml][mainwindow][hosting]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto* bar = root->findChild<QQuickItem*>(QStringLiteral("hostingNoticeBar"));
+    REQUIRE(bar != nullptr);
+    // Nothing to say while the sessions run where the launch wanted them.
+    CHECK_FALSE(bar->isVisible());
+
+    auto const notice = QStringLiteral("Contour could not reach its daemon (refused). This window runs its "
+                                       "shells itself; they end when it closes.");
+    controller.setHostingNotice(notice);
+    QCoreApplication::processEvents();
+    CHECK(bar->isVisible());
+    auto const* text = root->findChild<QObject*>(QStringLiteral("hostingNoticeText"));
+    REQUIRE(text != nullptr);
+    CHECK(text->property("text").toString() == notice);
+
+    // Dismissed through the bar's own button: the controller is told, and the bar goes.
+    auto* dismiss = root->findChild<QObject*>(QStringLiteral("hostingNoticeDismiss"));
+    REQUIRE(dismiss != nullptr);
+    REQUIRE(QMetaObject::invokeMethod(dismiss, "clicked"));
+    QCoreApplication::processEvents();
+    CHECK(controller.hostingNotice().isEmpty());
+    CHECK_FALSE(bar->isVisible());
+
+    for (auto const& w: warnings.messages())
+        UNSCOPED_INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 #include <MainWindowQml_test.moc>

@@ -48,8 +48,10 @@ HostedSession::HostedSession(SessionId id,
                              SessionNotifyCallback onNotify,
                              std::function<void(std::string)> onCopyToClipboard,
                              std::function<void()> onClosed,
-                             HostedSessionExtensions extensions):
+                             HostedSessionExtensions extensions,
+                             std::string profileName):
     _id(id),
+    _profileName(std::move(profileName)),
     _extensions(std::move(extensions.extensions)),
     _events(std::move(identity),
             std::move(onScreenUpdated),
@@ -236,17 +238,20 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _loop(loop),
     _gate(std::make_shared<HostGate>(HostGate { .host = this })),
     _ptyFactory(std::move(ptyFactory)),
+    _profilePtys(std::move(config.profilePtys)),
     // Normalized once, here, so _pageSize and every session that does not override it are derived
     // from settings a host can actually serve.
     _settings(hostedSessionSettings(std::move(settings))),
     _environment(env),
     _identity(std::move(config.identity)),
+    _instance(config.instance),
     _clocks(config.clocks),
     _pageSize(_settings.pageSize),
     _pumping(config.pumping),
     _inputWatermarks(config.inputWatermarks),
     _sizePolicy(config.sizePolicy),
     _fileSystem(config.fileSystem.get()),
+    _profiles(std::move(config.profiles)),
     _extensions(std::move(config.extensions)),
     _model(*this,
            [this]() -> SessionId {
@@ -288,10 +293,51 @@ SessionHost::~SessionHost()
     _gate->host = nullptr;
 }
 
+SessionHost::ResolvedSpawn SessionHost::resolveSpawn(SessionSpawnRequest const& request, SessionId id) const
+{
+    // With a catalog every spawn resolves its shell in it — a named profile, or the default for none — so a
+    // reloaded catalog reaches unnamed spawns too, and each shell carries its own profile's environment and
+    // sandbox policy rather than the default's. A layout pane's own command and directory still overlay
+    // that shell. A named profile's settings replace the requested ones; an unnamed spawn keeps the settings
+    // a client stated, else takes the default profile's.
+    auto spawn = ResolvedSpawn { .settings = request.settings, .commandOverride = request.commandOverride };
+    if (!_profiles)
+        return spawn;
+    auto resolved = _profiles->resolve(request.profileName);
+    auto const named = !request.profileName.empty();
+    if (named && resolved.match == ProfileMatch::Default)
+        sessionLog()("session {}: profile '{}' is unknown here; using '{}'",
+                     id.value,
+                     request.profileName,
+                     resolved.name);
+    vtpty::Process::applyCommandOverride(resolved.shell, request.commandOverride);
+    spawn.commandOverride = std::move(resolved.shell);
+    spawn.sandbox = resolved.sandbox;
+    if (named || !spawn.settings)
+        spawn.settings = std::move(resolved.settings);
+    // An unnamed spawn records no name: it follows whichever profile is the default, after a reload too.
+    if (named)
+        spawn.profileName = std::move(resolved.name);
+    return spawn;
+}
+
+std::unique_ptr<vtpty::Pty> SessionHost::makePty(ResolvedSpawn const& spawn) const
+{
+    // The profile's own sandbox policy travels with its shell: one inherited from the daemon's default
+    // profile would run a contained profile's shell on the host.
+    if (spawn.sandbox && _profilePtys && spawn.commandOverride)
+        return _profilePtys(_pageSize, *spawn.commandOverride, *spawn.sandbox);
+    return _ptyFactory(_pageSize, spawn.commandOverride);
+}
+
 std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& request)
 {
     auto const id = SessionId { _nextSessionId++ };
-    auto pty = _ptyFactory(_pageSize, request.commandOverride);
+
+    auto spawn = resolveSpawn(request, id);
+    auto& requestedSettings = spawn.settings;
+    auto& profileName = spawn.profileName;
+    auto pty = makePty(spawn);
     if (!pty)
     {
         // Until this line existed, a shell that could not be spawned produced NOTHING: the
@@ -313,13 +359,15 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
 
     // A request's settings are re-normalized rather than taken as given: they can have travelled in
     // from a client, and this is the one funnel every session passes through.
-    auto settings = request.settings ? hostedSessionSettings(*request.settings) : _settings;
+    auto settings = requestedSettings ? hostedSessionSettings(*requestedSettings) : _settings;
 
     // The terminal must open at the same size as its PTY: the client area, not the factory
     // settings' default — and not a size a requesting client named either, since the host projects
     // the pane tree onto the client area itself.
     settings.pageSize = _pageSize;
-    if (request.settings)
+    if (!profileName.empty())
+        sessionLog()("session {}: spawning under profile '{}'", id.value, profileName);
+    else if (request.settings)
         sessionLog()("session {}: spawning with the requesting client's emulation settings ({})",
                      id.value,
                      settings.terminalId);
@@ -378,7 +426,8 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
         },
         /*onClosed=*/
         [this, id] { _loop.post([this, id] { handleSessionExit(id); }); },
-        makeSessionExtensions(id));
+        makeSessionExtensions(id),
+        std::move(profileName));
 
     if (_pumping == SessionPumping::Threaded)
         session->start();
@@ -403,21 +452,23 @@ void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace
 {
     for (auto const& tabSpec: layout.tabs)
     {
-        // A pane's profile has no resolution path on the daemon (no Config object to look an
-        // arbitrary named profile up in) -- see the design doc's "Out of scope". Warn once per
-        // such pane so a user who wrote one is not left guessing why it did not take effect.
-        // command/arguments/directory ARE honored: an override is engaged when the pane names a
-        // program, or a directory. A directory-only pane still runs the daemon's configured shell,
-        // just at a different cwd.
+        // A pane's profile (else its tab's) is resolved in the host's profile catalog; a host without
+        // one has nothing to look it up in, and warns once per such pane so a user who wrote one is not
+        // left guessing why it did not take effect. command/arguments/directory ARE honored: an override is
+        // engaged when the pane names a program, or a directory. A directory-only pane still runs the
+        // daemon's configured shell, just at a different cwd.
         //
         // The directory half deliberately DIVERGES from the local path, which routes a directory
         // through its separate `cwd` channel because engaging an empty-program override there would
         // bypass an SSH profile's SshSession. The daemon has neither that channel nor an SSH path,
         // so the override is the only way a pane's directory can reach the session at all.
         auto const seeder = [&](vtworkspace::LayoutPane const& leaf) -> bool {
-            if (leaf.profile)
-                sessionLog()("startup layout: ignoring pane override (profile); spawning the "
-                             "daemon's configured shell.");
+            // A pane's profile wins over its tab's, as on the local path.
+            auto profile = leaf.profile.or_else([&] { return tabSpec.profile; }).value_or(std::string {});
+            if (!profile.empty() && !_profiles)
+                sessionLog()("startup layout: ignoring profile '{}' (the host resolves none); spawning the "
+                             "daemon's configured shell.",
+                             profile);
 
             // Arguments name what @c command is run with, so without one there is nothing for them
             // to belong to. Say so rather than dropping them where nobody can see it: the local path
@@ -441,7 +492,8 @@ void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace
                 if (leaf.directory)
                     commandOverride->workingDirectory = *leaf.directory;
             }
-            return seedSession(SessionSpawnRequest { .commandOverride = std::move(commandOverride) })
+            return seedSession(SessionSpawnRequest { .commandOverride = std::move(commandOverride),
+                                                     .profileName = std::move(profile) })
                 .has_value();
         };
         std::ignore = vtworkspace::realizeLayoutTab(_model, window, tabSpec, seeder);
@@ -471,19 +523,24 @@ Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<Se
     {
         // The model refused: destroy the orphaned backing session.
         errorLog()("model refused createTab; reaping orphaned session {}", seeded->value);
-        _sessions.erase(seeded->value);
+        eraseSession(seeded->value);
         return nullptr;
     }
     return tab;
 }
 
-vtworkspace::Window* SessionHost::createWindow(SessionSpawnRequest const& request)
+vtworkspace::Window* SessionHost::createWindow(SessionSpawnRequest const& request,
+                                               SessionStreamEvents const* creator)
 {
     auto const seeded = seedSession(request);
     if (!seeded)
         return nullptr;
 
     auto* window = _model.createWindow();
+    // Claimed before the first tab is announced: every client re-decides what it follows on that event,
+    // and the primary viewer would otherwise take an unclaimed window that is this creator's own.
+    if (creator != nullptr)
+        _windowCreators.insert_or_assign(window->id().value, creator);
     auto* tab = _model.createTab(window->id());
     _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     if (tab == nullptr)
@@ -492,11 +549,48 @@ vtworkspace::Window* SessionHost::createWindow(SessionSpawnRequest const& reques
         errorLog()("model refused the first tab of window {}; reaping orphaned session {}",
                    window->id().value,
                    seeded->value);
-        _sessions.erase(seeded->value);
+        eraseSession(seeded->value);
+        _windowCreators.erase(window->id().value);
         _model.removeWindow(window->id());
         return nullptr;
     }
     return window;
+}
+
+WindowClaim SessionHost::windowClaim(WindowId window, SessionStreamEvents const* client) const noexcept
+{
+    auto const creator = _windowCreators.find(window.value);
+    if (creator == _windowCreators.end())
+        return WindowClaim::Unclaimed;
+    return creator->second != nullptr && creator->second == client ? WindowClaim::Yours : WindowClaim::Others;
+}
+
+void SessionHost::noteClientAttached(SessionStreamEvents const* client)
+{
+    if (!std::ranges::contains(_attachedClients, client))
+        _attachedClients.push_back(client);
+}
+
+void SessionHost::noteClientDetached(SessionStreamEvents const* client)
+{
+    if (std::erase(_attachedClients, client) == 0)
+        return;
+    if (_primaryViewer == client)
+        _primaryViewer = nullptr;
+    // Still claimed, by nobody present: a window a GUI left behind waits for the next launch that takes
+    // every window, rather than appearing in another GUI. The address is forgotten, so a connection
+    // constructed where this one was is not taken for its creator. Windows gone from the model go too.
+    std::erase_if(_windowCreators,
+                  [this](auto const& entry) { return _model.window(WindowId { entry.first }) == nullptr; });
+    for (auto& [window, creator]: _windowCreators)
+        if (creator == client)
+            creator = nullptr;
+}
+
+void SessionHost::claimPrimaryViewer(SessionStreamEvents const* client)
+{
+    if (_primaryViewer == nullptr)
+        _primaryViewer = client;
 }
 
 void SessionHost::splitActivePane(TabId tab,
@@ -522,7 +616,7 @@ void SessionHost::splitActivePane(TabId tab,
     {
         errorLog()(
             "model refused the split of tab {}; reaping orphaned session {}", tab.value, seeded->value);
-        _sessions.erase(seeded->value);
+        eraseSession(seeded->value);
     }
 }
 
@@ -618,10 +712,58 @@ vtbackend::Terminal* SessionHost::terminal(SessionId session) noexcept
     return it != _sessions.end() ? &it->second->terminal() : nullptr;
 }
 
+HostedSession const* SessionHost::hostedSession(SessionId session) const noexcept
+{
+    auto const it = _sessions.find(session.value);
+    return it != _sessions.end() ? it->second.get() : nullptr;
+}
+
+void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles)
+{
+    if (!profiles)
+        return;
+    _profiles = std::move(profiles);
+    auto relimited = std::vector<SessionId> {};
+    for (auto const& [id, session]: _sessions)
+    {
+        // Normalized as a spawn's settings are, so a reload cannot hand a running session a limit no new
+        // session could have.
+        auto const limits =
+            hostedSessionSettings(_profiles->resolve(session->profileName()).settings).historyLimits;
+        auto& terminal = session->terminal();
+        auto const guard = std::lock_guard { terminal };
+        if (terminal.settings().historyLimits == limits)
+            continue;
+        terminal.setHistoryLimits(limits);
+        relimited.push_back(session->id());
+    }
+    sessionLog()("profiles reloaded; {} running session(s) took new scrollback limits", relimited.size());
+    // Outside every lock, as a resize is announced: a lowered limit evicts history, which the mirrors
+    // learn from the next delta.
+    for (auto const session: relimited)
+        fanOutStream(&SessionStreamEvents::sessionScreenUpdated, session);
+}
+
 void SessionHost::writeInput(SessionId session, std::string_view bytes)
 {
     if (auto const it = _sessions.find(session.value); it != _sessions.end())
+    {
+        _lastInput[session.value] = _loop.clock().now();
         it->second->writeInput(bytes);
+    }
+}
+
+std::optional<core::platform::SteadyTimePoint> SessionHost::lastInputAt(SessionId session) const
+{
+    if (auto const it = _lastInput.find(session.value); it != _lastInput.end())
+        return it->second;
+    return std::nullopt;
+}
+
+void SessionHost::eraseSession(uint64_t session)
+{
+    _lastInput.erase(session);
+    _sessions.erase(session);
 }
 
 std::size_t SessionHost::inputBacklog(SessionId session) const
@@ -791,7 +933,7 @@ void SessionHost::handleSessionExit(SessionId session)
         _model.closePane(window->id(), tab->id(), leaf->id());
 
     auto const hadExtensions = it->second->hasExtensions();
-    _sessions.erase(it);
+    eraseSession(session.value);
     // Reached from the pump thread's posted completion, so this runs on the loop thread like
     // every other line in this file.
     sessionLog()("session {} exited ({} live)", session.value, _sessions.size());

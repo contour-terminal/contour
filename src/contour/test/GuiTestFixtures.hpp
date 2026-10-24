@@ -205,14 +205,17 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         return _factory->hosting();
     }
 
-    [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty) override
+    [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty,
+                                        contour::session::RemoteSpawn const& spawn) override
     {
-        return _factory->requestRemoteTab(actingPty);
+        return _factory->requestRemoteTab(actingPty, spawn);
     }
 
-    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical) override
+    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty,
+                                          bool vertical,
+                                          contour::session::RemoteSpawn const& spawn) override
     {
-        return _factory->requestRemoteSplit(actingPty, vertical);
+        return _factory->requestRemoteSplit(actingPty, vertical, spawn);
     }
 
     void reportSplitRatio(vtpty::Pty const* firstPty, vtpty::Pty const* secondPty, double ratio) override
@@ -220,7 +223,15 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
         _factory->reportSplitRatio(firstPty, secondPty, ratio);
     }
 
-    [[nodiscard]] bool requestRemoteWindow() override { return _factory->requestRemoteWindow(); }
+    void reportTabPresentation(contour::session::LocalTabPresentation const& presentation) override
+    {
+        _factory->reportTabPresentation(presentation);
+    }
+
+    [[nodiscard]] bool requestRemoteWindow(contour::session::RemoteSpawn const& spawn) override
+    {
+        return _factory->requestRemoteWindow(spawn);
+    }
 
     void requestRemoteClose(vtpty::Pty const* pty) override { _factory->requestRemoteClose(pty); }
 

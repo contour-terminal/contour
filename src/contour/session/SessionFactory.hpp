@@ -18,6 +18,8 @@
 #include <optional>
 #include <string>
 
+#include <vthost/client/TabPresentation.hpp>
+
 namespace contour
 {
 // The composition root, which owns the configuration this factory reads. Named rather than
@@ -62,6 +64,30 @@ enum class SessionHosting : uint8_t
     Local = 0, ///< On this machine: a new session runs its profile's shell, or the command it is given.
     Remote,    ///< On a daemon or a tmux server (attach mode): a new pane is bound to a session the
                ///< remote end hosts, and a command given for it is dropped.
+};
+
+/// What a session authored on the remote end runs, as this client asks for it (SessionFactory's
+/// requestRemote* verbs). A struct rather than a bare name so that a later field -- a working directory,
+/// say -- is one more member, not one more parameter on every override.
+struct RemoteSpawn
+{
+    /// The host profile to run, by name: the action's own (`CreateNewTab`/`NewTerminal`), else empty for
+    /// the one this client named in its hello. The daemon resolves it in its own configuration and runs
+    /// its default profile for a name it does not have. A remote end without profiles ignores it.
+    std::string profileName {};
+};
+
+/// How a tab is presented here, as SessionFactory::reportTabPresentation is told. Its panes are named by the
+/// ptys behind them: only the factory knows which remote session a pty is bound to.
+struct LocalTabPresentation
+{
+    vtpty::Pty const* activePty = nullptr; ///< The active pane's pty, which also names the tab; never null.
+    vtpty::Pty const* zoomedPty = nullptr; ///< The zoomed pane's pty; null when the tab is not zoomed.
+    std::optional<std::string> title {};   ///< The user's title; std::nullopt for the automatic one.
+    /// The colour the user chose (vtworkspace::TabColorSource::User) as 0xRRGGBB; std::nullopt for none. Not
+    /// the effective colour: a profile's or an application's is this client's own, not the user's choice.
+    std::optional<uint32_t> color {};
+    vthost::client::TabActivity activity = vthost::client::TabActivity::Inactive;
 };
 
 class SessionFactory
@@ -116,9 +142,13 @@ class SessionFactory
     /// both ends can name a window by is a session it hosts. Taking no window at all is what made
     /// a "+" clicked in a second attach-mode window open its tab in the first.
     /// @param actingPty A pty backing any pane of the target window; null means no preference.
+    /// @param spawn What the new tab's session runs, as the host is asked for it.
     /// @return true if the request was routed to the daemon (the manager must NOT
     ///         also create a local tab); false for a local factory.
-    [[nodiscard]] virtual bool requestRemoteTab(vtpty::Pty const* /*actingPty*/) { return false; }
+    [[nodiscard]] virtual bool requestRemoteTab(vtpty::Pty const* /*actingPty*/, RemoteSpawn const& /*spawn*/)
+    {
+        return false;
+    }
 
     /// Attach mode: authors a split of the pane backed by @p actingPty on the
     /// DAEMON (@p vertical orientation) rather than splitting locally — the daemon's
@@ -126,11 +156,12 @@ class SessionFactory
     /// false so the manager performs the split itself.
     /// @param actingPty The pty of the pane to split.
     /// @param vertical  The split orientation.
+    /// @param spawn What the new pane's session runs, as the host is asked for it.
     /// @return true if routed to the daemon; false for a local factory.
-    [[nodiscard]] virtual bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical)
+    [[nodiscard]] virtual bool requestRemoteSplit(vtpty::Pty const* /*actingPty*/,
+                                                  bool /*vertical*/,
+                                                  RemoteSpawn const& /*spawn*/)
     {
-        (void) actingPty;
-        (void) vertical;
         return false;
     }
 
@@ -153,12 +184,23 @@ class SessionFactory
     {
     }
 
+    /// Attach mode: reports how the user now presents a tab -- its active and zoomed pane, title, colour, and
+    /// whether it is its window's active tab -- so the DAEMON's model, and every other client attached to it,
+    /// follows.
+    ///
+    /// Like reportSplitRatio it does not route anything: the local model already changed. The factory
+    /// compares with what the daemon last said and sends only what differs, so a report the daemon's own
+    /// layout caused costs nothing. A local factory does nothing.
+    /// @param presentation How the tab is presented here.
+    virtual void reportTabPresentation(LocalTabPresentation const& /*presentation*/) {}
+
     /// Attach mode: authors a new window on the DAEMON rather than opening a purely
     /// local one — the daemon honors it and pushes the new window's layout, which the
     /// GUI maps onto a fresh OS window (B4). A local factory returns false so the app
     /// opens an ordinary window.
+    /// @param spawn What the new window's first session runs, as the host is asked for it.
     /// @return true if routed to the daemon; false for a local factory.
-    [[nodiscard]] virtual bool requestRemoteWindow() { return false; }
+    [[nodiscard]] virtual bool requestRemoteWindow(RemoteSpawn const& /*spawn*/) { return false; }
 
     /// Attach mode: authors the CLOSE of the pane backed by @p pty on the DAEMON, so a session the
     /// user really ended does not linger there headless.

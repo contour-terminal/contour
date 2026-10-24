@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -54,6 +55,7 @@
     #include <vthost/client/DaemonGrantReplies.hpp>
 #endif
 #include <vthost/testing/FakeExtensionHosting.hpp>
+#include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/PreNegotiationCodec.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
@@ -694,7 +696,51 @@ Task<void> shippedDaemon(core::net::ISocket* socket, std::optional<uint32_t>* he
     socket->close();
 }
 
+/// A peer that reads the client's first frame, keeps the ClientHello it decodes to, and hangs up.
+/// @param hello Set to the hello the client sent, if its first frame decodes to one.
+Task<void> helloCapture(core::net::ISocket* socket, std::optional<proto::ClientHello>* hello)
+{
+    auto buffer = std::vector<std::byte> {};
+    auto scratch = std::vector<std::byte>(4096);
+    auto decoded = proto::decodePdu(buffer);
+    while (!decoded && decoded.error() == proto::DecodeError::NeedMoreData)
+    {
+        auto const n = co_await socket->read(scratch);
+        if (!n.has_value() || *n == 0)
+            co_return;
+        buffer.insert(buffer.end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
+        decoded = proto::decodePdu(buffer);
+    }
+    if (decoded)
+        if (auto const* sent = std::get_if<proto::ClientHello>(&decoded->pdu))
+            *hello = *sent;
+    socket->close();
+}
+
 } // namespace
+
+TEST_CASE("NativeClient states HandshakeOptions::clientArea in its hello", "[vthost][client]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions {
+                                     .clientArea = proto::WireClientArea { .columns = 100, .lines = 30 } },
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+
+    auto hello = std::optional<proto::ClientHello> {};
+    loop.blockOn(core::net::testing::allOf(client.run(), helloCapture(daemonSocket, &hello)));
+
+    REQUIRE(hello.has_value());
+    CHECK(hello->clientArea == proto::WireClientArea { .columns = 100, .lines = 30 });
+}
 
 TEST_CASE("a client meets a daemon of contour 0.7.0 with the version message", "[vthost][attach][handshake]")
 {
@@ -1014,7 +1060,7 @@ Task<void> awaitLayout(core::net::EventLoop* loop,
 Task<void> driveCreateTab(core::net::EventLoop* loop, NativeClient* client, int const* mirroredTabs)
 {
     co_await core::net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 1; });
-    client->createTab();
+    client->createTab(0, {});
     co_await core::net::testing::waitUntil(loop, [mirroredTabs] { return *mirroredTabs == 2; });
     client->detach();
 }
@@ -1024,7 +1070,7 @@ Task<void> driveCreateTab(core::net::EventLoop* loop, NativeClient* client, int 
 Task<void> driveCreateWindow(core::net::EventLoop* loop, NativeClient* client, std::set<uint64_t>* windows)
 {
     co_await core::net::testing::waitUntil(loop, [windows] { return windows->size() == 1; });
-    client->createWindow();
+    client->createWindow({});
     co_await core::net::testing::waitUntil(loop, [windows] { return windows->size() == 2; });
     client->detach();
 }
@@ -1613,7 +1659,7 @@ TEST_CASE("a PDU the daemon refused is not sent again", "[vthost][negotiation]")
             loop, [&] { return client->peerRefused(proto::PduType::ResizePane); });
         client->resizePane(1, 80, 24);
         // A PDU the daemon did not refuse, behind it: once it arrives, the ResizePane would have.
-        client->createTab(0);
+        client->createTab(0, {});
         co_await core::net::testing::waitUntil(
             loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
         client->detach();
@@ -1945,7 +1991,7 @@ TEST_CASE("a permission answer is sent only to a daemon that offered to ask", "[
             co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
             client->answerPermission("git@/x/git.wasm", "5f3c", vthost::GrantState::Granted);
             // Behind it: once this arrived, the answer would have.
-            client->createTab(0);
+            client->createTab(0, {});
             co_await core::net::testing::waitUntil(
                 loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
             client->detach();
@@ -1991,7 +2037,7 @@ TEST_CASE("an image fetch that was not sent awaits no reply", "[vthost][negotiat
         co_await core::net::testing::waitUntil(
             loop, [&] { return client->peerRefused(proto::PduType::FetchImage); });
         client->fetchImage(1, 7);
-        client->createTab(0);
+        client->createTab(0, {});
         co_await core::net::testing::waitUntil(
             loop, [&] { return client->screens().contains(1) || capture->contains("unrouted ImageData"); });
         client->detach();
@@ -2032,4 +2078,343 @@ TEST_CASE("a client reports the release its daemon stated", "[vthost][negotiatio
         std::move(scenario)));
 
     CHECK(client.daemonRelease() == "0.8.1");
+}
+
+namespace
+{
+
+/// Everything a phase-4 client offers on top of the version.
+[[nodiscard]] proto::CapabilitySet thinClientCapabilities()
+{
+    return proto::CapabilitySet::of(
+        { proto::Capability::AttachIntent, proto::Capability::ProfileByName, proto::Capability::TabEdits });
+}
+
+/// VT420 settings of 7000 lines: what a client states beside a profile name, for a daemon without names.
+[[nodiscard]] proto::WireSessionSettings vt420Settings()
+{
+    return proto::WireSessionSettings { .historyLineCount = 7000,
+                                        .terminalId = 41, // VT420
+                                        .graphemeClustering = 0,
+                                        .allowReflowOnResize = 0,
+                                        .maxImageRegisterCount = 512,
+                                        .sixelScrolling = 0 };
+}
+
+/// A real NativeSession serving a real NativeClient, with the handshake each states chosen by the case.
+struct IntentHarness
+{
+    IntentHarness(vthost::NativeSessionServices services,
+                  NativeClient::HandshakeOptions handshake,
+                  std::shared_ptr<vthost::ProfileCatalog const> profiles = {}):
+        host { loop,
+               [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                   return std::make_unique<vtpty::MockPty>(size);
+               },
+               vtbackend::Settings {},
+               core::defaultEnvironment(),
+               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                           .profiles = std::move(profiles) } },
+        server { std::make_unique<NativeSession>(loop,
+                                                 host,
+                                                 vthost::ConnectionId { .endpoint = "test", .index = 1 },
+                                                 std::move(pair.first),
+                                                 NativeSession::DefaultWriteQueueBytes,
+                                                 std::move(services)) },
+        client { std::make_unique<NativeClient>(
+            loop,
+            std::move(pair.second),
+            std::move(handshake),
+            vtbackend::CommandBlockStoreLimits {},
+            NativeClient::UpdateHandler {},
+            NativeClient::ImageHandler {},
+            NativeClient::SessionEventHandler {},
+            [this](proto::LayoutState const& layout) { layouts.push_back(layout); }) }
+    {
+    }
+
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source };
+    SessionHost host;
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
+    std::vector<proto::LayoutState> layouts {};
+    std::unique_ptr<NativeSession> server;
+    std::unique_ptr<NativeClient> client;
+
+    /// Runs both ends with @p scenario beside them; the scenario detaches the client when it is done.
+    void drive(Task<void> scenario)
+    {
+        loop.blockOn(core::net::testing::allOf(server->run(), client->run(), std::move(scenario)));
+    }
+
+    /// @return The profile each hosted session was spawned under, in session order.
+    [[nodiscard]] std::vector<std::string> profiles() const
+    {
+        auto names = std::vector<std::string> {};
+        for (auto const id: std::views::iota(uint64_t { 1 }, uint64_t { 10 }))
+            if (auto const* session = host.hostedSession(vtworkspace::SessionId { id }))
+                names.push_back(session->profileName());
+        return names;
+    }
+};
+
+/// @return A catalog of one profile, "main", the default.
+[[nodiscard]] std::shared_ptr<vthost::ProfileCatalog const> mainOnly()
+{
+    return std::make_shared<vthost::testing::FakeProfileCatalog>(
+        std::map<std::string, vthost::ResolvedProfile> {
+            { "main", vthost::testing::fakeProfile("/bin/zsh", vtbackend::LineCount(1000)) } },
+        "main");
+}
+
+/// Waits until the client holds a layout, then detaches it.
+Task<void> detachOnLayout(IntentHarness* h)
+{
+    co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+    h->client->detach();
+}
+
+} // namespace
+
+TEST_CASE("the client states its intent and profile and learns its windows", "[vthost][attach][intent]")
+{
+    auto services = vthost::NativeSessionServices {};
+    services.handshake.capabilities = thinClientCapabilities();
+    auto h = IntentHarness { std::move(services),
+                             NativeClient::HandshakeOptions {
+                                 .capabilities = thinClientCapabilities(),
+                                 .attachIntent = { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+                                 .profileName = "main" },
+                             mainOnly() };
+    h.drive(detachOnLayout(&h));
+
+    CHECK(h.client->followedWindows() == std::vector<uint64_t> { h.host.windowId().value });
+    CHECK(h.client->namesProfiles());
+    CHECK(h.profiles() == std::vector<std::string> { "main" }); // the attach's first session, under it
+}
+
+TEST_CASE("against a daemon without the capabilities nothing new is written", "[vthost][attach][compat]")
+{
+    // Review focus 3: a newer client, an older daemon.
+    SECTION("the verbs carry their older bodies, and no EditTab is written")
+    {
+        auto const source = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *source };
+        auto pair = *core::net::testing::makeSocketPair(loop);
+        auto* daemonSocket = pair.first.get();
+        auto client = NativeClient { loop,
+                                     std::move(pair.second),
+                                     NativeClient::HandshakeOptions {
+                                         .capabilities = thinClientCapabilities(), .profileName = "main" },
+                                     vtbackend::CommandBlockStoreLimits {},
+                                     NativeClient::UpdateHandler {},
+                                     NativeClient::ImageHandler {},
+                                     NativeClient::SessionEventHandler {},
+                                     NativeClient::LayoutHandler {} };
+        auto seen = std::vector<proto::DecodedFrame> {};
+        auto delivery = vthost::client::Delivery::Sent;
+        auto scenario = [](core::net::EventLoop* loop,
+                           NativeClient* client,
+                           std::vector<proto::DecodedFrame> const* seen,
+                           vthost::client::Delivery* delivery) -> Task<void> {
+            co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+            *delivery = client->editTab({ .session = 1, .kind = proto::TabEditKind::SetTitle, .title = "x" });
+            client->createTab(0, "x");
+            client->createWindow("y");
+            client->splitPane(1, 1, 5000, "z");
+            co_await core::net::testing::waitUntil(
+                loop, [&] { return std::ranges::any_of(*seen, carries<proto::SplitPane>); });
+            client->detach();
+        }(&loop, &client, &seen, &delivery);
+        loop.blockOn(core::net::testing::allOf(
+            client.run(),
+            scriptedDaemon(
+                &loop, daemonSocket, answeringHello(Script { { std::nullopt, acceptingHello() } }), &seen),
+            std::move(scenario)));
+
+        CHECK(delivery == vthost::client::Delivery::Unsupported);
+        CHECK_FALSE(client.namesProfiles());
+        CHECK_FALSE(std::ranges::any_of(seen, carries<proto::EditTab>));
+        auto const created = std::ranges::find_if(seen, carries<proto::CreateTab>);
+        REQUIRE(created != seen.end());
+        CHECK(std::get<proto::CreateTab>(created->pdu).profileName.empty());
+        auto const window = std::ranges::find_if(seen, carries<proto::NewWindow>);
+        REQUIRE(window != seen.end());
+        CHECK(std::get<proto::NewWindow>(window->pdu).profileName.empty());
+        auto const split = std::ranges::find_if(seen, carries<proto::SplitPane>);
+        REQUIRE(split != seen.end());
+        CHECK(std::get<proto::SplitPane>(split->pdu).profileName.empty());
+        // The hello still states the settings, for the older path to apply.
+        auto const hello = std::ranges::find_if(seen, carries<proto::ClientHello>);
+        REQUIRE(hello != seen.end());
+        CHECK(std::get<proto::ClientHello>(hello->pdu).profileName == "main");
+    }
+
+    SECTION("the daemon applies the client's session settings to the session it creates")
+    {
+        auto services = vthost::NativeSessionServices {};
+        services.handshake.capabilities = {};
+        auto h = IntentHarness { std::move(services),
+                                 NativeClient::HandshakeOptions { .sessionSettings = vt420Settings(),
+                                                                  .capabilities = thinClientCapabilities(),
+                                                                  .profileName = "main" },
+                                 mainOnly() };
+        h.drive(detachOnLayout(&h));
+        auto const session = h.host.model().window(h.host.windowId())->tabAt(0)->rootPane()->session();
+        CHECK(h.host.terminal(session)->terminalId() == vtbackend::VTType::VT420);
+        CHECK(h.client->followedWindows() == std::vector<uint64_t> { h.host.windowId().value });
+    }
+}
+
+TEST_CASE("editTab is sent when the daemon shares TabEdits", "[vthost][attach][intent]")
+{
+    auto h = IntentHarness { vthost::NativeSessionServices {},
+                             NativeClient::HandshakeOptions { .capabilities = thinClientCapabilities() } };
+    REQUIRE(h.host.createTab() != nullptr);
+    auto delivery = vthost::client::Delivery::Unsupported;
+    auto scenario = [](IntentHarness* h, vthost::client::Delivery* delivery) -> Task<void> {
+        co_await core::net::testing::waitUntil(&h->loop, [h] { return !h->layouts.empty(); });
+        auto const session = h->layouts.back().tabs.front().root.session;
+        *delivery = h->client->editTab(
+            { .session = session, .kind = proto::TabEditKind::SetTitle, .title = "build" });
+        co_await core::net::testing::waitUntil(
+            &h->loop, [h] { return h->layouts.back().tabs.front().title == "build"; });
+        h->client->detach();
+    }(&h, &delivery);
+    h.drive(std::move(scenario));
+
+    CHECK(delivery == vthost::client::Delivery::Sent);
+    CHECK(h.layouts.back().tabs.front().title == "build");
+}
+
+namespace
+{
+
+/// Turns @p loop until @p ready holds, waiting on its I/O up to a millisecond a turn.
+/// @return Whether it held within @p turns turns.
+[[nodiscard]] bool turnUntil(core::net::EventLoop& loop, std::function<bool()> const& ready, int turns = 5000)
+{
+    for ([[maybe_unused]] auto const turn: std::views::iota(0, turns))
+    {
+        if (ready())
+            return true;
+        std::ignore = loop.runOnce(1ms);
+    }
+    return ready();
+}
+
+/// Runs @p client to its end, then marks @p ended.
+Task<void> runToEnd(NativeClient* client, bool* ended)
+{
+    co_await client->run();
+    *ended = true;
+}
+
+/// Runs @p daemon to its end, then marks @p ended.
+Task<void> daemonToEnd(Task<void> daemon, bool* ended)
+{
+    co_await std::move(daemon);
+    *ended = true;
+}
+
+/// A client over @p socket offering Heartbeat, probing after 5 s and giving up after 15 s.
+[[nodiscard]] std::unique_ptr<NativeClient> heartbeatClient(core::net::EventLoop& loop,
+                                                            std::unique_ptr<core::net::ISocket> socket)
+{
+    return std::make_unique<NativeClient>(
+        loop,
+        std::move(socket),
+        NativeClient::HandshakeOptions { .capabilities =
+                                             proto::CapabilitySet::of({ proto::Capability::Heartbeat }) },
+        vtbackend::CommandBlockStoreLimits {},
+        NativeClient::UpdateHandler {},
+        NativeClient::ImageHandler {},
+        NativeClient::SessionEventHandler {},
+        NativeClient::LayoutHandler {},
+        NativeClient::PermissionHandler {},
+        vthost::client::LivenessPolicy { .idleBeforeProbe = 5s, .deadAfter = 15s });
+}
+
+/// A loop on a manual clock, a client on it, and a scripted daemon answering it with @p answer — driven by
+/// hand, a second of the clock at a time, since a manual clock moves only when the case moves it.
+struct ManualClockAttach
+{
+    explicit ManualClockAttach(ScriptFor answer)
+    {
+        loop.spawn(runToEnd(client.get(), &clientEnded));
+        loop.spawn(daemonToEnd(scriptedDaemon(&loop, daemonSocket, std::move(answer), &seen), &daemonEnded));
+    }
+
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + 10s };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source, clock };
+    core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
+    core::net::ISocket* daemonSocket = pair.first.get();
+    std::unique_ptr<NativeClient> client = heartbeatClient(loop, std::move(pair.second));
+    std::vector<proto::DecodedFrame> seen {};
+    bool clientEnded = false;
+    bool daemonEnded = false;
+
+    /// Advances the clock a second at a time, letting the loop settle between steps, until the client ended
+    /// or @p seconds passed.
+    void letTimePass(int seconds)
+    {
+        for ([[maybe_unused]] auto const second: std::views::iota(0, seconds))
+        {
+            if (clientEnded)
+                return;
+            clock.advance(1s);
+            std::ignore = turnUntil(loop, [] { return false; }, 20);
+        }
+    }
+
+    /// Lets both flows run out, as the case ends.
+    void settle()
+    {
+        if (!clientEnded)
+            client->detach();
+        CHECK(turnUntil(loop, [this] { return clientEnded && daemonEnded; }));
+    }
+};
+
+/// @return A script answering the hello with one that shares Heartbeat, and nothing else.
+[[nodiscard]] ScriptFor silentAfterHello()
+{
+    return answeringHello(Script {
+        { std::nullopt, acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } });
+}
+
+} // namespace
+
+TEST_CASE("a client whose daemon stops answering ends with a loss reason", "[vthost][attach][liveness]")
+{
+    // A daemon that reads but, past its hello, never writes: a half-open connection as the client sees it.
+    auto h = ManualClockAttach { silentAfterHello() };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.letTimePass(16);
+
+    CHECK(turnUntil(h.loop, [&h] { return h.clientEnded; }));
+    CHECK(h.client->lossReason() == "no answer from the daemon for 15 s");
+    CHECK(std::ranges::any_of(h.seen, carries<proto::Heartbeat>)); // it was probed first
+    h.settle();
+}
+
+TEST_CASE("a client whose daemon echoes stays connected", "[vthost][attach][liveness]")
+{
+    auto const echoing = [](proto::DecodedFrame const& frame) -> Script {
+        if (carries<proto::ClientHello>(frame))
+            return Script { { std::nullopt,
+                              acceptingHello(proto::CapabilitySet::of({ proto::Capability::Heartbeat })) } };
+        if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
+            return Script { { std::nullopt, *heartbeat } };
+        return Script {};
+    };
+    auto h = ManualClockAttach { echoing };
+    REQUIRE(turnUntil(h.loop, [&h] { return h.client->connected(); }));
+    h.letTimePass(40);
+
+    CHECK_FALSE(h.clientEnded);
+    CHECK_FALSE(h.client->lossReason().has_value());
+    CHECK(std::ranges::count_if(h.seen, carries<proto::Heartbeat>) >= 2);
+    h.settle();
 }

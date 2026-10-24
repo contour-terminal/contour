@@ -46,6 +46,7 @@
 #include <vthost/ClientSizePolicy.hpp>
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/PermissionWire.hpp>
+#include <vthost/ProfileCatalog.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/LayoutTree.hpp>
@@ -63,6 +64,12 @@ namespace vthost
 /// overlay rule, which mirrors AppSessionFactory::createPty's for a local session.
 using PtyFactory = std::function<std::unique_ptr<vtpty::Pty>(
     vtbackend::PageSize, std::optional<vtpty::Process::ExecInfo> const& commandOverride)>;
+
+/// Creates the backing PTY of a session a host profile was resolved for: the profile's whole shell (a layout
+/// pane's command and directory already laid over it), under the profile's own sandbox policy.
+/// @see SessionHostConfig::profilePtys
+using ProfilePtyFactory = std::function<std::unique_ptr<vtpty::Pty>(
+    vtbackend::PageSize, vtpty::Process::ExecInfo const& shell, SandboxEscape sandbox)>;
 
 /// Whether a resize request actually moved a grid.
 ///
@@ -163,6 +170,18 @@ class SessionStreamEvents
     }
 };
 
+/// Whose a window is, as one attached client asks about it.
+///
+/// A window an Attach connection's attach or NewWindow created is that connection's own — and stays
+/// claimed after it leaves, so a second GUI never inherits a first one's window. A window anything else
+/// created (the startup layout, a control connection) is unclaimed: the primary viewer follows it.
+enum class WindowClaim : uint8_t
+{
+    Unclaimed = 0, ///< No client's: created by the host itself, or through a control connection.
+    Yours = 1,     ///< Created for the client asking.
+    Others = 2,    ///< Created for another client, attached or gone.
+};
+
 /// What a hosted session hands a desktop notification on as: its title, its body, and the occasion
 /// an OSC 99 notification stated -- nullopt for OSC 9 / OSC 777, which state none.
 using SessionNotifyCallback =
@@ -201,6 +220,7 @@ class HostedSession
     /// @param env The process environment the hosted terminal reads through.
     /// @param extensions The session's status-line extensions, started once the terminal exists; none by
     ///        default.
+    /// @param profileName The host profile the session was spawned under; empty for none named.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -213,7 +233,8 @@ class HostedSession
                   SessionNotifyCallback onNotify,
                   std::function<void(std::string)> onCopyToClipboard,
                   std::function<void()> onClosed,
-                  HostedSessionExtensions extensions = {});
+                  HostedSessionExtensions extensions = {},
+                  std::string profileName = {});
 
     /// Joins the pump thread; the PTY must have been closed first (terminate()).
     ~HostedSession();
@@ -250,6 +271,10 @@ class HostedSession
 
     [[nodiscard]] vtworkspace::SessionId id() const noexcept { return _id; }
     [[nodiscard]] vtbackend::Terminal& terminal() noexcept { return _terminal; }
+
+    /// @return The host profile the session was spawned under — the one resolved, so the default's name
+    ///         when the name asked for was unknown — or empty when it was spawned under none.
+    [[nodiscard]] std::string const& profileName() const noexcept { return _profileName; }
 
     /// @return Whether the session runs status-line extensions.
     [[nodiscard]] bool hasExtensions() const noexcept { return _extensions != nullptr; }
@@ -374,6 +399,7 @@ class HostedSession
     void deliverPending();
 
     vtworkspace::SessionId _id;
+    std::string _profileName; ///< @see profileName
     /// The session's status-line extensions; null without any. Declared before _terminal, which it outlives:
     /// ~Terminal revokes the sink their workers publish through before they are destroyed.
     std::unique_ptr<ISessionExtensions> _extensions;
@@ -419,6 +445,12 @@ struct SessionSpawnRequest
     /// non-empty (a directory-only override must not wipe the daemon's default arguments), and
     /// `workingDirectory` overlays independently whenever it is non-empty.
     std::optional<vtpty::Process::ExecInfo> commandOverride {};
+
+    /// The host profile the session runs under, resolved through SessionHostConfig::profiles: its shell
+    /// and settings replace @ref settings and the daemon's shell, and @ref commandOverride still overlays
+    /// that shell. Empty names the catalog's default profile, whose shell it runs — @ref settings, when
+    /// set, still shaping its emulation; without a catalog the paths above stay as they are.
+    std::string profileName {};
 };
 
 /// Who feeds a hosted session's terminal from its PTY.
@@ -449,10 +481,9 @@ struct SessionHostConfig
     /// different ones.
     ClientSizePolicy sizePolicy = ClientSizePolicy::Latest;
     /// The profile's configured startup layout. A pane's `command`/`arguments`/`directory` are
-    /// honored (see @ref SessionSpawnRequest::commandOverride); `profile` is not — the daemon has no
-    /// `Config` object to resolve an arbitrary named profile at startup, so a pane naming one is
-    /// logged and otherwise ignored. Empty `tabs` (the default) keeps today's behavior: the window
-    /// starts with no tab at all.
+    /// honored (see @ref SessionSpawnRequest::commandOverride), and so is its `profile` (else its tab's)
+    /// when @ref profiles is set; without a catalog a pane naming one is logged and otherwise ignored.
+    /// Empty `tabs` (the default) keeps today's behavior: the window starts with no tab at all.
     vtworkspace::Layout startupLayout {};
     /// The machine the daemon runs on, as every session it spawns reports it. The default knows
     /// nothing, so only an OSC 7 URL with no host counts as local.
@@ -472,6 +503,18 @@ struct SessionHostConfig
     /// wakes nothing of them (A2). Shared only so that a test can keep a handle on a fake: the host destroys
     /// its share after its sessions, and nobody else is to hold one past the host. @see IExtensionHosting
     std::shared_ptr<IExtensionHosting> extensions {};
+    /// The host's profiles, in which every spawn resolves its shell (SessionSpawnRequest::profileName, or the
+    /// default profile for none) and passes it to the PTY factory as a whole shell; null for none, which
+    /// keeps the factory settings and the PTY factory's own shell for every session.
+    std::shared_ptr<ProfileCatalog const> profiles {};
+    /// What spawns a session resolved through @ref profiles, so that it runs under its own profile's sandbox
+    /// policy; null hands the resolved shell to the host's PtyFactory as its override instead, which knows no
+    /// policy (tests that do not ask about one).
+    ProfilePtyFactory profilePtys {};
+    /// Which run of the daemon this host is, as every ServerHello states it
+    /// (proto::ServerHello::daemonInstance): the daemon draws it at random as it starts. 0 states none, as an
+    /// embedded host or a test does.
+    uint64_t instance = 0;
 };
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
@@ -519,6 +562,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     ///         snapshot states it, so a client on another machine can tell "local" there from local
     ///         to itself.
     [[nodiscard]] vtbackend::HostIdentity const& identity() const noexcept { return _identity; }
+
+    /// @return Which run of the daemon this host is; 0 when none was stated. @see SessionHostConfig::instance
+    [[nodiscard]] uint64_t instance() const noexcept { return _instance; }
 
     /// @return The host's window (the daemon starts with exactly one).
     [[nodiscard]] vtworkspace::WindowId windowId() const noexcept { return _window; }
@@ -575,8 +621,43 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Creates a NEW window with a first tab (an empty window is useless), backed by
     /// a fresh session — the daemon side of a client "new window" (B4).
     /// @param request What this creation overrides about the session it spawns.
+    /// @param creator The attached client the window is created for, which then claims it (@see
+    ///        windowClaim) before its first tab is announced; null for a window no client claims.
     /// @return The created window, or nullptr on failure (nothing is leaked).
-    vtworkspace::Window* createWindow(SessionSpawnRequest const& request = {});
+    vtworkspace::Window* createWindow(SessionSpawnRequest const& request = {},
+                                      SessionStreamEvents const* creator = nullptr);
+
+    /// @param window The window asked about.
+    /// @param client The attached client asking.
+    /// @return Whether @p window was created for @p client, for another client, or for none.
+    [[nodiscard]] WindowClaim windowClaim(vtworkspace::WindowId window,
+                                          SessionStreamEvents const* client) const noexcept;
+
+    /// Counts @p client as an attached native client (`ConnectionRole::Attach`), from its handshake on.
+    /// Idempotent.
+    /// @param client The connection, by its stream observer.
+    void noteClientAttached(SessionStreamEvents const* client);
+
+    /// Stops counting @p client, releases its primary-viewer role, and leaves the windows it claimed
+    /// claimed by nobody present (still not unclaimed). Idempotent, and a no-op for a client never counted.
+    /// @param client The connection, by its stream observer.
+    void noteClientDetached(SessionStreamEvents const* client);
+
+    /// @return How many native Attach connections are handshaken. Neither a Control connection nor a tmux
+    ///         gateway counts — unlike the daemon's ClientCensus, which counts every client for idle exit.
+    [[nodiscard]] std::size_t connectedClients() const noexcept { return _attachedClients.size(); }
+
+    /// Makes @p client the primary viewer — the client whose launch took every window, which also follows
+    /// the windows no client claims, created later — unless another client holds that role.
+    /// @param client An attached client.
+    void claimPrimaryViewer(SessionStreamEvents const* client);
+
+    /// @param client An attached client.
+    /// @return Whether @p client is the primary viewer.
+    [[nodiscard]] bool isPrimaryViewer(SessionStreamEvents const* client) const noexcept
+    {
+        return client != nullptr && _primaryViewer == client;
+    }
 
     /// Splits @p tab's active pane, backing the new leaf with a fresh session.
     /// @param tab The tab whose active pane splits.
@@ -591,11 +672,34 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The terminal backing @p session, or nullptr if unknown.
     [[nodiscard]] vtbackend::Terminal* terminal(vtworkspace::SessionId session) noexcept;
 
+    /// @return The hosted session @p session, or nullptr if unknown.
+    [[nodiscard]] HostedSession const* hostedSession(vtworkspace::SessionId session) const noexcept;
+
+    /// Swaps the host's profile catalog for @p profiles, as the host's configuration was reloaded.
+    ///
+    /// Live reconfiguration is the feature (AGENT.md's carve-out): a daemon outlives many edits of its
+    /// configuration, and restarting it would end every session. New sessions resolve against
+    /// @p profiles; every running session takes its profile's scrollback limits from it, under its
+    /// terminal's lock, and its clients are told. The shell, environment and directory of a running
+    /// session never change — its process already runs with them.
+    /// @param profiles The new catalog; null keeps the current one.
+    void replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles);
+
     /// Hands @p bytes, a client's input, to session @p session's PTY without parking the calling loop thread:
     /// the session's pump writes them. @see HostedSession::writeInput()
     /// @param session The session the input is for; an unknown one drops it.
     /// @param bytes The input, as the client encoded it.
     void writeInput(vtworkspace::SessionId session, std::string_view bytes);
+
+    /// When a client last handed @p session input, on the host loop's clock. Loop thread only.
+    ///
+    /// The time doubles as the input's identity (FlushInputs::answeredInput compares stamps), which holds
+    /// while the loop runs on a clock that advances between inputs, as SteadyClock does. A per-turn
+    /// CachedClock would give every input of one turn the same stamp and one echo flush between them.
+    /// @param session The session asked about.
+    /// @return The time of the session's last writeInput(); nullopt for none or an unknown session.
+    [[nodiscard]] std::optional<core::platform::SteadyTimePoint> lastInputAt(
+        vtworkspace::SessionId session) const;
 
     /// @param session The session asked about.
     /// @return How many bytes of a client's input @p session holds unwritten; zero for an unknown one.
@@ -699,11 +803,37 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @return The minted id, or nullopt if the PTY factory failed.
     [[nodiscard]] std::optional<vtworkspace::SessionId> seedSession(SessionSpawnRequest const& request);
 
+    /// What a spawn runs with once the host's profiles have had their say.
+    struct ResolvedSpawn
+    {
+        std::optional<vtbackend::Settings> settings;             ///< Nullopt for the factory settings.
+        std::optional<vtpty::Process::ExecInfo> commandOverride; ///< The shell, or the pane's override.
+        std::string profileName {};              ///< The named profile resolved; empty for none.
+        std::optional<SandboxEscape> sandbox {}; ///< The profile's policy; nullopt without one.
+    };
+
+    /// Resolves @p request in the host's profiles (@see SessionHostConfig::profiles).
+    /// @param request What the spawn asked for.
+    /// @param id The session about to be spawned, for the log.
+    /// @return What it runs with.
+    [[nodiscard]] ResolvedSpawn resolveSpawn(SessionSpawnRequest const& request,
+                                             vtworkspace::SessionId id) const;
+
+    /// @param spawn What the spawn runs with.
+    /// @return Its PTY, through the profile PTY factory when a profile was resolved and one is set; null when
+    ///         the factory failed.
+    [[nodiscard]] std::unique_ptr<vtpty::Pty> makePty(ResolvedSpawn const& spawn) const;
+
+    /// Destroys session @p session and forgets everything kept beside it, so no erase site can leave a
+    /// stale entry behind.
+    /// @param session The id of the session to drop; an unknown one is a no-op.
+    void eraseSession(uint64_t session);
+
     /// Realizes @p layout's tabs into @p window in order, via the shared
     /// vtworkspace::realizeLayoutTab. Called once from the constructor body (never the
     /// initializer list — @c _window is the LAST member to construct). Each leaf's
-    /// command/arguments/directory become a @ref SessionSpawnRequest::commandOverride; its
-    /// profile (if named) is logged and otherwise ignored.
+    /// command/arguments/directory become a @ref SessionSpawnRequest::commandOverride, and its
+    /// profile (else its tab's) the @ref SessionSpawnRequest::profileName.
     /// @param window The window to realize every tab into (the host's own, freshly created).
     /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
     void realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout);
@@ -826,9 +956,11 @@ class SessionHost final: public vtworkspace::ModelEvents
     core::net::EventLoop& _loop;
     std::shared_ptr<HostGate> _gate;
     PtyFactory _ptyFactory;
+    ProfilePtyFactory _profilePtys; ///< @see SessionHostConfig::profilePtys
     vtbackend::Settings _settings;
     core::Environment const& _environment;
     vtbackend::HostIdentity _identity; ///< Handed to every session this host spawns.
+    uint64_t _instance;                ///< @see instance()
     vtbackend::TerminalClocks _clocks; ///< Read by every session this host spawns.
     vtpty::PageSize _pageSize;         ///< The RESOLVED authoritative client area (see pageSize()).
     SessionPumping _pumping;           ///< Whether new sessions start their PTY pump thread.
@@ -836,6 +968,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     ClientSizePolicy _sizePolicy;
     /// Where every session this host spawns looks up the paths printed on its screen.
     core::platform::FileSystem const& _fileSystem;
+    /// The host's profiles; null for none. @see SessionHostConfig::profiles
+    std::shared_ptr<ProfileCatalog const> _profiles;
     /// What each attached client reported it can display, keyed by its stream subscription so the
     /// entry lives exactly as long as the client does (@see unsubscribeStream). `_pageSize` is
     /// resolved from these, never assigned from one of them.
@@ -850,6 +984,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// after every session's extensions: its runtime joins the threads their runners lived on.
     std::shared_ptr<IExtensionHosting> _extensions;
     std::unordered_map<uint64_t, std::unique_ptr<HostedSession>> _sessions;
+    /// When each session last got client input, on `_loop`'s clock (@see lastInputAt). Erased with the
+    /// session's `_sessions` entry, by eraseSession().
+    std::unordered_map<uint64_t, core::platform::SteadyTimePoint> _lastInput;
     /// Every permission request no client answered yet, oldest first; one per installed extension and
     /// manifest digest.
     std::vector<proto::PermissionRequest> _pendingPermissions;
@@ -861,6 +998,13 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::optional<core::net::DeadlineTimer> _retiredRelease;
     std::vector<vtworkspace::ModelEvents*> _subscribers;
     std::vector<SessionStreamEvents*> _streamSubscribers;
+    /// The handshaken native Attach connections. @see connectedClients
+    std::vector<SessionStreamEvents const*> _attachedClients;
+    /// The client whose launch took every window; null while none is attached. @see claimPrimaryViewer
+    SessionStreamEvents const* _primaryViewer = nullptr;
+    /// Every window created for a client, by window id: that client while it is attached, null once it
+    /// left. A window absent here is unclaimed. @see windowClaim
+    std::unordered_map<uint64_t, SessionStreamEvents const*> _windowCreators;
 
     vtworkspace::SessionModel _model; ///< Last member: its callbacks reach into the host.
     vtworkspace::WindowId _window;

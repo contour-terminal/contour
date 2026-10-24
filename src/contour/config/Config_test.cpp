@@ -5378,80 +5378,6 @@ input_mapping:
 
 // }}}
 
-TEST_CASE("Config: resolveEmulationSettings resolves a named profile from a file", "[config]")
-{
-    // The one load-resolve-refuse sequence both `contour daemon` and `contour client` go through, so
-    // a warm daemon and the client that attaches to it cannot disagree about what the profile means.
-    QTemporaryDir dir;
-    auto const path = writeConfig(dir, R"(
-default_profile: main
-profiles:
-    main:
-        terminal_id: VT340
-        history:
-            limit: 4242
-    other:
-        terminal_id: VT420
-        history:
-            limit: 100
-)"sv);
-
-    SECTION("a named profile")
-    {
-        auto const settings = contour::config::resolveEmulationSettings(path.string(), "other");
-        REQUIRE(settings.has_value());
-        CHECK(settings->terminalId == vtbackend::VTType::VT420);
-        REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings->historyLimits.capacity));
-        CHECK(std::get<vtbackend::LineCount>(settings->historyLimits.capacity) == vtbackend::LineCount(100));
-    }
-
-    SECTION("an empty profile name selects the configuration's default")
-    {
-        auto const settings = contour::config::resolveEmulationSettings(path.string(), "");
-        REQUIRE(settings.has_value());
-        CHECK(settings->terminalId == vtbackend::VTType::VT340);
-    }
-}
-
-TEST_CASE("Config: resolveEmulationSettings refuses an unknown profile", "[config]")
-{
-    // Refusing beats falling back to the default: a daemon hosting sessions under a profile the user
-    // did not name is a misconfiguration they would discover only much later, through the wrong
-    // scrollback depth or the wrong reported terminal. The message has to name both halves of the
-    // mistake for that to be diagnosable at all.
-    QTemporaryDir dir;
-    auto const path = writeConfig(dir, R"(
-default_profile: main
-profiles:
-    main:
-        terminal_id: VT525
-)"sv);
-
-    auto const settings = contour::config::resolveEmulationSettings(path.string(), "nope");
-    REQUIRE_FALSE(settings.has_value());
-    CHECK(settings.error().contains("nope"));
-    CHECK(settings.error().contains(path.string()));
-}
-
-TEST_CASE("Config: resolveEmulationSettings reports a config it cannot parse", "[config]")
-{
-    // The failure mode the try/catch actually exists for. NOT a nonexistent path: loadConfigFromFile
-    // calls createFileIfNotExists, so an absent file is created rather than refused, and whether that
-    // creation fails is a property of the filesystem -- `/nonexistent/...` is refused on Linux and
-    // was happily created on Windows, which is how this test failed there and nowhere else.
-    QTemporaryDir dir;
-    auto const path = writeConfig(dir, R"(
-default_profile: main
-profiles:
-    main:
-  bad_indentation: [unclosed
-)"sv);
-
-    auto const settings = contour::config::resolveEmulationSettings(path.string(), "");
-    REQUIRE_FALSE(settings.has_value());
-    CHECK_FALSE(settings.error().empty());
-}
-
 TEST_CASE("Config: tryLoadConfigFromFile loads a file or says why it could not", "[config]")
 {
     QTemporaryDir dir;
@@ -5483,7 +5409,7 @@ profiles:
 TEST_CASE("Config: emulationSettingsFor resolves a profile of a configuration in memory", "[config]")
 {
     // What `contour client` states for each session it creates: the configuration it holds, as a reload
-    // left it, resolved and refused as resolveEmulationSettings resolves and refuses the file.
+    // left it, resolved and refused like a profile named on the command line.
     QTemporaryDir dir;
     auto const path = writeConfig(dir, R"(
 default_profile: main
@@ -5509,11 +5435,11 @@ profiles:
         CHECK(settings->terminalId == vtbackend::VTType::VT220);
     }
 
-    SECTION("an unknown profile is refused in the words the file's resolution uses")
+    SECTION("an unknown profile is refused, naming both the profile and the file")
     {
         auto const settings = contour::config::emulationSettingsFor(config, "nope");
         REQUIRE_FALSE(settings.has_value());
-        CHECK(settings.error() == contour::config::resolveEmulationSettings(path.string(), "nope").error());
+        CHECK(settings.error().contains("nope"));
         CHECK(settings.error().contains(path.string()));
     }
 }
@@ -5639,8 +5565,7 @@ profiles:
     CHECK(resolved->shell.workingDirectory == std::filesystem::path("/var/tmp"));
 }
 
-TEST_CASE("Config: resolveSessionConfig refuses an unknown profile, matching resolveEmulationSettings",
-          "[config]")
+TEST_CASE("Config: resolveSessionConfig refuses an unknown profile", "[config]")
 {
     QTemporaryDir dir;
     auto const path = writeConfig(dir, R"(

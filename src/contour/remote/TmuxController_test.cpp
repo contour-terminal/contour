@@ -9,29 +9,46 @@
 
 #include <crispy/BufferObject.hpp>
 
+#include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <format>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include <vthost/tmux/LayoutString.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
 
+namespace
+{
+
+/// Builds a controller as every test here does: no process placement, this machine's files, the steady
+/// clock. The one place the constructor is spelled, so a collaborator it gains is added here alone.
+/// @param tmuxSocket The tmux server socket (-S); empty for tmux's own discovery.
+/// @return The controller, not yet connecting.
+[[nodiscard]] std::unique_ptr<contour::remote::TmuxController> makeTmuxController(std::string tmuxSocket = {})
+{
+    return std::make_unique<contour::remote::TmuxController>(std::move(tmuxSocket),
+                                                             std::make_shared<vtpty::NoPlacement>(),
+                                                             core::platform::NativeFileSystem::instance(),
+                                                             core::platform::defaultSteadyClock());
+}
+
+} // namespace
+
 // The tmux mirror's structural reactions are driven through the TmuxModelEvents overrides, which
 // are pure C++ (no tmux process) — so this maps to a real GUI SessionModel headlessly, on every
 // platform. The oracle tests below (real `tmux` binary) are POSIX-only.
 TEST_CASE("tmux %window-renamed retitles the mirrored tab (B5)", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {},
-        std::make_shared<vtpty::NoPlacement>(),
-        core::platform::NativeFileSystem::instance()); // not connected
+    auto ctrlOwned = makeTmuxController(); // not connected
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -126,14 +143,13 @@ TEST_CASE("tmux performs only the operations it has a command for", "[attach][tm
 // refuses in steady state) — the regression that made the "+"/new-tab gesture a silent no-op.
 TEST_CASE("a GUI new tab in tmux mode is authored on the tmux server", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp const app { std::move(ctrlOwned) };
 
     // The delegate claims the request (true = authored remotely). Before the override, the base
     // returned false and the "new tab" gesture did nothing in mirror mode.
-    CHECK(ctrl->requestRemoteTab(nullptr));
+    CHECK(ctrl->requestRemoteTab(nullptr, {}));
 
     ctrl->stop();
 }
@@ -142,8 +158,7 @@ TEST_CASE("a GUI new tab in tmux mode is authored on the tmux server", "[attach]
 // true so the manager does NOT split locally); a pty not bound to a tmux pane is not routed.
 TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -156,12 +171,12 @@ TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[atta
     REQUIRE(session != nullptr);
 
     // The pane's pty is bound to tmux pane %10 → a GUI split routes to the server.
-    CHECK(ctrl->requestRemoteSplit(&session->terminal().device(), /*vertical=*/true));
+    CHECK(ctrl->requestRemoteSplit(&session->terminal().device(), /*vertical=*/true, {}));
 
     // A pty bound to no tmux pane is not routed (the manager would split it locally).
     auto foreign =
         vtpty::MockPty { vtbackend::PageSize { vtbackend::LineCount(24), vtbackend::ColumnCount(80) } };
-    CHECK_FALSE(ctrl->requestRemoteSplit(&foreign, /*vertical=*/true));
+    CHECK_FALSE(ctrl->requestRemoteSplit(&foreign, /*vertical=*/true, {}));
 
     ctrl->stop();
 }
@@ -171,8 +186,7 @@ TEST_CASE("a GUI split in tmux mode is authored on the tmux server (B5)", "[atta
 // pane tmux announced is left to the realization that is waiting for it.
 TEST_CASE("a command pane is refused in tmux mode", "[attach][tmux][semanticblocks]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -250,8 +264,7 @@ TEST_CASE("tmux binary layout converts to a ratio-bearing vtworkspace layout (F3
 // that realizeWindowLayout uses.
 TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -291,8 +304,7 @@ TEST_CASE("tmux whole-tree realize reproduces the split ratio and shape (F3)", "
 // model-owned sink survives, so output arriving in between is buffered and flushed on the new bind.
 TEST_CASE("a tmux pane moved before it was realized lands in the DESTINATION tab", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -319,8 +331,7 @@ TEST_CASE("a tmux pane moved before it was realized lands in the DESTINATION tab
 TEST_CASE("a realized tmux pane's move closes the local binding and defers the re-realization",
           "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -357,8 +368,7 @@ TEST_CASE("a realized tmux pane's move closes the local binding and defers the r
 // authored by the caller that knows, through SessionFactory::requestRemoteClose.
 TEST_CASE("closing a mirrored pane's pty does not kill it on tmux", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -383,8 +393,7 @@ TEST_CASE("closing a mirrored pane's pty does not kill it on tmux", "[attach][tm
 // ...and the deliberate close DOES route: requestRemoteClose resolves the pty to its tmux pane.
 TEST_CASE("requestRemoteClose resolves a mirrored pane, and ignores a foreign pty", "[attach][tmux]")
 {
-    auto ctrlOwned = std::make_unique<contour::remote::TmuxController>(
-        std::string {}, std::make_shared<vtpty::NoPlacement>(), core::platform::NativeFileSystem::instance());
+    auto ctrlOwned = makeTmuxController();
     auto* ctrl = ctrlOwned.get();
     contour::test::TestApp app { std::move(ctrlOwned) };
     contour::test::ScopedController const win { app.manager() };
@@ -416,9 +425,8 @@ TEST_CASE("a remote resize updates a not-yet-realized pane's extent", "[attach][
     // realization: once a pane has a display, the widget geometry drives its grid (@see
     // TerminalSession::resizeTerminalToDisplaySize) and immediately overwrites whatever it was born
     // at — which is exactly why PaneFeed::resize leaves a realized pane alone.
-    auto controller = contour::remote::TmuxController { std::string {},
-                                                        std::make_shared<vtpty::NoPlacement>(),
-                                                        core::platform::NativeFileSystem::instance() };
+    auto const controllerOwned = makeTmuxController();
+    auto& controller = *controllerOwned;
 
     controller.paneAdded(/*window=*/1, /*pane=*/10, 80, 24);
     controller.notePaneExtent(/*pane=*/10, 120, 40);
@@ -526,9 +534,8 @@ TEST_CASE("tmux controller mirrors a real tmux session", "[attach][tmux][oracle]
     std::ignore = runShellCapture(
         std::format("tmux -S {} send-keys -t mirror 'echo tmux-mirror-seed' Enter 2>&1", server->socketPath));
 
-    auto controller = contour::remote::TmuxController { server->socketPath,
-                                                        std::make_shared<vtpty::NoPlacement>(),
-                                                        core::platform::NativeFileSystem::instance() };
+    auto const controllerOwned = makeTmuxController(server->socketPath);
+    auto& controller = *controllerOwned;
     auto const connected = controller.connectAndWait(15s);
     REQUIRE(connected.has_value());
     REQUIRE(controller.canCreateSession());

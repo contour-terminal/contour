@@ -126,13 +126,13 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 
 | Option | What it does |
 | --- | --- |
-| `--socket PATH` | Path of the control socket file. Defaults to `$XDG_RUNTIME_DIR/contour/LABEL`, respecting `$CONTOUR_MUX`. |
+| `--socket PATH` | Path of the control socket file. Defaults to the configuration's `daemon.socket`, else `$XDG_RUNTIME_DIR/contour/LABEL`, respecting `$CONTOUR_MUX`. |
 | `--label NAME` | Socket label distinguishing daemon instances. Default `default`. |
 | `--config FILE` | Configuration file whose profile supplies the hosted sessions' terminal settings — including `history.limit`, which is how much scrollback a session keeps for clients that attach later. |
 | `--profile NAME` | Which profile of that configuration to take them from. Defaults to the configuration's default profile. |
 | `--lifecycle POLICY` | When the daemon ends on its own: `persistent` (the default), `exit-with-last-session` or `exit-when-idle`. See [Quick start](#quick-start). |
 | `--exit-with-last-session` | Alias for `--lifecycle=exit-with-last-session`. |
-| `--size-policy POLICY` | Which attached client's size the shared grid takes when clients of different sizes are attached: `latest` (default), `smallest` or `largest`. Mirrors tmux's `window-size`. |
+| `--size-policy POLICY` | Which attached client's size the shared grid takes when clients of different sizes are attached: `latest`, `smallest` or `largest`. Mirrors tmux's `window-size`. Defaults to the configuration's `daemon.size_policy` (`latest` unless set). |
 | `--background` | Relaunches the command detached and returns once the daemon accepts connections. Without `--log-file` the daemon logs beside its socket (`SOCKET.log`), since a detached process has no console. |
 | `--in-place` | Runs from the installed binary instead of a per-version copy. See [After upgrading Contour](#after-upgrading-contour). |
 | `--tmux-compat-socket LABEL` | Additionally binds tmux's own discovery path `/tmp/tmux-<uid>/<LABEL>`, so a plain `tmux -L LABEL -C attach-session` finds this daemon. |
@@ -143,11 +143,30 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 | `--log TAGS` | Enable logging for a comma-separated list of tags, or `all`. See [Diagnostics](#diagnostics). |
 | `--log-file FILE` | Append log output to `FILE` instead of standard error; `-` means standard error explicitly. |
 
+## Hosting from a plain `contour`
+
+`contour client` always attaches. A plain `contour` decides by `daemon.mode` in the configuration, or
+by `--daemon-mode` on its command line:
+
+| Mode | Where the sessions run |
+| --- | --- |
+| `in_process` (the default) | In the window's own process, as before daemon mode existed |
+| `auto` | In the daemon, started if none runs; when none can be had, in the window's process, with a bar saying why — those shells end when the window closes |
+| `required` | In the daemon, or not at all: the launch ends with the reason before any window opens |
+
+An attaching launch opens one new window beside whatever the daemon already shows, or brings every
+daemon window back when no other window is attached.
+
+A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
+under `auto`; under `required` it ends before any window, since a daemon session runs the host's profile.
+
 ## `contour client` options
 
 | Option | What it does |
 | --- | --- |
-| `--socket PATH`, `--label NAME` | Which daemon to attach to; same resolution as above. |
+| `--socket PATH`, `--label NAME` | Which daemon to attach to; same resolution as above, `daemon.socket` of the client's configuration included. |
+| `--window ID` | Show only the daemon window `ID` instead of opening a new one; fails, naming it, when the daemon has no such window. |
+| `--size-policy POLICY` | The policy a daemon this client auto-starts runs with; defaults to `daemon.size_policy`. |
 | `--tmux` | Attach to a **real tmux server** instead of a Contour daemon. See [tmux interoperability](#tmux-interoperability). |
 | `--tmux-socket PATH` | The tmux server socket (tmux's `-S`) for `--tmux`. |
 | `--profile NAME` | Config profile the window renders remote sessions with. |

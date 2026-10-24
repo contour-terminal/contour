@@ -178,16 +178,23 @@ void applyWireCell(vtbackend::LineSoA& soa,
 void applyWireLine(vtbackend::Line& line,
                    proto::WireLine const& wire,
                    std::unordered_map<uint16_t, vtbackend::HyperlinkId> const& hyperlinks,
-                   ContextIdMap const& contexts)
+                   ContextIdMap const& contexts,
+                   vtbackend::ColumnOffset firstColumn)
 {
     auto const flags = vtbackend::LineFlags::fromValue(wire.flags);
+    // A negative shift is no window into anything: it is read as none.
+    auto const skipped = static_cast<std::size_t>(std::max(unbox<int>(firstColumn), 0));
+    auto const shifted = [skipped](int32_t offset) {
+        return vtbackend::ColumnOffset::cast_from(
+            std::max(int64_t { offset } - static_cast<int64_t>(skipped), int64_t { 0 }));
+    };
     // The clear does three jobs at once: it drops stale content, it gives the omitted trailing
     // columns their color, and it puts the row into the blank state when nothing travelled — which
     // is what makes a uniformly-filled row as cheap on this side as it was on the wire.
     line.reset(flags, fillAttrsOf(wire));
     // After the reset, never before: Line::reset() clears an offset whose flag it does not keep.
-    line.setPromptEndOffset(vtbackend::ColumnOffset(wire.promptEndOffset));
-    line.setCommandEndOffset(vtbackend::ColumnOffset(wire.commandEndOffset));
+    line.setPromptEndOffset(shifted(wire.promptEndOffset));
+    line.setCommandEndOffset(shifted(wire.commandEndOffset));
     // Translated, never copied: the id is the SENDER's, and this terminal mints its own. An id with
     // no mapping resolves to none, exactly as an unmapped hyperlink id does. The zero test first,
     // because a session that never sees OSC 3008 stamps every line with it and would otherwise pay a
@@ -205,14 +212,14 @@ void applyWireLine(vtbackend::Line& line,
     // when is unknown" stamp — instead of wrapping round to a plausible time. A zero, a row the host
     // never stamped, stamps nothing.
     line.stampBornAt(wire.bornAt);
-    if (wire.cells.empty())
+    if (wire.cells.size() <= skipped)
         return;
 
-    auto const columns = std::min(wire.cells.size(), unbox<std::size_t>(line.size()));
+    auto const columns = std::min(wire.cells.size() - skipped, unbox<std::size_t>(line.size()));
     auto& soa = line.materializedStorage();
     for (auto const column: std::views::iota(std::size_t { 0 }, columns))
     {
-        auto const& cell = wire.cells[column];
+        auto const& cell = wire.cells[skipped + column];
         auto localLink = vtbackend::HyperlinkId {};
         if (auto const it = hyperlinks.find(cell.hyperlink); it != hyperlinks.end())
             localLink = it->second;

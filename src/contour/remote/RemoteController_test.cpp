@@ -5,12 +5,14 @@
 #include <core/async/Cancellation.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <stdexcept>
@@ -232,20 +234,60 @@ TEST_CASE("a cancelled reactor root task is still the silent shutdown", "[mux][c
 namespace
 {
 
-/// A controller still connecting: its root task parks until cancelled, and it has nothing to detach.
+/// What a ConnectingController's connection does once released.
+enum class OnRelease : uint8_t
+{
+    ComeUp, ///< The handshake completes, as a daemon's answer would complete it.
+    Fail,   ///< The connect fails, as a refused or reset one would.
+};
+
+/// A controller still connecting: its root task parks until cancelled, and it has nothing to detach --
+/// unless it is given a release, on which its connection comes up (or fails) as a daemon's answer would.
 class ConnectingController final: public contour::remote::RemoteController
 {
   public:
-    ConnectingController() = default;
+    /// @param clock What the connect budget is measured on.
+    /// @param release Once it holds true, the connection settles; null to stay connecting forever.
+    /// @param onRelease How it settles.
+    explicit ConnectingController(core::platform::IClock const& clock,
+                                  std::atomic<bool> const* release = nullptr,
+                                  OnRelease onRelease = OnRelease::ComeUp):
+        RemoteController(clock), _release(release), _onRelease(onRelease)
+    {
+    }
     ConnectingController(ConnectingController const&) = delete;
     ConnectingController& operator=(ConnectingController const&) = delete;
     ConnectingController(ConnectingController&&) = delete;
     ConnectingController& operator=(ConnectingController&&) = delete;
     ~ConnectingController() { stop(); }
 
+    using RemoteController::isConnected;
+
+    /// @return Whether stop() has torn the controller down.
+    [[nodiscard]] bool stopped() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _stopped;
+    }
+
   protected:
     [[nodiscard]] core::async::Task<void> runClient(core::net::EventLoop* loop) override
     {
+        if (_release != nullptr)
+        {
+            while (!_release->load(std::memory_order_acquire))
+                co_await loop->delay(1ms);
+            if (_onRelease == OnRelease::Fail)
+                failConnect("refused");
+            else
+            {
+                {
+                    auto const lock = std::lock_guard { _mutex };
+                    _state = State::Ready;
+                }
+                _connected.notify_all();
+            }
+        }
         while (true)
             co_await loop->delay(1h);
     }
@@ -253,7 +295,21 @@ class ConnectingController final: public contour::remote::RemoteController
     void closeReactorBindings() override {}
     [[nodiscard]] std::string connectTimeoutMessage() const override { return "timed out"; }
     [[nodiscard]] std::string connectClosedMessage() const override { return "closed"; }
+
+  private:
+    std::atomic<bool> const* _release;
+    OnRelease _onRelease;
 };
+
+/// Releases @p release from another thread after @p after, while the caller blocks in awaitConnected().
+/// @return The releasing thread; joined on destruction.
+[[nodiscard]] std::jthread releaseAfter(std::atomic<bool>& release, std::chrono::milliseconds after)
+{
+    return std::jthread { [&release, after] {
+        std::this_thread::sleep_for(after);
+        release.store(true, std::memory_order_release);
+    } };
+}
 
 } // namespace
 
@@ -262,10 +318,90 @@ TEST_CASE("a stop during connect does not wait out the detach bound", "[mux][con
     // The connect times out and stops the controller. With no client to detach, nothing will end
     // the root task by itself, so stop() must cancel at once rather than wait out
     // DefaultDetachBound on the GUI thread.
-    auto controller = ConnectingController {};
+    auto controller = ConnectingController { core::platform::defaultSteadyClock() };
     auto const started = std::chrono::steady_clock::now();
     auto const connected = controller.connectAndWait(50ms);
     auto const took = std::chrono::steady_clock::now() - started;
     CHECK_FALSE(connected.has_value());
     CHECK(took < contour::remote::DefaultDetachBound / 2);
+}
+
+TEST_CASE("startConnecting returns before the daemon answers, awaitConnected then succeeds",
+          "[remote][mux][controller]")
+{
+    auto release = std::atomic<bool> { false };
+    auto controller = ConnectingController { core::platform::defaultSteadyClock(), &release };
+    controller.startConnecting();
+    controller.startConnecting(); // idempotent: one reactor, one connect
+    CHECK_FALSE(controller.isConnected());
+
+    release.store(true, std::memory_order_release);
+    auto const connected = controller.awaitConnected(10s);
+    CHECK(connected.has_value());
+    CHECK(controller.isConnected());
+}
+
+TEST_CASE("awaitConnected past its budget fails with the timeout message and stops",
+          "[remote][mux][controller]")
+{
+    auto split = ConnectingController { core::platform::defaultSteadyClock() };
+    split.startConnecting();
+    auto const awaited = split.awaitConnected(200ms);
+    REQUIRE_FALSE(awaited.has_value());
+    CHECK(split.stopped());
+
+    auto joined = ConnectingController { core::platform::defaultSteadyClock() };
+    auto const waited = joined.connectAndWait(200ms);
+    REQUIRE_FALSE(waited.has_value());
+    CHECK(awaited.error() == waited.error());
+    CHECK(awaited.error() == "timed out");
+}
+
+TEST_CASE("awaitConnected counts its budget from startConnecting", "[remote][mux][controller]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto controller = ConnectingController { clock };
+    controller.startConnecting();
+    clock.advance(5s); // booting the GUI took the whole budget
+
+    auto const started = std::chrono::steady_clock::now();
+    auto const connected = controller.awaitConnected(5s);
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(connected.has_value());
+    CHECK(connected.error() == "timed out");
+    CHECK(controller.stopped());
+    CHECK(took >= contour::remote::MinimumConnectAwait); // the floor, not zero
+    CHECK(took < 4s);                                    // and not a fresh 5 s
+}
+
+TEST_CASE("a connect that comes up within the floor succeeds although the budget is spent",
+          "[remote][mux][controller]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto release = std::atomic<bool> { false };
+    auto controller = ConnectingController { clock, &release };
+    controller.startConnecting();
+    clock.advance(6s); // a stalled GUI boot spent more than the whole budget
+
+    auto const releaser = releaseAfter(release, 200ms);
+    auto const connected = controller.awaitConnected(5s);
+    CHECK(connected.has_value());
+    CHECK(controller.isConnected());
+}
+
+TEST_CASE("a connect that fails within the floor still fails, and at once", "[remote][mux][controller]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto release = std::atomic<bool> { false };
+    auto controller = ConnectingController { clock, &release, OnRelease::Fail };
+    controller.startConnecting();
+    clock.advance(6s);
+
+    auto const releaser = releaseAfter(release, 200ms);
+    auto const started = std::chrono::steady_clock::now();
+    auto const connected = controller.awaitConnected(5s);
+    auto const took = std::chrono::steady_clock::now() - started;
+    REQUIRE_FALSE(connected.has_value());
+    CHECK(connected.error() == "refused");
+    CHECK(took < contour::remote::MinimumConnectAwait); // the failure ends the wait, not the floor
 }

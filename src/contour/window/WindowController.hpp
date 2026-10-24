@@ -105,6 +105,7 @@ class WindowController:
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(bool settingsActive READ settingsActive NOTIFY settingsActiveChanged)
+    Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
     Q_PROPERTY(contour::window::SettingsController* settingsController READ settingsController CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -632,6 +633,20 @@ class WindowController:
     void updateStatusLine();
     // }}}
 
+    // {{{ Hosting notice
+    /// What this window tells the user about where its sessions run: set when the daemon the launch wanted
+    /// could not be had and the sessions run in this process instead (cli::hostingNotice), so they end
+    /// with the window. Main.qml shows it as a bar while non-empty.
+    [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
+
+    /// Shows @p notice in this window's notice bar.
+    /// @param notice The line to show; empty hides the bar.
+    void showHostingNotice(QString notice);
+
+    /// The user dismissed the notice bar: it is hidden for good.
+    Q_INVOKABLE void dismissHostingNotice() { showHostingNotice({}); }
+    // }}}
+
   signals:
     void countChanged();
     void activeTabIndexChanged();
@@ -666,6 +681,8 @@ class WindowController:
     void chromeHeightChanged();
     /// The content area switched between the settings page and the terminal (settingsActive changed).
     void settingsActiveChanged();
+    /// @see hostingNotice
+    void hostingNoticeChanged();
     /// @see requestNotification.
     void notificationRequested(QString const& title, QString const& body);
     /// @see requestBell.
@@ -796,6 +813,8 @@ class WindowController:
     /// The editable settings bridge for this window (created in the constructor; never null).
     std::unique_ptr<SettingsController> _settingsController;
     // }}}
+
+    QString _hostingNotice; ///< @see hostingNotice
 
     // {{{ Terminal context menu
     /// The menu as QML sees it, rebuilt on every right-click.

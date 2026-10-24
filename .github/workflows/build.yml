@@ -1218,11 +1218,12 @@ jobs:
         run: |
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
           mv "out\build\${{ env.CMAKE_PRESET }}\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
-      - name: "Check that the package ships no bench-headless"
-        # bench-headless is built into bin/, beside the staged conpty.dll it must run with. Two things
-        # keep it out of the MSI and the zip, which cpack fills from the same install: its PATTERN
+      - name: "Check that the package ships no benchmark tool"
+        # bench-headless and bench-latency are built into bin/, beside the staged conpty.dll they must run
+        # with. Two things keep each out of the MSI and the zip, which cpack fills from the same install: its PATTERN
         # exclusion in src/contour/CMakeLists.txt, against the GUI's wholesale copy of bin/, and
-        # CONTOUR_INSTALL_TOOLS=OFF in the Windows preset, against its own install rule. Assert it, as
+        # CONTOUR_INSTALL_TOOLS=OFF in the Windows preset, against its own install rule (bench-latency has
+        # none at all, so it needs the first alone). Assert it, as
         # the macOS job does for its image: the day either goes, a developer tool would ship in a
         # user-facing release with no other visible symptom. contour.exe must be found too, or the
         # check would pass on a zip it cannot read.
@@ -1239,7 +1240,7 @@ jobs:
             Write-Host "::error::the zip holds no contour.exe; the check below would pass vacuously"
             exit 1
           }
-          $shipped = $entries | Where-Object { $_ -like '*bench-headless*' }
+          $shipped = $entries | Where-Object { $_ -like '*bench-headless*' -or $_ -like '*bench-latency*' }
           if ($shipped) {
             Write-Host "::error::the zip ships $($shipped -join ', ')"
             exit 1
@@ -1859,6 +1860,190 @@ jobs:
         run: ./scripts/ci-install-gcc-runtime.sh
       - name: "bench-headless: ${{ matrix.test_case }}"
         run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
+  # }}}
+  # {{{ Latency trend: in-process vs daemon, recorded on every platform, never gating
+  latency_trend:
+    # Records, never gates: a shared runner is too noisy to hold a 1 ms budget to, and the gate is a
+    # reproducible local run (docs/internals/latency.md). What this gives is the trend -- a regression
+    # shows up as a step in the artifacts across commits. continue-on-error keeps a leg that cannot
+    # measure (no desktop session, a flaky Qt mirror) from failing the workflow, and no post-check job
+    # lists it in `needs`.
+    name: "Latency trend (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      # The Windows leg's vcpkg binary cache is a NuGet feed on GitHub Packages.
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            preset: clang-release
+          - os: windows-2022
+            preset: clangcl-release
+          - os: macos-15
+            preset: appleclang-release
+    env:
+      CMAKE_PRESET: ${{ matrix.preset }}
+      VCPKG_BINARY_SOURCES: "clear;nuget,GitHub,readwrite"
+    steps:
+      - uses: actions/checkout@v4
+      # {{{ Linux: the dependency steps of ubuntu_2404_cc_matrix
+      - name: "update APT database"
+        if: runner.os == 'Linux'
+        run: sudo ./scripts/apt-update.sh
+      - name: "Installing xmllint for ci-set-vars"
+        if: runner.os == 'Linux'
+        run: sudo apt -qy install libxml2-utils
+      - name: "install dependencies"
+        if: runner.os == 'Linux'
+        run: sudo env QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+      - name: "install weston and dbus-run-session (the GUI needs a compositor that paints frames)"
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -qy weston qt6-wayland dbus-daemon
+      - name: "Post-fix embedded dependency permissions."
+        if: runner.os == 'Linux'
+        run: sudo find _deps/sources -exec chown $UID {} \;
+      - name: "Install Clang"
+        if: runner.os == 'Linux'
+        env:
+          CC_VERSION: ${{ env.LLVM_VERSION }}
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "$CC_VERSION"
+          sudo apt install -y "clang-$CC_VERSION"
+      # }}}
+      # {{{ macOS: the dependency steps of build_headless_macos, plus the Homebrew Qt its comment explains
+      - name: "install dependencies (Homebrew Qt: a dev build that is never packaged)"
+        if: runner.os == 'macOS'
+        run: env CONTOUR_INSTALL_BREW_QT=ON QTVER=6 ./scripts/install-deps.sh
+      # }}}
+      # {{{ Windows: the dependency steps of the windows job
+      - name: "Fetch embedded dependencies"
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/install-deps.ps1 --skip-vcpkg
+      - name: "Setup NuGet for vcpkg caching"
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+            --name GitHub \
+            --username "${{ github.repository_owner }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            --store-password-in-clear-text
+      - name: "Cache vcpkg"
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        id: vcpkg-cache
+        with:
+          path: ${{ runner.workspace }}/vcpkg
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+      - name: "Upgrade NuGet"
+        if: runner.os == 'Windows'
+        run: choco upgrade nuget.commandline -y
+      - name: "vcpkg: Clone and bootstrap"
+        if: runner.os == 'Windows' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git ${{ runner.workspace }}\vcpkg
+          ${{ runner.workspace }}\vcpkg\bootstrap-vcpkg.bat
+          ${{ runner.workspace }}\vcpkg\vcpkg.exe fetch nuget
+      - name: "vcpkg: Install dependencies"
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ${{ runner.workspace }}\vcpkg\vcpkg.exe install --triplet x64-windows
+        env:
+          VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
+      - name: "Install cmake"
+        if: runner.os == 'Windows'
+        uses: lukka/get-cmake@v3.29.0
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      # }}}
+      # Qt, as the jobs above pin it: a GuiPrivate-capable one on Linux, the flat-layout 6.10 on Windows.
+      # macOS builds against the Homebrew Qt of the presets.
+      - name: "Install Qt (Linux)"
+        if: runner.os == 'Linux'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.1"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+      - name: "Install Qt (Windows)"
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.10.*"
+          modules: qtmultimedia qt5compat qtshadertools qtspeech
+      # CONTOUR_EXTENSIONS_BUNDLED is on by default, and its configuration fails without cargo and the
+      # wasm32-wasip1 target: the bundled status-line extensions are Rust.
+      - name: "install Rust (wasm32-wasip1)"
+        shell: bash
+        run: ./scripts/install-rust-wasm.sh
+      - name: "Generate build files"
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            cmake --preset "$CMAKE_PRESET" \
+                  -DCMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
+                  -DCONTOUR_WAYLAND=OFF \
+                  -DLIBUNICODE_UCD_BASE_DIR="$PWD/_ucd"
+          else
+            cmake --preset "$CMAKE_PRESET"
+          fi
+        env:
+          VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
+      - name: "Build contour and bench-latency"
+        shell: bash
+        run: cmake --build --preset "$CMAKE_PRESET" --target contour bench-latency
+      - name: "Locate the binaries"
+        id: binaries
+        shell: bash
+        run: |
+          # Where a preset puts them differs: out/<preset>/src/... on Linux and macOS (the latter inside
+          # the app bundle), out/build/<preset>/bin on Windows. A missing one fails here, by name.
+          bench=$(find out -type f \( -name 'bench-latency' -o -name 'bench-latency.exe' \) | head -n 1)
+          contour=$(find out -type f \( -path '*/Contents/MacOS/contour' -o -name 'contour.exe' -o -path '*/src/contour/contour' \) | head -n 1)
+          test -n "$bench" || { echo "::error::bench-latency was not built"; exit 1; }
+          test -n "$contour" || { echo "::error::contour was not built"; exit 1; }
+          echo "bench=$bench" >> "$GITHUB_OUTPUT"
+          echo "contour=$contour" >> "$GITHUB_OUTPUT"
+      - name: "bench-latency headless"
+        shell: bash
+        run: ${{ steps.binaries.outputs.bench }} headless record latency-headless.tsv
+      - name: "bench-latency e2e (headless weston)"
+        if: runner.os == 'Linux'
+        run: |
+          ./scripts/run-display-tests.sh --run \
+              "${{ steps.binaries.outputs.bench }}" e2e contour "${{ steps.binaries.outputs.contour }}" \
+              cold record latency-e2e.tsv
+      - name: "bench-latency e2e (the runner's desktop session)"
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          "${{ steps.binaries.outputs.bench }}" e2e contour "${{ steps.binaries.outputs.contour }}" \
+              cold record latency-e2e.tsv
+      - name: "Summarize"
+        if: always()
+        shell: bash
+        run: |
+          python=$(command -v python3 || command -v python)
+          "$python" scripts/ci/latency-summary.py \
+              "headless (in-process vs daemon, no GUI)=latency-headless.tsv" \
+              "e2e (contour terminal vs contour client)=latency-e2e.tsv" >> "$GITHUB_STEP_SUMMARY"
+      - name: "Upload the records"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "latency-${{ matrix.os }}-${{ github.sha }}"
+          path: latency-*.tsv
+          if-no-files-found: warn
+          retention-days: 90
   # }}}
   # {{{ Ubuntu check matrix
   check_ubuntu2404_matrix_test_matrix:

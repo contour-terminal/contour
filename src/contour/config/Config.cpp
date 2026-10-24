@@ -724,46 +724,18 @@ namespace
         return NamedProfile { .name = std::move(name), .profile = profile };
     }
 
-    /// A config loaded from disk together with the one profile @p profileName resolved to.
-    struct LoadedProfile
-    {
-        Config config;
-        std::string profileName; ///< The name actually resolved (the config's default, if empty).
-        TerminalProfile const* profile = nullptr;
-    };
-
-    /// The load-resolve-refuse sequence @ref resolveSessionConfig needs: load @p configPath (or the default
-    /// location, if empty), then resolve @p profileName within it (@see findNamedProfile).
-    /// @return The loaded config and resolved profile, or a human-readable reason it could not be resolved.
-    [[nodiscard]] std::expected<LoadedProfile, std::string> loadAndFindProfile(std::string const& configPath,
-                                                                               std::string const& profileName)
-    {
-        return tryLoadConfigFromFile(configFileNamed(configPath)).and_then([&](Config&& loaded) {
-            return findNamedProfile(loaded, profileName).transform([&](NamedProfile found) {
-                // The profile lives in the map's node, which the move hands over rather than copies.
-                return LoadedProfile {
-                    .config = std::move(loaded),
-                    .profileName = std::move(found.name),
-                    .profile = found.profile,
-                };
-            });
-        });
-    }
 } // namespace
+
+std::expected<Config, std::string> tryLoadConfigNamed(std::string_view configPath)
+{
+    return tryLoadConfigFromFile(configFileNamed(configPath));
+}
 
 std::expected<vtbackend::Settings, std::string> emulationSettingsFor(Config const& config,
                                                                      std::string const& profileName)
 {
     return findNamedProfile(config, profileName).transform([&](NamedProfile const& found) {
         return emulationSettings(config, *found.profile);
-    });
-}
-
-std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(std::string const& configPath,
-                                                                         std::string const& profileName)
-{
-    return tryLoadConfigFromFile(configFileNamed(configPath)).and_then([&](Config const& loaded) {
-        return emulationSettingsFor(loaded, profileName);
     });
 }
 
@@ -968,16 +940,23 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
     };
 }
 
-std::expected<ResolvedSessionConfig, std::string> resolveSessionConfig(std::string const& configPath,
-                                                                       std::string const& profileName)
+std::expected<ResolvedSessionConfig, std::string> resolvedSessionConfigFor(Config const& config,
+                                                                           std::string const& profileName)
 {
-    return loadAndFindProfile(configPath, profileName).transform([](LoadedProfile const& loaded) {
+    return findNamedProfile(config, profileName).transform([&](NamedProfile const& found) {
         // No dark/light preference to honor headlessly: a daemon presents nothing itself, so its
         // hosted sessions get the color config's default (light) half until an attaching client's
         // presentation states its own preference over the wire, the same way it states any other
         // per-client preference.
-        return resolvedSessionConfig(
-            loaded.config, *loaded.profile, loaded.profileName, vtbackend::ColorPreference::Light);
+        return resolvedSessionConfig(config, *found.profile, found.name, vtbackend::ColorPreference::Light);
+    });
+}
+
+std::expected<ResolvedSessionConfig, std::string> resolveSessionConfig(std::string const& configPath,
+                                                                       std::string const& profileName)
+{
+    return tryLoadConfigNamed(configPath).and_then([&](Config const& loaded) {
+        return resolvedSessionConfigFor(loaded, profileName);
     });
 }
 
@@ -1429,6 +1408,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images", c.images);
+        loadFromEntry("daemon", c.daemon);
         loadFromEntry("folding", c.folding);
         loadFromEntry("gutter", c.gutter);
         loadFromEntry("osc_context", c.oscContext);
@@ -2559,6 +2539,56 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
                            deprecatedKey);
 
         loadFromEntry(child, "good_image_protocol", where.goodImageProtocol);
+    }
+}
+
+namespace
+{
+    /// The names of @p table, comma separated, for a diagnostic.
+    template <typename Table>
+    [[nodiscard]] std::string acceptedNames(Table const& table)
+    {
+        auto names = std::string {};
+        for (auto const& [name, value]: table)
+        {
+            if (!names.empty())
+                names += ", ";
+            names += name;
+        }
+        return names;
+    }
+} // namespace
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    (void) detail::loadConfigEnum(
+        child,
+        "mode",
+        keyPathTo(child, "mode"),
+        where.mode,
+        logger,
+        [](std::string const& token) { return daemonModeFrom(core::toLower(token)); },
+        acceptedNames(DaemonModeNames));
+    (void) detail::loadConfigEnum(
+        child,
+        "size_policy",
+        keyPathTo(child, "size_policy"),
+        where.sizePolicy,
+        logger,
+        [](std::string const& token) { return vthost::clientSizePolicyFrom(core::toLower(token)); },
+        acceptedNames(vthost::ClientSizePolicyNames));
+    loadGuarded(child, "socket", where.socket);
+
+    // Absent or null (`~`) leaves the limit to the hosting profile's `history.limit`.
+    if (auto const limit = child["history_limit"]; limit && !limit.IsNull())
+    {
+        auto value = vtbackend::MaxHistoryLineCount { vtbackend::LineCount(0) };
+        loadFromEntry(child, "history_limit", value);
+        where.historyLimit = value;
     }
 }
 

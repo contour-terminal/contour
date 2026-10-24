@@ -39,8 +39,10 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <random>
 #include <ranges>
 #include <span>
 #include <string>
@@ -99,7 +101,8 @@ namespace
     /// The daemon's PTY factory: every session spawns the configured shell over a
     /// fresh PTY. Shared by the POSIX and Windows runDaemon paths.
     ///
-    /// @param shell         What to spawn.
+    /// @param shell         What to spawn; a spawn's override (a layout pane's command and directory) is
+    ///                      laid over it. A host with profiles spawns through makeProfilePtyFactory.
     /// @param escapeSandbox Whether the spawned shell escapes its sandbox (Flatpak), from the
     ///                      resolved profile's `escape_sandbox`. Was hardcoded `true` before this
     ///                      parameter existed, silently ignoring a profile's `escape_sandbox: false`.
@@ -113,26 +116,45 @@ namespace
                                                  std::filesystem::path const& socketPath,
                                                  std::shared_ptr<vtpty::ProcessPlacement> placement)
     {
-        // insert_or_assign, so the daemon wins over a profile that set the same name: a hosted
-        // shell being told where a DIFFERENT daemon lives is never what was meant, and the shell has
-        // no other way to learn where this one is.
-        for (auto const& [name, value]: hostedShellEnvironment(socketPath))
-            shell.env.insert_or_assign(name, value);
-
         return
-            [shell = std::move(shell), escapeSandbox, placement = std::move(placement)](
-                vtbackend::PageSize pageSize, std::optional<vtpty::Process::ExecInfo> const& commandOverride)
+            [shell = std::move(shell),
+             hosted = hostedShellEnvironment(socketPath),
+             escapeSandbox,
+             placement = std::move(placement)](vtbackend::PageSize pageSize,
+                                               std::optional<vtpty::Process::ExecInfo> const& commandOverride)
                 -> std::unique_ptr<vtpty::Pty> {
-                // Work on a local copy: `shell` is captured by the closure and reused for every
-                // session this factory spawns, so writing one session's override back into it would
-                // leak that pane's command/directory into every later session with no override of
-                // its own. Mirrors AppSessionFactory::createPty's identical local-copy comment for
-                // the same reason on the local-GUI path.
-                auto effective = shell;
-                vtpty::Process::applyCommandOverride(effective, commandOverride);
+                // A fresh shell per spawn: `shell` is captured by the closure and reused for every session
+                // this factory spawns, so writing one session's override back into it would leak that pane's
+                // command/directory into every later session. Mirrors AppSessionFactory::createPty.
                 return std::make_unique<vtpty::Process>(
-                    effective, vtpty::createPty(pageSize, std::nullopt), escapeSandbox, placement);
+                    hostedShellFor(shell, commandOverride, ShellOverride::Overlays, hosted),
+                    vtpty::createPty(pageSize, std::nullopt),
+                    escapeSandbox,
+                    placement);
             };
+    }
+
+    /// The PTY factory of a daemon with profiles: each session runs its resolved profile's whole shell, with
+    /// that profile's own environment and sandbox policy, as the in-process GUI spawns that profile
+    /// (SessionFactory takes `escape_sandbox` from the session's own profile).
+    /// @param shell      The daemon's default shell, whose program runs when a profile names none.
+    /// @param socketPath The daemon's control socket, which every hosted shell is told about.
+    /// @param placement  Moves each hosted shell into its own resource domain.
+    [[nodiscard]] ProfilePtyFactory makeProfilePtyFactory(vtpty::Process::ExecInfo shell,
+                                                          std::filesystem::path const& socketPath,
+                                                          std::shared_ptr<vtpty::ProcessPlacement> placement)
+    {
+        return [base = std::move(shell),
+                hosted = hostedShellEnvironment(socketPath),
+                placement = std::move(placement)](vtbackend::PageSize pageSize,
+                                                  vtpty::Process::ExecInfo const& profileShell,
+                                                  SandboxEscape sandbox) -> std::unique_ptr<vtpty::Pty> {
+            return std::make_unique<vtpty::Process>(
+                hostedShellFor(base, profileShell, ShellOverride::Replaces, hosted),
+                vtpty::createPty(pageSize, std::nullopt),
+                sandbox == SandboxEscape::Escapes,
+                placement);
+        };
     }
 
     /// Reads the whole file at @p path, or nullopt if it cannot be opened.
@@ -303,14 +325,24 @@ namespace
     /// handshake that offers DaemonControl, because @p runtime answers it. Only a daemon offers it; an
     /// embedded host's default handshake keeps not claiming what its null daemon control refuses.
     /// @param runtime The daemon (not owned; outlives every connection).
+    /// @param config The daemon's configuration: with profiles, the handshake offers ProfileByName too.
     /// @param token The preshared token required of every client; empty for the unix endpoint.
     /// @return The services.
-    [[nodiscard]] NativeSessionServices daemonNativeServices(DaemonRuntime& runtime, std::string token = {})
+    [[nodiscard]] NativeSessionServices daemonNativeServices(DaemonRuntime& runtime,
+                                                             DaemonConfig const& config,
+                                                             std::string token = {})
     {
+        auto capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
+                                                       proto::Capability::DaemonControl,
+                                                       proto::Capability::InitialClientArea,
+                                                       proto::Capability::AttachIntent,
+                                                       proto::Capability::TabEdits,
+                                                       proto::Capability::Heartbeat });
+        // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
+        if (config.profiles)
+            capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));
         return NativeSessionServices {
-            .handshake = { .expectedToken = std::move(token),
-                           .capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
-                                                                      proto::Capability::DaemonControl }) },
+            .handshake = { .expectedToken = std::move(token), .capabilities = std::move(capabilities) },
             .daemon = runtime,
         };
     }
@@ -457,6 +489,14 @@ namespace
     }
 } // namespace
 
+uint64_t drawDaemonInstance()
+{
+    auto device = std::random_device {};
+    auto engine = std::mt19937_64 { (uint64_t { device() } << 32U) ^ device() };
+    auto draw = std::uniform_int_distribution<uint64_t> { 1, std::numeric_limits<uint64_t>::max() };
+    return draw(engine);
+}
+
 std::expected<void, std::string> prepareSocketDirectory(
     [[maybe_unused]] std::filesystem::path const& socketPath)
 {
@@ -469,63 +509,6 @@ std::expected<void, std::string> prepareSocketDirectory(
 #else
     return {};
 #endif
-}
-
-std::string endpointToken(AttachEndpoint const& endpoint)
-{
-    if (auto const* tcp = std::get_if<TcpEndpoint>(&endpoint))
-        return tcp->token;
-    return {};
-}
-
-namespace
-{
-    /// @param error What a connect failed with.
-    /// @return Whether it says nothing listens: a refused connection, or a socket file that is gone.
-    [[nodiscard]] AttachFailure classifyConnectFailure(core::net::NetError const& error)
-    {
-        // ENOENT is ERROR_FILE_NOT_FOUND's number too, and WSAECONNREFUSED arrives as ConnRefused.
-        auto const absent = error.code == core::net::NetErrorCode::ConnRefused || error.systemCode == ENOENT;
-        return AttachFailure { .kind =
-                                   absent ? AttachFailureKind::DaemonAbsent : AttachFailureKind::Unreachable,
-                               .text = error.toString() };
-    }
-} // namespace
-
-core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, AttachFailure>> connectAttachDetailed(
-    core::net::EventLoop* loop, AttachEndpoint endpoint)
-{
-    if (auto const* unixEp = std::get_if<UnixEndpoint>(&endpoint))
-    {
-        auto socket =
-            co_await core::net::connectUnix(loop, core::pathToUtf8(nativeSocketPath(unixEp->socketPath)));
-        if (!socket)
-            co_return std::unexpected(classifyConnectFailure(socket.error()));
-        co_return std::move(*socket);
-    }
-
-    auto const& tcp = std::get<TcpEndpoint>(endpoint);
-    auto socket = co_await core::net::connect(loop, tcp.host, tcp.port);
-    if (!socket)
-        co_return std::unexpected(classifyConnectFailure(socket.error()));
-    // The host we asked for is also the name the certificate must carry: a pinned CA proves who
-    // signed, not who was signed for.
-    auto tls = core::net::makeTlsClientContext(tcp.caPem, tcp.host);
-    if (!tls)
-        co_return std::unexpected(AttachFailure { .text = tls.error() });
-    auto encrypted = (*tls)->wrap(std::move(*socket), *loop);
-    if (!encrypted)
-        co_return std::unexpected(AttachFailure { .text = "TLS handshake setup failed" });
-    co_return std::move(encrypted);
-}
-
-core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string>> connectAttach(
-    core::net::EventLoop* loop, AttachEndpoint endpoint)
-{
-    auto socket = co_await connectAttachDetailed(loop, std::move(endpoint));
-    if (!socket)
-        co_return std::unexpected(std::move(socket.error().text));
-    co_return std::move(*socket);
 }
 
 namespace
@@ -670,7 +653,13 @@ int runDaemon(DaemonConfig const& config)
                             .sizePolicy = config.sizePolicy,
                             .startupLayout = config.startupLayout,
                             .identity = thisHostIdentity(),
-                            .extensions = config.extensions ? config.extensions() : nullptr }
+                            .extensions = config.extensions ? config.extensions() : nullptr,
+                            .profiles = config.profiles,
+                            .profilePtys =
+                                config.profiles
+                                    ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
+                                    : ProfilePtyFactory {},
+                            .instance = config.instance }
     };
     // Declared before the drain, as the funnel is: the connection flows the drain unwinds hold its census
     // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
@@ -683,6 +672,10 @@ int runDaemon(DaemonConfig const& config)
     // already, or every listener died on its own and servers.clear() left it nothing to close.
     auto lifecycleWatchers = LifecycleWatchers {};
     installLifecycleWatchers(lifecycleWatchers, config, host, runtime.census(), loop, funnel);
+    // After the host, so its timer is disarmed before the host it hands catalogs to goes.
+    auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
+    if (config.configReload)
+        reloadWatcher.emplace(loop, host, *config.configReload);
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
@@ -701,10 +694,11 @@ int runDaemon(DaemonConfig const& config)
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer = ConnectionAcceptor { loop,
-                                             "native",
-                                             std::move(*nativeListener),
-                                             makeNativeHandler(loop, host, daemonNativeServices(runtime)) };
+    auto nativeServer =
+        ConnectionAcceptor { loop,
+                             "native",
+                             std::move(*nativeListener),
+                             makeNativeHandler(loop, host, daemonNativeServices(runtime, config)) };
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
@@ -761,7 +755,7 @@ int runDaemon(DaemonConfig const& config)
             "native-tcp",
             std::move(*tcpListener),
             makeTlsNativeHandler(
-                loop, host, std::move(tls), daemonNativeServices(runtime, config.nativeTcp->token)));
+                loop, host, std::move(tls), daemonNativeServices(runtime, config, config.nativeTcp->token)));
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
     }
@@ -784,21 +778,18 @@ DaemonPresence awaitDaemon(DaemonSpawner& spawner,
                            std::filesystem::path const& socketPath,
                            std::chrono::milliseconds timeout)
 {
-    // Poll until the socket accepts connections or the timeout elapses. Back off gradually: a freshly
-    // started daemon needs a moment to bind, but polling at a fixed interval wastes ~50 connect/close
-    // cycles over the default 5s timeout. Doubling the sleep each iteration caps at 1s.
+    // Poll until the socket accepts connections or the timeout elapses. A freshly started daemon binds
+    // within a few ms, so the poll starts at 5 ms and doubles up to a 1s cap, which keeps a long wait
+    // from burning connect/close cycles.
     auto const deadline = std::chrono::steady_clock::now() + timeout;
-    auto sleepMs = std::chrono::milliseconds { 50 };
+    auto delay = std::optional<core::platform::SteadyDuration> {};
     while (std::chrono::steady_clock::now() < deadline)
     {
         if (spawner.probe(socketPath) == DaemonPresence::Serving)
             return DaemonPresence::Serving;
-        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now());
-        if (remaining < sleepMs)
-            sleepMs = remaining;
-        std::this_thread::sleep_for(sleepMs);
-        sleepMs = std::min(sleepMs * 2, std::chrono::milliseconds { 1000 });
+        delay = nextProbeDelay(delay);
+        auto const remaining = deadline - std::chrono::steady_clock::now();
+        std::this_thread::sleep_for(std::min<core::platform::SteadyDuration>(*delay, remaining));
     }
     return DaemonPresence::Absent;
 }
@@ -877,13 +868,23 @@ int runDaemon(DaemonConfig const& config)
                             .sizePolicy = config.sizePolicy,
                             .startupLayout = config.startupLayout,
                             .identity = thisHostIdentity(),
-                            .extensions = config.extensions ? config.extensions() : nullptr }
+                            .extensions = config.extensions ? config.extensions() : nullptr,
+                            .profiles = config.profiles,
+                            .profilePtys =
+                                config.profiles
+                                    ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
+                                    : ProfilePtyFactory {},
+                            .instance = config.instance }
     };
     // See the POSIX body above for why the runtime is declared here, before the drain.
     auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
     // See the POSIX body above for why the lifecycle watchers are declared here, before the drain.
     auto lifecycleWatchers = LifecycleWatchers {};
     installLifecycleWatchers(lifecycleWatchers, config, host, runtime.census(), loop, funnel);
+    // After the host, so its timer is disarmed before the host it hands catalogs to goes.
+    auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
+    if (config.configReload)
+        reloadWatcher.emplace(loop, host, *config.configReload);
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
@@ -900,10 +901,11 @@ int runDaemon(DaemonConfig const& config)
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer = ConnectionAcceptor { loop,
-                                             "native",
-                                             std::move(*nativeListener),
-                                             makeNativeHandler(loop, host, daemonNativeServices(runtime)) };
+    auto nativeServer =
+        ConnectionAcceptor { loop,
+                             "native",
+                             std::move(*nativeListener),
+                             makeNativeHandler(loop, host, daemonNativeServices(runtime, config)) };
     // No imsg endpoint on Windows: SCM_RIGHTS fd passing does not exist here.
 
     servers = { &server, &nativeServer };
@@ -930,7 +932,7 @@ int runDaemon(DaemonConfig const& config)
             "native-tcp",
             std::move(*tcpListener),
             makeTlsNativeHandler(
-                loop, host, std::move(tls), daemonNativeServices(runtime, config.nativeTcp->token)));
+                loop, host, std::move(tls), daemonNativeServices(runtime, config, config.nativeTcp->token)));
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
     }

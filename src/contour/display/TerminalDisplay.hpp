@@ -30,13 +30,11 @@
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGRenderNode>
 
+#include <atomic>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <variant>
-#ifdef CONTOUR_PERF_STATS
-    #include <atomic>
-#endif
 
 QT_BEGIN_NAMESPACE
 class QRhi;
@@ -55,6 +53,28 @@ namespace contour::display
 {
 
 class RhiRenderer;
+
+/// The cursor column of the frame a display drew last. Shared rather than a plain member so a reader on
+/// the render thread -- the latency probe's frameSwapped handler -- may hold it past the display's end.
+class DrawnCursorColumn
+{
+  public:
+    /// @param column The 0-based column the frame drew the cursor at, or nullopt when it drew none.
+    void store(std::optional<int> column) noexcept
+    {
+        _column.store(column.value_or(-1), std::memory_order_release);
+    }
+
+    /// @return The column last stored, or nullopt when that frame drew no cursor (or none was drawn yet).
+    [[nodiscard]] std::optional<int> load() const noexcept
+    {
+        auto const column = _column.load(std::memory_order_acquire);
+        return column < 0 ? std::nullopt : std::optional<int> { column };
+    }
+
+  private:
+    std::atomic<int> _column { -1 };
+};
 
 // It currently can handles multiple terminals inside via tabs support.
 // that is managed by TerminalSessionManager.
@@ -117,6 +137,14 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     /// render-target-dependent methods (e.g. setFonts) must re-check this at dispatch time, the same
     /// way they re-check window().
     [[nodiscard]] bool hasRenderTarget() const noexcept final { return _renderTarget != nullptr; }
+
+    /// @return The cursor column of the frame prepareFrameRhi() drew last. Safe to read from any thread,
+    ///         and for as long as it is held, the display's own lifetime notwithstanding; what the latency
+    ///         probe waits on.
+    [[nodiscard]] std::shared_ptr<DrawnCursorColumn const> drawnCursorColumn() const noexcept
+    {
+        return _drawnCursorColumn;
+    }
 
     // NB: Use TerminalSession.attachDisplay, that one is calling this here. TODO(PR) ?
     void setSession(session::TerminalSession* newSession);
@@ -591,6 +619,8 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
     bool _locationReportPending = false;
     bool _doDumpState = false;
     std::optional<std::variant<std::filesystem::path, std::monostate>> _saveScreenshot { std::nullopt };
+    /// The cursor column of the frame prepareFrameRhi() drew last.
+    std::shared_ptr<DrawnCursorColumn> _drawnCursorColumn = std::make_shared<DrawnCursorColumn>();
 
     // ======================================================================
 

@@ -30,6 +30,60 @@ namespace
         return text;
     }
 
+    /// @return @p windows as `[1,3]`.
+    [[nodiscard]] std::string formatWindows(std::vector<uint64_t> const& windows)
+    {
+        auto text = std::string {};
+        for (auto const window: windows)
+            text += std::format("{}{}", text.empty() ? "" : ",", window);
+        return std::format("[{}]", text);
+    }
+
+    /// One row of the table naming an AttachIntentKind in a trace.
+    struct IntentName
+    {
+        AttachIntentKind kind;
+        std::string_view name;
+    };
+
+    constexpr auto IntentNames = std::array {
+        IntentName { .kind = AttachIntentKind::AllWindows, .name = "all-windows" },
+        IntentName { .kind = AttachIntentKind::Launch, .name = "launch" },
+        IntentName { .kind = AttachIntentKind::NewWindow, .name = "new-window" },
+        IntentName { .kind = AttachIntentKind::Windows, .name = "windows" },
+        IntentName { .kind = AttachIntentKind::Resume, .name = "resume" },
+    };
+
+    /// One row of the table naming a TabEditKind in a trace.
+    struct TabEditName
+    {
+        TabEditKind kind;
+        std::string_view name;
+    };
+
+    constexpr auto TabEditNames = std::array {
+        TabEditName { .kind = TabEditKind::ActivatePane, .name = "activate-pane" },
+        TabEditName { .kind = TabEditKind::Zoom, .name = "zoom" },
+        TabEditName { .kind = TabEditKind::Unzoom, .name = "unzoom" },
+        TabEditName { .kind = TabEditKind::SetTitle, .name = "set-title" },
+        TabEditName { .kind = TabEditKind::ClearTitle, .name = "clear-title" },
+        TabEditName { .kind = TabEditKind::SetColor, .name = "set-color" },
+        TabEditName { .kind = TabEditKind::ClearColor, .name = "clear-color" },
+        TabEditName { .kind = TabEditKind::ActivateTab, .name = "activate-tab" },
+    };
+
+    /// @return The profile as a trace field (`profile="x"`), or nothing for the connection's own.
+    [[nodiscard]] std::string profileField(std::string const& profileName)
+    {
+        return profileName.empty() ? std::string {} : std::format("profile=\"{}\"", profileName);
+    }
+
+    /// @return The profile field with the space that separates it from the fields before it, or nothing.
+    [[nodiscard]] std::string profileSuffix(std::string const& profileName)
+    {
+        return profileName.empty() ? std::string {} : std::format(" {}", profileField(profileName));
+    }
+
     /// The trace half of the catalog: one row per tag, carrying BOTH the name and how to
     /// summarise the payload — so adding a PDU is one row here, not a row in one table and an
     /// overload somewhere else. The captureless lambdas decay to plain function pointers via
@@ -54,12 +108,20 @@ namespace
                        // The token authenticates the peer: report its PRESENCE, never its bytes. The
                        // session settings get the same treatment for a different reason -- they are
                        // a block of the user's configuration, and a trace is not a config dump.
-                       return std::format("versions={} caps={} token={} settings={} role={}",
-                                          formatRange(value.versions),
-                                          formatCapabilities(value.capabilities),
-                                          value.token.empty() ? "no" : "yes",
-                                          value.sessionSettings ? "yes" : "no",
-                                          value.role == ConnectionRole::Control ? "control" : "attach");
+                       return std::format(
+                           "versions={} caps={} token={} settings={} role={} area={} intent={} windows={} "
+                           "profile=\"{}\"",
+                           formatRange(value.versions),
+                           formatCapabilities(value.capabilities),
+                           value.token.empty() ? "no" : "yes",
+                           value.sessionSettings ? "yes" : "no",
+                           value.role == ConnectionRole::Control ? "control" : "attach",
+                           value.clientArea
+                               ? std::format("{}x{}", value.clientArea->columns, value.clientArea->lines)
+                               : std::string { "none" },
+                           std::ranges::find(IntentNames, value.attachIntent.kind, &IntentName::kind)->name,
+                           formatWindows(value.attachIntent.windows),
+                           value.profileName);
                    } },
         TraceRow { PduType::ServerHello,
                    "ServerHello",
@@ -73,11 +135,14 @@ namespace
                                return std::format("layout=version-alone version={}", value.codecVersion);
                            case HelloLayout::Negotiating: break;
                        }
-                       return std::format("layout=negotiating agreed={} versions={} caps={} release={}",
+                       return std::format("layout=negotiating agreed={} versions={} caps={} release={} "
+                                          "followed={} instance={:016x}",
                                           value.agreedVersion,
                                           formatRange(value.versions),
                                           formatCapabilities(value.capabilities),
-                                          value.releaseVersion.empty() ? "unknown" : value.releaseVersion);
+                                          value.releaseVersion.empty() ? "unknown" : value.releaseVersion,
+                                          formatWindows(value.followedWindows),
+                                          value.daemonInstance);
                    } },
         TraceRow { PduType::Input,
                    "Input",
@@ -209,23 +274,30 @@ namespace
         TraceRow { PduType::CreateTab,
                    "CreateTab",
                    +[](DecodedPdu const& pdu) {
-                       return std::format("session={}", std::get<CreateTab>(pdu).session);
+                       auto const& value = std::get<CreateTab>(pdu);
+                       return std::format("session={}{}", value.session, profileSuffix(value.profileName));
                    } },
         TraceRow { PduType::SplitPane,
                    "SplitPane",
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<SplitPane>(pdu);
-                       return std::format("session={} orientation={} ratio={}",
+                       return std::format("session={} orientation={} ratio={}{}",
                                           value.session,
                                           value.orientation,
-                                          value.ratio);
+                                          value.ratio,
+                                          profileSuffix(value.profileName));
                    } },
         TraceRow { PduType::ClosePane,
                    "ClosePane",
                    +[](DecodedPdu const& pdu) {
                        return std::format("session={}", std::get<ClosePane>(pdu).session);
                    } },
-        TraceRow { PduType::NewWindow, "NewWindow", nullptr },
+        TraceRow { PduType::NewWindow,
+                   "NewWindow",
+                   +[](DecodedPdu const& pdu) {
+                       // Empty for the connection's own profile, which keeps a plain NewWindow's trace bare.
+                       return profileField(std::get<NewWindow>(pdu).profileName);
+                   } },
         TraceRow { PduType::ResizeSplit,
                    "ResizeSplit",
                    +[](DecodedPdu const& pdu) {
@@ -296,6 +368,27 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        return std::format("reason={}", std::get<StopDaemon>(pdu).reason);
                    } },
+        TraceRow { PduType::EditTab,
+                   "EditTab",
+                   +[](DecodedPdu const& pdu) {
+                       // The title is sized, never transcribed: it is the user's own text.
+                       auto const& value = std::get<EditTab>(pdu);
+                       auto const known = std::ranges::find(TabEditNames, value.kind, &TabEditName::kind);
+                       auto text = std::format("session={} {}",
+                                               value.session,
+                                               known != TabEditNames.end()
+                                                   ? std::string { known->name }
+                                                   : std::format("kind={}", std::to_underlying(value.kind)));
+                       if (value.kind == TabEditKind::SetTitle)
+                           text += std::format(" title={}B", value.title.size());
+                       if (value.kind == TabEditKind::SetColor)
+                           text += std::format(" #{:06x}", value.color);
+                       return text;
+                   } },
+        TraceRow {
+            PduType::Heartbeat,
+            "Heartbeat",
+            +[](DecodedPdu const& pdu) { return std::format("nonce={}", std::get<Heartbeat>(pdu).nonce); } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

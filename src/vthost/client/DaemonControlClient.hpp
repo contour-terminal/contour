@@ -5,7 +5,7 @@
 /// The client side of daemon control: asking a running daemon about itself, and asking it to stop, over a
 /// Control-role connection. `DaemonControlPort` is the seam the CLI and the GUI's drift handling talk to;
 /// `SocketDaemonControl` is its implementation over any connected socket, and `makeDaemonControl` wires it
-/// to the daemon's real endpoint.
+/// to a real transport.
 
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
@@ -21,8 +21,8 @@
 #include <optional>
 #include <string>
 
-#include <vthost/Daemon.hpp>
 #include <vthost/DaemonLifecycle.hpp>
+#include <vthost/Transport.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost::client
@@ -114,11 +114,13 @@ class SocketDaemonControl final: public DaemonControlPort
 /// longer — revisit it then.
 inline constexpr auto DefaultControlTimeout = std::chrono::milliseconds { 2000 };
 
-/// Daemon control over the daemon's real endpoint, owning the loop it runs on.
-/// @param endpoint Where the daemon listens.
+/// Daemon control over a real transport, owning the loop it runs on.
+/// @param transport How to reach the daemon. A probe passes one that never starts a daemon (a
+///        UnixTransportFactory with an empty ensureDaemon), so asking about a daemon never starts one.
 /// @param timeout How long a whole call may take.
-/// @return The port; a missing socket or a refused connection reads as ControlErrorCode::NotRunning.
+/// @return The port; TransportErrorKind::DaemonAbsent -- a missing socket or a refused connection -- reads
+///         as ControlErrorCode::NotRunning.
 [[nodiscard]] std::unique_ptr<DaemonControlPort> makeDaemonControl(
-    AttachEndpoint endpoint, std::chrono::milliseconds timeout = DefaultControlTimeout);
+    std::shared_ptr<ITransportFactory> transport, std::chrono::milliseconds timeout = DefaultControlTimeout);
 
 } // namespace vthost::client

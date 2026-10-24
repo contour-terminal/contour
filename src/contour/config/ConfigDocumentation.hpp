@@ -1395,6 +1395,26 @@ constexpr StringLiteral ImagesConfig {
     "\n"
 };
 
+constexpr StringLiteral DaemonConfig {
+    "daemon:\n"
+    "    {comment} Where sessions live. in_process keeps them in this process; auto hosts them in a\n"
+    "    {comment} daemon and falls back to in_process, with a notice, when none can be reached;\n"
+    "    {comment} required hosts them in a daemon and fails when none can be reached.\n"
+    "    mode: {}\n"
+    "\n"
+    "    {comment} The daemon's socket path. Empty selects the default.\n"
+    "    socket: {}\n"
+    "\n"
+    "    {comment} Which attached client's size the shared grid takes when clients disagree:\n"
+    "    {comment} latest, smallest or largest.\n"
+    "    size_policy: {}\n"
+    "\n"
+    "    {comment} Scrollback lines the daemon keeps per session (-1 for unlimited). ~ uses the\n"
+    "    {comment} hosting profile's history.limit.\n"
+    "    history_limit: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral ExperimentalFeaturesConfig {
     "\n"
     "{comment} Section of experimental features.\n"
@@ -2050,6 +2070,24 @@ constexpr StringLiteral ImagesWeb {
     "`sixel_scrolling`, `sixel_register_count`, and `good_image_protocol` to control various aspects of "
     "image rendering. The maximum image size is derived from the screen size; `max_width` and "
     "`max_height` are deprecated and ignored."
+};
+
+constexpr StringLiteral DaemonWeb {
+    "section decides whether sessions are hosted by a daemon process, so they outlive the window.\n"
+    "``` yaml\n"
+    "daemon:\n"
+    "  mode: auto\n"
+    "  socket: \"\"\n"
+    "  size_policy: latest\n"
+    "  history_limit: 1000\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==mode== `in_process` keeps sessions in the GUI process, `auto` uses a "
+    "daemon and falls back to in-process with a notice, `required` fails when no daemon can be reached.\n"
+    ":octicons-horizontal-rule-16: ==socket== The daemon's socket path; empty selects the default.\n"
+    ":octicons-horizontal-rule-16: ==size_policy== Which client's size wins when several are attached: "
+    "`latest`, `smallest` or `largest`.\n"
+    ":octicons-horizontal-rule-16: ==history_limit== Scrollback lines per session, `-1` for unlimited; "
+    "unset uses the hosting profile's `history.limit`.\n"
 };
 
 constexpr StringLiteral ProfilesWeb { "All profiles inside configuration files share parent node `profiles`. "
@@ -3438,6 +3476,7 @@ using InputMappings = DocumentationEntry<InputMappingsConfig, Dummy>;
 using SpawnNewProcess = DocumentationEntry<SpawnNewProcessConfig, SpawnNewProcessWeb>;
 using EarlyExitThreshold = DocumentationEntry<EarlyExitThresholdConfig, EarlyExitThresholdWeb>;
 using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
+using Daemon = DocumentationEntry<DaemonConfig, DaemonWeb>;
 using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;
 using DefaultColors = DocumentationEntry<DefaultColorsConfig, Dummy>;
 using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, HyperlinkDecorationWeb>;

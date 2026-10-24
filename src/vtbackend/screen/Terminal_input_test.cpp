@@ -147,6 +147,26 @@ TEST_CASE("Terminal.mouse coordinate modes are one mutually-exclusive setting", 
     }
 }
 
+TEST_CASE("mouse reports add the reported cell origin", "[vtbackend][mouse]")
+{
+    // A mirror smaller than the daemon's grid shows a window into it, so the cell under the pointer here is
+    // the cell the origin further in there -- and the application must hear about the cell it drew.
+    using namespace vtbackend;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(10) } };
+    auto constexpr NoPixel = PixelCoordinate {};
+    mc.writeToScreen("\033[?1000h\033[?1006h"sv);
+    mc.terminal.setReportedCellOrigin(CellLocation { .line = LineOffset(15), .column = ColumnOffset(30) });
+
+    mc.resetReplyData();
+    std::ignore =
+        mc.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, CellLocation {}, NoPixel, false);
+    CHECK(e(mc.replyData()) == e("\033[<0;31;16M"sv));
+
+    mc.resetReplyData();
+    std::ignore = mc.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, NoPixel, false);
+    CHECK(e(mc.replyData()) == e("\033[<0;31;16m"sv));
+}
+
 TEST_CASE("Terminal.KittyKeyRelease.sendKeyEvent", "[terminal]")
 {
     auto mc = MockTerm { PageSize { LineCount(24), ColumnCount(80) } };

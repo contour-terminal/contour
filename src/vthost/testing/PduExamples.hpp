@@ -62,12 +62,16 @@ namespace vthost::testing
               // The settings block is the user's configuration; PduTrace_test proves
               // the trace summarizes rather than transcribes it.
               .sessionSettings = proto::WireSessionSettings { .historyLineCount = 5000,
-                                                              .wordDelimiters = "secret-delimiters" } } } },
+                                                              .wordDelimiters = "secret-delimiters" },
+              .clientArea = proto::WireClientArea { .columns = 132, .lines = 43 },
+              .attachIntent = { .kind = proto::AttachIntentKind::Resume, .windows = { 1, 7 } },
+              .profileName = "work" } } },
         { proto::PduType::ServerHello,
           proto::DecodedPdu { proto::ServerHello { .agreedVersion = 4,
                                                    .capabilities = { .idents = { 1 } },
                                                    .machineId = "secret-machine-id",
-                                                   .hostname = "secret-host" } } },
+                                                   .hostname = "secret-host",
+                                                   .followedWindows = { 1, 3 } } } },
         { proto::PduType::Input,
           proto::DecodedPdu { proto::Input {
               .session = 4, .data = { std::byte { 'h' }, std::byte { 'i' }, std::byte { '!' } } } } },
@@ -93,7 +97,8 @@ namespace vthost::testing
         { proto::PduType::LayoutState,
           proto::DecodedPdu {
               proto::LayoutState { .window = 1, .activeTab = 0, .tabs = std::vector<proto::WireTab>(2) } } },
-        { proto::PduType::CreateTab, proto::DecodedPdu { proto::CreateTab { .session = 4 } } },
+        { proto::PduType::CreateTab,
+          proto::DecodedPdu { proto::CreateTab { .session = 4, .profileName = "work" } } },
         { proto::PduType::SplitPane,
           proto::DecodedPdu { proto::SplitPane { .session = 4, .orientation = 1, .ratio = 5000 } } },
         { proto::PduType::ClosePane, proto::DecodedPdu { proto::ClosePane { .session = 4 } } },
@@ -130,6 +135,10 @@ namespace vthost::testing
                                                          .sessions = 3,
                                                          .clients = 1 } } },
         { proto::PduType::StopDaemon, proto::DecodedPdu { proto::StopDaemon { .reason = 1 } } },
+        { proto::PduType::EditTab,
+          proto::DecodedPdu {
+              proto::EditTab { .session = 4, .kind = proto::TabEditKind::SetTitle, .title = "build" } } },
+        { proto::PduType::Heartbeat, proto::DecodedPdu { proto::Heartbeat { .nonce = 7 } } },
     };
 }
 

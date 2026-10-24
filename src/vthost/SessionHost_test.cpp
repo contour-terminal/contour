@@ -36,6 +36,7 @@
 #include <functional>
 #include <future>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -44,6 +45,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #ifdef CONTOUR_EXTENSIONS
@@ -52,9 +54,12 @@
     #include <vthost/DaemonExtensions.hpp>
     #include <vthost/testing/GatedFileSystem.hpp>
 #endif
+#include <vthost/ConfigReload.hpp>
+#include <vthost/HostedShell.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
+#include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -322,6 +327,39 @@ TEST_CASE("the last pane's session exit closes the whole tab", "[vthost][host]")
     CHECK(h.host.sessionCount() == 0);
     CHECK(h.host.model().window(h.host.windowId())->tabCount() == 0);
     CHECK(h.recorder.saw("tabClosed"));
+}
+
+TEST_CASE("writeInput stamps the session's last input on the loop clock", "[vthost][host][flush]")
+{
+    auto clock =
+        core::platform::ManualClock { core::platform::SteadyTimePoint {} + std::chrono::seconds { 5 } };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source, clock };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    auto const a = vthost::testing::newSession(host);
+    auto const b = vthost::testing::newSession(host);
+
+    CHECK_FALSE(host.lastInputAt(a).has_value());
+    host.writeInput(a, "x");
+    CHECK(host.lastInputAt(a) == clock.now());
+    CHECK_FALSE(host.lastInputAt(b).has_value());
+    CHECK_FALSE(host.lastInputAt(vtworkspace::SessionId { 999 }).has_value());
+
+    // A later input moves the stamp; input for an unknown session stamps nothing.
+    clock.advance(std::chrono::milliseconds { 7 });
+    host.writeInput(a, "y");
+    host.writeInput(vtworkspace::SessionId { 999 }, "z");
+    CHECK(host.lastInputAt(a) == clock.now());
+    CHECK_FALSE(host.lastInputAt(vtworkspace::SessionId { 999 }).has_value());
+
+    host.handleSessionExit(a);
+    CHECK_FALSE(host.lastInputAt(a).has_value());
 }
 
 TEST_CASE("an unsubscribed observer stops receiving events", "[vthost][host]")
@@ -1949,3 +1987,248 @@ TEST_CASE("SessionHost.extension.commandInFlightAtTeardown", "[vthost][host][ext
 
     #endif
 #endif
+
+namespace
+{
+
+/// @param mainShell What the default profile "main" runs.
+/// @param mainHistory The scrollback "main" keeps.
+/// @return The catalog the profile cases resolve in: "main" (the default), "build" running /bin/build-shell
+///         with 5000 lines, "ops" /bin/ops-shell with 2000.
+std::shared_ptr<vthost::ProfileCatalog const> profileCatalog(
+    std::string mainShell = "/bin/zsh", vtbackend::LineCount mainHistory = vtbackend::LineCount(1000))
+{
+    using vthost::testing::fakeProfile;
+    auto main = fakeProfile(std::move(mainShell), mainHistory);
+    main.shell.env["ONLY_MAIN"] = "1"; // set by the default profile alone
+    auto ops = fakeProfile("/bin/ops-shell", vtbackend::LineCount(2000));
+    ops.sandbox = vthost::SandboxEscape::Contained; // escape_sandbox: false, unlike the default
+    return std::make_shared<vthost::testing::FakeProfileCatalog>(
+        std::map<std::string, vthost::ResolvedProfile> {
+            { "main", std::move(main) },
+            { "build", fakeProfile("/bin/build-shell", vtbackend::LineCount(5000)) },
+            { "ops", ops },
+        },
+        "main");
+}
+
+/// A host over @ref profileCatalog that records the shell every session it spawns was given, on a loop
+/// timed by a clock the case advances.
+struct ProfileHost
+{
+    explicit ProfileHost(vtworkspace::Layout layout = {}):
+        host { loop,
+               [this](vtbackend::PageSize size,
+                      std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                   programs.push_back(commandOverride ? commandOverride->program : std::string {});
+                   shells.push_back(commandOverride.value_or(vtpty::Process::ExecInfo {}));
+                   return std::make_unique<vtpty::MockPty>(size);
+               },
+               vtbackend::Settings {},
+               core::defaultEnvironment(),
+               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                           .startupLayout = std::move(layout),
+                                           .profiles = profileCatalog(),
+                                           .profilePtys = recordProfileSpawn() } }
+    {
+    }
+
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + std::chrono::seconds { 10 } };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source, clock };
+    std::vector<std::string> programs {};            ///< The program each spawn was given, in spawn order.
+    std::vector<vtpty::Process::ExecInfo> shells {}; ///< The whole shell each spawn was given, in order.
+    std::vector<vthost::SandboxEscape> sandboxes {}; ///< The sandbox policy each profile spawn was given.
+
+    /// @return A profile PTY factory recording what each spawn was given, as the PtyFactory above does.
+    [[nodiscard]] vthost::ProfilePtyFactory recordProfileSpawn()
+    {
+        return [this](vtbackend::PageSize size,
+                      vtpty::Process::ExecInfo const& shell,
+                      vthost::SandboxEscape sandbox) {
+            programs.push_back(shell.program);
+            shells.push_back(shell);
+            sandboxes.push_back(sandbox);
+            return std::make_unique<vtpty::MockPty>(size);
+        };
+    }
+    SessionHost host;
+
+    /// @return The session hosted in @p tab's first pane.
+    [[nodiscard]] vtworkspace::SessionId sessionOf(vtworkspace::Tab const& tab) const
+    {
+        return tab.rootPane()->isLeaf() ? tab.rootPane()->session() : tab.rootPane()->first()->session();
+    }
+};
+
+} // namespace
+
+TEST_CASE("a session spawned under a profile name runs that profile's shell and settings",
+          "[vthost][profiles]")
+{
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "build" });
+    REQUIRE(tab != nullptr);
+    auto const session = h.sessionOf(*tab);
+    REQUIRE(h.programs == std::vector<std::string> { "/bin/build-shell" });
+    CHECK(h.host.terminal(session)->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(5000) });
+    CHECK(h.host.hostedSession(session)->profileName() == "build");
+}
+
+TEST_CASE("an unknown profile name runs the host's default profile", "[vthost][profiles]")
+{
+    // Review focus 4: a Windows laptop's pwsh profile against a Linux host -- the session still runs.
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "pwsh" });
+    REQUIRE(tab != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh" });
+    CHECK(h.host.hostedSession(h.sessionOf(*tab))->profileName() == "main");
+}
+
+TEST_CASE("a startup layout pane's profile is honoured", "[vthost][profiles]")
+{
+    auto tab = vtworkspace::LayoutTab {};
+    tab.profile = "build";
+    tab.root.orientation = vtworkspace::SplitState::Horizontal;
+    tab.root.children.emplace_back();
+    tab.root.children.emplace_back();
+    tab.root.children.back().profile = "ops";
+    auto h = ProfileHost { vtworkspace::Layout { .tabs = { tab } } };
+    CHECK(h.programs == std::vector<std::string> { "/bin/build-shell", "/bin/ops-shell" });
+}
+
+TEST_CASE("a session named no profile runs the host's default profile", "[vthost][profiles]")
+{
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh" });
+    CHECK(h.host.terminal(h.sessionOf(*tab))->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(1000) });
+    // Unnamed, so it follows whichever profile is the default.
+    CHECK(h.host.hostedSession(h.sessionOf(*tab))->profileName().empty());
+}
+
+TEST_CASE("a session spawned under another profile carries none of the default profile's environment",
+          "[vthost][profiles]")
+{
+    auto h = ProfileHost {};
+    REQUIRE(h.host.createTab({ .profileName = "build" }) != nullptr);
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.shells.size() == 2);
+    CHECK_FALSE(h.shells[0].env.contains("ONLY_MAIN"));
+    CHECK(h.shells[1].env.at("ONLY_MAIN") == "1");
+}
+
+TEST_CASE("after a reload a spawn naming no profile runs the reloaded default", "[vthost][profiles][reload]")
+{
+    auto h = ProfileHost {};
+    h.host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+    auto const* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh-next" });
+    CHECK(h.host.terminal(h.sessionOf(*tab))->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(3000) });
+}
+
+TEST_CASE("a hosted shell replacing the daemon's carries only its own environment", "[vthost][profiles]")
+{
+    auto base = vtpty::Process::ExecInfo {};
+    base.program = "/bin/zsh";
+    base.arguments = { "-l" };
+    base.env["ONLY_DEFAULT"] = "1";
+    auto profile = vtpty::Process::ExecInfo {};
+    profile.program = "/bin/fish";
+    profile.env["ONLY_WORK"] = "1";
+    profile.env["CONTOUR_MUX"] = "/elsewhere";
+    auto const hosted = vtpty::Process::Environment { { "CONTOUR_MUX", "/run/contour/default" } };
+
+    auto const replaced = vthost::hostedShellFor(base, profile, vthost::ShellOverride::Replaces, hosted);
+    CHECK(replaced.program == "/bin/fish");
+    CHECK(replaced.arguments.empty());
+    CHECK_FALSE(replaced.env.contains("ONLY_DEFAULT"));
+    CHECK(replaced.env.at("ONLY_WORK") == "1");
+    CHECK(replaced.env.at("CONTOUR_MUX") == "/run/contour/default"); // the daemon's own still wins
+
+    // A layout pane's directory-only override against a host without profiles keeps the daemon's shell.
+    auto pane = vtpty::Process::ExecInfo {};
+    pane.workingDirectory = "/tmp/project";
+    auto const overlaid = vthost::hostedShellFor(base, pane, vthost::ShellOverride::Overlays, hosted);
+    CHECK(overlaid.program == "/bin/zsh");
+    CHECK(overlaid.arguments == std::vector<std::string> { "-l" });
+    CHECK(overlaid.workingDirectory == "/tmp/project");
+    CHECK(overlaid.env.at("ONLY_DEFAULT") == "1");
+}
+
+TEST_CASE("replaceProfiles re-limits running sessions and serves new ones from the new catalog",
+          "[vthost][profiles][reload]")
+{
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "main" });
+    REQUIRE(tab != nullptr);
+    auto const running = h.sessionOf(*tab);
+    auto* terminal = h.host.terminal(running);
+
+    h.host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+
+    CHECK(terminal->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(3000) });
+    CHECK(h.host.terminal(running) == terminal);                  // the same terminal...
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh" }); // ...and no PTY respawned
+    REQUIRE(h.host.createTab({ .profileName = "main" }) != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh", "/bin/zsh-next" });
+}
+
+TEST_CASE("the reload watcher hands each catalog its hook yields to the host", "[vthost][profiles][reload]")
+{
+    using namespace std::chrono_literals;
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "main" });
+    REQUIRE(tab != nullptr);
+    auto* terminal = h.host.terminal(h.sessionOf(*tab));
+
+    // A few turns: a deadline that came due is found on a turn after the one that advanced past it.
+    auto const turn = [&h] {
+        for ([[maybe_unused]] auto const i: std::views::iota(0, 5))
+            std::ignore = h.loop.runOnce(0ms);
+    };
+    auto polls = 0;
+    auto next = std::shared_ptr<vthost::ProfileCatalog const> {};
+    auto const watcher = vthost::ConfigReloadWatcher { h.loop,
+                                                       h.host,
+                                                       { .poll =
+                                                             [&] {
+                                                                 ++polls;
+                                                                 return std::exchange(next, nullptr);
+                                                             },
+                                                         .interval = 2000ms } };
+    turn();
+    CHECK(polls == 0); // not before its interval
+
+    h.clock.advance(2000ms);
+    turn();
+    CHECK(polls == 1); // nothing yielded: nothing replaced
+    CHECK(terminal->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(1000) });
+
+    next = profileCatalog("/bin/zsh", vtbackend::LineCount(4000));
+    h.clock.advance(2000ms);
+    turn();
+    CHECK(polls == 2);
+    CHECK(terminal->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(4000) });
+}
+
+TEST_CASE("a session takes escape_sandbox from its own profile", "[vthost][profiles]")
+{
+    // A sandbox setting inherited from the default profile would run a contained profile's shell on the host.
+    auto h = ProfileHost {};
+    REQUIRE(h.host.createTab({ .profileName = "ops" }) != nullptr);
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.host.createTab({ .profileName = "nope" }) != nullptr);
+    CHECK(h.sandboxes
+          == std::vector { vthost::SandboxEscape::Contained,
+                           vthost::SandboxEscape::Escapes,
+                           vthost::SandboxEscape::Escapes });
+}

@@ -888,6 +888,11 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
         renderStatusRows(renderBuffer.get(), split);
     }
 
+    _lastDrawnCursorColumn.store(cursorOpt && cursorOpt->display == vtbackend::RenderedDisplay::Main
+                                     ? *cursorOpt->position.column
+                                     : -1,
+                                 std::memory_order_release);
+
     if (cursorOpt)
     {
         auto const cursor = *cursorOpt;

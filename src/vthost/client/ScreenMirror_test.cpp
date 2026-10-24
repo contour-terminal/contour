@@ -314,17 +314,18 @@ std::string numberedRows(int count)
 /// What a BareMirror is built with.
 struct BareMirrorShape
 {
-    vtbackend::LineCount lines { 1 };   ///< The page's height; it is five columns wide.
-    vtbackend::LineCount history { 0 }; ///< The scrollback the mirror terminal keeps.
+    vtbackend::LineCount lines { 1 };                           ///< The page's height.
+    vtbackend::ColumnCount columns { 5 };                       ///< The page's width.
+    vtbackend::LineCount history { 0 };                         ///< The scrollback the mirror terminal keeps.
     vthost::DaemonMachine daemon = vthost::DaemonMachine::Same; ///< Where the daemon runs, relative to it.
     vtbackend::HostIdentity identity {}; ///< The machine the mirror terminal says it runs on.
     /// The clocks the mirror terminal reads; the system's when unset. Borrowed: they must outlive it.
     std::optional<vtbackend::TerminalClocks> clocks {};
 };
 
-/// A bare mirror terminal, five columns wide, plus the ScreenMirror bound to it, for the unit-level cases
-/// that drive the mirror by hand instead of through the full server/client loop. Its events keep what the
-/// terminal raises (RecordingEvents), as MirrorHarness's do.
+/// A bare mirror terminal, five columns wide unless its shape says otherwise, plus the ScreenMirror bound to
+/// it, for the unit-level cases that drive the mirror by hand instead of through the full server/client loop.
+/// Its events keep what the terminal raises (RecordingEvents), as MirrorHarness's do.
 struct BareMirror
 {
     RecordingEvents events;
@@ -341,7 +342,7 @@ struct BareMirror
     {
         events.identity = std::move(shape.identity);
         auto settings = vtbackend::Settings {};
-        settings.pageSize = vtbackend::PageSize { shape.lines, vtbackend::ColumnCount(5) };
+        settings.pageSize = vtbackend::PageSize { shape.lines, shape.columns };
         settings.historyLimits = vtbackend::HistoryLimits::plain(shape.history);
         terminal =
             std::make_unique<vtbackend::Terminal>(events,
@@ -361,7 +362,150 @@ struct BareMirror
     }
 };
 
+/// A row @p columns wide at @p stableId, blank but for @p ch at @p column.
+proto::WireLine wideRowAt(int64_t stableId, uint32_t columns, uint32_t column, char32_t ch)
+{
+    auto line = proto::WireLine {};
+    line.stableId = stableId;
+    line.columns = columns;
+    line.cells.resize(column + 1);
+    for (auto& cell: line.cells)
+        cell.codepoint = U' ';
+    line.cells.back().codepoint = ch;
+    return line;
+}
+
+/// A host grid of 40x20 for the viewport cases, its rows 1..20, holding @p rows, the cursor at @p cursor.
+/// @param rows The rows the snapshot carries; the others are blank.
+/// @param cursor Where the host's cursor is.
+/// @return The delta, applied to @p screen as well.
+proto::Delta largeGridSnapshot(vthost::client::RemoteScreen& screen,
+                               std::vector<proto::WireLine> rows,
+                               vtbackend::CellLocation cursor)
+{
+    screen.columns = 40;
+    screen.lines = 20;
+    auto delta = proto::Delta {};
+    delta.snapshot = 1;
+    delta.generation = 1;
+    delta.stableViewportBase = 1;
+    delta.stableFloor = 1;
+    delta.cursorLine = unbox<int32_t>(cursor.line);
+    delta.cursorColumn = unbox<int32_t>(cursor.column);
+    delta.lines = std::move(rows);
+    screen.apply(delta);
+    return delta;
+}
+
+/// @return Where the host's cursor at (@p line, @p column) is.
+vtbackend::CellLocation cellAt(int line, int column)
+{
+    return vtbackend::CellLocation { .line = vtbackend::LineOffset(line),
+                                     .column = vtbackend::ColumnOffset(column) };
+}
+
 } // namespace
+
+TEST_CASE("a mirror smaller than the remote grid shows the cursor's region", "[vthost][mirror][viewport]")
+{
+    // The host's grid is 40x20 (another client's size); this one shows 10x5 of it. The cursor at the
+    // bottom-right corner puts the window at the grid's last 5 rows and last 10 columns.
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
+                                               .columns = vtbackend::ColumnCount(10) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto const delta = largeGridSnapshot(screen, { wideRowAt(20, 40, 39, U'X') }, cellAt(19, 39));
+    bare.mirror->apply(screen, delta);
+
+    auto const& page = bare.terminal->primaryScreen();
+    CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
+    CHECK(page.cursor().position == cellAt(4, 9));
+    CHECK(bare.terminal->reportedCellOrigin() == cellAt(15, 30));
+    // Nothing of the host's page above the window went into history.
+    CHECK(bare.historyLines() == 0);
+}
+
+TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirror][viewport]")
+{
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
+                                               .columns = vtbackend::ColumnCount(10) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto const first =
+        largeGridSnapshot(screen, { wideRowAt(1, 40, 0, U'A'), wideRowAt(20, 40, 39, U'X') }, cellAt(2, 2));
+    bare.mirror->apply(screen, first);
+    auto const& page = bare.terminal->primaryScreen();
+    REQUIRE(bare.terminal->reportedCellOrigin() == vtbackend::CellLocation {});
+    REQUIRE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
+    REQUIRE(page.cursor().position == cellAt(2, 2));
+
+    // The cursor moves to the bottom-right corner in an ordinary delta, no row changed: the page is
+    // rewritten.
+    auto move = proto::Delta {};
+    move.generation = 1;
+    move.stableViewportBase = 1;
+    move.stableFloor = 1;
+    move.cursorLine = 19;
+    move.cursorColumn = 39;
+    screen.apply(move);
+    bare.mirror->apply(screen, move);
+
+    CHECK(bare.terminal->reportedCellOrigin() == cellAt(15, 30));
+    CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
+    CHECK_FALSE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
+    CHECK(page.cursor().position == cellAt(4, 9));
+}
+
+TEST_CASE("a mirror at least as large as the remote grid is not panned", "[vthost][mirror][viewport]")
+{
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(25),
+                                               .columns = vtbackend::ColumnCount(50) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto const delta = largeGridSnapshot(screen, { wideRowAt(20, 40, 39, U'X') }, cellAt(19, 39));
+    bare.mirror->apply(screen, delta);
+
+    auto const& page = bare.terminal->primaryScreen();
+    CHECK(bare.terminal->reportedCellOrigin() == vtbackend::CellLocation {});
+    CHECK(page.grid().lineText(vtbackend::LineOffset(19)).substr(39, 1) == "X");
+    CHECK(page.cursor().position == cellAt(19, 39));
+}
+
+TEST_CASE("a restarted mirror applies a new connection's snapshot from scratch", "[vthost][mirror]")
+{
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(1),
+                                               .history = vtbackend::LineCount(10) } };
+
+    // The lost connection's screen: generation 5, the page at row 100, two rows of history above it.
+    auto lost = vthost::client::RemoteScreen {};
+    lost.columns = 5;
+    lost.lines = 1;
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.generation = 5;
+    seed.stableViewportBase = 100;
+    seed.stableFloor = 98;
+    seed.lines = { rowAt(98, "a"), rowAt(99, "b"), rowAt(100, "old") };
+    lost.apply(seed);
+    bare.mirror->apply(lost, seed);
+    REQUIRE(bare.terminal->primaryScreen().grid().renderMainPageText().contains("old"));
+    REQUIRE(bare.historyLines() == 2);
+
+    // A new connection, to a daemon that restarted: generation 1, its own stable ids from 1.
+    bare.mirror->restart();
+    auto fresh = vthost::client::RemoteScreen {};
+    fresh.columns = 5;
+    fresh.lines = 1;
+    auto first = proto::Delta {};
+    first.snapshot = 1;
+    first.generation = 1;
+    first.stableViewportBase = 1;
+    first.stableFloor = 1;
+    first.lines = { rowAt(1, "new") };
+    fresh.apply(first);
+    bare.mirror->apply(fresh, first);
+
+    CHECK(bare.terminal->primaryScreen().grid().renderMainPageText().contains("new"));
+    CHECK_FALSE(bare.terminal->primaryScreen().grid().renderMainPageText().contains("old"));
+    CHECK(bare.historyLines() == 0);
+}
 
 TEST_CASE("a server-side clear drops the mirror's local scrollback", "[vthost][mirror]")
 {

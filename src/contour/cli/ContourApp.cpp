@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/cli/CaptureScreen.hpp>
 #include <contour/cli/CatImageArgs.hpp>
+#include <contour/cli/ConfigProfileCatalog.hpp>
+#include <contour/cli/ConfigReloadPoller.hpp>
 #include <contour/cli/ContourApp.hpp>
 #include <contour/cli/DaemonVerbs.hpp>
+#include <contour/cli/Hosting.hpp>
 #include <contour/cli/ShellIntegration.hpp>
 #include <contour/config/Config.hpp>
 
@@ -66,6 +69,7 @@
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/Token.hpp>
+#include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 
 #ifndef _WIN32
@@ -232,9 +236,10 @@ namespace
         options.emplace_back(CLI::Option {
             "profile", CLI::Value { ""s }, "Config profile those settings come from.", "NAME" });
         options.emplace_back(CLI::Option { "size-policy",
-                                           CLI::Value { "latest"s },
+                                           CLI::Value { ""s },
                                            "Which attached client's size the shared grid takes: "
-                                           "`latest`, `smallest` or `largest`.",
+                                           "`latest`, `smallest` or `largest`. Defaults to the "
+                                           "configuration's `daemon.size_policy`.",
                                            "POLICY" });
         options.emplace_back(
             CLI::Option { "log", CLI::Value { ""s }, "Log tag filter for the installed daemon.", "TAGS" });
@@ -923,9 +928,30 @@ int ContourApp::daemonAction()
             return daemonVerbAction(row.verb, prefix);
     }
 
+    // The hosted terminals' full session configuration: emulation settings, presentation/color
+    // fields, the shell to run and its sandbox policy. The profile's `history.limit` is
+    // load-bearing here rather than cosmetic -- @see vthost::DefaultSessionHistoryLineCount. This
+    // is also, deliberately, the ONE place a daemon's hosted sessions get their shell and
+    // presentation from: a profile the user named must not be silently overridden by the bare OS
+    // login shell -- @see the contour daemon / contour client profile-resolution issue.
+    //
+    // Loaded once, and first: its `daemon:` section names the socket when --socket does not, and the
+    // same configuration resolves the daemon's own profile below and, as the host's profile catalog,
+    // every profile a client names later.
+    auto hostConfig = config::tryLoadConfigNamed(parameters().get<string>("contour.daemon.config"));
+    if (!hostConfig)
+    {
+        cerr << std::format("contour daemon: {}\n", hostConfig.error());
+        return EXIT_FAILURE;
+    }
+    auto const daemonSettings = hostConfig->daemon.value();
+
     auto config = vthost::DaemonConfig {};
-    config.socketPath = vthost::muxSocketPath(parameters().get<string>("contour.daemon.label"),
-                                              parameters().get<string>("contour.daemon.socket"));
+    // A new run of the daemon: a client that reconnects to it can tell it from the one it lost.
+    config.instance = vthost::drawDaemonInstance();
+    config.socketPath = vthost::muxSocketPath(
+        parameters().get<string>("contour.daemon.label"),
+        resolveSocketOption(parameters().get<string>("contour.daemon.socket"), daemonSettings.socket));
 
     // Before logging, whose default file lies beside the socket: a log sink creating the socket's
     // directory would give it the umask's 0755, which the listener refuses as world-accessible.
@@ -944,21 +970,40 @@ int ContourApp::daemonAction()
         return EXIT_FAILURE;
     }
 
-    // The hosted terminals' full session configuration: emulation settings, presentation/color
-    // fields, the shell to run and its sandbox policy. The profile's `history.limit` is
-    // load-bearing here rather than cosmetic -- @see vthost::DefaultSessionHistoryLineCount. This
-    // is also, deliberately, the ONE place a daemon's hosted sessions get their shell and
-    // presentation from: a profile the user named must not be silently overridden by the bare OS
-    // login shell -- @see the contour daemon / contour client profile-resolution issue.
-    auto const resolved = config::resolveSessionConfig(parameters().get<string>("contour.daemon.config"),
-                                                       parameters().get<string>("contour.daemon.profile"));
+    auto const daemonProfile = parameters().get<string>("contour.daemon.profile");
+    auto const resolved = config::resolvedSessionConfigFor(*hostConfig, daemonProfile);
     if (!resolved)
     {
         cerr << std::format("contour daemon: {}\n", resolved.error());
         return EXIT_FAILURE;
     }
-    config.settings = resolved->settings;
-    config.shell = resolved->shell;
+    auto profiles = std::make_shared<ConfigProfileCatalog const>(
+        *std::move(hostConfig), daemonProfile, vtbackend::ColorPreference::Light);
+    // Edits of the configuration reach the sessions spawned afterwards, and the scrollback of those
+    // running, without a restart; a load that fails keeps the running configuration.
+    auto reloads = std::make_shared<ConfigReloadPoller>(
+        core::platform::NativeFileSystem::instance(),
+        resolved->configFile,
+        [configPath = parameters().get<string>("contour.daemon.config"),
+         daemonProfile]() -> std::expected<std::shared_ptr<vthost::ProfileCatalog const>, std::string> {
+            return config::tryLoadConfigNamed(configPath)
+                .and_then([&](config::Config loaded) {
+                    // The daemon's own profile must survive the edit, as it had to for the daemon to start.
+                    return config::resolvedSessionConfigFor(loaded, daemonProfile)
+                        .transform([&](auto const&) {
+                            return std::make_shared<ConfigProfileCatalog const>(
+                                std::move(loaded), daemonProfile, vtbackend::ColorPreference::Light);
+                        });
+                })
+                .transform(
+                    [](auto catalog) -> std::shared_ptr<vthost::ProfileCatalog const> { return catalog; });
+        });
+    config.configReload = vthost::ConfigReloadHook { .poll = [reloads] { return reloads->poll().second; } };
+    // Through the catalog, so a session that names no profile gets `daemon.history_limit` too.
+    auto defaultProfile = profiles->resolve({});
+    config.settings = std::move(defaultProfile.settings);
+    config.shell = std::move(defaultProfile.shell);
+    config.profiles = std::move(profiles);
     config.escapeSandbox = resolved->escapeSandbox;
     config.placement = vtpty::makeDefaultProcessPlacement();
     config.startupLayout = resolved->startupLayout;
@@ -1009,16 +1054,13 @@ int ContourApp::daemonAction()
         config.lifecycle = vthost::DaemonLifecycle::ExitWhenEmpty;
     }
 
-    // Rejected rather than defaulted: silently serving `latest` to someone who asked for
-    // `smallest` would look like the feature does not work.
-    auto const sizePolicy = parameters().get<string>("contour.daemon.size-policy");
-    if (auto const policy = vthost::clientSizePolicyFrom(sizePolicy))
+    // The option, else the configuration's `daemon.size_policy`.
+    if (auto const policy = resolveSizePolicy(parameters().get<string>("contour.daemon.size-policy"),
+                                              daemonSettings.sizePolicy))
         config.sizePolicy = *policy;
     else
     {
-        cerr << std::format("contour daemon: unknown --size-policy '{}' (expected one of: {})\n",
-                            sizePolicy,
-                            core::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys));
+        cerr << std::format("contour daemon: {}\n", policy.error());
         return EXIT_FAILURE;
     }
 
@@ -1112,8 +1154,9 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
         return exitCode(ExitStatus::BadUsage);
     }
     auto const socket = vthost::muxSocketPath(*label, *socketOption);
+    // Never starts a daemon: asking about one, or stopping it, must not bring one up.
     auto control =
-        vthost::client::makeDaemonControl(vthost::AttachEndpoint { vthost::UnixEndpoint { socket } });
+        vthost::client::makeDaemonControl(std::make_shared<vthost::UnixTransportFactory>(socket, nullptr));
 
     switch (verb)
     {
@@ -1265,7 +1308,7 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
         if (!status)
             return std::unexpected(status.error());
         auto const control = vthost::client::makeDaemonControl(
-            vthost::AttachEndpoint { vthost::UnixEndpoint { socketOf(*status) } });
+            std::make_shared<vthost::UnixTransportFactory>(socketOf(*status), nullptr));
         if (auto const stopped = control->stop(vthost::proto::StopReason::User);
             !stopped && stopped.error().code != vthost::client::ControlErrorCode::NotRunning)
             return std::unexpected(vthost::ServiceError { .code = vthost::ServiceErrorCode::Backend,
@@ -1337,7 +1380,7 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
                                 vthost::nameOf(status->mode));
             if (live == vthost::DaemonPresence::Serving)
                 if (auto const daemon = vthost::client::makeDaemonControl(
-                                            vthost::AttachEndpoint { vthost::UnixEndpoint { socket } })
+                                            std::make_shared<vthost::UnixTransportFactory>(socket, nullptr))
                                             ->status())
                     cout << std::format("  version: {}\n", daemon->releaseVersion);
             if (!status->commandLine.empty())
@@ -1356,17 +1399,17 @@ std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCo
     // derived at start time would resolve somewhere the user's own client never looks.
     auto const socketPath = vthost::muxSocketPath(label, parameters().get<string>(prefix + ".socket"));
 
+    // The option, else `daemon.size_policy` of the configuration the installed daemon is given. Caught here
+    // rather than by the installed daemon: a rejected value would otherwise kill a process started by the OS,
+    // whose stderr nobody is watching.
     auto const sizePolicyText = parameters().get<string>(prefix + ".size-policy");
-    auto const sizePolicy = vthost::clientSizePolicyFrom(sizePolicyText);
+    auto const sizePolicy =
+        sizePolicyText.empty()
+            ? config::tryLoadConfigNamed(parameters().get<string>(prefix + ".config"))
+                  .transform([](config::Config const& loaded) { return loaded.daemon.value().sizePolicy; })
+            : resolveSizePolicy(sizePolicyText, vthost::ClientSizePolicy::Latest);
     if (!sizePolicy)
-    {
-        // Caught here rather than by the installed daemon: a rejected value would otherwise kill
-        // a process started by the OS, whose stderr nobody is watching.
-        return std::unexpected(
-            std::format("unknown --size-policy '{}' (expected one of: {})",
-                        sizePolicyText,
-                        core::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys)));
-    }
+        return std::unexpected(sizePolicy.error());
 
     auto logFile = parameters().get<string>(prefix + ".log-file");
     if (logFile.empty())
@@ -1567,8 +1610,9 @@ core::cli::Command ContourApp::parameterDefinition() const
                 CLI::OptionList {
                     CLI::Option { "socket",
                                   CLI::Value { ""s },
-                                  "Path of the control socket file. Defaults to "
-                                  "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                                  "Path of the control socket file. Defaults to the configuration's "
+                                  "`daemon.socket`, else $XDG_RUNTIME_DIR/contour/LABEL (respecting "
+                                  "$CONTOUR_MUX).",
                                   "PATH" },
                     CLI::Option { "label",
                                   CLI::Value { std::string { vthost::DefaultSocketLabel } },
@@ -1612,12 +1656,13 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   CLI::Value { false },
                                   "Alias for --lifecycle=exit-with-last-session." },
                     CLI::Option { "size-policy",
-                                  CLI::Value { "latest"s },
+                                  CLI::Value { ""s },
                                   "Which attached client's size the shared grid takes when several "
                                   "clients of different sizes are attached: `latest` (the client "
-                                  "that resized most recently, the default), `smallest` (the "
-                                  "largest grid every client can fully display) or `largest` (the "
-                                  "union, which smaller clients pan). Mirrors tmux's `window-size`.",
+                                  "that resized most recently), `smallest` (the largest grid every "
+                                  "client can fully display) or `largest` (the union, which smaller "
+                                  "clients pan). Mirrors tmux's `window-size`. Defaults to the "
+                                  "configuration's `daemon.size_policy` (`latest` unless set).",
                                   "POLICY" },
                     CLI::Option { "tmux-compat-socket",
                                   CLI::Value { ""s },

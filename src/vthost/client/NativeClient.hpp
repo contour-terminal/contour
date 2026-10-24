@@ -13,6 +13,7 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 
 #include <core/async/Task.hpp>
+#include <core/net/DeadlineTimer.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/WriteQueue.hpp>
@@ -34,6 +35,7 @@
 
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
+#include <vthost/client/Liveness.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Unsupported.hpp>
@@ -240,6 +242,13 @@ struct RemoteScreen
     void dropImage(uint32_t imageId);
 };
 
+/// Whether a request reached the wire.
+enum class Delivery : uint8_t
+{
+    Unsupported = 0, ///< The daemon did not negotiate what it needs; nothing was written.
+    Sent = 1,        ///< It was written.
+};
+
 /// One attached native-protocol connection.
 class NativeClient final
 {
@@ -257,6 +266,8 @@ class NativeClient final
     /// Handler invoked when a status-line extension the daemon runs asks this client's user whether it may
     /// run its declared commands; answered with answerPermission().
     using PermissionHandler = std::function<void(proto::PermissionRequest const&)>;
+    /// Handler invoked once, when the daemon accepted the handshake (connected() turned true).
+    using HandshakeHandler = std::function<void()>;
 
     /// Everything this client states about itself in its ClientHello.
     ///
@@ -275,6 +286,16 @@ class NativeClient final
         /// The optional features this client offers. The composition root offers
         /// proto::Capability::ExtensionPermissions exactly when it passes a PermissionHandler.
         proto::CapabilitySet capabilities = {};
+        /// The client area, in cells, the first session should spawn at; absent means "the daemon's
+        /// default". The ResizeRequest the client sends once its window is realized still corrects it.
+        std::optional<proto::WireClientArea> clientArea = std::nullopt;
+        /// Which of the daemon's windows to follow; honoured by a daemon sharing Capability::AttachIntent,
+        /// which every other daemon reads as AllWindows.
+        proto::AttachIntent attachIntent = {};
+        /// The host profile this client's sessions run under; empty for the daemon's default. Honoured by a
+        /// daemon sharing Capability::ProfileByName; @ref sessionSettings is still sent, for one that does
+        /// not.
+        std::string profileName = {};
     };
 
     /// @param loop The event loop everything runs on.
@@ -290,6 +311,8 @@ class NativeClient final
     /// @param onLayout Invoked when the daemon's tab/pane layout arrives.
     /// @param onPermissionRequest Invoked when a daemon's extension asks this client's user; none for a
     ///        client that shows no prompt, whose questions wait for another.
+    /// @param liveness When a silent daemon is probed and given up on, timed by @p loop's clock; applied
+    ///        only when both ends share Capability::Heartbeat.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -298,7 +321,8 @@ class NativeClient final
                  ImageHandler onImage,
                  SessionEventHandler onSessionEvent,
                  LayoutHandler onLayout,
-                 PermissionHandler onPermissionRequest = {});
+                 PermissionHandler onPermissionRequest = {},
+                 LivenessPolicy liveness = {});
 
     /// The connection flow: sends ClientHello, mirrors server pushes until the
     /// server disconnects or detach() is called.
@@ -320,6 +344,11 @@ class NativeClient final
     /// configuration path; use this only when a handler must be swapped mid-life.
     void setLayoutHandler(LayoutHandler handler) { _onLayout = std::move(handler); }
 
+    /// Sets the handler told when the daemon accepted the handshake. Not a constructor parameter, because
+    /// the one who wants to know -- a ClientSupervisor -- is not the one who constructs the client: it is the
+    /// single attach-style call after construction a supervisor makes, before run().
+    void setHandshakeHandler(HandshakeHandler handler) { _onHandshake = std::move(handler); }
+
     /// Sends keyboard/paste bytes to @p session's PTY.
     void sendInput(uint64_t session, std::string_view bytes);
 
@@ -340,12 +369,33 @@ class NativeClient final
     /// active pane (orientation 1 horizontal / 2 vertical, ratio × 10000), or
     /// close the pane hosting @p session. The daemon honors it and re-pushes a
     /// LayoutState to every attached client.
+    ///
+    /// A @p profileName travels only to a daemon sharing Capability::ProfileByName (@see namesProfiles);
+    /// any other is sent the verb's older body, and spawns with this client's session settings.
     /// @param beside A session of the window the new tab belongs in; 0 = the daemon's own first
     ///        window. Named by session because window ids are per model (@see proto::CreateTab).
-    void createTab(uint64_t beside = 0);
-    void createWindow();
-    void splitPane(uint64_t session, uint8_t orientation, uint16_t ratio);
+    /// @param profileName The host profile the new session runs; empty for this client's.
+    void createTab(uint64_t beside, std::string profileName);
+    /// @param profileName The host profile the new window's session runs; empty for this client's.
+    void createWindow(std::string profileName);
+    /// @param profileName The host profile the new pane's session runs; empty for this client's.
+    void splitPane(uint64_t session, uint8_t orientation, uint16_t ratio, std::string profileName);
     void closePane(uint64_t session);
+
+    /// Tells the daemon how the user changed a tab's presentation, so its model and every other client
+    /// follow.
+    /// @param edit The change.
+    /// @return Sent, or Unsupported — nothing written — unless the daemon shares Capability::TabEdits.
+    Delivery editTab(proto::EditTab edit);
+
+    /// @return Whether the daemon resolves profile names (Capability::ProfileByName shared): it then owns
+    ///         what the sessions run and how they emulate, and this client names profiles instead.
+    [[nodiscard]] bool namesProfiles() const noexcept { return shares(proto::Capability::ProfileByName); }
+
+    /// @return The daemon windows this connection follows, ascending: those its ServerHello named, plus every
+    ///         window whose layout the daemon pushed since (one this connection created). Empty until
+    ///         connected(), and from a daemon that predates attach intents.
+    [[nodiscard]] std::vector<uint64_t> const& followedWindows() const noexcept { return _followedWindows; }
 
     /// Reports a divider the user moved, so the ratio lives in the daemon's model and a re-attaching
     /// client rebuilds the tree at it. The split is named by the leftmost leaf session of each of its
@@ -365,7 +415,8 @@ class NativeClient final
 
     /// Restates the emulation settings to ask for the sessions this client creates from now on, when
     /// the client's configuration changed; the sessions that exist keep theirs. Sends nothing when
-    /// @p settings is what the daemon already has. @see proto::SessionSettingsChanged.
+    /// @p settings is what the daemon already has, nor to a daemon that resolves profiles (@see
+    /// namesProfiles), which owns emulation itself. @see proto::SessionSettingsChanged.
     /// @param settings The new preference; nullopt for whatever the daemon hosts with.
     void restateSessionSettings(std::optional<proto::WireSessionSettings> settings);
 
@@ -403,9 +454,17 @@ class NativeClient final
     /// @return The daemon's identity.
     [[nodiscard]] vtbackend::HostIdentity const& daemonIdentity() const noexcept { return _daemonIdentity; }
 
+    /// @return Why the connection was given up on — the daemon stopped answering — or nullopt while it was
+    ///         not. run() ends once it is set.
+    [[nodiscard]] std::optional<std::string> lossReason() const { return _lossReason; }
+
     /// @return The daemon's release as its ServerHello stated it; empty until connected(), and for a
     ///         daemon that predates the field.
     [[nodiscard]] std::string const& daemonRelease() const noexcept { return _daemonRelease; }
+
+    /// @return Which run of the daemon answered, as its ServerHello stated it; 0 until connected(), and from
+    ///         a daemon that predates the field. @see proto::ServerHello::daemonInstance
+    [[nodiscard]] uint64_t daemonInstance() const noexcept { return _daemonInstance; }
 
     /// How many rows above the viewport a mirror keeps; `nullopt` is unbounded.
     ///
@@ -418,7 +477,28 @@ class NativeClient final
     [[nodiscard]] static std::optional<int64_t> resolveHistoryKeep(HandshakeOptions const& handshake);
 
   private:
+    /// @return Whether the handshake shared @p capability; false until connected().
+    [[nodiscard]] bool shares(proto::Capability capability) const noexcept
+    {
+        return _negotiated.has_value() && _negotiated->shared.contains(capability);
+    }
+
+    /// @param profileName A profile a spawning verb names.
+    /// @return @p profileName for a daemon that resolves names, else empty: the verb's older body.
+    [[nodiscard]] std::string profileForWire(std::string profileName) const
+    {
+        return namesProfiles() ? std::move(profileName) : std::string {};
+    }
+
     void handlePdu(proto::DecodedFrame const& frame);
+
+    /// Arms the next liveness tick, a second from now on the loop's clock.
+    void armLivenessTick();
+
+    /// One liveness tick: probes a silent daemon, or gives up on one silent for too long.
+    /// @param self The NativeClient.
+    static void livenessTick(void* self);
+
     /// Records what the daemon's ServerHello negotiated, or why it did not; only the first counts.
     /// @param hello The daemon's answer to this client's ClientHello.
     void handleServerHello(proto::ServerHello const& hello);
@@ -458,6 +538,7 @@ class NativeClient final
     SessionEventHandler _onSessionEvent;
     LayoutHandler _onLayout;
     PermissionHandler _onPermissionRequest;
+    HandshakeHandler _onHandshake; ///< @see setHandshakeHandler()
     std::map<uint64_t, RemoteScreen> _screens;
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.
@@ -467,8 +548,16 @@ class NativeClient final
     uint64_t _nextSerial = 1;
     vtbackend::HostIdentity _daemonIdentity;         ///< @see daemonIdentity()
     std::string _daemonRelease;                      ///< @see daemonRelease()
+    uint64_t _daemonInstance = 0;                    ///< @see daemonInstance()
+    std::vector<uint64_t> _followedWindows;          ///< @see followedWindows()
     std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
     std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
+    LivenessTracker _liveness;              ///< When the daemon last spoke, and whether it was probed.
+    std::optional<std::string> _lossReason; ///< @see lossReason()
+    uint64_t _nextHeartbeatNonce = 1;
+    /// The once-a-second liveness tick; armed while both ends share Capability::Heartbeat and the
+    /// connection is open, disarmed as run() closes it.
+    std::optional<core::net::DeadlineTimer> _livenessTimer;
     bool _detached = false;
     bool _closing = false; ///< Set once run() has begun its orderly close; send() then writes nothing.
 };

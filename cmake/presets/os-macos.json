@@ -68,6 +68,7 @@
             "cacheVariables": {
                 "CONTOUR_INSTALL_TOOLS": "OFF",
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "OFF",
+                "VTHOST_BUILD_BENCH_LATENCY": "OFF",
                 "CONTOUR_MACOS_NOTARIZE": "ON",
                 "CONTOUR_MACOS_STAPLE_APP": "ON",
                 "CONTOUR_MACOS_NOTARY_PROFILE": "contour-notary",

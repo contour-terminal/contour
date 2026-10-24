@@ -242,28 +242,33 @@ namespace
         return std::move(*result);
     }
 
-    /// Connects to @p endpoint, with "nobody listens" told from every other failure by the typed error.
+    /// Connects through @p transport, with "nobody listens" told from every other failure by the typed error.
+    /// Only the socket is kept: a Control conversation is one request long, and the transports it runs over
+    /// today carry no lifetime of their own.
     core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, ControlError>> connectControl(
-        core::net::EventLoop* loop, AttachEndpoint endpoint)
+        core::net::EventLoop* loop, ITransportFactory* transport)
     {
-        auto socket = co_await connectAttachDetailed(loop, std::move(endpoint));
-        if (!socket)
-            co_return std::unexpected { fail(socket.error().kind == AttachFailureKind::DaemonAbsent
+        auto connection = co_await transport->connect(*loop);
+        if (!connection)
+            co_return std::unexpected { fail(connection.error().kind == TransportErrorKind::DaemonAbsent
                                                  ? ControlErrorCode::NotRunning
                                                  : ControlErrorCode::Transport,
-                                             std::move(socket.error().text)) };
-        co_return std::move(*socket);
+                                             std::move(connection.error().message)) };
+        co_return std::move((*connection)->socket);
     }
 
-    /// The daemon control of an endpoint, with the loop it runs on.
+    /// The daemon control of a transport, with the loop it runs on.
     class OwnedLoopDaemonControl final: public DaemonControlPort
     {
       public:
-        OwnedLoopDaemonControl(AttachEndpoint endpoint, std::chrono::milliseconds timeout):
+        OwnedLoopDaemonControl(std::shared_ptr<ITransportFactory> transport,
+                               std::chrono::milliseconds timeout):
             _loop(*_backend),
             _inner(
                 _loop,
-                [loop = &_loop, endpoint = std::move(endpoint)] { return connectControl(loop, endpoint); },
+                [loop = &_loop, transport = std::move(transport)] {
+                    return connectControl(loop, transport.get());
+                },
                 timeout)
         {
         }
@@ -327,10 +332,10 @@ std::expected<void, ControlError> SocketDaemonControl::stop(proto::StopReason re
     return bounded(_loop, requestStop(&_loop, &_connect, reason), _timeout);
 }
 
-std::unique_ptr<DaemonControlPort> makeDaemonControl(AttachEndpoint endpoint,
+std::unique_ptr<DaemonControlPort> makeDaemonControl(std::shared_ptr<ITransportFactory> transport,
                                                      std::chrono::milliseconds timeout)
 {
-    return std::make_unique<OwnedLoopDaemonControl>(std::move(endpoint), timeout);
+    return std::make_unique<OwnedLoopDaemonControl>(std::move(transport), timeout);
 }
 
 } // namespace vthost::client

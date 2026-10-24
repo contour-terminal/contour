@@ -224,6 +224,55 @@ ApplicationWindow
             }
         }
 
+        // Shown while this window runs its shells itself because the daemon the launch wanted could not be
+        // had (WindowController.hostingNotice): they end when the window closes, which a daemon-hosted
+        // window's do not. Over the top of the content rather than beside it, so the terminal is not
+        // resized for a line the user dismisses.
+        Rectangle {
+            id: hostingNoticeBar
+            objectName: "hostingNoticeBar" // so offscreen tests can findChild() it
+            // `|| ""` for the reason the gates above use `!!`: a lightweight mock `win` lacks the property.
+            readonly property string text: (appWindow.win && appWindow.win.hostingNotice) || ""
+            visible: text.length > 0
+            z: 11
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            implicitHeight: Math.max(hostingNoticeLabel.implicitHeight, hostingNoticeDismiss.implicitHeight) + 8
+            height: visible ? implicitHeight : 0
+            color: Qt.rgba(noticePalette.window.r, noticePalette.window.g, noticePalette.window.b, 0.92)
+            border.color: Qt.rgba(noticePalette.windowText.r, noticePalette.windowText.g, noticePalette.windowText.b, 0.25)
+            border.width: 1
+
+            SystemPalette {
+                id: noticePalette
+                colorGroup: SystemPalette.Active
+            }
+
+            Label {
+                id: hostingNoticeLabel
+                objectName: "hostingNoticeText"
+                anchors.left: parent.left
+                anchors.right: hostingNoticeDismiss.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                text: hostingNoticeBar.text
+                wrapMode: Text.WordWrap
+                color: noticePalette.windowText
+            }
+
+            ToolButton {
+                id: hostingNoticeDismiss
+                objectName: "hostingNoticeDismiss"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.rightMargin: 4
+                text: qsTr("Dismiss")
+                onClicked: appWindow.win.dismissHostingNotice()
+            }
+        }
+
         // Shown only while the daemon runs another release than this client (see DaemonDriftModel).
         DaemonDriftBadge {
             z: 10

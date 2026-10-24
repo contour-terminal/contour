@@ -29,6 +29,7 @@
 
 #include <core/async/StopToken.hpp>
 #include <core/async/ThreadPoolExecutor.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/platform/FileSystem.hpp>
 
 #include <QtCore/QPointer>
@@ -51,6 +52,8 @@
 #include <vector>
 
 #include <vthost/Daemon.hpp>
+#include <vthost/latency/KeystrokeProbe.hpp>
+#include <vthost/latency/StartupTimeline.hpp>
 
 class QQuickWindow;
 
@@ -79,6 +82,8 @@ namespace display
     class ForcedFontDpiProvider;
     class GraphicsDeviceSelector;
     class IGpuInventory;
+    class LatencyProbeDriver;
+    enum class SwapPacing : uint8_t;
 } // namespace display
 
 namespace platform
@@ -218,20 +223,24 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param windowPositionStore Last-window location persistence; null uses the atomic file adapter.
     /// @param env            The process environment every part of the application reads through.
     /// @param taskbarProgress Native taskbar adapter; null wires the production one.
-    explicit ContourGuiApp(core::Environment const& env,
-                           std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
-                           std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
-                           std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
-                           std::unique_ptr<command::CommandHistoryStore> commandHistoryStore = nullptr,
-                           std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr,
-                           std::unique_ptr<session::CommandOutputFiles> commandOutputFiles = nullptr,
-                           vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
-                           std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
-                           core::platform::FileSystem const* fileSystem = nullptr,
-                           std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr,
-                           std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt,
-                           std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress = nullptr,
-                           std::unique_ptr<window::WindowPositionStore> windowPositionStore = nullptr);
+    /// @param processStart When the process began, sampled first thing in main(): the origin of the
+    ///                     startup timeline. The default is the moment of construction, for tests.
+    explicit ContourGuiApp(
+        core::Environment const& env,
+        std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
+        std::unique_ptr<platform::ExternalLauncher> externalLauncher = nullptr,
+        std::unique_ptr<config::LayoutStore> layoutStore = nullptr,
+        std::unique_ptr<command::CommandHistoryStore> commandHistoryStore = nullptr,
+        std::unique_ptr<platform::SpeechSynthesizer> speechSynthesizer = nullptr,
+        std::unique_ptr<session::CommandOutputFiles> commandOutputFiles = nullptr,
+        vtbackend::TerminalClocks terminalClocks = vtbackend::TerminalClocks::system(),
+        std::optional<vtbackend::HostIdentity> hostIdentity = std::nullopt,
+        core::platform::FileSystem const* fileSystem = nullptr,
+        std::shared_ptr<vtpty::ProcessPlacement> processPlacement = nullptr,
+        std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt,
+        std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress = nullptr,
+        std::unique_ptr<window::WindowPositionStore> windowPositionStore = nullptr,
+        core::platform::SteadyTimePoint processStart = core::platform::defaultSteadyClock().now());
     ~ContourGuiApp() override;
 
     /// The shared persistence service for normal-window locations.
@@ -258,9 +267,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Attach mode: authors a new window on the daemon (routed through the session factory's
     /// requestRemoteWindow) instead of opening a purely local one. The daemon's new-window layout push
     /// then spawns and binds the matching OS window (B4). Called by the NewTerminalWindow action.
+    /// @param spawn What the new window's first session runs, as the daemon is asked for it.
     /// @return true if the request was routed to the daemon (do NOT open a local window); false for a
     ///         local factory.
-    [[nodiscard]] bool requestRemoteWindow();
+    [[nodiscard]] bool requestRemoteWindow(session::RemoteSpawn const& spawn);
 
     /// The app-wide forced-font-DPI provider (single instance; see display/ContentScale.h), created
     /// lazily on first use (requires a constructed QGuiApplication for platform detection).
@@ -285,6 +295,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     {
         return _selfOnlyEnvironment;
     }
+
+    /// What `--latency-probe` asks for: a keystroke-to-pixel run against the first window.
+    struct LatencyProbeRequest
+    {
+        std::filesystem::path reportFile; ///< Where the probe report is written.
+        std::size_t keys = 0;             ///< How many keys are measured.
+        display::SwapPacing pacing {};    ///< Whether swaps wait for the vertical blank.
+    };
 
     /// Hands a not-yet-exposed window the chosen GPU (Vulkan/Direct3D); no-op for OpenGL.
     /// @param window The window, before it is first exposed.
@@ -459,9 +477,60 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     int fontConfigAction();
     int checkConfig();
 
-    /// The `contour client` verb: boots the QML machinery connected to a
-    /// daemon or tmux server.
+    /// The `contour client` verb: collects its options into @ref _clientRequest, requires a daemon (or
+    /// tmux server), and boots the GUI through terminalGuiAction(), whose establishHosting() acts on them.
     int clientAction();
+
+    /// Which engine a `contour client` attaches through.
+    enum class ClientEngine : uint8_t
+    {
+        Native = 0, ///< A Contour daemon, over its native protocol.
+        Tmux = 1,   ///< A tmux server, in control mode (`--tmux`).
+    };
+
+    /// What `contour client` asked for, read before the verb re-parses into the terminal verb's surface,
+    /// where its own options are gone. establishHosting() acts on it.
+    struct ClientRequest
+    {
+        ClientEngine engine = ClientEngine::Native;
+        std::string tmuxSocket;         ///< `--tmux-socket`.
+        std::string socket;             ///< `--socket`; empty for `daemon.socket`.
+        std::string label;              ///< `--label`.
+        std::string profile;            ///< `--profile`.
+        std::string config;             ///< `--config`.
+        std::string connectTcp;         ///< `--connect-tcp`; empty for the local socket.
+        std::string tlsCaPath;          ///< `--tls-ca`.
+        std::string token;              ///< `--token` or `--token-file`, resolved.
+        std::string sizePolicy;         ///< `--size-policy`; empty for `daemon.size_policy`.
+        std::string logFilter;          ///< `--log`, forwarded to a daemon it starts.
+        std::string logFile;            ///< `--log-file`, likewise.
+        std::optional<uint64_t> window; ///< `--window`: the one daemon window to show.
+    };
+
+    /// Decides where this launch hosts its sessions (`daemon.mode`, forced to `required` by `contour
+    /// client`, else `--daemon-mode`, else the configuration) and, for a mode that attaches, starts the
+    /// connect: the attach is awaited, and the in-process fallback taken, once the QML engine exists
+    /// (settleHosting()), so the connect runs beside the GUI's boot. Runs right after the configuration
+    /// loaded.
+    /// @return Nothing to continue the launch; the line to print, ending it, otherwise.
+    [[nodiscard]] std::expected<void, std::string> establishHosting();
+
+    /// Starts the native attach establishHosting() decided on: builds the transport and the controller,
+    /// wires the controller's signals and starts its connect.
+    /// @return Nothing once connecting; the line to print otherwise.
+    [[nodiscard]] std::expected<void, std::string> startNativeAttach();
+
+    /// Attaches to a tmux server, as `contour client --tmux` asks, before the GUI boots.
+    /// @param request What the client asked for.
+    /// @return Nothing once attached; the line to print otherwise.
+    [[nodiscard]] std::expected<void, std::string> startTmuxAttach(ClientRequest const& request);
+
+    /// Maps how the attach ended through cli::decideHosting(): attached, hosted in-process with the
+    /// first window telling the user why, or the launch ends.
+    /// @param attached How the attach ended.
+    /// @return Nothing to continue the launch; the line to print, ending it, otherwise.
+    [[nodiscard]] std::expected<void, std::string> settleHosting(
+        std::expected<void, std::string> const& attached);
 
     /// Native attach: brings the local OS windows in line with the daemon's windows (B4). Maps the
     /// primary daemon window onto the boot window and, for each additional daemon window, spawns an OS
@@ -476,6 +545,20 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param controller The freshly-created controller of the just-spawned OS window.
     /// @return true if @p controller's window was bound to a pending daemon window.
     bool bindPendingAttachWindow(window::WindowController* controller);
+
+    /// Waits for the native attach started before the GUI booted, with what remains of its budget, then
+    /// routes session creation to the controller and offers a restart to a drifted local daemon.
+    /// @return Nothing once attached; why not, the controller given up, otherwise.
+    [[nodiscard]] std::expected<void, std::string> awaitNativeAttach();
+
+    /// After a reconnect: closes the OS windows of the daemon windows the daemon no longer has for this
+    /// client, once the windows that came instead are shown, so that closing them never closes the last one.
+    /// @param daemonWindows The lost daemon windows.
+    void closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWindows);
+
+    /// Connects what the native controller says about a lost connection: every pane's reconnecting state,
+    /// and the windows a reconnect did not bring back.
+    void connectReconnectSignals();
 
     /// Shows the daemon-drift badge when the daemon @p controller met runs another release than this
     /// client, and wires the badge's restart action to restartLocalDaemon().
@@ -506,6 +589,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// verbs that call installLogging() with their own option prefix.
     std::unique_ptr<core::log::ScopedOutput> _guiLogOutput;
 
+    /// When each step from process start to the first frame happened. Declared before the attach
+    /// engines, which stamp it, so it outlives them.
+    vthost::latency::StartupTimeline _startupTimeline;
+
     /// The attach engines, declared FIRST so they are destroyed LAST: remote-
     /// backed sessions hold ptys that unregister from them on destruction.
     std::unique_ptr<remote::NativeController> _nativeController;
@@ -515,6 +602,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// attach mode adopts the remaining remote sessions as tabs here.
     std::function<void()> _onGuiBooted;
 
+    /// Invoked by terminalGuiAction just before the first window: attach mode waits here for the
+    /// connect it started before the GUI booted, and adopts the controller once it is up.
+    /// @return Nothing once attached; the message to report, the controller given up, otherwise.
+    std::function<std::expected<void, std::string>()> _awaitAttach;
+
     /// Native attach (B4): each daemon window id mapped to the OS window that mirrors it. The primary
     /// daemon window maps to the boot window; additional ones map to spawned windows.
     std::unordered_map<uint64_t, vtworkspace::WindowId> _attachWindowMap;
@@ -523,6 +615,24 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Single-slot (like _pendingTransplant / _pendingSpawnScreen): the QML load is synchronous, so a
     /// stage is always consumed before the next is made.
     std::optional<uint64_t> _pendingAttachWindow;
+
+    /// Whether the boot window has adopted the daemon's primary window yet.
+    enum class AttachBoot : uint8_t
+    {
+        Pending = 0, ///< Not yet: the next daemon window shown goes into the boot window.
+        Adopted = 1, ///< It has: every later daemon window gets an OS window of its own.
+    };
+    /// Not "the map is empty": after a reconnect lost every window, the windows that came instead are new
+    /// OS windows, never the stale one about to be closed.
+    AttachBoot _attachBoot = AttachBoot::Pending;
+
+    /// What `contour client` asked for; empty for a plain launch. @see establishHosting
+    std::optional<ClientRequest> _clientRequest;
+    /// The `daemon.mode` this launch runs under, as establishHosting() resolved it.
+    config::DaemonMode _daemonMode = config::DaemonMode::InProcess;
+    /// What the first window tells the user when the daemon this launch wanted could not be had and its
+    /// sessions run in-process instead (cli::hostingNotice); empty otherwise.
+    std::string _hostingNotice;
 
     config::Config _config;
     // Sessions are heap-allocated with C++ ownership and never destroyed in production, so their command
@@ -615,6 +725,17 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param onFailure Called with the window when it shows no frame in time or its scene graph fails.
     void watchFirstFrame(QQuickWindow& window, std::function<void(QQuickWindow&)> onFailure);
 
+    /// @param verb The verb whose `latency-probe*` options are read: `contour.terminal` or `contour.client`.
+    /// @return The probe the options ask for, or nullopt without `latency-probe`.
+    [[nodiscard]] std::optional<LatencyProbeRequest> readLatencyProbeRequest(std::string const& verb) const;
+
+    /// Starts the latency probe once the first window shows a terminal display, retrying until it does or
+    /// the probe's prompt timeout, counted from the first attempt, ends the run.
+    void armLatencyProbe();
+
+    /// Writes the probe report and ends the event loop with the probe's exit code.
+    void finishLatencyProbe();
+
 #ifdef CONTOUR_WITH_GPU_SELECTION
     /// Moves @p window to the automatically chosen GPU, after the configured one failed to render on it.
     /// @param window The window that never showed a frame.
@@ -649,6 +770,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::optional<std::string> _gpuFallbackFrom;
     /// A fallback to another GPU, until it has been reported.
     std::optional<display::GpuFallback> _pendingGpuFallback;
+    /// The latency probe `--latency-probe` asked for; set by the verb before the GUI boots.
+    std::optional<LatencyProbeRequest> _latencyProbeRequest;
+    std::unique_ptr<vthost::latency::KeystrokeProbe> _keystrokeProbe;
+    std::unique_ptr<display::LatencyProbeDriver> _latencyProbeDriver;
+    /// The exit status the finished probe asks for; overrides the session's.
+    std::optional<int> _latencyProbeExitCode;
     /// Watches the first window's first frame when `renderer.gpu` names a GPU explicitly.
     std::unique_ptr<display::FirstFrameWatchdog> _firstFrameWatchdog;
     /// Raises the "could not render" notification; created on first use.

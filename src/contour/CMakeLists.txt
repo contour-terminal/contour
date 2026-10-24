@@ -284,6 +284,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/RenderState.hpp
         display/RenderingBackendSelection.hpp
         display/FirstFrameWatchdog.hpp
+        display/LatencyProbeDriver.hpp
         display/GpuSelection.hpp
         display/GpuInventory.hpp
         display/DxgiGpuInventory.hpp
@@ -312,6 +313,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
+        display/LatencyProbeDriver.cpp
         display/GpuInventory.cpp
         display/PciIds.cpp
         display/SysfsGpuInventory.cpp
@@ -782,6 +784,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ThreadJoin_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/FirstFrameWatchdog_test.cpp
+            display/ShaderConfig_test.cpp
             display/GpuSelection_test.cpp
             display/GpuInventory_test.cpp
             display/OpenGlGpuEnvironment_test.cpp
@@ -1038,6 +1041,15 @@ if(CONTOUR_FRONTEND_GUI)
             # developer's controlling terminal.
             add_test(NAME contour_e2e_daemon
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/daemon-lifecycle.sh $<TARGET_FILE:contour>)
+            # A client whose attach fails returns from the GUI verb before the event loop runs, with the QML
+            # engine already built; it must still exit cleanly, the engine gone before QApplication.
+            add_test(NAME contour_e2e_client_unreachable
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/client-unreachable.sh $<TARGET_FILE:contour>)
+            # Where a launch hosts its sessions (`daemon.mode`): `required` ends it before any window, `auto`
+            # falls back to in-process saying why, and `contour client --window` names a window the daemon
+            # lacks. The default `in_process` is what every other app run here already covers.
+            add_test(NAME contour_e2e_hosting
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/hosting.sh $<TARGET_FILE:contour>)
 
             # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
             # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->
@@ -1049,7 +1061,8 @@ if(CONTOUR_FRONTEND_GUI)
             # stays fully enabled here; the unit-test suites keep full leak checking.
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
-                contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon
+                contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
+                contour_e2e_hosting
                 PROPERTIES
                     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 120
@@ -1057,7 +1070,8 @@ if(CONTOUR_FRONTEND_GUI)
                     LABELS e2e)
             # Also selectable with the daemon suites: `ctest -L daemon` must cover the feature
             # end to end, not just its unit layers.
-            set_property(TEST contour_e2e_daemon APPEND PROPERTY LABELS daemon)
+            set_property(TEST contour_e2e_daemon contour_e2e_client_unreachable contour_e2e_hosting
+                         APPEND PROPERTY LABELS daemon)
 
             # Under ThreadSanitizer, the same ignore_noninstrumented_modules=1 as contour_gui_test, and
             # for the same reason: the application loads the same uninstrumented Qt, glib and libdbus,
@@ -1068,7 +1082,8 @@ if(CONTOUR_FRONTEND_GUI)
             # in such bodies has its races tested in an unsilenced module suite, not through these runs.
             if(CONTOUR_SANITIZE STREQUAL "thread")
                 set_property(TEST contour_e2e_lifecycle contour_e2e_vt_stream contour_e2e_custom_config
-                                  contour_e2e_cli contour_e2e_daemon
+                                  contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
+                                  contour_e2e_hosting
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
         endif()
@@ -1091,6 +1106,7 @@ if(CONTOUR_TESTING)
         test/core_test_main.cpp
         config/Actions_test.cpp
         config/FileOpenerTemplate_test.cpp
+        config/DaemonSettings_test.cpp
         config/GlobalOverrides_test.cpp
         config/LayoutBuilder_test.cpp
         config/PtyReadBufferSize_test.cpp
@@ -1105,7 +1121,10 @@ if(CONTOUR_TESTING)
         cli/CaptureScreen_test.cpp
         cli/ContourApp_test.cpp
         cli/DaemonVerbs_test.cpp
+        cli/Hosting_test.cpp
         cli/CatImageArgs_test.cpp
+        cli/ConfigProfileCatalog_test.cpp
+        cli/ConfigReloadPoller_test.cpp
         cli/ShellIntegration_test.cpp
         cli/ShellIntegrationShells_test.cpp
         display/RedrawCoalescer_test.cpp
@@ -1424,6 +1443,8 @@ if(WIN32)
                 # A developer benchmark, built here so that it runs beside the staged conpty.dll: the .exe,
                 # and the .ilk an incremental link leaves beside it.
                 PATTERN "bench-headless.*" EXCLUDE
+                # The latency benchmark, likewise: the .exe and the .ilk beside it.
+                PATTERN "bench-latency.*" EXCLUDE
                 PATTERN "*"
         )
     endif()

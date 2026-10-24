@@ -1,6 +1,10 @@
 add_library(vthost STATIC
+    AttachPlan.cpp
+    AttachPlan.hpp
     ClientCensus.hpp
     ClientSizePolicy.hpp
+    ConfigReload.hpp
+    FlushPolicy.hpp
     IdleExitWatcher.hpp
     CommandBlockWire.hpp
     DaemonControl.cpp
@@ -19,6 +23,7 @@ add_library(vthost STATIC
     DaemonRuntime.hpp
     ExtensionHosting.hpp
     PermissionWire.hpp
+    ProfileCatalog.hpp
     ImageWire.hpp
     TimeWire.hpp
     MouseWire.hpp
@@ -56,17 +61,36 @@ add_library(vthost STATIC
     ShutdownSignals.hpp
     SocketPath.hpp
     StatePath.hpp
+    TabEdits.cpp
+    TabEdits.hpp
     TappingPty.hpp
+    Transport.cpp
+    Transport.hpp
+    client/ClientSupervisor.cpp
+    client/ClientSupervisor.hpp
+    client/ConnectionState.hpp
     client/DaemonControlClient.cpp
     client/DaemonControlClient.hpp
     client/DaemonRestart.cpp
     client/DaemonRestart.hpp
     client/ReleaseDrift.cpp
     client/ReleaseDrift.hpp
+    client/Liveness.hpp
     client/NativeClient.cpp
     client/NativeClient.hpp
     client/LayoutReconstruction.cpp
     client/LayoutReconstruction.hpp
+    latency/EchoProtocol.hpp
+    latency/Gate.cpp
+    latency/Gate.hpp
+    latency/KeystrokeProbe.cpp
+    latency/KeystrokeProbe.hpp
+    latency/Report.cpp
+    latency/Report.hpp
+    latency/StartupTimeline.cpp
+    latency/StartupTimeline.hpp
+    latency/Stats.cpp
+    latency/Stats.hpp
     imsg/CommandArgv.cpp
     imsg/CommandArgv.hpp
     imsg/Identify.cpp
@@ -75,6 +99,8 @@ add_library(vthost STATIC
     imsg/ImsgCodec.hpp
     client/ScreenMirror.cpp
     client/ScreenMirror.hpp
+    client/TabPresentation.hpp
+    client/ViewportOrigin.hpp
     GridWire.cpp
     GridWire.hpp
     proto/Negotiation.cpp
@@ -145,10 +171,13 @@ if(VTHOST_TESTING)
     enable_testing()
     add_executable(vthost_test
         test_main.cpp
+        AttachPlan_test.cpp
+        TabEdits_test.cpp
         GracefulClose_test.cpp
         HostIdentity_test.cpp
         LoopDrain_test.cpp
         SessionHost_test.cpp
+        FlushPolicy_test.cpp
         SessionSettings_test.cpp
         ConnectionAcceptor_test.cpp
         CommandBlockWire_test.cpp
@@ -174,6 +203,7 @@ if(VTHOST_TESTING)
         SocketPath_test.cpp
         StatePath_test.cpp
         Token_test.cpp
+        Transport_test.cpp
         testing/GridParity.cpp
         testing/GridParity.hpp
         testing/ShippedCodec.hpp
@@ -184,17 +214,27 @@ if(VTHOST_TESTING)
         testing/FakeDaemonControl.hpp
         testing/FakeExtensionHosting.hpp
         testing/FakeImageLeases.hpp
+        testing/FakeProfileCatalog.hpp
         testing/ForwardingFileSystem.hpp
         testing/GatedFileSystem.hpp
         testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
+        client/ClientSupervisor_test.cpp
         client/DaemonControlClient_test.cpp
         client/DaemonRestart_test.cpp
         client/ReleaseDrift_test.cpp
+        client/Liveness_test.cpp
         client/NativeClient_test.cpp
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp
+        client/ViewportOrigin_test.cpp
         imsg/ImsgCodec_test.cpp
+        latency/EchoProtocol_test.cpp
+        latency/Gate_test.cpp
+        latency/KeystrokeProbe_test.cpp
+        latency/Report_test.cpp
+        latency/StartupTimeline_test.cpp
+        latency/Stats_test.cpp
         proto/Compatibility_test.cpp
         proto/Negotiation_test.cpp
         proto/Pdu_test.cpp
@@ -239,4 +279,44 @@ if(VTHOST_TESTING)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(vthost_test PRIVATE -Wno-c2y-extensions)
     endif()
+endif()
+
+# The latency benchmark: the echo child, the headless and the end-to-end legs, and the `bench-latency`
+# executable that runs them. Never installed, so it never reaches a package.
+option(VTHOST_BUILD_BENCH_LATENCY "Builds bench-latency, which compares the daemon path with in-process [default: OFF]" OFF)
+if(VTHOST_BUILD_BENCH_LATENCY)
+    add_library(vthost_bench_latency STATIC
+        latency/BenchSupport.cpp
+        latency/BenchSupport.hpp
+        latency/E2eBench.cpp
+        latency/E2eBench.hpp
+        latency/EchoChild.cpp
+        latency/EchoChild.hpp
+        latency/HeadlessBench.cpp
+        latency/HeadlessBench.hpp
+    )
+    target_link_libraries(vthost_bench_latency PUBLIC vthost)
+    add_executable(bench-latency latency/bench-latency.cpp)
+    target_compile_definitions(bench-latency PRIVATE CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}")
+    target_link_libraries(bench-latency vthost_bench_latency core::cli)
+    # `bench-latency e2e` and the display-gated runs find their executables beside the other tools.
+    if(VTHOST_TESTING)
+        add_executable(bench_latency_test test_main.cpp latency/BenchSupport_test.cpp)
+        target_link_libraries(bench_latency_test vthost_bench_latency core::testing Catch2::Catch2)
+        if(NOT WIN32)
+            target_compile_options(bench_latency_test PRIVATE -Wno-c2y-extensions)
+        endif()
+        add_test(NAME bench_latency_test COMMAND $<TARGET_FILE:bench_latency_test>)
+        set_tests_properties(bench_latency_test PROPERTIES LABELS "daemon;bench")
+        # A short headless run of each leg: a crash in the daemon leg or the in-process leg fails the suite.
+        add_test(NAME bench_latency_headless_smoke COMMAND bench-latency headless runs 1 keys 20)
+        set_tests_properties(bench_latency_headless_smoke PROPERTIES LABELS "daemon;bench" TIMEOUT 120
+            PASS_REGULAR_EXPRESSION "keystroke +daemon +[0-9]+ +[0-9.]+")
+        # A name that is not a workload must fail, naming the ones that are.
+        add_test(NAME bench_latency_rejects_unknown_workload
+                 COMMAND bench-latency headless workload no-such-workload)
+        set_tests_properties(bench_latency_rejects_unknown_workload PROPERTIES LABELS "daemon;bench"
+            WILL_FAIL TRUE)
+    endif()
+    message(STATUS "[vthost] Build bench-latency: ON")
 endif()

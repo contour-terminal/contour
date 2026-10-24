@@ -132,7 +132,7 @@ with any other value is a pre-negotiation peer's, decoded no further than that v
 | PDU | Layout |
 |-----|--------|
 | `ClientHello` | `u32 4`, one blob of `varint min, varint max, varint count + varint idents, string token, optional session settings` and whatever a later version appends, then one zero byte |
-| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname` and whatever a later version appends |
+| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname, string releaseVersion, varint count + varint followedWindows, varint daemonInstance` and whatever a later version appends |
 | `ServerHello` (version alone) | the `u32` alone: the refusal a pre-negotiation client (0.7.0 on codec 1, 0.8.0 on codec 2, or codec 3) reads |
 
 Each stays readable to contour 0.7.0, whose daemon decodes a hello whole before it checks the version
@@ -241,7 +241,25 @@ release: it is a new PDU behind a capability (see [Version negotiation](#version
 older peer that receives it anyway answers `Unsupported`. What genuinely costs a version step is changing
 an existing PDU's meaning.
 
-### Where a split ratio lives
+### What a client syncs back
+
+A client rebuilds its windows from `LayoutState`, so anything it changes about a tab and does not
+tell the daemon is lost on the next attach, and never reaches another client. Two verbs carry it
+back: `ResizeSplit` for a divider (below), and `EditTab` for how a tab is presented — its active
+pane, its zoom, its title, its colour, and which tab of the window is active.
+
+**`EditTab`** (tag 28, gated on `Capability::TabEdits`; without it the daemon answers
+`Unsupported`) names a session and a `TabEditKind`, and `vthost::applyTabEdit` applies it through
+one table row per kind: `ActivatePane` → `setActivePane`; `Zoom`/`Unzoom` → activate the pane, then
+`toggleActivePaneZoom` only when the zoom differs; `SetTitle`/`ClearTitle` →
+`setTabTitle`/`resetTabTitle`; `SetColor`/`ClearColor` → `setTabColor`/`resetTabColor` as
+`TabColorSource::User`; `ActivateTab` → `activateTab`. Every row compares before it mutates, so a
+client re-asserting state the daemon already holds fires no model event and so costs no client a
+layout push; a change fans out as a fresh `LayoutState` to every client, the sender included. An
+edit naming an unknown session or kind is logged with `describe(TabEditError)` and answered with
+nothing.
+
+#### Where a split ratio lives
 
 **In the daemon's model, or the user loses it.** A client rebuilds every tab from `LayoutState` on
 attach, so a divider the daemon never heard about comes back at the ratio the split was *created*
@@ -268,11 +286,25 @@ Two details the mechanism rests on:
 `applyRemoteLayout` therefore has a third pass, after the additive and subtractive ones and on the
 settled tree, that re-flows an already-realized tab when another client moves a divider. It pairs
 each wire tab with the local tab that matches it leaf-for-leaf, so a tab caught mid-reconciliation is
-skipped rather than written onto. That pass is the shape to generalize when a SECOND attribute needs
-the same treatment: `WireTab` already serializes `activePane`, `zoomedPane`, `title` and `color`, and
-none of them are reconciled yet — at that point one lockstep `reconcile(wire, local)` walk subsumes
-all three passes, and the outbound half wants `NativeController` as a second `ModelEvents` observer
-rather than a hand-written verb per attribute.
+skipped rather than written onto.
+
+#### How a tab's presentation travels
+
+The same pairing carries a tab's presentation both ways, compared as one
+`vthost::client::TabPresentation` (active and zoomed pane by session, title, colour, and whether the
+tab is its window's active one). **Outbound**, the five model events that can change it
+(`activePaneChanged`, `paneZoomChanged`, `tabTitleChanged`, `tabColorChanged`, `activeTabChanged`)
+call `SessionFactory::reportTabPresentation`, which names the panes by their ptys, since only the
+factory knows what a pty is bound to; `NativeController` translates them to sessions and sends one
+`EditTab` per field `tabEditsToReport` finds different. It compares with the last `LayoutState` for
+the tab, or with what it reported since, until the next push of that window: a zoom also retitles a
+tab, and the second report must not send the zoom again. **Inbound**, `applyRemoteLayout`'s last pass
+runs `tabEditsToReport` the other way round — what the daemon has that the local tab has not — and
+applies the edits to the local model through the daemon's own `applyTabEdit`, with the sessions
+translated, so the two ends cannot disagree on what an edit means. The colour compared and applied
+is the user's (`TabColorSource::User`), never the effective one: a profile's or an application's
+colour is the client's own business. Nothing echoes: the last pass runs inside the realizing bracket,
+and `reportTabPresentation` drops what arrives during it.
 
 Line PDUs carry the full per-cell renditional state (grapheme cluster extras,
 widths, OSC 66 scales and packed extras, hyperlink ids, colors, the 20
@@ -521,8 +553,10 @@ pre-retrofit baseline (acceptance was < 0.5 %), `writeTextToSoA` and
 ### Transport and clients
 
 `NativeSession` (server) pushes an attach snapshot (SessionState + a snapshot
-Delta per session), then 20 ms-debounced deltas off the host's screen-updated
-signal. Deltas also carry the currently-SET DEC private modes of a
+Delta per session), then deltas off the host's screen-updated signal. The
+first update after a client's input (its echo, once per input within a 50 ms
+window) and the first increment after a snapshot flush at once; everything else
+coalesces for 20 ms into one Delta (`vthost/FlushPolicy.hpp`). Deltas also carry the currently-SET DEC private modes of a
 single-sourced mirrored-mode table (`vthost/MirroredModes.hpp`: cursor keys,
 keypad, backarrow, bracketed paste, focus, cursor visibility) —
 everything a client needs to encode INPUT correctly; a pure mode flip pushes
@@ -600,7 +634,7 @@ terminal changed identity. A client whose configuration changed restates its pre
 from then on; `contour client` resolves its profile again before every session it asks for, from the
 configuration the GUI holds in memory (as a local new tab does), and sends the restatement only when
 the result differs, so a tab opened after a configuration reload gets the reloaded profile. Both `contour daemon` and `contour client` resolve those settings through
-the one `config::resolveEmulationSettings` helper, so a warm daemon and the client attaching to it
+the one `config::findNamedProfile` lookup (`emulationSettingsFor`, `resolvedSessionConfigFor`), so a warm daemon and the client attaching to it
 cannot disagree about what a profile means.
 
 Transient session events — bell, desktop notification, OSC 52 clipboard write — are one PDU each
@@ -726,12 +760,106 @@ change. The connection that asked is no longer special.
 
 **What a client that cannot show the grid does.** A client LARGER than the grid letterboxes — the
 sub-cell remainder already renders as background padding, so the surplus simply is not drawn. A
-client SMALLER than it shows a window into the grid, positioned by `contour::geometry::
-viewportOrigin` — tmux's `tty_window_offset1` rule, ported as a pure function: centre the cursor
-horizontally once it is past the viewport, keep it on the last visible row vertically, clamp so the
-view never runs off the grid, and decide the two axes independently. The rule and its tests are in
-place; wiring it into the render origin and the mouse hit-test is not yet done, so a too-small
-client currently clips at the top-left instead of following the cursor.
+client SMALLER than it shows a window into the grid, positioned by `vthost::client::viewportOrigin`
+— tmux's `tty_window_offset1` rule, ported as a pure function: centre the cursor horizontally once
+it is past the viewport, keep it on the last visible row vertically, clamp so the view never runs
+off the grid, and decide the two axes independently. `ScreenMirror` applies it on every update:
+local page row `r` shows the host's row `origin.line + r`, shifted left by `origin.column`, and the
+local cursor is the host's minus the origin. An origin that moves rewrites the whole page (the
+replay's page path); an unchanged one scrolls incrementally as before. Rows of the host's history
+are written unshifted, and the host's page rows above the window are not copied into local
+history. The mirror terminal adds the origin to every cell it reports in a mouse press, move or
+release (`vtbackend::Terminal::setReportedCellOrigin`), so a click lands on the cell the application
+drew there, not on the client's own cell.
+
+### Which windows a client sees
+
+A grid is shared; a *window* need not be. A client states an attach intent in its `ClientHello`
+(`proto::AttachIntent`, honoured only when both ends share `Capability::AttachIntent`), and the
+daemon decides with the pure `vthost::planAttach` what that connection follows and what attaching
+creates:
+
+| Intent | Follows | Creates |
+| --- | --- | --- |
+| `AllWindows` (no capability: every client before intents) | every window, later ones included (`FollowScope::Every`) | the first tab, on an empty daemon |
+| `Launch`, no other client attached | every window with a tab | the first tab, on an empty daemon |
+| `Launch`, another client attached | a new window of its own | that window |
+| `NewWindow` | a new window of its own | that window |
+| `Windows` | the listed windows that exist (possibly none) | nothing |
+| `Resume` | the listed windows that survive, holding a tab; none surviving, as `Launch` | as `Launch` when none survive |
+
+"Another client" is `SessionHost::connectedClients()`: handshaken native `Attach` connections,
+counted after the plan (so a connection never counts against itself) and uncounted as the
+connection is destroyed. It is deliberately not the daemon's `ClientCensus`, which counts tmux and
+imsg clients too, for idle exit: a tmux gateway attached must not turn the first GUI's launch into
+a second window.
+
+The handshake runs negotiate → plan → create → `ServerHello` (whose `followedWindows` names the
+windows followed) → `LayoutState` per followed window → snapshots of their sessions. The plan runs
+after the hello's client area is applied, so whatever it spawns spawns at the client's size. Nothing
+reaches the peer before its `ServerHello`. From then on a connection is sent the layout, screens,
+resizes, bells, notifications and clipboard writes of followed windows only; a window that closes
+leaves the set.
+
+A window gains followers in two ways. One a connection creates (its `NewWindow`, or the window a
+launch made for it) is *claimed* for it in `SessionHost` before its first tab is announced, and that
+connection follows it. A window nobody claims — one the control API creates — is followed by the
+**primary viewer**, the connection whose `Launch`/`Resume` found no other client attached: `contour
+new` then appears in the GUI the user launched first, not in none. A claimed window stays claimed
+after its creator leaves, so a second GUI never inherits the first one's window; it waits for the
+next launch that takes every window. Each window joining a connection's set is sent its sessions'
+snapshots, since a quiet session would otherwise produce nothing to send.
+
+A client that loses its connection keeps its windows. `vthost::client::ClientSupervisor` opens every
+connection through an `ITransportFactory` (`Transport.hpp`), and after a loss reconnects with backoff
+(250 ms doubling to 5 s), each new connection stating `Resume` of the windows the lost one followed —
+or `AllWindows` again for a client that attached with it, so a reconnect never narrows its view.
+Window and session ids count from 1 in every run of a daemon, so the ids alone cannot tell a restarted
+daemon's window 1 from the one the client showed: the `ServerHello` states `daemonInstance`, drawn at
+random as the daemon starts, and a client that meets another instance takes every window it showed for
+lost. That is also why `Resume` does not take an empty window for a survivor — a restarted daemon's own
+primary window holds no tab yet. The GUI (`contour::remote::NativeController`) keeps every pane and pty
+while reconnecting, drops what is typed meanwhile rather than replaying it into whatever shell answers
+next, restarts each pane's mirror for the new connection's snapshots, and reports the lost windows
+(`windowsLost`) with the first window that came instead, so it can close them without closing the last
+one.
+
+### Who configures a daemon session
+
+The host's configuration owns what runs; the client's owns how it looks. A client names a
+**profile** — in its `ClientHello` (`profileName`), or on a spawning verb (`CreateTab`, `SplitPane`,
+`NewWindow`, whose name overrides the connection's for that one spawn) — and the daemon resolves the
+name in its own configuration through `vthost::ProfileCatalog` (`contour::cli::ConfigProfileCatalog`
+for `contour daemon`). The resolved profile supplies the session's settings and its whole shell:
+program, arguments, working directory and environment — the shell the in-process GUI spawns for that
+profile (`config::resolvedSessionConfig`), replacing the daemon's rather than layered over it, so no
+variable of the default profile reaches a session of another; only the daemon's own variables
+(`hostedShellEnvironment`) are added and win. Its `escape_sandbox` travels with it
+(`ResolvedProfile::sandbox`, through `SessionHostConfig::profilePtys`), as `SessionFactory` takes it
+from the session's own profile in-process: a contained profile is never run on the host because the
+default profile escapes. A spawn naming no profile resolves the default one the
+same way, keeping the emulation settings a client stated, if any. A
+layout pane's `command`/`directory` overlay that shell, and a startup layout's per-pane profile (else
+its tab's) is honoured the same way.
+
+A name the host does not know — a Windows laptop's `pwsh` profile against a Linux host — never
+refuses the session: the host's default profile (the daemon's `--profile`, else `default_profile`)
+runs, and the log says `session N: profile 'pwsh' is unknown here; using 'main'`.
+`daemon.history_limit`, when set, replaces every profile's `history.limit` on the host, since the
+daemon keeps the lines.
+
+It is gated twice. The daemon offers `Capability::ProfileByName` only when it has a catalog, and a
+connection that shares it and names a profile has its stated `sessionSettings` ignored. A client
+that does not share it keeps the older path, in which its stated emulation settings shape the
+sessions it creates and the daemon's configured shell runs.
+
+The catalog follows the configuration file while the daemon runs. `contour daemon` hands
+`runDaemon` a `ConfigReloadHook` whose poll (every 2 s, on the loop) compares the file's last-write
+time with the one last seen and, when it moved, loads it again into a fresh catalog
+(`contour::cli::ConfigReloadPoller`). `SessionHost::replaceProfiles` then serves new sessions from
+it, named or not, and gives every running session its profile's new scrollback limits under the terminal's lock;
+a running session's shell, environment and directory never change. A file that fails to load is
+logged and leaves the running configuration in force, and is not retried until it changes again.
 
 ## Socket conventions
 

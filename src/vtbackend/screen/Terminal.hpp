@@ -1600,6 +1600,20 @@ class Terminal: public IStatusLinePublishTarget
                                   MouseButton button,
                                   PixelCoordinate pixelPosition,
                                   bool uiHandledHint);
+
+    /// Sets the cell that this terminal's top-left cell stands for in the grid the application sees.
+    ///
+    /// Zero for a terminal that runs its own application. A mirror of a daemon-hosted grid larger than
+    /// this terminal shows a window into it (vthost::client::viewportOrigin), so a cell here is the cell
+    /// @p origin further down and to the right there: every cell position reported to the application in
+    /// a mouse press, move or release has @p origin added. Runtime state, set on every update the mirror
+    /// applies -- the origin follows the cursor.
+    /// @param origin The grid cell this terminal's top-left cell shows.
+    void setReportedCellOrigin(CellLocation origin) noexcept { _reportedCellOrigin = origin; }
+
+    /// @return The cell this terminal's top-left cell stands for in the application's grid.
+    /// @see setReportedCellOrigin
+    [[nodiscard]] CellLocation reportedCellOrigin() const noexcept { return _reportedCellOrigin; }
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view text); // Sends verbatim text in bracketed mode to application.
@@ -4468,6 +4482,8 @@ class Terminal: public IStatusLinePublishTarget
     // {{{ mouse related state (helpers for detecting double/triple clicks)
     ClickCounter _clickCounter; ///< Multi-click sequences (drag, word, extended word, line).
     vtbackend::CellLocation _currentMousePosition {}; // current mouse position
+    /// What every cell position reported to the application is offset by. @see setReportedCellOrigin
+    vtbackend::CellLocation _reportedCellOrigin {};
     /// Where the pointer is in device pixels, from the grid's top left, as of the last move or press: what a
     /// DEC locator report gives while DECELR selects device pixels. xterm's pixel origin is its VT window,
     /// internal border included; the grid's is the sounder one, as the cells count from it too.

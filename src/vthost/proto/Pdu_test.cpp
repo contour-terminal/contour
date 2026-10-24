@@ -710,10 +710,36 @@ TEST_CASE("a Control-role ClientHello round-trips and an absent role reads as At
 {
     auto const hello = ClientHello { .role = ConnectionRole::Control };
     CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
-    // A hello encoded before the field existed: everything up to the role, nothing after.
+    // A hello encoded before the field existed: everything up to the role, nothing after -- neither
+    // the role, the absent client area's presence byte, the intent (kind, count) nor the empty profile.
     auto const legacy = encodeWithoutTrailingField(
-        DecodedPdu { ClientHello { .role = ConnectionRole::Control } }, /*bytesToDrop=*/1);
+        DecodedPdu { ClientHello { .role = ConnectionRole::Control } }, /*bytesToDrop=*/5);
     CHECK(decodeAs<ClientHello>(legacy).role == ConnectionRole::Attach);
+}
+
+TEST_CASE("a ClientHello's client area round-trips and an absent one decodes as none", "[vthost][proto]")
+{
+    auto const hello = ClientHello { .clientArea = WireClientArea { .columns = 132, .lines = 43 } };
+    CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+    // A phase-2 hello: everything up to the role, and no presence byte after it (nor the intent and
+    // profile that follow it now).
+    auto const legacy = encodeWithoutTrailingField(
+        DecodedPdu { ClientHello { .role = ConnectionRole::Control } }, /*bytesToDrop=*/4);
+    auto const decoded = decodeAs<ClientHello>(legacy);
+    CHECK(decoded.role == ConnectionRole::Control);
+    CHECK(decoded.clientArea == std::nullopt);
+    // The area is a presence byte, then two varints.
+    auto const withArea = bodyOf(DecodedPdu { hello });
+    auto const withoutArea = bodyOf(DecodedPdu { ClientHello {} });
+    CHECK(withArea.size() == withoutArea.size() + 3); // varint 132 is two bytes, varint 43 one
+}
+
+TEST_CASE("a ClientHello whose client area is cut short is malformed", "[vthost][proto]")
+{
+    auto const cut = encodeWithoutTrailingField(
+        DecodedPdu { ClientHello { .clientArea = WireClientArea { .columns = 80, .lines = 25 } } },
+        /*bytesToDrop=*/4); // the intent and the profile, and the area's lines
+    CHECK_FALSE(decodePdu(cut).has_value());
 }
 
 TEST_CASE("an unknown ConnectionRole byte reads as Control, never as Attach", "[vthost][proto]")
@@ -722,7 +748,9 @@ TEST_CASE("an unknown ConnectionRole byte reads as Control, never as Attach", "[
                                                [](std::span<std::byte const> fields) {
                                                    auto edited =
                                                        std::vector<std::byte>(fields.begin(), fields.end());
-                                                   edited.back() = std::byte { 7 };
+                                                   // The role, just before the area's presence byte, the
+                                                   // intent's kind and count, and the empty profile.
+                                                   edited.rbegin()[4] = std::byte { 7 };
                                                    return edited;
                                                });
     CHECK(decodeAs<ClientHello>(future).role == ConnectionRole::Control);
@@ -732,7 +760,9 @@ TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty
 {
     auto const hello = ServerHello { .releaseVersion = "0.8.1" };
     CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).releaseVersion == "0.8.1");
-    auto const legacy = encodeWithoutTrailingString(DecodedPdu { hello }, "0.8.1");
+    // The release string (length byte and five characters), and the followed-window count and the instance
+    // behind it.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, /*bytesToDrop=*/8);
     CHECK(decodeAs<ServerHello>(legacy).releaseVersion.empty());
 }
 
@@ -802,8 +832,9 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
                                          .machineId = "m",
                                          .hostname = "zeta",
                                          .releaseVersion = "r" };
-        auto const frame = encodeWithoutTrailingField(hello, 7); // "r", "zeta" and their lengths
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 7);
+        // "r", "zeta" and their lengths, the followed-window count and the instance
+        auto const frame = encodeWithoutTrailingField(hello, 9);
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 9);
         auto expected = hello;
         expected.hostname.clear();
         expected.releaseVersion.clear();
@@ -821,7 +852,8 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
                 ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 77 } }, .token = "tok" })
                 .size();
         auto const dropped =
-            bodyOf(hello).size() - settingsSize + 2; // the settings, less the absent byte, and the role
+            bodyOf(hello).size() - settingsSize + 6; // the settings, less the absent byte, the role, the
+                                                     // absent client area, the intent and the empty profile
         auto expected = hello;
         expected.sessionSettings.reset();
         CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, dropped)) == expected);
@@ -832,16 +864,12 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
     }
     SECTION("encodeWithoutTrailingString drops exactly the named last string")
     {
-        auto const hello = ServerHello { .agreedVersion = 4,
-                                         .versions = { 4, 4 },
-                                         .machineId = "m",
-                                         .hostname = "zeta",
-                                         .releaseVersion = "0.8.1" };
-        auto const frame = encodeWithoutTrailingString(hello, "0.8.1");
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 6);
+        auto const hello = ClientHello { .token = "tok", .profileName = "work" };
+        auto const frame = encodeWithoutTrailingString(hello, "work");
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 5);
         auto expected = hello;
-        expected.releaseVersion.clear();
-        CHECK(decodeAs<ServerHello>(frame) == expected);
+        expected.profileName.clear();
+        CHECK(decodeAs<ClientHello>(frame) == expected);
     }
     SECTION("encodeWithFieldAppended grows a plain body at its end, and a hello's blob")
     {
@@ -1691,4 +1719,139 @@ TEST_CASE("a command-block record's size estimate never under-counts", "[vthost]
             CHECK(estimate >= actual);
             CHECK(actual * 2 >= estimate); // and not so generous that a budget fills with air
         }
+}
+
+TEST_CASE("ClientHello carries an attach intent and a profile name", "[vthost][pdu]")
+{
+    auto const hello =
+        ClientHello { .attachIntent = { .kind = AttachIntentKind::Resume, .windows = { 1, 7 } },
+                      .profileName = "work" };
+    CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+}
+
+TEST_CASE("a ClientHello truncated before the appended fields decodes to AllWindows and no profile",
+          "[vthost][pdu]")
+{
+    auto const hello = ClientHello { .token = "tok",
+                                     .sessionSettings = WireSessionSettings { .historyLineCount = 5000 },
+                                     .role = ConnectionRole::Control,
+                                     .clientArea = WireClientArea { .columns = 132, .lines = 43 },
+                                     .attachIntent = { .kind = AttachIntentKind::Launch, .windows = { 3 } },
+                                     .profileName = "work" };
+    auto expected = hello;
+    expected.attachIntent = {};
+    expected.profileName.clear();
+
+    SECTION("after the client area")
+    {
+        // The intent (kind, count, one id) and the profile (length byte, four characters).
+        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, 3 + 5)) == expected);
+    }
+    SECTION("after the role")
+    {
+        // The area (presence, two varints) goes as well.
+        expected.clientArea.reset();
+        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, 3 + 5 + 4)) == expected);
+    }
+    SECTION("after the session settings")
+    {
+        expected.clientArea.reset();
+        expected.role = ConnectionRole::Attach;
+        auto const withoutSettings = ClientHello { .token = "tok" };
+        auto const settingsOnly =
+            bodyOf(DecodedPdu { hello }).size() - bodyOf(DecodedPdu { withoutSettings }).size();
+        CHECK(settingsOnly > 0);
+        // Everything after the settings block: the role as well.
+        auto const tail = std::size_t { 1 + 4 + 3 + 5 };
+        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, tail)) == expected);
+    }
+    SECTION("the profile alone")
+    {
+        expected.attachIntent = hello.attachIntent;
+        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, 5)) == expected);
+    }
+}
+
+TEST_CASE("an attach intent kind no enumerator names decodes as AllWindows", "[vthost][pdu]")
+{
+    auto const hello =
+        ClientHello { .attachIntent = { .kind = AttachIntentKind::Windows, .windows = { 4 } } };
+    auto const future = encodeWithFieldsEdited(DecodedPdu { hello }, [](std::span<std::byte const> fields) {
+        auto edited = std::vector<std::byte>(fields.begin(), fields.end());
+        // The kind precedes the count, the one id, and the empty profile's length byte.
+        edited.rbegin()[3] = std::byte { 0xEE };
+        return edited;
+    });
+    auto const decoded = decodeAs<ClientHello>(future);
+    CHECK(decoded.attachIntent.kind == AttachIntentKind::AllWindows);
+    CHECK(decoded.attachIntent.windows == std::vector<uint64_t> { 4 });
+}
+
+TEST_CASE("ServerHello carries the followed windows; a refusal carries none", "[vthost][pdu]")
+{
+    auto const hello = ServerHello { .agreedVersion = 4, .followedWindows = { 1, 3 } };
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).followedWindows
+          == std::vector<uint64_t> { 1, 3 });
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { ServerHello { .agreedVersion = 0 } }))
+              .followedWindows.empty());
+    // A daemon from before the field: the count, its ids and the instance after them are missing.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { hello }, 4);
+    CHECK(decodeAs<ServerHello>(legacy).followedWindows.empty());
+}
+
+TEST_CASE("ServerHello carries the daemon's instance; an older daemon's reads as unknown", "[vthost][pdu]")
+{
+    auto const hello =
+        ServerHello { .agreedVersion = 4, .followedWindows = { 1 }, .daemonInstance = 0xC0FFEE'0000'0001 };
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).daemonInstance == 0xC0FFEE'0000'0001);
+    // A daemon from before the field: the followed windows end the blob.
+    auto const legacy = encodeWithoutTrailingField(DecodedPdu { ServerHello { .agreedVersion = 4 } }, 1);
+    auto const decoded = decodeAs<ServerHello>(legacy);
+    CHECK(decoded.daemonInstance == 0);
+    CHECK(decoded.agreedVersion == 4);
+}
+
+TEST_CASE("EditTab and Heartbeat round-trip", "[vthost][pdu]")
+{
+    auto const edit = EditTab { .session = 9, .kind = TabEditKind::SetColor, .color = 0x336699 };
+    CHECK(roundTrip(DecodedPdu { edit }) == DecodedPdu { edit });
+    auto const titled = EditTab { .session = 2, .kind = TabEditKind::SetTitle, .title = "build" };
+    CHECK(roundTrip(DecodedPdu { titled }) == DecodedPdu { titled });
+    CHECK(roundTrip(DecodedPdu { Heartbeat { .nonce = 42 } }) == DecodedPdu { Heartbeat { .nonce = 42 } });
+}
+
+TEST_CASE("an EditTab kind no enumerator names still decodes", "[vthost][pdu]")
+{
+    auto const decoded =
+        std::get<EditTab>(roundTrip(DecodedPdu { EditTab { .kind = static_cast<TabEditKind>(0xEE) } }));
+    CHECK(std::to_underlying(decoded.kind) == 0xEE);
+}
+
+TEST_CASE("the tab-edit and heartbeat tags are pinned", "[vthost][pdu]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::EditTab) == 28);
+    STATIC_CHECK(std::to_underlying(PduType::Heartbeat) == 29);
+}
+
+TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[vthost][pdu]")
+{
+    CHECK(std::get<CreateTab>(roundTrip(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } }))
+              .profileName
+          == "ssh");
+    CHECK(std::get<SplitPane>(roundTrip(DecodedPdu { SplitPane {
+                                  .session = 3, .orientation = 2, .ratio = 5000, .profileName = "x" } }))
+              .profileName
+          == "x");
+    CHECK(std::get<NewWindow>(roundTrip(DecodedPdu { NewWindow { .profileName = "y" } })).profileName == "y");
+
+    // Bodies as a peer from before the field sends them.
+    CHECK(decodeAs<NewWindow>(frameOf(PduType::NewWindow, {})).profileName.empty());
+    auto createTab = Writer {};
+    createTab.varint(3);
+    CHECK(decodeAs<CreateTab>(frameOf(PduType::CreateTab, createTab.view())).profileName.empty());
+    auto splitPane = Writer {};
+    splitPane.varint(3);
+    splitPane.u8(2);
+    splitPane.u16(5000);
+    CHECK(decodeAs<SplitPane>(frameOf(PduType::SplitPane, splitPane.view())).profileName.empty());
 }

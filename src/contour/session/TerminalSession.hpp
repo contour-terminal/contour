@@ -57,6 +57,7 @@
 
 #include <qcolor.h>
 
+#include <vthost/client/ConnectionState.hpp>
 #include <vtworkspace/Primitives.hpp>
 
 namespace contour
@@ -244,6 +245,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
     Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
+    // Whether the daemon connection this pane mirrors through is being sought again: a QML-facing property,
+    // the documented bool exception (AGENT.md), read by TerminalPane.qml's reconnecting overlay.
+    Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -691,6 +695,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// what wakes the exit watcher. Runtime state, not construction-time configuration: a
     /// session is born connected and may lose that at any point.
     void noteTransportLost() noexcept { _transportLost = true; }
+
+    /// Tells a pane that mirrors a remote session where the connection to its host stands, so it can show
+    /// that it is reconnecting rather than a grid that merely stopped. Runtime state, not configuration: the
+    /// connection comes and goes while the session lives. A local session has no such connection and
+    /// ignores it.
+    /// @param state Where the connection stands now.
+    void setHostConnection(vthost::client::ConnectionState state);
+
+    /// @return Whether this pane's connection to its host is lost and being sought again.
+    [[nodiscard]] bool isReconnecting() const noexcept
+    {
+        return _hostConnection == vthost::client::ConnectionState::Reconnecting;
+    }
 
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
@@ -1253,6 +1270,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void searchBarRequested();
     /// The pattern, its tally, or the case policy changed.
     void searchStateChanged();
+    /// isReconnecting() changed.
+    void reconnectingChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -1351,7 +1370,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     bool reloadConfig(config::Config newConfig, std::string const& profileName);
     int executeAllActions(std::vector<actions::Action> const& actions);
-    void spawnNewTerminal(std::string const& profileName);
+    /// Opens a new window: a new process or an in-process window, or -- attached -- one the daemon hosts.
+    /// @param requestedProfile The profile the action named; std::nullopt runs this session's own locally,
+    ///        and the one this client named in its hello on a daemon.
+    void spawnNewTerminal(std::optional<std::string> const& requestedProfile);
 
     /// Writes @p lines into this session's own screen, highlighted the way onClosed()'s early-exit
     /// notice is, so the user reads them where the shell's output would have been.
@@ -1683,6 +1705,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Where the session's program runs: here, or on a daemon or tmux server the pane mirrors. A mirrored
     /// pane runs no status-line extension of its own -- they run where its terminal does, on the remote end.
     SessionHosting _hosting;
+    /// Where the connection to the host stands, for a mirrored pane. @see setHostConnection
+    vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;

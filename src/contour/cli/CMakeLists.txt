@@ -40,9 +40,12 @@ add_custom_command(
 add_library(contour_cli STATIC
     CaptureScreen.cpp CaptureScreen.hpp
     CatImageArgs.hpp
+    ConfigProfileCatalog.cpp ConfigProfileCatalog.hpp
+    ConfigReloadPoller.cpp ConfigReloadPoller.hpp
     ContourApp.cpp ContourApp.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp
     ExitStatus.hpp
+    Hosting.hpp
     ShellIntegration.cpp ShellIntegration.hpp
     "${_shell_integration_data}"
 )

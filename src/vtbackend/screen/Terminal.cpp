@@ -2005,8 +2005,11 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     auto const eventHandledByApp =
         (allowPassMouseEventToApp(modifiers) || allowWheelTranslationToApp(button, modifiers))
         && core::locked(_inputMutex, [&] {
-               return _inputGenerator.generateMousePress(
-                   modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
+               return _inputGenerator.generateMousePress(modifiers,
+                                                         button,
+                                                         _currentMousePosition + _reportedCellOrigin,
+                                                         pixelPosition,
+                                                         uiHandledHint);
            });
 
     flushInput();
@@ -2302,8 +2305,10 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     if (allowPassMouseEventToApp(modifiers))
     {
         if (core::locked(_inputMutex, [&] {
-                return _inputGenerator.generateMouseMove(
-                    modifiers, relativePos, pixelPosition, uiHandledHint || !selectionAvailable());
+                return _inputGenerator.generateMouseMove(modifiers,
+                                                         relativePos + _reportedCellOrigin,
+                                                         pixelPosition,
+                                                         uiHandledHint || !selectionAvailable());
             }))
             flushInput();
         if (!isModeEnabled(DECMode::MousePassiveTracking))
@@ -2383,7 +2388,7 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
 
     if (allowPassMouseEventToApp(modifiers) && core::locked(_inputMutex, [&] {
             return _inputGenerator.generateMouseRelease(
-                modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
+                modifiers, button, _currentMousePosition + _reportedCellOrigin, pixelPosition, uiHandledHint);
         }))
     {
         flushInput();

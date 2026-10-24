@@ -12,7 +12,9 @@
 
 #include <core/Utf8Path.hpp>
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 
 namespace vthost
 {
@@ -40,6 +42,50 @@ namespace vthost
     std::filesystem::path const& socketPath)
 {
     return vtpty::Process::Environment { { "CONTOUR_MUX", core::pathToUtf8(socketPath) } };
+}
+
+/// What a spawn's command override is, against the daemon's configured shell.
+enum class ShellOverride : uint8_t
+{
+    /// A layout pane's command and directory, laid over the daemon's shell: the host has no profiles.
+    Overlays = 0,
+    /// A whole shell the host resolved from a profile — program, arguments, directory and environment —
+    /// which replaces the daemon's, so no variable of another profile reaches it. This is what the
+    /// in-process GUI spawns for that profile (config::resolvedSessionConfig's shell).
+    Replaces = 1,
+};
+
+/// The shell a hosted session is spawned with.
+/// @param base The daemon's configured shell.
+/// @param commandOverride What the spawn asked for; nullopt runs @p base.
+/// @param mode How @p commandOverride relates to @p base. Replacing, a program-less override still runs
+///        @p base's program and arguments.
+/// @param hosted The daemon's own variables (@ref hostedShellEnvironment), which win over any profile's.
+/// @return The shell to spawn.
+[[nodiscard]] inline vtpty::Process::ExecInfo hostedShellFor(
+    vtpty::Process::ExecInfo const& base,
+    std::optional<vtpty::Process::ExecInfo> const& commandOverride,
+    ShellOverride mode,
+    vtpty::Process::Environment const& hosted)
+{
+    auto effective = base;
+    if (commandOverride && mode == ShellOverride::Replaces)
+    {
+        effective = *commandOverride;
+        if (effective.program.empty())
+        {
+            effective.program = base.program;
+            effective.arguments = base.arguments;
+        }
+    }
+    else
+        vtpty::Process::applyCommandOverride(effective, commandOverride);
+    // insert_or_assign, so the daemon wins over a profile that set the same name: a hosted shell being
+    // told where a DIFFERENT daemon lives is never what was meant, and it has no other way to learn
+    // where this one is.
+    for (auto const& [name, value]: hosted)
+        effective.env.insert_or_assign(name, value);
+    return effective;
 }
 
 } // namespace vthost

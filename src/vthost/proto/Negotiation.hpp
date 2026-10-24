@@ -38,6 +38,15 @@ enum class Capability : uint8_t
 {
     ExtensionPermissions = 1,
     DaemonControl = 2, ///< The peer serves DaemonStatusRequest and StopDaemon.
+    /// The peer spawns the first session at the ClientHello's client area. Informational only: the field
+    /// travels in the ClientHello, before the ServerHello says what the daemon offers, so neither end can
+    /// gate on it. A daemon applies a present client area regardless; a client sends it regardless. Do not
+    /// make either end require it -- that breaks every peer from before it.
+    InitialClientArea = 3,
+    AttachIntent = 4,  ///< The peer honours the ClientHello's attach intent (which windows to follow).
+    ProfileByName = 5, ///< The peer resolves the profile name a hello or spawning verb carries.
+    TabEdits = 6,      ///< The peer serves EditTab.
+    Heartbeat = 7,     ///< The peer echoes Heartbeat.
 };
 
 /// One row of the table naming a Capability.
@@ -51,6 +60,11 @@ struct CapabilityRow
 constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ExtensionPermissions, .name = "extension-permissions" },
     CapabilityRow { .capability = Capability::DaemonControl, .name = "daemon-control" },
+    CapabilityRow { .capability = Capability::InitialClientArea, .name = "initial-client-area" },
+    CapabilityRow { .capability = Capability::AttachIntent, .name = "attach-intent" },
+    CapabilityRow { .capability = Capability::ProfileByName, .name = "profile-by-name" },
+    CapabilityRow { .capability = Capability::TabEdits, .name = "tab-edits" },
+    CapabilityRow { .capability = Capability::Heartbeat, .name = "heartbeat" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

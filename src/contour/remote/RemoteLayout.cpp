@@ -4,13 +4,17 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <optional>
 #include <ranges>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include <vthost/TabEdits.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -157,6 +161,53 @@ namespace
         applyRatios(manager, tab, wire.children[1], *local.second());
     }
 
+    /// Brings how @p local is presented -- its active and zoomed pane, title, colour, and whether it is its
+    /// window's active tab -- in line with how the daemon presents @p wire, so a change another client made
+    /// arrives here too. @pre sameTree(), so every leaf of @p wire has its local session in the map.
+    ///
+    /// The edits are the ones this client would report were the daemon's presentation its own
+    /// (vthost::client::tabEditsToReport, read the other way round), applied to the local model by the
+    /// daemon's own table (vthost::applyTabEdit) once their sessions are translated to this model's: the two
+    /// ends then cannot disagree on what an edit means. Each compares first, so a converged push writes
+    /// nothing; and none is echoed back, as this runs while the controller realizes a layout, during which
+    /// NativeController::reportTabPresentation drops what the manager reports.
+    void applyPresentation(
+        vtworkspace::SessionModel& model,
+        std::unordered_map<uint64_t, contour::session::TerminalSession*> const& remoteToLocalSession,
+        vthost::proto::WireTab const& wire,
+        vthost::client::TabActivity activity,
+        vtworkspace::Tab const& local)
+    {
+        auto const remoteOf = [&](vtworkspace::Pane const* leaf) -> uint64_t {
+            if (leaf != nullptr)
+                for (auto const& [remote, session]: remoteToLocalSession)
+                    if (session->modelSessionId() == leaf->session())
+                        return remote;
+            return 0;
+        };
+        auto const* window = model.window(model.windowOfTab(local.id()));
+        auto const here = vthost::client::TabPresentation {
+            .activeSession = remoteOf(local.activePane()),
+            .zoomedSession = local.isZoomed() ? remoteOf(local.activePane()) : 0,
+            .title = local.runtimeTitle(),
+            .color = local.color(vtworkspace::TabColorSource::User).transform([](vtbackend::RGBColor color) {
+                return color.value();
+            }),
+            .activity = window != nullptr && window->activeTab() == &local
+                            ? vthost::client::TabActivity::Active
+                            : vthost::client::TabActivity::Inactive,
+        };
+        for (auto edit:
+             vthost::client::tabEditsToReport(vthost::client::presentationOf(wire, activity), here))
+        {
+            auto const session = remoteToLocalSession.find(edit.session);
+            if (session == remoteToLocalSession.end())
+                continue;
+            edit.session = session->second->modelSessionId().value;
+            std::ignore = vthost::applyTabEdit(model, edit);
+        }
+    }
+
     /// Realizes ONE whole daemon tab (no leaf yet bound) via the shared realizer.
     void realizeWholeTab(contour::session::TerminalSessionManager& manager,
                          vtworkspace::WindowId window,
@@ -242,16 +293,26 @@ void applyRemoteLayout(contour::session::TerminalSessionManager& manager,
 
     // Ratios last, on the settled tree: the passes above add and remove panes, and closing one makes
     // its parent absorb the survivor's ratio. A divider is only meaningful once the shape is right.
+    // Then, last of all, how each tab is presented: an active or zoomed pane is named by a leaf, so it
+    // too waits for the tree.
     //
     // Each wire tab is paired with the local tab that sameTree() accepts — the identity check IS the
     // pairing, so there is no separate correspondence to look up and keep honest. applyRatios only
-    // writes a double, so neither the window nor the tabs move under the loop.
+    // writes a double, and applyPresentation changes no tree, so neither the window nor the tabs move
+    // under the loop.
     auto* win = manager.model().window(window);
-    for (auto const& wireTab: layout->tabs)
+    for (auto const [index, wireTab]: core::views::enumerate(layout->tabs))
         for (auto const i: std::views::iota(0, win != nullptr ? win->tabCount() : 0))
             if (auto* tab = win->tabAt(i); sameTree(sessionMap, wireTab.root, *tab->rootPane()))
             {
                 applyRatios(manager, tab->id(), wireTab.root, *tab->rootPane());
+                applyPresentation(manager.model(),
+                                  sessionMap,
+                                  wireTab,
+                                  std::cmp_equal(index, layout->activeTab)
+                                      ? vthost::client::TabActivity::Active
+                                      : vthost::client::TabActivity::Inactive,
+                                  *tab);
                 break;
             }
 

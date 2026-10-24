@@ -72,6 +72,8 @@ enum class PduType : uint8_t
     DaemonStatusRequest = 25,
     DaemonStatusReply = 26,
     StopDaemon = 27,
+    EditTab = 28,
+    Heartbeat = 29,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -176,6 +178,36 @@ enum class ConnectionRole : uint8_t
     Control = 1, ///< A probe or a command to the daemon itself.
 };
 
+/// The client area a ClientHello states, in cells: the whole content area the client renders the
+/// layout into, as a ResizeRequest would propose it.
+struct WireClientArea
+{
+    uint32_t columns = 0; ///< The client area's width in cells.
+    uint32_t lines = 0;   ///< The client area's height in cells.
+    bool operator==(WireClientArea const&) const = default;
+};
+
+/// Which of the daemon's windows a connection wants to follow, and whether attaching creates one.
+/// Decoding is lenient: a byte no enumerator names reads as AllWindows, which is what a daemon without
+/// Capability::AttachIntent does anyway.
+enum class AttachIntentKind : uint8_t
+{
+    AllWindows = 0, ///< Every window, including those created later: the behaviour before intents existed.
+    Launch = 1,     ///< A fresh launch: every window when no other client is attached, else a new one.
+    NewWindow = 2,  ///< A new window of its own, mirroring none of the existing ones.
+    Windows = 3,    ///< Exactly the listed windows (those that exist).
+    Resume = 4,     ///< The listed windows after a reconnect; when none survives, as Launch.
+};
+
+/// What a ClientHello asks to be shown.
+struct AttachIntent
+{
+    AttachIntentKind kind = AttachIntentKind::AllWindows;
+    /// The daemon windows named; meaningful for Windows and Resume only.
+    std::vector<uint64_t> windows = {};
+    bool operator==(AttachIntent const&) const = default;
+};
+
 /// Client's first PDU: the protocol versions and capabilities it speaks, (for TCP) a preshared auth
 /// token, and optionally the emulation settings it wants the sessions it creates to have. Anything
 /// before it is a protocol error.
@@ -204,6 +236,15 @@ struct ClientHello
     std::optional<WireSessionSettings> sessionSettings = std::nullopt;
     /// What the connection is for; absent on the wire means Attach.
     ConnectionRole role = ConnectionRole::Attach;
+    /// The client area the first session should spawn at, so it needs no resize once attached;
+    /// absent means "the daemon's default", and the client's ResizeRequest corrects it. Honoured on
+    /// an Attach connection only.
+    std::optional<WireClientArea> clientArea = std::nullopt;
+    /// Which windows to follow; honoured only when both ends negotiated Capability::AttachIntent.
+    AttachIntent attachIntent = {};
+    /// The profile the connection's sessions run under, resolved by the daemon in its own configuration;
+    /// empty means the daemon's default. Honoured only with Capability::ProfileByName.
+    std::string profileName = {};
     bool operator==(ClientHello const&) const = default;
 };
 
@@ -237,6 +278,17 @@ struct ServerHello
     std::string hostname = {}; ///< The daemon's host name; empty when unknown.
     /// The daemon's release (e.g. "0.8.1"); empty when unknown, and in every refusal.
     std::string releaseVersion = {};
+    /// The daemon windows this connection follows, ascending; empty in a refusal and from a daemon that
+    /// predates attach intents.
+    std::vector<uint64_t> followedWindows = {};
+    /// Which run of the daemon answers: drawn at random as the daemon starts, so it differs across a
+    /// restart. Window and session ids count from 1 in every run, so this is how a reconnecting client tells
+    /// a daemon that restarted -- whose window 1 is not the window 1 it showed -- from the one it lost. 0 is
+    /// unknown: in a refusal, and from a daemon that predates the field.
+    ///
+    /// A daemon that restores a saved workspace after a restart (phase 6) is a new instance all the same: a
+    /// client that stayed connected sees its old windows lost, and the restored ones arrive as new windows.
+    uint64_t daemonInstance = 0;
     bool operator==(ServerHello const&) const = default;
 };
 
@@ -932,6 +984,8 @@ struct CreateTab
     /// window id for the reason SplitPane is: window ids are minted per model and the two ends
     /// have their own.
     uint64_t session = 0;
+    /// The profile the new tab's session runs under; empty means the connection's profile.
+    std::string profileName = {};
     bool operator==(CreateTab const&) const = default;
 };
 
@@ -940,6 +994,8 @@ struct CreateTab
 /// it (B4).
 struct NewWindow
 {
+    /// The profile the new window's first session runs under; empty means the connection's profile.
+    std::string profileName = {};
     bool operator==(NewWindow const&) const = default;
 };
 
@@ -950,6 +1006,8 @@ struct SplitPane
     uint64_t session = 0;    ///< The pane to split, by the session it hosts.
     uint8_t orientation = 1; ///< vtworkspace::SplitState: 1 horizontal, 2 vertical.
     uint16_t ratio = 5000;   ///< First child's share × 10000.
+    /// The profile the new pane's session runs under; empty means the connection's profile.
+    std::string profileName = {};
     bool operator==(SplitPane const&) const = default;
 };
 
@@ -1122,6 +1180,39 @@ struct StopDaemon
     bool operator==(StopDaemon const&) const = default;
 };
 
+/// What an EditTab changes. The codec carries any byte; the host refuses one it does not know.
+enum class TabEditKind : uint8_t
+{
+    ActivatePane = 0, ///< Make the pane hosting `session` the tab's active pane.
+    Zoom = 1,         ///< Zoom the pane hosting `session`.
+    Unzoom = 2,       ///< Unzoom the tab holding `session`.
+    SetTitle = 3,     ///< Set the tab's title to `title`.
+    ClearTitle = 4,   ///< Return the tab to its automatic title.
+    SetColor = 5,     ///< Set the tab's colour to `color`.
+    ClearColor = 6,   ///< Return the tab to its default colour.
+    ActivateTab = 7,  ///< Make the tab holding `session` the window's active tab.
+};
+
+/// Client→server: the user changed how a tab is presented, and the daemon's model follows so every other
+/// client sees it.
+struct EditTab
+{
+    /// The pane (ActivatePane, Zoom) or any pane of the tab (the rest) the edit addresses.
+    uint64_t session = 0;
+    TabEditKind kind = TabEditKind::ActivatePane;
+    std::string title = {}; ///< The new title; SetTitle only.
+    uint32_t color = 0;     ///< The new colour as 0xRRGGBB; SetColor only.
+    bool operator==(EditTab const&) const = default;
+};
+
+/// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
+/// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
+struct Heartbeat
+{
+    uint64_t nonce = 0;
+    bool operator==(Heartbeat const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -1149,7 +1240,9 @@ using DecodedPdu = std::variant<Invalid,
                                 Unsupported,
                                 DaemonStatusRequest,
                                 DaemonStatusReply,
-                                StopDaemon>;
+                                StopDaemon,
+                                EditTab,
+                                Heartbeat>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

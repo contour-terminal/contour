@@ -97,6 +97,15 @@ struct TempDir
 
 } // namespace
 
+TEST_CASE("the readiness poll starts at 5 ms and doubles to a 1 s cap", "[vthost][daemon]")
+{
+    using namespace std::chrono_literals;
+    CHECK(vthost::nextProbeDelay(std::nullopt) == 5ms);
+    CHECK(vthost::nextProbeDelay(5ms) == 10ms);
+    CHECK(vthost::nextProbeDelay(640ms) == 1s);
+    CHECK(vthost::nextProbeDelay(1s) == 1s);
+}
+
 TEST_CASE("ensureDaemon: a TCP endpoint is a no-op", "[vthost][daemon]")
 {
     // A remote daemon cannot be auto-spawned, so this short-circuits before any

@@ -311,9 +311,19 @@ class MockSession: public QObject
     // kind. Both change together, so one signal serves them.
     Q_PROPERTY(QVariantList scrollbarMarks READ scrollbarMarks NOTIFY scrollbarMarksChanged)
     Q_PROPERTY(QVariantList scrollbarMarkColors READ scrollbarMarkColors NOTIFY scrollbarMarksChanged)
+    // Mirrors TerminalSession's reconnecting state, which TerminalPane's overlay shows.
+    Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
 
   public:
     [[nodiscard]] int pageLineCount() const { return _lines; }
+    [[nodiscard]] bool isReconnecting() const { return _reconnecting; }
+
+    /// Loses or regains the host connection, as TerminalSession::setHostConnection does.
+    void setReconnecting(bool reconnecting)
+    {
+        _reconnecting = reconnecting;
+        emit reconnectingChanged();
+    }
     [[nodiscard]] int pageColumnsCount() const { return _columns; }
     [[nodiscard]] int historyLineCount() const { return _historyLineCount; }
     [[nodiscard]] bool showResizeIndicator() const { return true; }
@@ -435,6 +445,7 @@ class MockSession: public QObject
     void scrollbarMarksChanged();
     void opacityChanged();
     void dimUnfocusedChanged();
+    void reconnectingChanged();
     void onBell();
     void onAlert();
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);
@@ -459,6 +470,7 @@ class MockSession: public QObject
     QVariantList _scrollbarMarkColors;
     float _opacity = 1.0F;
     float _dimUnfocused = 0.0F;
+    bool _reconnecting = false;
 };
 
 /// A DYNAMIC stand-in for a PaneProxy (one node of the split tree). Unlike the old static mock, session /
@@ -2927,6 +2939,51 @@ TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
+}
+
+TEST_CASE("The reconnecting overlay shows only while the pane's session is reconnecting (offscreen)",
+          "[contour][gui][qml][reconnect]")
+{
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    MockSession session;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    engine.rootContext()->setContextProperty("mockSession", &session);
+    contour::test::installChromeStyle(engine);
+
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral("import QtQuick\n"
+                          "import QtQuick.Window\n"
+                          "import Contour.Ui\n"
+                          "Window {\n"
+                          "  width: 400; height: 300; visible: true\n"
+                          "  property var win: terminalSessions\n"
+                          "  property alias pane: paneItem\n"
+                          "  TerminalPane { id: paneItem; anchors.fill: parent; session: mockSession }\n"
+                          "}\n"),
+        QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TestWrapper.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO(component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> const obj(component.create());
+    REQUIRE(obj != nullptr);
+    auto* pane = obj->property("pane").value<QQuickItem*>();
+    REQUIRE(pane != nullptr);
+    auto* overlay = pane->findChild<QQuickItem*>("reconnectingOverlay");
+    REQUIRE(overlay != nullptr);
+    QCoreApplication::processEvents();
+
+    CHECK_FALSE(overlay->isVisible());
+    session.setReconnecting(true);
+    QCoreApplication::processEvents();
+    CHECK(overlay->isVisible());
+    CHECK(overlay->property("text").toString() == QStringLiteral("Reconnecting…"));
+    session.setReconnecting(false);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(overlay->isVisible());
 }
 
 TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last session (offscreen)",

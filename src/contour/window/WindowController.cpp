@@ -1785,6 +1785,14 @@ void WindowController::refreshAllTabTitles()
         emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
 }
 
+void WindowController::showHostingNotice(QString notice)
+{
+    if (_hostingNotice == notice)
+        return;
+    _hostingNotice = std::move(notice);
+    emit hostingNoticeChanged();
+}
+
 void WindowController::updateStatusLine()
 {
     // Per-window status-line fan-out (no _displayStates). Build THIS window's tab list once (identical for

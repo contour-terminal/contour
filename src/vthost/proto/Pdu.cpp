@@ -228,6 +228,14 @@ namespace
     {
         return std::to_underlying(PduType::StopDaemon);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(EditTab const&) noexcept
+    {
+        return std::to_underlying(PduType::EditTab);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(Heartbeat const&) noexcept
+    {
+        return std::to_underlying(PduType::Heartbeat);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -310,6 +318,17 @@ namespace
         fields.string(pdu.token);
         encodeOptionalSessionSettings(fields, pdu.sessionSettings);
         fields.u8(std::to_underlying(pdu.role));
+        fields.u8(pdu.clientArea ? 1 : 0);
+        if (pdu.clientArea)
+        {
+            fields.varint(pdu.clientArea->columns);
+            fields.varint(pdu.clientArea->lines);
+        }
+        fields.u8(std::to_underlying(pdu.attachIntent.kind));
+        fields.varint(pdu.attachIntent.windows.size());
+        for (auto const window: pdu.attachIntent.windows)
+            fields.varint(window);
+        fields.string(pdu.profileName);
         out.blob(fields.view());
         out.u8(0);
     }
@@ -336,6 +355,10 @@ namespace
         fields.string(pdu.machineId);
         fields.string(pdu.hostname);
         fields.string(pdu.releaseVersion);
+        fields.varint(pdu.followedWindows.size());
+        for (auto const window: pdu.followedWindows)
+            fields.varint(window);
+        fields.varint(pdu.daemonInstance);
         out.blob(fields.view());
     }
 
@@ -650,10 +673,12 @@ namespace
     void encodeBody(Writer& out, CreateTab const& pdu)
     {
         out.varint(pdu.session);
+        out.string(pdu.profileName);
     }
 
-    void encodeBody(Writer&, NewWindow const&)
+    void encodeBody(Writer& out, NewWindow const& pdu)
     {
+        out.string(pdu.profileName);
     }
 
     void encodeBody(Writer& out, SplitPane const& pdu)
@@ -661,6 +686,7 @@ namespace
         out.varint(pdu.session);
         out.u8(pdu.orientation);
         out.u16(pdu.ratio);
+        out.string(pdu.profileName);
     }
 
     void encodeBody(Writer& out, ClosePane const& pdu)
@@ -727,6 +753,19 @@ namespace
     void encodeBody(Writer& out, StopDaemon const& pdu)
     {
         out.u8(pdu.reason);
+    }
+
+    void encodeBody(Writer& out, EditTab const& pdu)
+    {
+        out.varint(pdu.session);
+        out.u8(std::to_underlying(pdu.kind));
+        out.string(pdu.title);
+        out.u32(pdu.color);
+    }
+
+    void encodeBody(Writer& out, Heartbeat const& pdu)
+    {
+        out.varint(pdu.nonce);
     }
 
     void encodeBody(Writer& out, ResizeSplit const& pdu)
@@ -844,6 +883,82 @@ namespace
         return decodeVector(in, capabilities.idents, [](Reader& reader) { return reader.varint(); });
     }
 
+    /// Reads one ClientHello field that follows the capabilities, into @p pdu.
+    using ClientHelloField = bool (*)(Reader&, ClientHello&, DecodeError&);
+
+    [[nodiscard]] bool decodeHelloToken(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        return assign(in.string(), pdu.token, error);
+    }
+
+    [[nodiscard]] bool decodeHelloSessionSettings(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        auto settings = decodeOptionalSessionSettings(in);
+        if (!settings)
+        {
+            error = settings.error();
+            return false;
+        }
+        pdu.sessionSettings = *std::move(settings);
+        return true;
+    }
+
+    [[nodiscard]] bool decodeHelloRole(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        // Fails closed: a role this version does not know is never Attach, which spawns a session.
+        auto role = uint8_t {};
+        if (!assign(in.u8(), role, error))
+            return false;
+        pdu.role = role == std::to_underlying(ConnectionRole::Attach) ? ConnectionRole::Attach
+                                                                      : ConnectionRole::Control;
+        return true;
+    }
+
+    [[nodiscard]] bool decodeHelloClientArea(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        auto present = uint8_t {};
+        if (!assign(in.u8(), present, error))
+            return false;
+        if (present == 0)
+            return true;
+        auto area = WireClientArea {};
+        if (!assign(in.varint(), area.columns, error) || !assign(in.varint(), area.lines, error))
+            return false;
+        pdu.clientArea = area;
+        return true;
+    }
+
+    [[nodiscard]] bool decodeHelloAttachIntent(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        auto kind = uint8_t {};
+        if (!assign(in.u8(), kind, error))
+            return false;
+        auto windows =
+            decodeVector(in, pdu.attachIntent.windows, [](Reader& reader) { return reader.varint(); });
+        if (!windows)
+        {
+            error = windows.error();
+            return false;
+        }
+        // A kind no enumerator names is what a daemon without the capability does anyway.
+        pdu.attachIntent.kind = kind <= std::to_underlying(AttachIntentKind::Resume)
+                                    ? static_cast<AttachIntentKind>(kind)
+                                    : AttachIntentKind::AllWindows;
+        return true;
+    }
+
+    [[nodiscard]] bool decodeHelloProfileName(Reader& in, ClientHello& pdu, DecodeError& error)
+    {
+        return assign(in.string(), pdu.profileName, error);
+    }
+
+    /// The ClientHello fields after the capabilities, in wire order; a field is appended here, never
+    /// inserted.
+    constexpr auto ClientHelloFields = std::array<ClientHelloField, 6> {
+        decodeHelloToken,      decodeHelloSessionSettings, decodeHelloRole,
+        decodeHelloClientArea, decodeHelloAttachIntent,    decodeHelloProfileName,
+    };
+
     /// The inverse of encodeBody(ClientHello), which says why the fields travel in a blob. Bytes after the
     /// fields this version knows, inside the blob, are a later version's, and skipped.
     DecodeResult decodeClientHello(Reader& in)
@@ -866,28 +981,14 @@ namespace
             return std::unexpected(error);
         if (auto const capabilities = decodeCapabilities(inner, pdu.capabilities); !capabilities)
             return std::unexpected(capabilities.error());
-        // A field the sender predates is missing at the end, and keeps its default.
-        if (inner.remaining() != 0)
+        // A field the sender predates is missing at the end, and keeps its default: the fields after the
+        // capabilities are read in order for as long as the blob has bytes left.
+        for (auto const& field: ClientHelloFields)
         {
-            if (!assign(inner.string(), pdu.token, error))
+            if (inner.remaining() == 0)
+                break;
+            if (!field(inner, pdu, error))
                 return std::unexpected(error);
-            if (inner.remaining() != 0)
-            {
-                auto settings = decodeOptionalSessionSettings(inner);
-                if (!settings)
-                    return std::unexpected(settings.error());
-                pdu.sessionSettings = *std::move(settings);
-                if (inner.remaining() != 0)
-                {
-                    // Fails closed: a role this version does not know is never Attach, which spawns a
-                    // session.
-                    auto role = uint8_t {};
-                    if (!assign(inner.u8(), role, error))
-                        return std::unexpected(error);
-                    pdu.role = role == std::to_underlying(ConnectionRole::Attach) ? ConnectionRole::Attach
-                                                                                  : ConnectionRole::Control;
-                }
-            }
         }
         auto closing = uint8_t {};
         if (!assign(in.u8(), closing, error))
@@ -934,6 +1035,15 @@ namespace
         if (inner.remaining() != 0 && !assign(inner.string(), pdu.hostname, error))
             return std::unexpected(error);
         if (inner.remaining() != 0 && !assign(inner.string(), pdu.releaseVersion, error))
+            return std::unexpected(error);
+        if (inner.remaining() != 0)
+        {
+            if (auto const followed =
+                    decodeVector(inner, pdu.followedWindows, [](Reader& reader) { return reader.varint(); });
+                !followed)
+                return std::unexpected(followed.error());
+        }
+        if (inner.remaining() != 0 && !assign(inner.varint(), pdu.daemonInstance, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -1284,12 +1394,19 @@ namespace
         auto error = DecodeError {};
         if (!assign(in.varint(), pdu.session, error))
             return std::unexpected(error);
+        // Appended by a later version; an older sender's body ends before it.
+        if (in.remaining() != 0 && !assign(in.string(), pdu.profileName, error))
+            return std::unexpected(error);
         return pdu;
     }
 
-    DecodeResult decodeNewWindow(Reader&)
+    DecodeResult decodeNewWindow(Reader& in)
     {
-        return NewWindow {};
+        auto pdu = NewWindow {};
+        auto error = DecodeError {};
+        if (in.remaining() != 0 && !assign(in.string(), pdu.profileName, error))
+            return std::unexpected(error);
+        return pdu;
     }
 
     DecodeResult decodeSplitPane(Reader& in)
@@ -1307,6 +1424,9 @@ namespace
         // as garbage every client rejects).
         if (pdu.orientation != 1 && pdu.orientation != 2)
             return std::unexpected(DecodeError::MalformedPdu);
+        // Appended by a later version; an older sender's body ends before it.
+        if (in.remaining() != 0 && !assign(in.string(), pdu.profileName, error))
+            return std::unexpected(error);
         return pdu;
     }
 
@@ -1404,6 +1524,28 @@ namespace
         auto pdu = StopDaemon {};
         auto error = DecodeError {};
         if (!assign(in.u8(), pdu.reason, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeEditTab(Reader& in)
+    {
+        auto pdu = EditTab {};
+        auto error = DecodeError {};
+        auto kind = uint8_t {};
+        if (!assign(in.varint(), pdu.session, error) || !assign(in.u8(), kind, error)
+            || !assign(in.string(), pdu.title, error) || !assign(in.u32(), pdu.color, error))
+            return std::unexpected(error);
+        // Carried, not judged: the host refuses a kind it does not know.
+        pdu.kind = static_cast<TabEditKind>(kind);
+        return pdu;
+    }
+
+    DecodeResult decodeHeartbeat(Reader& in)
+    {
+        auto pdu = Heartbeat {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.nonce, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -1518,6 +1660,8 @@ namespace
         DecodeRow { PduType::DaemonStatusRequest, decodeDaemonStatusRequest },
         DecodeRow { PduType::DaemonStatusReply, decodeDaemonStatusReply },
         DecodeRow { PduType::StopDaemon, decodeStopDaemon },
+        DecodeRow { PduType::EditTab, decodeEditTab },
+        DecodeRow { PduType::Heartbeat, decodeHeartbeat },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

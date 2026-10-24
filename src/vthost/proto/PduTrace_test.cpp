@@ -131,7 +131,7 @@ TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
     {
         // Not payloadless any more: it carries the session whose window the tab belongs in, and a
         // trace that omitted it could not tell two windows' tab requests apart.
-        CHECK(summaryOf(PduType::CreateTab) == "session=4");
+        CHECK(summaryOf(PduType::CreateTab) == "session=4 profile=\"work\"");
     }
 }
 
@@ -174,13 +174,26 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
 {
     CHECK(summarize(DecodedPdu {
               ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 4711 } }, .token = "t" } })
-          == "versions=4-6 caps=1,4711 token=yes settings=no role=attach");
+          == "versions=4-6 caps=1,4711 token=yes settings=no role=attach area=none "
+             "intent=all-windows windows=[] profile=\"\"");
     CHECK(summarize(DecodedPdu { ClientHello {} })
-          == "versions=4-4 caps=none token=no settings=no role=attach");
+          == "versions=4-4 caps=none token=no settings=no role=attach area=none intent=all-windows "
+             "windows=[] profile=\"\"");
+    CHECK(summarize(DecodedPdu { ClientHello { .attachIntent = { .kind = AttachIntentKind::Launch },
+                                               .profileName = "main" } })
+              .ends_with("intent=launch windows=[] profile=\"main\""));
+    CHECK(summarize(DecodedPdu { ClientHello {
+                        .attachIntent = { .kind = AttachIntentKind::Resume, .windows = { 1, 7 } } } })
+              .contains("intent=resume windows=[1,7]"));
     CHECK(summarize(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }).contains("role=control"));
     CHECK(summarize(DecodedPdu { ServerHello {
               .agreedVersion = 4, .capabilities = { .idents = { 1 } }, .machineId = "m", .hostname = "h" } })
-          == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown");
+          == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown followed=[] "
+             "instance=0000000000000000");
+    CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .followedWindows = { 1, 3 } } })
+              .contains("followed=[1,3]"));
+    CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .daemonInstance = 0xC0FFEE } })
+              .ends_with("instance=0000000000c0ffee"));
     CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .releaseVersion = "0.8.1" } })
               .contains("release=0.8.1"));
     CHECK(summarize(DecodedPdu { ServerHello { .layout = HelloLayout::VersionAlone, .codecVersion = 3 } })
@@ -233,4 +246,18 @@ TEST_CASE("the catalog's tags are contiguous from zero", "[vthost][proto]")
     REQUIRE(tags.size() == std::variant_size_v<DecodedPdu>);
     for (auto const expected: std::views::iota(std::size_t { 0 }, tags.size()))
         CHECK(tags[expected] == expected);
+}
+
+TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][proto]")
+{
+    CHECK(summarize(DecodedPdu { EditTab { .session = 9, .kind = TabEditKind::SetColor, .color = 0x336699 } })
+          == "session=9 set-color #336699");
+    CHECK(summarize(DecodedPdu { EditTab { .session = 9, .kind = TabEditKind::SetTitle, .title = "secret" } })
+          == "session=9 set-title title=6B");
+    CHECK(summarize(DecodedPdu { EditTab { .session = 9, .kind = static_cast<TabEditKind>(0xEE) } })
+          == "session=9 kind=238");
+    CHECK(summarize(DecodedPdu { Heartbeat { .nonce = 42 } }) == "nonce=42");
+    CHECK(summarize(DecodedPdu { CreateTab { .session = 3, .profileName = "ssh" } })
+          == "session=3 profile=\"ssh\"");
+    CHECK(summarize(DecodedPdu { NewWindow { .profileName = "y" } }) == "profile=\"y\"");
 }

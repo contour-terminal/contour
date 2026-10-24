@@ -21,6 +21,7 @@
 #include <vthost/DaemonControl.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
 
@@ -243,7 +244,8 @@ TEST_CASE("control errors read as sentences", "[vthost][client][control]")
 TEST_CASE("an absent socket reads as not running", "[vthost][client][control][afunix]")
 {
     auto const directory = fs::temp_directory_path() / std::format("contour-ctl-{}", std::random_device {}());
-    auto port = client::makeDaemonControl(vthost::UnixEndpoint { .socketPath = directory / "nobody" });
+    auto port = client::makeDaemonControl(
+        std::make_shared<vthost::UnixTransportFactory>(directory / "nobody", nullptr));
     auto const status = port->status();
     REQUIRE_FALSE(status.has_value());
     INFO(status.error().toString());
@@ -261,8 +263,8 @@ TEST_CASE("a refused TCP connection reads as not running", "[vthost][client][con
         REQUIRE(listener.has_value());
         port = (*listener)->boundPort();
     }
-    auto control = client::makeDaemonControl(
-        vthost::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} });
+    auto control = client::makeDaemonControl(std::make_shared<vthost::TlsTransportFactory>(
+        vthost::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} }));
     CHECK(control->status().error().code == client::ControlErrorCode::NotRunning);
 }
 
@@ -272,10 +274,28 @@ TEST_CASE("a TLS setup failure is a transport error, not an absent daemon", "[vt
     auto loop = core::net::EventLoop { *backend };
     auto listener = core::net::listen(loop, "127.0.0.1", 0);
     REQUIRE(listener.has_value());
-    auto control = client::makeDaemonControl(vthost::TcpEndpoint {
-        .host = "127.0.0.1", .port = (*listener)->boundPort(), .token = {}, .caPem = "not a certificate" });
+    auto control = client::makeDaemonControl(
+        std::make_shared<vthost::TlsTransportFactory>(vthost::TcpEndpoint { .host = "127.0.0.1",
+                                                                            .port = (*listener)->boundPort(),
+                                                                            .token = {},
+                                                                            .caPem = "not a certificate" }));
     auto const status = control->status();
     REQUIRE_FALSE(status.has_value());
     INFO(status.error().toString());
     CHECK(status.error().code == client::ControlErrorCode::Transport);
+}
+
+TEST_CASE("daemon control over a unix transport never starts a daemon",
+          "[vthost][transport][control][afunix]")
+{
+    auto const directory = fs::temp_directory_path() / std::format("contour-ctl-{}", std::random_device {}());
+    auto const controlSocket = directory / "control";
+    // The factory every probe passes: an empty ensureDaemon, so there is nothing that could start one.
+    auto port =
+        client::makeDaemonControl(std::make_shared<vthost::UnixTransportFactory>(controlSocket, nullptr));
+    auto const status = port->status();
+    REQUIRE_FALSE(status.has_value());
+    CHECK(status.error().code == client::ControlErrorCode::NotRunning);
+    // A daemon started on the probe's behalf would have made its socket directory.
+    CHECK_FALSE(fs::exists(directory));
 }

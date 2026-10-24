@@ -11,7 +11,7 @@ bool useOpenGLES() noexcept
     return QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
 }
 
-QSurfaceFormat createSurfaceFormat()
+QSurfaceFormat createSurfaceFormat(SwapPacing pacing)
 {
     QSurfaceFormat format;
 
@@ -29,7 +29,7 @@ QSurfaceFormat createSurfaceFormat()
     format.setProfile(QSurfaceFormat::CoreProfile);
     format.setAlphaBufferSize(8);
     format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-    format.setSwapInterval(1);
+    format.setSwapInterval(pacing == SwapPacing::VSync ? 1 : 0);
 
 #ifndef NDEBUG
     format.setOption(QSurfaceFormat::DebugContext);

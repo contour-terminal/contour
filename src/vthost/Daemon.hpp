@@ -9,9 +9,9 @@
 
 #include <vtpty/Process.hpp>
 
-#include <core/async/Task.hpp>
-#include <core/net/ISocket.hpp>
+#include <core/platform/Clock.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -31,15 +31,12 @@
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
 // needs them too and sits BELOW this header — a lower layer must not reach up for them.
 #include <vthost/ClientSizePolicy.hpp>
+#include <vthost/ConfigReload.hpp>
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/ExtensionHosting.hpp>
+#include <vthost/ProfileCatalog.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/ShutdownSignals.hpp>
-
-namespace core::net
-{
-class EventLoop;
-}
 
 namespace vthost
 {
@@ -64,6 +61,10 @@ struct NativeTcpListenerConfig
 /// Everything `contour daemon` needs to serve.
 struct DaemonConfig
 {
+    /// Which run of the daemon this is, as every ServerHello states it (proto::ServerHello::daemonInstance).
+    /// Supplied by the composition root -- drawDaemonInstance() once per daemon process -- rather than drawn
+    /// here, so a test states a fixed one; 0 states none. A configuration reload keeps it: the run goes on.
+    uint64_t instance = 0;
     /// When set, ALSO serves the native protocol over TCP (opt-in; see the struct).
     std::optional<NativeTcpListenerConfig> nativeTcp;
     /// The control-socket file (see muxSocketPath for derivation).
@@ -72,8 +73,15 @@ struct DaemonConfig
     /// bare so a daemon is correct standalone; `contour daemon` overwrites it from the
     /// resolved profile, which `src/vthost` cannot reach on its own.
     vtbackend::Settings settings = defaultSessionSettings();
-    /// The shell each new session runs.
+    /// The shell each new session runs, unless it runs under one of @ref profiles.
     vtpty::Process::ExecInfo shell;
+    /// The host's profiles, by name: what a session a client names a profile for runs (settings and
+    /// shell). Null for none — the bare `DaemonConfig{}` of a test — which keeps @ref settings and
+    /// @ref shell for every session and offers no Capability::ProfileByName.
+    std::shared_ptr<ProfileCatalog const> profiles {};
+    /// Reloads @ref profiles while the daemon runs: polled on its loop, every catalog it yields replaces the
+    /// host's (@see SessionHost::replaceProfiles). Unset for none, as a test's bare `DaemonConfig{}` has.
+    std::optional<ConfigReloadHook> configReload {};
     /// Whether a spawned shell escapes its sandbox (Flatpak). `true` by default, matching a local
     /// session's profile default (`escape_sandbox: true`); `contour daemon` overwrites it from the
     /// resolved profile, same as `settings` and `shell` above.
@@ -188,48 +196,15 @@ struct TcpEndpoint
 /// Where `contour client` reaches the daemon: the local unix socket or TCP+TLS.
 using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
 
+/// Draws which run of the daemon a new daemon process is (DaemonConfig::instance): at random, never 0. For
+/// the composition root that starts a daemon, once per process.
+/// @return The instance.
+[[nodiscard]] uint64_t drawDaemonInstance();
+
 /// Splits a `HOST:PORT` (or `[v6]:PORT`) string into its parts.
 /// @param spec The endpoint string; the port must be a decimal in [1, 65535].
 /// @return The host and port, or nullopt if @p spec is malformed.
 [[nodiscard]] std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec);
-
-/// The preshared token an endpoint carries (empty for the unix socket, whose
-/// filesystem permissions are the gate; the ClientHello sends it verbatim).
-[[nodiscard]] std::string endpointToken(AttachEndpoint const& endpoint);
-
-/// Connects to the daemon per @p endpoint: the local unix control socket (its
-/// native socket resolved beside it), or a TLS-encrypted TCP connection whose
-/// peer trust follows the endpoint's @c caPem (empty ⇒ TOFU). This establishes —
-/// and for TCP encrypts — the transport; the caller's NativeClient sends the
-/// token. Shared by the GUI NativeController.
-/// @param loop The event loop whose reactor drives the connect (not owned).
-/// @param endpoint The daemon endpoint.
-/// @return The ready transport, or a human-readable error string.
-[[nodiscard]] core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string>>
-connectAttach(core::net::EventLoop* loop, AttachEndpoint endpoint);
-
-/// Why connecting to the daemon failed, as far as a caller acts on it.
-enum class AttachFailureKind : uint8_t
-{
-    Unreachable = 0, ///< Anything else: TLS setup, permissions, the network. The text says what.
-    DaemonAbsent,    ///< Nothing listens there: the socket file is gone, or the connection was refused.
-};
-
-/// A failed connectAttachDetailed(): the kind, decided while the typed error was still in hand, and the
-/// words for the user.
-struct AttachFailure
-{
-    AttachFailureKind kind = AttachFailureKind::Unreachable; ///< What a caller acts on.
-    std::string text;                                        ///< What to tell the user.
-};
-
-/// connectAttach() with the failure kept typed, so a caller can tell an absent daemon from a broken
-/// transport without parsing text.
-/// @param loop The event loop whose reactor drives the connect (not owned).
-/// @param endpoint The daemon endpoint.
-/// @return The ready transport, or the failure.
-[[nodiscard]] core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, AttachFailure>>
-connectAttachDetailed(core::net::EventLoop* loop, AttachEndpoint endpoint);
 
 /// What an auto-spawned daemon inherits from the client that spawned it.
 ///
@@ -308,6 +283,20 @@ enum class DaemonPresence : uint8_t
 };
 
 class DaemonSpawner;
+
+/// The sleep before the next readiness probe: a spawned daemon usually binds within a few
+/// milliseconds, so the poll starts short and backs off by doubling.
+/// @param previous The sleep just taken, or nullopt before the first one.
+/// @return 5 ms for nullopt, otherwise twice @p previous, capped at one second.
+[[nodiscard]] constexpr core::platform::SteadyDuration nextProbeDelay(
+    std::optional<core::platform::SteadyDuration> previous) noexcept
+{
+    constexpr auto First = std::chrono::milliseconds { 5 };
+    constexpr auto Cap = std::chrono::seconds { 1 };
+    if (!previous)
+        return First;
+    return std::min<core::platform::SteadyDuration>(*previous * 2, Cap);
+}
 
 /// Waits for a daemon to accept connections.
 /// @param spawner Asks whether a daemon serves.

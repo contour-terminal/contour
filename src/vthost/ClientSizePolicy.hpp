@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <string_view>
@@ -130,3 +131,13 @@ struct ClientArea
 }
 
 } // namespace vthost
+
+/// Formats a policy as its configuration spelling, so diagnostics quote what the user would write.
+template <>
+struct std::formatter<vthost::ClientSizePolicy>: std::formatter<std::string_view>
+{
+    auto format(vthost::ClientSizePolicy policy, auto& ctx) const
+    {
+        return std::formatter<std::string_view>::format(vthost::nameOf(policy), ctx);
+    }
+};

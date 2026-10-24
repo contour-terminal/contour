@@ -1153,6 +1153,7 @@ void TerminalDisplay::paint()
         terminal().tick(steady_clock::now());
 
         auto const fontReconfigApplied = _renderer->render(terminal(), _renderingPressure);
+        _drawnCursorColumn->store(_renderer->lastDrawnCursorColumn());
 
         // The lazily-applied font/DPI change made the cell size current only now; re-derive page size
         // and the WM size hints against it (the triggering resize didn't).

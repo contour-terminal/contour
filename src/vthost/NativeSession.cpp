@@ -40,6 +40,7 @@
 #include <vthost/NotifyWire.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
+#include <vthost/TabEdits.hpp>
 #include <vthost/TimeWire.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -261,6 +262,11 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
     };
 }
 
+NativeSession::~NativeSession()
+{
+    _host.noteClientDetached(this);
+}
+
 void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t sessionTag)
 {
     if (_closed)
@@ -303,23 +309,47 @@ void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t
 
 void NativeSession::sessionScreenUpdated(SessionId session)
 {
-    if (!_negotiated || _closed)
+    if (!_negotiated || _closed || !followsSession(session))
         return;
     queueIncrement(session);
 }
 
 void NativeSession::queueIncrement(SessionId session)
 {
+    // Every producer of an increment comes through here -- a screen update, and the command-block
+    // records followUpRecords and requeueOnSendRoom owe -- so each is timed by the same decision.
     _pendingSessions.insert(session.value);
-    scheduleFlush();
+    auto const now = _loop.clock().now();
+    scheduleFlush(flushDeadline(_services.flush, flushReasonFor(session, now), now));
 }
 
-void NativeSession::scheduleFlush()
+FlushReason NativeSession::flushReasonFor(SessionId session, core::platform::SteadyTimePoint now)
 {
-    if (_flushScheduled || _closed)
+    // While the session's snapshot is queued or streaming its increment is held back anyway, and a follow
+    // not pushed yet is owed a snapshot: hurrying either would only spin, every screen update arming one
+    // more immediate flusher that holds the increment back again. The echo credit stays unspent for after.
+    auto const follow = _followed.find(session.value);
+    if (follow == _followed.end() || snapshotPending(session))
+        return FlushReason::Coalesce;
+    auto const lastInput = _host.lastInputAt(session);
+    auto const reason = decideFlush(_services.flush,
+                                    FlushInputs { .now = now,
+                                                  .lastInput = lastInput,
+                                                  .answeredInput = follow->second.answeredInput,
+                                                  .increments = follow->second.increments });
+    // Spent at once, not when the flush runs: a second update before it must not earn another.
+    if (reason == FlushReason::Echo)
+        follow->second.answeredInput = lastInput;
+    return reason;
+}
+
+void NativeSession::scheduleFlush(core::platform::SteadyTimePoint deadline)
+{
+    if (_closed || (_flushDeadline && *_flushDeadline <= deadline))
         return;
-    _flushScheduled = true;
-    _loop.spawn(flushSoon());
+    _flushDeadline = deadline;
+    ++_flushesInFlight;
+    _loop.spawn(flushAt(deadline));
 }
 
 void NativeSession::sessionClosed(SessionId session)
@@ -340,13 +370,15 @@ void NativeSession::sessionResized(SessionId session)
     // inline, and not through the 20ms debounce either: one client's resize re-projects every
     // pane of every window, so this arrives once PER PANE within a single callback. Pushing each
     // one inline is the same burst the attach walk used to be, with the same outcome.
-    if (!_negotiated || _closed || !_followed.contains(session.value))
+    if (!_negotiated || _closed || !_followed.contains(session.value) || !followsSession(session))
         return;
     requestSnapshot(session);
 }
 
 void NativeSession::sessionBell(SessionId session)
 {
+    if (!followsSession(session))
+        return;
     emitSessionEvent(proto::SessionBell { .session = session.value });
 }
 
@@ -355,12 +387,16 @@ void NativeSession::sessionNotify(SessionId session,
                                   std::string const& body,
                                   std::optional<vtbackend::DisplayOccasion> occasion)
 {
+    if (!followsSession(session))
+        return;
     emitSessionEvent(proto::SessionNotify {
         .session = session.value, .title = title, .body = body, .occasion = wireOccasionOf(occasion) });
 }
 
 void NativeSession::sessionCopyToClipboard(SessionId session, std::string const& data)
 {
+    if (!followsSession(session))
+        return;
     // "c" = the CLIPBOARD selection; the client applies its own write permission.
     emitSessionEvent(proto::SessionClipboard { .session = session.value, .selection = "c", .data = data });
 }
@@ -384,20 +420,64 @@ void NativeSession::pushLayout()
 {
     if (!_negotiated || _closed)
         return;
-    // One LayoutState per daemon window (B4) — the client opens a GUI window for
+    refreshFollowedWindows();
+    // One LayoutState per followed daemon window (B4) — the client opens a GUI window for
     // each and reconciles its tabs/splits independently.
     auto& model = _host.model();
     for (auto const i: std::views::iota(0, model.windowCount()))
-        if (auto* window = model.windowAt(i))
+        if (auto* window = model.windowAt(i); window != nullptr && follows(window->id()))
             send(0, proto::DecodedPdu { serializeLayout(*window) });
 }
 
-core::async::Task<void> NativeSession::flushSoon()
+void NativeSession::refreshFollowedWindows()
 {
-    // Debounce: a busy PTY produces many screenUpdated signals per frame-worth
-    // of output; one Delta per ~20ms window is what the client can use anyway.
-    co_await _loop.delay(20ms);
-    _flushScheduled = false;
+    if (_scope == FollowScope::Every)
+        return;
+    auto& model = _host.model();
+    std::erase_if(_followedWindows, [&model](uint64_t window) {
+        return model.window(vtworkspace::WindowId { window }) == nullptr;
+    });
+    for (auto const i: std::views::iota(0, model.windowCount()))
+    {
+        auto* window = model.windowAt(i);
+        // An empty window is nothing to show yet; it is taken up once it holds a tab.
+        if (window == nullptr || window->tabCount() == 0 || follows(window->id()))
+            continue;
+        // Index override 6: a window no client claims — one a control connection made — appears in the
+        // GUI whose launch took every window, rather than in none.
+        auto const claim = _host.windowClaim(window->id(), this);
+        auto const joins =
+            claim == WindowClaim::Yours || (claim == WindowClaim::Unclaimed && _host.isPrimaryViewer(this));
+        if (!joins)
+            continue;
+        _followedWindows.insert(window->id().value);
+        for (auto const tabIndex: std::views::iota(0, window->tabCount()))
+            if (auto* tab = window->tabAt(tabIndex))
+                tab->rootPane()->walkTree([this](vtworkspace::Pane& pane) {
+                    if (pane.isLeaf())
+                        requestSnapshot(pane.session());
+                });
+    }
+}
+
+bool NativeSession::followsSession(SessionId session) const
+{
+    if (_scope == FollowScope::Every)
+        return true;
+    auto const [window, tab, leaf] = _host.model().findSessionLeaf(session);
+    return window != nullptr && follows(window->id());
+}
+
+core::async::Task<void> NativeSession::flushAt(core::platform::SteadyTimePoint deadline)
+{
+    // A busy PTY produces many screenUpdated signals per frame-worth of output; one Delta per coalescing
+    // window is what the client can use anyway. A deadline already due resumes without suspending.
+    co_await _loop.sleepUntil(deadline);
+    --_flushesInFlight;
+    // An earlier deadline superseded this one, and its flusher flushed (or will): nothing is left to do.
+    if (_flushDeadline != deadline)
+        co_return;
+    _flushDeadline.reset();
     if (_closed)
         co_return;
     // A session whose whole grid is about to be (or is being) re-described gets no increment: the
@@ -410,11 +490,11 @@ core::async::Task<void> NativeSession::flushSoon()
             _pendingSessions.insert(session);
         else
             pushDelta(SessionId { session });
-    // Something was held back and nothing else will re-arm the debounce: a session whose output
+    // Something was held back and nothing else will re-arm the flush: a session whose output
     // has stopped raises no further screen update, so without this its last increment would wait
     // for one that never comes.
     if (!_pendingSessions.empty())
-        scheduleFlush();
+        scheduleFlush(_loop.clock().now() + _services.flush.coalesceDelay);
 }
 
 void NativeSession::collectContextState(vtbackend::Terminal& terminal,
@@ -906,6 +986,10 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
             // stream head directly -- forEachValidLine leaves it untouched, and a
             // second forEachLineChangedSince purely to advance it would rescan.
             grid.anchorCursorToHead(follow.cursor);
+            // The increment after an attach snapshot is the first since it, and flushes at once; after a
+            // resync's it is not (see Follow::historyAfterSnapshot).
+            follow.increments =
+                std::exchange(follow.historyAfterSnapshot, IncrementHistory::NoneSinceSnapshot);
 
             // Everything still queued for this session is about to be re-described in full,
             // so send the snapshot INSTEAD of them rather than behind them. Without this a
@@ -1043,6 +1127,10 @@ std::expected<NativeSession::BuiltPush, NativeSession::BuildFailure> NativeSessi
 
 void NativeSession::pushDelta(SessionId session)
 {
+    // Asked before buildPush, which records the displayed page even when it bails: a follow never pushed
+    // has none yet, and its bail is its first snapshot -- a tab opened after attaching -- not a resync.
+    auto const followed = _followed.find(session.value);
+    auto const firstPush = followed == _followed.end() || !followed->second.lastDisplayedPage;
     auto built = buildPush(session, SnapshotMode::Delta);
     if (!built)
     {
@@ -1050,7 +1138,10 @@ void NativeSession::pushDelta(SessionId session)
         {
             case BuildFailure::ResyncRequired:
                 // The increment could not describe the batch. The whole grid can, and the whole grid
-                // is exactly what must not go out inline.
+                // is exactly what must not go out inline. A resync's next increment coalesces; a first
+                // snapshot's flushes at once, as an attach's does.
+                if (!firstPush)
+                    _followed.at(session.value).historyAfterSnapshot = IncrementHistory::SomeSinceSnapshot;
                 requestSnapshot(session);
                 break;
             case BuildFailure::NoSuchSession:
@@ -1061,6 +1152,7 @@ void NativeSession::pushDelta(SessionId session)
     // No SessionState arm: it accompanies a snapshot only, and an increment that wanted to become
     // one reported ResyncRequired rather than building it.
     send(0, proto::DecodedPdu { std::move(built->delta) }, session.value);
+    _followed.at(session.value).increments = IncrementHistory::SomeSinceSnapshot;
 }
 
 bool NativeSession::snapshotPending(SessionId session) const noexcept
@@ -1182,7 +1274,7 @@ core::async::Task<void> NativeSession::streamSnapshots()
         co_await sendSnapshotPieces(std::move(built->delta), session);
 
         // The session is let go once the backlog is back under a piece, not the moment its last
-        // piece joined it. Letting go releases the increment flushSoon held back for the whole run —
+        // piece joined it. Letting go releases the increment flushAt held back for the whole run —
         // the one increment that is not small by construction — and it should meet at most one
         // piece of backlog, not two.
         if (!co_await awaitSendRoom())
@@ -1278,6 +1370,16 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     }
     if (serveDaemonRequest(frame) == DaemonRequest::Served)
         return;
+    // A liveness probe, from a connection of either role: echoed under its serial, so the client can tell a
+    // quiet daemon from a vanished one. Without the capability it is a PDU this daemon does not serve.
+    if (auto const* heartbeat = std::get_if<proto::Heartbeat>(&frame.pdu))
+    {
+        if (_negotiated->shared.contains(proto::Capability::Heartbeat))
+            send(frame.serial, proto::DecodedPdu { *heartbeat });
+        else
+            refuse(frame);
+        return;
+    }
     switch (_role)
     {
         case proto::ConnectionRole::Attach: break;
@@ -1370,12 +1472,13 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
         // clicked in a second daemon window into the first one.
         auto const beside =
             createTab->session != 0 ? std::optional { SessionId { createTab->session } } : std::nullopt;
-        std::ignore = _host.createTab(spawnRequest(), beside);
+        std::ignore = _host.createTab(spawnRequest(createTab->profileName), beside);
         return;
     }
-    if (std::holds_alternative<proto::NewWindow>(frame.pdu))
+    if (auto const* newWindow = std::get_if<proto::NewWindow>(&frame.pdu))
     {
-        std::ignore = _host.createWindow(spawnRequest());
+        // Claimed for this connection, which follows it from its first LayoutState on.
+        std::ignore = _host.createWindow(spawnRequest(newWindow->profileName), this);
         return;
     }
     if (auto const* split = std::get_if<proto::SplitPane>(&frame.pdu))
@@ -1393,7 +1496,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             _host.splitActivePane(tab->id(),
                                   static_cast<vtworkspace::SplitState>(split->orientation),
                                   proto::fromWireRatio(split->ratio),
-                                  spawnRequest());
+                                  spawnRequest(split->profileName));
         }
         return;
     }
@@ -1436,6 +1539,19 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(performed.error()));
         // A write queues for the session's pump, as input does, and backs up with it.
         pauseReadingIfBackedUp(SessionId { request->session });
+        return;
+    }
+    if (auto const* edit = std::get_if<proto::EditTab>(&frame.pdu))
+    {
+        // A client that did not negotiate it may not edit: it is refused as a PDU this daemon does not know.
+        if (!_negotiated->shared.contains(proto::Capability::TabEdits))
+        {
+            refuse(frame);
+            return;
+        }
+        // A change fans out as a model event, and so as a layout push to every client, this one included.
+        if (auto const applied = applyTabEdit(_host.model(), *edit); !applied)
+            errorLog()("{}: ignoring {}: {}", _id, proto::describe(frame.pdu), describe(applied.error()));
         return;
     }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
@@ -1547,33 +1663,38 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     // judged against, so the client can tell whose "local" that is before it mirrors a single one. By an
     // id derived for this application, never the machine's own, which machine-id(5) keeps confidential.
     auto stated = appSpecificIdentity(_host.identity().view());
-    send(frame.serial,
-         proto::DecodedPdu { proto::ServerHello {
-             .agreedVersion = *agreed,
-             .versions = policy.versions,
-             .capabilities = policy.capabilities,
-             .machineId = std::move(stated.machineId),
-             .hostname = std::move(stated.hostname),
-             .releaseVersion = std::string { _services.daemon.get().releaseVersion() } } });
-    _negotiated = proto::Negotiated { .version = *agreed,
-                                      .peerCapabilities = hello->capabilities,
-                                      .shared = proto::intersect(policy.capabilities, hello->capabilities) };
+    auto reply =
+        proto::ServerHello { .agreedVersion = *agreed,
+                             .versions = policy.versions,
+                             .capabilities = policy.capabilities,
+                             .machineId = std::move(stated.machineId),
+                             .hostname = std::move(stated.hostname),
+                             .releaseVersion = std::string { _services.daemon.get().releaseVersion() } };
+    auto negotiated =
+        proto::Negotiated { .version = *agreed,
+                            .peerCapabilities = hello->capabilities,
+                            .shared = proto::intersect(policy.capabilities, hello->capabilities) };
     _role = hello->role;
     switch (_role)
     {
         case proto::ConnectionRole::Attach:
             connectionLog()("{}: handshake complete (protocol v{})", _id, *agreed);
-            attachClient(*hello);
+            attachClient(frame.serial, *hello, std::move(reply), std::move(negotiated));
             break;
         case proto::ConnectionRole::Control:
             // A probe or a command to the daemon itself: shown nothing, spawning nothing, counted as no one.
             connectionLog()("{}: handshake complete (protocol v{}, control connection)", _id, *agreed);
+            send(frame.serial, proto::DecodedPdu { std::move(reply) });
+            _negotiated = std::move(negotiated);
             break;
     }
     return true;
 }
 
-void NativeSession::attachClient(proto::ClientHello const& hello)
+void NativeSession::attachClient(uint64_t serial,
+                                 proto::ClientHello const& hello,
+                                 proto::ServerHello reply,
+                                 proto::Negotiated negotiated)
 {
     // Counted, and subscribed, first: the spawn below fans out to the subscribers, as it did when every
     // connection subscribed before its hello.
@@ -1582,24 +1703,58 @@ void NativeSession::attachClient(proto::ClientHello const& hello)
     _layoutSubscription.emplace(_host, _layoutObserver, &SessionHost::subscribe, &SessionHost::unsubscribe);
 
     // Adopted BEFORE the spawn below: that session exists because THIS client attached, so it
-    // inherits this client's profile like any tab the client goes on to open.
-    adoptClientSessionSettings(hello.sessionSettings);
-
-    // Attaching to an empty daemon spawns the first session.
-    if (_host.model().window(_host.windowId())->tabCount() == 0)
+    // inherits this client's profile like any tab the client goes on to open. A profile the host
+    // resolves by name supersedes the settings the client states: the host decides what runs.
+    if (negotiated.shared.contains(proto::Capability::ProfileByName) && !hello.profileName.empty())
     {
-        connectionLog()("{}: daemon has no tabs; spawning the first session", _id);
-        std::ignore = _host.createTab(spawnRequest());
+        _profileName = hello.profileName;
+        connectionLog()("{}: sessions this client creates run the host's profile '{}'", _id, _profileName);
     }
+    else
+        adoptClientSessionSettings(hello.sessionSettings);
+
+    // The stated client area, applied BEFORE the spawn and the attach snapshots below, so the first
+    // session spawns at the size the client displays and its snapshot needs no resize and resync. An
+    // area out of range is refused as a ResizeRequest's is; the session then spawns at the host's
+    // size and the client's own ResizeRequest corrects it, as it does against a daemon that predates
+    // the field.
+    if (hello.clientArea)
+    {
+        if (auto const size = sanePageSize(hello.clientArea->columns, hello.clientArea->lines))
+            std::ignore = _host.applyClientSize(this, *size);
+        else
+            errorLog()("{}: rejecting hello client area {}x{} (out of range)",
+                       _id,
+                       hello.clientArea->columns,
+                       hello.clientArea->lines);
+    }
+
+    // After the client area, so whatever the plan spawns spawns at the size the client displays (D7). A
+    // client that cannot state an intent follows every window, as every client did before intents existed.
+    executeAttachPlan(negotiated.shared.contains(proto::Capability::AttachIntent) ? hello.attachIntent
+                                                                                  : proto::AttachIntent {});
+
+    // Under Every, the windows there are to show now; later ones follow without being named.
+    if (_scope == FollowScope::Listed)
+        reply.followedWindows.assign(_followedWindows.begin(), _followedWindows.end());
+    else
+        for (auto const i: std::views::iota(0, _host.model().windowCount()))
+            if (auto* window = _host.model().windowAt(i); window != nullptr && window->tabCount() > 0)
+                reply.followedWindows.push_back(window->id().value);
+    reply.daemonInstance = _host.instance();
+    send(serial, proto::DecodedPdu { std::move(reply) });
+    _negotiated = std::move(negotiated);
 
     // The window/tab/pane layout first, so the client builds its tabs and split
     // trees before the per-session content streams into them.
     pushLayout();
 
-    // The attach snapshot: every hosted session of every window, full state. QUEUED, not pushed:
+    // The attach snapshot: every hosted session of every followed window, full state. QUEUED, not pushed:
     // this runs inside the PDU pump's handler, which cannot suspend, so pushing here would put
     // every pane's whole grid into the send queue before the drain coroutine had run once.
-    _host.model().forEachTab([this](vtworkspace::Window&, vtworkspace::Tab& tab) {
+    _host.model().forEachTab([this](vtworkspace::Window& window, vtworkspace::Tab& tab) {
+        if (!follows(window.id()))
+            return;
         tab.rootPane()->walkTree([&](vtworkspace::Pane& pane) {
             if (pane.isLeaf())
                 requestSnapshot(pane.session());
@@ -1613,6 +1768,47 @@ void NativeSession::attachClient(proto::ClientHello const& hello)
     if (asksPermissions())
         for (auto const& request: _host.pendingPermissionRequests())
             send(0, proto::DecodedPdu { request });
+}
+
+void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)
+{
+    auto& model = _host.model();
+    auto context = AttachContext { .otherClients = _host.connectedClients(),
+                                   .primaryWindow = _host.windowId().value,
+                                   .windows = {} };
+    for (auto const i: std::views::iota(0, model.windowCount()))
+        if (auto const* window = model.windowAt(i))
+            context.windows.push_back(
+                WindowSummary { .id = window->id().value, .tabCount = window->tabCount() });
+    std::ranges::sort(context.windows, {}, &WindowSummary::id);
+
+    auto const plan = planAttach(intent, context);
+    _host.noteClientAttached(this);
+    _scope = plan.scope;
+    _followedWindows = std::set<uint64_t>(plan.follow.begin(), plan.follow.end());
+    // The first client of a fresh launch is the primary viewer: windows no client claims appear there.
+    auto const launched =
+        intent.kind == proto::AttachIntentKind::Launch || intent.kind == proto::AttachIntentKind::Resume;
+    if (plan.scope == FollowScope::Listed && launched && context.otherClients == 0)
+        _host.claimPrimaryViewer(this);
+
+    switch (plan.creation)
+    {
+        case AttachCreation::None: break;
+        case AttachCreation::FirstTabInPrimary:
+            connectionLog()("{}: daemon has no tabs; spawning the first session", _id);
+            std::ignore = _host.createTab(spawnRequest({}));
+            break;
+        case AttachCreation::NewWindow:
+            if (auto const* window = _host.createWindow(spawnRequest({}), this))
+            {
+                connectionLog()("{}: attaching to a new window {}", _id, window->id().value);
+                _followedWindows.insert(window->id().value);
+            }
+            else
+                errorLog()("{}: the window this attach asked for could not be created", _id);
+            break;
+    }
 }
 
 void NativeSession::reportPumpOutcome(PumpResult const& outcome) const
@@ -1653,20 +1849,22 @@ core::async::Task<void> NativeSession::run()
     _closed = true;
     // Lifetime constraint: serveNativeClient destroys this session the moment
     // run() returns (the unique_ptr goes out of scope immediately after the
-    // co_await). A debounce flush spawned before the disconnect may still be
-    // parked in its 20ms delay with `this` captured in its coroutine frame.
-    // pollUntil drains that pending flush — *this must still be alive for the
-    // entire poll, so this poll MUST remain the last thing run() does before
-    // returning. Any refactoring that moves logic after this point opens a
-    // use-after-free window on _flushScheduled.
+    // co_await). Flushes spawned before the disconnect may still be parked
+    // until their deadlines with `this` captured in their coroutine frames --
+    // superseded ones included, which is why this counts them rather than
+    // asking whether a deadline is armed. pollUntil drains them -- *this must
+    // still be alive for the entire poll, so this poll MUST remain the last
+    // thing run() does before returning. Any refactoring that moves logic after
+    // this point opens a use-after-free window on _flushesInFlight.
     //
     // The snapshot streamer joins the same barrier for the same reason, and needs it more: it
-    // parks on the write queue's watermark, which is a far longer park than the flush debounce.
+    // parks on the write queue's watermark, which is a far longer park than a flush deadline.
     // `_closed` was set just above, which is what unparks it — waitUntilBacklogBelow returns on
     // a closed queue, and the streamer's loops all test _closed — so this poll is bounded. The waiter
     // for room for command-block records parks on the same watermark, and joins for the same reason.
-    co_await core::net::pollUntil(
-        &_loop, [this] { return !_flushScheduled && !_streamingSession && _roomWaiter == RoomWaiter::Idle; });
+    co_await core::net::pollUntil(&_loop, [this] {
+        return _flushesInFlight == 0 && !_streamingSession && _roomWaiter == RoomWaiter::Idle;
+    });
     co_await closeGracefully(&_loop, &_writer, _connection.get());
 }
 

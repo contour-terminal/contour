@@ -4,6 +4,9 @@
 
 #include <vtpty/ChannelPty.hpp>
 
+#include <algorithm>
+#include <chrono>
+
 namespace contour::remote
 {
 
@@ -16,7 +19,8 @@ MuxConnectOutcome awaitMuxConnect(std::mutex& mutex,
     auto lock = std::unique_lock { mutex };
     if (!cv.wait_for(lock, timeout, [&phase] { return phase != MuxConnectPhase::Connecting; }))
         return MuxConnectOutcome { .ready = false, .timedOut = true, .failure = {} };
-    return MuxConnectOutcome { .ready = phase == MuxConnectPhase::Ready,
+    return MuxConnectOutcome { .ready =
+                                   phase == MuxConnectPhase::Ready || phase == MuxConnectPhase::Reconnecting,
                                .timedOut = false,
                                .failure = failure };
 }
@@ -57,7 +61,7 @@ void RemoteController::failConnect(std::string reason)
 {
     {
         auto const lock = std::lock_guard { _mutex };
-        if (_state != State::Connecting && _state != State::Ready)
+        if (_state != State::Connecting && _state != State::Ready && _state != State::Reconnecting)
             return; // already settled; the first reason is the interesting one
         _state = State::Failed;
         _failure = std::move(reason);
@@ -65,15 +69,25 @@ void RemoteController::failConnect(std::string reason)
     _connected.notify_all();
 }
 
-std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::milliseconds timeout)
+void RemoteController::startConnecting()
 {
+    if (_connectStartedAt)
+        return;
+    _connectStartedAt = _clock.now();
     // The reactor no longer dies silently: an exception that unwinds past runClient's own epilogue
-    // leaves the phase stuck in Connecting, and without this the GUI would sit out the full timeout
+    // leaves the phase stuck in Connecting, and without this the GUI would sit out the full budget
     // and then blame it on a slow daemon.
     _reactor.start([this](core::net::EventLoop* loop) { return runClient(loop); },
                    [this](std::string const& reason) { failConnect(reason); });
+}
 
-    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, timeout);
+std::expected<void, std::string> RemoteController::awaitConnected(std::chrono::milliseconds budget)
+{
+    startConnecting();
+    auto const spent = _clock.now() - *_connectStartedAt;
+    auto const remaining = std::max(std::min(budget, MinimumConnectAwait),
+                                    std::chrono::ceil<std::chrono::milliseconds>(budget - spent));
+    auto const outcome = awaitMuxConnect(_mutex, _connected, _state, _failure, remaining);
     if (outcome.timedOut)
     {
         stop();
@@ -82,6 +96,12 @@ std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::m
     if (!outcome.ready)
         return std::unexpected(outcome.failure.empty() ? connectClosedMessage() : outcome.failure);
     return {};
+}
+
+std::expected<void, std::string> RemoteController::connectAndWait(std::chrono::milliseconds timeout)
+{
+    startConnecting();
+    return awaitConnected(timeout);
 }
 
 void RemoteController::stop()
