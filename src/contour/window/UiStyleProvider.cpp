@@ -9,6 +9,8 @@
 
 #include <core/log/LogStore.hpp>
 
+#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
@@ -169,6 +171,18 @@ UiStyleProvider::UiStyleProvider(config::ChromeStyle row, QFont const& chromeFon
     _metrics { chromeMetricsFor(_tokens, chromeFont) },
     _glyphs { chromeGlyphsFor(_tokens) }
 {
+    if (auto* application = QCoreApplication::instance())
+        application->installEventFilter(this);
+}
+
+bool UiStyleProvider::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == QCoreApplication::instance() && event->type() == QEvent::ApplicationPaletteChange)
+    {
+        ++_paletteRevision;
+        emit paletteRevisionChanged();
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 QString UiStyleProvider::chromeStyleName() const

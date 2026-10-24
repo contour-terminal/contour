@@ -133,7 +133,8 @@ Item {
         // Delete (trashcan) — editable rows only, revealed on hover / when selected.
         AbstractButton {
             id: trashButton
-            readonly property color danger: chromeStyle.statusColor(chromeStyle.statusDanger)
+            // Reads paletteRevision so the binding re-evaluates on a light/dark flip (see UiStyleProvider).
+            readonly property color danger: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusColor(chromeStyle.statusDanger)
             objectName: "deleteEntryButton"
             visible: root.editable && !root.locked && (rowHover.hovered || root.selected)
             implicitWidth: 22

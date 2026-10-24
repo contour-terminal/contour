@@ -233,7 +233,8 @@ Popup {
                 // because a template cannot escape them.
                 text: qsTr("A comma or a brace cannot be stored with styling — remove it, or the styling "
                            + "on this text will be dropped.")
-                color: chromeStyle.statusColor(chromeStyle.statusWarning)
+                // Reads paletteRevision so the binding re-evaluates on a light/dark flip (see UiStyleProvider).
+                color: chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusColor(chromeStyle.statusWarning)
             }
         }
 

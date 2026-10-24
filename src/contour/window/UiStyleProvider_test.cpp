@@ -25,6 +25,7 @@
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
+#include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlExpression>
 
@@ -32,6 +33,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <memory>
 #include <ranges>
 #include <utility>
 
@@ -399,4 +401,39 @@ TEST_CASE("chromeStyle names the status roles as properties in QML", "[contour][
                 .startsWith("status");
         });
     CHECK(static_cast<size_t>(statusProperties) == contour::config::StatusColorRoleCount);
+}
+
+TEST_CASE("UiStyleProvider.paletteRevision changes when the application palette does", "[contour][uistyle]")
+{
+    auto provider = contour::window::UiStyleProvider(rowOf(UiStyle::Native), QGuiApplication::font());
+    auto notified = 0;
+    QObject::connect(
+        &provider, &contour::window::UiStyleProvider::paletteRevisionChanged, [&] { ++notified; });
+
+    auto const before = provider.paletteRevision();
+    withWindowColor(QColor(0x1E, 0x1E, 0x1E), [&] { CHECK(provider.paletteRevision() != before); });
+    CHECK(notified >= 2); // Once for the change, once for the restore.
+}
+
+TEST_CASE("chromeStyle.statusColor bindings re-evaluate on a palette change", "[contour][uistyle][qml]")
+{
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+
+    auto component = QQmlComponent(&engine);
+    component.setData("import QtQuick\n"
+                      "QtObject {\n"
+                      "    property color danger: chromeStyle.paletteRevision < 0\n"
+                      "        ? \"transparent\" : chromeStyle.statusColor(chromeStyle.statusDanger)\n"
+                      "}\n",
+                      QUrl());
+    withWindowColor(QColor(0xF6, 0xF6, 0xF6), [&] {
+        auto const object = std::unique_ptr<QObject>(component.create());
+        REQUIRE(object);
+        CHECK(object->property("danger").value<QColor>() == QColor(0xD7, 0x00, 0x15));
+
+        withWindowColor(QColor(0x1E, 0x1E, 0x1E), [&] {
+            CHECK(object->property("danger").value<QColor>() == QColor(0xFF, 0x69, 0x61));
+        });
+    });
 }

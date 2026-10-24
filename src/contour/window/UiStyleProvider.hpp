@@ -82,9 +82,9 @@ struct ChromeGlyphs
 /// Every number the chrome QML used to carry as a literal comes from here, already resolved (see
 /// ChromeMetrics), so a QML file never learns which style is active.
 ///
-/// Everything is CONSTANT because the style cannot change within a process: the Qt Quick Controls
-/// half of it is chosen once, before the first control exists (see ContourGuiApp), so a live-updating
-/// geometry half would only produce a half-switched window. @see UiStyle.
+/// Everything but @ref paletteRevision is CONSTANT because the style cannot change within a process: the Qt
+/// Quick Controls half of it is chosen once, before the first control exists (see ContourGuiApp), so a
+/// live-updating geometry half would only produce a half-switched window. @see UiStyle.
 ///
 /// Deliberately a context property rather than a registered QML singleton. Two separate QML modules
 /// read these tokens -- @c Contour.Ui and the @c ContourTui Quick Controls style -- and a singleton
@@ -152,6 +152,12 @@ class UiStyleProvider: public QObject
 
     Q_PROPERTY(QColor errorColor READ errorColor CONSTANT)
 
+    /// Bumped whenever the application palette changes. statusColor() and onStatusColor() read that
+    /// palette, and a binding cannot see through an invokable, so each QML call site reads this first,
+    /// using it rather than merely mentioning it (a bare read is dropped by the JS engine):
+    /// `chromeStyle.paletteRevision < 0 ? "transparent" : chromeStyle.statusColor(role)`.
+    Q_PROPERTY(int paletteRevision READ paletteRevision NOTIFY paletteRevisionChanged)
+
     Q_PROPERTY(QString tabSeparator READ tabSeparator CONSTANT)
     Q_PROPERTY(QString trafficLightGlyph READ trafficLightGlyph CONSTANT)
     Q_PROPERTY(QString closeGlyph READ closeGlyph CONSTANT)
@@ -167,6 +173,10 @@ class UiStyleProvider: public QObject
     ///                   extent is counted in.
     /// @param parent     Qt ownership.
     UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent = nullptr);
+
+    /// How many times the application palette has changed since this provider was built.
+    /// @see paletteRevisionChanged
+    [[nodiscard]] int paletteRevision() const noexcept { return _paletteRevision; }
 
     /// The active row's name for QML: "macos", "fluent", "linux" or "terminal".
     [[nodiscard]] QString chromeStyleName() const;
@@ -334,6 +344,15 @@ class UiStyleProvider: public QObject
     /// the token table rather than a literal repeated in every popup surface.
     [[nodiscard]] Q_INVOKABLE QColor shadowTint(QColor const& base) const;
 
+  signals:
+    /// The application palette changed, so every palette-derived colour (statusColor()) may have too.
+    void paletteRevisionChanged();
+
+  protected:
+    /// Watches the application object for QEvent::ApplicationPaletteChange and bumps paletteRevision.
+    /// An event filter rather than QGuiApplication::paletteChanged, which Qt 6 deprecates for the event.
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
   private:
     // By value rather than by reference: the rows have static storage duration, but a reference member
     // would delete move-assignment for no gain -- the row is a handful of ints and string_views.
@@ -342,6 +361,7 @@ class UiStyleProvider: public QObject
     ChromeFonts _fonts;
     ChromeMetrics _metrics;
     ChromeGlyphs _glyphs;
+    int _paletteRevision = 0;
 };
 
 /// The font @p config says the chrome should be drawn with.
