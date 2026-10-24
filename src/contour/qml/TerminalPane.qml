@@ -229,7 +229,7 @@ ContourTerminal {
         anchors.fill: parent
         color: "transparent"
         visible: pane.showFocusFrame && pane.paneActive
-        border.width: pane.paneActive ? 1 : 0
+        border.width: 1
         border.color: pane.palette.highlight
         z: 10
     }

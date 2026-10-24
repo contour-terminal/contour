@@ -112,6 +112,13 @@ void writeSideFile(QTemporaryDir& dir, std::filesystem::path const& relativePath
     out << content;
 }
 
+/// A Classic configuration, for the tests that edit the "default" colour scheme: a Classic profile
+/// names that scheme, whereas a Native2026 one names contour-dark/-light.
+[[nodiscard]] contour::config::Config classicConfig()
+{
+    return contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+}
+
 } // namespace
 
 TEST_CASE("Config: multiline command copying is opt-in per profile", "[config]")
@@ -1086,9 +1093,7 @@ color_schemes:
         // commented example whatever the scheme said, so a configured fold column did not survive a
         // write. Emitting the full block instead would be the opposite error -- it would PIN colours
         // an unset pair deliberately derives.
-        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
-        auto config =
-            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+        auto config = classicConfig();
         auto& scheme = config.colorschemes.value()["default"];
         scheme.foldMarker = vtbackend::RGBColorPair { .foreground = vtbackend::RGBColor(0x90, 0x90, 0x90),
                                                       .background = vtbackend::RGBColor(0x1A, 0x1A, 0x1A) };
@@ -1119,9 +1124,7 @@ TEST_CASE("Config: a scheme's context tints are written back", "[config]")
 
     SECTION("in the configuration file")
     {
-        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
-        auto config =
-            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+        auto config = classicConfig();
         config.colorschemes.value()["default"].contextTints[elevate] = tint;
 
         auto const tints =
@@ -6343,9 +6346,7 @@ color_schemes:
 
     SECTION("the writer emits what was set, and only that")
     {
-        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
-        auto config =
-            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+        auto config = classicConfig();
         auto& scheme = config.colorschemes.value()["default"];
         scheme.blockStatus[static_cast<size_t>(vtbackend::CommandBlockOutcome::Failure)] =
             vtbackend::RGBColor(0xE0, 0x20, 0x20);
@@ -6417,9 +6418,7 @@ TEST_CASE("Config: each gutter color a scheme sets is written back on its own", 
     for (auto const& [name, slot]: Slots)
     {
         INFO("set: " << name);
-        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
-        auto config =
-            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+        auto config = classicConfig();
         slot(config.colorschemes.value()["default"]) = color;
 
         auto const reloaded =
@@ -8027,9 +8026,7 @@ TEST_CASE("Config: the sticky header's colors load and are written back", "[conf
 
     SECTION("the writer emits what was set, and only that")
     {
-        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
-        auto config =
-            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+        auto config = classicConfig();
         config.colorschemes.value()["default"].stickyHeaderSeparator = vtbackend::RGBColor(0x50, 0x60, 0x70);
 
         auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);

@@ -1918,16 +1918,16 @@ bool ContourGuiApp::loadConfig(string const& target)
 
 void ContourGuiApp::registerBundledFonts() const
 {
-    // applicationDirPath() needs a QCoreApplication; the headless verbs have none, so borrow one.
-    auto argc = 1;
-    auto name = std::string { programPath() };
-    auto argv = std::array<char*, 2> { name.data(), nullptr };
-    auto const headless = QCoreApplication::instance() == nullptr
-                              ? std::make_unique<QCoreApplication>(argc, argv.data())
-                              : nullptr;
+    // Qt-free, so the headless verbs need no QCoreApplication to find the fonts shipped beside them.
+    auto const executable = vthost::currentExecutablePath();
+    if (!executable)
+    {
+        errorLog()("Bundled fonts not registered: cannot locate the executable: {}.",
+                   executable.error().message());
+        return;
+    }
 
-    auto const registered = text::registerBundledFonts(
-        bundledFontDirectories(fs::path { QCoreApplication::applicationDirPath().toStdU16String() }));
+    auto const registered = text::registerBundledFonts(bundledFontDirectories(executable->parent_path()));
     if (registered)
         return;
     // A missing directory (a build tree that was never installed) is expected: the configured fonts, or the

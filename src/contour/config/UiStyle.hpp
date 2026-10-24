@@ -252,14 +252,10 @@ struct StatusColor
     uint32_t dark = 0;                                   ///< Used on a dark chrome.
 };
 
-/// Number of @c StatusColorRole enumerators.
-inline constexpr size_t StatusColorRoleCount = 4;
+/// Number of @c StatusColorRole enumerators, derived from the last one.
+inline constexpr size_t StatusColorRoleCount = static_cast<size_t>(StatusColorRole::Running) + 1;
 
-static_assert(
-    static_cast<size_t>(StatusColorRole::Running) + 1 == StatusColorRoleCount,
-    "StatusColorRoleCount must name every StatusColorRole; add the new role's row to StatusColors.");
-
-/// The status colours, indexed by @c StatusColorRole.
+/// The status colours, indexed by @c StatusColorRole; a new role adds its row here.
 inline constexpr std::array<StatusColor, StatusColorRoleCount> StatusColors = {
     StatusColor { StatusColorSource::Fixed, 0xD70015, 0xFF6961 }, // Danger
     StatusColor { StatusColorSource::Fixed, 0xC93400, 0xFF9F0A }, // Warning
@@ -287,85 +283,85 @@ namespace detail
     // Rows are indexed by ChromeStyle, so their order is the enumerator order -- uiStyleTokens()
     // relies on that, and the static_assert below pins it against the enumerator count.
     //
-    // NB: zoomGlyph, newTabGlyph, menuGlyph and submenuGlyph happen to be identical in both rows. They live
-    // in the table anyway because they are the same KIND of thing as the two that do vary, and a
-    // style wanting an ASCII "v" rather than "▾" should not have to edit QML to get it.
-    // Native's numbers are the literals the chrome QML carried before it was made style-driven,
-    // so selecting Native reproduces the previous appearance. That is what the geometry
-    // assertions in MainWindowQml_test guard.
+    // NB: zoomGlyph, newTabGlyph, menuGlyph and submenuGlyph happen to be identical in both rows.
+    // They live in the table anyway because they are the same KIND of thing as the two that do
+    // vary, and a style wanting an ASCII "v" rather than "▾" should not have to edit QML to get it.
+    // NativeTokens' numbers are the literals the chrome QML carried before it was made
+    // style-driven, so every native ChromeStyle row reproduces the previous appearance. That is
+    // what the geometry assertions in MainWindowQml_test guard.
     //
     // One deliberate exception: stripButtonUnits. The "+" and "▾" used to be as narrow as a
     // tab's close glyph (controlUnits), which made two of the strip's three permanently visible
     // targets the hardest in it to hit. They are padded out here rather than in TabStrip.qml so
     // that every style states the width it wants.
     inline constexpr auto NativeTokens = UiStyleTokens {
-            .unit = LengthUnit::Pixel,
-            .quickControlsStyle = "Fusion",
-            .fontSource = ChromeFontSource::PlatformUi,
-            .cornerRadiusPixels = 3,
-            .borderWidthPixels = 1,
-            .dropCaretPixels = 4,
-            .hoverWashPercent = 25,
-            // The values Qt's own Basic and Fusion styles dim with, so a scrim looks like a scrim
-            // wherever the user has met one before.
-            .modalScrimPercent = 50,
-            .modelessScrimPercent = 12,
-            // A soft, clearly displaced shadow -- what a desktop menu casts everywhere else. The
-            // margin is generous enough that the blur is not cut off against the window edge.
-            .shadowBlurPixels = 24,
-            .shadowOffsetUnits = 4,
-            .shadowOpacityPercent = 35,
-            .shadowMarginUnits = 12,
-            .chromeHeightUnits = 34,
-            .tabHeightUnits = 32,
-            .labelPaddingUnits = 10,
-            .labelGapUnits = 4,
-            // None, which is what a native tab always had: its tabs abut with no rule between them, so
-            // the close button is followed by the next tab's own 10px leading inset. Giving it one here
-            // would widen every tab in every existing window for no visible gain.
-            .trailingPaddingUnits = 0,
-            .minTabUnits = 120,
-            .maxTabUnits = 240,
-            // The remainder of the historical `+ 56`: that literal covered the label's leading inset,
-            // the gap after it and the close button (10 + 4 + 22) with 20 pixels left over. Keeping
-            // the leftover is what keeps a native tab exactly as wide as it always was.
-            .tabSlackUnits = 20,
-            .controlUnits = 22,
-            .stripButtonUnits = 32,
-            .windowControlUnits = 44,
-            .badgeUnits = 16,
-            // The dimensions macOS itself uses for its traffic lights: a 12px dot on a 20px pitch,
-            // inset from the window's leading edge. They are stated here rather than in the macOS
-            // window-control row because they are lengths, and lengths are this table's business.
-            .trafficLightDotUnits = 12,
-            .trafficLightGapUnits = 8,
-            .windowControlInsetUnits = 10,
-            // Roughly what macOS leaves between its traffic lights and the first toolbar item. It is
-            // larger than the inset on purpose: the outer end of the group faces the window's edge,
-            // which is empty, while this end faces the tab strip -- a run of labelled, clickable
-            // boxes that the lights would otherwise read as the first of.
-            .windowControlGutterUnits = 16,
-            .closePointSize = 8,
-            .newTabPointSize = 12,
-            .menuPointSize = 10,
-            .windowControlPointSize = 10,
-            .badgePixelSize = 10,
-            .progressColors = {
-                0x000000,  // Inactive: never painted
-                0x3D9A50,  // Normal: running
-                0xD13438,  // Error: failed
-                0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
-                0xE8A317,  // Paused: paused, or warning
-            },
-            // Empty: at 12 logical pixels a dot is smaller than any text this chrome sets, so it is
-            // drawn as the shape it is rather than as a glyph scaled down to fit.
-            .trafficLightGlyph = "",
-            .tabSeparator = "",
-            .closeGlyph = "✕",
-            .zoomGlyph = "Z",
-            .newTabGlyph = "+",
-            .menuGlyph = "▾",
-            .submenuGlyph = "▸",
+        .unit = LengthUnit::Pixel,
+        .quickControlsStyle = "Fusion",
+        .fontSource = ChromeFontSource::PlatformUi,
+        .cornerRadiusPixels = 3,
+        .borderWidthPixels = 1,
+        .dropCaretPixels = 4,
+        .hoverWashPercent = 25,
+        // The values Qt's own Basic and Fusion styles dim with, so a scrim looks like a scrim
+        // wherever the user has met one before.
+        .modalScrimPercent = 50,
+        .modelessScrimPercent = 12,
+        // A soft, clearly displaced shadow -- what a desktop menu casts everywhere else. The
+        // margin is generous enough that the blur is not cut off against the window edge.
+        .shadowBlurPixels = 24,
+        .shadowOffsetUnits = 4,
+        .shadowOpacityPercent = 35,
+        .shadowMarginUnits = 12,
+        .chromeHeightUnits = 34,
+        .tabHeightUnits = 32,
+        .labelPaddingUnits = 10,
+        .labelGapUnits = 4,
+        // None, which is what a native tab always had: its tabs abut with no rule between them, so
+        // the close button is followed by the next tab's own 10px leading inset. Giving it one here
+        // would widen every tab in every existing window for no visible gain.
+        .trailingPaddingUnits = 0,
+        .minTabUnits = 120,
+        .maxTabUnits = 240,
+        // The remainder of the historical `+ 56`: that literal covered the label's leading inset,
+        // the gap after it and the close button (10 + 4 + 22) with 20 pixels left over. Keeping
+        // the leftover is what keeps a native tab exactly as wide as it always was.
+        .tabSlackUnits = 20,
+        .controlUnits = 22,
+        .stripButtonUnits = 32,
+        .windowControlUnits = 44,
+        .badgeUnits = 16,
+        // The dimensions macOS itself uses for its traffic lights: a 12px dot on a 20px pitch,
+        // inset from the window's leading edge. They are stated here rather than in the macOS
+        // window-control row because they are lengths, and lengths are this table's business.
+        .trafficLightDotUnits = 12,
+        .trafficLightGapUnits = 8,
+        .windowControlInsetUnits = 10,
+        // Roughly what macOS leaves between its traffic lights and the first toolbar item. It is
+        // larger than the inset on purpose: the outer end of the group faces the window's edge,
+        // which is empty, while this end faces the tab strip -- a run of labelled, clickable
+        // boxes that the lights would otherwise read as the first of.
+        .windowControlGutterUnits = 16,
+        .closePointSize = 8,
+        .newTabPointSize = 12,
+        .menuPointSize = 10,
+        .windowControlPointSize = 10,
+        .badgePixelSize = 10,
+        .progressColors = {
+            0x000000,  // Inactive: never painted
+            0x3D9A50,  // Normal: running
+            0xD13438,  // Error: failed
+            0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
+            0xE8A317,  // Paused: paused, or warning
+        },
+        // Empty: at 12 logical pixels a dot is smaller than any text this chrome sets, so it is
+        // drawn as the shape it is rather than as a glyph scaled down to fit.
+        .trafficLightGlyph = "",
+        .tabSeparator = "",
+        .closeGlyph = "✕",
+        .zoomGlyph = "Z",
+        .newTabGlyph = "+",
+        .menuGlyph = "▾",
+        .submenuGlyph = "▸",
     };
 
     // One row tall, every extent a whole cell, square corners and a box-drawing separator: the
@@ -373,74 +369,74 @@ namespace detail
     // rather than Native's heavy ✕, because at one cell wide beside a label set in the same
     // monospace font the heavy form reads as another letter of the label.
     inline constexpr auto TerminalTokens = UiStyleTokens {
-            .unit = LengthUnit::Cell,
-            .quickControlsStyle = "ContourTui",
-            .fontSource = ChromeFontSource::TerminalProfile,
-            .cornerRadiusPixels = 0,
-            .borderWidthPixels = 1,
-            .dropCaretPixels = 1,
-            .hoverWashPercent = 25,
-            // The values Qt's own Basic and Fusion styles dim with, so a scrim looks like a scrim
-            // wherever the user has met one before.
-            .modalScrimPercent = 50,
-            .modelessScrimPercent = 12,
-            // No blur, one cell of offset: the hard-edged drop shadow a text-mode UI casts, which is
-            // what this style is quoting. A soft 24px halo would be the one thing in the chrome not
-            // aligned to the character grid.
-            .shadowBlurPixels = 0,
-            .shadowOffsetUnits = 1,
-            .shadowOpacityPercent = 60,
-            .shadowMarginUnits = 1,
-            .chromeHeightUnits = 1,
-            .tabHeightUnits = 1,
-            .labelPaddingUnits = 1,
-            .labelGapUnits = 1,
-            // A cell, matching the leading inset: this style ends every tab with a "│" rule, and with
-            // no inset the close glyph sat directly against it -- "×│" reads as one box-drawing
-            // ligature rather than as a button beside a border.
-            .trailingPaddingUnits = 1,
-            .minTabUnits = 10,
-            .maxTabUnits = 24,
-            // None: a cell of padding at either end (labelPaddingUnits and trailingPaddingUnits) is
-            // already the breathing room slack buys natively, and a spare cell per tab is a cell of
-            // title the user does not get.
-            .tabSlackUnits = 0,
-            .controlUnits = 1,
-            .stripButtonUnits = 3,
-            .windowControlUnits = 3,
-            .badgeUnits = 1,
-            // One cell per dot, and one between them: "● ● ●" reads as the six-cell run a status
-            // line would draw, and every dot stays on the grid. The gap is not decoration -- a cell
-            // is around ten pixels, so three abutting one-cell dots are three targets too small and
-            // too close together to hit, which is what a bare "●●●" turned out to be.
-            .trafficLightDotUnits = 1,
-            .trafficLightGapUnits = 1,
-            .windowControlInsetUnits = 1,
-            // One cell, like every other gap this style states: the point of the gutter is that the
-            // lights are not the first tab, and one blank cell says that on a character grid as
-            // clearly as sixteen pixels do on a pixel one.
-            .windowControlGutterUnits = 1,
-            .closePointSize = 0,
-            .newTabPointSize = 0,
-            .menuPointSize = 0,
-            .windowControlPointSize = 0,
-            .badgePixelSize = 0,
-            .progressColors = {
-                0x000000,  // Inactive: never painted
-                0x3D9A50,  // Normal: running
-                0xD13438,  // Error: failed
-                0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
-                0xE8A317,  // Paused: paused, or warning
-            },
-            // A dot is a character here, like everything else this style paints: one cell of "●" in
-            // the traffic light's color, set in the same monospace font as the tabs beside it.
-            .trafficLightGlyph = "●",
-            .tabSeparator = "│",
-            .closeGlyph = "×",
-            .zoomGlyph = "Z",
-            .newTabGlyph = "+",
-            .menuGlyph = "▾",
-            .submenuGlyph = "▸",
+        .unit = LengthUnit::Cell,
+        .quickControlsStyle = "ContourTui",
+        .fontSource = ChromeFontSource::TerminalProfile,
+        .cornerRadiusPixels = 0,
+        .borderWidthPixels = 1,
+        .dropCaretPixels = 1,
+        .hoverWashPercent = 25,
+        // The values Qt's own Basic and Fusion styles dim with, so a scrim looks like a scrim
+        // wherever the user has met one before.
+        .modalScrimPercent = 50,
+        .modelessScrimPercent = 12,
+        // No blur, one cell of offset: the hard-edged drop shadow a text-mode UI casts, which is
+        // what this style is quoting. A soft 24px halo would be the one thing in the chrome not
+        // aligned to the character grid.
+        .shadowBlurPixels = 0,
+        .shadowOffsetUnits = 1,
+        .shadowOpacityPercent = 60,
+        .shadowMarginUnits = 1,
+        .chromeHeightUnits = 1,
+        .tabHeightUnits = 1,
+        .labelPaddingUnits = 1,
+        .labelGapUnits = 1,
+        // A cell, matching the leading inset: this style ends every tab with a "│" rule, and with
+        // no inset the close glyph sat directly against it -- "×│" reads as one box-drawing
+        // ligature rather than as a button beside a border.
+        .trailingPaddingUnits = 1,
+        .minTabUnits = 10,
+        .maxTabUnits = 24,
+        // None: a cell of padding at either end (labelPaddingUnits and trailingPaddingUnits) is
+        // already the breathing room slack buys natively, and a spare cell per tab is a cell of
+        // title the user does not get.
+        .tabSlackUnits = 0,
+        .controlUnits = 1,
+        .stripButtonUnits = 3,
+        .windowControlUnits = 3,
+        .badgeUnits = 1,
+        // One cell per dot, and one between them: "● ● ●" reads as the six-cell run a status
+        // line would draw, and every dot stays on the grid. The gap is not decoration -- a cell
+        // is around ten pixels, so three abutting one-cell dots are three targets too small and
+        // too close together to hit, which is what a bare "●●●" turned out to be.
+        .trafficLightDotUnits = 1,
+        .trafficLightGapUnits = 1,
+        .windowControlInsetUnits = 1,
+        // One cell, like every other gap this style states: the point of the gutter is that the
+        // lights are not the first tab, and one blank cell says that on a character grid as
+        // clearly as sixteen pixels do on a pixel one.
+        .windowControlGutterUnits = 1,
+        .closePointSize = 0,
+        .newTabPointSize = 0,
+        .menuPointSize = 0,
+        .windowControlPointSize = 0,
+        .badgePixelSize = 0,
+        .progressColors = {
+            0x000000,  // Inactive: never painted
+            0x3D9A50,  // Normal: running
+            0xD13438,  // Error: failed
+            0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
+            0xE8A317,  // Paused: paused, or warning
+        },
+        // A dot is a character here, like everything else this style paints: one cell of "●" in
+        // the traffic light's color, set in the same monospace font as the tabs beside it.
+        .trafficLightGlyph = "●",
+        .tabSeparator = "│",
+        .closeGlyph = "×",
+        .zoomGlyph = "Z",
+        .newTabGlyph = "+",
+        .menuGlyph = "▾",
+        .submenuGlyph = "▸",
     };
 
     // The three native rows start as copies of one another (Phase 0 moves no pixel); a platform's
@@ -452,16 +448,16 @@ namespace detail
         TerminalTokens, // ChromeStyle::Terminal
     };
 
-    /// Number of @c ChromeStyle enumerators; the token table must have exactly this many rows.
-    inline constexpr size_t ChromeStyleCount = 4;
+    /// Number of @c ChromeStyle enumerators, derived from the last one; the token table must have
+    /// exactly this many rows.
+    inline constexpr size_t ChromeStyleCount = static_cast<size_t>(ChromeStyle::Terminal) + 1;
 
     inline constexpr auto UiStyleTable = std::array {
         ConfigEnumInfo<UiStyle> { UiStyle::Native, "native", "Native (GUI)" },
         ConfigEnumInfo<UiStyle> { UiStyle::Terminal, "terminal", "Terminal (TUI)" },
     };
 
-    static_assert(UiStyleTokenTable.size() == ChromeStyleCount
-                      && static_cast<size_t>(ChromeStyle::Terminal) + 1 == ChromeStyleCount,
+    static_assert(UiStyleTokenTable.size() == ChromeStyleCount,
                   "Every ChromeStyle needs exactly one token row; uiStyleTokens() indexes by enumerator.");
 } // namespace detail
 

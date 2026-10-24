@@ -40,8 +40,7 @@ ApplicationWindow
 
     // Application window's background must be transparent in order to support transparent/semi-transparent
     // background in the terminal widgets.
-    // color: "transparent"
-    color: "#00000000"
+    color: "transparent"
 
     // Force the window's Qt Quick Controls palette to follow the application palette (which
     // ContourGuiApp::applyGuiTheme drives for the theme: dark|light|system setting).

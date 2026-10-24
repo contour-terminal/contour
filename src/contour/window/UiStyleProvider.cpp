@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
@@ -228,39 +229,14 @@ QColor UiStyleProvider::statusColor(int role) const
         case config::StatusColorSource::Fixed: break;
     }
 
-    auto const window = palette.color(QPalette::Window);
-    auto const background = vtbackend::RGBColor(static_cast<uint8_t>(window.red()),
-                                                static_cast<uint8_t>(window.green()),
-                                                static_cast<uint8_t>(window.blue()));
-    auto const dark = platform::colorSchemeOfBackground(background) == Qt::ColorScheme::Dark;
+    auto const dark = platform::colorSchemeOfBackground(platform::toRGBColor(palette.color(QPalette::Window)))
+                      == Qt::ColorScheme::Dark;
     return QColor::fromRgb(dark ? row.dark : row.light);
 }
 
-namespace
-{
-    static_assert(static_cast<int>(UiStyleProvider::StatusRole::Danger)
-                      == static_cast<int>(config::StatusColorRole::Danger)
-                  && static_cast<int>(UiStyleProvider::StatusRole::Warning)
-                         == static_cast<int>(config::StatusColorRole::Warning)
-                  && static_cast<int>(UiStyleProvider::StatusRole::Success)
-                         == static_cast<int>(config::StatusColorRole::Success)
-                  && static_cast<int>(UiStyleProvider::StatusRole::Running)
-                         == static_cast<int>(config::StatusColorRole::Running));
-    static_assert(static_cast<size_t>(UiStyleProvider::StatusRole::Running) + 1
-                      == config::StatusColorRoleCount,
-                  "UiStyleProvider::StatusRole must mirror every config::StatusColorRole.");
-
-    [[nodiscard]] vtbackend::RGBColor toRgb(QColor const& color) noexcept
-    {
-        return vtbackend::RGBColor(static_cast<uint8_t>(color.red()),
-                                   static_cast<uint8_t>(color.green()),
-                                   static_cast<uint8_t>(color.blue()));
-    }
-} // namespace
-
 QColor UiStyleProvider::onColor(QColor const& background) const
 {
-    auto const rgb = toRgb(background);
+    auto const rgb = platform::toRGBColor(background);
     auto const black = vtbackend::RGBColor(0, 0, 0);
     auto const white = vtbackend::RGBColor(255, 255, 255);
     return vtbackend::contrastRatio(rgb, black) >= vtbackend::contrastRatio(rgb, white) ? QColor(Qt::black)

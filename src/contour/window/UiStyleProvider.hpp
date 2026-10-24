@@ -96,19 +96,6 @@ class UiStyleProvider: public QObject
 {
     Q_OBJECT
 
-  public:
-    /// The status roles, for QML to name (`chromeStyle.statusDanger`). Mirrors
-    /// config::StatusColorRole value for value; a static_assert in UiStyleProvider.cpp keeps them equal.
-    enum class StatusRole : uint8_t
-    {
-        Danger = 0, ///< config::StatusColorRole::Danger
-        Warning,    ///< config::StatusColorRole::Warning
-        Success,    ///< config::StatusColorRole::Success
-        Running,    ///< config::StatusColorRole::Running
-    };
-    Q_ENUM(StatusRole)
-
-  private:
     /// Which token row is active: "macos", "fluent", "linux" or "terminal".
     Q_PROPERTY(QString chromeStyle READ chromeStyleName CONSTANT)
     Q_PROPERTY(QFont font READ font CONSTANT)
@@ -201,19 +188,19 @@ class UiStyleProvider: public QObject
     /// `chromeStyle.Danger` was silently undefined.
     [[nodiscard]] static constexpr int statusDanger() noexcept
     {
-        return static_cast<int>(StatusRole::Danger);
+        return static_cast<int>(config::StatusColorRole::Danger);
     }
     [[nodiscard]] static constexpr int statusWarning() noexcept
     {
-        return static_cast<int>(StatusRole::Warning);
+        return static_cast<int>(config::StatusColorRole::Warning);
     }
     [[nodiscard]] static constexpr int statusSuccess() noexcept
     {
-        return static_cast<int>(StatusRole::Success);
+        return static_cast<int>(config::StatusColorRole::Success);
     }
     [[nodiscard]] static constexpr int statusRunning() noexcept
     {
-        return static_cast<int>(StatusRole::Running);
+        return static_cast<int>(config::StatusColorRole::Running);
     }
 
     /// The colour of text drawn on the pane-dim scrim: whichever of black and white contrasts more
@@ -297,7 +284,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] Q_INVOKABLE QColor onColor(QColor const& background) const;
 
     /// The text colour to draw on statusColor(@p role).
-    /// @param role A StatusRole as its underlying value.
+    /// @param role A config::StatusColorRole as its underlying value.
     /// @return Black or white, see onColor().
     [[nodiscard]] Q_INVOKABLE QColor onStatusColor(int role) const;
 

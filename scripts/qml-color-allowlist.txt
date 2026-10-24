@@ -2,6 +2,3 @@
 # Only protocol-defined colours that are data belong here; everything else comes from the palette or
 # from chromeStyle. The macOS traffic-light colours are not listed: they are read from the window
 # control tokens (WindowControlStyle.hpp), not written in QML.
-
-# The fully transparent window background: it is "no colour", not a design choice.
-src/contour/qml/Main.qml:color: "#00000000"

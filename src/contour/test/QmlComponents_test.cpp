@@ -3529,12 +3529,12 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
 // divider drag..." above, and the model-layer clamp+emit in vtworkspace SessionModel_test's setPaneRatio
 // test.)
 
-TEST_CASE("TerminalPane: active-pane focus border width follows node.active (offscreen)",
+TEST_CASE("TerminalPane: active-pane focus border follows node.active (offscreen)",
           "[contour][gui][qml][split][behavior][focus]")
 {
-    // border.width is a plain rendered int: the RELIABLE focus-follows-active GUI oracle (replacing the
-    // unreliable offscreen keyboard-focus check). It is the GUI-observable proxy for "the right pane looks
-    // focused".
+    // The border's visibility is a plain rendered bool: the RELIABLE focus-follows-active GUI oracle
+    // (replacing the unreliable offscreen keyboard-focus check). It is the GUI-observable proxy for "the
+    // right pane looks focused". The pane is put in a split, the only place the frame is drawn at all.
     QQmlEngine engine;
     qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
     MockTabController controller;
@@ -3552,6 +3552,7 @@ TEST_CASE("TerminalPane: active-pane focus border width follows node.active (off
     auto paneNode = instantiatePaneNode(engine, window, leaf);
     REQUIRE(paneNode != nullptr);
 
+    paneNode->setProperty("inSplit", true);
     auto* rootItem = qobject_cast<QQuickItem*>(paneNode.get());
     REQUIRE(rootItem != nullptr);
     auto* pane = rootItem->findChild<StubContourTerminal*>();
@@ -3567,12 +3568,13 @@ TEST_CASE("TerminalPane: active-pane focus border width follows node.active (off
     auto* border = findFocusBorder();
     REQUIRE(border != nullptr);
 
-    // Inactive -> border width 0.
-    CHECK(border->property("border").value<QObject*>()->property("width").toInt() == 0);
+    // Inactive -> no border.
+    CHECK_FALSE(border->property("visible").toBool());
 
-    // Active -> border width 1 (the focus highlight).
+    // Active -> a one-pixel border (the focus highlight).
     leaf.setActive(true);
     QCoreApplication::processEvents();
+    CHECK(border->property("visible").toBool());
     CHECK(border->property("border").value<QObject*>()->property("width").toInt() == 1);
 }
 
@@ -3782,7 +3784,8 @@ class MockPaletteController: public QObject
     {
         _history.record("TogglePaneZoom");
         _model->setSources({ &_actionCommands });
-        _model->setShortcuts(contour::command::shortcutIndex(contour::config::defaultInputMappings(), contour::command::ShortcutStyle::Text));
+        _model->setShortcuts(contour::command::shortcutIndex(contour::config::defaultInputMappings(),
+                                                             contour::command::ShortcutStyle::Text));
         _model->refresh();
     }
 
@@ -6189,8 +6192,8 @@ TEST_CASE("TerminalPane: no focus frame on a single pane", "[contour][gui][qml][
         std::vector<QQuickItem*> frames;
         collectItemsNamed(qobject_cast<QQuickItem*>(root.get()), QStringLiteral("focusFrame"), frames);
         REQUIRE(frames.size() == 2);
-        auto const visibleCount = std::ranges::count_if(
-            frames, [](QQuickItem* f) { return f->property("visible").toBool(); });
+        auto const visibleCount =
+            std::ranges::count_if(frames, [](QQuickItem* f) { return f->property("visible").toBool(); });
         CHECK(visibleCount == 1);
     }
 }

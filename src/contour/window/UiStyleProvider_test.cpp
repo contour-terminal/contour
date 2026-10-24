@@ -10,6 +10,7 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
@@ -17,7 +18,8 @@
 
 #include <text_shaper/Font.hpp>
 
-#include <QtCore/QMetaEnum>
+#include <QtCore/QByteArrayView>
+#include <QtCore/QMetaProperty>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QFontMetricsF>
@@ -29,6 +31,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <ranges>
 #include <utility>
 
 using contour::config::UiStyle;
@@ -346,8 +350,7 @@ TEST_CASE("UiStyleProvider.onStatusColor picks the more legible of black and whi
     auto const danger = static_cast<int>(StatusColorRole::Danger);
 
     auto const ratio = [](QColor const& a, QColor const& b) {
-        return vtbackend::contrastRatio(vtbackend::RGBColor(a.red(), a.green(), a.blue()),
-                                        vtbackend::RGBColor(b.red(), b.green(), b.blue()));
+        return vtbackend::contrastRatio(contour::platform::toRGBColor(a), contour::platform::toRGBColor(b));
     };
 
     withWindowColor(QColor(0x1E, 0x1E, 0x1E), [&] {
@@ -388,7 +391,12 @@ TEST_CASE("chromeStyle names the status roles as properties in QML", "[contour][
         CHECK(color == QColor(0xD7, 0x00, 0x15));
     });
 
-    // A new config::StatusColorRole must get a QML name too.
-    CHECK(static_cast<size_t>(QMetaEnum::fromType<UiStyleProvider::StatusRole>().keyCount())
-          == contour::config::StatusColorRoleCount);
+    // A new config::StatusColorRole must get a QML name too: one `status...` property per role.
+    auto const& meta = UiStyleProvider::staticMetaObject;
+    auto const statusProperties =
+        std::ranges::count_if(std::views::iota(meta.propertyOffset(), meta.propertyCount()), [](int index) {
+            return QByteArrayView(UiStyleProvider::staticMetaObject.property(index).name())
+                .startsWith("status");
+        });
+    CHECK(static_cast<size_t>(statusProperties) == contour::config::StatusColorRoleCount);
 }

@@ -1033,7 +1033,6 @@ struct EditionDefaults
     std::string_view bellSound;                         ///< Bell::sound; "off" is silent.
     vtbackend::LineCount scrollback;                    ///< The scrollback depth that always survives.
     vtbackend::CursorShape insertCursorShape;           ///< The cursor's shape in insert mode.
-    vtbackend::CursorDisplay insertCursorDisplay;       ///< Whether the insert-mode cursor blinks.
     std::chrono::milliseconds screenTransitionDuration; ///< How long a screen switch animates.
     /// The color scheme a dark system uses. When it equals @ref lightColorScheme the profile names one
     /// scheme (`colors: <name>`) rather than a dark/light pair.
@@ -1083,7 +1082,6 @@ namespace detail
             .bellSound = "default",
             .scrollback = vtbackend::LineCount(1000),
             .insertCursorShape = vtbackend::CursorShape::Bar,
-            .insertCursorDisplay = vtbackend::CursorDisplay::Steady,
             .screenTransitionDuration = std::chrono::milliseconds { 250 },
             .darkColorScheme = "default",
             .lightColorScheme = "default",
@@ -1102,7 +1100,6 @@ namespace detail
             .bellSound = "off",
             .scrollback = vtbackend::LineCount(10000),
             .insertCursorShape = vtbackend::CursorShape::Block,
-            .insertCursorDisplay = vtbackend::CursorDisplay::Steady,
             .screenTransitionDuration = std::chrono::milliseconds { 150 },
             .darkColorScheme = "contour-dark",
             .lightColorScheme = "contour-light",
@@ -1227,7 +1224,7 @@ struct TerminalProfile
         cursorMotionAnimationDuration { std::chrono::milliseconds { 80 } };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
         .cursorShape = editionDefaults(defaultsEdition).insertCursorShape,
-        .cursorDisplay = editionDefaults(defaultsEdition).insertCursorDisplay,
+        .cursorDisplay = vtbackend::CursorDisplay::Steady,
         .cursorBlinkInterval = std::chrono::milliseconds { 500 } } };
     ConfigEntry<InputModeConfig, documentation::ModeNormal> modeNormal {
         CursorConfig { .cursorShape = vtbackend::CursorShape::Block,
@@ -2105,7 +2102,9 @@ struct YAMLConfigReader
         if (auto const child = node[entry]; child && child.IsMap())
         {
             logger()("Loading default profile: {}", defaultProfileName);
-            where.try_emplace(defaultProfileName, TerminalProfile { .defaultsEdition = edition });
+            // Built only when absent: the default profile is nearly always seeded already.
+            if (!where.contains(defaultProfileName))
+                where.emplace(defaultProfileName, TerminalProfile { .defaultsEdition = edition });
             // Guarded one profile at a time, so a profile that is not a map costs no other profile.
             loadGuarded(child, defaultProfileName, where[defaultProfileName]);
             for (auto entry: child)
