@@ -273,9 +273,10 @@ struct SnapshotVariant
 /// The edition- and appearance-dependent look a window is configured with.
 struct SnapshotLook
 {
-    vtbackend::RGBColor terminalBackground;    ///< The terminal's default background.
-    double dimUnfocused;                       ///< How far unfocused panes are dimmed.
-    config::TabBarVisibility tabBarVisibility; ///< When the tab strip is shown.
+    vtbackend::RGBColor terminalBackground; ///< The terminal's default background.
+    double dimUnfocused = 0.0; ///< How far unfocused panes are dimmed; Classic's value by default.
+    /// When the tab strip is shown; Classic's value by default.
+    config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
 };
 
 /// The look @p edition ships under @p appearance.

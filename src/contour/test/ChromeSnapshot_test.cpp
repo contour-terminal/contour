@@ -48,30 +48,34 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
         CHECK(titleBar->isVisible() == contour::config::isTabBarShown(look.tabBarVisibility, row.tabCount));
         switch (variant.script)
         {
-            case SnapshotScript::ThreeTabs:
-                CHECK(scene.root().findChild<QObject*>(QStringLiteral("tabList"))->property("count").toInt()
-                      == 3);
+            case SnapshotScript::ThreeTabs: {
+                auto const* tabList = scene.root().findChild<QObject*>(QStringLiteral("tabList"));
+                REQUIRE(tabList != nullptr);
+                CHECK(tabList->property("count").toInt() == 3);
                 break;
+            }
             case SnapshotScript::SplitThree:
                 CHECK(scene.root().findChildren<contour::test::StubContourTerminal*>().size() == 3);
                 break;
-            case SnapshotScript::Palette:
-                CHECK(scene.root()
-                          .findChild<QObject*>(QStringLiteral("commandPalette"))
-                          ->property("opened")
-                          .toBool());
+            case SnapshotScript::Palette: {
+                auto const* palette = scene.root().findChild<QObject*>(QStringLiteral("commandPalette"));
+                REQUIRE(palette != nullptr);
+                CHECK(palette->property("opened").toBool());
                 break;
-            case SnapshotScript::Settings:
-                CHECK(scene.root()
-                          .findChild<QObject*>(QStringLiteral("settingsPageLoader"))
-                          ->property("item")
-                          .value<QObject*>()
-                      != nullptr);
+            }
+            case SnapshotScript::Settings: {
+                auto const* loader = scene.root().findChild<QObject*>(QStringLiteral("settingsPageLoader"));
+                REQUIRE(loader != nullptr);
+                CHECK(loader->property("item").value<QObject*>() != nullptr);
                 break;
-            case SnapshotScript::RemoteReconnecting:
-                CHECK(
-                    scene.root().findChild<QQuickItem*>(QStringLiteral("reconnectingOverlay"))->isVisible());
+            }
+            case SnapshotScript::RemoteReconnecting: {
+                auto const* overlay =
+                    scene.root().findChild<QQuickItem*>(QStringLiteral("reconnectingOverlay"));
+                REQUIRE(overlay != nullptr);
+                CHECK(overlay->isVisible());
                 break;
+            }
             case SnapshotScript::SingleTab: break;
         }
     }
