@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <variant>
@@ -56,7 +57,11 @@ TEST_CASE("FontLocator.registerBundledFonts makes JetBrains Mono resolvable", "[
     auto& locator = FontLocatorProvider::get().native();
     auto const fonts = locator.locate(description("JetBrains Mono"));
     REQUIRE(!fonts.empty());
-    auto const& path = std::get<FontPath>(fonts.front());
-    CHECK(path.value.ends_with("JetBrainsMono[wght].ttf"));
+    // A system-wide install of the same family may sort first; the bundled file only has to be among them.
+    auto const expected = (bundledFontsSourceDir() / "JetBrainsMono[wght].ttf").lexically_normal();
+    CHECK(std::ranges::any_of(fonts, [&](FontSource const& source) {
+        auto const* path = std::get_if<FontPath>(&source);
+        return path != nullptr && std::filesystem::path { path->value }.lexically_normal() == expected;
+    }));
 }
 #endif

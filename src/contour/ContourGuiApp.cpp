@@ -101,6 +101,7 @@
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -108,6 +109,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <system_error>
@@ -1914,10 +1916,39 @@ bool ContourGuiApp::loadConfig(string const& target)
     return true;
 }
 
+void ContourGuiApp::registerBundledFonts() const
+{
+    // applicationDirPath() needs a QCoreApplication; the headless verbs have none, so borrow one.
+    auto argc = 1;
+    auto name = std::string { programPath() };
+    auto argv = std::array<char*, 2> { name.data(), nullptr };
+    auto const headless = QCoreApplication::instance() == nullptr
+                              ? std::make_unique<QCoreApplication>(argc, argv.data())
+                              : nullptr;
+
+    auto const registered = text::registerBundledFonts(
+        bundledFontDirectories(fs::path { QCoreApplication::applicationDirPath().toStdU16String() }));
+    if (registered)
+        return;
+    // A missing directory (a build tree that was never installed) is expected: the configured fonts, or the
+    // system's, are used instead. A rejected font file is not.
+    switch (registered.error())
+    {
+        case text::FontRegistrationError::DirectoryMissing:
+            startupLog()("Bundled fonts not registered: DirectoryMissing.");
+            break;
+        case text::FontRegistrationError::RegistrationFailed:
+            errorLog()("Bundled fonts not registered: RegistrationFailed.");
+            break;
+    }
+}
+
 int ContourGuiApp::fontConfigAction()
 {
     if (!loadConfig("font-locator"))
         return EXIT_FAILURE;
+
+    registerBundledFonts();
 
     vtrasterizer::FontDescriptions const& fonts =
         _config.profile(_config.defaultProfileName.value())->fonts.value();
@@ -2051,12 +2082,8 @@ int ContourGuiApp::terminalGuiAction()
     } };
     setupQCoreApplication();
 
-    // Once, before any font lookup. A missing directory (a build tree that was never installed) is not
-    // fatal: the configured fonts, or the system's, are used instead.
-    if (auto const registered = text::registerBundledFonts(
-            bundledFontDirectories(fs::path { QCoreApplication::applicationDirPath().toStdU16String() }));
-        !registered)
-        startupLog()("Bundled fonts not registered (error {}).", static_cast<int>(registered.error()));
+    registerBundledFonts();
+
     if (startupLog.isEnabled())
     {
         auto const elapsed = std::chrono::steady_clock::now() - qtInitStart;

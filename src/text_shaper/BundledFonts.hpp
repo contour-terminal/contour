@@ -29,6 +29,10 @@ struct BundledFontDirectories
 /// a missing one does not stop the others, and is reported as DirectoryMissing afterwards. Registering a
 /// font that is already registered is not an error. A no-op on Windows, which ships no bundled fonts.
 ///
+/// This is a free function called once from the composition root, not a factory parameter, because it
+/// targets the process-wide OS font registry, and FontLocatorProvider is a call_once singleton: passing
+/// the directories to its factory would need a static configure call, the global the design avoids.
+///
 /// @param directories The directories to scan.
 /// @return Nothing on success, otherwise the first failure encountered.
 [[nodiscard]] std::expected<void, FontRegistrationError> registerBundledFonts(

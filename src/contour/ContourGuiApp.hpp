@@ -495,6 +495,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         config::WindowControlStyle configured) const;
 
     static void ensureTermInfoFile();
+    /// Registers the fonts shipped with the application, once, before the first font lookup. A failure
+    /// is logged and never fatal. Used by every verb that resolves fonts, so they all agree.
+    void registerBundledFonts() const;
+
     void setupQCoreApplication();
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
