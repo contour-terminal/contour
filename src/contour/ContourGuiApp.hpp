@@ -783,10 +783,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<vtextension::IGrantStore, void (*)(vtextension::IGrantStore*)> _daemonGrants { nullptr,
                                                                                                    nullptr };
     session::TerminalSessionManager _sessionManager;
-    // The OS appearance sources the chrome follows. Declared after _sessionManager so they die first:
-    // nothing they call back into is torn down while they can still report a change.
-    std::unique_ptr<platform::IAccessibilityPreferenceSource> _accessibilitySource;
-    std::unique_ptr<platform::IPlatformAppearance> _platformAppearance;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
     // provider this needs no Qt application, so it is built eagerly with the app.
@@ -921,6 +917,14 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 #endif
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
+
+    // The OS appearance sources the chrome follows. Declared LAST -- after _sessionManager,
+    // _chromeStyleHost and _qmlEngine -- so they are destroyed FIRST: a source stops reporting once
+    // destroyed, so no late change can reach a destroyed host, its engine's QQmlContext, or the
+    // session manager. Nothing rebuilds the chrome after the event loop has exited in any case: a
+    // provider the host deleteLater()s then is never deleted, because no DeferredDelete pass runs.
+    std::unique_ptr<platform::IAccessibilityPreferenceSource> _accessibilitySource;
+    std::unique_ptr<platform::IPlatformAppearance> _platformAppearance;
 };
 
 } // namespace contour

@@ -444,13 +444,13 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     *_commandHistoryStore,
                     QDir::homePath().toStdString(),
                     *_taskbarProgressSink),
+    _gpuInventory { display::makePlatformGpuInventory() },
     _accessibilitySource(
         appearanceServices.accessibility([this](config::AccessibilityPreferences preferences) {
             onAccessibilityPreferencesChanged(preferences);
         })),
     _platformAppearance(appearanceServices.appearance(
-        [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
-    _gpuInventory { display::makePlatformGpuInventory() }
+        [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); }))
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
     // services carry the app's.
