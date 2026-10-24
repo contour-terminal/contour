@@ -1040,6 +1040,7 @@ struct EditionDefaults
     std::string_view lightColorScheme;           ///< The color scheme a light system uses.
     TabBarVisibility tabBarVisibility;           ///< When the window's tab strip is shown.
     vtbackend::Modifier followHyperlinkModifier; ///< The modifier a click opens a link with.
+    GuiTheme theme;                              ///< Which palette the window chrome follows.
 };
 
 namespace detail
@@ -1087,6 +1088,7 @@ namespace detail
             .lightColorScheme = "default",
             .tabBarVisibility = TabBarVisibility::Always,
             .followHyperlinkModifier = vtbackend::Modifier::Control,
+            .theme = GuiTheme::System,
         },
         EditionDefaults {
             .edition = DefaultsEdition::Native2026,
@@ -1105,6 +1107,7 @@ namespace detail
             .lightColorScheme = "contour-light",
             .tabBarVisibility = TabBarVisibility::Multiple,
             .followHyperlinkModifier = Native2026FollowHyperlinkModifier,
+            .theme = GuiTheme::Terminal,
         },
     };
 
@@ -1782,7 +1785,7 @@ struct Config
     };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme {
-        contour::config::GuiTheme::Terminal
+        editionDefaults(defaultsEdition).theme
     };
     // Like the tab bar above, the chrome style belongs to the APPLICATION rather than to a profile: a
     // window paints one tab strip and one set of menus while its panes may each run a different

@@ -3308,16 +3308,30 @@ TEST_CASE("Config: theme parses each value (ignore-case)", "[config]")
 {
     using contour::config::GuiTheme;
 
-    SECTION("default is Terminal (follow the terminal background)")
+    SECTION("native2026 defaults to Terminal (follow the terminal background)")
     {
         QTemporaryDir dir;
         auto const config = loadFromYaml(dir, R"(
+defaults_edition: native2026
 default_profile: main
 profiles:
     main:
         shell: /bin/sh
 )"sv);
         CHECK(config.theme.value() == GuiTheme::Terminal);
+    }
+
+    SECTION("a file without defaults_edition keeps the classic System (follow the OS)")
+    {
+        // Through the path-taking loader, which picks the edition from the file the way startup does.
+        QTemporaryDir dir;
+        auto const config = contour::config::loadConfigFromFile(writeConfig(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+)"sv));
+        CHECK(config.theme.value() == GuiTheme::System);
     }
 
     SECTION("terminal")
@@ -3379,8 +3393,9 @@ TEST_CASE("Config: an invalid theme value falls back to the default", "[config]"
 
     QTemporaryDir dir;
     // A typo in a visible appearance setting must not silently pass; the reader errorLog()s and keeps
-    // the compiled-in default (Terminal) rather than aborting the whole config load.
+    // the edition's default (Terminal under native2026) rather than aborting the whole config load.
     auto const config = loadFromYaml(dir, R"(
+defaults_edition: native2026
 default_profile: main
 theme: midnight
 profiles:
@@ -3914,6 +3929,7 @@ struct ExpectedEditionDefaults
     std::string_view lightColorScheme;
     contour::config::TabBarVisibility tabBarVisibility;
     vtbackend::Modifier followHyperlinkModifier;
+    contour::config::GuiTheme theme;
 };
 
 /// Every value the releases before the 2026 redesign shipped.
@@ -3946,6 +3962,7 @@ constexpr auto ClassicExpectation = ExpectedEditionDefaults {
     .lightColorScheme = "default",
     .tabBarVisibility = contour::config::TabBarVisibility::Always,
     .followHyperlinkModifier = vtbackend::Modifier::Control,
+    .theme = contour::config::GuiTheme::System,
 };
 
 /// Every first-launch value of the 2026 redesign.
@@ -3982,6 +3999,7 @@ constexpr auto Native2026Expectation = ExpectedEditionDefaults {
 #else
     .followHyperlinkModifier = vtbackend::Modifier::Control,
 #endif
+    .theme = contour::config::GuiTheme::Terminal,
 };
 
 /// The palette a built-in scheme name resolves to.
@@ -4053,6 +4071,7 @@ void checkEditionDefaults(contour::config::Config const& config, ExpectedEdition
 {
     CHECK(config.defaultsEdition == expected.edition);
     CHECK(config.tabBarVisibility.value() == expected.tabBarVisibility);
+    CHECK(config.theme.value() == expected.theme);
 
     auto const& mice = config.inputMappings.value().mouseMappings;
     auto const follow = std::ranges::find_if(mice, [](auto const& mapping) {

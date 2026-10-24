@@ -940,8 +940,12 @@ constexpr StringLiteral DefaultsEditionConfig {
     "{comment}                this key is read as classic.\n"
     "{comment}   native2026 = the 2026 redesign's defaults: JetBrains Mono (Cascadia Mono on Windows),\n"
     "{comment}                a 100x30 page with margins, the contour-dark/contour-light schemes, a\n"
-    "{comment}                silent bell, 10000 lines of scrollback and a tab bar shown for two or\n"
-    "{comment}                more tabs.\n"
+    "{comment}                silent bell, 10000 lines of scrollback, a tab bar shown for two or\n"
+    "{comment}                more tabs and chrome that follows the terminal background\n"
+    "{comment}                (theme: terminal; classic follows the OS).\n"
+    "{comment}                The default profile's contour-dark/contour-light palettes come from\n"
+    "{comment}                the built-in schemes; a color_schemes: entry of either name takes\n"
+    "{comment}                effect only once a profile names it in colors:.\n"
     "{comment} A settings.yml beside this file may set it too, and wins.\n"
     "defaults_edition: {}\n"
     "\n"
@@ -1110,8 +1114,8 @@ constexpr StringLiteral ThemeConfig {
     "{comment} Light/dark appearance of the GUI chrome (title bar, tab strip, command palette,\n"
     "{comment} settings pages, dialogs), independent of the terminal grid (ignore-case):\n"
     "{comment}   terminal = follow the terminal's background: dark chrome over a dark background,\n"
-    "{comment}              light over a light one (default).\n"
-    "{comment}   system   = follow the operating system's color scheme.\n"
+    "{comment}              light over a light one (the native2026 default).\n"
+    "{comment}   system   = follow the operating system's color scheme (the classic default).\n"
     "{comment}   dark     = force a dark GUI appearance regardless of the OS.\n"
     "{comment}   light    = force a light GUI appearance regardless of the OS.\n"
     "{comment} The terminal grid keeps following the OS light/dark preference via its color scheme.\n"
@@ -2000,7 +2004,11 @@ constexpr StringLiteral DefaultsEditionWeb {
     "elsewhere, a 100x30 page with 8x6 margins, the `contour-dark`/`contour-light` color schemes, the "
     "status line without hard-coded colors, a silent bell, 10000 lines of scrollback, a steady block "
     "cursor, links decorated while the follow modifier (Command on macOS) is held, unfocused panes dimmed, "
-    "and a tab bar shown only for two or more tabs. A freshly generated configuration states "
+    "a tab bar shown only for two or more tabs, and GUI chrome that follows the terminal background "
+    "(`theme: terminal`, where `classic` follows the OS). Under `native2026` the default profile's "
+    "`contour-dark` and `contour-light` palettes come from the built-in schemes: a `color_schemes:` "
+    "entry of either name takes effect only when a profile names it in `colors:`. "
+    "A freshly generated configuration states "
     "`native2026`. A `settings.yml` beside the file may set the key too, and wins."
 };
 
@@ -2119,7 +2127,7 @@ constexpr StringLiteral ThemeWeb {
     "settings pages, dialogs) independently of the operating system. Possible values are `terminal` "
     "(follow the terminal's background), `system` (follow the OS color scheme), `dark`, and `light`. "
     "The terminal grid keeps following the OS light/dark preference through its own color scheme. "
-    "The default value is `terminal`."
+    "The default value is `terminal` under `defaults_edition: native2026` and `system` under `classic`."
 };
 
 constexpr StringLiteral BypassMouseProtocolModifiersWeb {
