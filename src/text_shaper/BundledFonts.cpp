@@ -25,10 +25,15 @@ std::expected<std::vector<std::filesystem::path>, FontRegistrationError> listBun
 }
 
 #ifdef _WIN32
-// Windows ships no bundled fonts; it uses Cascadia Mono.
-std::expected<void, FontRegistrationError> registerBundledFonts(BundledFontDirectories const&)
+// Windows ships no bundled fonts (it uses Cascadia Mono), so nothing is registered. Each directory is
+// still checked, so that a missing one is reported here exactly as on the other platforms.
+std::expected<void, FontRegistrationError> registerBundledFonts(BundledFontDirectories const& directories)
 {
-    return {};
+    auto result = std::expected<void, FontRegistrationError> {};
+    for (auto const& directory: directories.paths)
+        if (auto const files = listBundledFontFiles(directory); !files && result)
+            result = std::unexpected { files.error() };
+    return result;
 }
 #endif
 

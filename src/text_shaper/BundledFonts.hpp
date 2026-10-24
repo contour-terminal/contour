@@ -27,7 +27,8 @@ struct BundledFontDirectories
 ///
 /// Call once from the composition root, before the first locator lookup. Every directory is attempted;
 /// a missing one does not stop the others, and is reported as DirectoryMissing afterwards. Registering a
-/// font that is already registered is not an error. A no-op on Windows, which ships no bundled fonts.
+/// font that is already registered is not an error. On Windows, which ships no bundled fonts, the
+/// directories are checked and a missing one is reported the same way, but no font is registered.
 ///
 /// This is a free function called once from the composition root, not a factory parameter, because it
 /// targets the process-wide OS font registry, and FontLocatorProvider is a call_once singleton: passing
