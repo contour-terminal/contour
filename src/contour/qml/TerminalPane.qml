@@ -38,6 +38,9 @@ ContourTerminal {
     // Whether this pane is the active pane of its tab (drives the focus border).
     property bool paneActive: false
 
+    // Whether the active pane draws its focus frame: true only inside a split (set by PaneNode).
+    property bool showFocusFrame: false
+
     // When this pane becomes the active pane (mouse click OR a keyboard FocusPane* action, which
     // flips node.active via the model's activePaneChanged), grab Qt keyboard focus so keystrokes go
     // to this terminal — not just the focus border. Without this, keyboard pane navigation moved the
@@ -130,7 +133,7 @@ ContourTerminal {
     Rectangle {
         id: sizeWidget
         anchors.centerIn: parent
-        border.width: 1
+        border.width: pane.paneActive ? 1 : 0
         border.color: "black"
         property int margin: 10
         color: "white"
@@ -219,12 +222,15 @@ ContourTerminal {
         }
     }
 
-    // Active-pane focus border.
+    // Active-pane focus border. Only meaningful when the tab is split: a lone pane is always the
+    // active one, so framing it says nothing.
     Rectangle {
+        objectName: "focusFrame"
         anchors.fill: parent
         color: "transparent"
+        visible: pane.showFocusFrame && pane.paneActive
         border.width: pane.paneActive ? 1 : 0
-        border.color: "#3daee9"
+        border.color: pane.palette.highlight
         z: 10
     }
 

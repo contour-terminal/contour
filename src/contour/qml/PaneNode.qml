@@ -38,6 +38,10 @@ FocusScope {
     // top-level instance in Main.qml still sets `node:` declaratively at construction.
     property var node: null
 
+    // True when this node lives inside a split. Only then does the active leaf draw its focus frame;
+    // the root node of a tab starts false, and split children are told true by their parent's loaders.
+    property bool inSplit: false
+
     // Smallest first-child share a divider drag may persist; keeps both panes visible/grabbable.
     readonly property real minPaneRatio: 0.05
 
@@ -54,6 +58,7 @@ FocusScope {
         sourceComponent: TerminalPane {
             session: root.node ? root.node.session : null
             paneActive: root.node ? root.node.active : false
+            showFocusFrame: root.inSplit
             onActivated: { if (root.node) root.node.activate() }
         }
     }
@@ -115,7 +120,10 @@ FocusScope {
             Loader {
                 id: firstChild
                 source: "PaneNode.qml"
-                onLoaded: item.node = Qt.binding(function() { return root.node ? root.node.first : null })
+                onLoaded: {
+                    item.inSplit = true
+                    item.node = Qt.binding(function() { return root.node ? root.node.first : null })
+                }
                 // Snapped to whole DEVICE pixels, not left fractional (#2040).
                 //
                 // `view.width * ratio` is a real number, so the first child routinely gets a
@@ -144,7 +152,10 @@ FocusScope {
             Loader {
                 id: secondChild
                 source: "PaneNode.qml"
-                onLoaded: item.node = Qt.binding(function() { return root.node ? root.node.second : null })
+                onLoaded: {
+                    item.inSplit = true
+                    item.node = Qt.binding(function() { return root.node ? root.node.second : null })
+                }
                 SplitView.fillWidth: true
                 SplitView.fillHeight: true
             }

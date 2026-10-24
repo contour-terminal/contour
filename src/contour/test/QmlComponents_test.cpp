@@ -6140,3 +6140,57 @@ TEST_CASE("the drift badge ignores clicks while a restart runs", "[contour][qml]
 }
 
 #include <QmlComponents_test.moc>
+
+namespace
+{
+/// Collect every visual item below @p root (inclusive) whose objectName equals @p name, walking childItems
+/// so items created by nested Loaders are found as well.
+void collectItemsNamed(QQuickItem* root, QString const& name, std::vector<QQuickItem*>& out)
+{
+    if (root->objectName() == name)
+        out.push_back(root);
+    for (auto* child: root->childItems())
+        collectItemsNamed(child, name, out);
+}
+} // namespace
+
+TEST_CASE("TerminalPane: no focus frame on a single pane", "[contour][gui][qml][split][focusframe]")
+{
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    QQuickWindow window;
+    window.resize(400, 300);
+    window.show();
+
+    SECTION("a root leaf shows no frame even when active")
+    {
+        MockPaneProxy leaf(/*leaf*/ true);
+        leaf.setActive(true);
+        auto root = instantiatePaneNode(engine, window, leaf);
+        REQUIRE(root != nullptr);
+        std::vector<QQuickItem*> frames;
+        collectItemsNamed(qobject_cast<QQuickItem*>(root.get()), QStringLiteral("focusFrame"), frames);
+        REQUIRE(frames.size() == 1);
+        CHECK_FALSE(frames.front()->property("visible").toBool());
+    }
+
+    SECTION("only the active leaf inside a split shows the frame")
+    {
+        auto* left = new MockPaneProxy(/*leaf*/ true);
+        auto* right = new MockPaneProxy(/*leaf*/ true);
+        left->setActive(true);
+        MockPaneProxy split(/*leaf*/ false, left, right);
+        auto root = instantiatePaneNode(engine, window, split);
+        REQUIRE(root != nullptr);
+        QCoreApplication::processEvents();
+        std::vector<QQuickItem*> frames;
+        collectItemsNamed(qobject_cast<QQuickItem*>(root.get()), QStringLiteral("focusFrame"), frames);
+        REQUIRE(frames.size() == 2);
+        auto const visibleCount = std::ranges::count_if(
+            frames, [](QQuickItem* f) { return f->property("visible").toBool(); });
+        CHECK(visibleCount == 1);
+    }
+}
