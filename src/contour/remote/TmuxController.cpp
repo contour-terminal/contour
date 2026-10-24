@@ -207,7 +207,9 @@ class TmuxController::PaneFeed final: public vthost::tmux::PaneSink
 
 TmuxController::TmuxController(std::string tmuxSocket,
                                std::shared_ptr<vtpty::ProcessPlacement> placement,
-                               core::platform::FileSystem const& fileSystem):
+                               core::platform::FileSystem const& fileSystem,
+                               core::platform::IClock const& clock):
+    RemoteController(clock),
     _tmuxSocket(std::move(tmuxSocket)),
     _placement(std::move(placement)),
     _fileSystem(fileSystem),
@@ -557,7 +559,9 @@ void TmuxController::setNextBindPane(uint64_t pane)
     _nextBindPane = pane;
 }
 
-bool TmuxController::requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical)
+bool TmuxController::requestRemoteSplit(vtpty::Pty const* actingPty,
+                                        bool vertical,
+                                        contour::session::RemoteSpawn const& /*spawn*/)
 {
     auto const pane = [&]() -> std::optional<uint64_t> {
         auto const lock = std::lock_guard { _mutex };
@@ -574,7 +578,8 @@ bool TmuxController::requestRemoteSplit(vtpty::Pty const* actingPty, bool vertic
     return true;
 }
 
-bool TmuxController::requestRemoteTab(vtpty::Pty const* /*actingPty*/)
+bool TmuxController::requestRemoteTab(vtpty::Pty const* /*actingPty*/,
+                                      contour::session::RemoteSpawn const& /*spawn*/)
 {
     // The acting pane is ignored: a tmux WINDOW is a tab, and `new-window` creates it in the
     // attached session — of which a mirror has exactly one, so there is no second window to pick.

@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include <vtcontrol/Catalog.hpp>
 #include <vtextension/ExtensionError.hpp>
 
 namespace vtextension
@@ -41,6 +42,10 @@ struct Manifest
     /// The commands the extension may ask the host to run.
     std::vector<DeclaredCommand> commands;
 
+    /// The control-API permissions the extension asks for, each once, in declaration order: the lines
+    /// `control <read|screen|input|write>`. Granted, or not, with its commands.
+    std::vector<vtcontrol::Permission> control {};
+
     /// SHA-256 of the manifest section's bytes, in lower-case hex. A grant is bound to it: an
     /// extension whose manifest changes needs a new grant.
     std::string digest;
@@ -60,8 +65,8 @@ struct Manifest
 /// @param module The bytes of the core module.
 /// @return The manifest; `ManifestMissing` if the module has no manifest section, `ManifestInvalid`
 ///         if the module cannot be walked, or the section's text is not a valid manifest (unknown
-///         line, missing or repeated `name`/`version`, duplicate command, an empty command, or a
-///         placeholder that is not a whole argv element).
+///         line, missing or repeated `name`/`version`, duplicate command, an empty command, a
+///         placeholder that is not a whole argv element, or an unknown or repeated `control` permission).
 [[nodiscard]] std::expected<Manifest, ExtensionError> parseManifest(std::span<std::byte const> module);
 
 /// Whether a WebAssembly core module declares a start function, which the runtime would run while

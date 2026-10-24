@@ -40,9 +40,12 @@ namespace vthost
 /// The posted callback therefore RE-READS the live session count rather than trusting the edge that
 /// armed it.
 ///
-/// Lifetime: the posted callback captures `this`, which is sound because posted callbacks run only
-/// from `EventLoop::runPostedCallbacks` on the pump, and `~EventLoop` drains the ready queue without
-/// running pending posts — so one still queued when `blockOn` returns is never invoked.
+/// Lifetime: the posted callback captures `this`, so the watcher must outlive every turn of the loop
+/// that may still run it. A post still queued when `blockOn` returns IS run — by the owner's LoopDrain,
+/// which turns the loop again — so runDaemon declares its watchers before the drain; only the posts
+/// left after the drain are never invoked, as `~EventLoop` drops them. The shutdown such a post asks
+/// for is harmless: the daemon's ShutdownFunnel is ShuttingDown by then, or — when every listener died
+/// on its own and left it Serving — runDaemon has emptied its server list, so there is nothing to close.
 class LastSessionWatcher final: public SessionStreamEvents
 {
   public:

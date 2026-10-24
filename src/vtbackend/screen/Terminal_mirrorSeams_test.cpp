@@ -507,3 +507,15 @@ TEST_CASE("Screen.noteBlockRowChange has the next read re-head a block a rewrite
     CHECK(screen.blockRowChanges() == changes + 2);
     CHECK(headRowOf(terminal, 5) == 2); // topmost row of the block now, which is still this one
 }
+
+TEST_CASE("Terminal raises workingDirectoryChanged once per distinct OSC 7", "[vtbackend][cwd]")
+{
+    auto mock = vtbackend::MockTerm<> { vtbackend::ColumnCount(20), vtbackend::LineCount(4) };
+
+    mock.writeToScreen("\033]7;file://h/tmp\033\\");
+    mock.writeToScreen("\033]7;file://h/tmp\033\\");
+    CHECK(mock.workingDirectoryChanges == 1);
+
+    mock.writeToScreen("\033]7;file://h/srv\033\\");
+    CHECK(mock.workingDirectoryChanges == 2);
+}

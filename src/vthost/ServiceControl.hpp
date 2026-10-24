@@ -19,6 +19,9 @@
 /// session-0 isolation a boot service lives under is the wrong shape for it (a shell spawned
 /// there runs in the service's window station, where any GUI program it launches is invisible).
 
+#include <core/Environment.hpp>
+#include <core/platform/FileSystem.hpp>
+
 #include <array>
 #include <cstdint>
 #include <expected>
@@ -28,6 +31,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <vthost/CommandRunner.hpp>
 
 namespace vthost
 {
@@ -133,6 +138,16 @@ struct ServiceInstallRequest
     std::string description {};                      ///< Longer text for the OS UI.
 };
 
+/// How a registered daemon relates to the process the OS starts for it.
+enum class DaemonLaunchStyle : std::uint8_t
+{
+    /// The OS supervises the process it started, so the daemon must stay in the foreground (systemd,
+    /// launchd).
+    Foreground = 0,
+    /// The OS only starts a launcher, so the daemon backgrounds itself (`--background`; the Task Scheduler).
+    SelfDetaching,
+};
+
 /// One OS mechanism for hosting the daemon. An interface so the verb layer is testable
 /// against a fake: registering a real service needs elevation, and registering a real task
 /// mutates the developer's own account — neither belongs in a unit test.
@@ -161,24 +176,52 @@ class ServiceBackend
 
     /// @return What the registration reports, or why it could not be queried.
     [[nodiscard]] virtual std::expected<ServiceStatus, ServiceError> status() const = 0;
+
+    /// @return Whether the registered command must run in the foreground or detach itself.
+    [[nodiscard]] virtual DaemonLaunchStyle launchStyle() const noexcept = 0;
+};
+
+/// What a service backend reaches the host through, so tests substitute fakes for all of it.
+struct ServiceBackendServices
+{
+    core::platform::FileSystem& fileSystem; ///< Where unit files and plists are written.
+    CommandRunner& commands;                ///< How `systemctl` and `launchctl` are run.
+    core::Environment const& environment;   ///< Where the home and config directories come from.
 };
 
 /// Builds the backend that hosts @p mode for the registration named @p name.
 ///
 /// @param mode Which mechanism to address.
 /// @param name The registration name (a task name, or an SCM service name).
+/// @param services What the backend reaches the host through; must outlive the backend.
 /// @return The backend; on a platform with no implementation, one whose every operation
 ///         reports @c ServiceErrorCode::Unsupported rather than a null pointer, so callers
 ///         have one error path instead of two.
 [[nodiscard]] std::unique_ptr<ServiceBackend> makeServiceBackend(ServiceStartMode mode,
-                                                                 std::string_view name);
+                                                                 std::string_view name,
+                                                                 ServiceBackendServices const& services);
+
+/// Runs a service-management tool such as `systemctl` or `launchctl`.
+/// @param commands What runs it.
+/// @param argv The program and its arguments.
+/// @param context What a failure is attributed to, e.g. `systemctl --user show`.
+/// @return What it printed; a Backend error if the program could not be started ("<program> not found") or
+///         exited non-zero (@p context, the exit code as the system code).
+[[nodiscard]] std::expected<CommandOutcome, ServiceError> runServiceCommand(
+    CommandRunner& commands, std::vector<std::string> const& argv, std::string_view context);
 
 /// The registration name for a daemon serving socket label @p label.
 ///
 /// Labels already distinguish daemon instances, so they distinguish their registrations too;
 /// without that, installing a second labelled daemon would silently overwrite the first.
 /// @param label The socket label (DefaultSocketLabel for the unnamed one).
-/// @return The registration name.
+/// @return `contour-daemon` for the default label, else `contour-daemon-<label>`.
 [[nodiscard]] std::string serviceNameForLabel(std::string_view label);
+
+/// Every name a daemon serving @p label may be registered under.
+/// @param label The socket label.
+/// @return The current name first, then the pre-phase-2 `contour-daemon-<label>` where it differs, so a
+///         registration made by an older release can still be found, stopped and uninstalled.
+[[nodiscard]] std::vector<std::string> registrationNamesForLabel(std::string_view label);
 
 } // namespace vthost

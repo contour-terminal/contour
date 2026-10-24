@@ -20,9 +20,9 @@ namespace vtextension
 ///
 /// Loading runs none of the module's code. It reads the manifest, and checks that the module speaks
 /// the statusline world: every import it declares is one the host provides (the world's `host`
-/// functions, or WASI preview 1), and it exports `load`, `update`, `render`, `cabi_realloc` and its
-/// memory, each with the shape the Canonical ABI gives it. It has no start function: one would run
-/// during instantiation, where no deadline can guard it.
+/// functions, the control interface's verbs, or WASI preview 1), and it exports `load`, `update`, `render`,
+/// `cabi_realloc` and its memory, each with the shape the Canonical ABI gives it. It has no start function:
+/// one would run during instantiation, where no deadline can guard it.
 ///
 /// The manifest is optional. A module without one is an extension that declares no commands, which
 /// therefore can never run one; a module whose manifest does not parse does not load.

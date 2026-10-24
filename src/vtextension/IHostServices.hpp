@@ -10,6 +10,9 @@
 #include <utility>
 #include <vector>
 
+#include <vtcontrol/Catalog.hpp>
+#include <vtcontrol/ControlError.hpp>
+#include <vtextension/CommandPolicy.hpp>
 #include <vtextension/Event.hpp>
 #include <vtextension/ExtensionError.hpp>
 
@@ -81,6 +84,29 @@ class IHostServices
     ///         command that could not be started or did not exit normally.
     [[nodiscard]] virtual std::expected<std::string, ExtensionError> runCommand(
         std::string_view name, std::span<std::pair<std::string, std::string> const> args) = 0;
+
+    /// Tells whether the user lets the extension use the control permissions its manifest declares. One
+    /// answer covers a manifest's commands and its control permissions together, bound to its digest.
+    /// Never blocks on the user: the first time the answer is `Pending`, the host asks, as it does for a
+    /// command refused as pending.
+    /// @return The answer: `Granted`, `Denied` (or extensions may not run commands at all), or `Pending`.
+    ///         `Granted`, without asking, where the host serves no control API: callControl() then answers
+    ///         every verb `unsupported`, and nobody is asked to grant what nothing can do.
+    [[nodiscard]] virtual GrantState controlConsent() = 0;
+
+    /// Serves one control verb for the extension, as its pane: the guest's import, after its checks (see
+    /// callControlImport()). Blocks the calling thread until the host answers, at most @p timeout.
+    /// @param method The verb's wire name (`pane.split`).
+    /// @param paramsJson Its request, as the control API's JSON.
+    /// @param granted What the extension is granted; the host refuses a verb outside it again.
+    /// @param timeout The longest the call may wait: what is left of the guest call's deadline.
+    /// @return The reply's JSON; or the control error, `failed` "timed out" when @p timeout passed, and
+    ///         `unsupported` where the host serves no control API.
+    [[nodiscard]] virtual std::expected<std::string, vtcontrol::ControlError> callControl(
+        std::string_view method,
+        std::string_view paramsJson,
+        vtcontrol::ControlGrants granted,
+        std::chrono::milliseconds timeout) = 0;
 };
 
 } // namespace vtextension

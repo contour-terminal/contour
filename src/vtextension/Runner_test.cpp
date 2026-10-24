@@ -10,6 +10,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <expected>
+#include <future>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -17,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtcontrol/ControlError.hpp>
 #include <vtextension/CommandLine.hpp>
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/Engine.hpp>
@@ -460,7 +463,7 @@ TEST_CASE("Runner.frameClamp", "[vtextension][runner][guest]")
 
     constexpr auto Elapsed = std::chrono::milliseconds { 1s };
     harness.scheduler.advance(Elapsed);
-    auto const renders = generationOf(*runner);
+    auto const renders = static_cast<int64_t>(generationOf(*runner));
     INFO("renders over " << Elapsed.count() << " ms: " << renders);
     CHECK(renders <= 1 + (Elapsed / limits.minFrameInterval));
     // The requested frames did arrive: the guest kept rendering, at the clamped rate.
@@ -567,6 +570,141 @@ TEST_CASE("Runner.runCommand.pending", "[vtextension][runner][guest]")
     runner->post(surfaceOf(42, 1));
     harness.scheduler.advance(1s);
     CHECK(runner->latest()->sgrText == "ok:0:now:");
+}
+
+TEST_CASE("Runner.control", "[vtextension][runner][control]")
+{
+    // Control verbs are granted with the commands, and asked for the same way: once, at the first refusal.
+    auto harness = RunnerHarness {};
+    harness.controlAnswer =
+        R"({"version":"9.8.7","protocolVersion":4,"platform":"linux","hostname":"h","uptimeSeconds":1})";
+    auto const module =
+        vtextension::testing::withManifest(toModule(vtextension::testing::ControlReportingModule),
+                                           "name = reporter\nversion = 1\ncontrol read\n");
+    auto const runner = makeRunner(harness, module, "reporter", {}, {}, CommandPermission::Ask);
+    runner->post(surfaceOf(80, 1));
+    harness.scheduler.runPending();
+    REQUIRE(runner->latest() != nullptr);
+    CHECK(runner->latest()->sgrText == "method 'daemon.info' needs grant 'read': not granted yet");
+    CHECK(harness.controlMethods.empty());
+    REQUIRE(harness.permissionRequests.size() == 1);
+
+    // The guest renders again on its own timer; it is asked no more.
+    harness.scheduler.advance(1s);
+    CHECK(harness.permissionRequests.size() == 1);
+
+    harness.grants.record(harness.permissionRequests.front().hostId,
+                          harness.permissionRequests.front().digest,
+                          GrantState::Granted);
+    harness.scheduler.advance(1s);
+    CHECK(runner->latest()->sgrText == "9.8.7");
+    CHECK_FALSE(harness.controlMethods.empty());
+    CHECK(harness.controlMethods.front() == "daemon.info");
+}
+
+TEST_CASE("Runner.control.deny", "[vtextension][runner][control]")
+{
+    // Extensions that may not run commands may not control the terminal either; nobody is asked.
+    auto harness = RunnerHarness {};
+    auto const module =
+        vtextension::testing::withManifest(toModule(vtextension::testing::ControlReportingModule),
+                                           "name = reporter\nversion = 1\ncontrol read\n");
+    auto const runner = makeRunner(harness, module, "reporter", {}, {}, CommandPermission::Deny);
+    runner->post(surfaceOf(80, 1));
+    harness.scheduler.runPending();
+    REQUIRE(runner->latest() != nullptr);
+    CHECK(runner->latest()->sgrText == "method 'daemon.info' needs grant 'read': denied");
+    CHECK(harness.permissionRequests.empty());
+}
+
+TEST_CASE("Runner.control.allowIsNoGrant", "[vtextension][runner][control]")
+{
+    // `allow` pre-approves commands only: control waits for the user's answer.
+    auto harness = RunnerHarness {};
+    auto const module =
+        vtextension::testing::withManifest(toModule(vtextension::testing::ControlReportingModule),
+                                           "name = reporter\nversion = 1\ncontrol read\n");
+    auto const runner = makeRunner(harness, module, "reporter", {}, {}, CommandPermission::Allow);
+    runner->post(surfaceOf(80, 1));
+    harness.scheduler.runPending();
+    REQUIRE(runner->latest() != nullptr);
+    CHECK(runner->latest()->sgrText.ends_with("not granted yet"));
+    CHECK(harness.permissionRequests.size() == 1);
+}
+
+TEST_CASE("Runner.control.notServed", "[vtextension][runner][control]")
+{
+    // A host serving no control API -- the GUI's -- answers every verb `unsupported`, and asks nobody to
+    // grant what it cannot do.
+    auto harness = RunnerHarness {};
+    auto module =
+        loadModule(*harness.backend,
+                   vtextension::testing::withManifest(toModule(vtextension::testing::ControlReportingModule),
+                                                      "name = reporter\nversion = 1\ncontrol read\n"));
+    auto services = harness.services();
+    services.callControl = nullptr;
+    auto const runner = std::make_unique<Runner>(std::move(module.engine),
+                                                 std::move(module.compiled),
+                                                 configFor("reporter", {}, {}, CommandPermission::Ask),
+                                                 std::move(services));
+    runner->post(surfaceOf(80, 1));
+    harness.scheduler.runPending();
+    REQUIRE(runner->latest() != nullptr);
+    CHECK(runner->latest()->sgrText == "the control API is not served here");
+    CHECK(harness.permissionRequests.empty());
+}
+
+TEST_CASE("Runner.threading.controlClosesItsOwnPane", "[vtextension][runner][control][threading]")
+{
+    // An extension closing its own pane: the host destroys the Runner while it serves the call, and answers
+    // only then -- as a daemon's loop does. The destructor must not wait for that answer, which it would
+    // itself be holding up, on the thread every session of the daemon shares.
+    auto harness = RunnerHarness {};
+    auto closeAsked = std::promise<void> {};
+    auto asked = closeAsked.get_future();
+    auto closeServed = std::promise<void> {};
+    auto const served = closeServed.get_future().share();
+    auto calls = std::atomic<int> { 0 };
+    auto answeredInTime = false; // Written on the lane, read once the pool is joined.
+    auto pool = ExtensionWorkerPool(*harness.backend, 1);
+
+    // A deadline far beyond the test's run, so that only a destructor that waits for the call misses it.
+    auto limits = ExtensionLimits {};
+    limits.callDeadline = 10s;
+    auto module =
+        loadModule(*harness.backend,
+                   vtextension::testing::withManifest(toModule(vtextension::testing::PaneClosingModule),
+                                                      "name = closer\nversion = 1\ncontrol write\n"),
+                   limits);
+    auto const config = configFor("closer", {}, limits, CommandPermission::Ask);
+    harness.grants.record(config.hostId, module.compiled->manifest()->digest, GrantState::Granted);
+    auto services = harness.services(pool);
+    services.callControl =
+        [&](std::string_view /*method*/,
+            std::string_view /*params*/,
+            vtcontrol::ControlGrants /*granted*/,
+            std::chrono::milliseconds timeout) -> std::expected<std::string, vtcontrol::ControlError> {
+        if (calls.fetch_add(1) == 0)
+        {
+            closeAsked.set_value();
+            answeredInTime = served.wait_for(timeout) == std::future_status::ready;
+        }
+        if (!answeredInTime)
+            return std::unexpected(vtcontrol::ControlError {
+                .code = vtcontrol::ControlErrorCode::Failed, .message = "timed out", .candidates = {} });
+        return "{}";
+    };
+    auto runner = std::make_unique<Runner>(
+        std::move(module.engine), std::move(module.compiled), config, std::move(services));
+    runner->post(surfaceOf(10, 1));
+
+    // The host's side: the close destroys the pane, and its runner with it, before the call is answered.
+    REQUIRE(asked.wait_for(30s) == std::future_status::ready);
+    runner.reset();
+    closeServed.set_value();
+    pool.stop();
+    CHECK(answeredInTime);
+    CHECK(calls.load() == 1); // A render after the Runner is gone reaches no host.
 }
 
 TEST_CASE("Runner.threading.spinNeverBlocksThePoster", "[vtextension][runner][threading][guest]")

@@ -174,10 +174,30 @@ target_compile_definitions(contour_config PUBLIC
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
-    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     CONTOUR_APP_ID="${AppId}"
 )
+# CONTOUR_VERSION_STRING embeds the branch name and HEAD sha, and CONTOUR_PROJECT_SOURCE_DIR is an
+# absolute path that differs per worktree. Both are per-checkout values, and the compile cache keys
+# on the command line: as target-wide definitions they would sit on nearly every compile and keep any
+# object from being reused across worktrees, branches or commits. They are therefore attached only to
+# the few sources that read them.
+set(_per_checkout_definitions
+    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
+    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+foreach(_reader IN ITEMS
+        config/Config.cpp
+        cli/ContourApp.cpp)
+    cmake_path(GET _reader PARENT_PATH _reader_dir)
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${_reader}"
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${_reader_dir}"
+        APPEND PROPERTY COMPILE_DEFINITIONS ${_per_checkout_definitions})
+endforeach()
+set_property(SOURCE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContourGuiApp.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cli/ShellIntegration_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/Config_test.cpp"
+    APPEND PROPERTY COMPILE_DEFINITIONS ${_per_checkout_definitions})
 if(CONTOUR_FRONTEND_GUI)
     target_compile_definitions(contour_config PUBLIC CONTOUR_FRONTEND_GUI)
 endif()
@@ -215,6 +235,7 @@ endif()
 
 set(_header_files
     session/HyperlinkTooltip.hpp
+    window/ProgramStatusBadge.hpp
     window/TabLabel.hpp
 )
 
@@ -264,6 +285,7 @@ if(CONTOUR_FRONTEND_GUI)
         display/RenderState.hpp
         display/RenderingBackendSelection.hpp
         display/FirstFrameWatchdog.hpp
+        display/LatencyProbeDriver.hpp
         display/GpuSelection.hpp
         display/GpuInventory.hpp
         display/DxgiGpuInventory.hpp
@@ -282,6 +304,7 @@ if(CONTOUR_FRONTEND_GUI)
     list(APPEND _core_source_files
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
+        window/DaemonDriftModel.cpp
         ContourGuiApp.cpp
         session/PaneProxy.cpp
         config/LayoutBuilder.cpp
@@ -291,6 +314,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
+        display/LatencyProbeDriver.cpp
         display/GpuInventory.cpp
         display/PciIds.cpp
         display/SysfsGpuInventory.cpp
@@ -366,6 +390,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SettingsNavItem.qml
         qml/SettingsListItem.qml
         qml/ConfirmDialog.qml
+        qml/DaemonDriftBadge.qml
         qml/ContourMenu.qml
         qml/PopupSurface.qml
         qml/SettingRow.qml
@@ -760,6 +785,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ThreadJoin_test.cpp
             display/RenderingBackendSelection_test.cpp
             display/FirstFrameWatchdog_test.cpp
+            display/ShaderConfig_test.cpp
             display/GpuSelection_test.cpp
             display/GpuInventory_test.cpp
             display/OpenGlGpuEnvironment_test.cpp
@@ -771,6 +797,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ContourTuiStyle_test.cpp
             window/WindowControlStyleProvider_test.cpp
             window/TabLabel_test.cpp
+            window/DaemonDriftModel_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
             platform/WindowResizeGrid_test.cpp
@@ -1015,6 +1042,19 @@ if(CONTOUR_FRONTEND_GUI)
             # developer's controlling terminal.
             add_test(NAME contour_e2e_daemon
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/daemon-lifecycle.sh $<TARGET_FILE:contour>)
+            # A client whose attach fails returns from the GUI verb before the event loop runs, with the QML
+            # engine already built; it must still exit cleanly, the engine gone before QApplication.
+            add_test(NAME contour_e2e_client_unreachable
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/client-unreachable.sh $<TARGET_FILE:contour>)
+            # Where a launch hosts its sessions (`daemon.mode`): `required` ends it before any window, `auto`
+            # falls back to in-process saying why, and `contour client --window` names a window the daemon
+            # lacks. The default `in_process` is what every other app run here already covers.
+            add_test(NAME contour_e2e_hosting
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/hosting.sh $<TARGET_FILE:contour>)
+            # `contour daemon --stdio`, the remote end of an ssh attach: stdout carries its preamble and
+            # nothing else, not even a warning the configuration logs before logging is installed.
+            add_test(NAME contour_e2e_stdio_relay
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/stdio-relay.sh $<TARGET_FILE:contour>)
 
             # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
             # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->
@@ -1026,7 +1066,8 @@ if(CONTOUR_FRONTEND_GUI)
             # stays fully enabled here; the unit-test suites keep full leak checking.
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
-                contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon
+                contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
+                contour_e2e_hosting contour_e2e_stdio_relay
                 PROPERTIES
                     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 120
@@ -1034,7 +1075,9 @@ if(CONTOUR_FRONTEND_GUI)
                     LABELS e2e)
             # Also selectable with the daemon suites: `ctest -L daemon` must cover the feature
             # end to end, not just its unit layers.
-            set_property(TEST contour_e2e_daemon APPEND PROPERTY LABELS daemon)
+            set_property(TEST contour_e2e_daemon contour_e2e_client_unreachable contour_e2e_hosting
+                              contour_e2e_stdio_relay
+                         APPEND PROPERTY LABELS daemon)
 
             # Under ThreadSanitizer, the same ignore_noninstrumented_modules=1 as contour_gui_test, and
             # for the same reason: the application loads the same uninstrumented Qt, glib and libdbus,
@@ -1045,7 +1088,8 @@ if(CONTOUR_FRONTEND_GUI)
             # in such bodies has its races tested in an unsilenced module suite, not through these runs.
             if(CONTOUR_SANITIZE STREQUAL "thread")
                 set_property(TEST contour_e2e_lifecycle contour_e2e_vt_stream contour_e2e_custom_config
-                                  contour_e2e_cli contour_e2e_daemon
+                                  contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
+                                  contour_e2e_hosting contour_e2e_stdio_relay
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
         endif()
@@ -1068,7 +1112,9 @@ if(CONTOUR_TESTING)
         test/core_test_main.cpp
         config/Actions_test.cpp
         config/FileOpenerTemplate_test.cpp
+        config/DaemonSettings_test.cpp
         config/GlobalOverrides_test.cpp
+        config/HostUrl_test.cpp
         config/LayoutBuilder_test.cpp
         config/PtyReadBufferSize_test.cpp
         config/UiStyle_test.cpp
@@ -1079,9 +1125,16 @@ if(CONTOUR_TESTING)
         command/FuzzyFilter_test.cpp
         command/Shortcut_test.cpp
         command/TitleBarContextMenu_test.cpp
+        cli/AgentSkill_test.cpp
         cli/CaptureScreen_test.cpp
         cli/ContourApp_test.cpp
+        cli/ControlVerbs_test.cpp
+        cli/DaemonVerbs_test.cpp
+        cli/Hosting_test.cpp
+        cli/HostTransport_test.cpp
         cli/CatImageArgs_test.cpp
+        cli/ConfigProfileCatalog_test.cpp
+        cli/ConfigReloadPoller_test.cpp
         cli/ShellIntegration_test.cpp
         cli/ShellIntegrationShells_test.cpp
         display/RedrawCoalescer_test.cpp
@@ -1093,6 +1146,8 @@ if(CONTOUR_TESTING)
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
         platform/SessionVisibility_test.cpp
+        window/ProgramStatusBadge_test.cpp
+        window/RemoteChrome_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
     # ScreenshotFile one over its Screen, and FinishNotification one over its CommandBlockSummary; testing
@@ -1104,10 +1159,18 @@ if(CONTOUR_TESTING)
         contour_command_output
         contour_cli
         contour_local_file
+        vthost
+        vtcontrol
+        glaze::glaze
         vtbackend
         core::testing
         Catch2::Catch2)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    # `contour api wit` must print the checked-in WIT package, and the exit statuses the docs list must be the
+    # skill's; the tests compare against the files themselves.
+    target_compile_definitions(contour_test PRIVATE
+        CONTOUR_CONTROL_WIT="${PROJECT_SOURCE_DIR}/wit/control/world.wit"
+        CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md")
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)
@@ -1399,6 +1462,8 @@ if(WIN32)
                 # A developer benchmark, built here so that it runs beside the staged conpty.dll: the .exe,
                 # and the .ilk an incremental link leaves beside it.
                 PATTERN "bench-headless.*" EXCLUDE
+                # The latency benchmark, likewise: the .exe and the .ilk beside it.
+                PATTERN "bench-latency.*" EXCLUDE
                 PATTERN "*"
         )
     endif()
@@ -1589,6 +1654,13 @@ else()
                 install(FILES "packaging/systemd/oom-policy-scope.conf"
                         DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
             endforeach()
+
+            # The daemon that hosts persistent sessions, as a user service. Shipped, not enabled:
+            # `contour daemon-service install` writes the user's own copy and enables it.
+            configure_file("packaging/systemd/contour-daemon.service.in"
+                           "${CMAKE_CURRENT_BINARY_DIR}/contour-daemon.service" @ONLY)
+            install(FILES "${CMAKE_CURRENT_BINARY_DIR}/contour-daemon.service"
+                    DESTINATION "${_systemdUserUnitDir}")
         endif()
     endif()
 endif()

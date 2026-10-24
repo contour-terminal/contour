@@ -97,6 +97,7 @@ nav:
     - configuration/profiles.md
     - configuration/links.md
     - configuration/layouts.md
+    - configuration/hosts.md
     - configuration/colors.md
     - configuration/indicator-statusline.md
     - configuration/paths.md
@@ -108,6 +109,8 @@ nav:
   - Features:
     - List of features: features.md
     - Persistent sessions: persistent-sessions.md
+    - Remote hosts: remote-hosts.md
+    - Control API: control-api.md
     - Font ligatures: demo/font-ligatures.md
     - Images: demo/images.md
     - ReGIS vector graphics: demo/regis-graphics.md
@@ -138,6 +141,7 @@ nav:
     - vt-extensions/osc-133-shell-integration.md
     - vt-extensions/osc-3008-context.md
     - vt-extensions/osc-9-4-progress.md
+    - vt-extensions/program-status.md
     - vt-extensions/semantic-block-query.md
     - vt-extensions/private-use-glyphs.md
   - Internals:

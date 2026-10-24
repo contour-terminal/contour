@@ -119,6 +119,16 @@ std::vector<Command> LayoutCommandSource::commands() const
     return result;
 }
 
+std::vector<Command> HostCommandSource::commands() const
+{
+    auto result = std::vector<Command> {};
+
+    for (auto const& name: _config.hosts.value() | std::views::keys)
+        result.push_back(makeCommand(actions::AttachToHost { .name = name }));
+
+    return result;
+}
+
 std::vector<Command> TabCommandSource::commands() const
 {
     auto const titles = _tabs.tabTitles();

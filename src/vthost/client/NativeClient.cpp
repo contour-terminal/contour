@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <format>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -114,6 +115,13 @@ namespace
         return table.size() > maxRecords ? dropCommandBlock(screen, table.begin()->first) : 0;
     }
 } // namespace
+
+void RemoteScreen::apply(proto::ProgramStatus const& status)
+{
+    auto const& records = status.records;
+    auto const kept = std::min(records.size(), vtbackend::MaxProgramStatusRecords);
+    programStatus.assign(records.end() - static_cast<std::ptrdiff_t>(kept), records.end());
+}
 
 void RemoteScreen::apply(proto::SessionState const& state)
 {
@@ -356,7 +364,8 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
                            ImageHandler onImage,
                            SessionEventHandler onSessionEvent,
                            LayoutHandler onLayout,
-                           PermissionHandler onPermissionRequest):
+                           PermissionHandler onPermissionRequest,
+                           LivenessPolicy liveness):
     _loop(loop),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), std::size_t { 1 } * 1024 * 1024),
@@ -367,8 +376,58 @@ NativeClient::NativeClient(core::net::EventLoop& loop,
     _onImage(std::move(onImage)),
     _onSessionEvent(std::move(onSessionEvent)),
     _onLayout(std::move(onLayout)),
-    _onPermissionRequest(std::move(onPermissionRequest))
+    _onPermissionRequest(std::move(onPermissionRequest)),
+    _liveness(liveness)
 {
+}
+
+void NativeClient::armLivenessTick()
+{
+    _livenessTimer.reset();
+    _livenessTimer.emplace(
+        _loop, _loop.clock().now() + std::chrono::seconds { 1 }, &NativeClient::livenessTick, this);
+}
+
+void NativeClient::handshakeExpired(void* self)
+{
+    auto& client = *static_cast<NativeClient*>(self);
+    if (client._closing || client._detached || client._negotiated || client._refusal)
+        return;
+    client._lossReason = std::format(
+        "the daemon did not answer the handshake within {} s",
+        std::chrono::duration_cast<std::chrono::seconds>(client._liveness.policy().handshakeDeadline)
+            .count());
+    errorLog()("attach: {}; closing the connection", *client._lossReason);
+    // As the liveness tick gives up: the parked read is retired and run() closes the connection in order.
+    client._connection->cancelRead();
+}
+
+void NativeClient::livenessTick(void* self)
+{
+    auto& client = *static_cast<NativeClient*>(self);
+    if (client._closing || client._detached)
+        return;
+    auto const now = client._loop.clock().now();
+    switch (client._liveness.decide(now))
+    {
+        case LivenessAction::None: break;
+        case LivenessAction::SendHeartbeat:
+            client.send(proto::DecodedPdu { proto::Heartbeat { .nonce = client._nextHeartbeatNonce++ } });
+            client._liveness.noteProbeSent(now);
+            break;
+        case LivenessAction::DeclareLost:
+            client._lossReason = std::format(
+                "no answer from the daemon for {} s",
+                std::chrono::duration_cast<std::chrono::seconds>(client._liveness.policy().deadAfter)
+                    .count());
+            errorLog()("attach: {}; closing the connection", *client._lossReason);
+            // As detach() does: the parked read is retired and run() closes the connection in order. Nothing
+            // comes after it, for the read's resumption can end the flow that owns this object.
+            client._connection->cancelRead();
+            return;
+    }
+    // Re-armed from inside its own callback, which DeadlineTimer allows: it is settled before it is called.
+    client.armLivenessTick();
 }
 
 std::optional<int64_t> NativeClient::resolveHistoryKeep(HandshakeOptions const& handshake)
@@ -396,8 +455,15 @@ RemoteScreen& NativeClient::screenFor(uint64_t session)
 
 uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
 {
-    if (_closing)
+    // A detached client is ending its connection in order: what it writes now would race the close.
+    if (_closing || _detached)
         return 0;
+    if (_unsupported.peerRefused(proto::typeOf(pdu)))
+    {
+        if (protocolTraceLog)
+            protocolTraceLog()("attach not sending {}: the daemon does not know it", proto::describe(pdu));
+        return 0;
+    }
     auto const serial = _nextSerial++;
     auto sink = proto::Writer {};
     proto::encodePdu(sink, serial, pdu);
@@ -438,34 +504,50 @@ void NativeClient::fetchImage(uint64_t session, uint32_t imageId)
 {
     auto const serial =
         send(proto::DecodedPdu { proto::FetchImage { .session = session, .imageId = imageId } });
+    // A fetch that was not sent awaits nothing -- and 0 is the serial of every frame the daemon pushes
+    // unasked, so recording it would route one of those to this screen.
+    if (serial == 0)
+        return;
     // The ImageData/ImageGone answer carries no session — remember which one this
     // serial belongs to so the reply lands in the right screen's cache.
     _pendingImages.insert_or_assign(serial, std::pair { session, imageId });
 }
 
-void NativeClient::createTab(uint64_t beside)
+void NativeClient::createTab(uint64_t beside, std::string profileName)
 {
-    send(proto::DecodedPdu { proto::CreateTab { .session = beside } });
+    send(proto::DecodedPdu {
+        proto::CreateTab { .session = beside, .profileName = profileForWire(std::move(profileName)) } });
+}
+
+Delivery NativeClient::editTab(proto::EditTab edit)
+{
+    // A daemon that did not negotiate it reads it as a PDU it does not know: it is not sent at all.
+    if (!shares(proto::Capability::TabEdits) || send(proto::DecodedPdu { std::move(edit) }) == 0)
+        return Delivery::Unsupported;
+    return Delivery::Sent;
 }
 
 void NativeClient::restateSessionSettings(std::optional<proto::WireSessionSettings> settings)
 {
-    if (settings == _handshake.sessionSettings)
+    // A daemon resolving profiles owns emulation: what this client would restate it ignores anyway.
+    if (namesProfiles() || settings == _handshake.sessionSettings)
         return;
     _handshake.sessionSettings = std::move(settings);
     send(proto::DecodedPdu {
         proto::SessionSettingsChanged { .sessionSettings = _handshake.sessionSettings } });
 }
 
-void NativeClient::createWindow()
+void NativeClient::createWindow(std::string profileName)
 {
-    send(proto::DecodedPdu { proto::NewWindow {} });
+    send(proto::DecodedPdu { proto::NewWindow { .profileName = profileForWire(std::move(profileName)) } });
 }
 
-void NativeClient::splitPane(uint64_t session, uint8_t orientation, uint16_t ratio)
+void NativeClient::splitPane(uint64_t session, uint8_t orientation, uint16_t ratio, std::string profileName)
 {
-    send(proto::DecodedPdu {
-        proto::SplitPane { .session = session, .orientation = orientation, .ratio = ratio } });
+    send(proto::DecodedPdu { proto::SplitPane { .session = session,
+                                                .orientation = orientation,
+                                                .ratio = ratio,
+                                                .profileName = profileForWire(std::move(profileName)) } });
 }
 
 void NativeClient::resizeSplit(uint64_t firstSession, uint64_t secondSession, uint16_t ratio)
@@ -474,9 +556,10 @@ void NativeClient::resizeSplit(uint64_t firstSession, uint64_t secondSession, ui
         .firstSession = firstSession, .secondSession = secondSession, .ratio = ratio } });
 }
 
-void NativeClient::closePane(uint64_t session)
+Delivery NativeClient::closePane(uint64_t session)
 {
-    send(proto::DecodedPdu { proto::ClosePane { .session = session } });
+    return send(proto::DecodedPdu { proto::ClosePane { .session = session } }) != 0 ? Delivery::Sent
+                                                                                    : Delivery::Unsupported;
 }
 
 void NativeClient::performOperation(proto::PerformOperation request)
@@ -486,6 +569,12 @@ void NativeClient::performOperation(proto::PerformOperation request)
 
 void NativeClient::answerPermission(std::string hostId, std::string digest, GrantState answer)
 {
+    // Only a daemon that offered to ask reads an answer; to any other it is a PDU it did not expect.
+    if (!_negotiated || !_negotiated->shared.contains(proto::Capability::ExtensionPermissions))
+    {
+        clientLog()("attach: not answering {}: the daemon did not offer to ask", hostId);
+        return;
+    }
     send(proto::DecodedPdu { proto::PermissionReply { .hostId = std::move(hostId),
                                                       .digest = std::move(digest),
                                                       .grantState = std::to_underlying(answer) } });
@@ -507,26 +596,34 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         protocolTraceLog()("attach {}",
                            proto::traceLine(proto::Direction::Recv, frame.serial, pdu, frame.consumed));
 
+    // Every frame counts as life, an Unsupported or an echo as much as a Delta (C8).
+    _liveness.noteInbound(_loop.clock().now());
     if (auto const* hello = std::get_if<proto::ServerHello>(&pdu))
     {
-        if (hello->codecVersion == proto::CodecVersion)
-        {
-            // From the first hello only: the identity is the connection's, and a mirror already judged
-            // by it must not see it change under its feet.
-            if (!_connected)
-                _daemonIdentity =
-                    vtbackend::HostIdentity { .machineId = hello->machineId, .hostname = hello->hostname };
-            _connected = true;
-            clientLog()("attach: connected (codec v{})", proto::CodecVersion);
-        }
-        else
-        {
-            errorLog()("attach: daemon speaks codec v{}, we speak v{}; detaching",
-                       hello->codecVersion,
-                       proto::CodecVersion);
-            _versionMismatch = true;
-        }
+        handleServerHello(*hello);
         return;
+    }
+    // Before a ServerHello negotiated, nothing is applied and nothing is answered: the handshake has not
+    // said what either end speaks, so a session PDU might be read in a protocol the daemon does not speak.
+    if (!_negotiated)
+    {
+        errorLog()("attach: ignoring {} before the handshake (serial {})",
+                   proto::toString(proto::typeOf(pdu)),
+                   frame.serial);
+        return;
+    }
+    // An unknown PDU from a newer daemon is answered rather than dropped, and an Unsupported the daemon
+    // sent is taken note of -- neither is dispatched further.
+    auto const handling = _unsupported.handle(frame);
+    switch (handling.verdict)
+    {
+        case proto::UnsupportedVerdict::NotConcerned: break;
+        case proto::UnsupportedVerdict::Answer: send(proto::DecodedPdu { handling.pdu }); return;
+        case proto::UnsupportedVerdict::Refused:
+            clientLog()("attach: the daemon does not know PDU {}; not sending it again",
+                        proto::nameOfIdent(handling.pdu.ident));
+            return;
+        case proto::UnsupportedVerdict::AlreadyRefused: return;
     }
     if (auto const* state = std::get_if<proto::SessionState>(&pdu))
     {
@@ -593,12 +690,22 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     // a fourth transient event joins the catalog.
     if (auto const event = proto::asSessionEvent(pdu))
     {
+        auto& screen = screenFor(proto::sessionOf(*event));
+        // The program-status set is state, not an event: the screen keeps it for a mirror bound later.
+        if (auto const* status = std::get_if<proto::ProgramStatus>(&*event))
+            screen.apply(*status);
         if (_onSessionEvent)
-            _onSessionEvent(screenFor(proto::sessionOf(*event)), *event);
+            _onSessionEvent(screen, *event);
         return;
     }
     if (auto const* layout = std::get_if<proto::LayoutState>(&pdu))
     {
+        // A daemon sends the layouts of the windows a connection follows, so one it pushes later -- a window
+        // this connection created -- is followed too, and a reconnect resumes it with the rest.
+        if (shares(proto::Capability::AttachIntent))
+            if (auto const at = std::ranges::lower_bound(_followedWindows, layout->window);
+                at == _followedWindows.end() || *at != layout->window)
+                _followedWindows.insert(at, layout->window);
         if (_onLayout)
             _onLayout(*layout);
         return;
@@ -609,10 +716,77 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
             _onPermissionRequest(*request);
         return;
     }
+    // A probe's echo: noted as life above, which is all it is for.
+    if (std::holds_alternative<proto::Heartbeat>(pdu))
+        return;
     // Unknown PDUs are ignored for forward compatibility — but recorded, so a mirror that is
     // quietly missing an update is distinguishable from one that never received it.
     errorLog()(
         "attach: ignoring unexpected {} (serial {})", proto::toString(proto::typeOf(pdu)), frame.serial);
+}
+
+std::expected<proto::Negotiated, proto::HandshakeRefusal> judgeServerHello(
+    proto::VersionRange const ours, proto::CapabilitySet const& offered, proto::ServerHello const& hello)
+{
+    // A pre-negotiation daemon states its codec version alone, and with it refuses this client.
+    if (hello.layout == proto::HelloLayout::VersionAlone)
+        return std::unexpected { proto::HandshakeRefusal {
+            .ours = ours, .theirs = { .min = hello.codecVersion, .max = hello.codecVersion } } };
+    auto const refused =
+        std::unexpected { proto::HandshakeRefusal { .ours = ours, .theirs = hello.versions } };
+    if (hello.agreedVersion == 0)
+        return refused;
+    // Which version both ends speak the daemon picks, by a policy of its own; what this end holds it to is
+    // that both do. A pick outside either range is refused as what it is: a daemon of that version alone.
+    auto const agreed = hello.agreedVersion;
+    auto const within = [agreed](proto::VersionRange range) {
+        return range.min <= agreed && agreed <= range.max;
+    };
+    if (!within(ours) || !within(hello.versions))
+    {
+        errorLog()("attach: the daemon agreed on protocol v{}, which not both ends speak", agreed);
+        return std::unexpected { proto::HandshakeRefusal { .ours = ours,
+                                                           .theirs = { .min = agreed, .max = agreed } } };
+    }
+    return proto::Negotiated { .version = hello.agreedVersion,
+                               .peerCapabilities = hello.capabilities,
+                               .shared = proto::intersect(offered, hello.capabilities) };
+}
+
+std::expected<proto::Negotiated, proto::HandshakeRefusal> NativeClient::judge(
+    proto::ServerHello const& hello) const
+{
+    return judgeServerHello(_handshake.versions, _handshake.capabilities, hello);
+}
+
+void NativeClient::handleServerHello(proto::ServerHello const& hello)
+{
+    // From the first hello only: the handshake, and the identity with it, is the connection's, and a mirror
+    // already judged by that identity must not see it change under its feet.
+    if (_negotiated || _refusal)
+    {
+        errorLog()("attach: ignoring a second ServerHello");
+        return;
+    }
+    auto outcome = judge(hello);
+    if (!outcome)
+    {
+        _refusal = outcome.error();
+        errorLog()("attach: {}; detaching", proto::describe(*_refusal, proto::PeerRole::Daemon));
+        return;
+    }
+    _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
+    _daemonRelease = hello.releaseVersion;
+    _daemonInstance = hello.daemonInstance;
+    _followedWindows = hello.followedWindows;
+    _negotiated = std::move(*outcome);
+    _handshakeTimer.reset();
+    clientLog()("attach: connected (protocol v{})", _negotiated->version);
+    // Only a daemon that echoes is probed: an older one would answer every Heartbeat Unsupported.
+    if (shares(proto::Capability::Heartbeat))
+        armLivenessTick();
+    if (_onHandshake)
+        _onHandshake();
 }
 
 void NativeClient::reportPumpOutcome(PumpResult const& outcome)
@@ -628,25 +802,38 @@ void NativeClient::reportPumpOutcome(PumpResult const& outcome)
 
 core::async::Task<void> NativeClient::run()
 {
-    send(proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion,
+    // Silence is measured from the hello, once the daemon answered it; until then the handshake deadline is
+    // what gives up on a daemon that never does.
+    auto const now = _loop.clock().now();
+    _liveness.noteInbound(now);
+    _handshakeTimer.emplace(
+        _loop, now + _liveness.policy().handshakeDeadline, &NativeClient::handshakeExpired, this);
+    send(proto::DecodedPdu { proto::ClientHello { .versions = _handshake.versions,
+                                                  .capabilities = _handshake.capabilities,
                                                   .token = _handshake.token,
-                                                  .sessionSettings = _handshake.sessionSettings } });
+                                                  .sessionSettings = _handshake.sessionSettings,
+                                                  .clientArea = _handshake.clientArea,
+                                                  .attachIntent = _handshake.attachIntent,
+                                                  .profileName = _handshake.profileName } });
 
     auto outcome = co_await pumpPdus(
         _connection.get(),
         [this](proto::DecodedFrame const& frame) {
             handlePdu(frame);
-            return !_detached && !_versionMismatch;
+            return !_detached && !_refusal;
         },
         [this] { return _detached; });
     // detach() retires the read it parked on, which the pump reports as a cancelled read. That is
     // the detach itself, not a failure.
-    if (_detached && outcome.stop == PumpStop::TransportError
+    // So does a connection given up on, whose loss was logged as it was declared.
+    if ((_detached || _lossReason) && outcome.stop == PumpStop::TransportError
         && outcome.transportError->code == core::net::NetErrorCode::Cancelled)
         outcome = PumpResult::stopped(PumpStop::HandlerStopped);
     reportPumpOutcome(outcome);
 
     _closing = true;
+    _handshakeTimer.reset();
+    _livenessTimer.reset();
     co_await closeGracefully(&_loop, &_writer, _connection.get());
 }
 

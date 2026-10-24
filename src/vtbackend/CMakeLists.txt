@@ -43,6 +43,9 @@ set(vtbackend_HEADERS
     screen/Gutter.hpp
     screen/GutterSettings.hpp
     vt/HierarchicalContext.hpp
+    vt/ProgramStatus.hpp
+    vt/SemanticBlockQuery.hpp
+    screen/ProgramStatusSet.hpp
     vt/JsonString.hpp
     input/vi/HintModeHandler.hpp
     core/Hyperlink.hpp
@@ -144,6 +147,8 @@ set(vtbackend_SOURCES
     core/ColorPalette.cpp
     core/TerminalContext.cpp
     vt/HierarchicalContext.cpp
+    vt/ProgramStatus.cpp
+    screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
     shell/CommandBlock.cpp
@@ -211,11 +216,14 @@ set(vtbackend_SOURCES
 )
 
 add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
+# The version string embeds the branch name and HEAD sha. The compile cache keys on the command line,
+# so it must not sit on every vtbackend source: only Screen.cpp reads it.
+set_property(SOURCE screen/Screen.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    LIBTERMINAL_VERSION_STRING="${CONTOUR_VERSION_STRING}")
 target_compile_definitions(vtbackend PRIVATE
     LIBTERMINAL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     LIBTERMINAL_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     LIBTERMINAL_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    LIBTERMINAL_VERSION_STRING="${CONTOUR_VERSION_STRING}"
     LIBTERMINAL_NAME="${PROJECT_NAME}"
 )
 
@@ -282,6 +290,9 @@ if(LIBTERMINAL_TESTING)
         core/ColorPalette_test.cpp
         core/TerminalContext_test.cpp
         vt/HierarchicalContext_test.cpp
+        vt/ProgramStatus_test.cpp
+        screen/ProgramStatusSet_test.cpp
+        screen/Terminal_programStatus_test.cpp
         vt/JsonString_test.cpp
         screen/Screen_context_test.cpp
         shell/MarkArbiter_test.cpp

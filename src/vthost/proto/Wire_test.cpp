@@ -182,9 +182,8 @@ TEST_CASE("every decode error has a distinct name", "[vthost][proto]")
     // The names end up in the daemon's log as the whole explanation of why a connection died,
     // so an unnamed or duplicated enumerator would silently degrade a diagnostic.
     constexpr auto AllErrors = std::array {
-        DecodeError::NeedMoreData,  DecodeError::MalformedVarint, DecodeError::CompressedFrame,
-        DecodeError::Truncated,     DecodeError::TrailingBytes,   DecodeError::VersionMismatch,
-        DecodeError::FrameTooLarge, DecodeError::MalformedPdu,
+        DecodeError::NeedMoreData, DecodeError::MalformedVarint, DecodeError::CompressedFrame,
+        DecodeError::Truncated,    DecodeError::FrameTooLarge,   DecodeError::MalformedPdu,
     };
 
     auto names = std::vector<std::string_view> {};

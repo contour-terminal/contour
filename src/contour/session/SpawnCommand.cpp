@@ -26,4 +26,16 @@ SpawnTerminalCommand buildSpawnTerminalCommand(string const& programPath,
     return command;
 }
 
+SpawnTerminalCommand buildAttachHostCommand(string const& programPath,
+                                            string const& configPath,
+                                            string const& hostName)
+{
+    auto command = SpawnTerminalCommand {};
+    command.program = QString::fromUtf8(programPath.c_str());
+    command.arguments << "client" << "--host" << QString::fromStdString(hostName);
+    if (!configPath.empty())
+        command.arguments << "--config" << QString::fromStdString(configPath);
+    return command;
+}
+
 } // namespace contour::session

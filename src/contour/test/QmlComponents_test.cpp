@@ -25,6 +25,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/TabColorScheme.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
@@ -132,6 +133,10 @@ class MockTabController: public QAbstractListModel
         //!< Ditto: both drive TabItem's OSC 9;4 progress bar.
         ProgressStateRole = Qt::UserRole + 8,
         ProgressPercentageRole = Qt::UserRole + 9,
+        //!< Ditto: the three drive TabItem's OSC 7501 program-status badge.
+        ProgramStatusRole = Qt::UserRole + 10,
+        ProgramStatusTextRole = Qt::UserRole + 11,
+        ProgramStatusProgressRole = Qt::UserRole + 12,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -154,6 +159,10 @@ class MockTabController: public QAbstractListModel
             // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
             case Roles::ProgressStateRole:
             case Roles::ProgressPercentageRole: return 0;
+            // 0 = BadgeKind::None: no program status, so TabItem paints no badge.
+            case Roles::ProgramStatusRole: return 0;
+            case Roles::ProgramStatusTextRole: return QString {};
+            case Roles::ProgramStatusProgressRole: return -1;
             default: return index.row();
         }
     }
@@ -171,7 +180,10 @@ class MockTabController: public QAbstractListModel
                  { static_cast<int>(Roles::RawTitleRole), "rawTitle" },
                  { static_cast<int>(Roles::ZoomedRole), "zoomed" },
                  { static_cast<int>(Roles::ProgressStateRole), "progressState" },
-                 { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" } };
+                 { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
+                 { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
+                 { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" },
+                 { static_cast<int>(Roles::ProgramStatusProgressRole), "programStatusProgress" } };
     }
 
     Q_INVOKABLE [[nodiscard]] QObject* createSession() { return nullptr; }
@@ -310,9 +322,19 @@ class MockSession: public QObject
     // kind. Both change together, so one signal serves them.
     Q_PROPERTY(QVariantList scrollbarMarks READ scrollbarMarks NOTIFY scrollbarMarksChanged)
     Q_PROPERTY(QVariantList scrollbarMarkColors READ scrollbarMarkColors NOTIFY scrollbarMarksChanged)
+    // Mirrors TerminalSession's reconnecting state, which TerminalPane's overlay shows.
+    Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
 
   public:
     [[nodiscard]] int pageLineCount() const { return _lines; }
+    [[nodiscard]] bool isReconnecting() const { return _reconnecting; }
+
+    /// Loses or regains the host connection, as TerminalSession::setHostConnection does.
+    void setReconnecting(bool reconnecting)
+    {
+        _reconnecting = reconnecting;
+        emit reconnectingChanged();
+    }
     [[nodiscard]] int pageColumnsCount() const { return _columns; }
     [[nodiscard]] int historyLineCount() const { return _historyLineCount; }
     [[nodiscard]] bool showResizeIndicator() const { return true; }
@@ -434,6 +456,7 @@ class MockSession: public QObject
     void scrollbarMarksChanged();
     void opacityChanged();
     void dimUnfocusedChanged();
+    void reconnectingChanged();
     void onBell();
     void onAlert();
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);
@@ -458,6 +481,7 @@ class MockSession: public QObject
     QVariantList _scrollbarMarkColors;
     float _opacity = 1.0F;
     float _dimUnfocused = 0.0F;
+    bool _reconnecting = false;
 };
 
 /// A DYNAMIC stand-in for a PaneProxy (one node of the split tree). Unlike the old static mock, session /
@@ -1587,6 +1611,165 @@ TEST_CASE("A zoomed TabItem shows the zoom badge and gives it back its width whe
     CHECK_FALSE(badge->isVisible());
     CHECK(badge->width() == 0.0);
     CHECK(label->x() + label->width() == unzoomedLabelRight);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A TabItem shows the OSC 7501 badge and gives it back its width when there is none",
+          "[contour][gui][qml][programstatus]")
+{
+    // The badge sits between the label and the zoom badge, so like the zoom badge it must cost the label
+    // nothing while there is no program status.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("cargo"));
+    initial.insert("tabRawTitle", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", false);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    auto* badge = tab->findChild<QQuickItem*>(QStringLiteral("programStatusBadge"));
+    REQUIRE(badge != nullptr);
+    auto* glyph = tab->findChild<QQuickItem*>(QStringLiteral("programStatusGlyph"));
+    REQUIRE(glyph != nullptr);
+    auto* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
+    REQUIRE(label != nullptr);
+
+    CHECK_FALSE(badge->isVisible());
+    CHECK(badge->width() == 0.0);
+    auto const bareLabelRight = label->x() + label->width();
+
+    // 2 = BadgeKind::Blocked.
+    tab->setProperty("tabProgramStatus", 2);
+    tab->setProperty("tabProgramStatusText", QStringLiteral("Approve?"));
+    CHECK(badge->isVisible());
+    CHECK(badge->width() > 0.0);
+    CHECK(glyph->property("text").toString() == QStringLiteral("!"));
+    CHECK(label->x() + label->width() < bareLabelRight);
+
+    // 1 = Working: spins without a progress, stands at the angle of one.
+    tab->setProperty("tabProgramStatus", 1);
+    CHECK(glyph->property("spinning").toBool());
+    tab->setProperty("tabProgramStatusProgress", 50);
+    CHECK_FALSE(glyph->property("spinning").toBool());
+    CHECK(glyph->rotation() == 180.0);
+
+    // A kind this build does not know draws nothing.
+    tab->setProperty("tabProgramStatus", 9);
+    CHECK_FALSE(badge->isVisible());
+
+    tab->setProperty("tabProgramStatus", 0);
+    CHECK_FALSE(badge->isVisible());
+    CHECK(badge->width() == 0.0);
+    CHECK(label->x() + label->width() == bareLabelRight);
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A working TabItem's spinner runs only while its window is on screen (offscreen)",
+          "[contour][gui][qml][programstatus]")
+{
+    // A program may work for hours in a minimized window; an infinite animation there is CPU for nothing.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTabItemHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+    auto* spinner = tab->findChild<QObject*>(QStringLiteral("programStatusSpinner"));
+    REQUIRE(spinner != nullptr);
+
+    // 1 = BadgeKind::Working, with no progress: it spins.
+    tab->setProperty("tabProgramStatus", 1);
+    QCoreApplication::processEvents();
+    CHECK(spinner->property("running").toBool());
+
+    window->showMinimized();
+    QCoreApplication::processEvents();
+    CHECK_FALSE(spinner->property("running").toBool());
+
+    window->showNormal();
+    QCoreApplication::processEvents();
+    CHECK(spinner->property("running").toBool());
+
+    window->hide();
+    QCoreApplication::processEvents();
+    CHECK_FALSE(spinner->property("running").toBool());
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as markup",
+          "[contour][gui][qml][programstatus]")
+{
+    // The message is what a program sent. Rendered as AutoText, `<font>` would colour it and `<img>` would
+    // have the engine load whatever it names.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml")));
+    REQUIRE(component.isReady());
+
+    QVariantMap initial;
+    initial.insert("controller", QVariant::fromValue(&controller));
+    initial.insert("window", QVariant::fromValue(static_cast<QObject*>(&controller)));
+    initial.insert("tabIndex", 0);
+    initial.insert("tabTitle", QStringLiteral("cargo"));
+    initial.insert("tabRawTitle", QString {});
+    initial.insert("tabColor", QColor(Qt::transparent));
+    initial.insert("tabActive", false);
+    initial.insert("tabPaneCount", 1);
+    initial.insert("tabZoomed", false);
+    initial.insert("tabProgressState", 0);
+    initial.insert("tabProgressPercentage", 0);
+    // 2 = BadgeKind::Blocked: the text reaches the tooltip only beside a badge.
+    initial.insert("tabProgramStatus", 2);
+    std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
+    REQUIRE(tab != nullptr);
+
+    auto* toolTip = tab->findChild<QObject*>(QStringLiteral("tabHoverToolTip"));
+    REQUIRE(toolTip != nullptr);
+    auto* content = toolTip->property("contentItem").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+
+    auto const hostile = std::array {
+        QStringLiteral("<font color=red>x</font>"),
+        QStringLiteral("<img src=\"file:///etc/passwd\">"),
+        QStringLiteral("<b>bold</b> &amp; plain"),
+    };
+    for (auto const& text: hostile)
+    {
+        tab->setProperty("tabProgramStatusText", text);
+        // What HoverHandler does when the pointer arrives.
+        QVariant composed;
+        REQUIRE(QMetaObject::invokeMethod(tab.get(), "buildHoverTooltip", Q_RETURN_ARG(QVariant, composed)));
+        tab->setProperty("hoverTooltip", composed);
+        CHECK(toolTip->property("text").toString().startsWith(text));
+        CHECK(content->property("text").toString().startsWith(text));
+        // 0 = Text.PlainText: the string is drawn as the characters it holds.
+        CHECK(content->property("textFormat").toInt() == 0);
+    }
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
@@ -2926,6 +3109,51 @@ TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors
         INFO("QML warning: " << w.toStdString());
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError") || w.contains("of null"); })
           == 0);
+}
+
+TEST_CASE("The reconnecting overlay shows only while the pane's session is reconnecting (offscreen)",
+          "[contour][gui][qml][reconnect]")
+{
+    QQmlEngine engine;
+    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    MockTabController controller;
+    MockSession session;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    engine.rootContext()->setContextProperty("mockSession", &session);
+    contour::test::installChromeStyle(engine);
+
+    QQmlComponent component(&engine);
+    component.setData(
+        QByteArrayLiteral("import QtQuick\n"
+                          "import QtQuick.Window\n"
+                          "import Contour.Ui\n"
+                          "Window {\n"
+                          "  width: 400; height: 300; visible: true\n"
+                          "  property var win: terminalSessions\n"
+                          "  property alias pane: paneItem\n"
+                          "  TerminalPane { id: paneItem; anchors.fill: parent; session: mockSession }\n"
+                          "}\n"),
+        QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TestWrapper.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO(component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> const obj(component.create());
+    REQUIRE(obj != nullptr);
+    auto* pane = obj->property("pane").value<QQuickItem*>();
+    REQUIRE(pane != nullptr);
+    auto* overlay = pane->findChild<QQuickItem*>("reconnectingOverlay");
+    REQUIRE(overlay != nullptr);
+    QCoreApplication::processEvents();
+
+    CHECK_FALSE(overlay->isVisible());
+    session.setReconnecting(true);
+    QCoreApplication::processEvents();
+    CHECK(overlay->isVisible());
+    CHECK(overlay->property("text").toString() == QStringLiteral("Reconnecting…"));
+    session.setReconnecting(false);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(overlay->isVisible());
 }
 
 TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last session (offscreen)",
@@ -5827,5 +6055,88 @@ TEST_CASE("The find bar hands its open state over when the pane is rebound (offs
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
+
+namespace
+{
+/// A drift badge shown in a window, with the model it reads.
+struct DriftBadgeFixture
+{
+    QQmlEngine engine;
+    contour::window::DaemonDriftModel model;
+    QQuickWindow window;
+    std::unique_ptr<QObject> object;
+    QQuickItem* badge = nullptr;
+
+    DriftBadgeFixture()
+    {
+        contour::test::installChromeStyle(engine);
+        engine.rootContext()->setContextProperty("daemonDrift", &model);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml")));
+        REQUIRE(component.isReady());
+        object.reset(component.create());
+        badge = qobject_cast<QQuickItem*>(object.get());
+        REQUIRE(badge != nullptr);
+        window.resize(400, 300);
+        badge->setParentItem(window.contentItem());
+        badge->setPosition({ 10, 10 });
+    }
+
+    /// Clicks the middle of the badge.
+    void click()
+    {
+        window.show();
+        auto const centre = badge->mapToScene(QPointF { badge->width() / 2, badge->height() / 2 });
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centre.toPoint());
+    }
+
+    [[nodiscard]] QObject* dialog() const
+    {
+        return badge->findChild<QObject*>(QStringLiteral("daemonDriftConfirm"));
+    }
+};
+} // namespace
+
+TEST_CASE("the drift badge shows the model's text and confirms before restarting", "[contour][qml][drift]")
+{
+    auto fixture = DriftBadgeFixture {};
+    CHECK_FALSE(fixture.badge->isVisible());
+
+    fixture.model.show(
+        vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost));
+    CHECK(fixture.badge->isVisible());
+    auto* label = fixture.badge->findChild<QObject*>(QStringLiteral("daemonDriftLabel"));
+    REQUIRE(label != nullptr);
+    CHECK(label->property("text").toString() == fixture.model.text());
+
+    auto* dialog = fixture.dialog();
+    REQUIRE(dialog != nullptr);
+    CHECK_FALSE(dialog->property("visible").toBool());
+
+    // A click opens the confirmation; nothing restarts until it is confirmed.
+    auto spy = QSignalSpy { &fixture.model, &contour::window::DaemonDriftModel::restartRequested };
+    fixture.click();
+    CHECK(dialog->property("visible").toBool());
+    CHECK(dialog->property("heading").toString() == QStringLiteral("Restart daemon on the new version"));
+    CHECK(dialog->property("message").toString() == fixture.model.confirmation());
+    CHECK(spy.count() == 0);
+
+    REQUIRE(QMetaObject::invokeMethod(dialog, "confirmed"));
+    CHECK(spy.count() == 1);
+}
+
+TEST_CASE("the drift badge ignores clicks while a restart runs", "[contour][qml][drift]")
+{
+    auto fixture = DriftBadgeFixture {};
+    fixture.model.show(
+        vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost));
+    fixture.model.requestRestart();
+    REQUIRE(fixture.model.isRestarting());
+
+    fixture.click();
+    CHECK_FALSE(fixture.dialog()->property("visible").toBool());
+    auto* label = fixture.badge->findChild<QObject*>(QStringLiteral("daemonDriftLabel"));
+    REQUIRE(label != nullptr);
+    CHECK(label->property("text").toString() == QStringLiteral("Restarting daemon…"));
+}
 
 #include <QmlComponents_test.moc>

@@ -3,6 +3,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <ranges>
+#include <thread>
+
 TEST_CASE("BufferObject", "[BufferObject]")
 {
     // TODO
@@ -35,4 +39,29 @@ TEST_CASE("BufferObject.rewindHotEndTo.handsTheTailToTheNextWrite", "[BufferObje
 
     CHECK(buffer->hotEnd() == begin + 4);
     CHECK(buffer->bytesAvailable() == capacity - 4);
+}
+
+TEST_CASE("BufferObjectPool.recyclesAcrossThreads", "[BufferObject][threading]")
+{
+    // A terminal allocates on its reader thread and on the thread that writes to its screen, and a buffer
+    // comes back to the pool on whichever thread drops it last. Each thread here holds at most one buffer
+    // at a time, so the pool never holds more than the two threads gave back.
+    static constexpr auto Rounds = 1000;
+    auto pool = crispy::BufferObjectPool<char> { 256 };
+    auto dirty = std::atomic<int> { 0 }; // Catch2's assertions are not for other threads
+    auto const churn = [&pool, &dirty] {
+        for ([[maybe_unused]] auto const round: std::views::iota(0, Rounds))
+        {
+            auto const buffer = pool.allocateBufferObject();
+            if (buffer->bytesUsed() != 0)
+                ++dirty;
+            buffer->advance(1);
+        }
+    };
+    {
+        auto first = std::jthread { churn };
+        auto second = std::jthread { churn };
+    }
+    CHECK(dirty == 0);
+    CHECK(pool.unusedBuffers() <= 2);
 }

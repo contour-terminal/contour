@@ -100,26 +100,46 @@ A mirror binds the verdict into its terminal as the terminal's replica role
 its application reports — a command block's, an OSC 3008 context's, the OSC 7 one — as foreign,
 showing it but never opening or spawning into it.
 
-The handshake is an **exact match**, not a negotiation: a peer of another revision is refused, and the
-two ends must therefore speak the same one. The refusal is the same `ServerHello` whether the version
-or the token was wrong — the daemon's version and nothing else, then the drop — so a peer probing it
-learns which revision the daemon speaks, but not whether its token was right. That version is the
+Two limits ride here as well, both applying in BOTH directions: `MaxFrameSize` bounds a declared
+payload, and `MaxGridExtent` bounds an announced or proposed grid — an announced one because the
+client sizes a repaint buffer from it. Integral fields are decoded with a range check rather than a
+narrowing cast, so an out-of-range value is a `MalformedPdu` instead of a plausible small one.
+
+### Version negotiation
+
+The handshake **negotiates**: each hello states the range of protocol versions its end speaks, and the
+daemon agrees on the highest one both ranges contain (`HandshakePolicy::versions`, by default
+`proto::SupportedVersions`, today `{ 4, 4 }`), along with the capabilities both ends offer. The client
+takes any agreed version inside both ranges; the outcome is `NativeSession::negotiated()` on one end and
+`NativeClient::negotiated()` on the other. A peer whose range does not meet the daemon's is refused, and
+`proto::describe` phrases the refusal for whichever end reports it.
+
+**The refusal discloses the daemon's supported range.** It is the same `ServerHello`, byte for byte,
+whether the version or the token was wrong — for a peer from before negotiation (codecs 1 to 3) the
+version alone, for any other an agreed version of 0 beside the daemon's range, then the drop — so a
+peer probing it learns which versions the daemon speaks, but not whether its token was right. That
+discloses the daemon's whole supported *range* where a pre-negotiation daemon disclosed one `u32`;
+accepted, since the range is fixed per release and so public knowledge of it. The range is the
 diagnosis a user needs who upgraded and left an old daemon running: each end reports the other's
-(`daemon speaks codec v1, we speak v2`).
+(`the daemon speaks protocol 3, from a release before version negotiation; this client speaks 4-4`). When the two ranges
+overlap, the refusal was not about the version, and the text says so: wrong token or insufficient
+rights.
 
-The diagnosis has to survive the revisions between the two ends, so the hellos keep two layout rules.
-**Each starts with its version, and a hello of another revision is decoded no further**: whatever a
-later revision adds after the version is never read. **And each stays readable to contour 0.7.0**,
-whose daemon decodes a hello whole before it checks the version and refuses a byte too many: a
-`ClientHello` carries its fields as one blob followed by a zero byte, which that daemon reads as a
-token and no session settings, and a refusing `ServerHello` is the version alone, all of one that
-release reads. `vthost/testing/ShippedCodec.hpp` holds both hellos to that release's reader.
+**The hello layouts.** The diagnosis has to survive the revisions between the two ends, so both hellos
+lead with a `u32`, and every negotiating hello's is `proto::NegotiatingHelloMarker` (4). A hello leading
+with any other value is a pre-negotiation peer's, decoded no further than that version.
 
-**The protocol is experimental since 0.7.0**, which shipped `CodecVersion` 1. Experimental means no
-compatibility across revisions beyond that handshake. The version moves with **every change to the
-wire**: a released peer exists — a 0.7.0 daemon keeps running across an upgrade — so two builds whose
-bytes differ must refuse each other at the handshake rather than pass it and then mis-read every PDU
-after it. The revisions so far:
+| PDU | Layout |
+|-----|--------|
+| `ClientHello` | `u32 4`, one blob of `varint min, varint max, varint count + varint idents, string token, optional session settings` and whatever a later version appends, then one zero byte |
+| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname, string releaseVersion, varint count + varint followedWindows, varint daemonInstance` and whatever a later version appends |
+| `ServerHello` (version alone) | the `u32` alone: the refusal a pre-negotiation client (0.7.0 on codec 1, 0.8.0 on codec 2, or codec 3) reads |
+
+Each stays readable to contour 0.7.0, whose daemon decodes a hello whole before it checks the version
+and refuses a byte too many: it reads the `ClientHello`'s blob as a token and the zero as "no session
+settings", and answers with its version. Codecs 2 and 3 consume everything after a version not their
+own. `vthost/testing/ShippedCodec.hpp` holds both hellos to 0.7.0's reader, and
+`PreNegotiationCodec.hpp` to those of codecs 2 and 3. The pre-negotiation revisions were:
 
 - 1: contour 0.7.0.
 - 2: command blocks (#1010) — each row's block id and birth time, the block records and their id
@@ -127,16 +147,65 @@ after it. The revisions so far:
 - 3: status-line extensions — a `Delta`'s status rows name the display they are for, and the
   `PermissionRequest` and `PermissionReply` PDUs.
 
-The same reasoning applies to `PduType`: the catalog is kept **contiguous** and may be renumbered with
-a version bump, so a retired PDU leaves no gap. A gap exists to keep a tag from being reused while a
-peer still remembers the old meaning, and the handshake refuses a peer of another revision before it
-sends any other PDU. The two hellos are the exception: their tags are how two revisions meet, so they
-keep 0.7.0's.
+A peer of any of them gets only the readable refusal; no old codec is kept for them.
 
-Two limits ride here as well, both applying in BOTH directions: `MaxFrameSize` bounds a declared
-payload, and `MaxGridExtent` bounds an announced or proposed grid — an announced one because the
-client sizes a repaint buffer from it. Integral fields are decoded with a range check rather than a
-narrowing cast, so an out-of-range value is a `MalformedPdu` instead of a plausible small one.
+**Capabilities gate new features; a version step is for a changed meaning.** An optional feature is a
+`proto::Capability`, offered in the hello by the end that supports it and used only when both did
+(`Negotiated::shared`). Adding one is a row in `proto::CapabilityTable`:
+
+| `Capability` | Ident | Name | Gates |
+|--------------|-------|------|-------|
+| `ExtensionPermissions` | 1 | `extension-permissions` | `PermissionRequest` / `PermissionReply`: the daemon asks an extension's permission question only of a client with which it shares it; one that did not offer it is never asked, and the question waits for another client, as it does while none is attached |
+| `ControlPermissions` | 11 | `control-permissions` | A `PermissionRequest`'s appended `control` list (the control-API permissions an extension's manifest declares, granted with its commands): a question that asks for any is sent only to a client sharing it, whose prompt shows them; one that would prompt with the commands alone is not asked, and the question waits for another. So an older client is never asked about such an extension at all -- its commands stay ungranted there too, and the extension shows only its own "not granted yet" text until a client sharing the capability answers |
+
+A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
+costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
+meaning.
+
+**PDU bodies are append-only.** A body grows only by appending fields at its end; a decoder ignores the
+bytes after the fields it knows and gives a field missing at the end its default, so a peer older or
+newer by one appended field still reads the PDU. A field that is itself a growing record travels as a
+blob, so its own appended fields stay inside it. Both hellos' blobs follow the same rule: a new hello
+field goes at the end of the blob, gated by a capability. The catalog of `PduType` tags is kept
+**contiguous**; renumbering or retiring a tag changes existing PDUs' meaning, so it takes a version
+step. The two hellos keep 0.7.0's tags, as they are how two versions meet at all.
+
+**`Unsupported` (tag 24) answers a PDU a peer does not know.** After the handshake, a frame whose tag
+the receiver does not know is answered with `Unsupported { refusedSerial, ident }`, and the connection
+continues. Its receiver stops sending that tag for the rest of the connection
+(`NativeSession::peerRefused()`, `NativeClient::peerRefused()`, both kept by `proto::UnsupportedTracker`)
+and never answers an `Unsupported` with another. Before the handshake no PDU is answered with one: the
+daemon answers anything but a `ClientHello` with a version-alone `ServerHello` and ends the connection,
+as it did before negotiation, and the client ignores anything but the `ServerHello` — a session PDU
+arriving first is logged, not applied.
+
+**The compatibility window.** A release speaks at least the protocol versions of the previous two
+releases, counted from the first release that ships the range handshake. `proto/ReleasedVersions.hpp`
+holds the data: `ReleasedProtocols`, one row per release that shipped negotiation with the range it
+speaks, oldest first, always followed by the row `{ "unreleased", SupportedVersions }` — the build under
+development, and until the first such release the only row (a `static_assert` pins it last and to
+`SupportedVersions`) — and `LastReleaseBeforeNegotiation` (`0.8.0`). `compatibilityFloor()` is the highest
+version of the row two before the newest — the older of this build's previous two releases — or of the
+oldest row while fewer exist, and `Compatibility_test.cpp` holds
+`SupportedVersions.min` at or below it: raising the floor of what this build speaks past that is a test
+failure. `vthost/testing/RecordedTranscripts.hpp` holds, per version, the bytes that version's client
+and daemon wrote for an attach — a `ClientHello`, an accepting `ServerHello`, a `ResizeRequest` and an
+`Input` — recorded once and **never regenerated** for a shipped version; every transcript of a version
+inside `SupportedVersions` must still be served: the daemon agrees on its version, answers no
+`Unsupported`, applies the resize and the input and keeps the connection open, and a client attaches to
+its `ServerHello`.
+
+**Cutting a release: add a `ReleasedProtocols` row and record its transcripts.** Insert
+`{ "<version>", <range> }` just before the `"unreleased"` row, which stays last, and, when the
+release ships a version without a transcript, run `vthost_test "[.dump]"`, which prints this build's
+attach PDUs in the header's layout, and append them to `RecordedTranscripts.hpp`. The `[release]` test
+enforces the step: it reads `metainfo.xml` (`CONTOUR_METAINFO_PATH`) and takes the newest `<release>`
+carrying a `date=` — undated `type="development"` entries and commented-out templates are not releases.
+While that is `LastReleaseBeforeNegotiation`, the only row may be `"unreleased"`; otherwise the row
+just before the trailing `"unreleased"` one must name it, and no other `"unreleased"` row may exist,
+or the test fails with `add a ReleasedProtocols
+row for <N> and record its transcripts`. `/draft-release` stamps the date, so the test turns red on the
+release branch exactly when the row is missing.
 
 ### Status-line extensions and the font
 
@@ -169,11 +238,29 @@ absence looks like an oversight:
   session's follow state and pending-delta entry — a dead session cannot accumulate work.
 
 Adding the verb later is not a compatibility event, which is why it is not rushed in ahead of a
-release: a new tag decodes to `Invalid{ident}` on an older peer, and the exact-match handshake above
-means both ends speak the same revision regardless. What genuinely costs a version bump is changing an
-existing PDU's fields.
+release: it is a new PDU behind a capability (see [Version negotiation](#version-negotiation)), and an
+older peer that receives it anyway answers `Unsupported`. What genuinely costs a version step is changing
+an existing PDU's meaning.
 
-### Where a split ratio lives
+### What a client syncs back
+
+A client rebuilds its windows from `LayoutState`, so anything it changes about a tab and does not
+tell the daemon is lost on the next attach, and never reaches another client. Two verbs carry it
+back: `ResizeSplit` for a divider (below), and `EditTab` for how a tab is presented — its active
+pane, its zoom, its title, its colour, and which tab of the window is active.
+
+**`EditTab`** (tag 28, gated on `Capability::TabEdits`; without it the daemon answers
+`Unsupported`) names a session and a `TabEditKind`, and `vthost::applyTabEdit` applies it through
+one table row per kind: `ActivatePane` → `setActivePane`; `Zoom`/`Unzoom` → activate the pane, then
+`toggleActivePaneZoom` only when the zoom differs; `SetTitle`/`ClearTitle` →
+`setTabTitle`/`resetTabTitle`; `SetColor`/`ClearColor` → `setTabColor`/`resetTabColor` as
+`TabColorSource::User`; `ActivateTab` → `activateTab`. Every row compares before it mutates, so a
+client re-asserting state the daemon already holds fires no model event and so costs no client a
+layout push; a change fans out as a fresh `LayoutState` to every client, the sender included. An
+edit naming an unknown session or kind is logged with `describe(TabEditError)` and answered with
+nothing.
+
+#### Where a split ratio lives
 
 **In the daemon's model, or the user loses it.** A client rebuilds every tab from `LayoutState` on
 attach, so a divider the daemon never heard about comes back at the ratio the split was *created*
@@ -200,11 +287,25 @@ Two details the mechanism rests on:
 `applyRemoteLayout` therefore has a third pass, after the additive and subtractive ones and on the
 settled tree, that re-flows an already-realized tab when another client moves a divider. It pairs
 each wire tab with the local tab that matches it leaf-for-leaf, so a tab caught mid-reconciliation is
-skipped rather than written onto. That pass is the shape to generalize when a SECOND attribute needs
-the same treatment: `WireTab` already serializes `activePane`, `zoomedPane`, `title` and `color`, and
-none of them are reconciled yet — at that point one lockstep `reconcile(wire, local)` walk subsumes
-all three passes, and the outbound half wants `NativeController` as a second `ModelEvents` observer
-rather than a hand-written verb per attribute.
+skipped rather than written onto.
+
+#### How a tab's presentation travels
+
+The same pairing carries a tab's presentation both ways, compared as one
+`vthost::client::TabPresentation` (active and zoomed pane by session, title, colour, and whether the
+tab is its window's active one). **Outbound**, the five model events that can change it
+(`activePaneChanged`, `paneZoomChanged`, `tabTitleChanged`, `tabColorChanged`, `activeTabChanged`)
+call `SessionFactory::reportTabPresentation`, which names the panes by their ptys, since only the
+factory knows what a pty is bound to; `NativeController` translates them to sessions and sends one
+`EditTab` per field `tabEditsToReport` finds different. It compares with the last `LayoutState` for
+the tab, or with what it reported since, until the next push of that window: a zoom also retitles a
+tab, and the second report must not send the zoom again. **Inbound**, `applyRemoteLayout`'s last pass
+runs `tabEditsToReport` the other way round — what the daemon has that the local tab has not — and
+applies the edits to the local model through the daemon's own `applyTabEdit`, with the sessions
+translated, so the two ends cannot disagree on what an edit means. The colour compared and applied
+is the user's (`TabColorSource::User`), never the effective one: a profile's or an application's
+colour is the client's own business. Nothing echoes: the last pass runs inside the realizing bracket,
+and `reportTabPresentation` drops what arrives during it.
 
 Line PDUs carry the full per-cell renditional state (grapheme cluster extras,
 widths, OSC 66 scales and packed extras, hyperlink ids, colors, the 20
@@ -453,8 +554,10 @@ pre-retrofit baseline (acceptance was < 0.5 %), `writeTextToSoA` and
 ### Transport and clients
 
 `NativeSession` (server) pushes an attach snapshot (SessionState + a snapshot
-Delta per session), then 20 ms-debounced deltas off the host's screen-updated
-signal. Deltas also carry the currently-SET DEC private modes of a
+Delta per session), then deltas off the host's screen-updated signal. The
+first update after a client's input (its echo, once per input within a 50 ms
+window) and the first increment after a snapshot flush at once; everything else
+coalesces for 20 ms into one Delta (`vthost/FlushPolicy.hpp`). Deltas also carry the currently-SET DEC private modes of a
 single-sourced mirrored-mode table (`vthost/MirroredModes.hpp`: cursor keys,
 keypad, backarrow, bracketed paste, focus, cursor visibility) —
 everything a client needs to encode INPUT correctly; a pure mode flip pushes
@@ -532,7 +635,7 @@ terminal changed identity. A client whose configuration changed restates its pre
 from then on; `contour client` resolves its profile again before every session it asks for, from the
 configuration the GUI holds in memory (as a local new tab does), and sends the restatement only when
 the result differs, so a tab opened after a configuration reload gets the reloaded profile. Both `contour daemon` and `contour client` resolve those settings through
-the one `config::resolveEmulationSettings` helper, so a warm daemon and the client attaching to it
+the one `config::findNamedProfile` lookup (`emulationSettingsFor`, `resolvedSessionConfigFor`), so a warm daemon and the client attaching to it
 cannot disagree about what a profile means.
 
 Transient session events — bell, desktop notification, OSC 52 clipboard write — are one PDU each
@@ -545,6 +648,89 @@ saying which field meant what.
 frontend can render — and `contour client` is the GUI frontend on top of it.
 Sessions survive detach; a reattach replays history. The daemon serves the native
 protocol on `<control-socket>-native`.
+
+### The stdio relay
+
+`contour daemon --stdio` is the remote end of an ssh attach (`ssh <target> contour daemon --stdio`):
+it reaches this user's daemon on `<control-socket>-native`, starting it through phase 2's
+`DaemonStarter` when none serves (a registered user service first, so a stopped service is started
+rather than an on-demand daemon beside it), and then copies bytes both ways between its standard
+input/output and that socket (`vthost/StdioAttach.hpp`, `vthost/ByteStream.hpp`).
+
+Before the protocol it writes exactly one line, the preamble (`vthost/StdioPreamble.hpp`):
+
+| Line | Meaning |
+| --- | --- |
+| `contour-stdio 1 ready\n` | The daemon is reached; the native protocol follows. |
+| `contour-stdio 1 error: <message>\n` | It could not be; the message says why, on one line. The relay then exits. |
+
+A client scans for that line, skipping up to 64 KiB of whatever came before it — a remote login shell
+that prints a banner or a motd on non-interactive logins is the classic reason binary protocols over
+ssh break. **Nothing may follow the ready line** before the client speaks: the native server reads a
+`ClientHello` before it writes anything, and the client has not sent one yet, so a byte after the
+ready line is not the protocol and the scanner reports it as such.
+
+The relay never parses a PDU. It is a pipe with a preamble, so a relay of one release serves any
+protocol version its daemon and the client negotiate (see [Version negotiation](#version-negotiation));
+an old relay in front of a new daemon costs nothing.
+
+**Logging must never reach stdout**, which is the invariant the whole transport rests on: every byte
+on stdout belongs to the protocol. The log's default sink is stderr and `--log-file` names a file or
+stderr, but that is not left to convention: `makeProcessStdioStream()` takes a private copy of stdout
+for the relay and points stdout itself at stderr, so a stray `std::cout` — a log category constructed
+after logging was installed, which defaults to the console, or a library's diagnostic — goes to ssh's
+stderr channel instead of into a frame. `contour daemon --stdio` takes stdout over that way **first**,
+before it loads its configuration: the configuration names the socket, so it loads before logging is
+installed, and a warning it logs then goes to the default console sink. Only a refused option
+combination is reported earlier, while stdout is still untouched; any later failure (a configuration
+that does not load, an unknown `--size-policy`) goes to stderr and, as an error preamble, to the
+client (`contour_e2e_stdio_relay` pins both). Stdout is read and written raw (fds 0/1, or the
+`GetStdHandle` handles on Windows), never through the CRT's text-mode streams, which would turn every
+`0x0A` into `0x0D 0x0A`.
+
+The client→daemon direction runs on a detached thread: a blocking read of process stdin cannot be
+interrupted portably, and the process exits as soon as the daemon→client direction ends, which is the
+relay's end.
+
+#### The ssh side
+
+`SshTransportFactory` (`vthost/SshTransport.hpp`) is the client end: an `ITransportFactory` whose
+`connect()` spawns, through the injected `IStdioSpawner`, exactly
+
+```
+ssh -T -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    [-p PORT] -- [USER@]HOST contour daemon --stdio
+```
+
+| Argument | Why |
+| --- | --- |
+| `-T` | No remote pty: a pty would translate bytes (`\n` → `\r\n`) and echo them. |
+| `-o BatchMode=yes` | Key and agent authentication only. Nothing may prompt: a GUI has no terminal to prompt on, and a prompt nobody answers is a hang. |
+| `-o ConnectTimeout=10` | A host that does not answer fails within ssh itself, before the transport's own bound. |
+| `-o ServerAliveInterval=15`, `-o ServerAliveCountMax=3` | A dead peer (sleep, Wi-Fi) is noticed in about 45 s, so ssh exits and the reconnect loop takes over. |
+| `--` | Ends ssh's options. `parseHostUrl` already refuses a user or host that begins with `-`, but the argv does not rely on it: a destination like `-oProxyCommand=…` can never be read as an option. |
+| `REMOTE_COMMAND` | `contour daemon --stdio`, or the host's `remote_command:`, verbatim. |
+
+From the spawn to the preamble the attempt is bounded by `SshConnectTimeout` (30 s). Bytes before the
+ready line are skipped and logged (`vthost.client`); the ready line hands out the child's socket as the
+`Connection`, with the ssh child as its `lifetime`, so the child is reaped only after the socket is
+closed. The token is empty: ssh authenticated the user, and the relay connects to the user's own
+AF_UNIX socket.
+
+When ssh ends before the preamble, what it wrote to stderr is classified by `SshFailureRules`, a table
+of needles matched in order (first match wins), with exit code 127 meaning "the remote shell found no
+`contour`". **A new message ssh or a remote shell prints is a new row there**, and its words a row of
+the message table in `SshTransport.cpp`. Each failure maps onto a `TransportErrorKind`, and that decides
+whether `ClientSupervisor` retries: only an unreachable host and an ssh that ended for no recognized
+reason are `Unreachable` (Transient). A refused login, an unknown or changed host key, a missing or too
+old remote Contour, a login shell that prints more than 64 KiB, and the relay's own error preamble are
+all Permanent: retrying cannot fix them, so the window ends with the message instead of looping. ssh
+never yields `DaemonAbsent`: the remote relay starts its daemon itself and reports a failed start as an
+error preamble (`Refused`).
+
+Every failure path ends the child before `connect()` returns, and every `connect()` spawns a fresh
+ssh: a dropped connection's child is reaped when its `Connection` goes, and the next attempt starts
+anew.
 
 ## The GUI seams (`contour client`, `contour client --tmux`)
 
@@ -658,12 +844,206 @@ change. The connection that asked is no longer special.
 
 **What a client that cannot show the grid does.** A client LARGER than the grid letterboxes — the
 sub-cell remainder already renders as background padding, so the surplus simply is not drawn. A
-client SMALLER than it shows a window into the grid, positioned by `contour::geometry::
-viewportOrigin` — tmux's `tty_window_offset1` rule, ported as a pure function: centre the cursor
-horizontally once it is past the viewport, keep it on the last visible row vertically, clamp so the
-view never runs off the grid, and decide the two axes independently. The rule and its tests are in
-place; wiring it into the render origin and the mouse hit-test is not yet done, so a too-small
-client currently clips at the top-left instead of following the cursor.
+client SMALLER than it shows a window into the grid, positioned by `vthost::client::viewportOrigin`
+— tmux's `tty_window_offset1` rule, ported as a pure function: centre the cursor horizontally once
+it is past the viewport, keep it on the last visible row vertically, clamp so the view never runs
+off the grid, and decide the two axes independently. `ScreenMirror` applies it on every update:
+local page row `r` shows the host's row `origin.line + r`, shifted left by `origin.column`, and the
+local cursor is the host's minus the origin. An origin that moves rewrites the whole page (the
+replay's page path); an unchanged one scrolls incrementally as before. Rows of the host's history
+are written unshifted, and the host's page rows above the window are not copied into local
+history. The mirror terminal adds the origin to every cell it reports in a mouse press, move or
+release (`vtbackend::Terminal::setReportedCellOrigin`), so a click lands on the cell the application
+drew there, not on the client's own cell.
+
+### Which windows a client sees
+
+A grid is shared; a *window* need not be. A client states an attach intent in its `ClientHello`
+(`proto::AttachIntent`, honoured only when both ends share `Capability::AttachIntent`), and the
+daemon decides with the pure `vthost::planAttach` what that connection follows and what attaching
+creates:
+
+| Intent | Follows | Creates |
+| --- | --- | --- |
+| `AllWindows` (no capability: every client before intents) | every window, later ones included (`FollowScope::Every`) | the first tab, on an empty daemon |
+| `Launch`, no other client attached | every window with a tab | the first tab, on an empty daemon |
+| `Launch`, another client attached | a new window of its own | that window |
+| `NewWindow` | a new window of its own | that window |
+| `Windows` | the listed windows that exist (possibly none) | nothing |
+| `Resume` | the listed windows that survive, holding a tab; none surviving, as `Launch` | as `Launch` when none survive |
+
+"Another client" is `SessionHost::connectedClients()`: handshaken native `Attach` connections,
+counted after the plan (so a connection never counts against itself) and uncounted as the
+connection is destroyed. It is deliberately not the daemon's `ClientCensus`, which counts tmux and
+imsg clients too, for idle exit: a tmux gateway attached must not turn the first GUI's launch into
+a second window.
+
+The handshake runs negotiate → plan → create → `ServerHello` (whose `followedWindows` names the
+windows followed) → `LayoutState` per followed window → snapshots of their sessions. The plan runs
+after the hello's client area is applied, so whatever it spawns spawns at the client's size. Nothing
+reaches the peer before its `ServerHello`. From then on a connection is sent the layout, screens,
+resizes, bells, notifications and clipboard writes of followed windows only; a window that closes
+leaves the set.
+
+A window gains followers in two ways. One a connection creates (its `NewWindow`, or the window a
+launch made for it) is *claimed* for it in `SessionHost` before its first tab is announced, and that
+connection follows it. A window nobody claims — one the control API creates — is followed by the
+**primary viewer**, the connection whose `Launch`/`Resume` found no other client attached: `contour
+new` then appears in the GUI the user launched first, not in none. A claimed window stays claimed
+after its creator leaves, so a second GUI never inherits the first one's window; it waits for the
+next launch that takes every window. Each window joining a connection's set is sent its sessions'
+snapshots, since a quiet session would otherwise produce nothing to send.
+
+A client that loses its connection keeps its windows. `vthost::client::ClientSupervisor` opens every
+connection through an `ITransportFactory` (`Transport.hpp`), and after a loss reconnects with backoff
+(250 ms doubling to 5 s), each new connection stating `Resume` of the windows the lost one followed —
+or `AllWindows` again for a client that attached with it, so a reconnect never narrows its view.
+Window and session ids count from 1 in every run of a daemon, so the ids alone cannot tell a restarted
+daemon's window 1 from the one the client showed: the `ServerHello` states `daemonInstance`, drawn at
+random as the daemon starts, and a client that meets another instance takes every window it showed for
+lost. That is also why `Resume` does not take an empty window for a survivor — a restarted daemon's own
+primary window holds no tab yet. The GUI (`contour::remote::NativeController`) keeps every pane and pty
+while reconnecting, drops what is typed meanwhile rather than replaying it into whatever shell answers
+next, restarts each pane's mirror for the new connection's snapshots, and reports the lost windows
+(`windowsLost`) with the first window that came instead, so it can close them without closing the last
+one.
+
+### Control channel
+
+The daemon's control API (`src/vtcontrol`: windows, tabs, panes and command blocks, named by UUID,
+spoken in strict JSON) travels on the native connection, not on a listener of its own, so it inherits
+that endpoint's whole access rule and phase 5's `--stdio` relay. A caller connects with the
+**Control** role, which never views: no first session is spawned for it, it is sent no layout, no
+snapshot and no screen, it reports no client area and counts as no client. A connection's
+`NativeSession::ConnectionPhase` (`AwaitingHello`, `Viewing`, `Controlling`) is the one state the
+accepted hello decides; what was negotiated with it stays in `negotiated()`.
+
+Three PDUs carry it, gated on `Capability::ControlApi` (`control-api`, 9):
+
+| PDU | Tag | Direction | Carries |
+| --- | --- | --- | --- |
+| `ControlRequest` | 30 | client → daemon | `requestId`, the method, the params JSON, the caller's `$CONTOUR_PANE` |
+| `ControlReply` | 31 | daemon → client | the same serial and `requestId`, `Ok` with the reply JSON or `Error` with a `ControlError` |
+| `ControlEvent` | 32 | daemon → client | a subscription id and one event's JSON |
+
+A `ControlRequest` on a connection that does not share the capability, or on a `Viewing` one, is
+answered `Unsupported` for its serial and the connection stays open. Otherwise
+`vtcontrol::dispatch` serves it through `NativeSessionServices::control` — the daemon's
+`control::ControlService`, an embedded host's null object that answers every call `unsupported` —
+and the reply goes out once the call completes, at once or, for a wait, later. A Control connection
+keeps the status and stop verbs of the role (`DaemonStatusRequest`, `StopDaemon`), whether or not it
+shares the API, and is answered `Unsupported` for everything else.
+
+`ControlService` runs on the loop thread. What a session's parser raises — a finished or changed
+command block, a title, a working directory — the host posts to the loop as a `SessionSignal`
+before any observer hears of it, so subscriptions (`EventHub`) and waits (`BlockWaiters`) are never
+touched off the loop, and a terminal is only read under its lock.
+
+**The reply bound.** Pane text — a capture, a block's prompt and output — is cut to
+`ControlServiceConfig::maxReplyBytes`, a quarter of a connection's send-queue bound in the daemon,
+keeping its tail (`"truncated":"head"`), so one reply always fits beside a backlog and a pane with a
+huge scrollback never costs the connection. Every byte a pane printed is made valid UTF-8 and every
+control character escaped, so the JSON stays valid whatever the pane holds.
+
+**Event backpressure.** An event is not queued while the connection's backlog is past half its
+send-queue bound: a per-subscription counter grows instead, and the next event that fits is preceded
+by `events.dropped { count }`. A subscriber that stops reading therefore costs the daemon bounded
+memory and loses events, never the connection, and no viewer is affected. What a connection may hold is bounded
+too: `ControlServiceConfig::maxSubscriptionsPerConnection` (64) subscriptions and
+`maxWaitsPerConnection` (256) pending `block.wait`s and `pane.send` waits; one more is answered
+`limitReached` and the connection stays open, a `pane.send` refused so typing nothing. Ending a
+subscription frees its place and its dropped-event counter (`EventSink::subscriptionEnded`); a
+connection's close frees its whole share. When a connection ends, its
+subscriptions and waits are dropped (`ControlApi::sinkClosed`) before it lets go of itself; an
+`Attach` connection's coming and going is published as `client.attached`/`client.detached`, beside
+`SessionHost::noteClientAttached`/`noteClientDetached`, so the events and `connectedClients()` agree.
+
+**Grants.** Every catalog row names a `vtcontrol::Permission` — `read`, `screen`, `input` or
+`write` — and a connection holds a `vtcontrol::ControlGrants` set, decided in the handshake with its
+token: `HandshakePolicy::acceptedTokens` lists the tokens an endpoint takes, each an `AcceptedToken`
+with its grants. The unix endpoint lists none, so any hello is taken with all four, the socket's
+owner check being the gate; a connection phase 5's `--stdio` relay carries arrives on that socket and
+holds all four too, ssh having authenticated it. The TCP endpoint lists `--token`/`--token-file`
+(everything) and the entries of `--access-file` (`AccessFile.hpp`), and a hello holds the grants of
+the first token it equals. `vtcontrol::dispatch` answers a row outside the grants `forbidden`
+(`needs grant 'input'`) without calling the handler, a typed `ControlReply` and not a closed
+connection. A row may also name a `requestGrant` rule, a permission and the reason for it with a predicate on the
+decoded request, for what a request needs beyond the row's permission: `tab.create` and `pane.split` need `input` beside `write` when they
+name a `command` (`CommandNeedsInput`), since running a program is typing it. Each `EventRow` names a permission as
+well (`block.finished` needs `screen`, every other kind `read`): `events.subscribe` narrows the kinds
+it is given, or every kind, to those the grants allow, and refuses one that names only forbidden kinds. The role's own verbs are gated alike: `DaemonStatusRequest` needs `read`, `StopDaemon`
+`write`, and without it they are answered `Unsupported`, the daemon logging why. A narrow token is
+for Control connections only: an `Attach` hello whose token lacks any grant is answered with the very
+bytes of a wrong token (`token lacks the grants an attach connection needs (has read,screen)` in the
+daemon's log), before it is counted or spawns a session.
+
+**Verified transports.** `ITransportFactory::peerTrust()` says before connecting whether the peer is
+authenticated: `Local` for the unix socket, `Verified` for TLS against a pinned CA (`--tls-ca`) and
+for ssh, which checks the host key, and `Unverified` for TLS without a trust anchor, which encrypts
+but would hand the token to an active machine-in-the-middle. A control client refuses an `Unverified`
+transport before it connects; the interactive `contour client` keeps attaching over it.
+
+### Program status
+
+A session's OSC 7501 records (`vtbackend::ProgramStatusSet`, at most 64) travel to viewers as one
+PDU, gated on `Capability::ProgramStatus` (`program-status`, 10):
+
+| PDU | Tag | Direction | Carries |
+| --- | --- | --- | --- |
+| `ProgramStatus` | 33 | daemon → client | a session id and its whole set, least recently updated first |
+
+The set is state, not an event, so it is always sent whole and replaces what the mirror held; an
+empty set says every record is gone. A change raises `ProgramStatusChangedSignal` on the parser
+thread, which the host posts to the loop like every `SessionSignal`; a `Viewing` connection that
+shares the capability marks the session and sends its set at the next debounced flush, read under
+the terminal lock when it goes, so a program reporting in a loop costs one PDU per coalescing window.
+A snapshot sends the set before its rows whenever it is not empty. On the client the set is kept on
+the `RemoteScreen`, so a mirror bound later (or replayed after a reconnect) catches up from it, and
+`ScreenMirror` hands it to `Terminal::replaceProgramStatus()`. A record whose state the client does
+not know is dropped (`control::fromWire`); `control/ProgramStatusConvert.hpp` holds the one table per
+enum that bridges `vtbackend`'s and `vtcontrol`'s spellings. The control API reads the same set for
+`PaneInfo.programStatus` and publishes `pane.programStatusChanged` with the whole set and its reason,
+both only to a connection granted `screen`: a record names a program and what it is doing, as the
+command line `block.finished` keeps behind `screen` does.
+
+The text is never traced (`ProgramStatus session=1 records=2`).
+
+### Who configures a daemon session
+
+The host's configuration owns what runs; the client's owns how it looks. A client names a
+**profile** — in its `ClientHello` (`profileName`), or on a spawning verb (`CreateTab`, `SplitPane`,
+`NewWindow`, whose name overrides the connection's for that one spawn) — and the daemon resolves the
+name in its own configuration through `vthost::ProfileCatalog` (`contour::cli::ConfigProfileCatalog`
+for `contour daemon`). The resolved profile supplies the session's settings and its whole shell:
+program, arguments, working directory and environment — the shell the in-process GUI spawns for that
+profile (`config::resolvedSessionConfig`), replacing the daemon's rather than layered over it, so no
+variable of the default profile reaches a session of another; only the daemon's own variables
+(`hostedShellEnvironment`) are added and win. Its `escape_sandbox` travels with it
+(`ResolvedProfile::sandbox`, through `SessionHostConfig::profilePtys`), as `SessionFactory` takes it
+from the session's own profile in-process: a contained profile is never run on the host because the
+default profile escapes. A spawn naming no profile resolves the default one the
+same way, keeping the emulation settings a client stated, if any. A
+layout pane's `command`/`directory` overlay that shell, and a startup layout's per-pane profile (else
+its tab's) is honoured the same way.
+
+A name the host does not know — a Windows laptop's `pwsh` profile against a Linux host — never
+refuses the session: the host's default profile (the daemon's `--profile`, else `default_profile`)
+runs, and the log says `session N: profile 'pwsh' is unknown here; using 'main'`.
+`daemon.history_limit`, when set, replaces every profile's `history.limit` on the host, since the
+daemon keeps the lines.
+
+It is gated twice. The daemon offers `Capability::ProfileByName` only when it has a catalog, and a
+connection that shares it and names a profile has its stated `sessionSettings` ignored. A client
+that does not share it keeps the older path, in which its stated emulation settings shape the
+sessions it creates and the daemon's configured shell runs.
+
+The catalog follows the configuration file while the daemon runs. `contour daemon` hands
+`runDaemon` a `ConfigReloadHook` whose poll (every 2 s, on the loop) compares the file's last-write
+time with the one last seen and, when it moved, loads it again into a fresh catalog
+(`contour::cli::ConfigReloadPoller`). `SessionHost::replaceProfiles` then serves new sessions from
+it, named or not, and gives every running session its profile's new scrollback limits under the terminal's lock;
+a running session's shell, environment and directory never change. A file that fails to load is
+logged and leaves the running configuration in force, and is not retried until it changes again.
 
 ## Socket conventions
 
@@ -671,6 +1051,10 @@ client currently clips at the top-left instead of following the cursor.
 overridable per flag and `$CONTOUR_MUX`. The socket directory hardening
 mirrors tmux exactly: 0700 directory, owner check, refuse **world**-rwx
 (group is permitted — tmux's `TMUX_SOCK_PERM == 7`).
+
+The socket directory is made `0700` **before** the daemon opens its log: the log sink used to create
+it first with the default mode, after which the listener's owner-only check refused the bind
+(`--background` and every on-demand spawn into a fresh socket directory failed that way).
 
 `vthost::daemonLogPath` derives `<socket>.log` beside the socket, as the default destination
 for a daemon with no console to write to (`--background`, and anything `contour daemon-service`
@@ -684,17 +1068,84 @@ user's own client never looks. `daemonServiceCommandLine` pins both the socket a
 
 ## Daemon lifetime
 
-A daemon stops for one of three reasons: `SIGINT`/`SIGTERM` (POSIX), a console-control event
-(Windows), or — with `--exit-with-last-session` — its last hosted session going away. All three
-funnel into one `requestDaemonShutdown`, which closes every listener and then unwinds the loop.
+Every shutdown carries a `ShutdownCause` (`DaemonLifecycle.hpp`), one row per trigger, and the
+single shutdown log line names it:
 
-`--exit-with-last-session` is **off by default**, because a daemon started by hand exists precisely
-to outlive its sessions and still be there for the next client. `ensureDaemon` turns it **on** for
-the daemon it auto-spawns: that one belongs to the client that needed it, and "make sure a daemon
-exists" must not mean "leave one behind". The policy rides on the *daemon*, not on the spawning
-client — a second client attaching inherits it, and the daemon ends when every session across every
-client is gone. Reference-counting attached clients (tmux's separate `exit-unattached`) is not
-implemented.
+| `ShutdownCause`     | Trigger                                                                       | Log text                         |
+|---------------------|-------------------------------------------------------------------------------|----------------------------------|
+| `Signal`            | `SIGINT`/`SIGTERM` (POSIX) or a console-control event (Windows)               | `signal received`                |
+| `LastSessionClosed` | with `--lifecycle=exit-with-last-session`, the last hosted session going away | `the last hosted session closed` |
+| `Idle`              | an `ExitWhenIdle` daemon with nothing to serve for its grace period           | `idle`                           |
+| `StopRequested`     | a Control connection's `StopDaemon` with reason `User`                        | `stop requested`                 |
+| `UpgradeRestart`    | a Control connection's `StopDaemon` with reason `UpgradeRestart`              | `restart for upgrade`            |
+| `StopRequestedKeepingWorkspace` | a Control connection's `StopDaemon` with reason `UserKeepingWorkspace` | `stop requested, keeping the workspace` |
+
+All of them funnel into one `ShutdownFunnel`, which runs on the loop thread and runs once: a second
+request — a `SIGTERM` racing a `StopDaemon` — logs nothing and does nothing. The shutdown first calls
+`DaemonConfig::beforeShutdown` with the cause, while every listener still accepts and every session
+is alive, then closes every listener and unwinds the loop. A trigger off the loop thread (the signal
+watch, the console-control handler) or inside a connection's PDU handler (a `StopDaemon`) posts its
+request rather than running it there, for the reasons `LastSessionWatcher` posts.
+
+The signals come through `DaemonConfig::shutdownSignals`. Its default is the process's own — a
+sigwait thread on POSIX, the console-control handler on Windows — and a test that runs `runDaemon`
+in-process sets `NoShutdownSignals`, so the daemon neither takes the test process's signals nor sends
+the `SIGTERM` that unblocks its sigwait thread into it.
+
+`runDaemon` arms that watch before it constructs the `SessionHost`. The sigwait watch blocks
+`SIGINT`/`SIGTERM` on the calling thread only, and a thread inherits the mask it was started under:
+the host starts a pump thread for each session of a startup layout in its constructor, and a
+process-directed `SIGTERM` that reaches a thread not blocking it kills the daemon by the default
+action — before the listeners unlink their sockets, and as a failure a service manager restarts.
+Declared first, the watch is also destroyed last, after `~SessionHost` has joined every pump thread,
+so the `SIGTERM` it sends itself after a `StopDaemon` has only its own thread to reach.
+
+The daemon itself is a `DaemonRuntime`, the `DaemonControl` behind every native endpoint. Besides an
+Attach connection — a terminal client, shown the sessions — a native connection may say in its
+`ClientHello` that it has the **Control** role: it asks the daemon about itself (`DaemonStatusRequest`,
+`StopDaemon`) and is sent nothing else. The daemon's ServerHello offers `Capability::DaemonControl`
+for it; an embedded host, whose null daemon control serves no such request, does not. A Control
+connection is no client: the `ClientCensus` counts Attach connections and every tmux control-mode
+and imsg connection, so a status probe never keeps an idle daemon alive.
+
+The lifecycle is `--lifecycle` (`DaemonLifecycle`): `Persistent` is the default, because a daemon
+started by hand or by a service exists precisely to outlive its sessions and still be there for the
+next client. `--exit-with-last-session` survives as an alias for `ExitWhenEmpty`. `ensureDaemon`
+starts the daemon it spawns on demand with `ExitWhenIdle` (no longer `--exit-with-last-session`): that
+one belongs to the clients that needed it, and "make sure a daemon exists" must not mean "leave one
+behind". The policy rides on the *daemon*, not on the spawning client.
+
+`ExitWhenIdle` is the `IdleExitWatcher`, which sits beside `LastSessionWatcher` (and, like it, answers
+`mirrorsScreens() == false`). It reads two things: the session count, from `sessionClosed`, and the
+**client census**. `ClientCensus` counts every connection that is a client — a native Attach
+connection, a tmux control-mode connection, an imsg connection — through `countedHandler(...)`, which
+wraps each endpoint's handler; a Control connection is deliberately not wrapped. When both counts reach
+zero the watcher arms a timer for `DefaultIdleExitGrace` (10 s); anything that arrives re-arms it. The
+decision is re-checked **at fire time**, not only when the timer was armed: a client admitted, or a
+session created, in the very turn the deadline passed but before the loop ran the timer must keep the
+daemon, and a session creation fires no event the watcher hears. The re-arm is edge-driven — after a
+fire-time "busy" the watcher waits for the next `clientCountChanged` or `sessionClosed`.
+
+A service-managed daemon (`contour daemon-service`, the packaged unit) starts with
+`--lifecycle=persistent` and so has no watcher at all.
+
+The **Control role** (`proto::ConnectionRole::Control`, `ClientHello::role`) is for connections that
+ask the daemon about itself: no session is spawned for it (an unknown role byte decodes as Control, so
+a future role can never spawn one), it is not counted in the census and it does not subscribe to the
+host's stream. It carries `DaemonStatusRequest` (tag 25), answered by `DaemonStatusReply` (tag 26:
+process id, release, uptime, socket, executable, log file, sessions, clients, lifecycle) and
+`StopDaemon` (tag 27) with a `StopReason` (`User` or `UpgradeRestart`). `ServerHello::releaseVersion`
+is appended to the hello and tells a client which release it met, which is what drives the GUI's drift
+badge (`vthost::client::assessDrift`). Bodies are append-only: a daemon that predates a field leaves it
+at the decoder's default, and a PDU tag it does not know is answered with `Unsupported`.
+`contour daemon status|stop|logs` and the GUI's restart reach the daemon through
+`client::DaemonControlPort` (`makeDaemonControl`), whose connect failure is typed
+(`ControlErrorCode::NotRunning` for a missing or refused socket) rather than a string the caller
+parses.
+
+`DaemonConfig::beforeShutdown` is the seam for persistent workspaces: the funnel calls it with the
+`ShutdownCause` before any listener closes, after the daemon's own last snapshot (see
+[Workspace snapshots](#workspace-snapshots)).
 
 Sessions leave through exactly one funnel, `SessionHost::handleSessionExit`: a shell exiting (the
 pump thread's posted completion), the native `ClosePane` PDU, or control mode's `kill-pane`. The
@@ -724,6 +1175,135 @@ path.
 One consequence worth knowing when shutting a daemon down by signal: a session whose shell is still
 running blocks teardown, because `~HostedSession` joins a pump thread parked in a blocking PTY read.
 The last-session path is unaffected (its sessions are already gone by then).
+
+### Workspace snapshots
+
+A daemon whose `DaemonConfig::persistence` names a file keeps its workspace there
+(`SessionSnapshotStore`), and offers `Capability::WorkspaceRestore` (8) while it does; that
+capability is what turns `client::layoutSurvivesRestart` to `Restored`, and with it the drift
+confirmation's text. `runDaemon` wires it in this order:
+
+1. the control socket is bound first, so a second daemon on the same label fails before it touches
+   the file the serving one keeps writing;
+2. `prepareRestore` loads the file and moves it aside to `<file>.restored`, and the result becomes
+   `SessionHostConfig::restore`, which the host realizes in its constructor instead of the startup
+   layout (unless nothing of it came back);
+3. after the host, a `DaemonPersistence` closes the restore (`endRestore`), then owns the
+   `SnapshotWriter` (its own thread, started after the signal watch so it inherits the blocked
+   `SIGINT`/`SIGTERM`) and the `WorkspacePersistence` observer that decides when to write;
+4. the funnel's hook runs `finalize(workspaceFor(cause))` and only then the caller's
+   `beforeShutdown`. `workspaceFor` discards for `StopRequested` alone: a signal is how a reboot ends
+   the daemon, a last session may have been killed by it, and `--keep-snapshot` is
+   `StopReason::UserKeepingWorkspace` (2), which a daemon that predates it refuses rather than reads
+   as a plain stop. The CLI therefore sends it only to a daemon whose hello offered
+   `WorkspaceRestore`.
+
+On Windows the console-control handler returns only once that hook has run, for at most 4 s, for a
+close, a logoff or a system shutdown: Windows ends the process as soon as the handler returns. The
+watch is handed the hook's future (`ShutdownSignals::watch`'s `lastWrite`) for that.
+
+The file, little-endian, every `blob{…}` decoded from a sub-reader of its own (bytes a reader does
+not know are skipped; absent trailing fields keep their defaults — phase 1's PDU body rule):
+
+```
+File     := Magic Version:varint BodyLength:varint ChecksumLo:u32 ChecksumHi:u32 Body
+Magic    := the 8 bytes "CTRSNAP\n"
+Body     := TakenAt:svarint(unix seconds) WindowCount:varint Window{WindowCount}
+Window   := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
+Tab      := blob{ Identity? Title:string? Color:u32(0xRRGGBB)? ActiveLeaf:varint Zoom:u8 Node }
+Node     := blob{ Split:u8 ( Ratio:varint(millionths) Node Node | Leaf ) }
+Leaf     := Identity? Cwd:string(UTF-8)? Profile:string? Foreground:string? CommandLine:string?
+            History:blob(encodePdu(Delta))?
+Identity := 16 raw bytes, Label:string?
+X?       := u8 0 (absent) | u8 1 then X
+```
+
+The checksum is FNV-1a 64 over `Body`. **Cross-version readability is a requirement**: the drift
+restart writes the file with the old daemon and reads it with the new one. A daemon reads every
+`SnapshotFormatVersion` an earlier release wrote, records grow only by appending inside their
+`blob{…}`, and the version steps only for a change an old reader would misread; an older daemon
+leaves a newer format in place instead of setting it aside. A history blob that does not decode
+drops only that pane's scrollback. The file is bounded (`MaxSnapshotFileBytes`, 64 MiB, and
+`daemon.restore.scrollback_lines` per pane), written to a private temporary sibling and renamed over
+the old one, and user-only (0600 in a 0700 directory; a protected DACL on Windows).
+
+A restore never loses the last good workspace: `<file>.restored` is deleted only by the first
+successful write after a restore that realized a pane. One that realized nothing keeps it for the next
+start, which tries it once more and then renames it `<file>.failed`.
+
+When to write is a pure table, `decideSnapshotWrite` (`SnapshotSchedule.hpp`), with the kill grace
+(5 s) and the layout debounce (1 s) of `SchedulePolicy`; `now` is T and `lastKill` the newest
+`SessionEnd::Killed`:
+
+| Trigger                  | Workspace | Last kill  | Action            |
+|--------------------------|-----------|------------|-------------------|
+| `Periodic`               | clean     | any        | skip              |
+| `Periodic`               | changed   | none, ≥ 5 s ago | write now    |
+| `Periodic`               | changed   | T−2 s      | defer to T+3 s    |
+| `LayoutChanged`          | any       | none       | defer to T+1 s    |
+| `LayoutChanged`          | any       | T−2 s      | defer to T+3 s    |
+| `SessionExited`          | any       | none       | write now         |
+| `SessionClosedByRequest` | any       | none       | write now         |
+| `SessionExited`, `SessionClosedByRequest` | any | T−1 s | defer to T+4 s |
+| `SessionKilled`          | any       | any        | defer to T+5 s    |
+| `Shutdown`               | any       | none, ≥ 5 s ago | write now    |
+| `Shutdown`               | any       | T−2 s      | skip: the file is kept as it was |
+
+**The kill grace** is what makes a reboot restore anything. A system shutdown stops every shell
+before the daemon (systemd stops each shell's scope; a Windows logoff ends the ConPTY children), so
+the daemon sees its panes die moments before it is asked to end. A pane whose process was killed is
+therefore dropped from the file only after the grace, and a shutdown inside the grace keeps the file
+as it was. The kill is recorded in `sessionEnded` itself, not in a posted job: an `ExitWhenEmpty`
+daemon's `LastSessionClosed` shutdown is posted right after the last `sessionClosed`, and must already
+see it. A pane closed on request (`ClosePane`, `kill-pane`, through `SessionHost::closeSession`) or
+whose shell exited leaves the file at once.
+
+A periodic write that fails (a full or read-only state directory) leaves the previous file and no
+temporary behind, is logged once until a write succeeds again, and makes the next interval retry.
+
+### Where a daemon runs from
+
+Where an upgrade would disturb the running binary — an AppImage, a macOS `.app`, a Windows install —
+a daemon runs from this version's copy under `<state-dir>/bin/` (`DaemonBinary.hpp`, over
+`DaemonImage.hpp`'s store); a packaged Linux install runs in place. A launcher (`ensureDaemon`,
+`--background`) spawns from the copy and keeps it leased until the daemon serves; a daemon started
+from the installed binary re-executes from the copy before it binds (`relocationFor`), keeping its
+process id, with the lease handed across the `execv`. `contour daemon --in-place` refuses the move.
+
+Which layouts stage is a table (`stagingPlan(StagingInputs)` → `StagingLayout`): an AppImage stages the AppImage
+file, macOS the whole `.app` (symbolic links such as a framework's `Versions/Current` are preserved,
+because a flattened bundle can fail code-signature validation), Windows the install tree (`bin` and
+`share/contour`), and a **packaged Linux install does not stage at all** — `/usr/…` and a Flatpak's
+`/app/…` are replaced atomically by the package manager, which a running daemon survives, and copying
+~474 MB per release for nothing would be a cost without a benefit. The state directory
+(`daemonStateDirectory`, `StatePath.hpp`) decides where copies go; when it is the temporary fallback
+the store stages nothing, since that directory is shared with other local users and a launcher must not
+execute a binary one of them could have planted.
+
+Publishing is the rename of a **complete** directory: two launchers staging the same release at once
+each copy into their own partial directory and rename it into place; the loser finds the target
+complete and uses it. An incomplete target (no `.complete` marker) is removed under the held lease
+before the rename is retried once.
+
+A **lease** is a file beside the image (`<release>-<fingerprint>.lease`, a sibling so that removing
+the image never removes the lock). Whoever runs from an image, or is about to, holds its lease; on
+POSIX that is an advisory `flock`, re-checked against the path's device and inode after it is taken
+so a concurrent prune cannot slip between the open and the lock. `prune` takes a `claim()` — an
+exclusive, non-blocking lock — and removes the image, its partial copies and the lease file only
+while holding it; a held lease stops the prune. A launcher takes the lease when it stages the image
+and holds it until the daemon it spawned serves (or the spawn fails), so a second, newer launcher
+pruning in that window cannot remove it; the daemon then holds its own for its lifetime. Each of
+them prunes once its own lease is held: the launcher after staging, the daemon in
+`leaseRunningImage`. The daemon's prune is the only one a daemon started by a service manager gets,
+since no launcher runs for it. Leases open `O_CLOEXEC`, so shells and `xdg-open` do not inherit
+them; the flag is cleared just before a daemon's re-`execv` from the copy and set again by the
+re-executed daemon.
+
+Manual check for an AppImage, which no CI job runs: start `Contour.AppImage daemon` and confirm that
+the pid started is still the daemon, that `APPIMAGE` in its `/proc/<pid>/environ` names
+`$XDG_STATE_HOME/contour/bin/<release>-<hash>/Contour.AppImage`, that the `.lease` beside that
+directory is listed by `ls -l /proc/<pid>/fd`, and that deleting the original AppImage file leaves
+the daemon serving.
 
 ## Binary imsg IPC (the real tmux binary as a client)
 
@@ -817,6 +1397,15 @@ under LocalSystem, whose different `%TEMP%`/`%USERNAME%` would bind a socket no 
 The logon trigger is bound to the installing user's SAM name, not left blank — a blank one fires
 on *any* user's logon.
 
+Each backend declares a `DaemonLaunchStyle`. A **SelfDetaching** backend (the Task Scheduler: it
+starts a launcher, and the daemon backgrounds itself, so the OS does not track the daemon's process)
+cannot stop the daemon by ending a unit. For such a backend `daemon-service stop`, `restart` and
+`uninstall` stop the daemon through `StopDaemon` on a Control connection, chosen by the table
+`stopVia(DaemonLaunchStyle)`; a tracked backend (systemd, launchd) is stopped through the service
+manager, which also keeps it from restarting a daemon that was stopped on purpose. The decision is
+portable code and tested on Linux with fakes; the Task Scheduler calls themselves are compiled only on
+Windows. The Windows image store (`DaemonImageLeases_win32.cpp`) is likewise compiled only there.
+
 The client side is the GUI (`contour client`) on Windows as everywhere else.
 There was briefly a console client here — `runAttach`, raw VT console mode plus
 a dedicated blocking stdin-reader thread, since console handles cannot park on
@@ -876,7 +1465,7 @@ Three behaviours worth knowing:
 `contour client` accepts both options and **passes them to a daemon it auto-spawns**. That
 matters more than it looks: the auto-spawned daemon is the common case, and without this it is
 the one instance nobody can configure, whose standard error lands in the client's terminal. The
-whole spawn command line — the socket, these two options and `--exit-with-last-session` — is built
+whole spawn command line — the socket, these two options and `--lifecycle=exit-when-idle` — is built
 once in `daemonSpawnArgs`, so the POSIX `execv` argv and the Windows `CreateProcess` command line
 cannot drift apart.
 
@@ -887,8 +1476,8 @@ the transport knows one — so a whole connection reads as one story:
 
 ```
 [vthost.conn]        native#3: accepted
-[vthost.trace.proto] native#3 recv #1 ClientHello version=2 token=yes settings=yes (60 bytes)
-[vthost.conn]        native#3: handshake complete (codec v2)
+[vthost.trace.proto] native#3 recv #1 ClientHello versions=4-4 caps=1 token=yes settings=yes (60 bytes)
+[vthost.conn]        native#3: handshake complete (protocol v4)
 [vthost.trace.proto] native#3 send #0 Delta session=1 gen=3 seq=98 lines=7 (412 bytes)
 [error]              native#3: malformed frame (MalformedVarint); dropping the connection
 ```

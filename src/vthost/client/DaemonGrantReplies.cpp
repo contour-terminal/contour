@@ -6,7 +6,7 @@
 namespace vthost::client
 {
 
-vtextension::ExtensionConsentRequest consentRequestOf(proto::PermissionRequest const& request)
+std::optional<vtextension::ExtensionConsentRequest> consentRequestOf(proto::PermissionRequest const& request)
 {
     auto consent = vtextension::ExtensionConsentRequest {
         .hostId = request.hostId,
@@ -18,6 +18,14 @@ vtextension::ExtensionConsentRequest consentRequestOf(proto::PermissionRequest c
     for (auto const& command: request.commands)
         consent.manifest.commands.push_back(
             vtextension::DeclaredCommand { .name = command.name, .argvTemplate = command.argv });
+    consent.manifest.control.reserve(request.control.size());
+    for (auto const& name: request.control)
+    {
+        auto const permission = vtcontrol::enumFromName<vtcontrol::Permission>(name);
+        if (!permission)
+            return std::nullopt;
+        consent.manifest.control.push_back(*permission);
+    }
     return consent;
 }
 

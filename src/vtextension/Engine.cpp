@@ -17,7 +17,7 @@ std::expected<std::shared_ptr<Engine>, ExtensionError> Engine::create(wasm::IWas
 {
     auto runtime = backend.createRuntime(
         wasm::RuntimeLimits { .memoryBytes = limits.memoryBytes, .stackBytes = limits.stackBytes },
-        detail::statuslineHostFunctions());
+        detail::hostFunctions());
     if (!runtime)
         return std::unexpected(ExtensionError::RuntimeUnavailable);
 

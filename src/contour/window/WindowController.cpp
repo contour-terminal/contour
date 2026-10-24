@@ -15,6 +15,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
@@ -30,6 +31,7 @@
 #include <QtQml/QQmlEngine>
 
 #include <cstdlib>
+#include <mutex>
 #include <ranges>
 #include <utility>
 
@@ -53,11 +55,16 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _tabCommands { *this },
     _profileCommands { manager.app().config() },
     _layoutCommands { manager.app().config() },
+    _hostCommands { manager.app().config() },
     _boundCommands { manager.app().config().inputMappings.value() },
     _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) }
 {
-    _commandPalette->setSources(
-        { &_tabCommands, &_profileCommands, &_layoutCommands, &_boundCommands, &_actionCommands });
+    _commandPalette->setSources({ &_tabCommands,
+                                  &_profileCommands,
+                                  &_layoutCommands,
+                                  &_hostCommands,
+                                  &_boundCommands,
+                                  &_actionCommands });
 
     // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
     // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
@@ -181,6 +188,17 @@ void WindowController::triggerContextMenuAction(int actionId)
     session->executeAction(*action);
 }
 
+QString WindowController::hostLabel() const
+{
+    return QString::fromStdString(_manager.app().attachedHostLabel());
+}
+
+QString WindowController::windowTitle(QString const& sessionTitle) const
+{
+    return QString::fromStdString(
+        remoteWindowTitle(_manager.app().attachedHostLabel(), sessionTitle.toStdString()));
+}
+
 void WindowController::openTitleBarContextMenu()
 {
     auto state = command::TitleBarContextMenuState {
@@ -191,6 +209,8 @@ void WindowController::openTitleBarContextMenu()
         .tabBarPosition = _tabBarPosition,
         .activeProfile = {},
         .profileNames = {},
+        // `hosts` is ordered by name already.
+        .hostNames = std::ranges::to<std::vector>(_manager.app().config().hosts.value() | std::views::keys),
     };
 
     if (auto* session = activeSession())
@@ -310,6 +330,9 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::ZoomedRole), "zoomed" },
         { static_cast<int>(Roles::ProgressStateRole), "progressState" },
         { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
+        { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
+        { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" },
+        { static_cast<int>(Roles::ProgramStatusProgressRole), "programStatusProgress" },
     };
 }
 
@@ -353,6 +376,19 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
                        ? static_cast<int>(std::to_underlying(progress.state))
                        : static_cast<int>(progress.percentage);
         }
+        // The three badge roles share one computation per tab, which takes every pane's terminal lock.
+        case Roles::ProgramStatusRole:
+            return tab != nullptr
+                       ? static_cast<int>(std::to_underlying(cachedProgramStatusBadge(*tab, row).kind))
+                       : 0;
+        case Roles::ProgramStatusTextRole:
+            return tab != nullptr ? QString::fromStdString(cachedProgramStatusBadge(*tab, row).text)
+                                  : QString {};
+        case Roles::ProgramStatusProgressRole: {
+            auto const progress =
+                tab != nullptr ? cachedProgramStatusBadge(*tab, row).progress : std::nullopt;
+            return progress ? static_cast<int>(*progress) : -1;
+        }
         default: return {};
     }
 }
@@ -375,6 +411,27 @@ int WindowController::activeTabIndex() const noexcept
 {
     auto* win = window();
     return win != nullptr ? win->activeTabIndex() : -1;
+}
+
+ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& tab, int row) const
+{
+    // In front exactly when the strip highlights it: the settings view hides every terminal tab.
+    auto const focus =
+        !_settingsActive && row == activeTabIndex() ? TabFocus::Foreground : TabFocus::Background;
+    return badgeForTab(tab, focus, [this](vtworkspace::SessionId id) {
+        auto const* session = _manager.sessionForId(id);
+        if (session == nullptr)
+            return std::vector<vtbackend::ProgramStatusRecord> {};
+        // The lock the parser thread holds while it changes the records; one hold per pane.
+        auto const& terminal = session->terminal();
+        auto const _ = std::lock_guard { terminal };
+        return resolvedRecords(terminal.programStatus());
+    });
+}
+
+ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab const& tab, int row) const
+{
+    return _badges.get(tab.id(), [&] { return programStatusBadge(tab, row); });
 }
 
 QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
@@ -1729,6 +1786,7 @@ void WindowController::onTabAboutToBeRemoved(int index)
 void WindowController::onTabClosed()
 {
     endRemoveRows();
+    _badges.clear(); // Its badge goes with it.
     emit countChanged();
     // See onTabAdded: re-notify so the strip re-hides in Multiple mode when the count falls back to 1.
     emit tabBarShouldShowChanged();
@@ -1762,6 +1820,8 @@ void WindowController::onActiveTabChanged()
 
 void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> const& roles)
 {
+    // Whatever changed -- its records, its panes -- may change its badge.
+    _badges.drop(tab);
     auto const row = rowOfTab(tab);
     if (row < 0)
         return;
@@ -1775,14 +1835,29 @@ void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> 
 
 void WindowController::refreshActiveTabHighlight()
 {
+    // The badges too: a done or failed program shows only in a tab the user is not looking at.
+    _badges.clear();
     if (auto const rows = rowCount(); rows > 0)
-        emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::IsActiveRole) });
+        emit dataChanged(index(0),
+                         index(rows - 1),
+                         { static_cast<int>(Roles::IsActiveRole),
+                           static_cast<int>(Roles::ProgramStatusRole),
+                           static_cast<int>(Roles::ProgramStatusTextRole),
+                           static_cast<int>(Roles::ProgramStatusProgressRole) });
 }
 
 void WindowController::refreshAllTabTitles()
 {
     if (auto const rows = rowCount(); rows > 0)
         emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
+}
+
+void WindowController::showHostingNotice(QString notice)
+{
+    if (_hostingNotice == notice)
+        return;
+    _hostingNotice = std::move(notice);
+    emit hostingNoticeChanged();
 }
 
 void WindowController::updateStatusLine()

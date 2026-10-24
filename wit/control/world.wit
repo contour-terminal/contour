@@ -1,0 +1,354 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Generated from the host's method catalog; regenerate it rather than edit it (see README.md).
+
+/// The control verbs: what an extension may ask its terminal to do with windows, tabs and panes.
+///
+/// The package is terminal-neutral: any terminal can implement the host side. README.md says how an
+/// extension imports it, and which permissions each verb needs.
+package terminal-extensions:control@0.1.0;
+
+/// The records and enums the control verbs take and return.
+interface types {
+    record daemon-info-reply {
+        version: string,
+        protocol-version: u32,
+        platform: string,
+        hostname: string,
+        uptime-seconds: u32,
+    }
+
+    record list-request {
+        window: string,
+    }
+
+    record size {
+        columns: u32,
+        lines: u32,
+    }
+
+    enum program-state {
+        idle,
+        working,
+        done,
+        blocked,
+        error,
+    }
+
+    enum blocked-kind {
+        none,
+        permission,
+        question,
+        auth,
+    }
+
+    record program-status-info {
+        id: string,
+        state: program-state,
+        kind: blocked-kind,
+        progress: option<u8>,
+        app: string,
+        title: string,
+        message: string,
+    }
+
+    record pane-info {
+        id: string,
+        label: string,
+        title: string,
+        cwd: string,
+        is-active: bool,
+        size: size,
+        program-status: list<program-status-info>,
+    }
+
+    record tab-info {
+        id: string,
+        label: string,
+        title: string,
+        position: u32,
+        is-active: bool,
+        panes: list<pane-info>,
+    }
+
+    record window-info {
+        id: string,
+        label: string,
+        position: u32,
+        tabs: list<tab-info>,
+    }
+
+    record list-reply {
+        windows: list<window-info>,
+    }
+
+    enum window-placement {
+        existing,
+        new,
+    }
+
+    enum focus-policy {
+        take,
+        keep,
+    }
+
+    record create-tab-request {
+        window: string,
+        placement: window-placement,
+        cwd: string,
+        command: list<string>,
+        label: string,
+        focus: focus-policy,
+    }
+
+    record create-tab-reply {
+        window: string,
+        tab: string,
+        pane: string,
+    }
+
+    enum split-direction {
+        right,
+        below,
+    }
+
+    record split-request {
+        pane: string,
+        direction: split-direction,
+        ratio-percent: option<u8>,
+        cwd: string,
+        command: list<string>,
+        label: string,
+        focus: focus-policy,
+    }
+
+    record split-reply {
+        tab: string,
+        pane: string,
+    }
+
+    enum send-wait {
+        none,
+        command-finished,
+    }
+
+    record send-request {
+        pane: string,
+        text: string,
+        wait: send-wait,
+    }
+
+    enum block-state {
+        prompting,
+        running,
+        finished,
+        superseded,
+    }
+
+    record block-info {
+        id: string,
+        pane: string,
+        state: block-state,
+        command: option<string>,
+        exit-code: option<s32>,
+        cwd: option<string>,
+        prompt-at: option<string>,
+        started-at: option<string>,
+        duration-ms: option<u32>,
+    }
+
+    record send-reply {
+        block: option<block-info>,
+    }
+
+    record capture-request {
+        pane: string,
+        scrollback: s32,
+    }
+
+    enum truncation {
+        none,
+        head,
+    }
+
+    record position {
+        line: s32,
+        column: u32,
+    }
+
+    record capture-reply {
+        pane: string,
+        text: string,
+        truncated: truncation,
+        cursor: position,
+        size: size,
+    }
+
+    record close-pane-request {
+        pane: string,
+    }
+
+    record close-tab-request {
+        tab: string,
+    }
+
+    record set-label-request {
+        object: string,
+        label: string,
+    }
+
+    record block-list-request {
+        pane: string,
+        limit: u32,
+    }
+
+    record block-list-reply {
+        pane: string,
+        blocks: list<block-info>,
+    }
+
+    enum block-part {
+        all,
+        prompt,
+        output,
+    }
+
+    record block-read-request {
+        block: string,
+        pane: string,
+        part: block-part,
+    }
+
+    record block-read-reply {
+        block: block-info,
+        prompt: string,
+        output: string,
+        truncated: truncation,
+    }
+
+    record api-entry {
+        name: string,
+        summary: string,
+    }
+
+    record api-list-reply {
+        methods: list<api-entry>,
+        events: list<api-entry>,
+    }
+
+    record api-describe-request {
+        name: string,
+    }
+
+    record api-description {
+        name: string,
+        summary: string,
+        input-schema: string,
+        output-schema: string,
+        request-example: string,
+        response-example: string,
+    }
+
+    enum control-error-code {
+        bad-request,
+        method-not-found,
+        not-found,
+        ambiguous,
+        unsupported,
+        forbidden,
+        failed,
+        limit-reached,
+    }
+
+    record control-error {
+        code: control-error-code,
+        message: string,
+        candidates: list<string>,
+    }
+}
+
+/// One func per verb. Each fails with a `control-error` rather than trapping.
+interface control {
+    use types.{
+        daemon-info-reply,
+        list-request,
+        list-reply,
+        create-tab-request,
+        create-tab-reply,
+        split-request,
+        split-reply,
+        send-request,
+        send-reply,
+        capture-request,
+        capture-reply,
+        close-pane-request,
+        close-tab-request,
+        set-label-request,
+        block-list-request,
+        block-list-reply,
+        block-read-request,
+        block-read-reply,
+        api-list-reply,
+        api-describe-request,
+        api-description,
+        control-error
+    };
+
+    /// Describe the daemon: version, protocol, platform, host and uptime.
+    /// Needs `read`.
+    daemon-info: func() -> result<daemon-info-reply, control-error>;
+
+    /// List the windows, tabs and panes.
+    /// Needs `read`.
+    workspace-list: func(request: list-request) -> result<list-reply, control-error>;
+
+    /// Open a tab, optionally in a new window and running a command.
+    /// Needs `write`, and `input` as well for running a command.
+    tab-create: func(request: create-tab-request) -> result<create-tab-reply, control-error>;
+
+    /// Split a pane and start a shell or command in the new half.
+    /// Needs `write`, and `input` as well for running a command.
+    pane-split: func(request: split-request) -> result<split-reply, control-error>;
+
+    /// Type text into a pane, optionally waiting for the command it starts to finish.
+    /// Needs `input`.
+    pane-send: func(request: send-request) -> result<send-reply, control-error>;
+
+    /// Read a pane's text: the page, and optionally history above it.
+    /// Needs `screen`.
+    pane-capture: func(request: capture-request) -> result<capture-reply, control-error>;
+
+    /// Close a pane and end its shell.
+    /// Needs `write`.
+    pane-close: func(request: close-pane-request) -> result<_, control-error>;
+
+    /// Close a tab with all its panes.
+    /// Needs `write`.
+    tab-close: func(request: close-tab-request) -> result<_, control-error>;
+
+    /// Give a window, tab or pane a label to address it by; an empty label clears it.
+    /// Needs `write`.
+    object-set-label: func(request: set-label-request) -> result<_, control-error>;
+
+    /// List a pane's recent command blocks, newest first.
+    /// Needs `screen`.
+    block-list: func(request: block-list-request) -> result<block-list-reply, control-error>;
+
+    /// Read a command block's prompt and output; without a block, the last finished one of a pane.
+    /// Needs `screen`.
+    block-read: func(request: block-read-request) -> result<block-read-reply, control-error>;
+
+    /// List the methods and events of this API.
+    /// Needs `read`.
+    api-list: func() -> result<api-list-reply, control-error>;
+
+    /// Describe one method or event: its schemas and examples.
+    /// Needs `read`.
+    api-describe: func(request: api-describe-request) -> result<api-description, control-error>;
+}
+
+/// A world for an extension that drives its terminal. An extension that also draws a status line
+/// includes its own world and imports `terminal-extensions:control/control@0.1.0` beside it.
+world controller {
+    import control;
+}

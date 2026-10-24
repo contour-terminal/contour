@@ -16,10 +16,15 @@
 
 #include <vtbackend/screen/StatusLineExtensions.hpp>
 
+#include <chrono>
+#include <expected>
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
 
+#include <vtcontrol/Catalog.hpp>
+#include <vtcontrol/ControlError.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/proto/Pdu.hpp>
 
@@ -40,6 +45,13 @@ struct SessionExtensionEvents
     /// Other extensions run now (a build landed): the terminal must be told. Called on the owner's thread,
     /// holding no lock.
     std::function<void()> onReplaced;
+
+    /// Serves a control verb an extension calls, as the session's pane: the method, its request JSON, what
+    /// the extension is granted, and the longest to wait. Called on the extension's lane, and blocks it until
+    /// the host's loop answers or the time is up (@see control::LoopControlBridge).
+    std::function<std::expected<std::string, vtcontrol::ControlError>(
+        std::string_view, std::string_view, vtcontrol::ControlGrants, std::chrono::milliseconds)>
+        callControl {};
 };
 
 /// One hosted session's status-line extensions, as its host drives them. Owned by the session, and declared

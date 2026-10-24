@@ -8,11 +8,16 @@
 /// so a newer peer's PDU is carried rather than fatal. Adding a PDU is: a struct, a tag in PduType,
 /// one row in each of the encode/decode tables in Pdu.cpp.
 ///
-/// While the protocol is experimental the catalog is kept CONTIGUOUS and may be renumbered with a
-/// CodecVersion bump: a retired tag leaves no gap, because the handshake refuses a peer of another
-/// revision before it sends a single other PDU. The two hellos are the exception: their tags are how
-/// two revisions meet at all, so every revision keeps 0.7.0's.
-/// @see CodecVersion
+/// The catalog is kept CONTIGUOUS. A new PDU is gated by a Capability; renumbering or retiring a tag
+/// changes existing PDUs' meaning, so it takes a protocol version step, and the handshake keeps a peer
+/// that speaks no version in common from sending a single other PDU. The two hellos are the exception:
+/// their tags are how two versions meet at all, so every version keeps 0.7.0's.
+/// @see SupportedVersions
+///
+/// A PDU body grows only by appending fields at its end. A decoder ignores the bytes left after the fields
+/// it knows, and gives a field it finds missing at the end its default, so a peer older or newer by one
+/// appended field still reads the PDU. A field that is itself a growing record travels as a blob, so its
+/// own appended fields stay inside it and the fields after it keep their place.
 ///
 /// The structs are deliberately wire-level (raw u32 colors, raw flag words,
 /// std-only types): the codec is shared by the server, the attach client, and
@@ -29,6 +34,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Wire.hpp>
 
 namespace vthost::proto
@@ -62,6 +68,16 @@ enum class PduType : uint8_t
     PerformOperation = 21,
     PermissionRequest = 22,
     PermissionReply = 23,
+    Unsupported = 24,
+    DaemonStatusRequest = 25,
+    DaemonStatusReply = 26,
+    StopDaemon = 27,
+    EditTab = 28,
+    Heartbeat = 29,
+    ControlRequest = 30,
+    ControlReply = 31,
+    ControlEvent = 32,
+    ProgramStatus = 33,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -145,35 +161,115 @@ struct WireSessionSettings
     bool operator==(WireSessionSettings const&) const = default;
 };
 
-/// Client's first PDU: its codec revision, (for TCP) a preshared auth token, and optionally the
-/// emulation settings it wants the sessions it creates to have. Anything before it is a protocol
-/// error.
+/// How a ServerHello is laid out on the wire.
+enum class HelloLayout : uint8_t
+{
+    /// NegotiatingHelloMarker, then one blob of the agreed version, our range, our capabilities, the
+    /// daemon's machine, and whatever a later version appends. What a negotiating client reads.
+    Negotiating = 0,
+    /// The version alone: all of a ServerHello a pre-negotiation client (codec 1 = contour 0.7.0, 2, 3)
+    /// reads, so it can tell its user which version refused it.
+    VersionAlone = 1,
+};
+
+/// What a connection is for. A Control connection asks the daemon about itself (DaemonStatusRequest,
+/// StopDaemon): it is no client, so it is shown no layout, spawns no first session and keeps nothing alive.
+/// Decoding fails closed: a role byte this version does not know reads as Control, so a future role never
+/// spawns a session.
+enum class ConnectionRole : uint8_t
+{
+    Attach = 0,  ///< A terminal client: it is shown the daemon's sessions and layout.
+    Control = 1, ///< A probe or a command to the daemon itself.
+};
+
+/// The client area a ClientHello states, in cells: the whole content area the client renders the
+/// layout into, as a ResizeRequest would propose it.
+struct WireClientArea
+{
+    uint32_t columns = 0; ///< The client area's width in cells.
+    uint32_t lines = 0;   ///< The client area's height in cells.
+    bool operator==(WireClientArea const&) const = default;
+};
+
+/// Which of the daemon's windows a connection wants to follow, and whether attaching creates one.
+/// Decoding is lenient: a byte no enumerator names reads as AllWindows, which is what a daemon without
+/// Capability::AttachIntent does anyway.
+enum class AttachIntentKind : uint8_t
+{
+    AllWindows = 0, ///< Every window, including those created later: the behaviour before intents existed.
+    Launch = 1,     ///< A fresh launch: every window when no other client is attached, else a new one.
+    NewWindow = 2,  ///< A new window of its own, mirroring none of the existing ones.
+    Windows = 3,    ///< Exactly the listed windows (those that exist).
+    Resume = 4,     ///< The listed windows after a reconnect; when none survives, as Launch.
+};
+
+/// What a ClientHello asks to be shown.
+struct AttachIntent
+{
+    AttachIntentKind kind = AttachIntentKind::AllWindows;
+    /// The daemon windows named; meaningful for Windows and Resume only.
+    std::vector<uint64_t> windows = {};
+    bool operator==(AttachIntent const&) const = default;
+};
+
+/// Client's first PDU: the protocol versions and capabilities it speaks, (for TCP) a preshared auth
+/// token, and optionally the emulation settings it wants the sessions it creates to have. Anything
+/// before it is a protocol error.
 ///
-/// On the wire, the version comes first and everything else after it. A hello of another revision is
-/// decoded as far as its version, the one field every revision shares, and the handshake refuses it on
-/// that. The layout after the version is kept readable to contour 0.7.0, whose daemon reads a hello
-/// whole before it checks the version, as the encoder in Pdu.cpp explains.
+/// On the wire: `u32 NegotiatingHelloMarker`, one blob of `varint min, varint max, varint count +
+/// varint idents, string token, optional session settings` and whatever a later version appends, then
+/// a zero byte. A daemon of contour 0.7.0 reads that blob as its token and the zero as "no session
+/// settings", and codecs 2 and 3 consume everything after a version not their own: each reads this
+/// hello far enough to answer with its version, as the encoder in Pdu.cpp explains.
+///
+/// A hello whose leading `u32` is not the marker is a pre-negotiation peer's: it decodes as far as that
+/// version, into a range of it alone, and the rest is consumed unread.
 struct ClientHello
 {
-    uint32_t codecVersion = CodecVersion;
+    /// The hello's leading `u32`: NegotiatingHelloMarker, or a pre-negotiation peer's codec version.
+    uint32_t codecVersion = NegotiatingHelloMarker;
+    /// The protocol versions the client speaks; `{ v, v }` for a pre-negotiation peer of codec `v`.
+    VersionRange versions = SupportedVersions;
+    /// The optional features the client offers on top of the negotiated version.
+    CapabilitySet capabilities = {};
     /// Preshared token authenticating the client on the opt-in TCP transport.
     /// Empty over AF_UNIX, where the hardened socket's permissions are the gate.
     std::string token = {};
     /// The client's preference for sessions it creates; absent means "whatever the daemon hosts
     /// with", which is what a client with no configuration of its own wants.
     std::optional<WireSessionSettings> sessionSettings = std::nullopt;
+    /// What the connection is for; absent on the wire means Attach.
+    ConnectionRole role = ConnectionRole::Attach;
+    /// The client area the first session should spawn at, so it needs no resize once attached;
+    /// absent means "the daemon's default", and the client's ResizeRequest corrects it. Honoured on
+    /// an Attach connection only.
+    std::optional<WireClientArea> clientArea = std::nullopt;
+    /// Which windows to follow; honoured only when both ends negotiated Capability::AttachIntent.
+    AttachIntent attachIntent = {};
+    /// The profile the connection's sessions run under, resolved by the daemon in its own configuration;
+    /// empty means the daemon's default. Honoured only with Capability::ProfileByName.
+    std::string profileName = {};
     bool operator==(ClientHello const&) const = default;
 };
 
-/// Server's answer to ClientHello: its codec revision and, when it accepts the client, the machine it
-/// runs on.
+/// Server's answer to ClientHello: the version it agreed on (0 refuses the client), the range and
+/// capabilities it speaks and, when it accepts the client, the machine it runs on.
 ///
-/// A hello of another revision is decoded as far as its version, as a ClientHello is. One naming no
-/// machine -- every refusal -- is the version alone on the wire: the whole of the ServerHello contour
-/// 0.7.0 reads, so a client of that release learns which revision refused it.
+/// Laid out as @ref layout says. Decoding yields HelloLayout::VersionAlone for a leading `u32` other than
+/// NegotiatingHelloMarker -- a pre-negotiation daemon's, the rest consumed unread -- and for the marker with
+/// nothing after it; either way `versions` is then the range of that version alone.
 struct ServerHello
 {
-    uint32_t codecVersion = CodecVersion;
+    /// Which of the two layouts this hello travels in.
+    HelloLayout layout = HelloLayout::Negotiating;
+    /// The hello's leading `u32`: NegotiatingHelloMarker, or a pre-negotiation daemon's codec version.
+    uint32_t codecVersion = NegotiatingHelloMarker;
+    /// The version both ends speak and the connection continues in; 0 is a refusal.
+    uint32_t agreedVersion = 0;
+    /// The protocol versions the daemon speaks.
+    VersionRange versions = SupportedVersions;
+    /// The optional features the daemon offers on top of the agreed version.
+    CapabilitySet capabilities = {};
     /// The machine the daemon runs on (vtbackend::HostIdentity), which every WireCommandBlock::locality
     /// was judged against: "local" there means local to the DAEMON, and a client attached from another
     /// machine must not take it for its own. Stated once per connection, as a connection never moves to
@@ -184,6 +280,19 @@ struct ServerHello
     /// /etc/machine-id itself; empty where the daemon has none.
     std::string machineId = {};
     std::string hostname = {}; ///< The daemon's host name; empty when unknown.
+    /// The daemon's release (e.g. "0.8.1"); empty when unknown, and in every refusal.
+    std::string releaseVersion = {};
+    /// The daemon windows this connection follows, ascending; empty in a refusal and from a daemon that
+    /// predates attach intents.
+    std::vector<uint64_t> followedWindows = {};
+    /// Which run of the daemon answers: drawn at random as the daemon starts, so it differs across a
+    /// restart. Window and session ids count from 1 in every run, so this is how a reconnecting client tells
+    /// a daemon that restarted -- whose window 1 is not the window 1 it showed -- from the one it lost. 0 is
+    /// unknown: in a refusal, and from a daemon that predates the field.
+    ///
+    /// A daemon that restores a saved workspace after a restart (phase 6) is a new instance all the same: a
+    /// client that stayed connected sees its old windows lost, and the restored ones arrive as new windows.
+    uint64_t daemonInstance = 0;
     bool operator==(ServerHello const&) const = default;
 };
 
@@ -271,8 +380,8 @@ struct MouseState
 /// instead of a silent protocol change.
 ///
 /// A record naming a bit outside the mask is refused on decode (DecodeError::MalformedPdu), never
-/// masked. The handshake admits only a peer of this CodecVersion, which assigns these bits and no
-/// others, so an unknown one can only come from a broken or hostile peer -- and clearing it would
+/// masked. The handshake admits only a peer of a version this build speaks, which assigns these bits
+/// and no others, so an unknown one can only come from a broken or hostile peer -- and clearing it would
 /// leave the reads that follow out of step with whatever field that peer wrote for it.
 constexpr inline uint16_t ContextPresentMask = 0x7FFF; // bits 0..14: fifteen fields
 
@@ -816,9 +925,39 @@ struct SessionClipboard
     bool operator==(SessionClipboard const&) const = default;
 };
 
-/// Any transient session event, as a type-safe alternative set: what a consumer handling "a session
-/// did something transient" dispatches over, without enumerating the catalog's tags itself.
-using SessionEventPdu = std::variant<SessionBell, SessionNotify, SessionClipboard>;
+/// One OSC 7501 program-status record on the wire. The enums travel as their bytes; a reader that does
+/// not know a state drops the record (vthost::control::fromWire), one that does not know a kind reads none.
+struct WireProgramStatusRecord
+{
+    /// The `progress` byte that says the record has no progress.
+    static constexpr uint8_t AbsentProgress = 255;
+
+    std::string id = {};               ///< The record's path; empty for the root.
+    uint8_t state = 0;                 ///< vtbackend::ProgramState.
+    uint8_t kind = 0;                  ///< vtbackend::BlockedKind.
+    uint8_t progress = AbsentProgress; ///< Percent done, 0..100, or AbsentProgress.
+    std::string app = {};              ///< The record's own app (not an inherited one).
+    std::string title = {};            ///< Decoded UTF-8.
+    std::string message = {};          ///< Decoded UTF-8.
+
+    bool operator==(WireProgramStatusRecord const&) const = default;
+};
+
+/// Server→client push (Capability::ProgramStatus): a session's whole set of program-status records, least
+/// recently updated first, replacing what the client mirrored before. An empty list clears it. Not
+/// transient like the events above, but pushed per session like them, so it reaches a mirror the same way;
+/// a snapshot repeats it. Its text is what a program sent, so the trace never shows it.
+struct ProgramStatus
+{
+    uint64_t session = 0;                              ///< The session the records belong to.
+    std::vector<WireProgramStatusRecord> records = {}; ///< The whole set.
+    bool operator==(ProgramStatus const&) const = default;
+};
+
+/// Any per-session push a mirror applies as it arrives -- the transient events, and the program-status set --
+/// as a type-safe alternative set: what a consumer handling "a session did something" dispatches over,
+/// without enumerating the catalog's tags itself.
+using SessionEventPdu = std::variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus>;
 
 /// One node of a tab's split tree on the wire (pre-order): a leaf carries a
 /// session and no children; a split carries a ratio and exactly two children.
@@ -879,6 +1018,8 @@ struct CreateTab
     /// window id for the reason SplitPane is: window ids are minted per model and the two ends
     /// have their own.
     uint64_t session = 0;
+    /// The profile the new tab's session runs under; empty means the connection's profile.
+    std::string profileName = {};
     bool operator==(CreateTab const&) const = default;
 };
 
@@ -887,6 +1028,8 @@ struct CreateTab
 /// it (B4).
 struct NewWindow
 {
+    /// The profile the new window's first session runs under; empty means the connection's profile.
+    std::string profileName = {};
     bool operator==(NewWindow const&) const = default;
 };
 
@@ -897,6 +1040,8 @@ struct SplitPane
     uint64_t session = 0;    ///< The pane to split, by the session it hosts.
     uint8_t orientation = 1; ///< vtworkspace::SplitState: 1 horizontal, 2 vertical.
     uint16_t ratio = 5000;   ///< First child's share × 10000.
+    /// The profile the new pane's session runs under; empty means the connection's profile.
+    std::string profileName = {};
     bool operator==(SplitPane const&) const = default;
 };
 
@@ -1002,6 +1147,10 @@ struct PermissionRequest
     uint32_t version = 0;    ///< The manifest's format revision.
     std::string digest = {}; ///< The manifest's digest, which the answer is bound to.
     std::vector<WireDeclaredCommand> commands = {}; ///< What it may run, if allowed.
+    /// The control-API permissions it asks for (`read`, `screen`, `input`, `write`), granted with the
+    /// commands. Appended by a later version: an older sender's body ends before it. Sent only to a client
+    /// that shares Capability::ControlPermissions, which shows them in its prompt.
+    std::vector<std::string> control = {};
     bool operator==(PermissionRequest const&) const = default;
 };
 
@@ -1015,6 +1164,130 @@ struct PermissionReply
     /// for a byte no enumerator has.
     uint8_t grantState = 0;
     bool operator==(PermissionReply const&) const = default;
+};
+
+/// Either direction, after the handshake: the frame with serial @ref refusedSerial carried a PDU tag this
+/// peer does not know, or knows but cannot serve (a Control connection's attach-only request, a daemon
+/// control request on an endpoint with no daemon behind it). Its receiver stops sending that tag for the rest
+/// of the connection, and never answers an Unsupported itself. Before the handshake no PDU is answered with
+/// one: the daemon answers anything but a ClientHello with a version-alone ServerHello and ends the
+/// connection, and the client ignores anything but the ServerHello.
+/// @see UnsupportedTracker
+struct Unsupported
+{
+    uint64_t refusedSerial = 0; ///< The serial of the frame that carried the unknown tag.
+    uint64_t ident = 0;         ///< The tag this peer does not know or cannot serve.
+    bool operator==(Unsupported const&) const = default;
+};
+
+/// Client→server: asks for a DaemonStatusReply. It carries nothing. Served on a connection of either
+/// role; a Control connection exists to send it without becoming a client.
+struct DaemonStatusRequest
+{
+    bool operator==(DaemonStatusRequest const&) const = default;
+};
+
+/// Server→client: the answer to a DaemonStatusRequest.
+struct DaemonStatusReply
+{
+    std::string releaseVersion = {}; ///< The daemon's release.
+    uint64_t processId = 0;          ///< The daemon's process id.
+    uint64_t uptimeSeconds = 0;      ///< Seconds since the daemon started serving.
+    std::string socketPath = {};     ///< The endpoint it listens on.
+    std::string executablePath = {}; ///< The image it runs from.
+    std::string logFile = {};        ///< Where it logs; empty when it does not log to a file.
+    uint32_t sessions = 0;           ///< How many sessions it hosts.
+    uint32_t clients = 0;            ///< How many attached clients it counts (Control connections excluded).
+    uint8_t lifecycle = 0;           ///< Its DaemonLifecycle, as the wire spells it: when it ends on its own.
+    bool operator==(DaemonStatusReply const&) const = default;
+};
+
+/// Why a daemon is asked to stop.
+enum class StopReason : uint8_t
+{
+    User = 0,           ///< The user asked.
+    UpgradeRestart = 1, ///< It is replaced by a newer release.
+    /// The user asked, and the daemon keeps its workspace for its next start. Sent only to a daemon that
+    /// offers Capability::WorkspaceRestore: an older one refuses the byte.
+    UserKeepingWorkspace = 2,
+};
+
+/// Client→server: asks the daemon to shut down. Served on a connection of either role, as a
+/// DaemonStatusRequest is.
+struct StopDaemon
+{
+    /// A StopReason as the wire spells it; read through vthost::stopReasonFrom().
+    uint8_t reason = 0;
+    bool operator==(StopDaemon const&) const = default;
+};
+
+/// What an EditTab changes. The codec carries any byte; the host refuses one it does not know.
+enum class TabEditKind : uint8_t
+{
+    ActivatePane = 0, ///< Make the pane hosting `session` the tab's active pane.
+    Zoom = 1,         ///< Zoom the pane hosting `session`.
+    Unzoom = 2,       ///< Unzoom the tab holding `session`.
+    SetTitle = 3,     ///< Set the tab's title to `title`.
+    ClearTitle = 4,   ///< Return the tab to its automatic title.
+    SetColor = 5,     ///< Set the tab's colour to `color`.
+    ClearColor = 6,   ///< Return the tab to its default colour.
+    ActivateTab = 7,  ///< Make the tab holding `session` the window's active tab.
+};
+
+/// Client→server: the user changed how a tab is presented, and the daemon's model follows so every other
+/// client sees it.
+struct EditTab
+{
+    /// The pane (ActivatePane, Zoom) or any pane of the tab (the rest) the edit addresses.
+    uint64_t session = 0;
+    TabEditKind kind = TabEditKind::ActivatePane;
+    std::string title = {}; ///< The new title; SetTitle only.
+    uint32_t color = 0;     ///< The new colour as 0xRRGGBB; SetColor only.
+    bool operator==(EditTab const&) const = default;
+};
+
+/// Either direction: a liveness probe. The client sends it under a request serial and the daemon echoes the
+/// same nonce under the same serial, so a client can tell a quiet daemon from a vanished one.
+struct Heartbeat
+{
+    uint64_t nonce = 0;
+    bool operator==(Heartbeat const&) const = default;
+};
+
+/// Whether a ControlReply carries the reply or an error.
+enum class ControlOutcome : uint8_t
+{
+    Ok = 0,    ///< `body` is the method's reply JSON.
+    Error = 1, ///< `body` is a `ControlError` JSON.
+};
+
+/// Client→server: one call of the control API (Capability::ControlApi). The reply comes under the same
+/// serial and carries the same `requestId`. `params`, `body` and `event` can hold pane text, so the trace
+/// never shows them.
+struct ControlRequest
+{
+    uint64_t requestId = 0;   ///< Chosen by the caller; echoed by the reply.
+    std::string method = {};  ///< The method name, e.g. `pane.split`.
+    std::string params = {};  ///< The request JSON; empty reads as `{}`.
+    std::string context = {}; ///< The caller's pane id (`$CONTOUR_PANE`), or empty.
+    bool operator==(ControlRequest const&) const = default;
+};
+
+/// Server→client: the outcome of a ControlRequest.
+struct ControlReply
+{
+    uint64_t requestId = 0;                      ///< The request's id.
+    ControlOutcome outcome = ControlOutcome::Ok; ///< Whether `body` is a reply or an error.
+    std::string body = {};                       ///< The reply JSON, or a `ControlError` JSON on `Error`.
+    bool operator==(ControlReply const&) const = default;
+};
+
+/// Server→client push: an event of a subscription made with `events.subscribe`.
+struct ControlEvent
+{
+    uint32_t subscription = 0; ///< The subscription it belongs to.
+    std::string event = {};    ///< The event JSON, as `vtcontrol::encodeEvent` writes it.
+    bool operator==(ControlEvent const&) const = default;
 };
 
 using DecodedPdu = std::variant<Invalid,
@@ -1040,7 +1313,17 @@ using DecodedPdu = std::variant<Invalid,
                                 SessionSettingsChanged,
                                 PerformOperation,
                                 PermissionRequest,
-                                PermissionReply>;
+                                PermissionReply,
+                                Unsupported,
+                                DaemonStatusRequest,
+                                DaemonStatusReply,
+                                StopDaemon,
+                                EditTab,
+                                Heartbeat,
+                                ControlRequest,
+                                ControlReply,
+                                ControlEvent,
+                                ProgramStatus>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

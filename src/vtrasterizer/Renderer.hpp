@@ -253,6 +253,14 @@ class Renderer
      */
     [[nodiscard]] bool render(vtbackend::Terminal& terminal, bool pressureHint);
 
+    /// @return The 0-based column of the main display's cursor in the frame render() drew last, or
+    ///         nullopt when that frame drew none. Safe to call from any thread.
+    [[nodiscard]] std::optional<int> lastDrawnCursorColumn() const noexcept
+    {
+        auto const column = _lastDrawnCursorColumn.load(std::memory_order_acquire);
+        return column < 0 ? std::nullopt : std::optional<int> { column };
+    }
+
     /// Synchronously applies any staged font/geometry reconfiguration.
     ///
     /// Used during display setup (before any frame, when a caller must read the resulting cell metrics
@@ -559,6 +567,10 @@ class Renderer
     /// display (consumeFontReconfigApplied()) to trigger a page-size recompute against the new cell
     /// size. Atomic because it is written on the render thread and read on the display thread.
     std::atomic<bool> _fontReconfigApplied { false };
+
+    /// The main display's cursor column in the frame render() drew last; -1 when it drew no cursor.
+    /// Written by the render thread, read by whoever measures when a keystroke's echo is on screen.
+    std::atomic<int> _lastDrawnCursorColumn { -1 };
 
     /// The terminal total page size observed by the per-frame reconcile in renderImpl() on the previous
     /// frame. Render-thread-only. Used to distinguish a terminal-driven page-size change (status-line

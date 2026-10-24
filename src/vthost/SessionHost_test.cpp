@@ -8,6 +8,9 @@
 
 #include <vtpty/MockPty.hpp>
 #ifndef _WIN32
+    #include <vtpty/Process.hpp>
+    #include <vtpty/ProcessPlacement.hpp>
+    #include <vtpty/Pty.hpp>
     #include <vtpty/UnixPty.hpp>
     #include <vtpty/test/PtyReading.hpp>
 #endif
@@ -36,6 +39,7 @@
 #include <functional>
 #include <future>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -44,17 +48,27 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
+#include <vtcontrol/ObjectRef.hpp>
+#include <vtcontrol/testing/SequentialUuidSource.hpp>
+
 #ifdef CONTOUR_EXTENSIONS
+    #include <vtextension/testing/TestModules.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
+    #include <vthost/control/ControlService.hpp>
     #include <vthost/testing/GatedFileSystem.hpp>
 #endif
+#include <vthost/ConfigReload.hpp>
+#include <vthost/HostedShell.hpp>
+#include <vthost/ObjectRegistry.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
+#include <vthost/testing/FakeProfileCatalog.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -193,6 +207,86 @@ class BlockingPty final: public vtpty::Pty
     int _reads = 0;
 };
 
+/// A PTY whose program prints @p output, then waits until it exits (EOF) or the host closes the device.
+///
+/// What tells a process that exited by itself from a close the host asked for: the first reads EOF, the
+/// second reads `EAGAIN` on a closed device, as `BlockingPty` documents of the real thing.
+class ExitingPty final: public vtpty::Pty
+{
+  public:
+    ExitingPty(vtbackend::PageSize size, std::string output): _size(size), _output(std::move(output)) {}
+
+    [[nodiscard]] vtpty::StartResult start() override { return vtpty::StartOutcome {}; }
+    [[nodiscard]] vtpty::PtySlave& slave() noexcept override { return _slave; }
+    void close() override
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _closed = true;
+        }
+        _wake.notify_all();
+    }
+    [[nodiscard]] bool isClosed() const noexcept override
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _closed;
+    }
+    void wakeupReader() override { _wake.notify_all(); }
+
+    /// The program exits: the next read reports EOF.
+    void exitProcess()
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _exited = true;
+        }
+        _wake.notify_all();
+    }
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t /*size*/) override
+    {
+        auto lock = std::unique_lock { _mutex };
+        if (!_output.empty())
+        {
+            auto const pooled = storage.writeAtEnd(_output);
+            _output.clear();
+            return ReadResult { .data = std::string_view(pooled.data(), pooled.size()),
+                                .fromStdoutFastPipe = false };
+        }
+        // The timeout is honoured: the parser reads ahead with a zero one while another thread holds
+        // the terminal, and a read that blocked there would park the pump before it parsed anything.
+        auto const ended = [this] {
+            return _exited || _closed;
+        };
+        if (timeout)
+            std::ignore = _wake.wait_for(lock, *timeout, ended);
+        else
+            _wake.wait(lock, ended);
+        errno = _exited ? EIO : EAGAIN;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] int write(std::string_view data) override { return static_cast<int>(data.size()); }
+    [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _size; }
+    void resizeScreen(vtpty::PageSize size, std::optional<vtpty::ImageSize>) override { _size = size; }
+    void waitForClosed() override
+    {
+        auto lock = std::unique_lock { _mutex };
+        _wake.wait(lock, [this] { return _closed; });
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::condition_variable _wake;
+    vtpty::PtySlaveDummy _slave;
+    vtpty::PageSize _size;
+    std::string _output;
+    bool _closed = false;
+    bool _exited = false;
+};
+
 /// Stands in for one attached client. The client-area registry is keyed by stream observer, so a
 /// test that reports an area has to be somebody — and these tests are about what the host does with
 /// the report, not about who made it.
@@ -228,17 +322,38 @@ struct HostHarness
     StubClient otherClient;           ///< For the multi-client policy cases.
     vthost::ClientSizePolicy policy;  // set by the constructor, before `host` reads it
     vtbackend::HostIdentity identity; // set by the constructor, before `host` reads it
-    SessionHost host { loop,
-                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
-                           return std::make_unique<vtpty::MockPty>(size);
-                       },
-                       vtbackend::Settings {},
-                       core::defaultEnvironment(),
-                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
-                                                   .sizePolicy = policy,
-                                                   .startupLayout = vtworkspace::Layout {},
-                                                   .identity = identity } };
+    /// The override every spawn was given, in spawn order (an absent one as an empty shell).
+    std::vector<vtpty::Process::ExecInfo> seen;
+    SessionHost host {
+        loop,
+        [this](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const& spawn) {
+            seen.push_back(spawn.value_or(vtpty::Process::ExecInfo {}));
+            return std::make_unique<vtpty::MockPty>(size);
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .sizePolicy = policy,
+                                    .startupLayout = vtworkspace::Layout {},
+                                    .identity = identity,
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
 };
+
+/// @param count Which identifier of a `SequentialUuidSource` (1-based).
+/// @return That identifier.
+[[nodiscard]] vtcontrol::Uuid seq(unsigned count)
+{
+    return *vtcontrol::parseUuid(std::format("00000000-0000-7000-8000-{:012x}", count));
+}
+
+/// @param kind What the id names.
+/// @param count Which identifier of a `SequentialUuidSource`.
+/// @return Its reference as the environment spells it, e.g. `pane:00000000-...-000000000002`.
+[[nodiscard]] std::string ref(vtcontrol::ObjectKind kind, unsigned count)
+{
+    return vtcontrol::toString(vtcontrol::ObjectRef { kind, seq(count) });
+}
 
 } // namespace
 
@@ -322,6 +437,39 @@ TEST_CASE("the last pane's session exit closes the whole tab", "[vthost][host]")
     CHECK(h.host.sessionCount() == 0);
     CHECK(h.host.model().window(h.host.windowId())->tabCount() == 0);
     CHECK(h.recorder.saw("tabClosed"));
+}
+
+TEST_CASE("writeInput stamps the session's last input on the loop clock", "[vthost][host][flush]")
+{
+    auto clock =
+        core::platform::ManualClock { core::platform::SteadyTimePoint {} + std::chrono::seconds { 5 } };
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source, clock };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    auto const a = vthost::testing::newSession(host);
+    auto const b = vthost::testing::newSession(host);
+
+    CHECK_FALSE(host.lastInputAt(a).has_value());
+    host.writeInput(a, "x");
+    CHECK(host.lastInputAt(a) == clock.now());
+    CHECK_FALSE(host.lastInputAt(b).has_value());
+    CHECK_FALSE(host.lastInputAt(vtworkspace::SessionId { 999 }).has_value());
+
+    // A later input moves the stamp; input for an unknown session stamps nothing.
+    clock.advance(std::chrono::milliseconds { 7 });
+    host.writeInput(a, "y");
+    host.writeInput(vtworkspace::SessionId { 999 }, "z");
+    CHECK(host.lastInputAt(a) == clock.now());
+    CHECK_FALSE(host.lastInputAt(vtworkspace::SessionId { 999 }).has_value());
+
+    host.handleSessionExit(a);
+    CHECK_FALSE(host.lastInputAt(a).has_value());
 }
 
 TEST_CASE("an unsubscribed observer stops receiving events", "[vthost][host]")
@@ -763,6 +911,7 @@ TEST_CASE("a hosted session whose program reads no input terminates at once", "[
                                            {},
                                            {},
                                            {},
+                                           {},
                                            {} };
     session.start();
     // Lines, which the slave's line discipline keeps for a reader: a megabyte of them parks the pump.
@@ -784,6 +933,68 @@ TEST_CASE("a hosted session whose program reads no input terminates at once", "[
     CHECK(terminated == std::future_status::ready);
 }
 #endif
+
+TEST_CASE("a hosted session's process exit drops its working program status before it closes",
+          "[vthost][host][programstatus]")
+{
+    // What the pump reads, then the exit or the close: the root is working, "lint" has failed.
+    auto ownedPty = std::make_unique<ExitingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) },
+        "\033]7501;state=working\033\\\033]7501;state=error:id=lint\033\\");
+    auto* const pty = ownedPty.get();
+    auto closed = std::promise<std::vector<std::string>> {};
+    auto* session = static_cast<vthost::HostedSession*>(nullptr);
+    auto hosted = vthost::HostedSession { vtworkspace::SessionId { 1 },
+                                          core::defaultEnvironment(),
+                                          std::move(ownedPty),
+                                          vtbackend::Settings {},
+                                          vtbackend::HostIdentity {},
+                                          vtbackend::TerminalClocks::system(),
+                                          core::platform::NativeFileSystem::instance(),
+                                          {},
+                                          {},
+                                          {},
+                                          {},
+                                          [&] {
+                                              // What the records are as the close is announced.
+                                              auto& terminal = session->terminal();
+                                              auto const _ = std::lock_guard { terminal };
+                                              auto ids = std::vector<std::string> {};
+                                              for (auto const& record: terminal.programStatus().records())
+                                                  ids.push_back(record.id);
+                                              closed.set_value(std::move(ids));
+                                          },
+                                          {} };
+    session = &hosted;
+    hosted.start();
+
+    // Both records are in before the program goes.
+    auto const parsed = [&] {
+        auto const _ = std::lock_guard { hosted.terminal() };
+        return hosted.terminal().programStatus().records().size() == 2;
+    };
+    for ([[maybe_unused]] auto const tick: std::views::iota(0, 500))
+    {
+        if (parsed())
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 5 });
+    }
+    REQUIRE(parsed());
+
+    auto announced = closed.get_future();
+    SECTION("the program exits by itself: the working record goes, the error stays")
+    {
+        pty->exitProcess();
+        REQUIRE(announced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+        CHECK(announced.get() == std::vector<std::string> { "lint" });
+    }
+    SECTION("the host closes the session: nothing is dropped, the records go with it")
+    {
+        hosted.terminate();
+        REQUIRE(announced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+        CHECK(announced.get() == std::vector<std::string> { "", "lint" });
+    }
+}
 
 TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
 {
@@ -1216,8 +1427,13 @@ TEST_CASE("SessionHost engages no override for a startup layout pane's arguments
 
     REQUIRE(host.sessionCount() == 1);
 
-    // The pane still spawns the daemon's configured shell -- just with no override at all.
-    CHECK(!seen.has_value());
+    // The pane still spawns the daemon's configured shell: the override is always engaged now (it carries
+    // the pane's ids), but names no program, arguments or directory, which the factory reads as "the
+    // configured one".
+    REQUIRE(seen.has_value());
+    CHECK(seen->program.empty());
+    CHECK(seen->arguments.empty());
+    CHECK(seen->workingDirectory.empty());
 }
 
 TEST_CASE("SessionHost still passes through an engaged-but-empty command with its arguments",
@@ -1737,9 +1953,12 @@ struct DaemonExtensionsHarness
     /// @param module The extension's module bytes.
     /// @param permission What the user allows its commands.
     /// @param config The extension's settings.
+    /// @param extensionLimits What the extension may use.
     DaemonExtensionsHarness(std::string const& module,
                             vtextension::CommandPermission permission,
-                            vtextension::ConfigMap config = {})
+                            vtextension::ConfigMap config = {},
+                            vtextension::ExtensionLimits extensionLimits = {}):
+        limits { extensionLimits }
     {
         REQUIRE(fileSystem.files.writeFile(modulePath, module).has_value());
         auto made = std::make_shared<vthost::DaemonExtensions>(
@@ -1836,6 +2055,83 @@ TEST_CASE("SessionHost.extension.buildInFlightAtTeardown", "[vthost][host][exten
     // What a daemon's loop does after its host: it turns once more, then goes.
     std::ignore = h.loop.runOnce(std::chrono::milliseconds { 0 });
     SUCCEED("the build's result was released while the runtime lived");
+}
+
+TEST_CASE("SessionHost.extension.controlVerb", "[vthost][host][extensions][control][threading]")
+{
+    // A daemon-hosted extension calls a control verb on its worker; the daemon's loop serves it through the
+    // control API, as the extension's pane, once the user granted the manifest's `control read`. The guest
+    // shows what it was answered: the refusal first, then the daemon's version.
+    auto const module = vtextension::testing::withManifest(
+        vtextension::testing::toModule(vtextension::testing::ControlReportingModule),
+        "name = reporter\nversion = 1\ncontrol read\n");
+    auto h =
+        DaemonExtensionsHarness { std::string(reinterpret_cast<char const*>(module.data()), module.size()),
+                                  vtextension::CommandPermission::Ask };
+    auto wall = core::platform::ManualWallClock {};
+    auto const service = vthost::control::ControlService {
+        *h.host,
+        vthost::control::ControlServiceConfig { .version = "e2e-1.2.3", .socketPath = "", .clock = wall }
+    };
+    h.fileSystem.open();
+    REQUIRE(h.host->createTab() != nullptr);
+    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto client = vthost::SessionStreamEvents {};
+    h.host->subscribeStream(&client);
+
+    h.turnUntil([&] { return h.indicatorText(session).contains("not granted yet"); });
+    INFO(h.indicatorText(session));
+    CHECK(h.indicatorText(session).contains("needs grant 'read': not granted yet"));
+    REQUIRE(h.host->pendingPermissionRequests().size() == 1);
+    auto const request = h.host->pendingPermissionRequests().front();
+    CHECK(request.control == std::vector<std::string> { "read" });
+
+    h.host->answerPermission(request.hostId, request.digest, vthost::GrantState::Granted);
+    h.turnUntil([&] { return h.indicatorText(session).contains("e2e-1.2.3"); });
+    CHECK(h.indicatorText(session).contains("e2e-1.2.3"));
+    h.host->unsubscribeStream(&client);
+}
+
+TEST_CASE("SessionHost.extension.controlClosesItsOwnPane", "[vthost][host][extensions][control][threading]")
+{
+    // A daemon-hosted extension closes its own pane. The loop serves the close, which destroys the pane's
+    // extensions -- the caller among them -- before it answers. Destroying them must not wait for the call
+    // in flight: that would hold the loop, every session's, until the guest's deadline passed.
+    auto const module = vtextension::testing::withManifest(
+        vtextension::testing::toModule(vtextension::testing::PaneClosingModule),
+        "name = closer\nversion = 1\ncontrol write\n");
+    // A deadline far beyond the test's run: a loop that waits for it is told apart from one that does not.
+    auto limits = vtextension::ExtensionLimits {};
+    limits.callDeadline = std::chrono::seconds { 60 };
+    auto h =
+        DaemonExtensionsHarness { std::string(reinterpret_cast<char const*>(module.data()), module.size()),
+                                  vtextension::CommandPermission::Ask,
+                                  {},
+                                  limits };
+    auto wall = core::platform::ManualWallClock {};
+    auto const service = vthost::control::ControlService {
+        *h.host,
+        vthost::control::ControlServiceConfig { .version = "e2e-1.2.3", .socketPath = "", .clock = wall }
+    };
+    h.fileSystem.open();
+    REQUIRE(h.host->createTab() != nullptr);
+    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto client = vthost::SessionStreamEvents {};
+    h.host->subscribeStream(&client);
+
+    h.turnUntil([&] { return h.indicatorText(session).contains("not granted yet"); });
+    INFO(h.indicatorText(session));
+    CHECK(h.indicatorText(session).contains("needs grant 'write': not granted yet"));
+    REQUIRE(h.host->pendingPermissionRequests().size() == 1);
+    auto const request = h.host->pendingPermissionRequests().front();
+
+    auto const granted = std::chrono::steady_clock::now();
+    h.host->answerPermission(request.hostId, request.digest, vthost::GrantState::Granted);
+    h.turnUntil([&] { return h.host->terminal(session) == nullptr; });
+    CHECK(h.host->terminal(session) == nullptr);
+    // Far below the deadline the loop would otherwise have been held for.
+    CHECK(std::chrono::steady_clock::now() - granted < std::chrono::seconds { 30 });
+    h.host->unsubscribeStream(&client);
 }
 
     #ifdef VTHOST_TEST_ECHO_WASM
@@ -1949,3 +2245,715 @@ TEST_CASE("SessionHost.extension.commandInFlightAtTeardown", "[vthost][host][ext
 
     #endif
 #endif
+
+namespace
+{
+
+/// @param mainShell What the default profile "main" runs.
+/// @param mainHistory The scrollback "main" keeps.
+/// @return The catalog the profile cases resolve in: "main" (the default), "build" running /bin/build-shell
+///         with 5000 lines, "ops" /bin/ops-shell with 2000.
+std::shared_ptr<vthost::ProfileCatalog const> profileCatalog(
+    std::string mainShell = "/bin/zsh", vtbackend::LineCount mainHistory = vtbackend::LineCount(1000))
+{
+    using vthost::testing::fakeProfile;
+    auto main = fakeProfile(std::move(mainShell), mainHistory);
+    main.shell.env["ONLY_MAIN"] = "1"; // set by the default profile alone
+    auto ops = fakeProfile("/bin/ops-shell", vtbackend::LineCount(2000));
+    ops.sandbox = vthost::SandboxEscape::Contained; // escape_sandbox: false, unlike the default
+    return std::make_shared<vthost::testing::FakeProfileCatalog>(
+        std::map<std::string, vthost::ResolvedProfile> {
+            { "main", std::move(main) },
+            { "build", fakeProfile("/bin/build-shell", vtbackend::LineCount(5000)) },
+            { "ops", ops },
+        },
+        "main");
+}
+
+/// A host over @ref profileCatalog that records the shell every session it spawns was given, on a loop
+/// timed by a clock the case advances.
+struct ProfileHost
+{
+    explicit ProfileHost(vtworkspace::Layout layout = {},
+                         std::shared_ptr<vthost::ProfileCatalog const> catalog = profileCatalog()):
+        host { loop,
+               [this](vtbackend::PageSize size,
+                      std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
+                   programs.push_back(commandOverride ? commandOverride->program : std::string {});
+                   shells.push_back(commandOverride.value_or(vtpty::Process::ExecInfo {}));
+                   return std::make_unique<vtpty::MockPty>(size);
+               },
+               vtbackend::Settings {},
+               core::defaultEnvironment(),
+               vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                           .startupLayout = std::move(layout),
+                                           .profiles = std::move(catalog),
+                                           .profilePtys = recordProfileSpawn() } }
+    {
+    }
+
+    core::platform::ManualClock clock { core::platform::SteadyTimePoint {} + std::chrono::seconds { 10 } };
+    std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *source, clock };
+    std::vector<std::string> programs {};            ///< The program each spawn was given, in spawn order.
+    std::vector<vtpty::Process::ExecInfo> shells {}; ///< The whole shell each spawn was given, in order.
+    std::vector<vthost::SandboxEscape> sandboxes {}; ///< The sandbox policy each profile spawn was given.
+
+    /// @return A profile PTY factory recording what each spawn was given, as the PtyFactory above does.
+    [[nodiscard]] vthost::ProfilePtyFactory recordProfileSpawn()
+    {
+        return [this](vtbackend::PageSize size,
+                      vtpty::Process::ExecInfo const& shell,
+                      vthost::SandboxEscape sandbox) {
+            programs.push_back(shell.program);
+            shells.push_back(shell);
+            sandboxes.push_back(sandbox);
+            return std::make_unique<vtpty::MockPty>(size);
+        };
+    }
+    SessionHost host;
+
+    /// @return The session hosted in @p tab's first pane.
+    [[nodiscard]] vtworkspace::SessionId sessionOf(vtworkspace::Tab const& tab) const
+    {
+        return tab.rootPane()->isLeaf() ? tab.rootPane()->session() : tab.rootPane()->first()->session();
+    }
+};
+
+} // namespace
+
+TEST_CASE("a session spawned under a profile name runs that profile's shell and settings",
+          "[vthost][profiles]")
+{
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "build" });
+    REQUIRE(tab != nullptr);
+    auto const session = h.sessionOf(*tab);
+    REQUIRE(h.programs == std::vector<std::string> { "/bin/build-shell" });
+    CHECK(h.host.terminal(session)->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(5000) });
+    CHECK(h.host.hostedSession(session)->profileName() == "build");
+}
+
+TEST_CASE("a profile's shell still learns the pane's own ids", "[vthost][profiles][ids]")
+{
+    // A profile that sets a CONTOUR_PANE of its own loses to the real one, and keeps its other variables.
+    auto main = vthost::testing::fakeProfile("/bin/zsh", vtbackend::LineCount(1000));
+    main.shell.env["A"] = "1";
+    main.shell.env["CONTOUR_PANE"] = "bogus";
+    auto catalog = std::make_shared<vthost::testing::FakeProfileCatalog>(
+        std::map<std::string, vthost::ResolvedProfile> { { "main", std::move(main) } }, "main");
+    auto h = ProfileHost { {}, catalog };
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.shells.size() == 1);
+    CHECK(h.shells.back().env.at("A") == "1");
+    CHECK(h.shells.back().env.at("CONTOUR_PANE").starts_with("pane:"));
+    CHECK(h.shells.back().env.at("CONTOUR_TAB").starts_with("tab:"));
+    CHECK(h.shells.back().env.at("CONTOUR_WINDOW").starts_with("window:"));
+}
+
+TEST_CASE("an unknown profile name runs the host's default profile", "[vthost][profiles]")
+{
+    // Review focus 4: a Windows laptop's pwsh profile against a Linux host -- the session still runs.
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "pwsh" });
+    REQUIRE(tab != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh" });
+    CHECK(h.host.hostedSession(h.sessionOf(*tab))->profileName() == "main");
+}
+
+TEST_CASE("a startup layout pane's profile is honoured", "[vthost][profiles]")
+{
+    auto tab = vtworkspace::LayoutTab {};
+    tab.profile = "build";
+    tab.root.orientation = vtworkspace::SplitState::Horizontal;
+    tab.root.children.emplace_back();
+    tab.root.children.emplace_back();
+    tab.root.children.back().profile = "ops";
+    auto h = ProfileHost { vtworkspace::Layout { .tabs = { tab } } };
+    CHECK(h.programs == std::vector<std::string> { "/bin/build-shell", "/bin/ops-shell" });
+}
+
+TEST_CASE("a session named no profile runs the host's default profile", "[vthost][profiles]")
+{
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh" });
+    CHECK(h.host.terminal(h.sessionOf(*tab))->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(1000) });
+    // Unnamed, so it follows whichever profile is the default.
+    CHECK(h.host.hostedSession(h.sessionOf(*tab))->profileName().empty());
+}
+
+TEST_CASE("a session spawned under another profile carries none of the default profile's environment",
+          "[vthost][profiles]")
+{
+    auto h = ProfileHost {};
+    REQUIRE(h.host.createTab({ .profileName = "build" }) != nullptr);
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.shells.size() == 2);
+    CHECK_FALSE(h.shells[0].env.contains("ONLY_MAIN"));
+    CHECK(h.shells[1].env.at("ONLY_MAIN") == "1");
+}
+
+TEST_CASE("after a reload a spawn naming no profile runs the reloaded default", "[vthost][profiles][reload]")
+{
+    auto h = ProfileHost {};
+    h.host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+    auto const* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh-next" });
+    CHECK(h.host.terminal(h.sessionOf(*tab))->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(3000) });
+}
+
+TEST_CASE("a hosted shell replacing the daemon's carries only its own environment", "[vthost][profiles]")
+{
+    auto base = vtpty::Process::ExecInfo {};
+    base.program = "/bin/zsh";
+    base.arguments = { "-l" };
+    base.env["ONLY_DEFAULT"] = "1";
+    auto profile = vtpty::Process::ExecInfo {};
+    profile.program = "/bin/fish";
+    profile.env["ONLY_WORK"] = "1";
+    profile.env["CONTOUR_MUX"] = "/elsewhere";
+    auto const hosted = vtpty::Process::Environment { { "CONTOUR_MUX", "/run/contour/default" } };
+
+    auto const replaced = vthost::hostedShellFor(base, profile, vthost::ShellOverride::Replaces, hosted);
+    CHECK(replaced.program == "/bin/fish");
+    CHECK(replaced.arguments.empty());
+    CHECK_FALSE(replaced.env.contains("ONLY_DEFAULT"));
+    CHECK(replaced.env.at("ONLY_WORK") == "1");
+    CHECK(replaced.env.at("CONTOUR_MUX") == "/run/contour/default"); // the daemon's own still wins
+
+    // A layout pane's directory-only override against a host without profiles keeps the daemon's shell.
+    auto pane = vtpty::Process::ExecInfo {};
+    pane.workingDirectory = "/tmp/project";
+    auto const overlaid = vthost::hostedShellFor(base, pane, vthost::ShellOverride::Overlays, hosted);
+    CHECK(overlaid.program == "/bin/zsh");
+    CHECK(overlaid.arguments == std::vector<std::string> { "-l" });
+    CHECK(overlaid.workingDirectory == "/tmp/project");
+    CHECK(overlaid.env.at("ONLY_DEFAULT") == "1");
+}
+
+TEST_CASE("replaceProfiles re-limits running sessions and serves new ones from the new catalog",
+          "[vthost][profiles][reload]")
+{
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "main" });
+    REQUIRE(tab != nullptr);
+    auto const running = h.sessionOf(*tab);
+    auto* terminal = h.host.terminal(running);
+
+    h.host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+
+    CHECK(terminal->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(3000) });
+    CHECK(h.host.terminal(running) == terminal);                  // the same terminal...
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh" }); // ...and no PTY respawned
+    REQUIRE(h.host.createTab({ .profileName = "main" }) != nullptr);
+    CHECK(h.programs == std::vector<std::string> { "/bin/zsh", "/bin/zsh-next" });
+}
+
+TEST_CASE("replaceProfiles leaves the limits a client stated for an unnamed session",
+          "[vthost][profiles][reload]")
+{
+    // A client that shares no ProfileByName states its own settings; the host's default profile is not its.
+    auto h = ProfileHost {};
+    auto stated = vtbackend::Settings {};
+    stated.historyLimits =
+        vtbackend::HistoryLimits::plain(vtbackend::MaxHistoryLineCount { vtbackend::LineCount(200) });
+    auto const* tab = h.host.createTab({ .settings = stated });
+    REQUIRE(tab != nullptr);
+    auto* terminal = h.host.terminal(h.sessionOf(*tab));
+    auto const before = terminal->settings().historyLimits;
+    REQUIRE(before.guaranteed == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(200) });
+
+    h.host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+
+    CHECK(terminal->settings().historyLimits == before);
+}
+
+TEST_CASE("the reload watcher hands each catalog its hook yields to the host", "[vthost][profiles][reload]")
+{
+    using namespace std::chrono_literals;
+    auto h = ProfileHost {};
+    auto const* tab = h.host.createTab({ .profileName = "main" });
+    REQUIRE(tab != nullptr);
+    auto* terminal = h.host.terminal(h.sessionOf(*tab));
+
+    // A few turns: a deadline that came due is found on a turn after the one that advanced past it.
+    auto const turn = [&h] {
+        for ([[maybe_unused]] auto const i: std::views::iota(0, 5))
+            std::ignore = h.loop.runOnce(0ms);
+    };
+    auto polls = 0;
+    auto next = std::shared_ptr<vthost::ProfileCatalog const> {};
+    auto const watcher = vthost::ConfigReloadWatcher { h.loop,
+                                                       h.host,
+                                                       { .poll =
+                                                             [&] {
+                                                                 ++polls;
+                                                                 return std::exchange(next, nullptr);
+                                                             },
+                                                         .interval = 2000ms } };
+    turn();
+    CHECK(polls == 0); // not before its interval
+
+    h.clock.advance(2000ms);
+    turn();
+    CHECK(polls == 1); // nothing yielded: nothing replaced
+    CHECK(terminal->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(1000) });
+
+    next = profileCatalog("/bin/zsh", vtbackend::LineCount(4000));
+    h.clock.advance(2000ms);
+    turn();
+    CHECK(polls == 2);
+    CHECK(terminal->settings().historyLimits.guaranteed
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(4000) });
+}
+
+TEST_CASE("a session takes escape_sandbox from its own profile", "[vthost][profiles]")
+{
+    // A sandbox setting inherited from the default profile would run a contained profile's shell on the host.
+    auto h = ProfileHost {};
+    REQUIRE(h.host.createTab({ .profileName = "ops" }) != nullptr);
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.host.createTab({ .profileName = "nope" }) != nullptr);
+    CHECK(h.sandboxes
+          == std::vector { vthost::SandboxEscape::Contained,
+                           vthost::SandboxEscape::Escapes,
+                           vthost::SandboxEscape::Escapes });
+}
+
+namespace
+{
+
+/// Remembers the order in which a host announced the end of its sessions.
+struct EndRecorder final: vthost::SessionStreamEvents
+{
+    std::vector<std::pair<vtworkspace::SessionId, vthost::SessionEnd>> ended {};
+    std::vector<std::string> order {};
+
+    void sessionEnded(vtworkspace::SessionId session, vthost::SessionEnd cause) override
+    {
+        ended.emplace_back(session, cause);
+        order.push_back(std::format("ended({})", session.value));
+    }
+    void sessionClosed(vtworkspace::SessionId session) override
+    {
+        order.push_back(std::format("closed({})", session.value));
+    }
+};
+
+} // namespace
+
+TEST_CASE("SessionHost reports why each session ended", "[vthost][snapshot]")
+{
+    auto h = HostHarness {};
+    auto recorder = EndRecorder {};
+    h.host.subscribeStream(&recorder);
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
+    h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
+    REQUIRE(h.host.sessionCount() == 3);
+    auto const a = tab->rootPane()->first()->session();
+    auto const b = tab->rootPane()->second()->first()->session();
+    auto const c = tab->rootPane()->second()->second()->session();
+
+    h.host.closeSession(a);
+    h.host.handleSessionExit(b);
+    using Entry = std::pair<vtworkspace::SessionId, vthost::SessionEnd>;
+    CHECK(recorder.ended
+          == std::vector<Entry> { { a, vthost::SessionEnd::Requested }, { b, vthost::SessionEnd::Exited } });
+    CHECK(recorder.order
+          == std::vector<std::string> { std::format("ended({})", a.value),
+                                        std::format("closed({})", a.value),
+                                        std::format("ended({})", b.value),
+                                        std::format("closed({})", b.value) });
+
+    h.host.endSession(c, vthost::SessionEnd::Killed);
+    CHECK(recorder.ended.back() == Entry { c, vthost::SessionEnd::Killed });
+    h.host.unsubscribeStream(&recorder);
+}
+
+#ifndef _WIN32
+TEST_CASE("a hosted shell killed by a signal ends Killed, one that exits ends Exited",
+          "[vthost][snapshot][threading]")
+{
+    // The PTY reports its hangup before the child is necessarily reaped; the pump's short poll of the exit
+    // status is what tells a kill from an exit, and the kill-grace rule of the snapshot rests on it.
+    struct Row
+    {
+        std::string script;
+        vthost::SessionEnd expected;
+    };
+    for (auto const& row: {
+             Row { "kill -9 $$", vthost::SessionEnd::Killed },
+             // Closing its terminal while it lives on makes the pump see the hangup first, and the host's
+             // close then hangs the shell up: there is no status yet when the pump asks, only a moment later.
+             Row { "exec 0<&- 1>&- 2>&-; sleep 5", vthost::SessionEnd::Killed },
+             Row { "exit 3", vthost::SessionEnd::Exited },
+         })
+    {
+        INFO(row.script);
+        auto const backend = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *backend };
+        auto host =
+            SessionHost { loop,
+                          [&row](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                              auto shell = vtpty::Process::ExecInfo {};
+                              shell.program = "/bin/sh";
+                              shell.arguments = { "-c", row.script };
+                              return std::make_unique<vtpty::Process>(shell,
+                                                                      vtpty::createPty(size, std::nullopt),
+                                                                      false,
+                                                                      std::make_shared<vtpty::NoPlacement>());
+                          },
+                          vtbackend::Settings {},
+                          core::defaultEnvironment(),
+                          vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Threaded } };
+        auto recorder = EndRecorder {};
+        host.subscribeStream(&recorder);
+        REQUIRE(host.createTab() != nullptr);
+
+        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+        while (recorder.ended.empty() && std::chrono::steady_clock::now() < deadline)
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 10 });
+        REQUIRE(recorder.ended.size() == 1);
+        CHECK(recorder.ended.front().second == row.expected);
+        host.unsubscribeStream(&recorder);
+    }
+}
+#endif
+
+TEST_CASE("ending a session twice reports it once", "[vthost][snapshot]")
+{
+    auto h = HostHarness {};
+    auto recorder = EndRecorder {};
+    h.host.subscribeStream(&recorder);
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    h.host.closeSession(session);
+    h.host.handleSessionExit(session);
+    CHECK(recorder.ended.size() == 1);
+    h.host.unsubscribeStream(&recorder);
+}
+
+TEST_CASE("paneRuntime reports the reported directory and the spawn profile", "[vthost][snapshot]")
+{
+    SECTION("a directory the shell reported, on a MockPty")
+    {
+        auto h = HostHarness { vthost::ClientSizePolicy::Latest,
+                               vtbackend::HostIdentity { .machineId = {}, .hostname = "zeta" } };
+        auto* tab = h.host.createTab();
+        REQUIRE(tab != nullptr);
+        auto const session = tab->rootPane()->session();
+        auto const before = h.host.paneRuntime(session);
+        CHECK_FALSE(before.workingDirectory);
+        CHECK_FALSE(before.foregroundProcess);
+        CHECK_FALSE(before.profile);
+
+        h.host.terminal(session)->writeToScreen("\033]7;file://zeta/tmp/work\033\\");
+        auto const after = h.host.paneRuntime(session);
+        CHECK(after.workingDirectory == std::filesystem::path { "/tmp/work" });
+        CHECK_FALSE(after.foregroundProcess);
+    }
+    SECTION("the profile a session was spawned under")
+    {
+        auto h = ProfileHost {};
+        auto const* const named = h.host.createTab({ .profileName = "build" });
+        auto const* const unnamed = h.host.createTab();
+        REQUIRE(named != nullptr);
+        REQUIRE(unnamed != nullptr);
+        CHECK(h.host.paneRuntime(h.sessionOf(*named)).profile == "build");
+        CHECK_FALSE(h.host.paneRuntime(h.sessionOf(*unnamed)).profile);
+    }
+    SECTION("an unknown session")
+    {
+        auto h = HostHarness {};
+        auto const runtime = h.host.paneRuntime(vtworkspace::SessionId { 4711 });
+        CHECK_FALSE(runtime.workingDirectory);
+        CHECK_FALSE(runtime.profile);
+    }
+}
+
+// {{{ Object ids
+
+namespace
+{
+
+/// Model events that do nothing, for a probe that overrides the one it watches.
+struct NullModelEvents: vtworkspace::ModelEvents
+{
+    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
+    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
+    void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override {}
+    void tabTitleChanged(vtworkspace::TabId) override {}
+    void tabColorChanged(vtworkspace::TabId) override {}
+};
+
+} // namespace
+
+TEST_CASE("createTab mints window, pane and tab ids and exports them to the shell", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+
+    // The window is minted at construction, then the tab's pane, then the tab.
+    CHECK(h.host.objects().uuidOf(h.host.windowId()) == seq(1));
+    CHECK(h.host.objects().uuidOf(session) == seq(2));
+    CHECK(h.host.objects().uuidOf(tab->id()) == seq(3));
+    REQUIRE(h.seen.size() == 1);
+    CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
+    CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    // The override engaged for the ids names no program: the configured shell runs.
+    CHECK(h.seen.back().program.empty());
+}
+
+TEST_CASE("the tab's id is bound before observers hear of the tab", "[vthost][host][ids]")
+{
+    struct Probe final: NullModelEvents
+    {
+        void tabAdded(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        {
+            uuid = host->objects().uuidOf(tab);
+        }
+        SessionHost* host = nullptr;
+        std::optional<vtcontrol::Uuid> uuid;
+    };
+    auto h = HostHarness {};
+    auto probe = Probe {};
+    probe.host = &h.host;
+    h.host.subscribe(&probe);
+    REQUIRE(h.host.createTab() != nullptr);
+    h.host.unsubscribe(&probe);
+    CHECK(probe.uuid == seq(3));
+}
+
+TEST_CASE("a split pane gets a new id and its tab's id in CONTOUR_TAB", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+
+    REQUIRE(h.seen.size() == 2);
+    CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
+    CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(h.host.objects().uuidOf(tab->rootPane()->second()->session()) == seq(4));
+    // The first pane keeps its own.
+    CHECK(h.host.objects().uuidOf(tab->rootPane()->first()->session()) == seq(2));
+}
+
+TEST_CASE("a new window gets its own id, and its first pane lives in it", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* window = h.host.createWindow();
+    REQUIRE(window != nullptr);
+
+    // pane, tab, window.
+    CHECK(h.host.objects().uuidOf(window->id()) == seq(4));
+    CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
+    CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 4));
+    auto const* tab = window->activeTab();
+    REQUIRE(tab != nullptr);
+    CHECK(h.host.objects().uuidOf(tab->id()) == seq(3));
+}
+
+TEST_CASE("startup layout panes share their tab's and window's ids", "[vthost][host][ids]")
+{
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.orientation = vtworkspace::SplitState::Horizontal;
+    tab.root.children.emplace_back();
+    tab.root.children.emplace_back();
+    auto seen = std::vector<vtpty::Process::ExecInfo> {};
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto host = SessionHost {
+        loop,
+        [&](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const& spawn) {
+            seen.push_back(spawn.value_or(vtpty::Process::ExecInfo {}));
+            return std::make_unique<vtpty::MockPty>(size);
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .startupLayout = vtworkspace::Layout { .tabs = { tab } },
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(seen[1].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(seen[0].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
+    CHECK(seen[0].env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(seen[1].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
+    CHECK(seen[1].env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+}
+
+TEST_CASE("preset ids and labels are honoured", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto const pane = seq(100);
+    auto const tabId = seq(101);
+    auto* tab = h.host.createTab(vthost::SessionSpawnRequest {
+        .presetIds =
+            vthost::PresetObjectIds { .pane = pane, .tab = tabId, .paneLabel = "logs", .tabLabel = "ops" } });
+    REQUIRE(tab != nullptr);
+
+    CHECK(h.host.objects().uuidOf(tab->rootPane()->session()) == pane);
+    CHECK(h.host.objects().uuidOf(tab->id()) == tabId);
+    CHECK(h.host.objects().labelOf(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }) == "logs");
+    CHECK(h.host.objects().labelOf(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, tabId }) == "ops");
+    CHECK(h.seen.back().env.at("CONTOUR_PANE")
+          == vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }));
+
+    // The source minted nothing for them: the next ids continue from the window's.
+    auto* next = h.host.createTab();
+    REQUIRE(next != nullptr);
+    CHECK(h.host.objects().uuidOf(next->rootPane()->session()) == seq(2));
+    CHECK(h.host.objects().uuidOf(next->id()) == seq(3));
+}
+
+TEST_CASE("closed objects are forgotten and ids never repeat", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    auto const tabId = tab->id();
+    auto const paneRef = vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, seq(2) };
+    auto const tabRef = vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, seq(3) };
+    REQUIRE(h.host.objects().find(paneRef));
+
+    h.host.handleSessionExit(session);
+
+    CHECK_FALSE(h.host.objects().uuidOf(session));
+    CHECK_FALSE(h.host.objects().uuidOf(tabId));
+    CHECK_FALSE(h.host.objects().find(paneRef));
+    CHECK_FALSE(h.host.objects().find(tabRef));
+
+    auto* again = h.host.createTab();
+    REQUIRE(again != nullptr);
+    CHECK(h.host.objects().uuidOf(again->rootPane()->session()) == seq(4));
+    CHECK(h.host.objects().uuidOf(again->id()) == seq(5));
+}
+
+TEST_CASE("observers can still name what closed while they are told", "[vthost][host][ids]")
+{
+    struct Probe final: NullModelEvents
+    {
+        void tabClosed(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        {
+            uuid = host->objects().uuidOf(tab);
+        }
+        SessionHost* host = nullptr;
+        std::optional<vtcontrol::Uuid> uuid;
+    };
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto probe = Probe {};
+    probe.host = &h.host;
+    h.host.subscribe(&probe);
+    h.host.handleSessionExit(tab->rootPane()->session());
+    h.host.unsubscribe(&probe);
+    CHECK(probe.uuid == seq(3));
+}
+
+TEST_CASE("a refused split leaves no pane id behind", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
+    CHECK_FALSE(h.host.objects().find(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, seq(4) }));
+}
+
+TEST_CASE("applyCommandOverride overlays env entries", "[vthost][host]")
+{
+    auto shell = vtpty::Process::ExecInfo {};
+    shell.program = "/bin/zsh";
+    shell.env = { { "A", "0" }, { "B", "2" } };
+    auto commandOverride = std::optional { vtpty::Process::ExecInfo {} };
+    commandOverride->env = { { "A", "1" } };
+    vtpty::Process::applyCommandOverride(shell, commandOverride);
+    CHECK(shell.env == vtpty::Process::Environment { { "A", "1" }, { "B", "2" } });
+    CHECK(shell.program == "/bin/zsh");
+}
+
+// }}}
+
+namespace
+{
+/// Keeps every signal the host fans out, in order.
+struct SignalRecorder final: vthost::SessionStreamEvents
+{
+    void sessionSignal(vtworkspace::SessionId session, vthost::SessionSignal const& signal) override
+    {
+        signals.emplace_back(session, signal);
+    }
+
+    template <typename T>
+    [[nodiscard]] std::vector<T> all() const
+    {
+        auto found = std::vector<T> {};
+        for (auto const& [session, signal]: signals)
+            if (auto const* value = std::get_if<T>(&signal))
+                found.push_back(*value);
+        return found;
+    }
+
+    std::vector<std::pair<vtworkspace::SessionId, vthost::SessionSignal>> signals;
+};
+} // namespace
+
+TEST_CASE("hosted sessions fan out block, title and cwd signals", "[vthost][host][signals]")
+{
+    auto h = HostHarness {};
+    auto recorder = SignalRecorder {};
+    auto const subscription = vthost::makeScopedStreamSubscription(h.host, recorder);
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    auto& terminal = *h.host.terminal(session);
+    auto const drain = [&] {
+        std::ignore = h.loop.runUntilIdle();
+    };
+
+    terminal.writeToScreen("\033]133;A\007$ \033]133;B\007make\r\n\033]133;C\007out\r\n\033]133;D;3\007");
+    // Nothing reaches an observer before the loop runs: the parser thread only posts.
+    CHECK(recorder.signals.empty());
+    drain();
+    auto const finished = recorder.all<vthost::CommandBlockFinishedSignal>();
+    REQUIRE(finished.size() == 1);
+    CHECK(finished.front().summary.exitCode == 3);
+    auto const changed = recorder.all<vthost::CommandBlockChangedSignal>();
+    CHECK(std::ranges::any_of(changed, [&](auto const& c) { return c.id == finished.front().summary.id; }));
+    CHECK(recorder.signals.front().first == session);
+
+    terminal.writeToScreen("\033]2;hello\007");
+    drain();
+    auto const titles = recorder.all<vthost::TitleChangedSignal>();
+    REQUIRE(titles.size() == 1);
+    CHECK(titles.front().title == "hello");
+
+    terminal.writeToScreen("\033]7;file://h/tmp\033\\");
+    terminal.writeToScreen("\033]7;file://h/tmp\033\\");
+    drain();
+    CHECK(recorder.all<vthost::WorkingDirectoryChangedSignal>().size() == 1);
+}

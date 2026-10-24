@@ -614,6 +614,159 @@ layouts:
     CHECK(*layouts.at("extra").tabs.at(0).root.command == "zsh");
 }
 
+// {{{ hosts
+TEST_CASE("Config: saved hosts parse", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    home:
+        url: "ssh://me@homepc"
+        remote_command: "/opt/contour/bin/contour daemon --stdio"
+        profile: "remote"
+    studio:
+        url: "tls://studio.tailnet.ts.net:7297"
+        token_file: "~/.config/contour/studio.token"
+        tls_ca: "~/.config/contour/studio-ca.pem"
+)"sv);
+
+    auto const& hosts = config.hosts.value();
+    REQUIRE(hosts.size() == 2);
+    auto const& home = hosts.at("home");
+    CHECK(home.url.scheme == contour::config::HostScheme::Ssh);
+    CHECK(home.url.user == "me");
+    CHECK(home.url.host == "homepc");
+    CHECK(home.remoteCommand == "/opt/contour/bin/contour daemon --stdio");
+    CHECK(home.profile == "remote");
+    CHECK(home.tokenFile.empty());
+
+    auto const& studio = hosts.at("studio");
+    CHECK(studio.url.scheme == contour::config::HostScheme::Tls);
+    CHECK(studio.url.port == 7297);
+    CHECK(studio.tokenFile == vtpty::Process::homeDirectory() / ".config/contour/studio.token");
+    CHECK(studio.tlsCa == vtpty::Process::homeDirectory() / ".config/contour/studio-ca.pem");
+}
+
+TEST_CASE("Config: a host with a malformed url is skipped, the others load", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    bad:
+        url: "homepc"
+    home:
+        url: "ssh://homepc"
+)"sv);
+
+    auto const& hosts = config.hosts.value();
+    CHECK(hosts.size() == 1);
+    CHECK(hosts.contains("home"));
+}
+
+TEST_CASE("Config: a host without url is skipped", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    nowhere:
+        profile: "remote"
+    home:
+        url: "ssh://homepc"
+)"sv);
+
+    auto const& hosts = config.hosts.value();
+    CHECK(hosts.size() == 1);
+    CHECK(hosts.contains("home"));
+}
+
+TEST_CASE("Config: tls host without token_file is skipped", "[config][hosts]")
+{
+    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    studio:
+        url: "tls://studio:7297"
+)"sv);
+
+    CHECK(config.hosts.value().empty());
+}
+
+TEST_CASE("Config: tls host without tls_ca loads, unverified", "[config][hosts]")
+{
+    // Warned about at load rather than skipped: the guide explains when an unpinned daemon is acceptable.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    studio:
+        url: "tls://studio:7297"
+        token_file: "/tmp/studio.token"
+)"sv);
+
+    REQUIRE(config.hosts.value().contains("studio"));
+    CHECK(config.hosts.value().at("studio").tlsCa.empty());
+}
+
+TEST_CASE("Config: resolveHost finds saved hosts and parses ad-hoc URLs", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+hosts:
+    home:
+        url: "ssh://me@homepc"
+    studio:
+        url: "tls://studio:7297"
+        token_file: "/tmp/studio.token"
+)"sv);
+
+    SECTION("a saved name")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "home");
+        REQUIRE(host.has_value());
+        CHECK(host->url.user == "me");
+    }
+
+    SECTION("an unknown name lists the saved ones")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "office");
+        REQUIRE_FALSE(host.has_value());
+        CHECK(host.error().contains("no host named 'office'"));
+        CHECK(host.error().contains("home"));
+        CHECK(host.error().contains("studio"));
+    }
+
+    SECTION("an ad-hoc ssh URL needs no configuration")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "ssh://other");
+        REQUIRE(host.has_value());
+        CHECK(host->url.host == "other");
+    }
+
+    SECTION("an ad-hoc tls URL is refused")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "tls://studio:7297");
+        REQUIRE_FALSE(host.has_value());
+        CHECK(host.error() == "a tls:// host needs a token; save it under hosts: with token_file");
+    }
+
+    SECTION("a malformed ad-hoc URL says why")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "ssh://-oProxyCommand=x");
+        REQUIRE_FALSE(host.has_value());
+        CHECK(host.error().contains("a host may not begin with '-'"));
+    }
+}
+
+TEST_CASE("Config: resolveHost says (none) when nothing is saved", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, "default_profile: main\n");
+    auto const host = contour::config::resolveHost(path.string(), "home");
+    REQUIRE_FALSE(host.has_value());
+    CHECK(host.error().contains("(saved hosts: (none))"));
+}
+// }}}
+
 TEST_CASE("Config: a malformed layout field is skipped, not fatal to the rest of the config",
           "[config][layout]")
 {
@@ -2167,6 +2320,36 @@ input_mapping:
     });
     CHECK(nameless);
     CHECK(named);
+}
+
+TEST_CASE("Config: an AttachToHost binding carries its host's name, and one without is refused",
+          "[config][hosts]")
+{
+    // Like LaunchLayout: "attach to which host?" has no default, so a nameless binding is dropped on parse.
+    using namespace contour::actions;
+
+    CHECK(std::format("{}", Action { AttachToHost { .name = "home" } }) == "AttachToHost, name: 'home'");
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F6, action: AttachToHost, name: home }
+    - { mods: [Control, Shift], key: F7, action: AttachToHost }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    auto const attaches = std::ranges::count_if(
+        mappings, [](auto const& m) { return std::holds_alternative<AttachToHost>(m.binding.at(0)); });
+    CHECK(attaches == 1);
+    auto const home = std::ranges::any_of(mappings, [](auto const& m) {
+        auto const* attach = std::get_if<AttachToHost>(&m.binding.at(0));
+        return attach != nullptr && attach->name == "home";
+    });
+    CHECK(home);
 }
 
 TEST_CASE("Config: font features, text shaping engine, frozen DEC modes and hint patterns load", "[config]")
@@ -5378,80 +5561,6 @@ input_mapping:
 
 // }}}
 
-TEST_CASE("Config: resolveEmulationSettings resolves a named profile from a file", "[config]")
-{
-    // The one load-resolve-refuse sequence both `contour daemon` and `contour client` go through, so
-    // a warm daemon and the client that attaches to it cannot disagree about what the profile means.
-    QTemporaryDir dir;
-    auto const path = writeConfig(dir, R"(
-default_profile: main
-profiles:
-    main:
-        terminal_id: VT340
-        history:
-            limit: 4242
-    other:
-        terminal_id: VT420
-        history:
-            limit: 100
-)"sv);
-
-    SECTION("a named profile")
-    {
-        auto const settings = contour::config::resolveEmulationSettings(path.string(), "other");
-        REQUIRE(settings.has_value());
-        CHECK(settings->terminalId == vtbackend::VTType::VT420);
-        REQUIRE(std::holds_alternative<vtbackend::LineCount>(settings->historyLimits.capacity));
-        CHECK(std::get<vtbackend::LineCount>(settings->historyLimits.capacity) == vtbackend::LineCount(100));
-    }
-
-    SECTION("an empty profile name selects the configuration's default")
-    {
-        auto const settings = contour::config::resolveEmulationSettings(path.string(), "");
-        REQUIRE(settings.has_value());
-        CHECK(settings->terminalId == vtbackend::VTType::VT340);
-    }
-}
-
-TEST_CASE("Config: resolveEmulationSettings refuses an unknown profile", "[config]")
-{
-    // Refusing beats falling back to the default: a daemon hosting sessions under a profile the user
-    // did not name is a misconfiguration they would discover only much later, through the wrong
-    // scrollback depth or the wrong reported terminal. The message has to name both halves of the
-    // mistake for that to be diagnosable at all.
-    QTemporaryDir dir;
-    auto const path = writeConfig(dir, R"(
-default_profile: main
-profiles:
-    main:
-        terminal_id: VT525
-)"sv);
-
-    auto const settings = contour::config::resolveEmulationSettings(path.string(), "nope");
-    REQUIRE_FALSE(settings.has_value());
-    CHECK(settings.error().contains("nope"));
-    CHECK(settings.error().contains(path.string()));
-}
-
-TEST_CASE("Config: resolveEmulationSettings reports a config it cannot parse", "[config]")
-{
-    // The failure mode the try/catch actually exists for. NOT a nonexistent path: loadConfigFromFile
-    // calls createFileIfNotExists, so an absent file is created rather than refused, and whether that
-    // creation fails is a property of the filesystem -- `/nonexistent/...` is refused on Linux and
-    // was happily created on Windows, which is how this test failed there and nowhere else.
-    QTemporaryDir dir;
-    auto const path = writeConfig(dir, R"(
-default_profile: main
-profiles:
-    main:
-  bad_indentation: [unclosed
-)"sv);
-
-    auto const settings = contour::config::resolveEmulationSettings(path.string(), "");
-    REQUIRE_FALSE(settings.has_value());
-    CHECK_FALSE(settings.error().empty());
-}
-
 TEST_CASE("Config: tryLoadConfigFromFile loads a file or says why it could not", "[config]")
 {
     QTemporaryDir dir;
@@ -5483,7 +5592,7 @@ profiles:
 TEST_CASE("Config: emulationSettingsFor resolves a profile of a configuration in memory", "[config]")
 {
     // What `contour client` states for each session it creates: the configuration it holds, as a reload
-    // left it, resolved and refused as resolveEmulationSettings resolves and refuses the file.
+    // left it, resolved and refused like a profile named on the command line.
     QTemporaryDir dir;
     auto const path = writeConfig(dir, R"(
 default_profile: main
@@ -5509,11 +5618,11 @@ profiles:
         CHECK(settings->terminalId == vtbackend::VTType::VT220);
     }
 
-    SECTION("an unknown profile is refused in the words the file's resolution uses")
+    SECTION("an unknown profile is refused, naming both the profile and the file")
     {
         auto const settings = contour::config::emulationSettingsFor(config, "nope");
         REQUIRE_FALSE(settings.has_value());
-        CHECK(settings.error() == contour::config::resolveEmulationSettings(path.string(), "nope").error());
+        CHECK(settings.error().contains("nope"));
         CHECK(settings.error().contains(path.string()));
     }
 }
@@ -5639,8 +5748,7 @@ profiles:
     CHECK(resolved->shell.workingDirectory == std::filesystem::path("/var/tmp"));
 }
 
-TEST_CASE("Config: resolveSessionConfig refuses an unknown profile, matching resolveEmulationSettings",
-          "[config]")
+TEST_CASE("Config: resolveSessionConfig refuses an unknown profile", "[config]")
 {
     QTemporaryDir dir;
     auto const path = writeConfig(dir, R"(

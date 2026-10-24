@@ -227,6 +227,11 @@ namespace
         [[nodiscard]] std::expected<void, ServiceError> start() override;
         [[nodiscard]] std::expected<void, ServiceError> stop() override;
         [[nodiscard]] std::expected<ServiceStatus, ServiceError> status() const override;
+        /// The Task Scheduler starts the command and tracks that process, so the daemon detaches itself.
+        [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override
+        {
+            return DaemonLaunchStyle::SelfDetaching;
+        }
 
       private:
         /// Connects to the local Task Scheduler and opens the root folder.
@@ -546,6 +551,10 @@ namespace
         {
             return std::unexpected(error());
         }
+        [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override
+        {
+            return DaemonLaunchStyle::Foreground;
+        }
 
       private:
         [[nodiscard]] static ServiceError error()
@@ -559,7 +568,9 @@ namespace
     };
 } // namespace
 
-std::unique_ptr<ServiceBackend> makeServiceBackend(ServiceStartMode mode, std::string_view name)
+std::unique_ptr<ServiceBackend> makeServiceBackend(ServiceStartMode mode,
+                                                   std::string_view name,
+                                                   ServiceBackendServices const& /*services*/)
 {
     switch (mode)
     {

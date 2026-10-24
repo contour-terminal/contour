@@ -348,3 +348,86 @@ TEST_CASE("paneTreeHosts finds a session anywhere in the tree", "[vthost][layout
     auto malformed = proto::WirePane { .paneId = 1, .split = 2, .session = 7 };
     CHECK(vthost::client::paneTreeHosts(malformed, 7));
 }
+
+TEST_CASE("tabEditsToReport names exactly the fields that differ", "[vthost][layout][sync-back]")
+{
+    using proto::TabEditKind;
+    using vthost::client::tabEditsToReport;
+    using vthost::client::TabPresentation;
+
+    auto const stated = TabPresentation { .activeSession = 1, .title = std::nullopt };
+    CHECK(tabEditsToReport(stated, stated).empty());
+    auto local = stated;
+    local.activeSession = 2;
+    local.title = "build";
+    CHECK(tabEditsToReport(local, stated)
+          == std::vector<proto::EditTab> {
+              { .session = 2, .kind = TabEditKind::ActivatePane },
+              { .session = 2, .kind = TabEditKind::SetTitle, .title = "build" },
+          });
+    auto zoomedThere = stated;
+    zoomedThere.zoomedSession = 1;
+    CHECK(tabEditsToReport(stated, zoomedThere).front().kind == TabEditKind::Unzoom);
+}
+
+TEST_CASE("tabEditsToReport orders every field and leaves a tab only the daemon activates alone",
+          "[vthost][layout][sync-back]")
+{
+    using proto::TabEditKind;
+    using vthost::client::TabActivity;
+    using vthost::client::tabEditsToReport;
+    using vthost::client::TabPresentation;
+
+    auto const daemon = TabPresentation { .activeSession = 1,
+                                          .zoomedSession = 0,
+                                          .title = "old",
+                                          .color = 0x112233,
+                                          .activity = TabActivity::Inactive };
+    auto const local = TabPresentation { .activeSession = 3,
+                                         .zoomedSession = 3,
+                                         .title = std::nullopt,
+                                         .color = std::nullopt,
+                                         .activity = TabActivity::Active };
+    CHECK(tabEditsToReport(local, daemon)
+          == std::vector<proto::EditTab> {
+              { .session = 3, .kind = TabEditKind::ActivateTab },
+              { .session = 3, .kind = TabEditKind::ActivatePane },
+              { .session = 3, .kind = TabEditKind::Zoom },
+              { .session = 3, .kind = TabEditKind::ClearTitle },
+              { .session = 3, .kind = TabEditKind::ClearColor },
+          });
+
+    // The other way round: a colour set, and an activity that only the daemon has, which is not undone.
+    auto const colored = TabPresentation { .activeSession = 1, .color = 0xABCDEF };
+    auto const activeThere = TabPresentation { .activeSession = 1, .activity = TabActivity::Active };
+    CHECK(tabEditsToReport(colored, activeThere)
+          == std::vector<proto::EditTab> {
+              { .session = 1, .kind = TabEditKind::SetColor, .color = 0xABCDEF } });
+}
+
+TEST_CASE("presentationOf reads a daemon tab's panes by their leaf sessions", "[vthost][layout][sync-back]")
+{
+    using vthost::client::presentationOf;
+    using vthost::client::TabActivity;
+    using vthost::client::TabPresentation;
+
+    auto tab = proto::WireTab {};
+    tab.activePane = 12;
+    tab.zoomedPane = 12;
+    tab.title = "logs";
+    tab.root = proto::WirePane { .paneId = 10,
+                                 .split = 2,
+                                 .children = { proto::WirePane { .paneId = 11, .session = 7 },
+                                               proto::WirePane { .paneId = 12, .session = 8 } } };
+    CHECK(presentationOf(tab, TabActivity::Active)
+          == TabPresentation {
+              .activeSession = 8, .zoomedSession = 8, .title = "logs", .activity = TabActivity::Active });
+
+    // No title, a colour, a pane id no leaf has.
+    tab.title.clear();
+    tab.zoomedPane = 0;
+    tab.activePane = 99;
+    tab.hasColor = 1;
+    tab.color = 0x00FF00;
+    CHECK(presentationOf(tab, TabActivity::Inactive) == TabPresentation { .color = 0x00FF00 });
+}

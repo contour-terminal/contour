@@ -20,8 +20,9 @@ namespace vthost
 // proto::WireCell::flags), which is only sound while those bits are FROZEN. The tables below are a
 // deliberately INDEPENDENT copy of the bit assignments: they exist to disagree. Renumbering a flag
 // in VTBACKEND_LINE_FLAGS or VTBACKEND_CELL_FLAGS then fails to compile here, which is where the
-// question "does this need a proto::CodecVersion bump?" has to be answered — instead of a peer on
-// the old numbering silently decoding a curly underline as a dotted one.
+// question "does this need a protocol version step, gated by the negotiated version?" has to be
+// answered — instead of a peer on the old numbering silently decoding a curly underline as a dotted
+// one.
 //
 // Asserting against the generating macro itself would be tautological (it defines the enumerator AS
 // `1U << Bit`), so these numbers are written out on purpose. Adding a flag needs one row here too;
@@ -77,15 +78,15 @@ namespace
 
 static_assert(bitsAreAsPinned(PinnedLineFlagBits),
               "A LineFlag's bit value changed. Those bits travel on the native wire verbatim, so an "
-              "older peer would mis-decode them: bump proto::CodecVersion (or restore the bit) and "
-              "update the pin above.");
+              "older peer would mis-decode them: add a protocol version step and gate by the "
+              "negotiated version (or restore the bit), and update the pin above.");
 static_assert(PinnedLineFlagBits.size() == vtbackend::LineFlagList.size(),
               "A LineFlag was added or removed. Add (or drop) its row in PinnedLineFlagBits, which is "
               "what freezes the wire encoding.");
 static_assert(bitsAreAsPinned(PinnedCellFlagBits),
               "A CellFlag's bit value changed. Those bits travel on the native wire verbatim, so an "
-              "older peer would mis-decode them: bump proto::CodecVersion (or restore the bit) and "
-              "update the pin above.");
+              "older peer would mis-decode them: add a protocol version step and gate by the "
+              "negotiated version (or restore the bit), and update the pin above.");
 static_assert(PinnedCellFlagBits.size() == vtbackend::CellFlagList.size(),
               "A CellFlag was added or removed. Add (or drop) its row in PinnedCellFlagBits, which is "
               "what freezes the wire encoding.");
@@ -177,16 +178,23 @@ void applyWireCell(vtbackend::LineSoA& soa,
 void applyWireLine(vtbackend::Line& line,
                    proto::WireLine const& wire,
                    std::unordered_map<uint16_t, vtbackend::HyperlinkId> const& hyperlinks,
-                   ContextIdMap const& contexts)
+                   ContextIdMap const& contexts,
+                   vtbackend::ColumnOffset firstColumn)
 {
     auto const flags = vtbackend::LineFlags::fromValue(wire.flags);
+    // A negative shift is no window into anything: it is read as none.
+    auto const skipped = static_cast<std::size_t>(std::max(unbox<int>(firstColumn), 0));
+    auto const shifted = [skipped](int32_t offset) {
+        return vtbackend::ColumnOffset::cast_from(
+            std::max(int64_t { offset } - static_cast<int64_t>(skipped), int64_t { 0 }));
+    };
     // The clear does three jobs at once: it drops stale content, it gives the omitted trailing
     // columns their color, and it puts the row into the blank state when nothing travelled — which
     // is what makes a uniformly-filled row as cheap on this side as it was on the wire.
     line.reset(flags, fillAttrsOf(wire));
     // After the reset, never before: Line::reset() clears an offset whose flag it does not keep.
-    line.setPromptEndOffset(vtbackend::ColumnOffset(wire.promptEndOffset));
-    line.setCommandEndOffset(vtbackend::ColumnOffset(wire.commandEndOffset));
+    line.setPromptEndOffset(shifted(wire.promptEndOffset));
+    line.setCommandEndOffset(shifted(wire.commandEndOffset));
     // Translated, never copied: the id is the SENDER's, and this terminal mints its own. An id with
     // no mapping resolves to none, exactly as an unmapped hyperlink id does. The zero test first,
     // because a session that never sees OSC 3008 stamps every line with it and would otherwise pay a
@@ -204,14 +212,14 @@ void applyWireLine(vtbackend::Line& line,
     // when is unknown" stamp — instead of wrapping round to a plausible time. A zero, a row the host
     // never stamped, stamps nothing.
     line.stampBornAt(wire.bornAt);
-    if (wire.cells.empty())
+    if (wire.cells.size() <= skipped)
         return;
 
-    auto const columns = std::min(wire.cells.size(), unbox<std::size_t>(line.size()));
+    auto const columns = std::min(wire.cells.size() - skipped, unbox<std::size_t>(line.size()));
     auto& soa = line.materializedStorage();
     for (auto const column: std::views::iota(std::size_t { 0 }, columns))
     {
-        auto const& cell = wire.cells[column];
+        auto const& cell = wire.cells[skipped + column];
         auto localLink = vtbackend::HyperlinkId {};
         if (auto const it = hyperlinks.find(cell.hyperlink); it != hyperlinks.end())
             localLink = it->second;

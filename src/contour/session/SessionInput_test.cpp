@@ -584,6 +584,20 @@ TEST_CASE("wheel and mouse event helpers route through the session", "[session][
     SUCCEED("display-less mouse/wheel routing is crash-free");
 }
 
+TEST_CASE("buildAttachHostCommand runs contour client --host with the active configuration",
+          "[helper][spawn][hosts]")
+{
+    auto const cmd = contour::session::buildAttachHostCommand(
+        "/usr/bin/contour", "/home/me/.config/contour/contour.yml", "home");
+    CHECK(cmd.program == "/usr/bin/contour");
+    CHECK(cmd.arguments
+          == QStringList { "client", "--host", "home", "--config", "/home/me/.config/contour/contour.yml" });
+
+    // No configuration file: the new process loads the default one.
+    auto const bare = contour::session::buildAttachHostCommand("/usr/bin/contour", "", "home");
+    CHECK(bare.arguments == QStringList { "client", "--host", "home" });
+}
+
 TEST_CASE("buildSpawnTerminalCommand assembles arguments and forwards the working directory",
           "[helper][spawn]")
 {

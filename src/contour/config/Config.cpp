@@ -3,6 +3,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
+#include <contour/config/HostUrl.hpp>
 #include <contour/config/ModifierNames.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -724,32 +725,12 @@ namespace
         return NamedProfile { .name = std::move(name), .profile = profile };
     }
 
-    /// A config loaded from disk together with the one profile @p profileName resolved to.
-    struct LoadedProfile
-    {
-        Config config;
-        std::string profileName; ///< The name actually resolved (the config's default, if empty).
-        TerminalProfile const* profile = nullptr;
-    };
-
-    /// The load-resolve-refuse sequence @ref resolveSessionConfig needs: load @p configPath (or the default
-    /// location, if empty), then resolve @p profileName within it (@see findNamedProfile).
-    /// @return The loaded config and resolved profile, or a human-readable reason it could not be resolved.
-    [[nodiscard]] std::expected<LoadedProfile, std::string> loadAndFindProfile(std::string const& configPath,
-                                                                               std::string const& profileName)
-    {
-        return tryLoadConfigFromFile(configFileNamed(configPath)).and_then([&](Config&& loaded) {
-            return findNamedProfile(loaded, profileName).transform([&](NamedProfile found) {
-                // The profile lives in the map's node, which the move hands over rather than copies.
-                return LoadedProfile {
-                    .config = std::move(loaded),
-                    .profileName = std::move(found.name),
-                    .profile = found.profile,
-                };
-            });
-        });
-    }
 } // namespace
+
+std::expected<Config, std::string> tryLoadConfigNamed(std::string_view configPath)
+{
+    return tryLoadConfigFromFile(configFileNamed(configPath));
+}
 
 std::expected<vtbackend::Settings, std::string> emulationSettingsFor(Config const& config,
                                                                      std::string const& profileName)
@@ -759,12 +740,34 @@ std::expected<vtbackend::Settings, std::string> emulationSettingsFor(Config cons
     });
 }
 
-std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(std::string const& configPath,
-                                                                         std::string const& profileName)
+std::expected<HostEntry, std::string> resolveHost(std::string const& configPath, std::string_view nameOrUrl)
 {
-    return tryLoadConfigFromFile(configFileNamed(configPath)).and_then([&](Config const& loaded) {
-        return emulationSettingsFor(loaded, profileName);
-    });
+    if (nameOrUrl.contains("://"))
+        return parseHostUrl(nameOrUrl)
+            .transform_error(
+                [&](HostUrlError error) { return std::format("{}: {}", nameOrUrl, describe(error)); })
+            .and_then([](HostUrl url) -> std::expected<HostEntry, std::string> {
+                // A TCP daemon always requires a token, and only a saved host can name its file.
+                if (url.scheme == HostScheme::Tls)
+                    return std::unexpected { std::string {
+                        "a tls:// host needs a token; save it under hosts: with token_file" } };
+                return HostEntry {
+                    .url = std::move(url), .tokenFile = {}, .tlsCa = {}, .remoteCommand = {}, .profile = {}
+                };
+            });
+
+    return tryLoadConfigFromFile(configFileNamed(configPath))
+        .and_then([&](Config const& loaded) -> std::expected<HostEntry, std::string> {
+            auto const& hosts = loaded.hosts.value();
+            if (auto const found = hosts.find(std::string { nameOrUrl }); found != hosts.end())
+                return found->second;
+            auto const names = std::ranges::to<std::vector<std::string>>(std::views::keys(hosts));
+            return std::unexpected { std::format("no host named '{}' in {} (saved hosts: {})",
+                                                 nameOrUrl,
+                                                 core::pathToUtf8(loaded.configFile),
+                                                 names.empty() ? std::string { "(none)" }
+                                                               : core::joinHumanReadable(names, ", ")) };
+        });
 }
 
 vtbackend::ColorPalette const* preferredColorPalette(ColorConfig const& colorConfig,
@@ -968,16 +971,23 @@ ResolvedSessionConfig resolvedSessionConfig(Config const& config,
     };
 }
 
-std::expected<ResolvedSessionConfig, std::string> resolveSessionConfig(std::string const& configPath,
-                                                                       std::string const& profileName)
+std::expected<ResolvedSessionConfig, std::string> resolvedSessionConfigFor(Config const& config,
+                                                                           std::string const& profileName)
 {
-    return loadAndFindProfile(configPath, profileName).transform([](LoadedProfile const& loaded) {
+    return findNamedProfile(config, profileName).transform([&](NamedProfile const& found) {
         // No dark/light preference to honor headlessly: a daemon presents nothing itself, so its
         // hosted sessions get the color config's default (light) half until an attaching client's
         // presentation states its own preference over the wire, the same way it states any other
         // per-client preference.
-        return resolvedSessionConfig(
-            loaded.config, *loaded.profile, loaded.profileName, vtbackend::ColorPreference::Light);
+        return resolvedSessionConfig(config, *found.profile, found.name, vtbackend::ColorPreference::Light);
+    });
+}
+
+std::expected<ResolvedSessionConfig, std::string> resolveSessionConfig(std::string const& configPath,
+                                                                       std::string const& profileName)
+{
+    return tryLoadConfigNamed(configPath).and_then([&](Config const& loaded) {
+        return resolvedSessionConfigFor(loaded, profileName);
     });
 }
 
@@ -1429,6 +1439,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("read_buffer_size", c.ptyReadBufferSize);
         loadFromEntry("pty_buffer_size", c.ptyBufferObjectSize);
         loadFromEntry("images", c.images);
+        loadFromEntry("daemon", c.daemon);
         loadFromEntry("folding", c.folding);
         loadFromEntry("gutter", c.gutter);
         loadFromEntry("osc_context", c.oscContext);
@@ -1461,6 +1472,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("layouts", c.layouts);
+        loadFromEntry("hosts", c.hosts);
         loadFromEntry("git_drawings", c.gitDrawings);
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
@@ -1800,6 +1812,68 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             parseLayoutNode(layoutEntry.second, layout);
         }
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::map<std::string, HostEntry>& where) const
+{
+    auto const child = node[entry];
+    if (!child || !child.IsMap())
+        return;
+    for (auto hostEntry: child)
+    {
+        if (!hostEntry.first.IsScalar())
+        {
+            errorLog()("Ignoring a host with a non-scalar name.");
+            continue;
+        }
+        auto const name = hostEntry.first.as<std::string>();
+        if (auto host = parseHostNode(hostEntry.second, name))
+            where.insert_or_assign(name, std::move(*host));
+    }
+}
+
+std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostNode,
+                                                         std::string const& name) const
+{
+    auto const skip = [&](std::string_view reason) -> std::optional<HostEntry> {
+        errorLog()("Ignoring host '{}': {}", name, reason);
+        return std::nullopt;
+    };
+    auto const scalar = [&](char const* key) -> std::optional<std::string> {
+        if (auto const value = hostNode[key]; value && value.IsScalar())
+            return value.as<std::string>();
+        return std::nullopt;
+    };
+    auto const path = [&](char const* key) {
+        return scalar(key)
+            .transform([&](std::string const& text) { return resolvedPath(text); })
+            .value_or(std::filesystem::path {});
+    };
+
+    if (!hostNode.IsMap())
+        return skip("expected a map of url, token_file, tls_ca, remote_command and profile");
+    auto const urlText = scalar("url");
+    if (!urlText)
+        return skip("it has no url");
+    auto url = parseHostUrl(*urlText);
+    if (!url)
+        return skip(describe(url.error()));
+
+    auto host = HostEntry {
+        .url = std::move(*url),
+        .tokenFile = path("token_file"),
+        .tlsCa = path("tls_ca"),
+        .remoteCommand = scalar("remote_command").value_or(std::string {}),
+        .profile = scalar("profile").value_or(std::string {}),
+    };
+    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
+    if (host.url.scheme == HostScheme::Tls && host.tokenFile.empty())
+        return skip("a tls:// host needs a token_file");
+    if (host.url.scheme == HostScheme::Tls && host.tlsCa.empty())
+        errorLog()("Host '{}' has no tls_ca: the daemon's certificate is not verified", name);
+    return host;
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -2560,6 +2634,58 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
 
         loadFromEntry(child, "good_image_protocol", where.goodImageProtocol);
     }
+}
+
+namespace
+{
+    /// The names of @p table, comma separated, for a diagnostic.
+    template <typename Table>
+    [[nodiscard]] std::string acceptedNames(Table const& table)
+    {
+        auto names = std::string {};
+        for (auto const& [name, value]: table)
+        {
+            if (!names.empty())
+                names += ", ";
+            names += name;
+        }
+        return names;
+    }
+} // namespace
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where)
+{
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    (void) detail::loadConfigEnum(
+        child,
+        "mode",
+        keyPathTo(child, "mode"),
+        where.mode,
+        logger,
+        [](std::string const& token) { return daemonModeFrom(core::toLower(token)); },
+        acceptedNames(DaemonModeNames));
+    (void) detail::loadConfigEnum(
+        child,
+        "size_policy",
+        keyPathTo(child, "size_policy"),
+        where.sizePolicy,
+        logger,
+        [](std::string const& token) { return vthost::clientSizePolicyFrom(core::toLower(token)); },
+        acceptedNames(vthost::ClientSizePolicyNames));
+    loadGuarded(child, "socket", where.socket);
+
+    // Absent or null (`~`) leaves the limit to the hosting profile's `history.limit`.
+    if (auto const limit = child["history_limit"]; limit && !limit.IsNull())
+    {
+        auto value = vtbackend::MaxHistoryLineCount { vtbackend::LineCount(0) };
+        loadFromEntry(child, "history_limit", value);
+        where.historyLimit = value;
+    }
+
+    loadFromEntry(child, "restore", where.restore);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where)
@@ -3367,6 +3493,80 @@ namespace
         return negative ? chrono::seconds::zero() : chrono::seconds { *count };
     }
 } // namespace
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     DaemonRestoreConfig& where)
+{
+    // Only the children present are written, and each is read without as<>(), which would throw on a value
+    // of the wrong kind and leave the keys after it unread.
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    loadGuarded(child, "scrollback", where.scrollback);
+
+    if (auto const lines = child["scrollback_lines"])
+    {
+        auto const count = lines.IsScalar() ? core::toInteger<10, size_t>(lines.Scalar()) : nullopt;
+        if (!count)
+            errorLog()("{} must be a whole number of lines, not '{}'; keeping {}.",
+                       keyPathTo(child, "scrollback_lines"),
+                       YAML::Dump(lines),
+                       where.scrollbackLines);
+        else
+        {
+            if (*count > MaxRestoreScrollbackLines)
+                errorLog()("{} is at most {}, not {}; using {}.",
+                           keyPathTo(child, "scrollback_lines"),
+                           MaxRestoreScrollbackLines,
+                           *count,
+                           MaxRestoreScrollbackLines);
+            where.scrollbackLines = std::min(*count, MaxRestoreScrollbackLines);
+        }
+    }
+
+    if (auto const programs = child["rerun_programs"])
+    {
+        if (!programs.IsSequence())
+            errorLog()(
+                "{} ({}) takes a list of program names, such as [vim, htop]; keeping the previous one.",
+                keyPathTo(child, "rerun_programs"),
+                detail::placeOf(programs));
+        else
+        {
+            where.rerunPrograms.clear();
+            for (auto const& program: programs)
+            {
+                if (program.IsScalar() && !program.Scalar().empty())
+                    where.rerunPrograms.push_back(program.Scalar());
+                else
+                    errorLog()("{} ({}) lists something other than a program name; ignored.",
+                               keyPathTo(child, "rerun_programs"),
+                               detail::placeOf(program));
+            }
+        }
+    }
+
+    if (auto const interval = child["interval"])
+    {
+        if (auto const parsed = wholeSecondsFloor(interval); !parsed)
+            errorLog()("{} must be a whole number of seconds, not '{}'; keeping {}.",
+                       keyPathTo(child, "interval"),
+                       YAML::Dump(interval),
+                       where.interval.count());
+        else
+        {
+            if (*parsed < MinRestoreInterval)
+                errorLog()("{} is at least {} s, not {} s; using {} s.",
+                           keyPathTo(child, "interval"),
+                           MinRestoreInterval.count(),
+                           parsed->count(),
+                           MinRestoreInterval.count());
+            where.interval = std::max(*parsed, MinRestoreInterval);
+        }
+    }
+}
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,
@@ -4338,6 +4538,14 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             return std::nullopt;
         }
 
+        if (holds_alternative<actions::AttachToHost>(action))
+        {
+            // Like LaunchLayout: a nameless "attach to which host?" has no default, so it is dropped.
+            if (auto name = node["name"]; name && name.IsScalar())
+                return actions::AttachToHost { name.as<std::string>() };
+            return std::nullopt;
+        }
+
         if (holds_alternative<actions::SaveLayout>(action))
         {
             // The name is OPTIONAL, unlike LaunchLayout above: with one, SaveLayout saves straight to it;
@@ -4647,6 +4855,8 @@ static std::string createForGlobal(Config const& c)
         [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, config::Layout>,
                                          documentation::Layouts> const& v) {},
+        [&]([[maybe_unused]] auto const& name,
+            [[maybe_unused]] ConfigEntry<std::map<std::string, HostEntry>, documentation::Hosts> const& v) {},
         [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},
     };
 

@@ -1787,21 +1787,19 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 
 TEST_CASE("Terminal.ParsingBuffer", "[terminal]")
 {
-    // Test that parsingBuffer() returns the correct buffer during parsing.
-    // When _parsingBuffer is not set, it should fall back to currentPtyBuffer().
+    // Outside a parse there is no buffer being parsed: text flushed then (queued trace events) may lie in the
+    // reader's buffer or in writeToScreen()'s, so neither may have its hot end moved for it.
 
     auto mock = MockTerm { ColumnCount { 10 }, LineCount { 3 } };
     auto& terminal = mock.terminal;
 
-    // Initially, parsingBuffer() should return currentPtyBuffer() since _parsingBuffer is not set
-    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer().get());
+    CHECK(terminal.parsingBuffer() == nullptr);
 
     // Write some text - this will exercise the parsing path
     mock.writeToScreen("Hello");
 
-    // After parsing completes, parsingBuffer() should still return currentPtyBuffer()
-    // because _parsingBuffer is reset after each parse
-    CHECK(terminal.parsingBuffer() == terminal.currentPtyBuffer().get());
+    // _parsingBuffer is reset after each parse
+    CHECK(terminal.parsingBuffer() == nullptr);
 }
 
 TEST_CASE("Terminal.TrivialLineBufferIntegrity", "[terminal]")
@@ -5572,6 +5570,110 @@ TEST_CASE("Terminal.input the PTY pushed back on is written again by its reader"
     pty.wakeupReader();
     reader.join();
     CHECK(written == "x");
+}
+
+/// A PTY whose program prints one full row Rows times, then falls silent: a read waits for its
+/// timeout, as a real PTY's does, until the PTY closes.
+class RowPrintingPty final: public vtpty::MockPty
+{
+  public:
+    static constexpr auto Row = std::string_view { "PPPPPPPPPP\r\n" };
+    static constexpr auto Rows = 1000;
+
+    using MockPty::MockPty;
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t /*size*/) override
+    {
+        auto lock = std::unique_lock { _mutex };
+        if (_rowsLeft > 0)
+        {
+            --_rowsLeft;
+            auto const _ = std::scoped_lock { storage };
+            auto const pooled = storage.writeAtEnd(Row);
+            return ReadResult { .data = std::string_view(pooled.data(), pooled.size()),
+                                .fromStdoutFastPipe = false };
+        }
+        auto const closed = [this] {
+            return _closed;
+        };
+        if (timeout)
+            std::ignore = _wake.wait_for(lock, *timeout, closed);
+        else
+            _wake.wait(lock, closed);
+        errno = EAGAIN;
+        return std::nullopt;
+    }
+
+    void close() override
+    {
+        {
+            auto const _ = std::scoped_lock { _mutex };
+            _closed = true;
+        }
+        _wake.notify_all();
+    }
+
+    [[nodiscard]] bool isClosed() const noexcept override
+    {
+        auto const _ = std::scoped_lock { _mutex };
+        return _closed;
+    }
+
+    [[nodiscard]] bool printedAll() const
+    {
+        auto const _ = std::scoped_lock { _mutex };
+        return _rowsLeft == 0;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::condition_variable _wake;
+    int _rowsLeft = Rows;
+    bool _closed = false;
+};
+
+TEST_CASE("Terminal.writeToScreen from another thread keeps apart from what the reader reads",
+          "[terminal][threading]")
+{
+    // The GUI writes to the screen (a notice, the WriteScreen action) while the session's reader reads the
+    // PTY. Each must parse out of a buffer of its own: sharing the reader's, the GUI's text lands where the
+    // reader's next read lands, and one overwrites the other's row.
+    constexpr auto Rows = RowPrintingPty::Rows;
+    constexpr auto WriterRow = std::string_view { "WWWWWWWWWW\r\n" };
+    auto mc =
+        MockTerm<RowPrintingPty> { PageSize { LineCount(5), ColumnCount(10) }, LineCount(2 * Rows), 1024 };
+    auto& pty = mc.mockPty();
+    auto reader = std::jthread { [&mc] {
+        while (!mc.terminal.device().isClosed() && mc.terminal.processInputOnce())
+            ;
+    } };
+    mc.terminal.setReaderThread(reader.get_id());
+
+    for ([[maybe_unused]] auto const row: std::views::iota(0, Rows))
+        mc.terminal.writeToScreen(WriterRow);
+    for ([[maybe_unused]] auto const tick: std::views::iota(0, 500))
+    {
+        if (pty.printedAll())
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 5 });
+    }
+    REQUIRE(pty.printedAll());
+    pty.close();
+    reader.join();
+
+    auto const _ = std::scoped_lock { mc.terminal };
+    auto const& grid = mc.terminal.primaryScreen().grid();
+    auto const isWhole = [](std::string_view text) {
+        return text == "PPPPPPPPPP" || text == "WWWWWWWWWW" || text == "          ";
+    };
+    for (auto const offset: std::views::iota(-grid.historyLineCount().as<int>(), 5))
+    {
+        auto const text = grid.lineText(LineOffset(offset));
+        INFO(std::format("line {}: \"{}\"", offset, text));
+        CHECK(isWhole(text));
+    }
 }
 
 TEST_CASE("Terminal.DECSCUSR sets the cursor a frame is drawn with", "[terminal]")

@@ -40,7 +40,7 @@ When enabled:
   them), but a reader never sees a command that started before it enabled the mode, so enabling it is never a
   way to read back commands that ran earlier.
 - The terminal generates a session token and replies with a DCS containing the token (see Authentication below).
-- The query sequence `CSI > Ps ; Pn ; T1 ; T2 ; T3 ; T4 b` becomes available.
+- The query sequence `CSI > Ps ; Pn ; T1 ; T2 ; T3 ; T4 [; Ph] b` becomes available.
 
 When disabled:
 - Nothing is reported any more; commands started so far stay hidden even if the mode is enabled again.
@@ -82,7 +82,7 @@ authentication may not be usable. This is a known limitation.
 ## Query Syntax — SBQUERY
 
 ```
-CSI > Ps ; Pn ; T1 ; T2 ; T3 ; T4 b
+CSI > Ps ; Pn ; T1 ; T2 ; T3 ; T4 [; Ph] b
 ```
 
 **Mnemonic:** SBQUERY — **S**emantic **B**lock **QUERY**
@@ -92,17 +92,25 @@ CSI with `>` leader, final character `b` (for "blocks").
 | Parameter | Meaning                                              |
 |-----------|------------------------------------------------------|
 | Ps        | Query type (see table below)                         |
-| Pn        | Count parameter (default 1)                          |
+| Pn        | Count parameter (default 1); for `Ps` 4, the id's low 16 bits |
 | T1..T4    | The session token, as the DECSET reply carried it    |
+| Ph        | For `Ps` 4, the id's high 16 bits (default 0)        |
 
 | Ps | Meaning                         | Pn                  |
 |----|-------------------------------- |---------------------|
 | 1  | Last completed command block    | ignored             |
 | 2  | Last N completed command blocks | count (default 1)   |
 | 3  | Current in-progress command     | ignored             |
+| 4  | The block with id `Ph × 65536 + Pn`, in any state | the id's low 16 bits |
 
 A `Ps` of 0, like an omitted one, means 1. Any other `Ps` is answered `DCS > 0 b ST`, as a query with no
 data: a reader asking a question the terminal does not know never receives the answer to another.
+
+`Ps` 4 answers an older block a reader learned the `id` of from an earlier reply: finished, superseded,
+running or still at its prompt. A CSI parameter cannot exceed 65535, so the id travels in two halves,
+`Pn = id & 0xFFFF` and `Ph = id >> 16`; `Ph` comes after the token, which so stays at parameters 2..5. A
+block the reader may not see (its command started before the mode was enabled), or one the terminal no
+longer keeps, is answered `DCS > 0 b ST`, as is an id of 0, which no block has.
 
 A *completed* block is one the shell finished with OSC 133;D (or OSC 3008 `end=`). A block that a newer
 prompt superseded without one -- the prompt of a nested shell, such as inside `ssh` -- is not reported.
@@ -149,11 +157,11 @@ DCS > 3 b ST
 ## JSON Response Schema
 
 The JSON of step 4 of the [example session](#example-session) below, laid out with whitespace the terminal
-does not send:
+does not send; the values of the keys version 2 adds are an example of their own:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "blocks": [
     {
       "command": "echo hello",
@@ -161,7 +169,11 @@ does not send:
       "output": "hello",
       "exitCode": 0,
       "finished": true,
-      "outputLineCount": 1
+      "outputLineCount": 1,
+      "id": 4,
+      "cwd": "/home/user",
+      "startedAt": "2026-10-24T09:41:07.312Z",
+      "durationMs": 4
     }
   ]
 }
@@ -171,7 +183,7 @@ does not send:
 
 | Field             | Type              | Description                                                       |
 |-------------------|-------------------|-------------------------------------------------------------------|
-| `version`         | integer           | Schema version, currently `1`.                                    |
+| `version`         | integer           | Schema version, currently `2`.                                    |
 | `blocks`          | array             | Array of command block objects, ordered chronologically.           |
 | `command`         | string or null    | The command line from OSC 133;C `cmdline_url` or `cmdline`, or -- when the shell sent none but marked its prompt end with OSC 133;B -- the text typed after the prompt. `null` when neither is known. Longer than 4096 bytes it is cut at a character boundary and ends in `…`. |
 | `prompt`          | string            | The prompt the command was typed at, the typed command included: the block's lines from the one OSC 133;A marked down to the one its output starts on. |
@@ -179,6 +191,14 @@ does not send:
 | `exitCode`        | integer           | From OSC 133;D (or OSC 3008 `end=`). `-1` if unknown.            |
 | `finished`        | boolean           | `false` for in-progress commands (Ps=3 query), `true` otherwise. |
 | `outputLineCount` | integer           | Number of lines in `output`.                                      |
+| `id`              | integer           | The block's id (version 2): what `Ps` 4 asks for. Valid within the current id epoch only -- the ids start over when they would overflow -- and not the `block:<pane>/<serial>` id of the [control API](../control-api.md). |
+| `cwd`             | string or null    | The working directory (OSC 7) the command started in (version 2). `null` before it started, or when none was reported. |
+| `startedAt`       | string or null    | When the command started (OSC 133;C), as RFC 3339 in UTC with milliseconds (version 2). `null` before it started. |
+| `durationMs`      | integer or null   | How long it ran, from OSC 133;C to its reported end, in milliseconds (version 2). `null` until it ended. |
+
+**Versions.** Version 2 only adds keys, after every key of version 1, which keeps its spelling, place and
+meaning: a reader of version 1 reads a version-2 reply unchanged. A reader that needs `id`, `cwd`,
+`startedAt` or `durationMs` checks `version >= 2`.
 
 `prompt` and `output` are read from the block's own lines, wherever they are in the scrollback, so
 neither ever carries another command's text. Lines that have scrolled out of the history are missing
@@ -208,7 +228,7 @@ echo hello
 
 # 4. Query the last completed command (with token)
 printf '\033[>1;1;41394;50132;58870;1816b'
-# Response: DCS > 1 b {"version":1,"blocks":[{"command":"echo hello","prompt":"user@host:~$ echo hello","output":"hello","exitCode":0,"finished":true,"outputLineCount":1}]} ST
+# Response: DCS > 1 b {"version":2,"blocks":[{"command":"echo hello","prompt":"user@host:~$ echo hello","output":"hello","exitCode":0,"finished":true,"outputLineCount":1,"id":4,...}]} ST
 
 # 5. Query the last 3 completed commands (with token)
 printf '\033[>2;3;41394;50132;58870;1816b'
@@ -218,7 +238,11 @@ printf '\033[>2;3;41394;50132;58870;1816b'
 printf '\033[>3;1;41394;50132;58870;1816b'
 # Response: DCS > 1 b {JSON} ST, listing this printf itself, with "finished":false and "exitCode":-1
 
-# 7. Disable when done (invalidates the token)
+# 7. Query block 4, the `echo hello` of step 3, by the id step 4 reported (Pn = 4, Ph = 0)
+printf '\033[>4;4;41394;50132;58870;1816;0b'
+# Response: DCS > 1 b {JSON} ST, listing that block alone
+
+# 8. Disable when done (invalidates the token)
 printf '\033[?2034l'
 ```
 

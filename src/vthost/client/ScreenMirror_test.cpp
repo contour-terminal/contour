@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <format>
 #include <functional>
 #include <limits>
@@ -203,7 +204,9 @@ struct MirrorHarness
         client = std::make_unique<NativeClient>(
             loop,
             std::move(pair.second),
-            NativeClient::HandshakeOptions {},
+            // ProgramStatus, as the GUI offers it: the set rides only a connection that shares it.
+            NativeClient::HandshakeOptions {
+                .capabilities = proto::CapabilitySet::of({ proto::Capability::ProgramStatus }) },
             mirrorBlockLimits,
             NativeClient::UpdateHandler {
                 [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {
@@ -219,14 +222,13 @@ struct MirrorHarness
                     populator->applyEvent(event);
                 } },
             NativeClient::LayoutHandler {});
-        // Deliver the host's stream fan-out (bell / notify / clipboard, and screen
-        // updates) to the session, exactly as the daemon's serveNativeClient does —
-        // so the transient-event path (Terminal::Events -> host -> NativeSession) is
-        // exercised, not just the manually-poked sessionScreenUpdated.
-        host.subscribeStream(server.get());
+        // The session subscribes itself to the host's stream fan-out (bell / notify / clipboard,
+        // and screen updates) as its hello is accepted, so the transient-event path
+        // (Terminal::Events -> host -> NativeSession) is exercised, not just the manually-poked
+        // sessionScreenUpdated.
     }
 
-    ~MirrorHarness() { host.unsubscribeStream(server.get()); }
+    ~MirrorHarness() = default;
 
     MirrorHarness(MirrorHarness const&) = delete;
     MirrorHarness& operator=(MirrorHarness const&) = delete;
@@ -245,9 +247,49 @@ Task<void> waitUntil(core::net::EventLoop* loop, std::function<bool()> ready)
         co_await loop->delay(1ms);
 }
 
+/// The longest a scenario may take before the client is detached under it.
+constexpr auto ScenarioDeadline = std::chrono::seconds { 30 };
+
+/// Runs @p scenario, detaching the client when it fails: a REQUIRE that throws leaves the scenario before its
+/// own detach(), and the client's run() would wait for the daemon forever, with blockOn parked under it.
+Task<void> detachOnFailure(MirrorHarness* h, Task<void> scenario, bool* finished)
+{
+    auto failure = std::exception_ptr {};
+    try
+    {
+        co_await std::move(scenario);
+    }
+    catch (...)
+    {
+        failure = std::current_exception();
+    }
+    *finished = true;
+    if (!failure)
+        co_return;
+    h->client->detach();
+    std::rethrow_exception(failure);
+}
+
+/// Detaches the client once ScenarioDeadline passes with the scenario still running: the bound on a scenario
+/// that awaits something that never comes.
+Task<void> scenarioWatchdog(MirrorHarness* h, bool const* finished)
+{
+    auto const deadline = std::chrono::steady_clock::now() + ScenarioDeadline;
+    while (!*finished && std::chrono::steady_clock::now() < deadline)
+        co_await h->loop.delay(10ms);
+    if (*finished)
+        co_return;
+    FAIL_CHECK("the scenario did not finish in time");
+    h->client->detach();
+}
+
 Task<void> drive(MirrorHarness* h, Task<void> scenario)
 {
-    co_await core::async::whenAll(h->server->run(), h->client->run(), std::move(scenario));
+    auto finished = false;
+    co_await core::async::whenAll(h->server->run(),
+                                  h->client->run(),
+                                  detachOnFailure(h, std::move(scenario), &finished),
+                                  scenarioWatchdog(h, &finished));
 }
 
 /// Writes @p bytes on the server terminal and pushes the resulting delta.
@@ -315,17 +357,18 @@ std::string numberedRows(int count)
 /// What a BareMirror is built with.
 struct BareMirrorShape
 {
-    vtbackend::LineCount lines { 1 };   ///< The page's height; it is five columns wide.
-    vtbackend::LineCount history { 0 }; ///< The scrollback the mirror terminal keeps.
+    vtbackend::LineCount lines { 1 };                           ///< The page's height.
+    vtbackend::ColumnCount columns { 5 };                       ///< The page's width.
+    vtbackend::LineCount history { 0 };                         ///< The scrollback the mirror terminal keeps.
     vthost::DaemonMachine daemon = vthost::DaemonMachine::Same; ///< Where the daemon runs, relative to it.
     vtbackend::HostIdentity identity {}; ///< The machine the mirror terminal says it runs on.
     /// The clocks the mirror terminal reads; the system's when unset. Borrowed: they must outlive it.
     std::optional<vtbackend::TerminalClocks> clocks {};
 };
 
-/// A bare mirror terminal, five columns wide, plus the ScreenMirror bound to it, for the unit-level cases
-/// that drive the mirror by hand instead of through the full server/client loop. Its events keep what the
-/// terminal raises (RecordingEvents), as MirrorHarness's do.
+/// A bare mirror terminal, five columns wide unless its shape says otherwise, plus the ScreenMirror bound to
+/// it, for the unit-level cases that drive the mirror by hand instead of through the full server/client loop.
+/// Its events keep what the terminal raises (RecordingEvents), as MirrorHarness's do.
 struct BareMirror
 {
     RecordingEvents events;
@@ -342,7 +385,7 @@ struct BareMirror
     {
         events.identity = std::move(shape.identity);
         auto settings = vtbackend::Settings {};
-        settings.pageSize = vtbackend::PageSize { shape.lines, vtbackend::ColumnCount(5) };
+        settings.pageSize = vtbackend::PageSize { shape.lines, shape.columns };
         settings.historyLimits = vtbackend::HistoryLimits::plain(shape.history);
         terminal =
             std::make_unique<vtbackend::Terminal>(events,
@@ -362,7 +405,150 @@ struct BareMirror
     }
 };
 
+/// A row @p columns wide at @p stableId, blank but for @p ch at @p column.
+proto::WireLine wideRowAt(int64_t stableId, uint32_t columns, uint32_t column, char32_t ch)
+{
+    auto line = proto::WireLine {};
+    line.stableId = stableId;
+    line.columns = columns;
+    line.cells.resize(column + 1);
+    for (auto& cell: line.cells)
+        cell.codepoint = U' ';
+    line.cells.back().codepoint = ch;
+    return line;
+}
+
+/// A host grid of 40x20 for the viewport cases, its rows 1..20, holding @p rows, the cursor at @p cursor.
+/// @param rows The rows the snapshot carries; the others are blank.
+/// @param cursor Where the host's cursor is.
+/// @return The delta, applied to @p screen as well.
+proto::Delta largeGridSnapshot(vthost::client::RemoteScreen& screen,
+                               std::vector<proto::WireLine> rows,
+                               vtbackend::CellLocation cursor)
+{
+    screen.columns = 40;
+    screen.lines = 20;
+    auto delta = proto::Delta {};
+    delta.snapshot = 1;
+    delta.generation = 1;
+    delta.stableViewportBase = 1;
+    delta.stableFloor = 1;
+    delta.cursorLine = unbox<int32_t>(cursor.line);
+    delta.cursorColumn = unbox<int32_t>(cursor.column);
+    delta.lines = std::move(rows);
+    screen.apply(delta);
+    return delta;
+}
+
+/// @return Where the host's cursor at (@p line, @p column) is.
+vtbackend::CellLocation cellAt(int line, int column)
+{
+    return vtbackend::CellLocation { .line = vtbackend::LineOffset(line),
+                                     .column = vtbackend::ColumnOffset(column) };
+}
+
 } // namespace
+
+TEST_CASE("a mirror smaller than the remote grid shows the cursor's region", "[vthost][mirror][viewport]")
+{
+    // The host's grid is 40x20 (another client's size); this one shows 10x5 of it. The cursor at the
+    // bottom-right corner puts the window at the grid's last 5 rows and last 10 columns.
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
+                                               .columns = vtbackend::ColumnCount(10) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto const delta = largeGridSnapshot(screen, { wideRowAt(20, 40, 39, U'X') }, cellAt(19, 39));
+    bare.mirror->apply(screen, delta);
+
+    auto const& page = bare.terminal->primaryScreen();
+    CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
+    CHECK(page.cursor().position == cellAt(4, 9));
+    CHECK(bare.terminal->reportedCellOrigin() == cellAt(15, 30));
+    // Nothing of the host's page above the window went into history.
+    CHECK(bare.historyLines() == 0);
+}
+
+TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirror][viewport]")
+{
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(5),
+                                               .columns = vtbackend::ColumnCount(10) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto const first =
+        largeGridSnapshot(screen, { wideRowAt(1, 40, 0, U'A'), wideRowAt(20, 40, 39, U'X') }, cellAt(2, 2));
+    bare.mirror->apply(screen, first);
+    auto const& page = bare.terminal->primaryScreen();
+    REQUIRE(bare.terminal->reportedCellOrigin() == vtbackend::CellLocation {});
+    REQUIRE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
+    REQUIRE(page.cursor().position == cellAt(2, 2));
+
+    // The cursor moves to the bottom-right corner in an ordinary delta, no row changed: the page is
+    // rewritten.
+    auto move = proto::Delta {};
+    move.generation = 1;
+    move.stableViewportBase = 1;
+    move.stableFloor = 1;
+    move.cursorLine = 19;
+    move.cursorColumn = 39;
+    screen.apply(move);
+    bare.mirror->apply(screen, move);
+
+    CHECK(bare.terminal->reportedCellOrigin() == cellAt(15, 30));
+    CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
+    CHECK_FALSE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
+    CHECK(page.cursor().position == cellAt(4, 9));
+}
+
+TEST_CASE("a mirror at least as large as the remote grid is not panned", "[vthost][mirror][viewport]")
+{
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(25),
+                                               .columns = vtbackend::ColumnCount(50) } };
+    auto screen = vthost::client::RemoteScreen {};
+    auto const delta = largeGridSnapshot(screen, { wideRowAt(20, 40, 39, U'X') }, cellAt(19, 39));
+    bare.mirror->apply(screen, delta);
+
+    auto const& page = bare.terminal->primaryScreen();
+    CHECK(bare.terminal->reportedCellOrigin() == vtbackend::CellLocation {});
+    CHECK(page.grid().lineText(vtbackend::LineOffset(19)).substr(39, 1) == "X");
+    CHECK(page.cursor().position == cellAt(19, 39));
+}
+
+TEST_CASE("a restarted mirror applies a new connection's snapshot from scratch", "[vthost][mirror]")
+{
+    auto bare = BareMirror { BareMirrorShape { .lines = vtbackend::LineCount(1),
+                                               .history = vtbackend::LineCount(10) } };
+
+    // The lost connection's screen: generation 5, the page at row 100, two rows of history above it.
+    auto lost = vthost::client::RemoteScreen {};
+    lost.columns = 5;
+    lost.lines = 1;
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.generation = 5;
+    seed.stableViewportBase = 100;
+    seed.stableFloor = 98;
+    seed.lines = { rowAt(98, "a"), rowAt(99, "b"), rowAt(100, "old") };
+    lost.apply(seed);
+    bare.mirror->apply(lost, seed);
+    REQUIRE(bare.terminal->primaryScreen().grid().renderMainPageText().contains("old"));
+    REQUIRE(bare.historyLines() == 2);
+
+    // A new connection, to a daemon that restarted: generation 1, its own stable ids from 1.
+    bare.mirror->restart();
+    auto fresh = vthost::client::RemoteScreen {};
+    fresh.columns = 5;
+    fresh.lines = 1;
+    auto first = proto::Delta {};
+    first.snapshot = 1;
+    first.generation = 1;
+    first.stableViewportBase = 1;
+    first.stableFloor = 1;
+    first.lines = { rowAt(1, "new") };
+    fresh.apply(first);
+    bare.mirror->apply(fresh, first);
+
+    CHECK(bare.terminal->primaryScreen().grid().renderMainPageText().contains("new"));
+    CHECK_FALSE(bare.terminal->primaryScreen().grid().renderMainPageText().contains("old"));
+    CHECK(bare.historyLines() == 0);
+}
 
 TEST_CASE("a server-side clear drops the mirror's local scrollback", "[vthost][mirror]")
 {
@@ -1154,6 +1340,57 @@ TEST_CASE("the progress indicator mirrors", "[vthost][mirror]")
         co_await waitUntil(&h->loop, [&] { return !h->mirror->isAlternateScreen(); });
         REQUIRE(h->serverTerminal(session)->progress() == vtbackend::Progress {});
         CHECK(h->mirror->progress() == vtbackend::Progress {});
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+namespace
+{
+/// The ids of the mirror terminal's program-status records, read under its lock.
+std::vector<std::string> mirroredIds(MirrorHarness* h)
+{
+    auto const _ = std::lock_guard { *h->mirror };
+    auto ids = std::vector<std::string> {};
+    for (auto const& record: h->mirror->programStatus().records())
+        ids.push_back(record.id);
+    return ids;
+}
+} // namespace
+
+TEST_CASE("ScreenMirror applies ProgramStatus to the mirror terminal", "[vthost][client][programstatus]")
+{
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    // In flight before the client attaches: the snapshot carries it.
+    h.serverTerminal(session)->writeToScreen("\033]7501;state=done:id=build:app=make\033\\shell-ready");
+
+    // Captureless: the coroutine outlives the closure that started it.
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] { return mirroredIds(h) == std::vector<std::string> { "build" }; });
+        REQUIRE(mirroredIds(h) == std::vector<std::string> { "build" });
+
+        // A report after the attach, with an ancestor's app to inherit.
+        serverWrites(h, session, "\033]7501;state=blocked:id=build/test:kind=question:progress=60\033\\");
+        co_await waitUntil(&h->loop, [&] { return mirroredIds(h).size() == 2; });
+        {
+            auto const _ = std::lock_guard { *h->mirror };
+            auto const& set = h->mirror->programStatus();
+            REQUIRE(set.records().size() == 2);
+            auto const& blocked = set.records().back();
+            CHECK(blocked.id == "build/test");
+            CHECK(blocked.state == vtbackend::ProgramState::Blocked);
+            CHECK(blocked.kind == vtbackend::BlockedKind::Question);
+            CHECK(blocked.progress == uint8_t { 60 });
+            CHECK(set.appOf(blocked) == "make");
+        }
+
+        // A clear empties the mirror too: an empty set is news.
+        serverWrites(h, session, "\033]7501;state=clear\033\\");
+        co_await waitUntil(&h->loop, [&] { return mirroredIds(h).empty(); });
+        CHECK(mirroredIds(h).empty());
 
         h->client->detach();
     }(&h, session);
@@ -4719,7 +4956,6 @@ struct AttachedClient
     /// @param host The host to attach to.
     /// @param index The connection's number, for the host's log.
     AttachedClient(core::net::EventLoop& loop, SessionHost& host, uint64_t index):
-        attachedTo { &host },
         pair { *core::net::testing::makeSocketPair(loop) },
         server { std::make_unique<NativeSession>(
             loop, host, vthost::ConnectionId { .endpoint = "test", .index = index }, std::move(pair.first)) }
@@ -4746,17 +4982,15 @@ struct AttachedClient
             NativeClient::ImageHandler {},
             NativeClient::SessionEventHandler {},
             NativeClient::LayoutHandler {});
-        host.subscribeStream(server.get());
     }
 
-    ~AttachedClient() { attachedTo->unsubscribeStream(server.get()); }
+    ~AttachedClient() = default;
 
     AttachedClient(AttachedClient const&) = delete;
     AttachedClient& operator=(AttachedClient const&) = delete;
     AttachedClient(AttachedClient&&) = delete;
     AttachedClient& operator=(AttachedClient&&) = delete;
 
-    SessionHost* attachedTo; ///< The host it is attached to, which outlives it.
     core::net::testing::SocketPair pair;
     std::unique_ptr<NativeSession> server;
     RecordingEvents events;

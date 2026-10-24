@@ -98,6 +98,34 @@ void createTabs(contour::session::TerminalSessionManager& manager,
 
 } // namespace
 
+TEST_CASE("a window's hosting notice shows until it is dismissed", "[contour][multiwindow][hosting]")
+{
+    contour::test::TestApp app;
+    contour::test::ScopedController const window { app.manager() };
+    auto& controller = *window.controller;
+    auto changes = QSignalSpy { &controller, &contour::window::WindowController::hostingNoticeChanged };
+    REQUIRE(controller.hostingNotice().isEmpty());
+
+    controller.showHostingNotice(QStringLiteral("Contour could not reach its daemon (gone)."));
+    CHECK(controller.hostingNotice() == QStringLiteral("Contour could not reach its daemon (gone)."));
+    // The same line again is no change, and announces none.
+    controller.showHostingNotice(QStringLiteral("Contour could not reach its daemon (gone)."));
+    CHECK(changes.count() == 1);
+
+    controller.dismissHostingNotice();
+    CHECK(controller.hostingNotice().isEmpty());
+    CHECK(changes.count() == 2);
+}
+
+TEST_CASE("a local window names no host in its chrome", "[contour][multiwindow][window][hosts]")
+{
+    contour::test::TestApp app;
+    contour::test::ScopedController const window { app.manager() };
+    auto const& controller = *window.controller;
+    CHECK(controller.hostLabel().isEmpty());
+    CHECK(controller.windowTitle(QStringLiteral("vim")) == QStringLiteral("vim"));
+}
+
 TEST_CASE("new tabs use their profile's default color", "[contour][multiwindow][tab-color]")
 {
     TestApp app(std::make_unique<contour::test::MockPtySessionFactory>());

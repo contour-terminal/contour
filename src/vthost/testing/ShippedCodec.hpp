@@ -22,8 +22,8 @@
 namespace vthost::testing
 {
 
-/// The codec revision contour 0.7.0 shipped.
-constexpr auto ShippedCodecVersion = uint32_t { 1 };
+/// The protocol version (codec revision) contour 0.7.0 shipped.
+constexpr auto ShippedProtocolVersion = uint32_t { 1 };
 
 /// The tag 0.7.0 gives the ClientHello.
 constexpr auto ShippedClientHelloTag = uint64_t { 1 };
@@ -73,7 +73,7 @@ constexpr auto ShippedServerHelloTag = uint64_t { 2 };
 [[nodiscard]] inline std::vector<std::byte> shippedClientHello(uint64_t serial)
 {
     auto body = proto::Writer {};
-    body.u32(ShippedCodecVersion);
+    body.u32(ShippedProtocolVersion);
     body.string("s3cr3t");
     body.u8(1);         // session settings follow
     body.svarint(-1);   // an unlimited history
@@ -96,7 +96,7 @@ constexpr auto ShippedServerHelloTag = uint64_t { 2 };
 [[nodiscard]] inline std::vector<std::byte> shippedServerHello(uint64_t serial)
 {
     auto body = proto::Writer {};
-    body.u32(ShippedCodecVersion);
+    body.u32(ShippedProtocolVersion);
     auto frame = proto::Writer {};
     proto::writeFrame(frame, serial, ShippedServerHelloTag, body.view());
     return frame.take();

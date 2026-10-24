@@ -123,6 +123,7 @@ namespace
         static auto const rows = std::array {
             Table::command(CreateNewTab {}, "New Tab"),
             Table::submenu("New Tab with Profile", newTabProfileRows).shownWhen(hasProfiles),
+            Table::attachToHostSubmenu(),
 
             Table::separator(),
 

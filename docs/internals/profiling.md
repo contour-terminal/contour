@@ -135,7 +135,8 @@ Two traps, both easy to fall into:
 
 The result is a lower bound on felt latency: it ends at the frame's *start*, so it excludes the
 frame's own CPU cost, GPU time, the swap and the compositor, and it begins at the PTY parse, so it
-excludes the keyboard leg entirely.
+excludes the keyboard leg entirely. For latency measured to the swapped frame, from the keystroke and
+from the launch, and compared between in-process and daemon mode, see [Latency](latency.md).
 
 ### Measuring key press latency under output load
 

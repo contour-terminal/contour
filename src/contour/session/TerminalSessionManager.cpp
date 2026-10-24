@@ -1225,7 +1225,7 @@ void TerminalSessionManager::tabMovedToWindow(
     scheduleTaskbarProgress();
 }
 
-void TerminalSessionManager::activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId, int)
+void TerminalSessionManager::activeTabChanged(vtworkspace::WindowId window, vtworkspace::TabId tab, int)
 {
     if (auto* c = controllerFor(window))
     {
@@ -1234,6 +1234,7 @@ void TerminalSessionManager::activeTabChanged(vtworkspace::WindowId window, vtwo
         // also covers cross-window moves, which route through activeTabChanged on the destination.
         syncFocusForWindow(c);
     }
+    reportTabPresentation(tab);
 }
 
 void TerminalSessionManager::paneSplit(vtworkspace::TabId tab, vtworkspace::PaneId, vtworkspace::PaneId)
@@ -1268,6 +1269,7 @@ void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspa
         // Move terminal focus to the newly active pane's leaf (symmetric out/in via setFocusedSession).
         syncFocusForWindow(c);
     }
+    reportTabPresentation(tab);
 }
 
 void TerminalSessionManager::paneRatioChanged(vtworkspace::TabId tab,
@@ -1299,6 +1301,34 @@ void TerminalSessionManager::reportSplitRatio(vtworkspace::TabId tab,
     auto const* second = ptyOfLeafUnder(split->second());
     if (first != nullptr && second != nullptr)
         _sessionFactory.reportSplitRatio(first, second, ratio);
+}
+
+void TerminalSessionManager::reportTabPresentation(vtworkspace::TabId tabId)
+{
+    // Every model event below reaches here, local tabs' included: nothing is computed for those.
+    if (_sessionFactory.hosting() != SessionHosting::Remote)
+        return;
+    auto const* tab = _model->findTab(tabId);
+    auto const* window = tab != nullptr ? _model->window(_model->windowOfTab(tabId)) : nullptr;
+    if (window == nullptr || tab->activePane() == nullptr)
+        return;
+    auto const ptyOf = [this](vtworkspace::Pane const* leaf) -> vtpty::Pty const* {
+        auto* session = leaf != nullptr ? sessionForId(leaf->session()) : nullptr;
+        return session != nullptr ? &session->terminal().device() : nullptr;
+    };
+    auto const* active = ptyOf(tab->activePane());
+    if (active == nullptr)
+        return; // the active pane has no session yet: a pane being built, which reports once it has one
+    _sessionFactory.reportTabPresentation(LocalTabPresentation {
+        .activePty = active,
+        .zoomedPty = tab->isZoomed() ? ptyOf(tab->activePane()) : nullptr,
+        .title = tab->runtimeTitle(),
+        .color = tab->color(vtworkspace::TabColorSource::User).transform([](vtbackend::RGBColor color) {
+            return color.value();
+        }),
+        .activity = window->activeTab() == tab ? vthost::client::TabActivity::Active
+                                               : vthost::client::TabActivity::Inactive,
+    });
 }
 
 void TerminalSessionManager::paneOrientationChanged(vtworkspace::TabId tab,
@@ -1334,6 +1364,7 @@ void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::option
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::ZoomedRole });
         c->refreshActiveTabLayoutRoot();
     }
+    reportTabPresentation(tab);
 }
 
 void TerminalSessionManager::paneTreeRestructured(vtworkspace::TabId tab)
@@ -1358,6 +1389,7 @@ void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
         c->notifyTabRowChanged(
             tab,
             { window::WindowController::Roles::TitleRole, window::WindowController::Roles::RawTitleRole });
+    reportTabPresentation(tab);
 }
 
 void TerminalSessionManager::tabColorChanged(vtworkspace::TabId tab)
@@ -1365,6 +1397,7 @@ void TerminalSessionManager::tabColorChanged(vtworkspace::TabId tab)
     updateStatusLine();
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::ColorRole });
+    reportTabPresentation(tab);
 }
 
 void TerminalSessionManager::refreshAllTabTitles()
@@ -1404,6 +1437,19 @@ void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId
     // rewiring. @see platform::TaskbarProgressRouter.
     if (auto* s = sessionForId(session))
         recordProgress(session, s->terminal().resolvedProgress(), _app.terminalClocks().steady.now());
+}
+
+void TerminalSessionManager::refreshTabProgramStatusForSession(vtworkspace::SessionId session)
+{
+    // Only the badge's roles, for the reason refreshTabProgressForSession gives.
+    auto* tab = findTabHostingSession(session);
+    if (tab == nullptr)
+        return;
+    if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
+        c->notifyTabRowChanged(tab->id(),
+                               { window::WindowController::Roles::ProgramStatusRole,
+                                 window::WindowController::Roles::ProgramStatusTextRole,
+                                 window::WindowController::Roles::ProgramStatusProgressRole });
 }
 
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
@@ -1675,7 +1721,9 @@ void TerminalSessionManager::splitActivePane(bool vertical, TerminalSession* act
     // Attach mode: author the split on the daemon (B3-Qt); its layout re-push
     // reconciles the new pane in. A reconciliation-driven split (during realization)
     // returns false and builds locally below, as does a local factory.
-    if (acting != nullptr && _sessionFactory.requestRemoteSplit(&acting->terminal().device(), vertical))
+    // No profile is named: a local split runs the default profile too.
+    if (acting != nullptr
+        && _sessionFactory.requestRemoteSplit(&acting->terminal().device(), vertical, RemoteSpawn {}))
         return;
 
     auto const direction = vertical ? vtworkspace::SplitState::Vertical : vtworkspace::SplitState::Horizontal;

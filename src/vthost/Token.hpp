@@ -11,15 +11,42 @@
 
 #include <core/Utf8Path.hpp>
 
+#include <algorithm>
 #include <expected>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace vthost
 {
+
+/// Strips the carriage returns and the trailing whitespace a token picks up in a file.
+/// @param token The token as read.
+/// @return The token as the client will present it; interior whitespace is preserved.
+[[nodiscard]] inline std::string cleanedToken(std::string token)
+{
+    std::erase(token, '\r');
+    while (!token.empty() && (token.back() == '\n' || token.back() == ' ' || token.back() == '\t'))
+        token.pop_back();
+    return token;
+}
+
+/// The token a token file holds, for a caller that read the file itself: cleaned (cleanedToken()), and
+/// refused when nothing is left, as readTokenFile() does.
+/// @param content The file's content, as read.
+/// @param path The file it came from, which a refusal names.
+/// @return The token, or a human-readable reason it holds none.
+[[nodiscard]] inline std::expected<std::string, std::string> tokenFromFileContent(
+    std::string content, std::filesystem::path const& path)
+{
+    auto token = cleanedToken(std::move(content));
+    if (token.empty())
+        return std::unexpected(std::string { "token file '" } + core::pathToUtf8(path) + "' is empty");
+    return token;
+}
 
 /// Reads a preshared token from a file.
 ///
@@ -37,16 +64,7 @@ namespace vthost
     auto file = std::ifstream { path, std::ios::in | std::ios::binary };
     if (!file.is_open())
         return std::unexpected(std::string { "cannot open token file '" } + core::pathToUtf8(path) + "'");
-
-    auto token = std::string { std::istreambuf_iterator<char> { file }, {} };
-    std::erase(token, '\r');
-    while (!token.empty() && (token.back() == '\n' || token.back() == ' ' || token.back() == '\t'))
-        token.pop_back();
-
-    if (token.empty())
-        return std::unexpected(std::string { "token file '" } + core::pathToUtf8(path) + "' is empty");
-
-    return token;
+    return tokenFromFileContent(std::string { std::istreambuf_iterator<char> { file }, {} }, path);
 }
 
 /// Resolves the effective token from the two mutually exclusive CLI spellings.

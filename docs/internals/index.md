@@ -29,7 +29,7 @@ depend on higher ones, and the GUI must not reach around `vtbackend`/
 
 The daemon and its protocols are documented separately in
 [Multiplexer & daemon mode](vthost.md), and measuring where the time goes in
-[Profiling with Tracy](profiling.md).
+[Profiling with Tracy](profiling.md) and [what the daemon costs in latency](latency.md).
 
 ### `crispy` library
 

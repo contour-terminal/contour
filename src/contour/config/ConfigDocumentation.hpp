@@ -1136,6 +1136,31 @@ constexpr StringLiteral LayoutsConfig {
     "\n"
 };
 constexpr StringLiteral LayoutsWeb { "Named sets of tabs opened together." };
+constexpr StringLiteral HostsConfig {
+    "\n"
+    "{comment} Hosts\n"
+    "{comment} -----\n"
+    "{comment}\n"
+    "{comment} Saved remote hosts that \"Attach to Host\" lists, by name. Each host has:\n"
+    "{comment}   url             ssh://[user@]host[:port] or tls://host:port (required)\n"
+    "{comment}   token_file      the daemon's token file (required for tls://)\n"
+    "{comment}   tls_ca          a CA to verify the daemon's certificate against (tls://)\n"
+    "{comment}   remote_command  replaces the whole remote command (ssh://)\n"
+    "{comment}   profile         the profile the remote sessions are created with\n"
+    "{comment}\n"
+    "{comment} hosts:\n"
+    "{comment}     home:\n"
+    "{comment}         url: \"ssh://me@homepc\"\n"
+    "{comment}         remote_command: \"/opt/contour/bin/contour daemon --stdio\"\n"
+    "{comment}         profile: \"remote\"\n"
+    "{comment}     studio:\n"
+    "{comment}         url: \"tls://studio.tailnet.ts.net:7297\"\n"
+    "{comment}         token_file: \"~/.config/contour/studio.token\"\n"
+    "{comment}         tls_ca: \"~/.config/contour/studio-ca.pem\"\n"
+    "hosts:\n"
+    "\n"
+};
+constexpr StringLiteral HostsWeb { "Saved remote hosts that \"Attach to Host\" lists." };
 constexpr StringLiteral DefaultLayoutWeb {
     "Name of the layout to open at startup, instead of a single default tab."
 };
@@ -1392,6 +1417,43 @@ constexpr StringLiteral ImagesConfig {
     "\n"
     "    {comment} Enable or disable Good Image Protocol (GIP) support (disabled by default).\n"
     "    good_image_protocol: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral DaemonConfig {
+    "daemon:\n"
+    "    {comment} Where sessions live. in_process keeps them in this process; auto hosts them in a\n"
+    "    {comment} daemon and falls back to in_process, with a notice, when none can be reached;\n"
+    "    {comment} required hosts them in a daemon and fails when none can be reached.\n"
+    "    mode: {}\n"
+    "\n"
+    "    {comment} The daemon's socket path. Empty selects the default.\n"
+    "    socket: {}\n"
+    "\n"
+    "    {comment} Which attached client's size the shared grid takes when clients disagree:\n"
+    "    {comment} latest, smallest or largest.\n"
+    "    size_policy: {}\n"
+    "\n"
+    "    {comment} Scrollback lines the daemon keeps per session (-1 for unlimited). ~ uses the\n"
+    "    {comment} hosting profile's history.limit.\n"
+    "    history_limit: {}\n"
+    "\n"
+    "    {comment} What the daemon keeps of its workspace across a restart (a reboot, a crash, an upgrade):\n"
+    "    {comment} windows, tabs, splits, each pane's directory and profile, and the tail of its "
+    "scrollback.\n"
+    "    {comment} `contour daemon stop` discards it, unless given --keep-snapshot.\n"
+    "    restore:\n"
+    "        {comment} Whether a restored pane gets its scrollback back. The file may hold secrets that\n"
+    "        {comment} were on screen; it is readable by your user only.\n"
+    "        scrollback: {}\n"
+    "        {comment} The most scrollback lines kept per pane (0 to 100000).\n"
+    "        scrollback_lines: {}\n"
+    "        {comment} Programs a restored pane runs again when it was running one of them, e.g. [vim, "
+    "htop].\n"
+    "        {comment} Nothing is re-run unless listed here.\n"
+    "        rerun_programs: {}\n"
+    "        {comment} How often, in seconds, a changed workspace is written (at least 5).\n"
+    "        interval: {}\n"
     "\n"
 };
 
@@ -2050,6 +2112,37 @@ constexpr StringLiteral ImagesWeb {
     "`sixel_scrolling`, `sixel_register_count`, and `good_image_protocol` to control various aspects of "
     "image rendering. The maximum image size is derived from the screen size; `max_width` and "
     "`max_height` are deprecated and ignored."
+};
+
+constexpr StringLiteral DaemonWeb {
+    "section decides whether sessions are hosted by a daemon process, so they outlive the window.\n"
+    "``` yaml\n"
+    "daemon:\n"
+    "  mode: in_process\n"
+    "  socket: \"\"\n"
+    "  size_policy: latest\n"
+    "  history_limit: 1000\n"
+    "  restore:\n"
+    "    scrollback: true\n"
+    "    scrollback_lines: 1000\n"
+    "    rerun_programs: []\n"
+    "    interval: 30\n"
+    "```\n"
+    ":octicons-horizontal-rule-16: ==mode== `in_process` keeps sessions in the GUI process, `auto` uses a "
+    "daemon and falls back to in-process with a notice, `required` fails when no daemon can be reached.\n"
+    ":octicons-horizontal-rule-16: ==socket== The daemon's socket path; empty selects the default.\n"
+    ":octicons-horizontal-rule-16: ==size_policy== Which client's size wins when several are attached: "
+    "`latest`, `smallest` or `largest`.\n"
+    ":octicons-horizontal-rule-16: ==history_limit== Scrollback lines per session, `-1` for unlimited; "
+    "unset uses the hosting profile's `history.limit`.\n"
+    ":octicons-horizontal-rule-16: ==restore.scrollback== Whether a restored pane gets its scrollback back; "
+    "the snapshot file may hold secrets that were on screen, and is readable by your user only.\n"
+    ":octicons-horizontal-rule-16: ==restore.scrollback_lines== The most scrollback lines kept per pane, "
+    "from `0` to `100000`; the live scrollback stays `history_limit`.\n"
+    ":octicons-horizontal-rule-16: ==restore.rerun_programs== Programs a restored pane runs again when it "
+    "was running one of them, such as `[vim, htop]`; nothing is re-run unless listed.\n"
+    ":octicons-horizontal-rule-16: ==restore.interval== How often, in seconds, a changed workspace is "
+    "written; at least `5`.\n"
 };
 
 constexpr StringLiteral ProfilesWeb { "All profiles inside configuration files share parent node `profiles`. "
@@ -3426,6 +3519,7 @@ using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;
 using Layouts = DocumentationEntry<LayoutsConfig, LayoutsWeb>;
+using Hosts = DocumentationEntry<HostsConfig, HostsWeb>;
 using DefaultLayout = DocumentationEntry<StringLiteral { "default_layout: {}\n" }, DefaultLayoutWeb>;
 using WordDelimiters = DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>;
 using ExtendedWordDelimiters = DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>;
@@ -3438,6 +3532,7 @@ using InputMappings = DocumentationEntry<InputMappingsConfig, Dummy>;
 using SpawnNewProcess = DocumentationEntry<SpawnNewProcessConfig, SpawnNewProcessWeb>;
 using EarlyExitThreshold = DocumentationEntry<EarlyExitThresholdConfig, EarlyExitThresholdWeb>;
 using Images = DocumentationEntry<ImagesConfig, ImagesWeb>;
+using Daemon = DocumentationEntry<DaemonConfig, DaemonWeb>;
 using ExperimentalFeatures = DocumentationEntry<ExperimentalFeaturesConfig, StringLiteral { "" }>;
 using DefaultColors = DocumentationEntry<DefaultColorsConfig, Dummy>;
 using HyperlinkDecoration = DocumentationEntry<HyperlinkDecorationConfig, HyperlinkDecorationWeb>;

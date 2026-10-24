@@ -11,6 +11,7 @@
                 "CONTOUR_TESTING": "ON",
                 "LIBTERMINAL_BUILD_BENCH_HEADLESS": "ON",
                 "LIBUNICODE_TESTING": "OFF",
+                "VTHOST_BUILD_BENCH_LATENCY": "ON",
                 "PEDANTIC_COMPILER": "ON",
                 "PEDANTIC_COMPILER_WERROR": "ON"
             }

@@ -173,6 +173,56 @@ TEST_CASE("ExtensionConsent: the prompt's first line holds nothing the guest cho
     CHECK(text.contains("status: git <br> '<span style=\"font-size:1px\">x</span>'"));
 }
 
+TEST_CASE("ExtensionConsent: a prompt for commands only", "[vtextension][extensions]")
+{
+    // The golden text of a manifest that declares commands and nothing else.
+    CHECK(consentText(gitRequest())
+          == "A status-line extension asks to run commands.\n"
+             "\n"
+             "Extension: \"git\"\n"
+             "Module: git@/usr/share/contour/extensions/git.wasm\n"
+             "\n"
+             "It may run only these, exactly as written ({name} is filled in by the extension):\n"
+             "\n"
+             "    status: git -C {dir} status --porcelain=v2 --branch\n"
+             "\n"
+             "Allow it? The answer is remembered until the extension's manifest changes.");
+}
+
+TEST_CASE("consent lists control permissions", "[vtextension][consent][control]")
+{
+    using vtcontrol::Permission;
+    auto request = gitRequest();
+    request.manifest.control = { Permission::Read, Permission::Input };
+    CHECK(consentText(request)
+          == "A status-line extension asks to run commands and to control the terminal.\n"
+             "\n"
+             "Extension: \"git\"\n"
+             "Module: git@/usr/share/contour/extensions/git.wasm\n"
+             "\n"
+             "It may run only these, exactly as written ({name} is filled in by the extension):\n"
+             "\n"
+             "    status: git -C {dir} status --porcelain=v2 --branch\n"
+             "\n"
+             "It may also control the terminal:\n"
+             "\n"
+             "    May see the windows, tabs and panes.\n"
+             "    May type into panes.\n"
+             "\n"
+             "Allow it? The answer is remembered until the extension's manifest changes.");
+
+    SECTION("without commands")
+    {
+        request.manifest.commands.clear();
+        request.manifest.control = { Permission::Screen, Permission::Write };
+        auto const text = consentText(request);
+        CHECK(text.substr(0, text.find('\n')) == vtextension::ControlConsentHeadline);
+        CHECK_FALSE(text.contains("It may run only these"));
+        CHECK(text.contains("    May read what panes show, and their command history.\n"
+                            "    May open, split, close and label tabs and panes.\n"));
+    }
+}
+
 TEST_CASE("ExtensionConsentQueue: one prompt at a time, each answer recorded", "[vtextension][extensions]")
 {
     auto grants = MemoryGrants {};

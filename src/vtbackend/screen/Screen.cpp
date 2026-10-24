@@ -24,7 +24,9 @@
 #include <vtbackend/vt/JsonString.hpp>
 #include <vtbackend/vt/MacroDefinition.hpp>
 #include <vtbackend/vt/ModifyKeys.hpp>
+#include <vtbackend/vt/ProgramStatus.hpp>
 #include <vtbackend/vt/RectangularAreaChecksum.hpp>
+#include <vtbackend/vt/SemanticBlockQuery.hpp>
 #include <vtbackend/vt/SemanticPrompt.hpp>
 #include <vtbackend/vt/SgrWriter.hpp>
 #include <vtbackend/vt/VTType.hpp>
@@ -6519,6 +6521,12 @@ namespace
         int outputLineCount = 0; ///< The number of lines @ref output spans.
     };
 
+    /// @return @p value, a JSON value already, or `null` when there is none.
+    [[nodiscard]] std::string jsonOrNull(std::optional<std::string> value)
+    {
+        return std::move(value).value_or("null");
+    }
+
     /// Formats a single command block as a JSON object.
     ///
     /// The command line is untrusted -- whatever wrote to the PTY reported it -- and the reply goes back to
@@ -6528,15 +6536,29 @@ namespace
     /// @param text The text of its own rows.
     std::string formatBlockJson(CommandBlockRecord const& block, CommandBlockText const& text)
     {
+        // Version 2 appends its keys after every key of version 1, which keep their spelling, order and
+        // meaning: a reader of version 1 reads a version-2 reply as it read one before.
         return std::format(
-            R"({{"command":{},"prompt":{},"output":{},"exitCode":{},"finished":{},"outputLineCount":{}}})",
+            R"({{"command":{},"prompt":{},"output":{},"exitCode":{},"finished":{},"outputLineCount":{},)"
+            R"("id":{},"cwd":{},"startedAt":{},"durationMs":{}}})",
             block.commandLineSource != CommandLineSource::None ? jsonString(block.commandLine.insertable())
                                                                : "null",
             jsonString(text.prompt),
             jsonString(text.output),
             block.exitCode.value_or(-1),
             block.state == CommandBlockState::Finished ? "true" : "false",
-            text.outputLineCount);
+            text.outputLineCount,
+            unbox(block.id),
+            jsonOrNull(block.workingDirectory.path.empty()
+                           ? std::nullopt
+                           : std::optional { jsonString(block.workingDirectory.path) }),
+            jsonOrNull(block.commandStartedAt.transform([](auto instant) {
+                return std::format(R"("{:%FT%T}Z")", std::chrono::floor<std::chrono::milliseconds>(instant));
+            })),
+            jsonOrNull(block.duration.transform([](auto duration) {
+                return std::format("{}",
+                                   std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+            })));
     }
 
     /// How many columns zsh leaves between a right prompt and the right margin by default
@@ -6797,6 +6819,11 @@ void Screen::handleSemanticBlockQuery(Sequence const& seq)
             replyWithBlocks(std::span { &block, block ? 1U : 0U }); // the one block in progress, or none
             return;
         }
+        case SBQueryType::BlockById: {
+            auto const* const block = tracker.blockById(blocks, sbQueryBlockId(seq));
+            replyWithBlocks(std::span { &block, block ? 1U : 0U }); // the block, or none this reader may see
+            return;
+        }
         default:
             // A query this terminal does not know is answered as one with no data, never as another it does.
             reply(SBQueryResponseDisabled);
@@ -6846,7 +6873,7 @@ void Screen::replyWithBlocks(std::span<CommandBlockRecord const* const> newestFi
             json += ',';
         json += formatBlockJson(*block, textOf(*block));
     }
-    reply(R"({}{{"version":1,"blocks":[{}]}}{})", SBQueryResponseSuccess, json, DcsTerminator);
+    reply(R"({}{{"version":2,"blocks":[{}]}}{})", SBQueryResponseSuccess, json, DcsTerminator);
 }
 
 std::expected<LivePromptSpan, PromptRegionError> Screen::livePromptSpan() const
@@ -6992,6 +7019,21 @@ ApplyResult Screen::processHierarchicalContext(std::string_view payload)
     // process tree, which an alternate-screen switch or a page change does not touch.
     auto const transition = _terminal->applyContextCommand(*command);
     synthesizeSemanticMarks(transition, *command);
+    return ApplyResult::Ok;
+}
+
+ApplyResult Screen::processProgramStatus(std::string_view payload)
+{
+    auto const report = parseProgramStatus(payload);
+    if (!report)
+    {
+        // Discarded whole, as program-status rev 0.4 says: the records stay as they were.
+        if (vtParserLog)
+            vtParserLog()("Ignoring OSC 7501 report: {}", toString(report.error()));
+        return ApplyResult::Invalid;
+    }
+    // The records are terminal-global, not per screen: an alternate-screen switch does not touch them.
+    _terminal->applyProgramStatus(*report);
     return ApplyResult::Ok;
 }
 
@@ -8295,6 +8337,7 @@ ApplyResult Screen::apply(Function const& function, Sequence const& seq)
         case KITTYCLIPBOARD: return processKittyClipboard(seq.intermediateCharacters());
         case POINTERSHAPE: return processPointerShape(seq.intermediateCharacters());
         case HIERCONTEXT: return processHierarchicalContext(seq.intermediateCharacters());
+        case PROGRAMSTATUS: return processProgramStatus(seq.intermediateCharacters());
         case DESKTOPNOTIFY: return impl::DESKTOPNOTIFY(seq, *_terminal);
         case DUMPSTATE: inspect(); break;
         case SEMA: processShellIntegration(seq); break;

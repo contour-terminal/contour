@@ -11,12 +11,16 @@
 #include <core/platform/Clock.hpp>
 #include <core/platform/FileSystem.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 
+#include <vtcontrol/Catalog.hpp>
+#include <vtcontrol/ControlError.hpp>
 #include <vtextension/CommandLine.hpp>
 #include <vtextension/CommandPolicy.hpp>
 #include <vtextension/CompiledExtension.hpp>
@@ -110,7 +114,9 @@ struct RunnerConfig
 /// The callbacks may touch shorter-lived objects: none is called once the Runner's destructor has
 /// returned. Each is called on the runner's lane, must be cheap and must not throw; none may call
 /// back into the runner. The destructor waits for a callback that is running, so a Runner must not be
-/// destroyed while holding a lock that one of its callbacks takes.
+/// destroyed while holding a lock that one of its callbacks takes. `callControl` is the exception: it
+/// waits, so the destructor does not wait for it, and a call that began before may still be running
+/// after the destructor returned.
 struct RunnerServices
 {
     IExtensionScheduler& scheduler;                 ///< The lane the runner lives on, its timers and clock.
@@ -133,6 +139,19 @@ struct RunnerServices
 
     /// Called for every message the extension logs, at most ExtensionLimits::maxLogsPerCall per call.
     std::function<void(std::string_view name, LogLevel level, std::string_view message)> onLog;
+
+    /// Serves a control verb the extension calls, as its pane (IHostServices::callControl). The one callback
+    /// that waits: it blocks the lane until the host answers, at most the timeout it is given, which is the
+    /// rest of the guest call's deadline. Unlike the other callbacks it is copied under the gate and called
+    /// outside it, so the destructor does not wait for it: the host may destroy the Runner while serving the
+    /// call (an extension closing its own pane) and still answer it. The copy may therefore run after the
+    /// Runner is gone, and must own or outlive what it reaches. Null where no control API is served: every
+    /// verb is then `unsupported`.
+    std::function<std::expected<std::string, vtcontrol::ControlError>(std::string_view method,
+                                                                      std::string_view params,
+                                                                      vtcontrol::ControlGrants granted,
+                                                                      std::chrono::milliseconds timeout)>
+        callControl {};
 };
 
 /// Runs one extension for one pane: owns its instance and private terminal, feeds it events, renders
@@ -154,6 +173,9 @@ struct RunnerServices
 /// - **Commands.** `run-command` resolves through a CommandPolicy (no manifest: nothing is declared)
 ///   and runs through the CommandCapture for at most vtbackend::MaxCommandRuntime, blocking only this
 ///   runner's lane.
+/// - **Control verbs.** Granted with the commands (CommandPolicy::controlConsent()), and asked for the same
+///   way; served by RunnerServices::callControl, blocking this runner's lane for at most the rest of the
+///   guest call's deadline.
 class Runner
 {
   public:
@@ -169,7 +191,7 @@ class Runner
 
     /// Detaches the runner: no callback is called once this returns, a command in flight is stopped,
     /// and the instance is destroyed on its lane. Never waits for the extension, only for a callback
-    /// that is running.
+    /// that is running -- but never for a control call in flight (RunnerServices::callControl).
     ~Runner();
 
     Runner(Runner const&) = delete;

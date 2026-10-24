@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include <vtcontrol/Catalog.hpp>
 #include <vtextension/CompiledExtension.hpp>
 #include <vtextension/DeadlineGuard.hpp>
 #include <vtextension/Engine.hpp>
@@ -48,6 +49,11 @@ using ConfigMap = std::vector<std::pair<std::string, std::string>>;
 /// - **Host calls are bounded.** What the host copies out of the guest for one host call is capped
 ///   at `maxHostCallBytes`; a guest that asks for more traps. No exception thrown in a host call
 ///   crosses into the runtime: it faults the call.
+/// - **Control verbs.** The control interface's imports (ControlImports.hpp) are served by
+///   callControlImport(): checked against the manifest's `control` lines and the user's grant, then
+///   handed to IHostServices::callControl. Unlike a command, a verb counts against the call's deadline,
+///   which keeps running while the host answers; an answer that comes after it passed is dropped, never
+///   written into the guest.
 /// - **Host calls do not nest.** A host function called while another is in progress (from the
 ///   guest's `cabi_realloc`, which the host calls to store a result) faults the call as `Trapped`.
 /// - **Faults are final.** A call that fails for any reason (trap, deadline, memory, an output over
@@ -143,9 +149,9 @@ class Instance final: private wasm::IHostContext
         InProgress,
     };
 
-    /// Runs the world's host function at @p functionIndex of the table every runtime is created with
-    /// (detail::statuslineHostFunctions()). Called by the runtime, synchronously, from inside a call
-    /// into the guest.
+    /// Runs the host function at @p functionIndex of the table every runtime is created with
+    /// (detail::hostFunctions()): the world's, or a control verb's. Called by the runtime, synchronously,
+    /// from inside a call into the guest.
     /// @return Nothing on success; otherwise the error that faults the call, which makes the guest trap.
     [[nodiscard]] std::expected<void, ExtensionError> callHost(
         std::size_t functionIndex, std::span<uint32_t const> arguments) noexcept override;
@@ -185,6 +191,7 @@ class Instance final: private wasm::IHostContext
     IHostServices& _services;
     core::platform::IClock& _clock;
     ExtensionLimits _limits;
+    vtcontrol::ControlGrants _declaredControl; ///< The control permissions the manifest declares.
     /// Written by the watchdog, from its own thread, before it interrupts the instance. Once Expired it
     /// stays so: the instance is faulted for good by then.
     std::atomic<DeadlineState> _deadlineState = DeadlineState::Running;

@@ -11,6 +11,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -105,6 +106,9 @@ class WindowController:
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(bool settingsActive READ settingsActive NOTIFY settingsActiveChanged)
+    Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
+    // CONSTANT: a process attaches to one host for its life, and has done so before its first window.
+    Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
     Q_PROPERTY(contour::window::SettingsController* settingsController READ settingsController CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -127,6 +131,12 @@ class WindowController:
         //!< value (0 = inactive, i.e. nothing to paint). @see vtbackend::ProgressState.
         ProgressStateRole = Qt::UserRole + 8,
         ProgressPercentageRole = Qt::UserRole + 9, //!< The active pane's progress percentage, 0..100.
+        //!< The tab's OSC 7501 program-status badge, as the BadgeKind enumerator's value (0 = none), from the
+        //!< records of all its panes. @see ProgramStatusBadge.hpp.
+        ProgramStatusRole = Qt::UserRole + 10,
+        ProgramStatusTextRole = Qt::UserRole + 11, //!< The badge's tooltip, disarmed; empty for none.
+        //!< The progress of a Working badge, 0..100, or -1 when the program gave none (a plain spinner).
+        ProgramStatusProgressRole = Qt::UserRole + 12,
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -632,6 +642,33 @@ class WindowController:
     void updateStatusLine();
     // }}}
 
+    // {{{ Hosting notice
+    /// What this window tells the user about where its sessions run: set when the daemon the launch wanted
+    /// could not be had and the sessions run in this process instead (cli::hostingNotice), so they end
+    /// with the window. Main.qml shows it as a bar while non-empty.
+    [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
+
+    /// Shows @p notice in this window's notice bar.
+    /// @param notice The line to show; empty hides the bar.
+    void showHostingNotice(QString notice);
+
+    /// The user dismissed the notice bar: it is hidden for good.
+    Q_INVOKABLE void dismissHostingNotice() { showHostingNotice({}); }
+    // }}}
+
+    // {{{ Remote chrome
+    /// The remote host this window's sessions run on (`contour client --host`), which its title and tab
+    /// strip name, so it is never mistaken for a local window.
+    /// @return The host's label; empty for a local window.
+    [[nodiscard]] QString hostLabel() const;
+
+    /// The OS window title for the active session's @p sessionTitle: prefixed with the host for a remote
+    /// window. @see remoteWindowTitle
+    /// @param sessionTitle The active session's title.
+    /// @return The window title.
+    Q_INVOKABLE [[nodiscard]] QString windowTitle(QString const& sessionTitle) const;
+    // }}}
+
   signals:
     void countChanged();
     void activeTabIndexChanged();
@@ -666,6 +703,8 @@ class WindowController:
     void chromeHeightChanged();
     /// The content area switched between the settings page and the terminal (settingsActive changed).
     void settingsActiveChanged();
+    /// @see hostingNotice
+    void hostingNoticeChanged();
     /// @see requestNotification.
     void notificationRequested(QString const& title, QString const& body);
     /// @see requestBell.
@@ -690,6 +729,11 @@ class WindowController:
     [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
     /// The strip's label for list-model row @p row, through the model's own TitleRole.
     [[nodiscard]] std::string titleAtRow(int row) const;
+    /// The program-status badge @p row's tab shows, from the records of all its panes, each read under its
+    /// terminal's lock.
+    [[nodiscard]] ProgramStatusBadge programStatusBadge(vtworkspace::Tab const& tab, int row) const;
+    /// programStatusBadge(), computed once until the row or the tab in front changes (@ref _badges).
+    [[nodiscard]] ProgramStatusBadge cachedProgramStatusBadge(vtworkspace::Tab const& tab, int row) const;
     /// Resolves the label shown on @p row's tab.
     [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab,
                                            session::TerminalSession* session,
@@ -785,6 +829,7 @@ class WindowController:
     command::TabCommandSource _tabCommands;
     command::ProfileCommandSource _profileCommands;
     command::LayoutCommandSource _layoutCommands;
+    command::HostCommandSource _hostCommands;
     command::BoundCommandSource _boundCommands;
     command::ActionCommandSource _actionCommands;
     std::unique_ptr<CommandPaletteModel> _commandPalette;
@@ -796,6 +841,11 @@ class WindowController:
     /// The editable settings bridge for this window (created in the constructor; never null).
     std::unique_ptr<SettingsController> _settingsController;
     // }}}
+
+    QString _hostingNotice; ///< @see hostingNotice
+
+    /// Each tab's badge, computed once for the three roles that show it. Mutable: data() fills it.
+    mutable TabBadgeCache _badges;
 
     // {{{ Terminal context menu
     /// The menu as QML sees it, rebuilt on every right-click.

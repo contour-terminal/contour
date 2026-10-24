@@ -407,3 +407,30 @@ TEST_CASE("OpenCommandOutput's arguments are part of its identity", "[contour][p
                                                     .placement = actions::OutputPlacement::Detached })
           == "Open Command Output: wl-copy (last, detached)");
 }
+
+TEST_CASE("HostCommandSource offers one row per saved host", "[contour][palette][hosts]")
+{
+    auto config = config::Config {};
+    config.hosts.value() = {
+        { "home", config::HostEntry {} },
+        { "studio", config::HostEntry {} },
+    };
+
+    auto const commands = HostCommandSource { config }.commands();
+    REQUIRE(commands.size() == 2);
+    auto const* home = find(commands, "AttachToHost:home");
+    REQUIRE(home != nullptr);
+    CHECK(home->title == "Attach To Host: home");
+    CHECK(std::get<actions::AttachToHost>(home->action).name == "home");
+    CHECK(home->description == actions::documentation::AttachToHost);
+    auto const* studio = find(commands, "AttachToHost:studio");
+    REQUIRE(studio != nullptr);
+    CHECK(studio->title == "Attach To Host: studio");
+    CHECK(std::get<actions::AttachToHost>(studio->action).name == "studio");
+}
+
+TEST_CASE("ActionCommandSource does not offer a nameless AttachToHost", "[contour][palette][hosts]")
+{
+    // "Attach to which host?" has no default; the saved hosts reach the palette through HostCommandSource.
+    CHECK_FALSE(hasCommand(ActionCommandSource {}.commands(), "AttachToHost"));
+}

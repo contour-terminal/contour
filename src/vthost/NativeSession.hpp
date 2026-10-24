@@ -7,10 +7,11 @@
 /// The server emulates, the client renders: after the ClientHello/ServerHello
 /// version handshake the session pushes a full snapshot (SessionState + a
 /// snapshot Delta per hosted session), then per-line deltas driven by the
-/// host's screen-updated signal, debounced so bursts coalesce into one Delta.
+/// host's screen-updated signal. A screen update that answers a client's input (its echo), and the first
+/// one after a snapshot, flush at once; everything else coalesces for 20ms into one Delta (@see FlushPolicy).
 ///
 /// Snapshots and increments travel differently, and the difference is the point. An increment is
-/// small by construction — the rows that changed in one 20ms window. A snapshot is the whole
+/// small by construction — the rows that changed in one coalescing window. A snapshot is the whole
 /// grid INCLUDING all scrollback, which is legitimately megabytes and has no smaller form. So
 /// snapshots are queued per session and emitted by a single streamer coroutine that waits for
 /// room in the send queue before each piece and splits anything over `snapshotPieceBytes`.
@@ -20,6 +21,11 @@
 /// Grid rows are addressed by stable id; a generation change triggers one
 /// resync snapshot. Hyperlink URIs ship once per connection on first
 /// reference; image pixels only on FetchImage.
+///
+/// All of that is for an Attach connection, the hello's default role. A Control connection only asks the
+/// daemon about itself and calls its control API: it is sent its ServerHello, the answers to its
+/// daemon-control and control requests and the control events it subscribed to, and nothing else — no
+/// layout, no snapshot, no screen of the host's — and it counts as no client.
 
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
@@ -28,6 +34,7 @@
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/WriteQueue.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -38,18 +45,73 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include <vtcontrol/Catalog.hpp>
+#include <vtcontrol/ControlApi.hpp>
+#include <vtcontrol/Events.hpp>
+#include <vthost/AccessFile.hpp>
+#include <vthost/AttachPlan.hpp>
+#include <vthost/ClientCensus.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/DaemonControl.hpp>
+#include <vthost/FlushPolicy.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/Unsupported.hpp>
 
 namespace vthost
 {
+
+/// What the daemon side of the handshake admits: the token, versions and capabilities it requires
+/// and offers.
+struct HandshakePolicy
+{
+    /// The preshared tokens a ClientHello may carry, each with what it grants; empty accepts any hello with
+    /// every grant (the AF_UNIX default, where the socket's permissions are the gate). An Attach hello needs
+    /// a token that grants everything.
+    std::vector<AcceptedToken> acceptedTokens = {};
+    /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
+    proto::VersionRange versions = proto::SupportedVersions;
+    /// The optional features this endpoint offers on top of the agreed version.
+    proto::CapabilitySet capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
+                                                                   proto::Capability::InitialClientArea,
+                                                                   proto::Capability::AttachIntent,
+                                                                   proto::Capability::TabEdits,
+                                                                   proto::Capability::Heartbeat,
+                                                                   proto::Capability::ProgramStatus,
+                                                                   proto::Capability::ControlPermissions });
+};
+
+/// When a connection sends a session's program-status set.
+enum class ProgramStatusPush : uint8_t
+{
+    Always = 0, ///< It changed: even an empty set is news, since it says the records are gone.
+    IfAny,      ///< A snapshot: an empty set says nothing a fresh mirror does not already hold.
+};
+
+/// The collaborators and policy a native connection is constructed with.
+///
+/// Later phases append members, every one with a default, so a test or an embedded host names only
+/// what it needs, and no phase adds a constructor parameter.
+struct NativeSessionServices
+{
+    HandshakePolicy handshake = {}; ///< What the handshake admits.
+    /// The daemon behind this endpoint: what a Control connection asks about, and what counts each Attach
+    /// connection as a client. The null object, which serves nothing, for an endpoint without a daemon.
+    std::reference_wrapper<DaemonControl> daemon = nullDaemonControl();
+    FlushPolicy flush = {}; ///< When a pending screen increment is flushed: at once, or coalesced.
+    /// The control API a Control connection that shares Capability::ControlApi calls, and that is told of
+    /// every Attach connection coming and going. The null object, which serves nothing, by default.
+    std::reference_wrapper<vtcontrol::ControlApi> control = vtcontrol::nullControlApi();
+};
 
 /// One connected native-protocol client.
 class NativeSession final: public SessionStreamEvents
@@ -57,6 +119,15 @@ class NativeSession final: public SessionStreamEvents
   public:
     /// The default send-queue bound (see the constructor).
     static constexpr std::size_t DefaultWriteQueueBytes = std::size_t { 4 } * 1024 * 1024;
+
+    /// Where a connection is in its life, and so what it is for. The single stored state the handshake
+    /// decides; what was agreed on along with it is negotiated().
+    enum class ConnectionPhase : uint8_t
+    {
+        AwaitingHello = 0, ///< No ClientHello accepted yet: nothing but a hello is read.
+        Viewing,           ///< An accepted Attach hello: a client that shows the host's windows.
+        Controlling, ///< An accepted Control hello: calls the daemon and its control API, views nothing.
+    };
 
     /// The largest snapshot payload one PDU carries; a grid bigger than this travels as several.
     ///
@@ -110,22 +181,28 @@ class NativeSession final: public SessionStreamEvents
     /// @param maxWriteQueueBytes Send-queue byte bound; a client whose backlog
     ///        exceeds it is disconnected rather than under-served (its delta
     ///        cursor has already moved past what an overflow would drop).
-    /// @param expectedToken The preshared token this endpoint requires in the
-    ///        ClientHello; empty accepts any (the AF_UNIX default, where the
-    ///        socket permissions are the gate).
+    /// @param services The collaborators and policy of this connection, its handshake's among them.
     NativeSession(core::net::EventLoop& loop,
                   SessionHost& host,
                   ConnectionId id,
                   std::unique_ptr<core::net::ISocket> connection,
                   std::size_t maxWriteQueueBytes = DefaultWriteQueueBytes,
-                  std::string expectedToken = {});
+                  NativeSessionServices services = {});
+
+    /// Stops counting this connection as the host's client (@see SessionHost::noteClientDetached).
+    ~NativeSession() override;
+
+    NativeSession(NativeSession const&) = delete;
+    NativeSession& operator=(NativeSession const&) = delete;
+    NativeSession(NativeSession&&) = delete;
+    NativeSession& operator=(NativeSession&&) = delete;
 
     /// The connection flow: handshake, initial snapshot, then serve until the
     /// peer disconnects.
     [[nodiscard]] core::async::Task<void> run();
 
-    /// Marks @p session changed and schedules a debounced delta flush (the
-    /// connection subscribes itself to the host's stream fan-out).
+    /// Marks @p session changed and schedules its delta flush, at once or coalesced (an Attach
+    /// connection subscribes itself to the host's stream fan-out as its hello is accepted).
     void sessionScreenUpdated(vtworkspace::SessionId session) override;
 
     /// Drops the follow state for a session the host destroyed, so a long-lived
@@ -141,6 +218,10 @@ class NativeSession final: public SessionStreamEvents
                        std::optional<vtbackend::DisplayOccasion> occasion) override;
     void sessionCopyToClipboard(vtworkspace::SessionId session, std::string const& data) override;
 
+    /// A session's program-status records changed: marked, and pushed whole by the next debounced flush to a
+    /// viewer sharing Capability::ProgramStatus. Every other signal is the control service's.
+    void sessionSignal(vtworkspace::SessionId session, SessionSignal const& signal) override;
+
     /// Asks this client's user, whose GUI shows the prompt in @p session's pane. Sent as the question opens;
     /// a client attaching later is asked from SessionHost::pendingPermissionRequests() instead.
     void sessionPermissionRequested(vtworkspace::SessionId session,
@@ -148,8 +229,8 @@ class NativeSession final: public SessionStreamEvents
 
     /// Adapts the host's model-change fan-out into a single "layout changed"
     /// callback: every structural change re-pushes the whole LayoutState. It is a
-    /// `vtworkspace::ModelEvents` the caller subscribes to the host (see @ref
-    /// layoutObserver), so the model stays transport-agnostic.
+    /// `vtworkspace::ModelEvents` an Attach connection subscribes to the host as its
+    /// hello is accepted, so the model stays transport-agnostic.
     struct LayoutObserver final: vtworkspace::ModelEvents
     {
         std::function<void()> onChange;
@@ -180,12 +261,35 @@ class NativeSession final: public SessionStreamEvents
         void tabColorChanged(vtworkspace::TabId) override { onChange(); }
     };
 
-    /// The layout observer to subscribe to the host's model fan-out (see
-    /// serveNativeClient) so live tab/pane changes reach this connection.
-    [[nodiscard]] LayoutObserver& layoutObserver() noexcept { return _layoutObserver; }
+    /// @param type A PDU type this connection may send.
+    /// @return Whether the client answered it with Unsupported, so it is no longer sent.
+    [[nodiscard]] bool peerRefused(proto::PduType type) const noexcept
+    {
+        return _unsupported.peerRefused(type);
+    }
+
+    /// @return What the handshake agreed on; nullopt until a ClientHello was accepted.
+    [[nodiscard]] std::optional<proto::Negotiated> const& negotiated() const noexcept { return _negotiated; }
+
+    /// @return Where the connection is in its life.
+    [[nodiscard]] ConnectionPhase phase() const noexcept { return _phase; }
+
+    /// @return What the hello's token granted: every permission over a socket that takes any hello, those of
+    ///         the matched token otherwise; none before a hello is accepted.
+    [[nodiscard]] vtcontrol::ControlGrants grants() const noexcept { return _grants; }
+
+    /// @param window A daemon window.
+    /// @return Whether this connection is shown @p window: its layout, its sessions' screens and events.
+    ///         Every window under FollowScope::Every; under Listed, the attach plan's and those it gained
+    ///         since (its own NewWindow, and — for the primary viewer — the windows no client claims).
+    [[nodiscard]] bool follows(vtworkspace::WindowId window) const noexcept
+    {
+        return _scope == FollowScope::Every || _followedWindows.contains(window.value);
+    }
 
   private:
     friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
+    friend struct NativeSessionFlushTester;  ///< Test-only view of the armed flush deadline.
 
     /// A walk over a session's command-block records that a budget, a cap or a full send queue cut short;
     /// the next increment resumes it where it stopped rather than from the oldest record.
@@ -290,6 +394,17 @@ class NativeSession final: public SessionStreamEvents
         /// xterm's modifyOtherKeys level last sent (-1 until the first snapshot); the
         /// other half of the input-encoding state a client has to track.
         int lastModifyOtherKeys = -1;
+        /// The input stamp (SessionHost::lastInputAt) this connection already flushed an echo for: one
+        /// immediate flush per input, however many screen updates its output raises.
+        std::optional<core::platform::SteadyTimePoint> answeredInput;
+        /// Whether an increment went out since this follow's last snapshot: the first one flushes at once.
+        IncrementHistory increments = IncrementHistory::NoneSinceSnapshot;
+        /// What `increments` becomes when the snapshot queued for this follow is built. Attach, resize and a
+        /// follow's first push leave it at NoneSinceSnapshot, so the first increment after them flushes at
+        /// once; a resync
+        /// forced by a batch the increment could not describe sets it to SomeSinceSnapshot, because a flood
+        /// that keeps resyncing must coalesce rather than flush after every snapshot.
+        IncrementHistory historyAfterSnapshot = IncrementHistory::NoneSinceSnapshot;
 
         /// The resolved mouse-reporting state last sent, diffed as ONE value because that is what
         /// it is — the wire's own struct, so there is no second declaration to keep in step.
@@ -307,7 +422,73 @@ class NativeSession final: public SessionStreamEvents
 
     void handlePdu(proto::DecodedFrame const& frame);
 
-    /// Encodes @p pdu and hands it to the write queue, disconnecting on refusal.
+    /// Whether a frame was a request to the daemon itself -- daemon control, or the control API -- which is
+    /// served (or refused) before the frame would be dispatched on.
+    enum class DaemonRequest : uint8_t
+    {
+        None = 0,   ///< It was not one: the frame is dispatched on.
+        Served = 1, ///< It was, and it has been answered or carried out.
+    };
+
+    /// Serves @p frame if it is a DaemonStatusRequest or a StopDaemon, through NativeSessionServices::daemon.
+    /// What the daemon does not serve, a stop for a reason this version does not know, and a request the
+    /// token does not grant (`read` for the status, `write` for a stop) is answered Unsupported.
+    /// @param frame A frame received after the handshake.
+    /// @return Whether it was such a request.
+    [[nodiscard]] DaemonRequest serveDaemonRequest(proto::DecodedFrame const& frame);
+
+    /// What requireGrant() decided.
+    enum class GrantCheck : uint8_t
+    {
+        Refused = 0, ///< The connection lacks the permission; the frame was answered Unsupported.
+        Granted,     ///< Serve the frame.
+    };
+
+    /// Refuses @p frame unless the connection holds @p permission: answered Unsupported, and why logged.
+    /// @param permission What serving @p frame needs.
+    /// @param frame The request.
+    /// @return Whether it was refused or is to be served.
+    [[nodiscard]] GrantCheck requireGrant(vtcontrol::Permission permission, proto::DecodedFrame const& frame);
+
+    /// Serves @p frame if it is a ControlRequest: through the control API on a Controlling connection that
+    /// shares Capability::ControlApi, else answered Unsupported.
+    /// @param frame A frame received after the handshake.
+    /// @return Whether it was a ControlRequest.
+    [[nodiscard]] DaemonRequest serveControlApiRequest(proto::DecodedFrame const& frame);
+
+    /// Serves one call of the control API through NativeSessionServices::control, and answers it with a
+    /// ControlReply under @p serial once the call completes, at once or later, unless the connection closed
+    /// meanwhile.
+    /// @param serial The request's serial.
+    /// @param request The call.
+    void serveControlRequest(uint64_t serial, proto::ControlRequest const& request);
+
+    /// Sends one event of a subscription, or counts it dropped while the send backlog is past half its bound:
+    /// a subscriber that does not read loses events, never the connection, and is told how many it lost as
+    /// the next event that fits arrives.
+    /// @param subscription The subscription.
+    /// @param event The event.
+    void deliverControlEvent(uint32_t subscription, vtcontrol::Event const& event);
+
+    /// The connection as the control API's subscriptions and waits know it.
+    struct ControlEventSink final: vtcontrol::EventSink
+    {
+        explicit ControlEventSink(NativeSession& owner): session(owner) {}
+        void deliverEvent(uint32_t subscription, vtcontrol::Event const& event) override
+        {
+            session.deliverControlEvent(subscription, event);
+        }
+        void subscriptionEnded(uint32_t subscription) override { session._droppedEvents.erase(subscription); }
+        NativeSession& session; ///< The connection.
+    };
+
+    /// Answers @p frame with an Unsupported naming its serial and tag: a PDU this connection knows but cannot
+    /// serve.
+    /// @param frame The frame refused.
+    void refuse(proto::DecodedFrame const& frame);
+
+    /// Encodes @p pdu and hands it to the write queue, disconnecting on refusal. A PDU the client answered
+    /// with Unsupported is not sent at all.
     /// @param serial The request serial to answer, or 0 for an unsolicited push.
     /// @param pdu What to send.
     /// @param sessionTag The session this frame describes, or 0 when it describes none
@@ -331,14 +512,45 @@ class NativeSession final: public SessionStreamEvents
     /// @param event A SessionBell, SessionNotify or SessionClipboard.
     void emitSessionEvent(proto::SessionEventPdu const& event);
 
-    /// Serializes the host's window/tab/pane tree into a LayoutState and pushes it
+    /// Serializes each followed window's tab/pane tree into a LayoutState and pushes it
     /// (serial 0), once the handshake completed — on attach and on every change.
     void pushLayout();
 
-    /// Validates the peer's ClientHello, answers, and queues the attach
-    /// snapshot (spawning the first session on an empty daemon).
+    /// Brings the followed windows in line with the model before a layout push: closed windows leave the
+    /// set; this connection's own new windows, and — for the primary viewer — unclaimed ones, join it, and
+    /// each joining window's sessions are queued a snapshot.
+    void refreshFollowedWindows();
+
+    /// @param session A hosted session.
+    /// @return Whether @p session sits in a window this connection follows; false for one in no window.
+    [[nodiscard]] bool followsSession(vtworkspace::SessionId session) const;
+
+    /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
+    /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the
+    /// first session on an empty daemon); a Control connection gets the ServerHello and nothing else.
     /// @return False when the hello was missing or version-mismatched.
     [[nodiscard]] bool completeHandshake(proto::DecodedFrame const& frame);
+
+    /// What an accepted Attach hello starts: the census ticket and the host's subscriptions, the client's
+    /// settings and client area, the attach plan and what it creates, then the ServerHello naming the
+    /// followed windows, their layout, their sessions' snapshots and the open permission questions.
+    ///
+    /// The ServerHello waits for the plan because it states what the plan follows; nothing reaches the
+    /// peer before it, as @ref _negotiated is engaged only once it is sent.
+    /// @param serial The hello's serial, which the ServerHello answers.
+    /// @param hello The accepted hello.
+    /// @param reply The ServerHello, without its followed windows.
+    /// @param negotiated What the handshake agreed on.
+    void attachClient(uint64_t serial,
+                      proto::ClientHello const& hello,
+                      proto::ServerHello reply,
+                      proto::Negotiated negotiated);
+
+    /// Decides which windows this connection follows and creates what that asks for: a first tab in the
+    /// primary window, or a window of its own. Counts the connection as the host's client after deciding,
+    /// so that it is not among the clients it is decided against.
+    /// @param intent What the hello asked for; AllWindows when Capability::AttachIntent is not shared.
+    void executeAttachPlan(proto::AttachIntent const& intent);
 
     /// Adopts the emulation settings the client states for the sessions it creates from now on, in
     /// its ClientHello or later in a SessionSettingsChanged.
@@ -418,6 +630,14 @@ class NativeSession final: public SessionStreamEvents
     /// when an increment turns out not to be able to describe the batch.
     void pushDelta(vtworkspace::SessionId session);
 
+    /// Whether this connection is a viewer that mirrors program status (shares Capability::ProgramStatus).
+    [[nodiscard]] bool mirrorsProgramStatus() const noexcept;
+
+    /// Sends @p session's whole program-status set, read under its terminal lock.
+    /// @param session The session.
+    /// @param when Whether an empty set is news (a change emptied it) or not worth a PDU (a snapshot).
+    void pushProgramStatus(vtworkspace::SessionId session, ProgramStatusPush when);
+
     /// Queues a full-grid snapshot of @p session and starts the streamer if it is idle.
     ///
     /// Queued rather than sent: a snapshot is the whole grid, several of them are asked for at
@@ -464,13 +684,26 @@ class NativeSession final: public SessionStreamEvents
     /// a piece, then queues an increment for every session in @ref _recordsAwaitingRoom.
     [[nodiscard]] core::async::Task<void> requeueOnSendRoom();
 
-    /// Arms the debounced delta flush unless one is already armed or the connection is closing.
-    void scheduleFlush();
+    /// Arms a delta flush due at @p deadline, unless one due no later is already armed or the connection
+    /// is closing. An earlier deadline supersedes the armed one: its flusher wakes to find it moved, and
+    /// returns.
+    /// @param deadline When the flush is due.
+    void scheduleFlush(core::platform::SteadyTimePoint deadline);
 
-    /// Marks @p session as owed an increment and arms the debounced flush: what a screen update
-    /// does, and what a push that left command-block records unsent has done for it.
-    /// @param session The session to push in the next debounce window.
+    /// Marks @p session as owed an increment and arms its flush: what a screen update does, and what a
+    /// push that left command-block records unsent has done for it. At once for the echo of an input or
+    /// the first increment after a snapshot, else after the coalescing delay (@see decideFlush).
+    /// @param session The session to push in the next flush.
     void queueIncrement(vtworkspace::SessionId session);
+
+    /// Why @p session's increment is flushed, and so how soon; spends @p session's echo credit when the
+    /// answer is FlushReason::Echo.
+    /// @param session The session owed an increment.
+    /// @param now The loop clock's current time.
+    /// @return Coalesce while the session's snapshot is pending or before its first push, which a snapshot
+    ///         describes, else what decideFlush says of its follow.
+    [[nodiscard]] FlushReason flushReasonFor(vtworkspace::SessionId session,
+                                             core::platform::SteadyTimePoint now);
 
     /// The single snapshot streamer: drains @ref _snapshotQueue, one session at a time, waiting
     /// for room in the send queue before each piece. One streamer rather than one coroutine per
@@ -547,12 +780,41 @@ class NativeSession final: public SessionStreamEvents
     ///
     /// One spelling for all four creation paths (the attach-time first session, CreateTab, NewWindow,
     /// SplitPane), so a fifth cannot quietly forget the client's preference.
-    [[nodiscard]] SessionSpawnRequest spawnRequest() const
+    /// @param verbProfile The profile the spawning verb names; empty for the connection's. Honoured only
+    ///        with Capability::ProfileByName shared.
+    [[nodiscard]] SessionSpawnRequest spawnRequest(std::string_view verbProfile) const
     {
-        return SessionSpawnRequest { .settings = _clientSessionSettings };
+        auto const verbNamesProfile = !verbProfile.empty() && _negotiated.has_value()
+                                      && _negotiated->shared.contains(proto::Capability::ProfileByName);
+        return SessionSpawnRequest { .settings = _clientSessionSettings,
+                                     .profileName =
+                                         verbNamesProfile ? std::string { verbProfile } : _profileName };
     }
 
-    [[nodiscard]] core::async::Task<void> flushSoon();
+    /// Tells whether this client is asked extensions' permission questions: both ends offered
+    /// proto::Capability::ExtensionPermissions. A client that did not stays unasked, and the questions
+    /// wait for another, as they do while no client is attached.
+    /// @return true once a handshake shared the capability.
+    [[nodiscard]] bool asksPermissions() const noexcept
+    {
+        return _negotiated.has_value()
+               && _negotiated->shared.contains(proto::Capability::ExtensionPermissions);
+    }
+
+    /// Tells whether this client is asked @p request: it is asked permission questions, and, for one that
+    /// asks for control permissions, both ends offered proto::Capability::ControlPermissions -- a client
+    /// that would prompt without them is not asked, and the question waits for another.
+    /// @return true if @p request is to be sent.
+    [[nodiscard]] bool asks(proto::PermissionRequest const& request) const noexcept
+    {
+        return asksPermissions()
+               && (request.control.empty()
+                   || _negotiated->shared.contains(proto::Capability::ControlPermissions));
+    }
+
+    /// Flushes every pending increment at @p deadline, unless an earlier deadline superseded it by then.
+    /// @param deadline The deadline scheduleFlush() armed it for.
+    [[nodiscard]] core::async::Task<void> flushAt(core::platform::SteadyTimePoint deadline);
 
     core::net::EventLoop& _loop;
     SessionHost& _host;
@@ -561,8 +823,21 @@ class NativeSession final: public SessionStreamEvents
     /// What a snapshot is cut into, and the backlog each piece waits to get under before it is
     /// enqueued: @ref snapshotPieceBytes of this connection's bound.
     std::size_t _snapshotPieceBytes;
-    ConnectionId _id;           ///< Prefixes this connection's every log line.
-    std::string _expectedToken; ///< Required ClientHello token; empty accepts any.
+    ConnectionId _id;                ///< Prefixes this connection's every log line.
+    NativeSessionServices _services; ///< The handshake's policy, the daemon, and later phases' collaborators.
+    /// Where the connection is in its life: decided by the accepted hello's role. @see phase
+    ConnectionPhase _phase = ConnectionPhase::AwaitingHello;
+    vtcontrol::ControlGrants _grants = vtcontrol::ControlGrants::none(); ///< @see grants()
+    /// What the handshake agreed on, the shared capabilities among it; engaged once a ClientHello was
+    /// accepted.
+    std::optional<proto::Negotiated> _negotiated;
+    /// The send-queue bound, half of which is where control events start to be dropped.
+    std::size_t _maxWriteQueueBytes;
+    /// Where this connection's control events are delivered. @see deliverControlEvent
+    ControlEventSink _controlEvents { *this };
+    /// The events dropped per subscription since its last one sent, erased as the subscription ends; at most
+    /// one entry per subscription, which ControlServiceConfig caps. @see deliverControlEvent
+    std::unordered_map<uint32_t, uint32_t> _droppedEvents;
     /// The emulation settings this client asked the sessions IT creates to have, layered onto the
     /// host's own in completeHandshake; nullopt when the client stated no preference.
     ///
@@ -570,9 +845,20 @@ class NativeSession final: public SessionStreamEvents
     /// clients on different profiles share a daemon without either re-emulating the other's
     /// sessions. An application that already read DA1 cannot be told its terminal changed identity.
     std::optional<vtbackend::Settings> _clientSessionSettings;
+    /// The host profile this client's sessions run under, as its hello named it with
+    /// Capability::ProfileByName shared; empty for none, which keeps @ref _clientSessionSettings' path.
+    std::string _profileName;
+    /// Whether this connection follows every window or a listed set; Every until the attach plan says.
+    FollowScope _scope = FollowScope::Every;
+    /// The windows followed under FollowScope::Listed, by id. @see follows
+    std::set<uint64_t> _followedWindows;
     LayoutObserver _layoutObserver;
+    /// Answers the client's unknown PDUs, and holds back the ones it said it does not know.
+    proto::UnsupportedTracker _unsupported;
     std::unordered_map<uint64_t, FollowState> _followed;
     std::unordered_set<uint64_t> _pendingSessions;
+    /// Sessions whose program-status records changed since the last flush. @see sessionSignal
+    std::unordered_set<uint64_t> _programStatusPending;
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
     std::deque<uint64_t> _snapshotQueue;
     /// The session @ref streamSnapshots is emitting right now; engaged exactly while a streamer
@@ -588,19 +874,34 @@ class NativeSession final: public SessionStreamEvents
     /// Whether @ref requeueOnSendRoom is live, which @ref run waits out before it lets `this` go — kept
     /// apart from the set, which a closed session leaves while the waiter still holds `this`.
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
-    bool _flushScheduled = false;
-    bool _handshaken = false;
+    /// The earliest flush deadline armed; nullopt while no flush is due.
+    std::optional<core::platform::SteadyTimePoint> _flushDeadline;
+    /// The flushAt() coroutines live, superseded ones included: what @ref run waits out before it lets
+    /// `this` go, since a superseded flusher still sleeps with `this` in its frame.
+    std::size_t _flushesInFlight = 0;
     bool _closed = false;
     /// The session this connection's input backed up in, past the high-water mark: the connection is read
     /// no further until it drains. @see awaitInputRoom
     std::optional<vtworkspace::SessionId> _inputBackedUp;
+    /// Counts this connection as a client of the daemon from its accepted Attach hello on; holds nothing for
+    /// a Control connection. Released after the subscriptions below, so a census that drops to zero sees the
+    /// connection gone from the host already.
+    ClientCensus::Ticket _clientTicket;
+    /// The host's stream and model events, taken for an accepted Attach hello only: a Control connection is
+    /// never among the host's subscribers, so it is sent no screen, resize, bell or layout, and it neither
+    /// reports a client area nor is told one. Optional because a ScopedSubscription cannot be moved, and
+    /// the last members, so they are released before anything they deliver to.
+    std::optional<ScopedStreamSubscription> _streamSubscription;
+    std::optional<ScopedModelSubscription> _layoutSubscription;
 };
 
 /// The daemon's connection-handler factory for native-protocol clients.
-/// @param expectedToken The preshared token required in each ClientHello (empty
-///        accepts any — the AF_UNIX default).
+/// @param loop The event loop every connection runs on.
+/// @param host The session host every connection serves (not owned; outlives the handler).
+/// @param services What each connection is constructed with.
+/// @return The handler.
 [[nodiscard]] ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
                                                   SessionHost& host,
-                                                  std::string expectedToken = {});
+                                                  NativeSessionServices services = {});
 
 } // namespace vthost

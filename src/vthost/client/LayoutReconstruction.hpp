@@ -18,7 +18,9 @@
 #include <ranges>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include <vthost/client/TabPresentation.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 
@@ -117,5 +119,24 @@ template <std::ranges::input_range Roots>
     }
     return fallback;
 }
+
+/// How the daemon presents @p tab.
+/// @param tab The daemon's tab.
+/// @param activity Whether it is its window's active tab (proto::LayoutState::activeTab names it).
+/// @return The sessions of its active and zoomed panes -- the leaves those pane ids name, 0 where none
+///         does -- its title (none when empty) and its colour (none when `hasColor` is 0).
+[[nodiscard]] TabPresentation presentationOf(proto::WireTab const& tab, TabActivity activity);
+
+/// What a client tells the daemon so that its model presents a tab as @p local does: one edit per field
+/// that differs, in the order activate-tab, activate-pane, zoom or unzoom, title, colour.
+///
+/// A tab that is active only on the daemon is left alone: a tab stops being active only because another
+/// becomes so, and that other tab's own report says which. Tab-wide edits name the tab by @p local's active
+/// session.
+/// @param local How the client presents the tab.
+/// @param lastFromDaemon How the daemon last said it does.
+/// @return The edits; empty when the two agree.
+[[nodiscard]] std::vector<proto::EditTab> tabEditsToReport(TabPresentation const& local,
+                                                           TabPresentation const& lastFromDaemon);
 
 } // namespace vthost::client

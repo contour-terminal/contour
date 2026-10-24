@@ -60,6 +60,7 @@
 #include <string_view>
 #include <system_error>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -712,9 +713,8 @@ bool Terminal::processInputOnce()
                   })));
 
     runParseBatch(std::move(lock), [&] {
-        // Parse against the buffer readFromPty() read into, not _currentPtyBuffer, which writeToScreen()
-        // on another thread may have replaced meanwhile: Screen's bulk text path moves this buffer's hot
-        // end past the text it parsed.
+        // Parse against the buffer readFromPty() read into: Screen's bulk text path moves this buffer's hot
+        // end past the text it parsed. writeToScreen() parses out of a buffer of its own.
         _parsingBuffer = ptyReadResult->buffer;
         for (auto const& piece: batch)
         {
@@ -2006,8 +2006,11 @@ Handled Terminal::sendMousePressEvent(Modifiers modifiers,
     auto const eventHandledByApp =
         (allowPassMouseEventToApp(modifiers) || allowWheelTranslationToApp(button, modifiers))
         && core::locked(_inputMutex, [&] {
-               return _inputGenerator.generateMousePress(
-                   modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
+               return _inputGenerator.generateMousePress(modifiers,
+                                                         button,
+                                                         _currentMousePosition + _reportedCellOrigin,
+                                                         pixelPosition,
+                                                         uiHandledHint);
            });
 
     flushInput();
@@ -2303,8 +2306,10 @@ void Terminal::sendMouseMoveEvent(Modifiers modifiers,
     if (allowPassMouseEventToApp(modifiers))
     {
         if (core::locked(_inputMutex, [&] {
-                return _inputGenerator.generateMouseMove(
-                    modifiers, relativePos, pixelPosition, uiHandledHint || !selectionAvailable());
+                return _inputGenerator.generateMouseMove(modifiers,
+                                                         relativePos + _reportedCellOrigin,
+                                                         pixelPosition,
+                                                         uiHandledHint || !selectionAvailable());
             }))
             flushInput();
         if (!isModeEnabled(DECMode::MousePassiveTracking))
@@ -2384,7 +2389,7 @@ Handled Terminal::sendMouseReleaseEvent(Modifiers modifiers,
 
     if (allowPassMouseEventToApp(modifiers) && core::locked(_inputMutex, [&] {
             return _inputGenerator.generateMouseRelease(
-                modifiers, button, _currentMousePosition, pixelPosition, uiHandledHint);
+                modifiers, button, _currentMousePosition + _reportedCellOrigin, pixelPosition, uiHandledHint);
         }))
     {
         flushInput();
@@ -2595,13 +2600,16 @@ void Terminal::parseFragmentChunked(string_view vtStream)
 
     while (!vtStream.empty())
     {
-        if (_currentPtyBuffer->bytesAvailable() < 64 && _currentPtyBuffer->bytesAvailable() < vtStream.size())
-            _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
-        auto const chunk = vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
+        if (!_screenWriteBuffer
+            || (_screenWriteBuffer->bytesAvailable() < 64
+                && _screenWriteBuffer->bytesAvailable() < vtStream.size()))
+            _screenWriteBuffer = _ptyBufferPool.allocateBufferObject();
+        auto const chunk =
+            vtStream.substr(0, std::min(vtStream.size(), _screenWriteBuffer->bytesAvailable()));
         vtStream.remove_prefix(chunk.size());
         // Set parsingBuffer to ensure BufferFragment holds the correct buffer reference.
-        _parsingBuffer = _currentPtyBuffer;
-        auto const written = _currentPtyBuffer->writeAtEnd(chunk);
+        _parsingBuffer = _screenWriteBuffer;
+        auto const written = _screenWriteBuffer->writeAtEnd(chunk);
         parseExpandingMacros(std::string_view { written.data(), written.size() });
         _parsingBuffer = nullptr;
     }
@@ -5933,6 +5941,41 @@ void Terminal::setProgress(Progress progress)
     _extensionEvents.post([&] { return StatusLineEvents::ProgressChanged { .progress = progress }; });
 }
 
+void Terminal::applyProgramStatus(ProgramStatusReport const& report)
+{
+    // Lock-free for the reason setProgress() gives: reached from the OSC 7501 dispatch in Screen, inside
+    // writeToScreen()'s _stateMutex hold.
+    std::visit(
+        [this](auto const& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, ProgramStatusRecord>)
+                announceProgramStatus(_programStatus.apply(value));
+            else if constexpr (std::is_same_v<T, ProgramStatusClear>)
+                announceProgramStatus(_programStatus.clear(value.id));
+            else
+                reply(programStatusDetectionReply());
+        },
+        report);
+}
+
+void Terminal::markProcessExited()
+{
+    auto const _ = std::lock_guard { *this };
+    announceProgramStatus(_programStatus.processExited());
+}
+
+void Terminal::replaceProgramStatus(std::vector<ProgramStatusRecord> records)
+{
+    // Lock-free: the mirror applying a host's frame holds _stateMutex, as it does for setProgress().
+    announceProgramStatus(_programStatus.replaceAll(std::move(records)));
+}
+
+void Terminal::announceProgramStatus(ProgramStatusChange const& change)
+{
+    if (!change.empty())
+        _eventListener.programStatusChanged(change);
+}
+
 ContextTransition Terminal::applyContextCommand(ContextCommand const& command)
 {
     auto const transition = _contexts.apply(command);
@@ -6541,6 +6584,9 @@ void Terminal::beginCommandBlock()
     // The new record is the current one; the one before learns where its command left the shell.
     _commandBlocks.promptStarted(headStableId, headIdGeneration, workingDirectorySnapshot());
     publishActiveBlock(idEpoch);
+    // A new prompt ends whatever was running: its working and blocked program-status records go
+    // (program-status rev 0.4, "Lifetime"); idle, done and error stay.
+    announceProgramStatus(_programStatus.promptStarted());
 }
 
 void Terminal::beginCommand(std::optional<std::string> commandLine, CommandLineSource source)
@@ -6605,8 +6651,11 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
                       core::escape(url));
         return;
     }
+    auto const changed = *parsed != _currentWorkingDirectory;
     _currentWorkingDirectory = *std::move(parsed);
     recordForeignDirectory();
+    if (changed)
+        _eventListener.workingDirectoryChanged();
     _extensionEvents.post(
         [&] { return StatusLineEvents::CwdChanged { .cwd = _currentWorkingDirectory.path }; });
 }
@@ -7292,6 +7341,9 @@ void Terminal::hardReset()
     // The register is cleared whole, not through setMode(), so the state a mode keeps outside it
     // goes here: mode 2034's reader session ends with the mode, and its token with it.
     _semanticBlockTracker.disable();
+
+    // RIS removes every program-status record (program-status rev 0.4); DECSTR, softReset(), does not.
+    announceProgramStatus(_programStatus.reset());
 
     // SRM, set: the terminal does *not* echo what it sends -- the host does. The mode register was just
     // cleared to all zeroes, and a *reset* SRM means local echo is on, so leaving it here would echo every

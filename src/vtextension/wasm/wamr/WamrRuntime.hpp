@@ -90,8 +90,10 @@ class WamrRuntime final: public IWasmRuntime, public std::enable_shared_from_thi
     std::span<ExportDescription const> exports,
     IHostContext& context);
 
-/// The most i32 parameters a host function can take: a trampoline exists for each count up to it.
-inline constexpr auto MaxHostParameters = uint32_t { 5 };
+/// The most i32 parameters a host function can take: a trampoline exists for each count up to it. The
+/// Canonical ABI passes at most 16 flat parameters (more go through memory), and a func with a result
+/// that does not flatten to one value takes the result's address after them: 17.
+inline constexpr auto MaxHostParameters = uint32_t { 17 };
 
 /// The most host functions one runtime can be created with.
 inline constexpr auto MaxHostFunctions = std::size_t { 32 };

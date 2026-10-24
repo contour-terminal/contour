@@ -80,6 +80,13 @@ CommandBlockRecord const* SemanticBlockTracker::inProgressBlock(CommandBlockStor
     return (isEnabled() && current && isVisible(store, *current)) ? current : nullptr;
 }
 
+CommandBlockRecord const* SemanticBlockTracker::blockById(CommandBlockStore const& store,
+                                                          CommandBlockId id) const noexcept
+{
+    auto const* const record = isEnabled() ? store.find(id) : nullptr;
+    return record && isVisible(store, *record) ? record : nullptr;
+}
+
 bool SemanticBlockTracker::isVisible(CommandBlockStore const& store,
                                      CommandBlockRecord const& record) const noexcept
 {

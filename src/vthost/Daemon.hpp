@@ -9,9 +9,9 @@
 
 #include <vtpty/Process.hpp>
 
-#include <core/async/Task.hpp>
-#include <core/net/ISocket.hpp>
+#include <core/platform/Clock.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -26,18 +26,19 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/AccessFile.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 // Supplies DaemonConfig::settings' default, plus DefaultSessionHistoryLineCount and
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
 // needs them too and sits BELOW this header — a lower layer must not reach up for them.
 #include <vthost/ClientSizePolicy.hpp>
+#include <vthost/ConfigReload.hpp>
+#include <vthost/DaemonLifecycle.hpp>
 #include <vthost/ExtensionHosting.hpp>
+#include <vthost/ProfileCatalog.hpp>
 #include <vthost/SessionSettings.hpp>
-
-namespace core::net
-{
-class EventLoop;
-}
+#include <vthost/ShutdownSignals.hpp>
+#include <vthost/WorkspacePersistenceConfig.hpp>
 
 namespace vthost
 {
@@ -51,7 +52,10 @@ struct NativeTcpListenerConfig
 {
     std::string host = "127.0.0.1"; ///< Bind address; loopback by default.
     std::uint16_t port = 0;         ///< TCP port (0 = OS-assigned ephemeral).
-    std::string token;              ///< Preshared token required of every client.
+    std::string token;              ///< Preshared token required of every client; empty for none.
+    /// Further preshared tokens, from `--access-file`, each with the control API grants it carries; a
+    /// client presents @ref token or one of these. @see acceptedTokensOf
+    std::vector<AcceptedToken> accessTokens {};
     /// PEM certificate + private key files for TLS. When both are empty the
     /// daemon generates an ephemeral self-signed certificate (the TOFU default);
     /// the TCP transport is ALWAYS encrypted.
@@ -59,20 +63,19 @@ struct NativeTcpListenerConfig
     std::string tlsKeyPath;
 };
 
-/// Whether a daemon outlives its last hosted session.
-enum class DaemonLifecycle : std::uint8_t
-{
-    /// Keeps serving with zero sessions — a user-started `contour daemon`, whose whole point is
-    /// to still be there when the next client attaches.
-    Persistent,
-    /// Terminates once the last hosted session is gone — an auto-spawned daemon, which belongs
-    /// to the client that started it (tmux spells this `exit-empty`).
-    ExitWhenEmpty,
-};
+/// @param listener The TCP listener's configuration.
+/// @return The tokens it accepts: its single token first, granting everything, when there is one, then the
+///         access file's in file order. A token in both would grant everything, as the first match wins,
+///         which is why parseAccessFile() refuses a line repeating the single token.
+[[nodiscard]] std::vector<AcceptedToken> acceptedTokensOf(NativeTcpListenerConfig const& listener);
 
 /// Everything `contour daemon` needs to serve.
 struct DaemonConfig
 {
+    /// Which run of the daemon this is, as every ServerHello states it (proto::ServerHello::daemonInstance).
+    /// Supplied by the composition root -- drawDaemonInstance() once per daemon process -- rather than drawn
+    /// here, so a test states a fixed one; 0 states none. A configuration reload keeps it: the run goes on.
+    uint64_t instance = 0;
     /// When set, ALSO serves the native protocol over TCP (opt-in; see the struct).
     std::optional<NativeTcpListenerConfig> nativeTcp;
     /// The control-socket file (see muxSocketPath for derivation).
@@ -81,8 +84,15 @@ struct DaemonConfig
     /// bare so a daemon is correct standalone; `contour daemon` overwrites it from the
     /// resolved profile, which `src/vthost` cannot reach on its own.
     vtbackend::Settings settings = defaultSessionSettings();
-    /// The shell each new session runs.
+    /// The shell each new session runs, unless it runs under one of @ref profiles.
     vtpty::Process::ExecInfo shell;
+    /// The host's profiles, by name: what a session a client names a profile for runs (settings and
+    /// shell). Null for none — the bare `DaemonConfig{}` of a test — which keeps @ref settings and
+    /// @ref shell for every session and offers no Capability::ProfileByName.
+    std::shared_ptr<ProfileCatalog const> profiles {};
+    /// Reloads @ref profiles while the daemon runs: polled on its loop, every catalog it yields replaces the
+    /// host's (@see SessionHost::replaceProfiles). Unset for none, as a test's bare `DaemonConfig{}` has.
+    std::optional<ConfigReloadHook> configReload {};
     /// Whether a spawned shell escapes its sandbox (Flatpak). `true` by default, matching a local
     /// session's profile default (`escape_sandbox: true`); `contour daemon` overwrites it from the
     /// resolved profile, same as `settings` and `shell` above.
@@ -101,10 +111,10 @@ struct DaemonConfig
     /// `/tmp/tmux-<uid>/<label>` for the imsg endpoint, so a plain
     /// `tmux -L <label> -C attach-session` finds this daemon. Opt-in only.
     std::optional<std::string> tmuxCompatLabel;
-    /// Whether this daemon outlives its last session. `Persistent` by default, so a user-started
-    /// `contour daemon` keeps serving with none — that persistence is the whole point of starting
-    /// one by hand. `ensureDaemon` starts the daemons IT spawns with `ExitWhenEmpty`, which is
-    /// what `--exit-with-last-session` selects.
+    /// Whether, and when, this daemon ends on its own. `Persistent` by default, so a user-started
+    /// `contour daemon` keeps serving with no session — that persistence is the whole point of starting
+    /// one by hand. `ensureDaemon` starts the daemons IT spawns with `ExitWhenIdle`; `--lifecycle`
+    /// selects any of them, and `--exit-with-last-session` is the alias for `ExitWhenEmpty`.
     DaemonLifecycle lifecycle = DaemonLifecycle::Persistent;
     /// How the authoritative client area is resolved when several attached clients report
     /// different ones. `Latest` by default, matching tmux's `window-size` — the window you just
@@ -115,10 +125,44 @@ struct DaemonConfig
     /// daemon's event loop: runDaemon() makes them once that exists, and its session host destroys them
     /// before it goes. `contour daemon` sets it from the profile, which `src/vthost` cannot reach.
     std::function<std::shared_ptr<IExtensionHosting>()> extensions {};
+    /// The release this daemon states in every ServerHello and status reply; empty when unknown.
+    std::string releaseVersion {};
+    /// The image this daemon runs from, as its status reply states it.
+    std::filesystem::path executablePath {};
+    /// The file this daemon logs to, as its status reply states it; empty for stderr.
+    std::filesystem::path logFile {};
+    /// How long an ExitWhenIdle daemon waits with no session and no client before it ends.
+    std::chrono::seconds idleExitGrace = DefaultIdleExitGrace;
+    /// Called once, on the loop thread, with what asked for the shutdown, before any listener closes and
+    /// while every session is still alive. Unset for nothing; the seam a later phase hands sessions over
+    /// through.
+    std::function<void(ShutdownCause)> beforeShutdown {};
+    /// Where the daemon hears that its process is asked to end. The process's own signals by default, so
+    /// a daemon is correct standalone; a test running the daemon in-process sets NoShutdownSignals, whose
+    /// watch neither takes the test process's signals nor sends one into it.
+    /// Never null.
+    std::shared_ptr<ShutdownSignals> shutdownSignals = processShutdownSignals();
+    /// How the daemon keeps its workspace across a restart: restored at start from the snapshot file,
+    /// written while it serves and as it ends (workspaceFor). An empty `snapshotPath` (the default, a test's
+    /// bare `DaemonConfig{}`) keeps nothing and offers no Capability::WorkspaceRestore; `contour daemon`
+    /// sets it from `daemon.restore`.
+    WorkspacePersistenceConfig persistence {};
 };
 
-/// Runs the daemon: binds the hardened control socket, serves connections until
-/// SIGINT/SIGTERM, then shuts down cleanly. Blocks the calling thread.
+/// Creates the directory @p socketPath lives in owner-only, or checks that it is safe, as the
+/// daemon's listener does when it binds there.
+///
+/// What runs before anything else could create that directory with looser permissions: the default
+/// log file (daemonLogPath()) lies in it, and a log sink creates its parent with the umask's mode,
+/// 0755 under the usual 022, which the listener then refuses as world-accessible. POSIX only; a no-op
+/// on Windows, and for a socket named in the current directory, whose directory is not ours to change.
+/// @param socketPath The daemon's control socket.
+/// @return Nothing, or why the directory is unusable.
+[[nodiscard]] std::expected<void, std::string> prepareSocketDirectory(
+    std::filesystem::path const& socketPath);
+
+/// Runs the daemon: binds the hardened control socket, serves connections until a shutdown is asked
+/// for (see ShutdownCause), then shuts down cleanly. Blocks the calling thread.
 /// @param config The daemon configuration.
 /// @return The process exit code (EXIT_SUCCESS on clean shutdown).
 [[nodiscard]] int runDaemon(DaemonConfig const& config);
@@ -168,25 +212,15 @@ struct TcpEndpoint
 /// Where `contour client` reaches the daemon: the local unix socket or TCP+TLS.
 using AttachEndpoint = std::variant<UnixEndpoint, TcpEndpoint>;
 
+/// Draws which run of the daemon a new daemon process is (DaemonConfig::instance): at random, never 0. For
+/// the composition root that starts a daemon, once per process.
+/// @return The instance.
+[[nodiscard]] uint64_t drawDaemonInstance();
+
 /// Splits a `HOST:PORT` (or `[v6]:PORT`) string into its parts.
 /// @param spec The endpoint string; the port must be a decimal in [1, 65535].
 /// @return The host and port, or nullopt if @p spec is malformed.
 [[nodiscard]] std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec);
-
-/// The preshared token an endpoint carries (empty for the unix socket, whose
-/// filesystem permissions are the gate; the ClientHello sends it verbatim).
-[[nodiscard]] std::string endpointToken(AttachEndpoint const& endpoint);
-
-/// Connects to the daemon per @p endpoint: the local unix control socket (its
-/// native socket resolved beside it), or a TLS-encrypted TCP connection whose
-/// peer trust follows the endpoint's @c caPem (empty ⇒ TOFU). This establishes —
-/// and for TCP encrypts — the transport; the caller's NativeClient sends the
-/// token. Shared by the GUI NativeController.
-/// @param loop The event loop whose reactor drives the connect (not owned).
-/// @param endpoint The daemon endpoint.
-/// @return The ready transport, or a human-readable error string.
-[[nodiscard]] core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string>>
-connectAttach(core::net::EventLoop* loop, AttachEndpoint endpoint);
 
 /// What an auto-spawned daemon inherits from the client that spawned it.
 ///
@@ -215,6 +249,10 @@ struct DaemonSpawnOptions
     ClientSizePolicy sizePolicy = ClientSizePolicy::Latest;
 };
 
+/// The option daemonSpawnArgs spells the daemon's socket with, its value following directly. Shared with
+/// registeredSocketPath(), which reads it back.
+inline constexpr std::string_view SocketOption = "--socket=";
+
 /// The argv an auto-spawned daemon is started with.
 ///
 /// ONE spelling of the flag list: POSIX `execv` wants an argv array and Win32 `CreateProcess` a
@@ -223,12 +261,27 @@ struct DaemonSpawnOptions
 /// @param daemonBinary argv[0] — the contour binary to exec.
 /// @param socketPath The control socket the spawned daemon binds.
 /// @param spawnOptions What to forward to the spawned daemon; empty entries are omitted.
-/// @param lifecycle Whether the spawned daemon ends with its last session.
-/// @return The argv, argv[0] first.
+/// @param lifecycle When the spawned daemon ends on its own; spelled `--lifecycle=<name>`.
+/// @return The argv, argv[0] first. It always carries `--log-file`: the given one, else
+///         daemonLogPath(@p socketPath), so a spawned daemon's diagnostics are never lost.
 [[nodiscard]] std::vector<std::string> daemonSpawnArgs(std::string_view daemonBinary,
                                                        std::filesystem::path const& socketPath,
                                                        DaemonSpawnOptions const& spawnOptions,
                                                        DaemonLifecycle lifecycle);
+
+/// Reads the socket a registered daemon serves on back out of the command line its service backend
+/// reports for the registration (ServiceStatus::commandLine), which daemonSpawnArgs spelled.
+///
+/// That text is one string, joined by the backend: each argument double-quoted (systemd, and the Task
+/// Scheduler for an argument with a blank in it) or bare (launchd). A bare value ends at the next blank
+/// and is taken as it stands. A quoted value ends at the first unescaped quote, with the escapes
+/// systemdQuote() writes undone: `\\` and `\"`, and `%%` and `$$`; any other backslash is itself. That
+/// also reads the Task Scheduler's quoting, which doubles a backslash only before the closing quote,
+/// for every path but one holding a doubled backslash, `%` or `$` (a UNC `\\server` prefix, say).
+/// @param commandLine The registration's command line.
+/// @return The path after SocketOption; nullopt when the registration names none, and the daemon then
+///         serves on its label's default socket.
+[[nodiscard]] std::optional<std::filesystem::path> registeredSocketPath(std::string_view commandLine);
 
 /// Joins @p args into the Win32 command line that runs them, args[0] the program: by
 /// vtpty::buildWindowsCommandLine(), as a spawned shell's command line is spelled.
@@ -236,18 +289,81 @@ struct DaemonSpawnOptions
 /// @return The command line; empty for no @p args.
 [[nodiscard]] std::string joinCommandLine(std::span<std::string const> args);
 
+class DaemonBinarySource;
+
+/// Whether a daemon accepts connections.
+enum class DaemonPresence : uint8_t
+{
+    Absent = 0,
+    Serving,
+};
+
+class DaemonSpawner;
+
+/// The sleep before the next readiness probe: a spawned daemon usually binds within a few
+/// milliseconds, so the poll starts short and backs off by doubling.
+/// @param previous The sleep just taken, or nullopt before the first one.
+/// @return 5 ms for nullopt, otherwise twice @p previous, capped at one second.
+[[nodiscard]] constexpr core::platform::SteadyDuration nextProbeDelay(
+    std::optional<core::platform::SteadyDuration> previous) noexcept
+{
+    constexpr auto First = std::chrono::milliseconds { 5 };
+    constexpr auto Cap = std::chrono::seconds { 1 };
+    if (!previous)
+        return First;
+    return std::min<core::platform::SteadyDuration>(*previous * 2, Cap);
+}
+
+/// Waits for a daemon to accept connections.
+/// @param spawner Asks whether a daemon serves.
+/// @param socketPath The control socket the daemon binds.
+/// @param timeout How long to wait before giving up.
+/// @return Serving once it accepts; Absent when @p timeout elapsed first.
+[[nodiscard]] DaemonPresence awaitDaemon(DaemonSpawner& spawner,
+                                         std::filesystem::path const& socketPath,
+                                         std::chrono::milliseconds timeout);
+
+/// Starts a daemon process, and asks whether one serves: the two operating-system effects of
+/// ensureDaemon(), behind an interface so the window between them is testable.
+class DaemonSpawner
+{
+  public:
+    virtual ~DaemonSpawner() = default;
+
+    /// Starts @p argv detached from this process, so this process may exit without taking the daemon
+    /// with it.
+    /// @param argv The full argv; argv[0] is the binary to execute, looked up on PATH if bare.
+    /// @param placement Places the daemon before it runs, as a session's shell is placed. POSIX only.
+    /// @return Nothing once started, or why it could not be.
+    [[nodiscard]] virtual std::expected<void, std::string> spawn(std::span<std::string const> argv,
+                                                                 vtpty::ProcessPlacement& placement) = 0;
+
+    /// @param socketPath A daemon's control socket; the native endpoint beside it is what is asked.
+    /// @return Whether a daemon accepts connections there.
+    [[nodiscard]] virtual DaemonPresence probe(std::filesystem::path const& socketPath) = 0;
+};
+
+/// @return The operating system's spawner: a detached process, and a connect to its native socket.
+[[nodiscard]] std::unique_ptr<DaemonSpawner> makeNativeDaemonSpawner();
+
 /// Ensures a daemon is running at @p endpoint. For Unix sockets, spawns
 /// `contour daemon` in the background if the socket isn't already accepting
 /// connections, then blocks until the daemon is ready or @p timeout elapses.
 /// For TCP endpoints this is a no-op (remote daemons can't be auto-spawned).
 ///
-/// A daemon spawned here is started `--exit-with-last-session` and therefore ends with its last
-/// session: it belongs to the client that needed it, and "make sure one exists" does not mean
-/// "leave one behind". Note this is a property of the DAEMON, not of the spawning client — a
-/// second client attaching inherits it, and the daemon ends when every session across every
-/// client is gone. An already-running daemon keeps whatever policy it was started with.
+/// The binary is asked for only once the probe found no daemon, since staging it can mean a copy of the
+/// whole install. The image it hands out stays leased until the spawned daemon serves, or the spawn has
+/// failed: by then the daemon holds its own lease, taken before it binds, so no prune of another
+/// launcher can remove the image in between.
+///
+/// A daemon spawned here is started `--lifecycle=exit-when-idle` and therefore ends DefaultIdleExitGrace
+/// after it has no session and no client: it belongs to the clients that needed it, and "make sure one
+/// exists" does not mean "leave one behind". Note this is a property of the DAEMON, not of the spawning
+/// client — a second client attaching inherits it. An already-running daemon keeps whatever policy it
+/// was started with.
 /// @param endpoint Where to reach the daemon.
-/// @param daemonBinary Path to the `contour` binary (argv[0] of the client).
+/// @param binary What to start the daemon from: the `contour` binary, or a staged copy of it.
+/// @param spawner What starts the daemon and asks whether it serves.
 /// @param placement Places a spawned daemon before it runs, as a session's shell is placed: the
 ///        daemon holds every hosted session's scrollback, and must live in neither the client's own
 ///        resource domain nor the tab's it was started from. POSIX only.
@@ -255,7 +371,21 @@ struct DaemonSpawnOptions
 /// @param timeout How long to wait for a spawned daemon to accept connections.
 /// @return EXIT_SUCCESS if a daemon is confirmed running, EXIT_FAILURE otherwise.
 [[nodiscard]] int ensureDaemon(AttachEndpoint const& endpoint,
-                               std::string_view daemonBinary,
+                               DaemonBinarySource& binary,
+                               DaemonSpawner& spawner,
+                               vtpty::ProcessPlacement& placement,
+                               DaemonSpawnOptions const& spawnOptions,
+                               std::chrono::seconds timeout);
+
+/// ensureDaemon() through the operating system's spawner (makeNativeDaemonSpawner()).
+/// @param endpoint Where to reach the daemon.
+/// @param binary What to start the daemon from.
+/// @param placement Places a spawned daemon before it runs. POSIX only.
+/// @param spawnOptions Options forwarded to a spawned daemon's command line.
+/// @param timeout How long to wait for a spawned daemon to accept connections.
+/// @return EXIT_SUCCESS if a daemon is confirmed running, EXIT_FAILURE otherwise.
+[[nodiscard]] int ensureDaemon(AttachEndpoint const& endpoint,
+                               DaemonBinarySource& binary,
                                vtpty::ProcessPlacement& placement,
                                DaemonSpawnOptions const& spawnOptions = {},
                                std::chrono::seconds timeout = std::chrono::seconds(5));

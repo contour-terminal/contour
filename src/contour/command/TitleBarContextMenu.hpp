@@ -29,6 +29,7 @@ struct TitleBarContextMenuState
 
     std::string activeProfile;             ///< The profile the active session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.
+    std::vector<std::string> hostNames {}; ///< Saved hosts (`hosts:`), sorted.
 };
 
 /// The title bar's context menu for @p state.

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/window/RemoteChrome.hpp>
+
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QString>
 
@@ -16,9 +18,23 @@ namespace contour::test
 class MainWindowControllerMock: public QAbstractListModel
 {
     Q_OBJECT
+    // Mirrors WindowController's remote chrome, which Main.qml's title and the tab strip's badge read.
+    Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
 
   public:
     using QAbstractListModel::QAbstractListModel;
+
+    /// Mirrors WindowController::hostLabel(): the attached host, set by a test before Main.qml loads.
+    [[nodiscard]] QString const& hostLabel() const noexcept { return attachedHost; }
+
+    /// Mirrors WindowController::windowTitle(), through the same remoteWindowTitle().
+    Q_INVOKABLE [[nodiscard]] QString windowTitle(QString const& sessionTitle) const
+    {
+        return QString::fromStdString(
+            contour::window::remoteWindowTitle(attachedHost.toStdString(), sessionTitle.toStdString()));
+    }
+
+    QString attachedHost; ///< The host hostLabel() reports; empty for a local window.
 
     /// Mirrors WindowController::trayMessageClicked(), counting the calls.
     Q_INVOKABLE void trayMessageClicked() { ++trayClickCount; }

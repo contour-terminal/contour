@@ -69,6 +69,9 @@ struct SessionExtensionCallbacks
     /// Other extensions are running now: the terminal must be told
     /// (vtbackend::Terminal::statusLineExtensionsReplaced()). Called on the owner's thread, holding no lock.
     std::function<void()> onReplaced;
+
+    /// Serves a control verb an extension of the pane calls, as the pane. @see RunnerServices::callControl
+    decltype(RunnerServices::callControl) callControl {};
 };
 
 /// Where work finished on another thread is handed back to the thread that owns a pane.

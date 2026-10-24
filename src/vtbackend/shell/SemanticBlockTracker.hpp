@@ -52,6 +52,8 @@ struct SBQueryType
     static constexpr unsigned LastCommand = 1;          ///< Last completed command block.
     static constexpr unsigned LastNumberOfCommands = 2; ///< Last N completed command blocks (Pn = count).
     static constexpr unsigned InProgress = 3;           ///< Current in-progress command.
+    /// The block whose id is `Ph * 65536 + Pn`, in any state (@see sbQueryBlockId).
+    static constexpr unsigned BlockById = 4;
 };
 
 /// The reader side of DEC mode 2034 (Semantic Block Reader Protocol): the session token, and which of the
@@ -99,6 +101,12 @@ class SemanticBlockTracker
     /// @param store The terminal's blocks.
     /// @return The block in progress (prompting or running), if this reader may see it, else nullptr.
     [[nodiscard]] CommandBlockRecord const* inProgressBlock(CommandBlockStore const& store) const noexcept;
+
+    /// @param store The terminal's blocks.
+    /// @param id A block's id, in the store's current id epoch.
+    /// @return The block @p id names, in any state, if this reader may see it, else nullptr.
+    [[nodiscard]] CommandBlockRecord const* blockById(CommandBlockStore const& store,
+                                                      CommandBlockId id) const noexcept;
 
   private:
     /// Whether @p record's command had not started when this reader session did.

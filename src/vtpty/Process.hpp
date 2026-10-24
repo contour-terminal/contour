@@ -79,6 +79,8 @@ class [[nodiscard]] Process: public Pty
     /// an engaged override with an empty program (a directory-only layout pane) must not wipe the
     /// shell's configured default arguments. The working directory is overlaid independently of the
     /// program, so a directory-only pane can still redirect the shell's cwd.
+    ///
+    /// The override's environment entries are laid over the shell's, an entry of the same name winning.
     /// @param shell            The shell config to overlay onto; modified in place.
     /// @param commandOverride  A session's command override, if any; no-op when nullopt.
     static void applyCommandOverride(ExecInfo& shell, std::optional<ExecInfo> const& commandOverride)
@@ -92,6 +94,8 @@ class [[nodiscard]] Process: public Pty
         }
         if (!commandOverride->workingDirectory.empty())
             shell.workingDirectory = commandOverride->workingDirectory;
+        for (auto const& [name, value]: commandOverride->env)
+            shell.env.insert_or_assign(name, value);
     }
 
     /// @param placement Moves each spawned child into its own resource domain before it runs; never

@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/ServiceControl.hpp>
 
+#include <core/platform/UserPaths.hpp>
+
 #include <algorithm>
 #include <format>
+#include <tuple>
 #include <utility>
+
+#include <vthost/ServiceControl_launchd.hpp>
+#include <vthost/ServiceControl_systemd.hpp>
+#include <vthost/SocketPath.hpp>
+
+#ifdef __APPLE__
+    #include <unistd.h>
+#endif
 
 namespace vthost
 {
@@ -18,6 +29,9 @@ namespace
     class UnsupportedBackend final: public ServiceBackend
     {
       public:
+        /// @param context What to tell the user: why this backend refuses, and what to do instead.
+        explicit UnsupportedBackend(std::string context): _context { std::move(context) } {}
+
         [[nodiscard]] std::expected<void, ServiceError> install(ServiceInstallRequest const&) override
         {
             return refuse();
@@ -29,15 +43,21 @@ namespace
         {
             return std::unexpected(error());
         }
+        [[nodiscard]] DaemonLaunchStyle launchStyle() const noexcept override
+        {
+            return DaemonLaunchStyle::Foreground;
+        }
 
       private:
-        [[nodiscard]] static ServiceError error()
+        [[nodiscard]] ServiceError error() const
         {
             return ServiceError { .code = ServiceErrorCode::Unsupported,
                                   .systemCode = 0,
-                                  .context = "no service backend on this platform" };
+                                  .context = _context };
         }
-        [[nodiscard]] static std::expected<void, ServiceError> refuse() { return std::unexpected(error()); }
+        [[nodiscard]] std::expected<void, ServiceError> refuse() const { return std::unexpected(error()); }
+
+        std::string _context;
     };
 
     [[nodiscard]] std::string_view describe(ServiceErrorCode code) noexcept
@@ -84,16 +104,68 @@ std::optional<ServiceStartMode> serviceStartModeFrom(std::string_view text)
 
 std::string serviceNameForLabel(std::string_view label)
 {
+    if (label == DefaultSocketLabel)
+        return "contour-daemon";
     return std::format("contour-daemon-{}", label);
 }
 
-#ifndef _WIN32
-std::unique_ptr<ServiceBackend> makeServiceBackend(ServiceStartMode /*mode*/, std::string_view /*name*/)
+std::vector<std::string> registrationNamesForLabel(std::string_view label)
 {
-    // POSIX equivalents exist (a systemd USER unit is the close analogue of the logon task,
-    // and launchd's LaunchAgents the macOS one), but neither is implemented yet. The seam is
-    // here; what is missing is a backend, not a design.
-    return std::make_unique<UnsupportedBackend>();
+    auto names = std::vector { serviceNameForLabel(label) };
+    // Before phase 2 the default label was registered as `contour-daemon-default`.
+    if (auto legacy = std::format("contour-daemon-{}", label); legacy != names.front())
+        names.push_back(std::move(legacy));
+    return names;
+}
+
+std::expected<CommandOutcome, ServiceError> runServiceCommand(CommandRunner& commands,
+                                                              std::vector<std::string> const& argv,
+                                                              std::string_view context)
+{
+    auto outcome = commands.run(argv);
+    if (!outcome)
+        return std::unexpected(ServiceError { .code = ServiceErrorCode::Backend,
+                                              .systemCode = outcome.error().value(),
+                                              .context = std::format("{} not found", argv.front()) });
+    if (outcome->exitCode != 0)
+        return std::unexpected(ServiceError { .code = ServiceErrorCode::Backend,
+                                              .systemCode = outcome->exitCode,
+                                              .context = std::string { context } });
+    return *std::move(outcome);
+}
+
+#ifndef _WIN32
+std::unique_ptr<ServiceBackend> makeServiceBackend(ServiceStartMode mode,
+                                                   std::string_view name,
+                                                   ServiceBackendServices const& services)
+{
+    if (mode != ServiceStartMode::Logon)
+        return std::make_unique<UnsupportedBackend>(
+            "--start=boot and --start=manual are Windows-only; use --start=logon");
+
+    #ifdef __APPLE__
+    auto const home = core::platform::homeDirectory(services.environment);
+    if (!home)
+        return std::make_unique<UnsupportedBackend>("cannot locate the home directory (HOME is not set)");
+    auto label = launchdLabelFor(name);
+    auto plistPath = launchAgentPath(*home, label);
+    return std::make_unique<LaunchdBackend>(LaunchdAgentConfig { .label = std::move(label),
+                                                                 .plistPath = std::move(plistPath),
+                                                                 .domain = launchdGuiDomain(::getuid()) },
+                                            services);
+    #elifdef __linux__
+    auto const directory = systemdUserUnitDirectory(services.environment);
+    if (directory.empty())
+        return std::make_unique<UnsupportedBackend>("cannot locate the home directory (HOME is not set)");
+    auto unitName = std::format("{}.service", name);
+    auto unitPath = directory / unitName;
+    return std::make_unique<SystemdUserBackend>(
+        SystemdUnitConfig { .unitName = std::move(unitName), .unitPath = std::move(unitPath) }, services);
+    #else
+    std::ignore = name;
+    std::ignore = services;
+    return std::make_unique<UnsupportedBackend>("no service backend on this platform");
+    #endif
 }
 #endif
 

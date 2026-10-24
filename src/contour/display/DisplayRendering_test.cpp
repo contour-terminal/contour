@@ -18,6 +18,7 @@
 // the teardown-lifetimes section there.
 
 #include <contour/config/Actions.hpp>
+#include <contour/display/LatencyProbeDriver.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
@@ -68,6 +69,8 @@
 #include <unordered_map>
 
 #include <QtTest/QTest>
+#include <vthost/latency/EchoProtocol.hpp>
+#include <vthost/latency/KeystrokeProbe.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -2569,3 +2572,68 @@ TEST_CASE("display: a redraw whose queued call was dropped does not block the ne
     h.display->removeEventFilter(&counter);
 }
 // }}}
+
+TEST_CASE("the probe driver measures echo through a real frame", "[contour][display]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    namespace latency = vthost::latency;
+    DisplayHarness h;
+
+    // The application the display's keys reach: the echo child, answering through the pty.
+    auto written = std::string {};
+    auto writtenLock = std::mutex {};
+    auto echo = latency::EchoState {};
+    h.pty->setWriteSink([&](std::string_view data) {
+        for (auto const byte: data)
+            if (auto const reply = latency::echoReply(echo, byte); !reply.bytes.empty())
+                h.pty->feed(reply.bytes);
+        auto const lock = std::scoped_lock { writtenLock };
+        written += data;
+    });
+    h.pty->feed(latency::PromptText);
+
+    auto const plan = latency::ProbePlan { .warmupKeys = 0, .measuredKeys = 3, .minGap = 1ms, .maxGap = 1ms };
+    auto probe = latency::KeystrokeProbe(core::platform::defaultSteadyClock(), plan);
+    auto finished = false;
+    auto const driver =
+        contour::display::LatencyProbeDriver(*h.window, *h.display, probe, [&] { finished = true; });
+
+    REQUIRE(QTest::qWaitFor([&] { return finished; }, 5000));
+
+    auto const result = probe.result();
+    CHECK(result.phase == latency::ProbePhase::Finished);
+    CHECK(result.firstPrompt.has_value());
+    REQUIRE(result.keystrokes.size() == 3);
+    for (auto const keystroke: result.keystrokes)
+        CHECK(keystroke > core::platform::SteadyDuration::zero());
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            auto const lock = std::scoped_lock { writtenLock };
+            return written == std::string { "abc" } + latency::QuitByte;
+        },
+        2000));
+}
+
+TEST_CASE("the probe driver outlives its display", "[contour][display]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    namespace latency = vthost::latency;
+    DisplayHarness h;
+
+    // No prompt is fed, so the probe waits for it until its timeout, while the window keeps swapping frames
+    // with the display already gone: the driver's frame handler must not reach for it.
+    auto const plan = latency::ProbePlan { .warmupKeys = 0, .measuredKeys = 1, .promptTimeout = 200ms };
+    auto probe = latency::KeystrokeProbe(core::platform::defaultSteadyClock(), plan);
+    auto finished = false;
+    auto const driver =
+        contour::display::LatencyProbeDriver(*h.window, *h.display, probe, [&] { finished = true; });
+    h.display.reset();
+
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            h.pump();
+            return finished;
+        },
+        5000));
+    CHECK(probe.result().phase == latency::ProbePhase::PromptTimedOut);
+}

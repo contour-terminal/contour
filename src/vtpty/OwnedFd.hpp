@@ -38,6 +38,10 @@ class OwnedFd
     /// @return Whether a descriptor is owned.
     [[nodiscard]] bool isOpen() const noexcept { return _fd >= 0; }
 
+    /// Gives up ownership without closing.
+    /// @return The descriptor, or -1 when none was owned.
+    [[nodiscard]] int release() noexcept { return std::exchange(_fd, -1); }
+
     /// Closes the owned descriptor, if any.
     void reset() noexcept;
 

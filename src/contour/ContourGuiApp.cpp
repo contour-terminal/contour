@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/Logging.hpp>
+#include <contour/cli/Hosting.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/FirstFrameWatchdog.hpp>
 #include <contour/display/GpuInventory.hpp>
+#include <contour/display/LatencyProbeDriver.hpp>
 #ifdef CONTOUR_WITH_GPU_SELECTION
     #include <contour/display/GraphicsDeviceSelector.hpp>
 #endif
@@ -29,10 +31,12 @@
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/WindowController.hpp>
+#include <contour/window/WindowLiveness.hpp>
 
 #include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
 #ifdef CONTOUR_EXTENSIONS
@@ -53,6 +57,7 @@
 #include <core/cli/CLI.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/log/LogStore.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/PathUtils.hpp>
 
@@ -65,9 +70,18 @@
 #include <QtNetwork/QHostInfo>
 #include <QtQml/qqmlextensionplugin.h>
 
+#include <vthost/CommandRunner.hpp>
 #include <vthost/Daemon.hpp>
+#include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonStarter.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/StdioChild.hpp>
 #include <vthost/Token.hpp>
+#include <vthost/Transport.hpp>
+#include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/client/DaemonRestart.hpp>
+#include <vthost/client/ReleaseDrift.hpp>
+#include <vthost/latency/Report.hpp>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
@@ -87,9 +101,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <ranges>
@@ -254,6 +270,96 @@ namespace
         return vtbackend::readHostIdentity(core::platform::NativeFileSystem::instance(),
                                            QHostInfo::localHostName().toStdString());
     }
+
+    /// Ends the app when no window is left to show anything: quit-on-last-window-closed was suspended
+    /// for a daemon restart, and a failed restart must not leave a windowless process behind.
+    void quitIfWindowless()
+    {
+        auto facts = std::vector<window::WindowFacts> {};
+        for (auto const* topLevel: QGuiApplication::topLevelWindows())
+            facts.push_back({ .visibility = topLevel->isVisible() ? window::WindowVisibility::Shown
+                                                                  : window::WindowVisibility::Hidden,
+                              .transience = topLevel->transientParent() != nullptr
+                                                ? window::WindowTransience::Transient
+                                                : window::WindowTransience::Independent });
+        if (!window::anyWindowKeepsAppAlive(facts))
+            QCoreApplication::quit();
+    }
+
+    /// What starting this client's local daemon needs: this release's binary, the spawner, and the
+    /// command runner the service backends reach the OS through. Shared by the first connect and by the
+    /// drift badge's restart, so the two start a daemon the same way.
+    struct LocalDaemonStart
+    {
+        std::unique_ptr<vthost::DaemonBinarySource> binary;
+        std::unique_ptr<vthost::DaemonSpawner> spawner;
+        std::unique_ptr<vthost::CommandRunner> commands;
+        vthost::ServiceBackendServices services;
+
+        /// @param env The process environment.
+        /// @param fileSystem The file system the binary source reads.
+        /// @param programPath The running executable as it was started.
+        LocalDaemonStart(core::Environment const& env,
+                         core::platform::FileSystem const& fileSystem,
+                         std::string const& programPath):
+            binary { vthost::makeOwnDaemonBinary(env, fileSystem, CONTOUR_VERSION_STRING, programPath) },
+            spawner { vthost::makeNativeDaemonSpawner() },
+            commands { vthost::makeNativeCommandRunner() },
+            services { .fileSystem = core::platform::NativeFileSystem::instance(),
+                       .commands = *commands,
+                       .environment = env }
+        {
+        }
+
+        /// @param label The socket label.
+        /// @param endpoint Where the daemon listens.
+        /// @param placement Places a daemon spawned on demand.
+        /// @param options What a spawned daemon is told.
+        /// @return A registered service when there is one, spawning on demand otherwise. Valid while
+        ///         this object lives.
+        [[nodiscard]] std::unique_ptr<vthost::DaemonStarter> starter(
+            std::string_view label,
+            vthost::UnixEndpoint const& endpoint,
+            vtpty::ProcessPlacement& placement,
+            vthost::DaemonSpawnOptions const& options) const
+        {
+            return vthost::chooseDaemonStarter(
+                vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)),
+                vthost::OnDemandSpawn { .endpoint = endpoint,
+                                        .spawner = *spawner,
+                                        .binary = *binary,
+                                        .placement = placement,
+                                        .options = options,
+                                        .timeout = std::chrono::seconds(5) });
+        }
+    };
+
+    /// The `--latency-probe` options, which `terminal` and `client` share.
+    [[nodiscard]] CLI::Option latencyProbeFileOption()
+    {
+        return CLI::Option { "latency-probe",
+                             CLI::Value { ""s },
+                             "Types keys at the first window and writes when their echo was drawn to FILE "
+                             "(see docs/internals/latency.md). For `bench-latency`.",
+                             "FILE" };
+    }
+
+    [[nodiscard]] CLI::Option latencyProbeVsyncOption()
+    {
+        // A CLI boundary flag, not an API bool.
+        return CLI::Option { "latency-probe-vsync",
+                             CLI::Value { false },
+                             "With --latency-probe: swap on the vertical blank like a normal run, instead of "
+                             "unpaced." };
+    }
+
+    [[nodiscard]] CLI::Option latencyProbeKeysOption()
+    {
+        return CLI::Option { "latency-probe-keys",
+                             CLI::Value { static_cast<int>(vthost::latency::ProbePlan {}.measuredKeys) },
+                             "With --latency-probe: how many keys are measured.",
+                             "N" };
+    }
 } // namespace
 
 VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachablePredicate isReachable)
@@ -297,8 +403,11 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::shared_ptr<vtpty::ProcessPlacement> processPlacement,
                              std::optional<vtbackend::LinkDetectionServices> linkServices,
                              std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress,
-                             std::unique_ptr<window::WindowPositionStore> windowPositionStore):
+                             std::unique_ptr<window::WindowPositionStore> windowPositionStore,
+                             core::platform::SteadyTimePoint processStart):
     ContourApp { env },
+    _startupTimeline { core::platform::defaultSteadyClock(), processStart },
+    _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeBackgroundExecutor(StatusLineCommandThreads)),
     _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
@@ -420,8 +529,19 @@ void ContourGuiApp::askHostedExtensions()
                          } };
     }
     for (auto& [pty, request]: _nativeController->takePermissionRequests())
-        if (auto* session = _sessionManager.sessionForPty(pty))
-            session->askForHostedExtension(vthost::client::consentRequestOf(request), *_daemonGrants);
+    {
+        auto* session = _sessionManager.sessionForPty(pty);
+        if (!session)
+            continue;
+        if (auto consent = vthost::client::consentRequestOf(request))
+            session->askForHostedExtension(std::move(*consent), *_daemonGrants);
+        else
+            // A newer daemon's permission this client cannot phrase: asking without it would have the
+            // user grant what they were not shown. Asked again on the next attach.
+            errorLog()("Extension {} asks for a control permission this version of Contour cannot show; "
+                       "not asking.",
+                       request.hostId);
+    }
 }
 #endif
 
@@ -459,6 +579,85 @@ void ContourGuiApp::watchFirstFrame(QQuickWindow& window, std::function<void(QQu
         });
 }
 
+std::optional<ContourGuiApp::LatencyProbeRequest> ContourGuiApp::readLatencyProbeRequest(
+    std::string const& verb) const
+{
+    auto const file = parameters().get<string>(verb + ".latency-probe");
+    if (file.empty())
+        return std::nullopt;
+    auto const keys = std::max(1, parameters().get<int>(verb + ".latency-probe-keys"));
+    return LatencyProbeRequest {
+        .reportFile = core::pathFromUtf8(file).value_or(fs::path {}),
+        .keys = static_cast<std::size_t>(keys),
+        .pacing = parameters().get<bool>(verb + ".latency-probe-vsync") ? display::SwapPacing::VSync
+                                                                        : display::SwapPacing::Unpaced,
+    };
+}
+
+void ContourGuiApp::armLatencyProbe()
+{
+    using namespace std::chrono_literals;
+    if (_latencyProbeDriver || !_latencyProbeRequest)
+        return;
+    // Built on the first attempt, so its prompt timeout runs from here: a first window that never shows a
+    // terminal display ends the run with PromptTimedOut instead of retrying until closed by hand.
+    if (!_keystrokeProbe)
+    {
+        auto plan = vthost::latency::ProbePlan {};
+        plan.measuredKeys = _latencyProbeRequest->keys;
+        _keystrokeProbe =
+            std::make_unique<vthost::latency::KeystrokeProbe>(core::platform::defaultSteadyClock(), plan);
+    }
+    // The first window shows its terminal display a little after the window itself exists.
+    auto const focused = _sessionManager.focusedWindow();
+    auto* const controller = focused ? _sessionManager.controllerFor(*focused) : nullptr;
+    auto* const terminalDisplay = controller ? controller->activeDisplay() : nullptr;
+    auto* const window = terminalDisplay ? terminalDisplay->window() : nullptr;
+    if (!window)
+    {
+        // Nothing is due while the prompt is awaited; asking settles the prompt timeout.
+        std::ignore = _keystrokeProbe->takeDueKey();
+        if (_keystrokeProbe->phase() == vthost::latency::ProbePhase::PromptTimedOut)
+            finishLatencyProbe();
+        else
+            QTimer::singleShot(5ms, this, [this] { armLatencyProbe(); });
+        return;
+    }
+
+    _latencyProbeDriver = std::make_unique<display::LatencyProbeDriver>(
+        *window, *terminalDisplay, *_keystrokeProbe, [this] { finishLatencyProbe(); });
+    // After the driver's own handler, so the probe has seen the frame when this asks it.
+    connect(
+        window,
+        &QQuickWindow::frameSwapped,
+        this,
+        [this] {
+            if (_keystrokeProbe->phase() != vthost::latency::ProbePhase::AwaitingPrompt)
+                _startupTimeline.mark(vthost::latency::StartupMark::FirstPromptSwapped);
+        },
+        Qt::DirectConnection);
+    // The prompt may have been drawn before the driver listened, and an idle terminal draws no more frames.
+    window->update();
+}
+
+void ContourGuiApp::finishLatencyProbe()
+{
+    auto const result = _keystrokeProbe->result();
+    auto const report = vthost::latency::formatProbeReport(result, _startupTimeline);
+    auto out = std::ofstream(_latencyProbeRequest->reportFile, std::ios::binary | std::ios::trunc);
+    out << report;
+    out.close();
+    auto exitCode = result.phase == vthost::latency::ProbePhase::Finished ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (!out)
+    {
+        cerr << std::format("contour: cannot write the latency probe report to {}\n",
+                            core::pathToUtf8(_latencyProbeRequest->reportFile));
+        exitCode = EXIT_FAILURE;
+    }
+    _latencyProbeExitCode = exitCode;
+    QCoreApplication::exit(exitCode);
+}
+
 void ContourGuiApp::logGpuInUse(QQuickWindow& window)
 {
     // The first window names the GPU its first frame was really drawn on, for every backend -- `auto`
@@ -471,7 +670,9 @@ void ContourGuiApp::logGpuInUse(QQuickWindow& window)
         &window,
         &QQuickWindow::frameSwapped,
         &window,
-        [&window, requested = _config.renderer.value().gpu] {
+        [this, &window, requested = _config.renderer.value().gpu] {
+            _startupTimeline.mark(vthost::latency::StartupMark::FirstFrameSwapped);
+            startupLog()("startup timeline:\n{}", _startupTimeline.describe());
             auto const* const rhi = window.rhi();
             if (!rhi)
                 return;
@@ -660,252 +861,491 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 #endif
 }
 
+std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(std::chrono::milliseconds budget,
+                                                                  std::string hostLabel)
+{
+    if (auto connected = _nativeController->awaitConnected(budget); !connected)
+    {
+        _nativeController.reset();
+        return std::unexpected(connected.error());
+    }
+    _attachedHostLabel = std::move(hostLabel);
+    _routingFactory->setDelegate(_nativeController.get());
+    // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
+    // can restart -- a local one, which is what _restartDaemon is set for -- is offered a restart.
+    if (_restartDaemon)
+        offerDaemonRestartIfDrifted(*_nativeController);
+    return {};
+}
+
+void ContourGuiApp::offerDaemonRestartIfDrifted(remote::NativeController const& controller)
+{
+    auto const layout = controller.negotiated()
+                            .transform(vthost::client::layoutSurvivesRestart)
+                            .value_or(vthost::client::LayoutAfterRestart::Lost);
+    _daemonDrift.show(
+        vthost::client::assessDrift(CONTOUR_VERSION_STRING, controller.daemonRelease(), layout));
+    connect(&_daemonDrift, &window::DaemonDriftModel::restartRequested, this, [this] {
+        // Stopping the daemon drops this client's connection, which closes every window. Without this
+        // the last window closing would quit the app before the queued hand-off below ever ran.
+        QGuiApplication::setQuitOnLastWindowClosed(false);
+        // Ended here, rather than lost when the daemon stops: a lost connection is sought again, and a
+        // reconnect would start a daemon of its own while the restart below waits for none to accept.
+        // Before stop(), which closes every mirror pty -- @see TerminalSession::noteTransportLost
+        if (_nativeController)
+        {
+            _sessionManager.noteTransportLost();
+            _nativeController->stop();
+        }
+        _daemonRestartThread = std::jthread { [this] {
+            auto result = _restartDaemon();
+            QMetaObject::invokeMethod(
+                &_daemonDrift,
+                [this, result = std::move(result)] {
+                    QGuiApplication::setQuitOnLastWindowClosed(true);
+                    if (!result)
+                    {
+                        _daemonDrift.noteRestartFailed(QString::fromStdString(result.error()));
+                        quitIfWindowless();
+                        return;
+                    }
+                    // Until the client reconnects by itself, the new process is what attaches to the
+                    // new daemon.
+                    auto arguments = QStringList {};
+                    for (auto const argument: std::span { _argv, static_cast<size_t>(_argc) }.subspan(1))
+                        arguments.push_back(QString::fromUtf8(argument));
+                    if (auto const started =
+                            externalLauncher().runDetached(QString::fromStdString(programPath()), arguments);
+                        !started)
+                    {
+                        _daemonDrift.noteRestartFailed(
+                            tr("the daemon restarted, but this window could not be reopened"));
+                        quitIfWindowless();
+                        return;
+                    }
+                    QCoreApplication::quit();
+                },
+                Qt::QueuedConnection);
+        } };
+    });
+}
+
+std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string const& label,
+                                                                   std::filesystem::path const& controlPath,
+                                                                   vthost::DaemonSpawnOptions const& options)
+{
+    auto const endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
+    auto start = LocalDaemonStart { processEnvironment(), fileSystem(), programPath() };
+    auto const starter = start.starter(label, endpoint, *_processPlacement, options);
+    // Never starts a daemon itself: the restart below starts the new one through the starter. The stop waits
+    // for the old daemon to write the workspace the new one restores.
+    auto const control = vthost::client::makeDaemonControl(
+        std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr),
+        vthost::client::DefaultStopTimeout);
+    return vthost::client::restartDaemon(*control, *starter)
+        .transform_error([](vthost::client::DaemonRestartFailure const& failure) { return failure.detail; });
+}
+
+namespace
+{
+    /// Each would be silently ignored beside `--host`: the host's entry says where and how to connect.
+    constexpr auto HostExclusions = std::array {
+        cli::OptionPresence { .name = "connect-tcp", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "socket", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "tmux", .givenAs = cli::GivenAs::Flag },
+        cli::OptionPresence { .name = "token", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "token-file", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "tls-ca", .givenAs = cli::GivenAs::Text },
+        // A host attach mirrors all of the remote daemon's windows; one window would need its own intent.
+        cli::OptionPresence { .name = "window", .givenAs = cli::GivenAs::Text },
+    };
+} // namespace
+
+std::expected<cli::HostTransport, std::string> ContourGuiApp::resolveClientHost(std::string const& nameOrUrl,
+                                                                                ClientRequest& request)
+{
+    if (auto const given = firstGivenOption("contour.client", HostExclusions))
+        return std::unexpected { std::format("pass either --host or --{}, not both", *given) };
+    auto host = config::resolveHost(request.config, nameOrUrl);
+    if (!host)
+        return std::unexpected { host.error() };
+    // The host's profile, unless --profile names one: the GUI renders with it and the daemon creates with it.
+    if (request.profile.empty())
+        request.profile = host->profile;
+    // A saved host by its name, an ad-hoc one by its URL, canonically spelled.
+    auto label = nameOrUrl.contains("://") ? config::toString(host->url) : nameOrUrl;
+    return cli::makeHostTransport(
+        std::move(label),
+        *host,
+        fileSystem(),
+        vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
+            .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }));
+}
+
 int ContourGuiApp::clientAction()
 {
-    // Installed first, so an ensureDaemon spawn failure below is captured. Read here with the
-    // other client-verb parameters, BEFORE the re-parse further down replaces the flag store
-    // with the terminal verb's surface and drops every contour.client.* key.
-    auto const logFilter = parameters().get<string>("contour.client.log");
-    auto const logFile = parameters().get<string>("contour.client.log-file");
+    // Installed first, so an ensureDaemon spawn failure is captured. Read here with the other client-verb
+    // parameters, BEFORE the re-parse further down replaces the flag store with the terminal verb's surface
+    // and drops every contour.client.* key.
+    auto request = ClientRequest {};
+    request.logFilter = parameters().get<string>("contour.client.log");
+    request.logFile = parameters().get<string>("contour.client.log-file");
     if (auto const installed = installLogging("contour.client", /*showProcessId=*/true); !installed)
     {
         cerr << std::format("contour client: {}\n", installed.error());
         return EXIT_FAILURE;
     }
+    _latencyProbeRequest = readLatencyProbeRequest("contour.client");
 
-    auto const wantsTmux = parameters().get<bool>("contour.client.tmux");
-
-    // Resolve every client-verb parameter BEFORE the re-parse below drops them.
-    auto const socketOption = parameters().get<string>("contour.client.socket");
-    auto const label = parameters().get<string>("contour.client.label");
-    auto const attachProfile = parameters().get<string>("contour.client.profile");
-    auto const attachConfig = parameters().get<string>("contour.client.config");
-    auto const tmuxSocket = parameters().get<string>("contour.client.tmux-socket");
-    auto const connectTcp = parameters().get<string>("contour.client.connect-tcp");
-    auto const tlsCaPath = parameters().get<string>("contour.client.tls-ca");
-
-    auto const resolvedToken = vthost::resolveToken(parameters().get<string>("contour.client.token"),
-                                                    parameters().get<string>("contour.client.token-file"));
-    if (!resolvedToken)
+    request.engine =
+        parameters().get<bool>("contour.client.tmux") ? ClientEngine::Tmux : ClientEngine::Native;
+    request.tmuxSocket = parameters().get<string>("contour.client.tmux-socket");
+    request.socket = parameters().get<string>("contour.client.socket");
+    request.label = parameters().get<string>("contour.client.label");
+    request.profile = parameters().get<string>("contour.client.profile");
+    request.config = parameters().get<string>("contour.client.config");
+    request.connectTcp = parameters().get<string>("contour.client.connect-tcp");
+    request.tlsCaPath = parameters().get<string>("contour.client.tls-ca");
+    request.sizePolicy = parameters().get<string>("contour.client.size-policy");
+    if (auto const window = parameters().get<string>("contour.client.window"); !window.empty())
     {
-        cerr << std::format("contour client: {}\n", resolvedToken.error());
+        auto id = uint64_t {};
+        if (auto const [end, error] = std::from_chars(window.data(), window.data() + window.size(), id);
+            error != std::errc {} || end != window.data() + window.size())
+        {
+            cerr << std::format("contour client: invalid --window '{}' (expected a daemon window id)\n",
+                                window);
+            return EXIT_FAILURE;
+        }
+        request.window = id;
+    }
+    auto token = vthost::resolveToken(parameters().get<string>("contour.client.token"),
+                                      parameters().get<string>("contour.client.token-file"));
+    if (!token)
+    {
+        cerr << std::format("contour client: {}\n", token.error());
         return EXIT_FAILURE;
     }
-    auto const& tcpToken = *resolvedToken;
-
-    // Auto-spawn the daemon if it is not already running (Unix sockets only;
-    // TCP endpoints pass through — you cannot spawn a remote daemon).
-    if (!wantsTmux && connectTcp.empty())
+    request.token = *std::move(token);
+    if (auto const host = parameters().get<string>("contour.client.host"); !host.empty())
     {
-        auto const controlPath = vthost::muxSocketPath(label, socketOption);
-        auto const endpoint = vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = controlPath } };
-        // The spawned daemon inherits our logging: it is the instance nobody can configure by
-        // hand and whose stderr lands in this process's terminal. It inherits our config and
-        // profile for the same reason — its hosted terminals must emulate the way THIS client's
-        // configuration says, or the scrollback it retains disagrees with what we render.
-        // Rejected rather than defaulted, matching `contour daemon`: silently serving `latest` to
-        // someone who asked for `smallest` would look like the option does not work.
-        auto const requestedPolicy = parameters().get<string>("contour.client.size-policy");
-        auto const sizePolicy = vthost::clientSizePolicyFrom(requestedPolicy);
-        if (!sizePolicy)
+        auto resolved = resolveClientHost(host, request);
+        if (!resolved)
         {
-            cerr << std::format("contour client: unknown --size-policy '{}' (expected one of: {})\n",
-                                requestedPolicy,
-                                core::joinHumanReadable(vthost::ClientSizePolicyNames | std::views::keys));
+            cerr << std::format("contour client: {}\n", resolved.error());
             return EXIT_FAILURE;
         }
-        auto const daemonOptions = vthost::DaemonSpawnOptions { .filter = logFilter,
-                                                                .logFile = logFile,
-                                                                .configPath = attachConfig,
-                                                                .profileName = attachProfile,
-                                                                .sizePolicy = *sizePolicy };
-        if (vthost::ensureDaemon(endpoint, programPath(), *_processPlacement, daemonOptions) != EXIT_SUCCESS)
-        {
-            cerr << std::format("contour client: daemon did not start within 5 seconds.\n");
-            return EXIT_FAILURE;
-        }
+        request.host = *std::move(resolved);
     }
 
-    auto adopt = std::function<void()> {};
-    if (wantsTmux)
-    {
-        _tmuxController =
-            std::make_unique<remote::TmuxController>(tmuxSocket, _processPlacement, fileSystem());
-        if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
-        {
-            cerr << std::format("contour client --tmux: {}\n", connected.error());
-            _tmuxController.reset();
-            return EXIT_FAILURE;
-        }
-        _routingFactory->setDelegate(_tmuxController.get());
-        adopt = [this] {
-            if (auto const window = _sessionManager.focusedWindow())
-                _tmuxController->adoptPendingPanes(_sessionManager, *window);
-        };
-        connect(_tmuxController.get(),
-                &remote::TmuxController::remotePaneDiscovered,
-                this,
-                adopt,
-                Qt::QueuedConnection);
-        // A %window-renamed reflects onto the owning tab's title (a tmux window is a tab).
-        connect(
-            _tmuxController.get(),
-            &remote::TmuxController::tabTitleChanged,
-            this,
-            [this] { _tmuxController->applyPendingRenames(_sessionManager); },
-            Qt::QueuedConnection);
-        connect(
-            _tmuxController.get(),
-            &remote::TmuxController::connectionClosed,
-            this,
-            [this] { _tmuxController->stop(); },
-            Qt::QueuedConnection);
-    }
-    else
-    {
-        // Build the daemon endpoint: a TLS-encrypted TCP connection when
-        // --connect-tcp is given, otherwise the local control socket (connectAttach
-        // resolves the native socket beside it).
-        auto endpoint = vthost::AttachEndpoint {};
-        auto endpointLabel = std::string {};
-        if (!connectTcp.empty())
-        {
-            auto const hostPort = vthost::parseHostPort(connectTcp);
-            if (!hostPort)
-            {
-                cerr << std::format("contour client: invalid --connect-tcp '{}' (expected HOST:PORT)\n",
-                                    connectTcp);
-                return EXIT_FAILURE;
-            }
-            auto tcp = vthost::TcpEndpoint {
-                .host = hostPort->first, .port = hostPort->second, .token = tcpToken, .caPem = {}
-            };
-            if (!tlsCaPath.empty())
-            {
-                auto const path = core::pathFromUtf8(tlsCaPath).value_or(fs::path {});
-                // An empty CA read must hard-fail exactly like the thin client:
-                // makeTlsClientContext treats "" as the TOFU/no-verify posture, so
-                // accepting it would silently strip the pinning the user asked for.
-                auto caPem = std::string {};
-                if (std::filesystem::is_regular_file(path))
-                    caPem = core::readFileAsString(path);
-                if (caPem.empty())
-                {
-                    cerr << std::format("contour client: cannot read --tls-ca file '{}'\n", tlsCaPath);
-                    return EXIT_FAILURE;
-                }
-                tcp.caPem = std::move(caPem);
-            }
-            endpointLabel = std::format("{}:{}", tcp.host, tcp.port);
-            endpoint = std::move(tcp);
-        }
-        else
-        {
-            auto const controlPath = vthost::muxSocketPath(label, socketOption);
-            endpointLabel = core::pathToUtf8(controlPath);
-            endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
-        }
-
-        // The emulation settings we ask the daemon to give the sessions WE create. At attach they are
-        // loaded from the file, because the re-parse that makes the attach profile visible to config()
-        // runs further down — after the controller has already connected — and it loads that same file.
-        //
-        // A failure is a warning, not a verb failure: the re-parse below reports a broken
-        // configuration with far better context, and hosting under the daemon's own resolved
-        // profile is a sane thing to do meanwhile.
-        auto attachSettings = std::optional<vtbackend::Settings> {};
-        if (auto resolved = config::resolveEmulationSettings(attachConfig, attachProfile); resolved)
-            attachSettings = *std::move(resolved);
-        else
-            cerr << std::format("contour client: {}; the daemon's own profile will be used for new "
-                                "sessions.\n",
-                                resolved.error());
-
-        // Every session created after that takes them from the configuration in memory, exactly as a
-        // local new tab does, so a reload reaches remote and local tabs alike.
-        _nativeController = std::make_unique<remote::NativeController>(
-            std::move(endpoint), std::move(attachSettings), [this] { return currentEmulationSettings(); });
-        if (auto connected = _nativeController->connectAndWait(std::chrono::seconds(5)); !connected)
-        {
-            cerr << std::format("contour client: {} ({})\n", connected.error(), endpointLabel);
-            _nativeController.reset();
-            return EXIT_FAILURE;
-        }
-        _routingFactory->setDelegate(_nativeController.get());
-        // A window spawned to host a daemon window binds itself here (from its
-        // Main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
-        _sessionManager.setAttachWindowBinder(
-            [this](window::WindowController* controller) { return bindPendingAttachWindow(controller); });
-        // Reconcile the GUI against the daemon's authoritative window→tab→split tree
-        // (B2/B4): whenever a layout arrives or changes (GUI boot, or a window/tab/
-        // split authored on the daemon, here or by another client), map each daemon
-        // window onto an OS window and realize any tab not yet shown, each pane bound
-        // to its remote session. Incremental — what is already shown is left untouched.
-        // A dying connection ends every mirror session (stop() closes the ptys),
-        // closing the tabs through the shell-exit teardown.
-        adopt = [this] {
-            reconcileAttachWindows();
-        };
-        connect(_nativeController.get(),
-                &remote::NativeController::layoutChanged,
-                this,
-                adopt,
-                Qt::QueuedConnection);
-        connect(
-            _nativeController.get(),
-            &remote::NativeController::connectionClosed,
-            this,
-            [this] {
-                // Before stop(), which closes every mirror pty — the order matters.
-                // @see TerminalSession::noteTransportLost
-                _sessionManager.noteTransportLost();
-                _nativeController->stop();
-            },
-            Qt::QueuedConnection);
-#ifdef CONTOUR_EXTENSIONS
-        connect(
-            _nativeController.get(),
-            &remote::NativeController::extensionPermissionRequested,
-            this,
-            [this] { askHostedExtensions(); },
-            Qt::QueuedConnection);
-#endif
-    }
-
-    // Boot the GUI under the terminal verb's parameter surface: re-parse a
-    // synthetic argv so every contour.terminal.* key resolves, carrying the
-    // attach-specific profile/config choices over.
+    // Boot the GUI under the terminal verb's parameter surface: re-parse a synthetic argv so every
+    // contour.terminal.* key resolves, carrying the attach-specific profile/config choices over.
     auto argv = std::vector<char const*> { "contour", "terminal" };
-    if (!attachProfile.empty())
+    if (!request.profile.empty())
     {
         argv.push_back("profile");
-        argv.push_back(attachProfile.c_str());
+        argv.push_back(request.profile.c_str());
     }
-    if (!attachConfig.empty())
+    if (!request.config.empty())
     {
         argv.push_back("config");
-        argv.push_back(attachConfig.c_str());
+        argv.push_back(request.config.c_str());
     }
-    auto const stopControllers = [this] {
-        if (_nativeController)
-            _nativeController->stop();
-        if (_tmuxController)
-            _tmuxController->stop();
-    };
     if (!reparseParameters(static_cast<int>(argv.size()), argv.data()))
-    {
-        _routingFactory->setDelegate(nullptr);
-        stopControllers();
         return EXIT_FAILURE;
-    }
 
-    _onGuiBooted = adopt;
+    _clientRequest = std::move(request);
     auto const rv = terminalGuiAction();
-
-    _onGuiBooted = nullptr;
-    _routingFactory->setDelegate(nullptr);
-    stopControllers();
+    _clientRequest.reset();
     return rv;
+}
+
+std::expected<void, std::string> ContourGuiApp::establishHosting()
+{
+    // The verb that launched, for what a failure is prefixed with.
+    auto const verb = std::string_view { _clientRequest ? "contour client" : "contour" };
+    auto const mode =
+        cli::resolveDaemonMode(_clientRequest ? std::optional { config::DaemonMode::Required } : std::nullopt,
+                               parameters().get<string>("contour.terminal.daemon-mode"),
+                               _config.daemon.value().mode);
+    if (!mode)
+        return std::unexpected(std::format("{}: {}", verb, mode.error()));
+    _daemonMode = *mode;
+    // A program the command line names runs here or nowhere: a daemon session runs the host's profile.
+    auto const program = _cliCommand ? cli::LaunchProgram::Named : cli::LaunchProgram::Profile;
+    if (!cli::attemptsAttach(_daemonMode, program))
+    {
+        if (cli::decideHosting(_daemonMode, program, std::nullopt) == cli::HostingDecision::Fail)
+            return std::unexpected(std::format("{}: {}", verb, cli::NamedProgramRefusal));
+        return {};
+    }
+    if (_clientRequest && _clientRequest->engine == ClientEngine::Tmux)
+        return startTmuxAttach(*_clientRequest);
+    return startNativeAttach().transform_error(
+        [verb](std::string const& reason) { return std::format("{}: {}", verb, reason); });
+}
+
+std::expected<void, std::string> ContourGuiApp::startTmuxAttach(ClientRequest const& request)
+{
+    _tmuxController = std::make_unique<remote::TmuxController>(
+        request.tmuxSocket, _processPlacement, fileSystem(), core::platform::defaultSteadyClock());
+    if (auto connected = _tmuxController->connectAndWait(std::chrono::seconds(10)); !connected)
+    {
+        _tmuxController.reset();
+        return std::unexpected(std::format("contour client --tmux: {}", connected.error()));
+    }
+    _routingFactory->setDelegate(_tmuxController.get());
+    _onGuiBooted = [this] {
+        if (auto const window = _sessionManager.focusedWindow())
+            _tmuxController->adoptPendingPanes(_sessionManager, *window);
+    };
+    connect(_tmuxController.get(),
+            &remote::TmuxController::remotePaneDiscovered,
+            this,
+            _onGuiBooted,
+            Qt::QueuedConnection);
+    // A %window-renamed reflects onto the owning tab's title (a tmux window is a tab).
+    connect(
+        _tmuxController.get(),
+        &remote::TmuxController::tabTitleChanged,
+        this,
+        [this] { _tmuxController->applyPendingRenames(_sessionManager); },
+        Qt::QueuedConnection);
+    connect(
+        _tmuxController.get(),
+        &remote::TmuxController::connectionClosed,
+        this,
+        [this] { _tmuxController->stop(); },
+        Qt::QueuedConnection);
+    return {};
+}
+
+namespace
+{
+    /// Where a native attach connects, and what it follows there.
+    struct NativeAttachTarget
+    {
+        std::shared_ptr<vthost::ITransportFactory> transport;
+        vthost::proto::AttachIntent intent;
+    };
+
+    /// @param connectTcp `--connect-tcp`: the daemon's HOST:PORT.
+    /// @param token The token it is sent.
+    /// @param tlsCaPath `--tls-ca`: the PEM pinning its certificate; empty to trust on first use.
+    /// @return The TLS transport to a daemon over TCP, which a client follows every window of.
+    [[nodiscard]] std::expected<NativeAttachTarget, std::string> tcpAttachTarget(
+        std::string const& connectTcp,
+        std::string const& token,
+        std::string const& tlsCaPath,
+        core::platform::FileSystem const& fileSystem)
+    {
+        auto const hostPort = vthost::parseHostPort(connectTcp);
+        if (!hostPort)
+            return std::unexpected(
+                std::format("invalid --connect-tcp '{}' (expected HOST:PORT)", connectTcp));
+        auto tcp = vthost::TcpEndpoint {
+            .host = hostPort->first, .port = hostPort->second, .token = token, .caPem = {}
+        };
+        if (!tlsCaPath.empty())
+        {
+            auto caPem = cli::readPinnedCa(
+                fileSystem, core::pathFromUtf8(tlsCaPath).value_or(fs::path {}), "--tls-ca");
+            if (!caPem)
+                return std::unexpected(caPem.error());
+            tcp.caPem = *std::move(caPem);
+        }
+        return NativeAttachTarget {
+            .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(tcp)),
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows,
+                                                    .windows = {} },
+        };
+    }
+} // namespace
+
+std::expected<void, std::string> ContourGuiApp::startNativeAttach()
+{
+    auto const& settings = _config.daemon.value();
+    auto target = std::expected<NativeAttachTarget, std::string> {};
+    // Ten seconds for the local daemon: the first connect starts it too, when none serves, and that waits up
+    // to five seconds for it to accept before the connect's own share of the budget begins.
+    auto budget = std::chrono::milliseconds { std::chrono::seconds(10) };
+    auto hostLabel = std::string {};
+    if (_clientRequest && _clientRequest->host)
+    {
+        // A remote daemon is started by the remote relay, never from here; a client follows every window.
+        auto& host = *_clientRequest->host;
+        budget = std::max(host.connectTimeout, std::chrono::milliseconds { remote::MinimumConnectAwait });
+        hostLabel = host.label;
+        target = NativeAttachTarget {
+            .transport = host.factory,
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows,
+                                                    .windows = {} },
+        };
+    }
+    else if (_clientRequest && !_clientRequest->connectTcp.empty())
+        target = tcpAttachTarget(
+            _clientRequest->connectTcp, _clientRequest->token, _clientRequest->tlsCaPath, fileSystem());
+    else
+    {
+        // The local daemon: its socket and size policy are the client's options, else the `daemon:` section.
+        auto const label =
+            _clientRequest ? _clientRequest->label : std::string { vthost::DefaultSocketLabel };
+        auto const controlPath = vthost::muxSocketPath(
+            label, cli::resolveSocketOption(_clientRequest ? _clientRequest->socket : "", settings.socket));
+        auto const sizePolicy =
+            cli::resolveSizePolicy(_clientRequest ? _clientRequest->sizePolicy : "", settings.sizePolicy);
+        if (!sizePolicy)
+            return std::unexpected(sizePolicy.error());
+        // The spawned daemon inherits our logging: it is the instance nobody can configure by hand and whose
+        // stderr lands in this process's terminal. It inherits our config and profile for the same reason --
+        // its hosted terminals must emulate the way THIS client's configuration says, or the scrollback it
+        // retains disagrees with what we render.
+        auto const daemonOptions = vthost::DaemonSpawnOptions {
+            .filter =
+                _clientRequest ? _clientRequest->logFilter : parameters().get<string>("contour.terminal.log"),
+            .logFile = _clientRequest ? _clientRequest->logFile
+                                      : parameters().get<string>("contour.terminal.log-file"),
+            .configPath =
+                _clientRequest ? _clientRequest->config : parameters().get<string>("contour.terminal.config"),
+            .profileName = _clientRequest ? _clientRequest->profile
+                                          : parameters().get<string>("contour.terminal.profile"),
+            .sizePolicy = *sizePolicy,
+        };
+        _restartDaemon = [this, label, controlPath, daemonOptions] {
+            return restartLocalDaemon(label, controlPath, daemonOptions);
+        };
+        // Before every connect, the first and each reconnect alike, so a daemon that crashed or was stopped
+        // is started again. Spawned, if it must be, from this version's own copy where an upgrade would
+        // disturb the installed binary, and that copy held leased until the daemon serves. Runs on the
+        // transport's worker thread, one call at a time, so the attach's reactor goes on serving -- and
+        // stop() does not wait -- while a spawned daemon comes up; nothing else uses what it captures.
+        auto ensureDaemon =
+            [start = std::make_shared<LocalDaemonStart>(processEnvironment(), fileSystem(), programPath()),
+             placement = _processPlacement,
+             label,
+             controlPath,
+             daemonOptions]() -> std::expected<void, vthost::TransportError> {
+            if (start->spawner->probe(controlPath) == vthost::DaemonPresence::Serving)
+                return {};
+            // A registered service is started before a daemon is spawned on demand.
+            auto const starter = start->starter(
+                label, vthost::UnixEndpoint { .socketPath = controlPath }, *placement, daemonOptions);
+            if (auto const started = starter->start(); !started)
+                // Transient: a reconnect tries again, and a first connect is not retried anyway.
+                return std::unexpected(vthost::TransportError {
+                    .kind = vthost::TransportErrorKind::Unreachable, .message = started.error() });
+            return {};
+        };
+        // A plain launch opens one new window beside whatever the daemon already shows, or brings them all
+        // back when no other client does; `--window` shows exactly one.
+        auto intent =
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .windows = {} };
+        if (_clientRequest && _clientRequest->window)
+            intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Windows,
+                                                   .windows = { *_clientRequest->window } };
+        target = NativeAttachTarget {
+            .transport = std::make_shared<vthost::UnixTransportFactory>(controlPath, std::move(ensureDaemon)),
+            .intent = std::move(intent),
+        };
+    }
+    if (!target)
+        return std::unexpected(target.error());
+
+    // The emulation settings the daemon gives the sessions this client creates, from the configuration
+    // loaded already; every session created later takes them from the configuration in memory, exactly
+    // as a local new tab does, so a reload reaches remote and local tabs alike. A failure is a warning:
+    // hosting under the daemon's own resolved profile is a sane thing to do meanwhile.
+    auto attachSettings = std::optional<vtbackend::Settings> {};
+    if (auto resolved = currentEmulationSettings(); resolved)
+        attachSettings = *std::move(resolved);
+    else
+        errorLog()("attach: {}; the daemon's own profile will be used for new sessions.", resolved.error());
+
+    _nativeController = std::make_unique<remote::NativeController>(
+        std::move(target->transport),
+        std::move(target->intent),
+        profileName(),
+        std::move(attachSettings),
+        [this] { return currentEmulationSettings(); },
+        core::platform::defaultSteadyClock(),
+        _startupTimeline);
+    // A window spawned to host a daemon window binds itself here (from its Main.qml, via
+    // consumeAttachWindow) instead of creating a fresh first tab.
+    _sessionManager.setAttachWindowBinder(
+        [this](window::WindowController* controller) { return bindPendingAttachWindow(controller); });
+    // Reconcile the GUI against the daemon's authoritative window→tab→split tree (B2/B4): whenever a layout
+    // arrives or changes (GUI boot, or a window/tab/split authored on the daemon, here or by another
+    // client), map each daemon window onto an OS window and realize any tab not yet shown, each pane bound
+    // to its remote session. Incremental — what is already shown is left untouched.
+    _onGuiBooted = [this] {
+        reconcileAttachWindows();
+    };
+    connect(_nativeController.get(),
+            &remote::NativeController::layoutChanged,
+            this,
+            _onGuiBooted,
+            Qt::QueuedConnection);
+    connectReconnectSignals();
+    // A dying connection ends every mirror session (stop() closes the ptys), closing the tabs through the
+    // shell-exit teardown.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::connectionClosed,
+        this,
+        [this] {
+            // Null once a connect that failed has been given up on (see _awaitAttach).
+            if (!_nativeController)
+                return;
+            // Before stop(), which closes every mirror pty — the order matters.
+            // @see TerminalSession::noteTransportLost
+            _sessionManager.noteTransportLost();
+            _nativeController->stop();
+        },
+        Qt::QueuedConnection);
+#ifdef CONTOUR_EXTENSIONS
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::extensionPermissionRequested,
+        this,
+        [this] { askHostedExtensions(); },
+        Qt::QueuedConnection);
+#endif
+
+    // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots;
+    // terminalGuiAction() waits for them through _awaitAttach just before the first window, by when booting
+    // has already spent part of the budget, and settles the hosting there. The signals above are connected
+    // first, so nothing the connection emits meanwhile is lost. A cold start's daemon start is part of the
+    // connect, in the transport's ensureDaemon, on a worker thread of the transport's own while the GUI
+    // boots.
+    _nativeController->startConnecting();
+    _awaitAttach = [this, budget, hostLabel = std::move(hostLabel)] {
+        return awaitNativeAttach(budget, hostLabel);
+    };
+    return {};
+}
+
+std::expected<void, std::string> ContourGuiApp::settleHosting(
+    std::expected<void, std::string> const& attached)
+{
+    switch (cli::decideHosting(_daemonMode,
+                               attached ? cli::AttachResult::Attached : cli::AttachResult::Unreachable))
+    {
+        case cli::HostingDecision::InProcess:
+        case cli::HostingDecision::Attached: return {};
+        case cli::HostingDecision::InProcessWithNotice:
+            // The attach is given up (awaitNativeAttach() released the controller): nothing waits for the
+            // daemon's windows, and the first window opens a tab of its own, which runs here.
+            errorLog()("Hosting this window's sessions in-process: {}", attached.error());
+            _onGuiBooted = nullptr;
+            _restartDaemon = nullptr;
+            _sessionManager.setAttachWindowBinder(nullptr);
+            _hostingNotice = cli::hostingNotice(attached.error());
+            return {};
+        case cli::HostingDecision::Fail:
+            return std::unexpected(
+                std::format("{}: {}", _clientRequest ? "contour client" : "contour", attached.error()));
+    }
+    return {};
 }
 
 int ContourGuiApp::run(int argc, char const* argv[])
@@ -931,8 +1371,9 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
             CLI::OptionList {
                 CLI::Option { "socket",
                               CLI::Value { ""s },
-                              "Path of the daemon's control socket file. Defaults to "
-                              "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                              "Path of the daemon's control socket file. Defaults to the "
+                              "configuration's `daemon.socket`, else $XDG_RUNTIME_DIR/contour/LABEL "
+                              "(respecting $CONTOUR_MUX).",
                               "PATH" },
                 CLI::Option { "label",
                               CLI::Value { std::string { vthost::DefaultSocketLabel } },
@@ -950,6 +1391,12 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "NAME" },
                 CLI::Option {
                     "config", CLI::Value { ""s }, "Path to configuration file the GUI loads.", "FILE" },
+                CLI::Option { "host",
+                              CLI::Value { ""s },
+                              "Attaches to a remote host: a name under the configuration's `hosts:`, or a "
+                              "URL, `ssh://[USER@]HOST[:PORT]` (key or agent authentication only). The "
+                              "remote host's daemon is started there when none runs.",
+                              "NAME|URL" },
                 CLI::Option { "connect-tcp",
                               CLI::Value { ""s },
                               "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "
@@ -982,14 +1429,24 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "Appends log output to FILE instead of standard error ('-' means "
                               "standard error). Also passed to an auto-spawned daemon.",
                               "FILE" },
+                latencyProbeFileOption(),
+                latencyProbeVsyncOption(),
+                latencyProbeKeysOption(),
                 CLI::Option { "size-policy",
-                              CLI::Value { "latest"s },
+                              CLI::Value { ""s },
                               "Which attached client's size the shared grid takes when several "
                               "clients of different sizes are attached: `latest`, `smallest` or "
-                              "`largest` (see `contour daemon --help`). Applies only to an "
+                              "`largest` (see `contour daemon --help`). Defaults to the "
+                              "configuration's `daemon.size_policy`. Applies only to an "
                               "auto-spawned daemon; one already running keeps the policy it was "
                               "started with.",
                               "POLICY" },
+                CLI::Option { "window",
+                              CLI::Value { ""s },
+                              "Shows only the daemon window with this id (see `contour daemon "
+                              "status`) instead of opening a new one; fails when the daemon has "
+                              "no such window.",
+                              "ID" },
             },
         });
 
@@ -1065,6 +1522,16 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "standard error).",
                               "FILE" },
                 CLI::Option { "live-config", CLI::Value { false }, "Enables live config reloading." },
+                CLI::Option { "daemon-mode",
+                              CLI::Value { ""s },
+                              "Where the sessions run: `in_process` (in this process), `auto` (in "
+                              "the daemon, started if need be, else in this process with a notice) "
+                              "or `required` (in the daemon, or not at all). Defaults to the "
+                              "configuration's `daemon.mode`.",
+                              "MODE" },
+                latencyProbeFileOption(),
+                latencyProbeVsyncOption(),
+                latencyProbeKeysOption(),
                 CLI::Option {
                     "dump-state-at-exit",
                     CLI::Value { ""s },
@@ -1448,6 +1915,29 @@ int ContourGuiApp::terminalGuiAction()
         if (!loadConfig("terminal"))
             return EXIT_FAILURE;
     }
+    _startupTimeline.mark(vthost::latency::StartupMark::ConfigLoaded);
+    // The client verb has read its own options before it re-parsed into this verb's surface.
+    if (!_latencyProbeRequest)
+        _latencyProbeRequest = readLatencyProbeRequest("contour.terminal");
+
+    // Where the sessions live: decided, and an attach started, before anything else boots, so the connect
+    // runs beside the boot. Whatever it set up is undone on every return -- after `app` below is gone, as the
+    // attach engines' ptys outlive the windows.
+    auto const releaseHosting = core::Finally { [this] {
+        _awaitAttach = nullptr;
+        _onGuiBooted = nullptr;
+        if (_nativeController || _tmuxController)
+            _routingFactory->setDelegate(nullptr);
+        if (_nativeController)
+            _nativeController->stop();
+        if (_tmuxController)
+            _tmuxController->stop();
+    } };
+    if (auto const hosting = establishHosting(); !hosting)
+    {
+        cerr << hosting.error() << '\n';
+        return EXIT_FAILURE;
+    }
 
 #ifdef __APPLE__
     QGuiApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
@@ -1515,6 +2005,21 @@ int ContourGuiApp::terminalGuiAction()
     // NOTE: Cannot use ScopedTimer here because QApplication must live until end of function.
     auto const qtInitStart = std::chrono::steady_clock::now();
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
+    // Every Qt object this app owns goes before QApplication, on every return from here on -- the
+    // failed-attach one included, which leaves before the event loop ever runs. Declared right after
+    // `app`, so it runs before `app` is destroyed.
+    auto const releaseQtObjects = core::Finally { [this] {
+        // The QML engine first: its context properties point at the style providers, and the windows
+        // the helpers below served are gone with it.
+        _qmlEngine.reset();
+        // The GPU-selection helpers hold Qt objects (a timer, a D-Bus notifier, a Vulkan instance).
+        _latencyProbeDriver.reset();
+        _firstFrameWatchdog.reset();
+        _gpuNotifier.reset();
+#ifdef CONTOUR_WITH_GPU_SELECTION
+        _graphicsDeviceSelector.reset();
+#endif
+    } };
     setupQCoreApplication();
     if (startupLog.isEnabled())
     {
@@ -1620,7 +2125,8 @@ int ContourGuiApp::terminalGuiAction()
 
     QGuiApplication::setWindowIcon(QIcon(":/contour/logo-256.png"));
 
-    QSurfaceFormat::setDefaultFormat(display::createSurfaceFormat());
+    QSurfaceFormat::setDefaultFormat(display::createSurfaceFormat(
+        _latencyProbeRequest ? _latencyProbeRequest->pacing : display::SwapPacing::VSync));
 
     // Hands out the accessibility interface for the terminal item, so OS magnifiers and screen readers
     // can follow the caret. Installed here rather than from a static initializer: the ordering against
@@ -1683,6 +2189,7 @@ int ContourGuiApp::terminalGuiAction()
 
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
+        context->setContextProperty("daemonDrift", &_daemonDrift);
         // A context property rather than a registered QML singleton: two separate modules read these
         // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
         // the style module import this application's own C++ URI, which a style that Qt resolves by
@@ -1696,6 +2203,19 @@ int ContourGuiApp::terminalGuiAction()
         // tokens because what QML needs here is a TEXTURE: a real Gaussian cannot be assembled from
         // QML primitives without banding, and the engine takes ownership of this.
         _qmlEngine->addImageProvider(QStringLiteral("popupshadow"), new window::PopupShadowImageProvider());
+    }
+    _startupTimeline.mark(vthost::latency::StartupMark::QmlEngineReady);
+
+    // Attach mode's connect has run beside everything above; the first window needs it done, and decides
+    // whether there is a daemon to show at all. A `required` one that is not there ends the launch here,
+    // before any window exists.
+    if (_awaitAttach)
+    {
+        if (auto const settled = settleHosting(std::exchange(_awaitAttach, nullptr)()); !settled)
+        {
+            cerr << settled.error() << '\n';
+            return EXIT_FAILURE;
+        }
     }
 
     // auto const HTS = "\033H";
@@ -1737,18 +2257,28 @@ int ContourGuiApp::terminalGuiAction()
         auto const timer = crispy::ScopedTimer(startupLog, "newWindow (QML load)");
         newWindow();
     }
+    _startupTimeline.mark(vthost::latency::StartupMark::WindowCreated);
+    // The window that runs its shells itself, as the daemon could not be had, says so.
+    if (!_hostingNotice.empty())
+        if (auto const window = _sessionManager.focusedWindow())
+            if (auto* controller = _sessionManager.controllerFor(*window))
+                controller->showHostingNotice(QString::fromStdString(_hostingNotice));
 
     // Attach mode adopts the remaining remote sessions as tabs now that a
     // window exists to put them in.
     if (_onGuiBooted)
         _onGuiBooted();
 
+    if (_latencyProbeRequest)
+        armLatencyProbe();
+
     // Run the event loop FIRST (it populates _exitStatus via onExit during the run), THEN map that
     // status to the process exit code. The mapping is the pure exitCodeFor() (ExitCode.h), extracted
     // so it is unit-testable without the event loop. NB: sequenced explicitly — passing exec() as an
     // argument alongside _exitStatus would read _exitStatus before the loop populated it.
     auto const loopResult = QApplication::exec();
-    auto const rv = session::exitCodeFor(_exitStatus, loopResult);
+    // A finished probe has the last word: the echo child it ends exits 0 whether or not the probe succeeded.
+    auto const rv = _latencyProbeExitCode.value_or(session::exitCodeFor(_exitStatus, loopResult));
 
     // Ensure the multimedia warmup thread has finished before destroying Qt objects -- but keep serving
     // this thread's event queue while waiting, rather than blocking straight into join().
@@ -1770,18 +2300,8 @@ int ContourGuiApp::terminalGuiAction()
     if (multimediaWarmupThread.joinable())
         multimediaWarmupThread.join();
 
-    // Explicitly destroy QML engine here to ensure it's being destructed before QGuiApplication.
-    _qmlEngine.reset();
-    // The GPU-selection helpers hold Qt objects (a timer, a D-Bus notifier, a Vulkan instance), so they too
-    // go before QApplication; the windows they served are gone with the engine.
-    _firstFrameWatchdog.reset();
-    _gpuNotifier.reset();
-#ifdef CONTOUR_WITH_GPU_SELECTION
-    _graphicsDeviceSelector.reset();
-#endif
-
     // printf("\r%s", TBC);
-    return rv;
+    return rv; // releaseQtObjects tears the Qt objects down before `app`
 }
 
 void ContourGuiApp::setupQCoreApplication()
@@ -1850,9 +2370,9 @@ QScreen* ContourGuiApp::takePendingSpawnScreen() noexcept
     return screen;
 }
 
-bool ContourGuiApp::requestRemoteWindow()
+bool ContourGuiApp::requestRemoteWindow(session::RemoteSpawn const& spawn)
 {
-    return _routingFactory != nullptr && _routingFactory->requestRemoteWindow();
+    return _routingFactory != nullptr && _routingFactory->requestRemoteWindow(spawn);
 }
 
 void ContourGuiApp::reconcileAttachWindows()
@@ -1874,7 +2394,7 @@ void ContourGuiApp::reconcileAttachWindows()
         if (_pendingAttachWindow == daemonWindow)
             continue; // an OS window is already spawning for this daemon window
 
-        if (_attachWindowMap.empty())
+        if (_attachBoot == AttachBoot::Pending)
         {
             // The primary daemon window adopts the boot window (already created before
             // the first layout arrived). A missing focused window (mid-boot) stages
@@ -1886,6 +2406,11 @@ void ContourGuiApp::reconcileAttachWindows()
                 _pendingAttachWindow = daemonWindow;
             continue;
         }
+
+        // A daemon window holding no tab is nothing to show yet -- one a reconnect found emptied, under a
+        // client that follows every window -- and gets its OS window once it holds one.
+        if (auto const known = _nativeController->layout(daemonWindow); !known || known->tabs.empty())
+            continue;
 
         // A new daemon window: spawn an OS window to host it. Its Main.qml claims the
         // staged id (consumeAttachWindow → bindPendingAttachWindow), records the mapping
@@ -1923,7 +2448,7 @@ bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller
     // attach mode would author a spurious extra tab on the daemon (and create no local first tab).
     // Bind the primary window now if the daemon already reported one; otherwise still claim the boot
     // window (return true) and let reconcileAttachWindows bind it once the first layout arrives.
-    if (_attachWindowMap.empty())
+    if (_attachBoot == AttachBoot::Pending)
     {
         if (auto const adopt = primaryDaemonWindowToAdopt(false, _nativeController->windowIds()))
             bindDaemonWindow(*adopt, controller->windowId());
@@ -1933,8 +2458,56 @@ bool ContourGuiApp::bindPendingAttachWindow(window::WindowController* controller
     return false;
 }
 
+void ContourGuiApp::connectReconnectSignals()
+{
+    // Every pane says it is reconnecting while the connection is sought again, rather than showing a
+    // grid that merely stopped.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::connectionStateChanged,
+        this,
+        [this] {
+            if (_nativeController)
+                _sessionManager.setHostConnection(_nativeController->connectionState());
+        },
+        Qt::QueuedConnection);
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::windowsLost,
+        this,
+        [this](std::vector<std::uint64_t> const& daemonWindows) { closeLostAttachWindows(daemonWindows); },
+        Qt::QueuedConnection);
+}
+
+void ContourGuiApp::closeLostAttachWindows(std::vector<std::uint64_t> const& daemonWindows)
+{
+    if (!_nativeController)
+        return;
+    auto doomed = std::vector<window::WindowController*> {};
+    for (auto const daemonWindow: daemonWindows)
+    {
+        auto const mapped = _attachWindowMap.find(daemonWindow);
+        if (mapped == _attachWindowMap.end())
+            continue;
+        // Before the close, which closes their ptys: their shells did not exit, the connection to them went.
+        // @see TerminalSession::noteTransportLost
+        if (auto* window = _sessionManager.model().window(mapped->second))
+            for (auto const index: std::views::iota(0, window->tabCount()))
+                for (auto* session: _sessionManager.sessionsOfTab(window->tabAt(index)))
+                    session->noteTransportLost();
+        if (auto* controller = _sessionManager.controllerFor(mapped->second))
+            doomed.push_back(controller);
+        _attachWindowMap.erase(mapped);
+    }
+    // The windows that came instead first: closing the last stale window before would end the application.
+    reconcileAttachWindows();
+    for (auto* controller: doomed)
+        controller->closeWindow();
+}
+
 void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::WindowId osWindow)
 {
+    _attachBoot = AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWindow, osWindow);
     contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
 }

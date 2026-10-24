@@ -7,6 +7,7 @@
 #include <gsl/span_ext>
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -149,6 +150,9 @@ class BufferObject: public std::enable_shared_from_this<BufferObject<T>>
  * BufferObject objects that are about to be disposed
  * are not getting its resources deleted but ownership moved
  * back to BufferObjectPool.
+ *
+ * Thread-safe: a buffer comes back on whichever thread drops its last reference, and a terminal
+ * allocates on its reader thread and on the thread that writes to its screen.
  */
 template <BufferObjectElementType T>
 class BufferObjectPool
@@ -158,14 +162,15 @@ class BufferObjectPool
     ~BufferObjectPool();
 
     void releaseUnusedBuffers();
-    [[nodiscard]] size_t unusedBuffers() const noexcept;
+    [[nodiscard]] size_t unusedBuffers() const;
     [[nodiscard]] BufferObjectPtr<T> allocateBufferObject();
 
   private:
     void release(BufferObject<T>* ptr);
 
-    bool _reuseBuffers = true;
+    std::atomic<bool> _reuseBuffers = true;
     size_t _bufferSize;
+    mutable std::mutex _mutex; ///< Guards _unusedBuffers.
     std::list<BufferObjectPtr<T>> _unusedBuffers;
 };
 
@@ -371,30 +376,41 @@ BufferObjectPool<T>::~BufferObjectPool()
 }
 
 template <BufferObjectElementType T>
-size_t BufferObjectPool<T>::unusedBuffers() const noexcept
+size_t BufferObjectPool<T>::unusedBuffers() const
 {
+    auto const _ = std::scoped_lock { _mutex };
     return _unusedBuffers.size();
 }
 
 template <BufferObjectElementType T>
 void BufferObjectPool<T>::releaseUnusedBuffers()
 {
+    // Taken out under the lock, destroyed outside it: each one's release() runs as it goes.
+    auto unused = std::list<BufferObjectPtr<T>> {};
+    {
+        auto const _ = std::scoped_lock { _mutex };
+        unused.swap(_unusedBuffers);
+    }
     _reuseBuffers = false;
-    _unusedBuffers.clear();
+    unused.clear();
     _reuseBuffers = true;
 }
 
 template <BufferObjectElementType T>
 BufferObjectPtr<T> BufferObjectPool<T>::allocateBufferObject()
 {
-    if (_unusedBuffers.empty())
-        return BufferObject<T>::create(_bufferSize, [this](auto p) { release(p); });
-
-    BufferObjectPtr<T> buffer = std::move(_unusedBuffers.front());
-    if (bufferObjectLog)
-        bufferObjectLog()("Recycling BufferObject from pool: @{}.", (void*) buffer.get());
-    _unusedBuffers.pop_front();
-    return buffer;
+    {
+        auto const _ = std::scoped_lock { _mutex };
+        if (!_unusedBuffers.empty())
+        {
+            BufferObjectPtr<T> buffer = std::move(_unusedBuffers.front());
+            _unusedBuffers.pop_front();
+            if (bufferObjectLog)
+                bufferObjectLog()("Recycling BufferObject from pool: @{}.", (void*) buffer.get());
+            return buffer;
+        }
+    }
+    return BufferObject<T>::create(_bufferSize, [this](auto p) { release(p); });
 }
 
 template <BufferObjectElementType T>
@@ -405,6 +421,7 @@ void BufferObjectPool<T>::release(BufferObject<T>* ptr)
         if (bufferObjectLog)
             bufferObjectLog()("Releasing BufferObject from pool: @{}", (void*) ptr);
         ptr->reset();
+        auto const _ = std::scoped_lock { _mutex };
         _unusedBuffers.emplace_back(ptr, [this](auto p) { release(p); });
     }
     else

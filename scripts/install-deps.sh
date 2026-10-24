@@ -30,11 +30,11 @@ SYSDEPS_DIST_DIR="$SYSDEPS_BASE_DIR/distfiles"
 SYSDEPS_SRC_DIR="$SYSDEPS_BASE_DIR/sources"
 SYSDEPS_CMAKE_FILE="$SYSDEPS_SRC_DIR/CMakeLists.txt"
 
-fetch_and_unpack() {
+# Downloads and extracts a source archive into $SYSDEPS_SRC_DIR, without adding it to the build.
+fetch_source() {
     NAME=$1
     DISTFILE=$2
     URL=$3
-    MACRO=$4
 
     FULL_DISTFILE="$SYSDEPS_DIST_DIR/$DISTFILE"
 
@@ -60,6 +60,13 @@ fetch_and_unpack() {
     else
         echo "Already extracted $DISTFILE. Skipping."
     fi
+}
+
+# Fetches a source archive and adds it to the build: directly, or through a
+# ContourThirdParties_Embed_<MACRO> macro that cmake/ContourThirdParties.cmake calls.
+fetch_and_unpack() {
+    fetch_source "$1" "$2" "$3"
+    MACRO=$4
 
     if test x$MACRO = x; then
         echo "add_subdirectory($NAME EXCLUDE_FROM_ALL)" >>$SYSDEPS_CMAKE_FILE
@@ -140,6 +147,16 @@ fetch_and_unpack_reflection_cpp() {
         reflection-cpp-$reflection_cpp_version.tar.gz \
         https://github.com/contour-terminal/reflection-cpp/archive/refs/tags/v${reflection_cpp_version}.tar.gz \
         reflection_cpp
+}
+
+# Only unpacked, never added: cmake/ContourThirdParties.cmake declares _deps/sources/glaze-<version> to
+# FetchContent itself, ahead of termbench-pro's own glaze, so that the build holds exactly one.
+fetch_and_unpack_glaze() {
+    local glaze_version="9.0.0"
+    fetch_source \
+        glaze-$glaze_version \
+        glaze-$glaze_version.tar.gz \
+        https://github.com/stephenberry/glaze/archive/refs/tags/v${glaze_version}.tar.gz
 }
 
 fetch_and_unpack_yaml_cpp() {
@@ -682,6 +699,7 @@ main() {
     fetch_and_unpack_boxed
     fetch_and_unpack_termbenchpro
     fetch_and_unpack_reflection_cpp
+    fetch_and_unpack_glaze
 }
 
 main $*

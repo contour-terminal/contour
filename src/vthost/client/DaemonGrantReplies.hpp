@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,8 +22,10 @@ namespace vthost::client
 
 /// @param request A daemon extension's question, as it arrived.
 /// @return The same, as a consent prompt asks it: the manifest the daemon read, under the host id it
-/// assigned.
-[[nodiscard]] vtextension::ExtensionConsentRequest consentRequestOf(proto::PermissionRequest const& request);
+/// assigned; nothing for a question that asks for a control permission this build cannot name, which is
+/// not asked, as its prompt could not say what it grants.
+[[nodiscard]] std::optional<vtextension::ExtensionConsentRequest> consentRequestOf(
+    proto::PermissionRequest const& request);
 
 /// The vtextension::IGrantStore a client's consent prompt records a daemon's questions in: each answer is
 /// sent to the daemon, which keeps it in its own grant store, and remembered here for as long as this lives,

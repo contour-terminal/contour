@@ -105,7 +105,7 @@ namespace
         // The renderer's own origin, not the profile margin re-derived: they are equal while the
         // grid starts at the top-left, and they must STAY equal when it does not. A daemon-hosted
         // grid can be larger than this client's viewport, and the pan that shows a window into it
-        // rides this margin (@see contour::geometry::viewportOrigin) -- so a hit-test computing the
+        // rides this margin (@see vthost::client::viewportOrigin) -- so a hit-test computing the
         // origin for itself would report the cell the user clicked minus the pan.
         //
         // Correct from the FIRST event, not merely after one: the renderer is constructed with the

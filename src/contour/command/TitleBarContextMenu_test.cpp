@@ -9,8 +9,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <iterator>
 #include <ranges>
 #include <utility>
+#include <variant>
 
 using contour::command::buildTitleBarContextMenu;
 using contour::command::ContextMenuEntry;
@@ -225,4 +227,36 @@ TEST_CASE("titleBarContextMenu: no separator is ever left stranded", "[contour][
                     previousWasSeparator = isSeparator;
                 }
             }
+}
+
+TEST_CASE("the Attach to Host submenu lists saved hosts", "[menu][hosts]")
+{
+    auto state = populatedState();
+    state.hostNames = { "home", "studio" };
+
+    auto const menu = buildTitleBarContextMenu(state);
+    auto const* hosts = find(menu, "Attach to Host");
+    REQUIRE(hosts != nullptr);
+    REQUIRE(hosts->kind == ContextMenuEntryKind::Submenu);
+    REQUIRE(hosts->children.size() == 2);
+    for (auto const& [child, name]: std::views::zip(hosts->children, state.hostNames))
+    {
+        CHECK(child.title == name);
+        auto const* attach = std::get_if<contour::actions::AttachToHost>(&child.action);
+        REQUIRE(attach != nullptr);
+        CHECK(attach->name == name);
+    }
+
+    // Directly after the profile submenu, as in the pane's menu.
+    auto const profiles =
+        std::ranges::find(menu, std::string { "New Tab with Profile" }, &ContextMenuEntry::title);
+    REQUIRE(profiles != menu.end());
+    REQUIRE(std::next(profiles) != menu.end());
+    CHECK(std::next(profiles)->title == "Attach to Host");
+}
+
+TEST_CASE("no hosts, no Attach to Host submenu", "[menu][hosts]")
+{
+    auto const menu = buildTitleBarContextMenu(populatedState());
+    CHECK(find(menu, "Attach to Host") == nullptr);
 }

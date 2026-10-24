@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -119,6 +120,12 @@ class ScreenMirror
     /// @param history Whether to keep or erase the mirror's local scrollback.
     void fullReplay(RemoteScreen const& screen, LocalHistory history);
 
+    /// Forgets everything learned from the connection that fed this mirror -- every stable-id mapping,
+    /// generation, hyperlink, context and image -- so that the next update, from a new connection, is applied
+    /// as the first one is: a full replay. Called when a lost connection was replaced, before the new one's
+    /// snapshots arrive; the terminal and its replica role stay.
+    void restart();
+
     /// Places image @p imageId now that its pixels arrived, or releases it if the server dropped
     /// it — what the client's image handler calls so the image appears where the delta put it.
     void applyImage(RemoteScreen const& screen, uint32_t imageId);
@@ -139,10 +146,17 @@ class ScreenMirror
 
     /// Reproduces a transient session event (bell / desktop notification / OSC 52 clipboard write)
     /// on the mirror terminal, so the frontend's own bell, notify and clipboard handling — and its
-    /// permissions — apply. Stateless: the event carries everything it needs.
+    /// permissions — apply; and replaces the program-status records with a ProgramStatus set, under the
+    /// terminal lock. Stateless: the event carries everything it needs.
     void applyEvent(proto::SessionEventPdu const& event);
 
   private:
+    /// Replaces the mirror terminal's program-status records with the host's
+    /// (Terminal::replaceProgramStatus), dropping each record whose state this build does not know. The
+    /// caller holds the terminal lock.
+    /// @param records The host's whole set, least recently updated first.
+    void syncProgramStatus(std::span<proto::WireProgramStatusRecord const> records);
+
     /// Brings the mirror's INPUT-encoding state in line with the server's: the mirrored DEC modes
     /// (each an independent boolean) and then the resolved mouse protocol, coordinate encoding and
     /// wheel mode, which are not modes at all. The order is load-bearing — @see the definition.
@@ -198,7 +212,11 @@ class ScreenMirror
     /// @param page The page the line belongs to.
     /// @param offset Where the line is in @p page; negative for a scrollback row.
     /// @param row The wire row to write, or nullptr to clear the line.
-    void writeLine(vtbackend::Screen& page, vtbackend::LineOffset offset, proto::WireLine const* row);
+    /// @param firstColumn The column of @p row that lands in the line's first one (@see writeRow).
+    void writeLine(vtbackend::Screen& page,
+                   vtbackend::LineOffset offset,
+                   proto::WireLine const* row,
+                   vtbackend::ColumnOffset firstColumn);
 
     /// Heads every block noted since the last call that has no head in the mirror's grid yet, by the rule
     /// the host heads by — once all of an update's rows are written, since a lowest mark can only be told
@@ -228,6 +246,14 @@ class ScreenMirror
 
     /// @return The page the server's `screenType` names, on the mirror terminal.
     [[nodiscard]] vtbackend::Screen& activePage() const noexcept;
+
+    /// Which cell of @p screen's grid the mirror page's top-left cell shows: the origin of the window a
+    /// page smaller than the host's grid shows into it, following the host's cursor (viewportOrigin), and
+    /// (0,0) for a page at least as large. Under the terminal lock: it reads the page's size.
+    [[nodiscard]] vtbackend::CellLocation originFor(RemoteScreen const& screen) const;
+
+    /// @return The host's row the mirror page's first line shows: the viewport base plus the origin's line.
+    [[nodiscard]] int64_t pageTop() const noexcept;
 
     /// Registers every URI in @p screen's side table that this terminal does not already hold under
     /// the wire id naming it, so `_linkIds` can translate the wire ids the rows carry. Ids are
@@ -313,6 +339,10 @@ class ScreenMirror
     uint32_t _columns = 0;
     uint32_t _lines = 0;
     uint8_t _screenType = 0;
+    /// The cell of the host's grid the mirror page's top-left cell shows, as the last full replay placed it.
+    /// A change rewrites the page (@see apply()); every row written onto the page and the cursor are offset
+    /// by it, and the terminal adds it to the mouse reports it sends.
+    vtbackend::CellLocation _origin {};
     /// Wire hyperlink id → this terminal's own id, so a URI is registered once and every later
     /// cell referencing it resolves without a lookup by string. Re-pointed, never merely inserted:
     /// the sender's id space wraps, and @see syncHyperlinks for what a reused id must do.

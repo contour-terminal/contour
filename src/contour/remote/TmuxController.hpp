@@ -123,9 +123,12 @@ class TmuxController final:
     /// @param placement Places the `tmux -C` client before it runs, as the app places sessions.
     /// @param fileSystem The files of this machine, among which tmux is looked for. Borrowed: it must outlive
     ///        the controller.
+    /// @param clock What the connect budget is measured on (@see RemoteController::awaitConnected).
+    ///        Borrowed: it must outlive the controller.
     TmuxController(std::string tmuxSocket,
                    std::shared_ptr<vtpty::ProcessPlacement> placement,
-                   core::platform::FileSystem const& fileSystem);
+                   core::platform::FileSystem const& fileSystem,
+                   core::platform::IClock const& clock);
 
     /// Stops the reactor (detaching if still connected) and joins.
     ~TmuxController() override;
@@ -173,15 +176,19 @@ class TmuxController final:
     /// (`split-window`) rather than split locally — tmux's %layout-change re-realizes the new pane
     /// through the mirror. A split issued BY the reconciler itself (while realizing an existing tmux
     /// pane) is not re-authored — it builds the mirror pane locally. Returns false (a local split) if
-    /// the pty is not bound to a tmux pane.
-    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty, bool vertical) override;
+    /// the pty is not bound to a tmux pane. tmux has no profiles to run, so @p spawn is not sent.
+    [[nodiscard]] bool requestRemoteSplit(vtpty::Pty const* actingPty,
+                                          bool vertical,
+                                          contour::session::RemoteSpawn const& spawn) override;
 
     /// SessionFactory: a GUI "new tab" is authored on the tmux server as a new window
     /// (`new-window`) rather than created locally; tmux's %window-add + layout re-realizes it through
     /// the mirror as a new tab. Without this override the base returns false and a "new tab" gesture is
     /// a silent no-op in mirror mode (canCreateSession() is false in steady state). A tab created BY the
-    /// reconciler itself (while realizing) is not re-authored.
-    [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty) override;
+    /// reconciler itself (while realizing) is not re-authored. tmux has no profiles to run, so @p spawn
+    /// is not sent.
+    [[nodiscard]] bool requestRemoteTab(vtpty::Pty const* actingPty,
+                                        contour::session::RemoteSpawn const& spawn) override;
 
     /// SessionFactory: the user ENDED the pane backed by @p pty, so kill it on the tmux server too
     /// rather than leave it running there with nothing showing it.

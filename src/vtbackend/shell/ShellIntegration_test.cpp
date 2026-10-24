@@ -5,19 +5,24 @@
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 #include <vtbackend/vt/Functions.hpp>
+#include <vtbackend/vt/SemanticBlockQuery.hpp>
+#include <vtbackend/vt/Sequence.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cctype>
+#include <chrono>
 #include <format>
 #include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace vtbackend;
@@ -86,22 +91,44 @@ std::string authenticatedSBQuery(unsigned queryType, unsigned count, SemanticBlo
     return SBQUERY(queryType, count, token[0], token[1], token[2], token[3]);
 }
 
+/// Sends an authenticated SBQUERY and collects the terminal's whole reply to it, and nothing else.
+///
+/// @param mc The MockTerm to query.
+/// @param query The SBQUERY sequence.
+/// @return The reply, as the shell reads it from its stdin.
+std::string queryBlocksWhole(MockTerm<>& mc, std::string_view query)
+{
+    mc.resetReplyData();
+    mc.writeToScreen(query);
+    mc.terminal.flushInput();
+    return mc.replyData();
+}
+
+/// @p reply without the keys JSON version 2 appended to every block (`id`, `cwd`, `startedAt`, `durationMs`).
+///
+/// What the cases that pin version 1's keys compare: that they are byte for byte what they were is the
+/// promise version 2 makes, and the appended keys are pinned by cases of their own.
+std::string withoutVersion2Keys(std::string const& reply)
+{
+    static auto const appended = std::regex {
+        R"re(,"id":[0-9]+,"cwd":(null|"(\\.|[^"\\])*"),"startedAt":(null|"[^"]*"),"durationMs":(null|[0-9]+)\})re"
+    };
+    return std::regex_replace(reply, appended, "}");
+}
+
 /// Sends an authenticated SBQUERY and collects the terminal's reply to it, and nothing else.
 ///
 /// @param mc The MockTerm to query.
 /// @param queryType The SBQUERY query type (Ps).
 /// @param count The count parameter (Pn).
 /// @param token The session token to authenticate with.
-/// @return The reply, as the shell reads it from its stdin.
-std::string const& queryBlocks(MockTerm<>& mc,
-                               unsigned queryType,
-                               unsigned count,
-                               SemanticBlockTracker::Token const& token)
+/// @return The reply, as the shell reads it from its stdin, with version 1's keys only (withoutVersion2Keys).
+std::string queryBlocks(MockTerm<>& mc,
+                        unsigned queryType,
+                        unsigned count,
+                        SemanticBlockTracker::Token const& token)
 {
-    mc.resetReplyData();
-    mc.writeToScreen(authenticatedSBQuery(queryType, count, token));
-    mc.terminal.flushInput();
-    return mc.replyData();
+    return withoutVersion2Keys(queryBlocksWhole(mc, authenticatedSBQuery(queryType, count, token)));
 }
 
 /// Simulates a complete command cycle: prompt -> command -> output -> finish.
@@ -569,7 +596,7 @@ TEST_CASE("SemanticBlockProtocol.QueryLastCommand")
     // Should get success DCS
     REQUIRE(reply.contains("\033P>1b"));
     // Should contain JSON with version
-    CHECK(reply.contains("\"version\":1"));
+    CHECK(reply.contains("\"version\":2"));
     // Should contain the command
     CHECK(reply.contains("\"command\":\"ls\""));
     // Should contain exit code
@@ -650,7 +677,7 @@ TEST_CASE("SemanticBlockProtocol.aHostileCommandLineIsRepliedAsSafeJson", "[sema
 
 TEST_CASE("SemanticBlockProtocol.AnUnknownQueryTypeIsRefused", "[semanticblocks]")
 {
-    // Only Ps 1 to 3 mean something. Any other is answered as a query with no data, not as Ps 2's "the last N
+    // Only Ps 1 to 4 mean something. Any other is answered as a query with no data, not as Ps 2's "the last N
     // blocks": a reader asking a question this terminal does not know must not read an answer to another.
     auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
     auto const token = enableModeAndGetToken(mc);
@@ -658,7 +685,7 @@ TEST_CASE("SemanticBlockProtocol.AnUnknownQueryTypeIsRefused", "[semanticblocks]
     simulateCommand(mc, "$ ", "cmd2", "out2", 0);
     mc.writeToScreen("\033]133;A\033\\");
 
-    for (auto const queryType: { 4U, 5U, 65535U })
+    for (auto const queryType: { 5U, 6U, 65535U })
     {
         INFO("Ps " << queryType);
         CHECK(queryBlocks(mc, queryType, 2, token) == "\033P>0b\033\\");
@@ -1001,7 +1028,7 @@ namespace
 /// @param blocks The JSON of each block, comma-separated, oldest first.
 [[nodiscard]] std::string blocksReply(std::string_view blocks)
 {
-    return std::format("\033P>1b{{\"version\":1,\"blocks\":[{}]}}\033\\", blocks);
+    return std::format("\033P>1b{{\"version\":2,\"blocks\":[{}]}}\033\\", blocks);
 }
 
 /// @p text as OSC 133;C's cmdline_url carries it: every byte but an ASCII letter or digit percent-encoded,
@@ -1314,7 +1341,8 @@ TEST_CASE("SemanticBlockProtocol.TheDocumentedExampleSession", "[semanticblocks]
         mc.resetReplyData();
         mc.writeToScreen(writes);
         mc.terminal.flushInput();
-        auto reply = mc.replyData();
+        // The keys version 2 appends are left out, as the page's step 4 leaves them out.
+        auto reply = withoutVersion2Keys(mc.replyData());
         mc.writeToScreen("\033]133;D;0\033\\");
         return reply;
     };
@@ -1348,7 +1376,12 @@ TEST_CASE("SemanticBlockProtocol.TheDocumentedExampleSession", "[semanticblocks]
                          R"("prompt":"user@host:~$ printf '\\033[>3;1;41394;50132;58870;1816b'","output":"",)"
                          R"("exitCode":-1,"finished":false,"outputLineCount":1})"));
 
-    // 7.
+    // 7. Step 3's `echo hello` by its id, which step 4's reply carried.
+    CHECK(run(R"(printf '\033[>4;4;41394;50132;58870;1816;0b')", "\033[>4;4;41394;50132;58870;1816;0b")
+          == blocksReply(R"({"command":"echo hello","prompt":"user@host:~$ echo hello","output":"hello",)"
+                         R"("exitCode":0,"finished":true,"outputLineCount":1})"));
+
+    // 8.
     CHECK(run(R"(printf '\033[?2034l')", "\033[?2034l").empty());
     CHECK_FALSE(mc.terminal.semanticBlockTracker().isEnabled());
 }
@@ -1727,3 +1760,116 @@ TEST_CASE("ShellIntegration.OSC 133;D invalidates the fold ranges it changes")
     // Without the invalidation this still reports the warmed, empty answer.
     CHECK(!mock.terminal.foldRanges().empty());
 }
+
+// {{{ SBQUERY 4 and JSON version 2
+
+namespace
+{
+/// An SBQUERY 4 for the block @p id, Pn and Ph split as a reader splits it.
+std::string queryBlockById(SemanticBlockTracker::Token const& token, uint32_t id)
+{
+    return SBQUERY(SBQueryType::BlockById, id & 0xFFFF, token[0], token[1], token[2], token[3], id >> 16);
+}
+
+/// A CSI sequence carrying @p values as its parameters.
+vtbackend::Sequence sequenceWith(std::initializer_list<uint16_t> values)
+{
+    auto seq = vtbackend::Sequence {};
+    auto builder = vtbackend::SequenceParameterBuilder { seq.parameters() };
+    auto first = true;
+    for (auto const value: values)
+    {
+        if (!std::exchange(first, false))
+            builder.nextParameter();
+        builder.set(value);
+    }
+    builder.fixiate();
+    return seq;
+}
+} // namespace
+
+TEST_CASE("SBQUERY 4 answers a block by id with cwd and timing", "[vtbackend][sbquery]")
+{
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+    mc.writeToScreen("\033]7;file://h/tmp\033\\");
+    auto const token = enableModeAndGetToken(mc);
+
+    // The first command: started a second into the session, running for 1500 ms.
+    mc.wallClock.advance(std::chrono::seconds { 1 });
+    typeAtPrompt(mc, "make");
+    mc.writeToScreen("\033]133;C\033\\built\r\n");
+    mc.steadyClock.advance(std::chrono::milliseconds { 1500 });
+    mc.writeToScreen("\033]133;D;0\033\\");
+    auto const first = unbox(mc.terminal.commandBlocks().lastFinished()->id);
+    runCommand(mc, "ls", { "a-file" });
+    mc.writeToScreen("\033]133;A\033\\$ ");
+
+    CHECK(queryBlocksWhole(mc, queryBlockById(token, first))
+          == std::format("\033P>1b{{\"version\":2,\"blocks\":[{{\"command\":\"make\",\"prompt\":\"$ make\","
+                         "\"output\":\"built\",\"exitCode\":0,\"finished\":true,\"outputLineCount\":1,"
+                         "\"id\":{},\"cwd\":\"/tmp\",\"startedAt\":\"1970-01-01T00:00:01.000Z\","
+                         "\"durationMs\":1500}}]}}\033\\",
+                         first));
+
+    // A block in any state, the one at its prompt included: no command has started in it, so it has no
+    // directory (taken as its command starts), no start and no duration yet.
+    auto const current = unbox(mc.terminal.commandBlocks().currentId());
+    auto const atPrompt = queryBlocksWhole(mc, queryBlockById(token, current));
+    CHECK(atPrompt.contains(
+        std::format(R"("id":{},"cwd":null,"startedAt":null,"durationMs":null}})", current)));
+    CHECK(atPrompt.contains(R"("finished":false)"));
+}
+
+TEST_CASE("SBQUERY 4 refuses blocks the reader may not see or that do not exist", "[vtbackend][sbquery]")
+{
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+    runCommand(mc, "before", { "secret" });
+    auto const before = unbox(mc.terminal.commandBlocks().lastFinished()->id);
+    mc.writeToScreen("\033]133;A\033\\$ ");
+    auto const token = enableModeAndGetToken(mc);
+    runCommand(mc, "after", { "out" });
+
+    auto constexpr NoData = std::string_view { "\033P>0b\033\\" };
+    // Run before the reader's session began: hidden, as the other queries hide it.
+    CHECK(queryBlocksWhole(mc, queryBlockById(token, before)) == NoData);
+    // No such block.
+    CHECK(queryBlocksWhole(mc, queryBlockById(token, 4242)) == NoData);
+    // Zero is no block's id, and is what an absent Pn reads as.
+    CHECK(queryBlocksWhole(mc, queryBlockById(token, 0)) == NoData);
+    // The token is still required.
+    CHECK(queryBlocksWhole(mc, SBQUERY(SBQueryType::BlockById, before)) == "\033P>2b\033\\");
+}
+
+TEST_CASE("sbQueryBlockId joins the high part", "[vtbackend][sbquery]")
+{
+    CHECK(vtbackend::sbQueryBlockId(sequenceWith({ 4, 1, 9, 9, 9, 9, 1 })) == CommandBlockId { 65537 });
+    CHECK(vtbackend::sbQueryBlockId(sequenceWith({ 4, 1, 9, 9, 9, 9 })) == CommandBlockId { 1 });
+    CHECK(vtbackend::sbQueryBlockId(sequenceWith({ 4, 0xFFFF, 9, 9, 9, 9, 2 }))
+          == CommandBlockId { 0x2FFFF });
+    CHECK(vtbackend::sbQueryBlockId(sequenceWith({ 4 })) == CommandBlockId { 0 });
+}
+
+TEST_CASE("SBQUERY replies are version 2", "[vtbackend][sbquery]")
+{
+    // A reader of version 1 finds every key it knows, in the place and the form it knew it; the keys version
+    // 2 adds come after them.
+    auto mc = MockTerm { PageSize { LineCount(25), ColumnCount(80) } };
+    auto const token = enableModeAndGetToken(mc);
+    runCommand(mc, "ls", { "a-file" });
+    mc.writeToScreen("\033]133;A\033\\$ ");
+
+    auto const reply = queryBlocksWhole(mc, authenticatedSBQuery(SBQueryType::LastCommand, 1, token));
+    auto const id = unbox(mc.terminal.commandBlocks().lastFinished()->id);
+    CHECK(reply
+          == std::format(
+              "\033P>1b{{\"version\":2,\"blocks\":[{{\"command\":\"ls\",\"prompt\":\"$ ls\","
+              "\"output\":\"a-file\",\"exitCode\":0,\"finished\":true,\"outputLineCount\":1,"
+              "\"id\":{},\"cwd\":null,\"startedAt\":\"1970-01-01T00:00:00.000Z\",\"durationMs\":0}}]}}"
+              "\033\\",
+              id));
+    CHECK(withoutVersion2Keys(reply)
+          == blocksReply(R"({"command":"ls","prompt":"$ ls","output":"a-file","exitCode":0,"finished":true,)"
+                         R"("outputLineCount":1})"));
+}
+
+// }}}

@@ -17,10 +17,22 @@
 # below).
 #
 # Usage: scripts/run-display-tests.sh <path-to-contour_gui_test> [extra test binary args...]
+#        scripts/run-display-tests.sh --run <program> [args...]
+#
+# With --run the program is started as given, under the same compositor and private session bus, and
+# no test selection is appended: for a measurement that needs a real display (bench-latency e2e), not
+# a Catch2 suite.
 
 set -euo pipefail
 
-TEST_BINARY="${1:?usage: $0 <path-to-contour_gui_test> [args...]}"
+# The arguments appended to the program: the display tests' tag, unless the program is no test binary.
+SELECTION=("[display]")
+if [ "${1:-}" = "--run" ]; then
+    SELECTION=()
+    shift
+fi
+
+TEST_BINARY="${1:?usage: $0 [--run] <program> [args...]}"
 shift
 [ -x "$TEST_BINARY" ] || { echo "error: $TEST_BINARY is not executable" >&2; exit 64; }
 
@@ -74,7 +86,7 @@ run_tests()
     ASAN_OPTIONS="hard_rss_limit_mb=4096:${ASAN_OPTIONS:-}" \
     LSAN_OPTIONS="${LSAN_OPTIONS:-detect_leaks=0}" \
         dbus-run-session --config-file="$BUS_CONFIG" -- \
-            env -u AT_SPI_BUS_ADDRESS "$TEST_BINARY" "[display]" "$@"
+            env -u AT_SPI_BUS_ADDRESS "$TEST_BINARY" "${SELECTION[@]}" "$@"
 }
 
 # 1. Explicit caller-chosen platform.

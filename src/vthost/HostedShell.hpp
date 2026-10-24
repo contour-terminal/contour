@@ -12,7 +12,12 @@
 
 #include <core/Utf8Path.hpp>
 
+#include <cstdint>
 #include <filesystem>
+#include <optional>
+
+#include <vtcontrol/ObjectRef.hpp>
+#include <vtcontrol/Uuid.hpp>
 
 namespace vthost
 {
@@ -29,6 +34,9 @@ namespace vthost
 /// and with escape_sandbox (the default) that shell runs on the host while the daemon that spawned
 /// it does not. @see muxSocketPath.
 ///
+/// `$CONTOUR_DAEMON` is the same path under the name the control API's clients look for: `contour` reads it
+/// to find the daemon its pane belongs to. `$CONTOUR_MUX` stays as it is.
+///
 /// Note what is NOT here and arguably should be: `TERM`, `COLORTERM` and `TERM_PROGRAM`, which the
 /// GUI path sets from YAMLConfigReader::defaultSettings() and which a daemon-hosted shell has
 /// therefore never received at all. That is a pre-existing gap, named here rather than fixed,
@@ -39,7 +47,70 @@ namespace vthost
 [[nodiscard]] inline vtpty::Process::Environment hostedShellEnvironment(
     std::filesystem::path const& socketPath)
 {
-    return vtpty::Process::Environment { { "CONTOUR_MUX", core::pathToUtf8(socketPath) } };
+    auto const path = core::pathToUtf8(socketPath);
+    return vtpty::Process::Environment { { "CONTOUR_MUX", path }, { "CONTOUR_DAEMON", path } };
+}
+
+/// The environment that tells a pane's shell which pane, tab and window it lives in, so that
+/// `$CONTOUR_PANE` is the default target of every control call the shell makes.
+/// @param window The window's UUID.
+/// @param tab The tab's UUID.
+/// @param pane The pane's UUID.
+/// @return `CONTOUR_PANE`, `CONTOUR_TAB` and `CONTOUR_WINDOW`, each the full reference (`pane:<uuid>`).
+[[nodiscard]] inline vtpty::Process::Environment paneEnvironment(vtcontrol::Uuid const& window,
+                                                                 vtcontrol::Uuid const& tab,
+                                                                 vtcontrol::Uuid const& pane)
+{
+    return vtpty::Process::Environment {
+        { "CONTOUR_PANE", vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }) },
+        { "CONTOUR_TAB", vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, tab }) },
+        { "CONTOUR_WINDOW",
+          vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Window, window }) },
+    };
+}
+
+/// What a spawn's command override is, against the daemon's configured shell.
+enum class ShellOverride : uint8_t
+{
+    /// A layout pane's command and directory, laid over the daemon's shell: the host has no profiles.
+    Overlays = 0,
+    /// A whole shell the host resolved from a profile — program, arguments, directory and environment —
+    /// which replaces the daemon's, so no variable of another profile reaches it. This is what the
+    /// in-process GUI spawns for that profile (config::resolvedSessionConfig's shell).
+    Replaces = 1,
+};
+
+/// The shell a hosted session is spawned with.
+/// @param base The daemon's configured shell.
+/// @param commandOverride What the spawn asked for; nullopt runs @p base.
+/// @param mode How @p commandOverride relates to @p base. Replacing, a program-less override still runs
+///        @p base's program and arguments.
+/// @param hosted The daemon's own variables (@ref hostedShellEnvironment), which win over any profile's.
+/// @return The shell to spawn.
+[[nodiscard]] inline vtpty::Process::ExecInfo hostedShellFor(
+    vtpty::Process::ExecInfo const& base,
+    std::optional<vtpty::Process::ExecInfo> const& commandOverride,
+    ShellOverride mode,
+    vtpty::Process::Environment const& hosted)
+{
+    auto effective = base;
+    if (commandOverride && mode == ShellOverride::Replaces)
+    {
+        effective = *commandOverride;
+        if (effective.program.empty())
+        {
+            effective.program = base.program;
+            effective.arguments = base.arguments;
+        }
+    }
+    else
+        vtpty::Process::applyCommandOverride(effective, commandOverride);
+    // insert_or_assign, so the daemon wins over a profile that set the same name: a hosted shell being
+    // told where a DIFFERENT daemon lives is never what was meant, and it has no other way to learn
+    // where this one is.
+    for (auto const& [name, value]: hosted)
+        effective.env.insert_or_assign(name, value);
+    return effective;
 }
 
 } // namespace vthost

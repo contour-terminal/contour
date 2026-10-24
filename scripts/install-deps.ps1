@@ -8,6 +8,7 @@ class ThirdParty {
     [ValidateNotNullOrEmpty()] [string] $Archive
     [ValidateNotNullOrEmpty()] [string] $URI
     [string] $Macro
+    [bool] $SourceOnly
 }
 
 # Single source of truth: the version lives in cmake/ContourThirdParties.cmake
@@ -26,6 +27,7 @@ if (-not $libunicode_match) {
 }
 $libunicode_version = $libunicode_match.Matches[0].Groups[1].Value
 $reflection_cpp_version="0.4.0"
+$glaze_version="9.0.0"
 
 # Take care, order matters, at least as much as dependencies are of concern.
 $ThirdParties =
@@ -35,6 +37,14 @@ $ThirdParties =
         Archive = "reflection-cpp-${reflection_cpp_version}.zip";
         URI     = "https://github.com/contour-terminal/reflection-cpp/archive/refs/tags/v${reflection_cpp_version}.zip";
         Macro   = "reflection_cpp"
+    };
+    [ThirdParty]@{
+        Folder  = "glaze-${glaze_version}";
+        Archive = "glaze-${glaze_version}.zip";
+        URI     = "https://github.com/stephenberry/glaze/archive/refs/tags/v${glaze_version}.zip";
+        # Only unpacked, never added: cmake/ContourThirdParties.cmake declares the folder to
+        # FetchContent itself, ahead of termbench-pro's own glaze, so that the build holds exactly one.
+        SourceOnly = $true
     };
     [ThirdParty]@{
         Folder  = "libunicode-${libunicode_version}";
@@ -63,6 +73,7 @@ function Fetch-And-Add {
         [Parameter(Mandatory)] [string] $Archive,
         [Parameter(Mandatory)] [string] $URI,
         [string] $Macro,
+        [bool] $SourceOnly,
         [Parameter(Mandatory)] [string] $CMakeListsFile
     )
 
@@ -86,6 +97,10 @@ function Fetch-And-Add {
     }
     else {
         Write-Host "Already there ${Folder}"
+    }
+
+    if ($SourceOnly) {
+        return
     }
 
     if ($Macro -ne "") {
@@ -126,6 +141,7 @@ function Run {
             -Archive $TP.Archive `
             -URI $TP.URI `
             -Macro $TP.Macro `
+            -SourceOnly $TP.SourceOnly `
             -Target $ThirdPartiesDir `
             -CMakeListsFile $CMakeListsFile
     }

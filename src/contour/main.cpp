@@ -18,12 +18,14 @@
 #endif
 
 #include <core/Environment.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <optional>
 #include <print>
 #include <string>
 #include <string_view>
@@ -182,6 +184,11 @@ void qtCustomMessageOutput(QtMsgType type, QMessageLogContext const& context, QS
 
 int main(int argc, char const* argv[])
 {
+#ifdef CONTOUR_FRONTEND_GUI
+    // The origin of the startup timeline: sampled before anything else runs.
+    auto const processStart = core::platform::defaultSteadyClock().now();
+#endif
+
 #ifdef _WIN32
     // Ahead of the app, which keeps argv for as long as it lives.
     auto const arguments = utf8Arguments();
@@ -210,7 +217,21 @@ int main(int argc, char const* argv[])
 #ifdef CONTOUR_FRONTEND_GUI
     qInstallMessageHandler(qtCustomMessageOutput);
 
-    contour::ContourGuiApp app { environment };
+    contour::ContourGuiApp app { environment,
+                                 nullptr, // sessionFactory
+                                 nullptr, // externalLauncher
+                                 nullptr, // layoutStore
+                                 nullptr, // commandHistoryStore
+                                 nullptr, // speechSynthesizer
+                                 nullptr, // commandOutputFiles
+                                 vtbackend::TerminalClocks::system(),
+                                 std::nullopt, // hostIdentity
+                                 nullptr,      // fileSystem
+                                 nullptr,      // processPlacement
+                                 std::nullopt, // linkServices
+                                 nullptr,      // taskbarProgress
+                                 nullptr,      // windowPositionStore
+                                 processStart };
 #else
     // Without the GUI frontend there is no window to open, so `contour client` is gone with it;
     // what remains is `contour daemon` and the CLI verbs, which need nothing beyond Qt Core.

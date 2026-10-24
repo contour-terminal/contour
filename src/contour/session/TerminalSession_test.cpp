@@ -10935,3 +10935,63 @@ TEST_CASE("TerminalSession: input into a program that reads nothing leaves the G
     }
     CHECK(pty->written() == "abcd");
 }
+
+TEST_CASE("TerminalSession: a mirrored pane follows its host connection, a local one ignores it",
+          "[contour][session][reconnect]")
+{
+    using vthost::client::ConnectionState;
+    TestApp testApp;
+    auto const remote =
+        std::make_unique<contour::session::TerminalSession>(&testApp.app().sessionsManager(),
+                                                            std::make_unique<vtpty::MockPty>(TestPageSize),
+                                                            testApp.app(),
+                                                            std::string {},
+                                                            std::nullopt,
+                                                            std::nullopt,
+                                                            contour::test::makeTestNotifier(),
+                                                            contour::session::SessionRole::Shell,
+                                                            contour::session::SessionHosting::Remote);
+    auto changes = 0;
+    QObject::connect(
+        remote.get(), &contour::session::TerminalSession::reconnectingChanged, [&changes] { ++changes; });
+    CHECK_FALSE(remote->isReconnecting()); // born connected
+
+    remote->setHostConnection(ConnectionState::Reconnecting);
+    CHECK(remote->isReconnecting());
+    CHECK(changes == 1);
+    remote->setHostConnection(ConnectionState::Reconnecting); // no change, no signal
+    CHECK(changes == 1);
+    remote->setHostConnection(ConnectionState::Connected);
+    CHECK_FALSE(remote->isReconnecting());
+    CHECK(changes == 2);
+
+    auto const local = makeDisplaylessSession(testApp.app());
+    auto localChanges = 0;
+    QObject::connect(local.get(), &contour::session::TerminalSession::reconnectingChanged, [&localChanges] {
+        ++localChanges;
+    });
+    local->setHostConnection(ConnectionState::Reconnecting);
+    CHECK_FALSE(local->isReconnecting());
+    CHECK(localChanges == 0);
+}
+
+TEST_CASE("TerminalSessionManager: the host connection reaches every remotely hosted session",
+          "[contour][session][reconnect]")
+{
+    using vthost::client::ConnectionState;
+    auto owned = std::make_unique<contour::test::MockPtySessionFactory>();
+    owned->reportedHosting = contour::session::SessionHosting::Remote;
+    auto app = TestApp { std::move(owned) };
+    auto const win = contour::test::ScopedController { app.manager() };
+    auto* first = app.manager().createSession(win.id);
+    auto* second = app.manager().createSession(win.id);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+
+    app.manager().setHostConnection(ConnectionState::Reconnecting);
+    CHECK(first->isReconnecting());
+    CHECK(second->isReconnecting());
+    app.manager().setHostConnection(ConnectionState::Connected);
+    CHECK_FALSE(first->isReconnecting());
+    CHECK_FALSE(second->isReconnecting());
+}

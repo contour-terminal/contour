@@ -18,6 +18,7 @@
 #include <vtpty/Pty.hpp>
 
 #include <core/async/Task.hpp>
+#include <core/platform/Clock.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -75,22 +76,23 @@ class SelfUnbindingChannelPty final: public vtpty::ChannelPty
     std::function<void()> _onDestroy;
 };
 
-/// A mux controller's connection lifecycle. `connectAndWait` blocks until the
+/// A mux controller's connection lifecycle. `awaitConnected` blocks until the
 /// phase leaves Connecting; the reactor's serve-loop epilogue settles it to
 /// Failed or Closed.
 enum class MuxConnectPhase : uint8_t
 {
-    Connecting, ///< The reactor started; no session/pane discovered yet.
-    Ready,      ///< The first unit of remote structure arrived (handshake done).
-    Failed,     ///< The connection could not be established.
-    Closed,     ///< The connection ended after having been Ready.
+    Connecting,   ///< The reactor started; no session/pane discovered yet.
+    Ready,        ///< The first unit of remote structure arrived (handshake done).
+    Failed,       ///< The connection could not be established.
+    Closed,       ///< The connection ended after having been Ready.
+    Reconnecting, ///< It had been Ready, was lost, and is being sought again; Ready once it is back.
 };
 
 /// The result of `awaitMuxConnect`: exactly one of ready/timedOut holds, or
 /// neither (the phase reached Failed/Closed without a timeout).
 struct MuxConnectOutcome
 {
-    bool ready = false;    ///< The phase reached Ready.
+    bool ready = false;    ///< The phase reached Ready (and may have lost it again since: Reconnecting).
     bool timedOut = false; ///< The wait elapsed while still Connecting.
     std::string failure;   ///< The recorded failure reason (empty if none).
 };
@@ -118,6 +120,12 @@ struct MuxConnectOutcome
 /// @return An unbound `ChannelPty` the session can drive and close cleanly.
 [[nodiscard]] std::unique_ptr<vtpty::Pty> makeUnboundFallbackPty(std::optional<vtbackend::PageSize> pageSize);
 
+/// The least awaitConnected() waits, however much of its budget the caller spent before asking: the
+/// budget runs from startConnecting(), so a GUI boot stalled by something the daemon does not control
+/// (a fontconfig rebuild, a wedged desktop portal) would otherwise report a healthy daemon as timed out.
+/// A budget shorter than this is waited in full and no longer.
+inline constexpr auto MinimumConnectAwait = std::chrono::milliseconds { 2000 };
+
 /// How long stopMuxReactor lets a detached client end its connection before it cancels the loop:
 /// the graceful close's own deadline plus room for the turns around it.
 inline constexpr auto DefaultDetachBound = std::chrono::milliseconds { 3000 };
@@ -144,9 +152,9 @@ inline constexpr auto DefaultDetachBound = std::chrono::milliseconds { 3000 };
                                   std::chrono::milliseconds detachBound = DefaultDetachBound);
 
 /// The connect state machine both GUI mux controllers share: the reactor thread plus the
-/// connection-phase handshake, with `connectAndWait()` / `stop()` implemented ONCE on top of the
-/// free functions above. A concrete controller (native attach, tmux mirror) supplies its own client
-/// lifetime, detach, binding teardown, and connect messages through the protected hooks; the
+/// connection-phase handshake, with `startConnecting()` / `awaitConnected()` / `stop()` implemented ONCE on
+/// top of the free functions above. A concrete controller (native attach, tmux mirror) supplies its own
+/// client lifetime, detach, binding teardown, and connect messages through the protected hooks; the
 /// per-remote PENDING/BINDING registry stays in the derived controller, since the remote unit — a
 /// native session vs a tmux pane — differs.
 ///
@@ -162,9 +170,22 @@ class RemoteController
     RemoteController(RemoteController&&) = delete;
     RemoteController& operator=(RemoteController&&) = delete;
 
-    /// Starts the reactor on `runClient()`, then blocks the calling (GUI) thread until the handshake
-    /// completes, fails, or times out. On timeout it stops and returns `connectTimeoutMessage()`; a
-    /// non-ready close returns the recorded failure or `connectClosedMessage()`.
+    /// Starts the reactor on `runClient()` and returns at once, the connect running on the reactor
+    /// while the caller goes on with its own work (the GUI loads QML meanwhile). Stamps the instant
+    /// awaitConnected() counts its budget from. Idempotent: a second call does nothing.
+    void startConnecting();
+
+    /// Blocks the calling (GUI) thread until the handshake completes, fails, or the budget runs out.
+    /// The budget counts from startConnecting(), not from this call: it waits for what remains of it,
+    /// so the time the caller spent between the two is already spent -- but never less than
+    /// `MinimumConnectAwait` (or the whole budget, if that is shorter). On expiry it stops and returns
+    /// `connectTimeoutMessage()`; a non-ready close returns the recorded failure or
+    /// `connectClosedMessage()`. Starts the connect first if startConnecting() has not.
+    /// @param budget How long the connect may take, from startConnecting().
+    /// @return Nothing on success; a human-readable reason on failure.
+    [[nodiscard]] std::expected<void, std::string> awaitConnected(std::chrono::milliseconds budget);
+
+    /// startConnecting(), then awaitConnected(): for a caller with nothing to do meanwhile.
     /// @param timeout How long to wait before giving up.
     /// @return Nothing on success; a human-readable reason on failure.
     [[nodiscard]] std::expected<void, std::string> connectAndWait(std::chrono::milliseconds timeout);
@@ -174,7 +195,9 @@ class RemoteController
     void stop();
 
   protected:
-    RemoteController() = default;
+    /// @param clock What awaitConnected() measures the budget spent since startConnecting() on.
+    ///        Borrowed: it must outlive the controller.
+    explicit RemoteController(core::platform::IClock const& clock): _clock(clock) {}
     ~RemoteController() = default;
 
     /// The reactor's whole lifetime (connect, serve, notify); runs on the reactor thread.
@@ -205,6 +228,9 @@ class RemoteController
     [[nodiscard]] bool isConnected() const;
 
     using State = MuxConnectPhase;
+    core::platform::IClock const& _clock;
+    /// When startConnecting() started the connect; empty until it has. GUI thread only.
+    std::optional<core::platform::SteadyTimePoint> _connectStartedAt;
     ReactorThread _reactor;
     mutable std::mutex _mutex;          ///< Guards the phase/failure AND each controller's registry.
     std::condition_variable _connected; ///< Notified by the reactor on every phase transition.

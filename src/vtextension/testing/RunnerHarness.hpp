@@ -208,6 +208,14 @@ class RunnerHarness
             .onLog = [this](std::string_view /*name*/,
                             LogLevel /*level*/,
                             std::string_view message) { logged.emplace_back(message); },
+            .callControl =
+                [this](std::string_view method,
+                       std::string_view /*params*/,
+                       vtcontrol::ControlGrants /*granted*/,
+                       std::chrono::milliseconds /*timeout*/) {
+                    controlMethods.emplace_back(method);
+                    return controlAnswer;
+                },
         };
     }
 
@@ -225,6 +233,8 @@ class RunnerHarness
     std::size_t published = 0; ///< How often onSnapshotPublished was called.
     std::vector<PermissionRequest> permissionRequests;
     std::vector<std::string> logged;
+    std::vector<std::string> controlMethods; ///< Every control verb served, in order.
+    std::expected<std::string, vtcontrol::ControlError> controlAnswer; ///< What a control verb answers.
 };
 
 } // namespace vtextension::testing

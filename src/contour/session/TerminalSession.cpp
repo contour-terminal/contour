@@ -246,6 +246,7 @@ namespace
             sessionLog()("ExitWatcherThread: Started.");
             _session.terminal().device().waitForClosed();
             sessionLog()("ExitWatcherThread: Terminal device closed.");
+            _session.deviceClosed();
             platform::postToObject(&_session, [&]() { _session.onClosed(); });
         }
 
@@ -434,6 +435,16 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     // Once the terminal exists, which the build reports to. Without extensions this starts nothing (A2).
     reloadExtensions();
 #endif
+}
+
+void TerminalSession::setHostConnection(vthost::client::ConnectionState state)
+{
+    if (_hosting != SessionHosting::Remote)
+        return;
+    auto const wasReconnecting = isReconnecting();
+    _hostConnection = state;
+    if (isReconnecting() != wasReconnecting)
+        emit reconnectingChanged();
 }
 
 TerminalSession::~TerminalSession()
@@ -737,6 +748,13 @@ void TerminalSession::mainLoop()
     }
 
     sessionLog()("Event loop terminating (PTY {}).", _terminal.device().isClosed() ? "closed" : "open");
+}
+
+void TerminalSession::deviceClosed()
+{
+    // A requested close ends the session, and its records with it: nothing is left to drop.
+    if (!_terminationRequested)
+        _terminal.markProcessExited();
 }
 
 void TerminalSession::terminate()
@@ -2123,6 +2141,22 @@ void TerminalSession::progressChanged(vtbackend::Progress /*progress*/)
     // strip cannot paint a state older than the one in effect when the posted call finally runs.
     postToManager([id = modelSessionId()](TerminalSessionManager& manager) {
         manager.refreshTabProgressForSession(id);
+    });
+}
+
+void TerminalSession::programStatusChanged(vtbackend::ProgramStatusChange const& /*change*/)
+{
+    // OSC 7501, a mirror's replacement, a prompt or the process's exit. The threading constraint of
+    // progressChanged() above, and its answer: the badge reads the records back, under the lock, on the GUI
+    // thread, so it never paints a set older than the one in effect when the posted call runs. That is also
+    // what lets a program reporting in a loop cost one queued call, not one per report: while one is queued,
+    // another would read the same records. postToObject targets `this`, so Qt drops it if the session goes.
+    if (_isProgramStatusRefreshPending.exchange(true))
+        return;
+    platform::postToObject(this, [this]() {
+        _isProgramStatusRefreshPending = false;
+        if (_manager != nullptr)
+            _manager->refreshTabProgramStatusForSession(modelSessionId());
     });
 }
 
@@ -3988,6 +4022,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
             .lastCommandLine = lastCommandLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
+            // `hosts` is ordered by name already.
+            .hostNames = std::ranges::to<std::vector>(_config.hosts.value() | std::views::keys),
         };
     });
 }
@@ -4668,7 +4704,7 @@ bool TerminalSession::operator()(actions::IncreaseOpacity)
 
 bool TerminalSession::operator()(actions::NewTerminal const& action)
 {
-    spawnNewTerminal(action.profileName.value_or(_profileName));
+    spawnNewTerminal(action.profileName);
     return true;
 }
 
@@ -5513,6 +5549,23 @@ bool TerminalSession::operator()(actions::LaunchLayout const& event)
     return true;
 }
 
+bool TerminalSession::operator()(actions::AttachToHost const& event)
+{
+    // A process of its own: a GUI process is attached to exactly one daemon for its life.
+    // An unknown name is still handled: the new process would only report the same.
+    if (!_config.hosts.value().contains(event.name))
+    {
+        errorLog()("Could not attach to host \"{}\": {}.", event.name, "no such host under hosts:");
+        return true;
+    }
+    auto const command = buildAttachHostCommand(
+        _app.programPath(), core::platform::normalizePath(_config.configFile), event.name);
+    if (auto const started = _app.externalLauncher().runDetached(command.program, command.arguments);
+        !started)
+        errorLog()("Could not attach to host \"{}\": {}.", event.name, platform::describe(started.error()));
+    return true;
+}
+
 bool TerminalSession::operator()(actions::SaveLayout const& event)
 {
     // Naming no layout means "ask me for one": open the save-as prompt (the mirror of a colorless
@@ -5677,9 +5730,10 @@ std::string TerminalSession::displayWorkingDirectory() const
     return vtbackend::sanitizeCommandLine(directory, vtbackend::SanitizePurpose::Display);
 }
 
-void TerminalSession::spawnNewTerminal(string const& profileName)
+void TerminalSession::spawnNewTerminal(std::optional<std::string> const& requestedProfile)
 {
     auto const wd = workingDirectory();
+    auto const profileName = requestedProfile.value_or(_profileName);
 
     if (_config.spawnNewProcess.value())
     {
@@ -5696,7 +5750,9 @@ void TerminalSession::spawnNewTerminal(string const& profileName)
     {
         // Attach mode: author the window on the daemon (B4); its new-window layout push spawns and
         // binds the matching OS window. A local factory returns false and we open an ordinary window.
-        if (_app.requestRemoteWindow())
+        // The profile the action named, else none: the daemon then runs the one this client named in its
+        // hello, where a local window would run this session's own -- a name the daemon may not have.
+        if (_app.requestRemoteWindow(RemoteSpawn { .profileName = requestedProfile.value_or("") }))
             return;
         sessionLog()("spawning new in-process window");
         _app.config().profile(_profileName)->shell.value().workingDirectory =

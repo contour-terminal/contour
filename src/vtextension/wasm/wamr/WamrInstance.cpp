@@ -338,10 +338,28 @@ namespace
     /// The trampolines, indexed by parameter count.
     constexpr auto Trampolines = makeTrampolines(std::make_index_sequence<MaxHostParameters + 1> {});
 
+    /// The signature of a host function taking @p Arity i32s, in WAMR's notation: `(` an `i` per i32 `)`,
+    /// NUL-terminated.
+    template <std::size_t Arity>
+    constexpr auto SignatureText = [] {
+        auto text = std::array<char, Arity + 3> {};
+        text.front() = '(';
+        std::ranges::fill(std::span { text }.subspan(1, Arity), 'i');
+        text[Arity + 1] = ')';
+        return text;
+    }();
+
+    /// @return The signatures for 0 to MaxHostParameters parameters, indexed by parameter count.
+    template <std::size_t... Arities>
+    [[nodiscard]] consteval auto makeSignatures(std::index_sequence<Arities...> /*arities*/)
+    {
+        return std::array<char const*, sizeof...(Arities)> { SignatureText<Arities>.data()... };
+    }
+
     /// The signatures in WAMR's notation, indexed by parameter count.
-    constexpr auto Signatures =
-        std::to_array<char const*>({ "()", "(i)", "(ii)", "(iii)", "(iiii)", "(iiiii)" });
+    constexpr auto Signatures = makeSignatures(std::make_index_sequence<MaxHostParameters + 1> {});
     static_assert(Signatures.size() == Trampolines.size(), "a signature for every trampoline");
+    static_assert(std::string_view { SignatureText<3>.data() } == "(iii)");
 
     /// @return The process-lived attachments naming host function indices to the trampolines.
     [[nodiscard]] std::array<std::size_t, MaxHostFunctions>& attachments() noexcept

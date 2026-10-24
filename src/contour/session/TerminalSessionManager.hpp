@@ -195,7 +195,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
         // this did — sent every window's "+" to the daemon's FIRST window, so a tab opened in a
         // second attach-mode window appeared in the wrong one and the window clicked in gained
         // nothing.
-        if (_sessionFactory.requestRemoteTab(actingPtyOfWindow(window)))
+        if (_sessionFactory.requestRemoteTab(actingPtyOfWindow(window),
+                                             RemoteSpawn { .profileName = profileName.value_or("") }))
             return;
         createSession(window, profileName);
     }
@@ -588,6 +589,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose hosting tab should refresh its progress indicator.
     void refreshTabProgressForSession(vtworkspace::SessionId session);
 
+    /// Repaints the program-status badge (OSC 7501) of the tab hosting @p session, which pools the records
+    /// of all its panes. No-op if no tab hosts @p session. MUST be called on the GUI thread.
+    /// @param session The session whose records changed.
+    void refreshTabProgramStatusForSession(vtworkspace::SessionId session);
+
     /// What the OS taskbar should show right now, aggregated across every reporting session.
     ///
     /// The staleness policy is read from the config here, at the point of use, rather than pushed
@@ -760,6 +766,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                 session->noteTransportLost();
     }
 
+    /// Tells every session where the connection to the daemon (or tmux server) its pane mirrors stands: each
+    /// whose factory hosts it remotely shows that it is reconnecting while the connection is sought again;
+    /// a local one ignores it. @see TerminalSession::setHostConnection
+    /// @param state Where the connection stands now.
+    void setHostConnection(vthost::client::ConnectionState state)
+    {
+        for (auto* session: _sessionsById | std::views::values)
+            if (session != nullptr)
+                session->setHostConnection(state);
+    }
+
     /// Returns whether the Qt multimedia backend has been initialized.
     [[nodiscard]] bool isMultimediaReady() const noexcept { return _multimediaReady; }
 
@@ -858,6 +875,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param splitNode The split node whose ratio changed.
     /// @param ratio     Its new first-child share.
     void reportSplitRatio(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio);
+
+    /// Tells the session factory how @p tab is presented now (@see SessionFactory::reportTabPresentation):
+    /// what activePaneChanged, paneZoomChanged, tabTitleChanged, tabColorChanged and activeTabChanged call,
+    /// each with the tab it is about. Nothing for a factory whose sessions this process hosts.
+    /// @param tab The tab whose presentation may have changed.
+    void reportTabPresentation(vtworkspace::TabId tab);
 
     /// Re-syncs terminal focus after an active-tab/-pane change in @p controller: if it owns the
     /// focused display, moves focus to its new active-leaf session (symmetric out/in). A background

@@ -8,6 +8,7 @@
 #include <contour/config/ConfigEnumReader.hpp>
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
+#include <contour/config/HostUrl.hpp>
 #include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
@@ -89,6 +90,7 @@
 #include <vector>
 
 #include <reflection-cpp/reflection.hpp>
+#include <vthost/ClientSizePolicy.hpp>
 #include <vtworkspace/LayoutTree.hpp> // layout tree structs (LayoutPane, LayoutTab, Layout)
 
 namespace contour::config
@@ -814,6 +816,83 @@ struct ImagesConfig
     bool sixelScrolling { true };
     int maxImageColorRegisters { 4096 };
     bool goodImageProtocol { false };
+};
+
+/// Whether the terminal hosts its sessions in a daemon process, and how hard it tries to.
+enum class DaemonMode : uint8_t
+{
+    InProcess = 0, ///< Sessions live in the GUI process; no daemon is involved.
+    Auto = 1,      ///< Use a daemon; when none can be reached, fall back to in-process with a notice.
+    Required = 2,  ///< Use a daemon; when none can be reached, fail loudly.
+};
+
+/// The `daemon.mode` spellings, single-sourced: the reader, the writer and the diagnostic read this table.
+constexpr auto DaemonModeNames = std::to_array<std::pair<std::string_view, DaemonMode>>({
+    { "in_process", DaemonMode::InProcess },
+    { "auto", DaemonMode::Auto },
+    { "required", DaemonMode::Required },
+});
+
+/// @param mode The mode to name.
+/// @return Its configuration spelling.
+[[nodiscard]] constexpr std::string_view nameOf(DaemonMode mode) noexcept
+{
+    for (auto const& [name, value]: DaemonModeNames)
+        if (value == mode)
+            return name;
+    return "in_process";
+}
+
+/// @param name A configuration spelling, as written by a user.
+/// @return The mode it names, or nullopt if it names none.
+[[nodiscard]] constexpr std::optional<DaemonMode> daemonModeFrom(std::string_view name) noexcept
+{
+    for (auto const& [candidate, value]: DaemonModeNames)
+        if (candidate == name)
+            return value;
+    return std::nullopt;
+}
+
+/// The most rows `daemon.restore.scrollback_lines` keeps per pane.
+inline constexpr std::size_t MaxRestoreScrollbackLines = 100'000;
+
+/// The shortest `daemon.restore.interval`.
+inline constexpr auto MinRestoreInterval = std::chrono::seconds { 5 };
+
+/// `daemon.restore`: what a daemon keeps of its workspace across a restart.
+struct DaemonRestoreConfig
+{
+    /// `scrollback`: whether a restored pane gets its history back. A Config boundary bool (AGENT.md
+    /// exception); `contour daemon` converts it to vthost::ScrollbackPersistence.
+    bool scrollback = true;
+    /// `scrollback_lines`: the most rows kept per pane, clamped to [0, MaxRestoreScrollbackLines]. It bounds
+    /// the snapshot only; the live scrollback stays `daemon.history_limit`.
+    std::size_t scrollbackLines = 1000;
+    std::vector<std::string> rerunPrograms {}; ///< `rerun_programs`: what a restored pane may re-run.
+    std::chrono::seconds interval {
+        30
+    }; ///< `interval`: how often it is written, at least MinRestoreInterval.
+};
+
+/// The `daemon:` section: whether and how the terminal talks to a session-hosting daemon.
+///
+/// GLOBAL rather than per-profile: it decides where sessions live, not how one of them looks.
+struct DaemonSettings
+{
+    /// Whether to host sessions in a daemon (`daemon.mode`).
+    DaemonMode mode { DaemonMode::InProcess };
+
+    /// The daemon's socket path; empty means the `vthost::muxSocketPath` default.
+    std::string socket {};
+
+    /// Which attached client's size wins when several disagree (`daemon.size_policy`).
+    vthost::ClientSizePolicy sizePolicy { vthost::ClientSizePolicy::Latest };
+
+    /// The scrollback the daemon keeps per session; unset means the hosting profile's `history.limit`.
+    std::optional<vtbackend::MaxHistoryLineCount> historyLimit {};
+
+    /// What the daemon keeps of its workspace across a restart (`daemon.restore`).
+    DaemonRestoreConfig restore {};
 };
 
 struct HorizontalMarginTag
@@ -1585,6 +1664,7 @@ struct Config
     ConfigEntry<bool, documentation::Live> live { false };
     ConfigEntry<std::set<std::string>, documentation::ExperimentalFeatures> experimentalFeatures {};
     ConfigEntry<ImagesConfig, documentation::Images> images {};
+    ConfigEntry<DaemonSettings, documentation::Daemon> daemon {};
     ConfigEntry<FoldingConfig, documentation::Folding> folding {};
     ConfigEntry<GutterConfig, documentation::Gutter> gutter {};
     ConfigEntry<OscContextConfig, documentation::OscContext> oscContext {};
@@ -1595,6 +1675,9 @@ struct Config
     };
     ConfigEntry<std::unordered_map<std::string, Layout>, documentation::Layouts> layouts {};
     ConfigEntry<std::string, documentation::DefaultLayout> defaultLayoutName { "" };
+    /// The saved remote hosts, by name. Ordered, so every listing is sorted by name without a sort at
+    /// each consumer.
+    ConfigEntry<std::map<std::string, HostEntry>, documentation::Hosts> hosts {};
     ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>, documentation::ColorSchemes>
         colorschemes { { { "default", vtbackend::ColorPalette {} } } };
 
@@ -1877,6 +1960,22 @@ struct YAMLConfigReader
 
     void loadFromEntry(YAML::Node const& node, std::string const& entry, Layout& where);
 
+    /// Reads `hosts:` -- a map from a host's name to its `url`, `token_file`, `tls_ca`, `remote_command`
+    /// and `profile`. A malformed entry costs that entry alone, reported, never the map.
+    /// @param node The mapping that holds @p entry.
+    /// @param entry The key to read (`hosts`).
+    /// @param where Receives the entries; a later duplicate replaces an earlier one.
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::map<std::string, HostEntry>& where) const;
+
+    /// Parses one entry of `hosts:`. Never throws: an entry that cannot be used is reported and skipped.
+    /// @param hostNode The entry's value.
+    /// @param name The entry's key, for the report.
+    /// @return The host, or no value when it is skipped.
+    [[nodiscard]] std::optional<HostEntry> parseHostNode(YAML::Node const& hostNode,
+                                                         std::string const& name) const;
+
     /// Parses one layout's node (its `tabs:` sequence) into @p where. Never throws: malformed
     /// scalars are logged and skipped, so one broken layout cannot unwind the whole config load
     /// (which would silently drop every entry loaded after it, e.g. the user's input_mapping).
@@ -2038,6 +2137,8 @@ struct YAMLConfigReader
 
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonRestoreConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where);
@@ -2462,6 +2563,31 @@ struct Writer
         return format(doc, v.sixelScrolling, v.maxImageColorRegisters, v.goodImageProtocol);
     }
 
+    [[nodiscard]] std::string format(std::string_view doc, DaemonSettings const& v)
+    {
+        auto const historyLimit = [&]() -> std::string {
+            if (!v.historyLimit)
+                return "~";
+            if (std::holds_alternative<vtbackend::Infinite>(*v.historyLimit))
+                return "-1";
+            return std::format("{}", unbox(std::get<vtbackend::LineCount>(*v.historyLimit)));
+        }();
+        auto rerunPrograms = std::string { "[" };
+        for (auto const& program: v.restore.rerunPrograms)
+            rerunPrograms +=
+                std::format("{}{}", rerunPrograms.size() > 1 ? ", " : "", SingleQuoted { program });
+        rerunPrograms += "]";
+        return format(doc,
+                      nameOf(v.mode),
+                      SingleQuoted { v.socket },
+                      vthost::nameOf(v.sizePolicy),
+                      historyLimit,
+                      v.restore.scrollback,
+                      v.restore.scrollbackLines,
+                      rerunPrograms,
+                      v.restore.interval.count());
+    }
+
     [[nodiscard]] std::string format(std::string_view doc, WindowMargins const& v)
     {
         return format(doc, v.horizontal, v.vertical);
@@ -2837,6 +2963,11 @@ Config loadConfig();
 ///                   default one (@see loadConfig).
 /// @return The configuration loaded.
 [[nodiscard]] Config loadConfigNamed(std::string_view configPath);
+
+/// @ref loadConfigNamed, reporting a configuration that cannot be loaded instead of throwing.
+/// @param configPath The file, UTF-8; empty for the default one.
+/// @return The configuration loaded, or why it could not be.
+[[nodiscard]] std::expected<Config, std::string> tryLoadConfigNamed(std::string_view configPath);
 void compareEntries(Config& config, auto const& output);
 
 /// The VT-EMULATION half of a profile's terminal settings — everything that decides what
@@ -2865,33 +2996,26 @@ void compareEntries(Config& config, auto const& output);
 /// @return The gutter settings vtbackend draws with.
 [[nodiscard]] vtbackend::GutterSettings gutterSettingsFor(Config const& config);
 
-/// One profile's @ref emulationSettings, from a configuration already loaded: what @ref
-/// resolveEmulationSettings does once it has read the file, for a caller that holds its configuration in
-/// memory -- `contour client`, whose new sessions follow the configuration as a reload left it.
+/// One profile's @ref emulationSettings, from a configuration already loaded in memory -- what
+/// `contour client` needs, whose new sessions follow the configuration as a reload left it.
 ///
 /// @param config The loaded configuration.
 /// @param profileName Profile to resolve; empty selects the configuration's default.
 /// @return The settings, or a human-readable reason they could not be resolved; an unknown profile is
-///         refused, as @ref resolveEmulationSettings refuses it.
+///         refused rather than replaced by the default.
 [[nodiscard]] std::expected<vtbackend::Settings, std::string> emulationSettingsFor(
     Config const& config, std::string const& profileName);
 
-/// Loads a configuration and resolves one profile's @ref emulationSettings from it.
+/// Resolves the host `contour client --host` names: a saved one of `hosts:`, or an ad-hoc URL.
 ///
-/// The whole load-resolve-refuse sequence, in one place, because two verbs need exactly it and
-/// nothing else: `contour daemon`, which hosts terminals no display ever presents, and
-/// `contour client`, which states the same settings in its handshake so a WARM daemon emulates the
-/// sessions it creates the way this client's configuration says. Spelling it twice is how the two
-/// would come to disagree.
-///
-/// @param configPath Configuration file to read; empty selects the default location.
-/// @param profileName Profile to resolve; empty selects the configuration's default.
-/// @return The settings, or a human-readable reason they could not be resolved. An unknown profile
-///         is a failure rather than a fall back to the default one: hosting sessions under a
-///         profile the user did not name is a misconfiguration they would discover only much later,
-///         through the wrong scrollback depth or the wrong reported terminal.
-[[nodiscard]] std::expected<vtbackend::Settings, std::string> resolveEmulationSettings(
-    std::string const& configPath, std::string const& profileName);
+/// @param configPath Configuration file to read; empty selects the default location. Not read for a URL.
+/// @param nameOrUrl A name under `hosts:`, or a URL (anything containing `://`). An ad-hoc `ssh://` URL
+///        needs no configuration; an ad-hoc `tls://` URL is refused, as a TLS daemon needs a token
+///        and only a saved host can name its `token_file`.
+/// @return The host, or a human-readable reason it could not be resolved: a malformed URL, or an
+///         unknown name with the saved ones listed.
+[[nodiscard]] std::expected<HostEntry, std::string> resolveHost(std::string const& configPath,
+                                                                std::string_view nameOrUrl);
 
 /// Picks the color palette @p colorConfig yields for @p preference: the matching half of a dual
 /// (dark/light) config, or the single palette of a simple one.
@@ -3023,8 +3147,16 @@ template <typename A>
     vtbackend::ColorPreference colorPreference,
     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
 
+/// Resolves @p profileName's @ref resolvedSessionConfig in an already loaded @p config, under the color
+/// configuration's light half (a daemon presents nothing itself).
+/// @param config The loaded configuration.
+/// @param profileName Profile to resolve; empty selects the configuration's default.
+/// @return The resolved configuration, or why the profile does not exist.
+[[nodiscard]] std::expected<ResolvedSessionConfig, std::string> resolvedSessionConfigFor(
+    Config const& config, std::string const& profileName);
+
 /// Loads a configuration and resolves one profile's @ref resolvedSessionConfig from it — the
-/// `resolveEmulationSettings` counterpart for callers that also need the shell, sandbox policy and
+/// @ref emulationSettingsFor counterpart for callers that also need the shell, sandbox policy and
 /// presentation fields, chiefly `ContourApp::daemonAction()`.
 ///
 /// @param configPath Configuration file to read; empty selects the default location.
@@ -3304,3 +3436,13 @@ struct std::formatter<
     }
 };
 // }}}
+
+/// Formats a daemon mode as its configuration spelling, so diagnostics quote what the user would write.
+template <>
+struct std::formatter<contour::config::DaemonMode>: std::formatter<std::string_view>
+{
+    auto format(contour::config::DaemonMode mode, auto& ctx) const
+    {
+        return std::formatter<std::string_view>::format(contour::config::nameOf(mode), ctx);
+    }
+};
