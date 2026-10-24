@@ -16,6 +16,11 @@ live_config: false
 tab_bar_position: Bottom
 tab_bar_visibility: Multiple
 
+# The sessions of this run live in the GUI process: the thin client is the default, and this run
+# covers the in-process path.
+daemon:
+    mode: in_process
+
 # OSC 3008 hierarchical context signalling, driven with a non-default scope so the tint lookup and
 # the mark-derivation path are both exercised.
 osc_context:

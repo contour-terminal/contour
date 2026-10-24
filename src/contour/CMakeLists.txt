@@ -1010,10 +1010,10 @@ if(CONTOUR_FRONTEND_GUI)
 
             add_test(NAME contour_e2e_lifecycle
                 COMMAND $<TARGET_FILE:contour>
-                        early-exit-threshold 0 execute sh -c "exit 0")
+                        daemon-mode in_process early-exit-threshold 0 execute sh -c "exit 0")
             add_test(NAME contour_e2e_vt_stream
                 COMMAND $<TARGET_FILE:contour>
-                        early-exit-threshold 0
+                        daemon-mode in_process early-exit-threshold 0
                         execute sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/vt-stream.sh)
             # NB: still no dump-state-at-exit e2e scenario. Two real bugs on that path were fixed
             # (dump ordering: inspect() now runs BEFORE the model prune that tears the display down;

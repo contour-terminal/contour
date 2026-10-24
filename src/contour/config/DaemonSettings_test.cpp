@@ -17,7 +17,7 @@ using contour::test::loadConfigFromYaml;
 TEST_CASE("daemon section defaults", "[config][daemon]")
 {
     auto const config = contour::config::Config {};
-    CHECK(config.daemon.value().mode == DaemonMode::InProcess);
+    CHECK(config.daemon.value().mode == DaemonMode::Auto);
     CHECK(config.daemon.value().socket.empty());
     CHECK(config.daemon.value().sizePolicy == vthost::ClientSizePolicy::Latest);
     CHECK_FALSE(config.daemon.value().historyLimit.has_value());
@@ -43,7 +43,7 @@ TEST_CASE("daemon.history_limit takes a line count", "[config][daemon]")
 TEST_CASE("an unknown daemon.mode keeps the default", "[config][daemon]")
 {
     auto const config = loadConfigFromYaml("daemon:\n  mode: sometimes\n  size_policy: biggest\n");
-    CHECK(config.daemon.value().mode == DaemonMode::InProcess);
+    CHECK(config.daemon.value().mode == DaemonMode::Auto);
     CHECK(config.daemon.value().sizePolicy == vthost::ClientSizePolicy::Latest);
 }
 
