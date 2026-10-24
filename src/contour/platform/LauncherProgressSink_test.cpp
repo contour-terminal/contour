@@ -47,7 +47,7 @@ TEST_CASE("Launcher adapter stays disconnected offscreen", "[contour][taskbar-na
     sink->setApplicationProgress({ .state = vtbackend::ProgressState::Normal, .percentage = 60 });
 }
 
-TEST_CASE("Launcher adapter broadcasts progress and clears it on destruction",
+TEST_CASE("Launcher adapter broadcasts progress and clears only what it published",
           "[contour][taskbar-native][display]")
 {
     using namespace contour::platform;
@@ -74,6 +74,9 @@ TEST_CASE("Launcher adapter broadcasts progress and clears it on destruction",
                                &receiver,
                                subscriptions);
     CHECK(sink->scope() == TaskbarProgressScope::Application);
+    // An adapter that never published clears nothing: a stray Update would arrive first on the bus and
+    // fail the progress check below.
+    makeTaskbarProgressSink().reset();
     sink->setApplicationProgress({ .state = vtbackend::ProgressState::Normal, .percentage = 60 });
     REQUIRE(QTest::qWaitFor([&] { return receiver.updates == 1; }, 1000));
     CHECK(receiver.uri == QStringLiteral("application://contour-progress-test.desktop"));

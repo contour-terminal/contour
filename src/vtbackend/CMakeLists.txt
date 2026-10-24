@@ -211,11 +211,14 @@ set(vtbackend_SOURCES
 )
 
 add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
+# The version string embeds the branch name and HEAD sha. The compile cache keys on the command line,
+# so it must not sit on every vtbackend source: only Screen.cpp reads it.
+set_property(SOURCE screen/Screen.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    LIBTERMINAL_VERSION_STRING="${CONTOUR_VERSION_STRING}")
 target_compile_definitions(vtbackend PRIVATE
     LIBTERMINAL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     LIBTERMINAL_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     LIBTERMINAL_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    LIBTERMINAL_VERSION_STRING="${CONTOUR_VERSION_STRING}"
     LIBTERMINAL_NAME="${PROJECT_NAME}"
 )
 

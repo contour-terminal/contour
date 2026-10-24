@@ -3452,14 +3452,15 @@ class Terminal: public IStatusLinePublishTarget
     /// past the text it wrote.
     /// @return The buffer, owned by the member that holds it and valid until parsing ends or the buffer is
     ///         replaced. Null while a macro's body is parsed: that is parsed out of a copy of its own, not
-    ///         out of any pty buffer.
+    ///         out of any pty buffer. Null outside a parse too, as when queued trace events are flushed:
+    ///         their text may lie in the reader's buffer or in writeToScreen()'s, and nothing says which.
     [[nodiscard]] crispy::BufferObject<char>* parsingBuffer() const noexcept
     {
         // A raw pointer rather than a reference to a shared one: the macro's null would then have to be a
         // static, and a static shared_ptr, with its destructor to register, costs a guard on every call.
         if (isMacroRunning()) [[unlikely]]
             return nullptr;
-        return (_parsingBuffer ? _parsingBuffer : _currentPtyBuffer).get();
+        return _parsingBuffer.get();
     }
 
     [[nodiscard]] vtbackend::SelectionHelper& selectionHelper() noexcept { return _selectionHelper; }
@@ -4449,7 +4450,12 @@ class Terminal: public IStatusLinePublishTarget
 
     // {{{ PTY and PTY read buffer management
     crispy::BufferObjectPool<char> _ptyBufferPool;
+    /// The reader thread's alone: it reads into it unlocked.
     crispy::BufferObjectPtr<char> _currentPtyBuffer;
+    /// What writeToScreen() parses out of, under the state lock, on whichever thread calls it. Never the
+    /// reader's: its text would land where the reader's next read lands, and one would overwrite the other.
+    /// Allocated on the first write.
+    crispy::BufferObjectPtr<char> _screenWriteBuffer;
     crispy::BufferObjectPtr<char> _parsingBuffer; // Buffer currently being parsed (set during parseFragment)
     size_t _ptyReadBufferSize;
 

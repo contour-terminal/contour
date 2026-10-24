@@ -174,10 +174,30 @@ target_compile_definitions(contour_config PUBLIC
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
-    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     CONTOUR_APP_ID="${AppId}"
 )
+# CONTOUR_VERSION_STRING embeds the branch name and HEAD sha, and CONTOUR_PROJECT_SOURCE_DIR is an
+# absolute path that differs per worktree. Both are per-checkout values, and the compile cache keys
+# on the command line: as target-wide definitions they would sit on nearly every compile and keep any
+# object from being reused across worktrees, branches or commits. They are therefore attached only to
+# the few sources that read them.
+set(_per_checkout_definitions
+    CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
+    CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+foreach(_reader IN ITEMS
+        config/Config.cpp
+        cli/ContourApp.cpp)
+    cmake_path(GET _reader PARENT_PATH _reader_dir)
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${_reader}"
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${_reader_dir}"
+        APPEND PROPERTY COMPILE_DEFINITIONS ${_per_checkout_definitions})
+endforeach()
+set_property(SOURCE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContourGuiApp.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cli/ShellIntegration_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/config/Config_test.cpp"
+    APPEND PROPERTY COMPILE_DEFINITIONS ${_per_checkout_definitions})
 if(CONTOUR_FRONTEND_GUI)
     target_compile_definitions(contour_config PUBLIC CONTOUR_FRONTEND_GUI)
 endif()

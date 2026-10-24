@@ -712,9 +712,8 @@ bool Terminal::processInputOnce()
                   })));
 
     runParseBatch(std::move(lock), [&] {
-        // Parse against the buffer readFromPty() read into, not _currentPtyBuffer, which writeToScreen()
-        // on another thread may have replaced meanwhile: Screen's bulk text path moves this buffer's hot
-        // end past the text it parsed.
+        // Parse against the buffer readFromPty() read into: Screen's bulk text path moves this buffer's hot
+        // end past the text it parsed. writeToScreen() parses out of a buffer of its own.
         _parsingBuffer = ptyReadResult->buffer;
         for (auto const& piece: batch)
         {
@@ -2595,13 +2594,16 @@ void Terminal::parseFragmentChunked(string_view vtStream)
 
     while (!vtStream.empty())
     {
-        if (_currentPtyBuffer->bytesAvailable() < 64 && _currentPtyBuffer->bytesAvailable() < vtStream.size())
-            _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
-        auto const chunk = vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
+        if (!_screenWriteBuffer
+            || (_screenWriteBuffer->bytesAvailable() < 64
+                && _screenWriteBuffer->bytesAvailable() < vtStream.size()))
+            _screenWriteBuffer = _ptyBufferPool.allocateBufferObject();
+        auto const chunk =
+            vtStream.substr(0, std::min(vtStream.size(), _screenWriteBuffer->bytesAvailable()));
         vtStream.remove_prefix(chunk.size());
         // Set parsingBuffer to ensure BufferFragment holds the correct buffer reference.
-        _parsingBuffer = _currentPtyBuffer;
-        auto const written = _currentPtyBuffer->writeAtEnd(chunk);
+        _parsingBuffer = _screenWriteBuffer;
+        auto const written = _screenWriteBuffer->writeAtEnd(chunk);
         parseExpandingMacros(std::string_view { written.data(), written.size() });
         _parsingBuffer = nullptr;
     }

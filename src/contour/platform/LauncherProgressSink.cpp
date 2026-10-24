@@ -24,7 +24,14 @@ namespace
 
         /// @param busProvider Session bus provider used to broadcast launcher updates.
         explicit LauncherProgressSink(BusProvider busProvider): _busProvider(busProvider) {}
-        ~LauncherProgressSink() override { setApplicationProgress({}); }
+
+        // Clears only what was shown: an adapter that never published must not open the session bus
+        // at teardown, which would start Qt's D-Bus thread in every headless `contour <verb>` exit.
+        ~LauncherProgressSink() override
+        {
+            if (_published != TaskbarProgress {})
+                setApplicationProgress({});
+        }
 
         [[nodiscard]] bool isSupported() const noexcept override
         {
@@ -53,10 +60,13 @@ namespace
             // This protocol is a broadcast, not a request: a desktop without a listener simply ignores it.
             if (!_busProvider().send(message))
                 taskbarLog()("Cannot send desktop launcher progress update");
+            else
+                _published = progress;
         }
 
       private:
         BusProvider _busProvider;
+        TaskbarProgress _published; ///< The progress the launcher last received.
     };
 } // namespace
 
