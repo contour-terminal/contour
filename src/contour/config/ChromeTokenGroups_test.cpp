@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <ranges>
+#include <vector>
 
 using namespace vtbackend;
 
@@ -37,6 +38,175 @@ TEST_CASE("chromeTokens.componentTokens", "[chrometokens]")
     CHECK(tui.elevation.levels[2].offsetX == 1);
     CHECK(tui.elevation.levels[2].blur == 0);
     CHECK(tui.colors[static_cast<size_t>(ChromeColorRole::BannerFill)].slot == SchemeSlot::Bar);
+}
+
+namespace
+{
+/// Every numeric field of a row, in declaration order, so a whole row compares against one list.
+std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
+{
+    auto out = std::vector<double> { double(row.size.titleBar),    double(row.size.tabWell),
+                                     double(row.size.tab),         double(row.size.control),
+                                     double(row.size.paneHeader),  double(row.size.toast),
+                                     double(row.size.dialogWidth), double(row.space.paneGap),
+                                     double(row.space.splitHit),   double(row.space.paneInset) };
+    for (auto const v: row.space.scale)
+        out.push_back(v);
+    for (auto const v:
+         { row.radii.control, row.radii.popover, row.radii.menu, row.radii.paneCard, row.radii.toast })
+        out.push_back(v);
+    for (auto const v: { row.type.caption, row.type.footnote, row.type.body, row.type.tab, row.type.title })
+        out.push_back(v);
+    for (auto const v:
+         { row.motion.fastMs, row.motion.standardMs, row.motion.emphasizedMs, row.motion.travel })
+        out.push_back(v);
+    for (auto const& level: row.elevation.levels)
+        for (auto const v: { level.offsetX, level.offsetY, level.blur, level.opacityPercent })
+            out.push_back(v);
+    out.push_back(row.contrast.separatorPercent);
+    out.push_back(row.contrast.activeCardRing);
+    out.push_back(row.contrast.paneDimPercent.value_or(-1));
+    out.push_back(row.tui.inactivePaneOpacity);
+    return out;
+}
+
+struct ExpectedRow
+{
+    contour::config::ChromeStyle style = contour::config::ChromeStyle::MacOS;
+    std::vector<double> numbers {};
+    contour::config::Material titleBand = contour::config::Material::None;
+    contour::config::Material popover = contour::config::Material::None;
+    contour::config::ToastStyle toast = contour::config::ToastStyle::Floating;
+    contour::config::DialogPlacement dialog = contour::config::DialogPlacement::Centered;
+};
+} // namespace
+
+TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
+{
+    using namespace contour::config;
+    // size(7) space(3) scale(10) radii(5) type(5) motion(4) elevation e0..e3 (16) separator ring dim opacity
+    auto const native = std::vector<double> { 2, 4, 6, 8, 10, 12, 16, 20, 24, 32 };
+    auto const nativeTail = std::vector<double> { 100, 160, 220, 8,  0, 0,  0,  0,  0,  1,   2,  12,
+                                                  0,   4,   16,  25, 0, 12, 40, 35, 10, 0.0, -1, 1.0 };
+    auto const join = [](std::vector<double> head,
+                         std::vector<double> const& scale,
+                         std::vector<double> const& mid,
+                         std::vector<double> const& tail) {
+        head.insert(head.end(), scale.begin(), scale.end());
+        head.insert(head.end(), mid.begin(), mid.end());
+        head.insert(head.end(), tail.begin(), tail.end());
+        return head;
+    };
+    auto const rows = std::vector<ExpectedRow> {
+        { ChromeStyle::MacOS,
+          join({ 38, 28, 24, 28, 22, 36, 280, 6, 10, 6 },
+               native,
+               { 6, 14, 10, 10, 18, 10, 11, 13, 12, 15 },
+               nativeTail),
+          Material::Glass,
+          Material::Glass,
+          ToastStyle::Floating,
+          DialogPlacement::Sheet },
+        { ChromeStyle::Fluent,
+          join({ 40, 0, 34, 32, 28, 36, 280, 4, 10, 4 },
+               native,
+               { 4, 8, 8, 4, 18, 12, 12, 14, 12, 20 },
+               nativeTail),
+          Material::Mica,
+          Material::Solid,
+          ToastStyle::Floating,
+          DialogPlacement::Centered },
+        { ChromeStyle::ContourLinux,
+          join({ 46, 0, 34, 34, 28, 36, 280, 6, 10, 6 },
+               native,
+               { 8, 12, 10, 6, 18, 12, 12.5, 14, 13.5, 15 },
+               nativeTail),
+          Material::Solid,
+          Material::Solid,
+          ToastStyle::Floating,
+          DialogPlacement::Centered },
+        { ChromeStyle::Terminal,
+          join({ 1, 1, 1, 2, 1, 1, 32, 1, 1, 0 },
+               { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
+               { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+               { 100, 160, 220, 0, 0, 0, 0, 0, 1, 1, 0, 60, 1, 1, 0, 60, 1, 1, 0, 60, 10, 0.0, -1, 0.62 }),
+          Material::None,
+          Material::None,
+          ToastStyle::Inverse,
+          DialogPlacement::Centered },
+    };
+
+    for (auto const& expected: rows)
+    {
+        CAPTURE(static_cast<int>(expected.style));
+        auto const row = resolveChromeTokens(expected.style, {});
+        auto const actual = numbersOf(row);
+        REQUIRE(actual.size() == expected.numbers.size());
+        for (auto const i: std::views::iota(std::size_t { 0 }, actual.size()))
+        {
+            CAPTURE(i);
+            CHECK(actual[i] == Catch::Approx(expected.numbers[i]));
+        }
+        CHECK(row.material.titleBand == expected.titleBand);
+        CHECK(row.material.popover == expected.popover);
+        CHECK(row.tui.toastStyle == expected.toast);
+        CHECK(row.layout.dialog == expected.dialog);
+
+        auto const& fill = row.colors[static_cast<size_t>(ChromeColorRole::BannerFill)];
+        auto const& text = row.colors[static_cast<size_t>(ChromeColorRole::BannerText)];
+        auto const& glyph = row.colors[static_cast<size_t>(ChromeColorRole::BannerGlyph)];
+        auto const& toastFill = row.colors[static_cast<size_t>(ChromeColorRole::ToastFill)];
+        auto const& toastText = row.colors[static_cast<size_t>(ChromeColorRole::ToastText)];
+        if (expected.style == ChromeStyle::Terminal)
+        {
+            CHECK(fill.kind == ColorSourceKind::Scheme);
+            CHECK(fill.slot == SchemeSlot::Bar);
+            CHECK(text.kind == ColorSourceKind::Scheme);
+            CHECK(text.slot == SchemeSlot::Foreground);
+            CHECK(glyph.kind == ColorSourceKind::Scheme);
+            CHECK(glyph.slot == SchemeSlot::Warning);
+            CHECK(toastFill.kind == ColorSourceKind::Scheme);
+            CHECK(toastFill.slot == SchemeSlot::Foreground);
+            CHECK(toastText.kind == ColorSourceKind::Scheme);
+            CHECK(toastText.slot == SchemeSlot::Background);
+        }
+        else
+        {
+            CHECK(fill.kind == ColorSourceKind::PaletteWindow);
+            CHECK(text.kind == ColorSourceKind::PaletteWindowText);
+            CHECK(glyph.kind == ColorSourceKind::Status);
+            CHECK(glyph.status == StatusColorRole::Warning);
+            CHECK(toastFill.kind == ColorSourceKind::Fixed);
+            CHECK(toastFill.rgb == 0x28282C);
+            CHECK(toastFill.alphaPercent == 92);
+            CHECK(toastText.kind == ColorSourceKind::Fixed);
+            CHECK(toastText.rgb == 0xFFFFFF);
+            CHECK(toastText.alphaPercent == 100);
+        }
+    }
+}
+
+TEST_CASE("chromeTokens.allOverridesTogether", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const preferences = AccessibilityPreferences { .motion = MotionPreference::Reduced,
+                                                        .transparency = TransparencyPreference::Reduced,
+                                                        .contrast = ContrastPreference::Increased };
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        auto const base = resolveChromeTokens(style, {});
+        auto const tokens = resolveChromeTokens(style, preferences);
+        CHECK(tokens.motion.fastMs == ReducedMotionCrossFadeMs);
+        CHECK(tokens.motion.travel == 0);
+        CHECK(tokens.material.titleBand != Material::Glass);
+        CHECK(tokens.material.titleBand != Material::Mica);
+        CHECK(tokens.contrast.separatorPercent == 2 * base.contrast.separatorPercent);
+        CHECK(tokens.contrast.activeCardRing == Catch::Approx(1.5));
+        CHECK(tokens.contrast.paneDimPercent == 5);
+        CHECK(tokens.size == base.size);
+        CHECK(tokens.colors == base.colors);
+    }
 }
 
 TEST_CASE("chromeTokens.reducedMotion", "[chrometokens]")

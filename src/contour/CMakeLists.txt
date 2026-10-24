@@ -1115,6 +1115,7 @@ if(CONTOUR_TESTING)
     add_executable(contour_test
         test/core_test_main.cpp
         config/Actions_test.cpp
+        config/ChromeTokenGroups_test.cpp
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp
         config/GlobalOverrides_test.cpp
@@ -1122,7 +1123,6 @@ if(CONTOUR_TESTING)
         config/LayoutBuilder_test.cpp
         config/PtyReadBufferSize_test.cpp
         config/TabBarMode_test.cpp
-        config/ChromeTokenGroups_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
         test/ChromeSnapshotPlan_test.cpp

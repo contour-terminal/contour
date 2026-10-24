@@ -217,17 +217,18 @@ struct LayoutTokens
 /// One style's complete 1a token set.
 struct ChromeTokenRow
 {
-    SizeTokens size {};
-    SpaceTokens space {};
-    RadiusTokens radii {};
-    TypeTokens type {};
-    MotionTokens motion {};
-    ElevationTokens elevation {};
-    MaterialTokens material {};
-    ContrastTokens contrast {};
-    TuiTokens tui {};
-    LayoutTokens layout {};
-    std::array<ChromeColorSource, ChromeColorRoleCount> colors {};
+    SizeTokens size {};           ///< Component extents.
+    SpaceTokens space {};         ///< Gaps and the spacing scale.
+    RadiusTokens radii {};        ///< Corner radii.
+    TypeTokens type {};           ///< Chrome font sizes.
+    MotionTokens motion {};       ///< Animation durations and travel.
+    ElevationTokens elevation {}; ///< Drop shadows e0..e3.
+    MaterialTokens material {};   ///< Surface materials.
+    ContrastTokens contrast {};   ///< Separation strength.
+    TuiTokens tui {};             ///< Terminal-style specifics.
+    LayoutTokens layout {};       ///< Per-style layout choices.
+    std::array<ChromeColorSource, ChromeColorRoleCount>
+        colors {}; ///< Colour sources, indexed by @c ChromeColorRole.
 };
 
 /// Duration every transition collapses to under @c MotionPreference::Reduced.
