@@ -4,9 +4,11 @@
 // engine and scene graph run without a display server (CI-safe), then constructs the
 // QGuiApplication that the QML components need before running the Catch2 session.
 
+#include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 
+#include <core/Environment.hpp>
 #include <core/testing/SuppressWindowsDialogs.hpp>
 
 #include <QtCore/QCoreApplication>
@@ -107,12 +109,19 @@ int main(int argc, char* argv[])
 
     QGuiApplication const app(argc, argv);
 
-    // Pin the same Qt Quick Controls style the app itself pins (ContourGuiApp: QQuickStyle::setStyle).
-    // The tests instantiate real Controls (SessionChrome's customized ScrollBar, the tab flyout, ...),
-    // and the platform-native style (notably on Windows) refuses contentItem/background customization,
-    // emitting a QML diagnostic that the gate below then fails on. Fusion supports customization on
-    // every platform, so pinning it here makes the test environment match production.
-    QQuickStyle::setStyle(QStringLiteral("Fusion"));
+    // Pin a Qt Quick Controls style the way the app itself does (ContourGuiApp: a Fusion fallback, then
+    // the row's style). The tests instantiate real Controls (SessionChrome's customized ScrollBar, the
+    // tab flyout, ...), and the platform-native style (notably on Windows) refuses contentItem/background
+    // customization, emitting a QML diagnostic that the gate below then fails on. Fusion supports
+    // customization on every platform, so it is the default here as it is in production.
+    //
+    // CONTOUR_TEST_CONTROLS_STYLE names another style for the whole run. A style is resolved once per
+    // process, before the first control exists, so the rows a style draws -- the Terminal row's
+    // ContourTui, notably -- can only be rendered by a second run under it; the chrome snapshot case
+    // (ChromeSnapshot_test.cpp, tag [snapshot]) draws the rows of whichever style this run has.
+    QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
+    QQuickStyle::setStyle(
+        QString::fromStdString(contour::test::snapshot::controlsStyleFor(core::LiveEnvironment {})));
 
     // Run-wide gate: capture every warning/critical for the whole session. Per-test QmlMessageCapture guards
     // chain to this one (see QmlMessageCapture.h), so a per-test guard never blinds the gate.

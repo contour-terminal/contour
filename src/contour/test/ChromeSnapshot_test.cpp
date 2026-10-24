@@ -2,7 +2,8 @@
 //
 // Offscreen checks of the chrome snapshot scene: every script builds as Main.qml over mocks, a scene
 // gives the application palette back, and the bundled chrome fonts register. The pictures themselves
-// need a display and are rendered elsewhere; these prove the scenes they are taken of.
+// need a display: the last case renders them, on the display route only, and only when
+// CONTOUR_SNAPSHOT_DIR names where they go.
 
 #include <contour/config/Config.hpp>
 #include <contour/config/TabBarMode.hpp>
@@ -10,24 +11,31 @@
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/ChromeSnapshotScene.hpp>
 #include <contour/test/ChromeSnapshotWriter.hpp>
+#include <contour/test/DisplayHarness.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/SettingsController.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
 
+#include <core/Environment.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <QtGui/QColor>
+#include <QtGui/QFontInfo>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 #include <QtGui/QPalette>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <filesystem>
+
+#include <QtQuickControls2/QQuickStyle>
+#include <QtTest/QTest>
 
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
           "[contour][gui][qml][snapshot]")
@@ -165,4 +173,47 @@ TEST_CASE("The snapshot writer refuses a directory it cannot use", "[contour][gu
         .isDirectory = false,
         .isSymlink = false } };
     CHECK(ChromeSnapshotWriter::open(files, "/out").error() == SnapshotWriteError::DirectoryUnavailable);
+}
+
+TEST_CASE("Chrome snapshots: every script on every row this process draws", "[display][snapshot]")
+{
+    using namespace contour::test::snapshot;
+    auto const environment = core::LiveEnvironment {};
+    if (!contour::test::displayTestsEnabled(environment))
+        SKIP("renders through a real compositor: run under scripts/run-chrome-snapshots.sh");
+    auto const directory = snapshotDirectory(environment);
+    if (!directory)
+        SKIP("set " << SnapshotDirectoryVariable << " to the directory the snapshots go to");
+
+    // The style test_main.cpp was asked for must be the one in effect, or a pass renders the wrong rows.
+    auto const controls = QQuickStyle::name().toStdString();
+    INFO("Quick Controls style: " << controls << " (set " << ControlsStyleVariable << ")");
+    REQUIRE(controls == controlsStyleFor(environment));
+    auto const rows = rowsRenderableUnder(controls);
+    REQUIRE_FALSE(rows.empty());
+
+    auto const& files = core::platform::NativeFileSystem::instance();
+    REQUIRE(registerBundledChromeFonts(files, bundledChromeFontDirectory()).has_value());
+    auto writer = ChromeSnapshotWriter::open(files, *directory);
+    REQUIRE(writer.has_value());
+
+    for (auto const& variant: snapshotMatrix(rows))
+    {
+        INFO(snapshotFileName(variant));
+        auto scene = ChromeSnapshotScene { variant };
+        scene.show();
+        REQUIRE(QTest::qWaitForWindowExposed(&scene.window(), 3000));
+        auto const image = scene.grab();
+        CHECK(scene.diagnostics().isEmpty());
+        REQUIRE_FALSE(image.isNull());
+        CHECK(image.size() == SnapshotWindowSize * scene.window().devicePixelRatio());
+        auto const facts = SnapshotFacts {
+            .platform = QGuiApplication::platformName().toStdString(),
+            .devicePixelRatio = scene.window().devicePixelRatio(),
+            .chromeFontFamily = QFontInfo(scene.chromeFont()).family().toStdString(),
+            .controlsStyle = controls,
+            .qtVersion = qVersion(),
+        };
+        CHECK(writer->write(variant, image, facts).has_value());
+    }
 }

@@ -325,11 +325,11 @@ inline constexpr std::string_view SnapshotDirectoryVariable = "CONTOUR_SNAPSHOT_
 /// What the manifest records about the machine a snapshot was rendered on.
 struct SnapshotFacts
 {
-    std::string platform;         ///< The Qt platform plugin.
-    double devicePixelRatio;      ///< The window's device pixel ratio.
-    std::string chromeFontFamily; ///< The font the chrome resolved.
-    std::string controlsStyle;    ///< The Quick Controls style in effect.
-    std::string qtVersion;        ///< The Qt version rendered with.
+    std::string platform {};         ///< The Qt platform plugin.
+    double devicePixelRatio = 1.0;   ///< The window's device pixel ratio.
+    std::string chromeFontFamily {}; ///< The font the chrome resolved.
+    std::string controlsStyle {};    ///< The Quick Controls style in effect.
+    std::string qtVersion {};        ///< The Qt version rendered with.
 };
 
 /// The manifest's header line.

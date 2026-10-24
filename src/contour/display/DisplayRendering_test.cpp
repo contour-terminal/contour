@@ -36,6 +36,8 @@
 
 #include <vtpty/ChannelPty.hpp>
 
+#include <core/Environment.hpp>
+
 #include <QtCore/QBuffer>
 #include <QtCore/QDir>
 #include <QtCore/QRunnable>
@@ -83,15 +85,10 @@ using contour::test::HarnessWindow;
 namespace
 {
 
-[[nodiscard]] bool displayTestsEnabled()
-{
-    return qgetenv("CONTOUR_TEST_DISPLAY") == "1";
-}
-
 #define REQUIRE_DISPLAY_OR_SKIP()                                                          \
     do                                                                                     \
     {                                                                                      \
-        if (!displayTestsEnabled())                                                        \
+        if (!contour::test::displayTestsEnabled(core::LiveEnvironment {}))                 \
         {                                                                                  \
             WARN("Skipping display test: set CONTOUR_TEST_DISPLAY=1 with a real display"); \
             return;                                                                        \

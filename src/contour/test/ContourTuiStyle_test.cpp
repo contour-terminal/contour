@@ -21,8 +21,10 @@
 #include <memory>
 
 // The ContourTui Qt Quick Controls style is selected by name, once per process, before the first
-// control exists (ContourGuiApp). That makes it untestable by *selecting* it here -- this binary has
-// already pinned Fusion in test_main.cpp, and Qt offers no way to re-resolve a style afterwards.
+// control exists (ContourGuiApp). This binary does the same in test_main.cpp: it runs under Fusion
+// unless CONTOUR_TEST_CONTROLS_STYLE names another style for the whole run, and Qt offers no way to
+// re-resolve a style afterwards, so these cases cannot select it themselves. A run under
+// CONTOUR_TEST_CONTROLS_STYLE=ContourTui is what renders the Terminal row's chrome snapshots.
 // (Qt 6.11's QQuickStyle exposes only name/setStyle/setFallbackStyle; there is no availableStyles()
 // to ask, either.)
 //
