@@ -17,10 +17,12 @@ using vtbackend::operator""_rgb;
 TEST_CASE("snapshot.scriptTable", "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    CHECK(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::KitDialog) + 1);
+    CHECK(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::HostingBanner) + 1);
     CHECK(scriptRow(SnapshotScript::ThreeTabs).tabCount == 3);
     CHECK(scriptRow(SnapshotScript::RemoteReconnecting).connection == HostConnection::Reconnecting);
     CHECK(scriptRow(SnapshotScript::Settings).page == ContentPage::Settings);
+    CHECK(scriptRow(SnapshotScript::HostingBanner).banner == SnapshotBanner::Hosting);
+    CHECK(scriptRow(SnapshotScript::SingleTab).banner == SnapshotBanner::None);
 }
 
 TEST_CASE("snapshot.rowHosts", "[snapshot]")

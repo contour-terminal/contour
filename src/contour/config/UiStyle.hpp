@@ -267,11 +267,9 @@ inline constexpr std::array<StatusColor, StatusColorRoleCount> StatusColors = {
 /// literal in a QML file.
 namespace ChromeTokens
 {
-    inline constexpr int PaneDimPercent = 60;  ///< Opacity of the black scrim over a dimmed pane.
-    inline constexpr int DotGlyphPercent = 60; ///< Opacity of the glyph drawn on a traffic-light dot.
-    inline constexpr int HostingNoticeFillPercent = 92;   ///< Opacity of the hosting-notice bar's fill.
-    inline constexpr int HostingNoticeBorderPercent = 25; ///< Opacity of the hosting-notice bar's border.
-    inline constexpr int CaptionFontPercent = 85;         ///< Caption text size relative to the chrome font.
+    inline constexpr int PaneDimPercent = 60;       ///< Opacity of the black scrim over a dimmed pane.
+    inline constexpr int DotGlyphPercent = 60;      ///< Opacity of the glyph drawn on a traffic-light dot.
+    inline constexpr int CaptionFontPercent = 85;   ///< Caption text size relative to the chrome font.
     inline constexpr int HeadlineFontPercent = 150; ///< Overlay headline size relative to the chrome font.
 } // namespace ChromeTokens
 

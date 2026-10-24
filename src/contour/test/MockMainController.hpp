@@ -38,7 +38,8 @@ struct MainWindowScene
     /// The settings page's controller; borrowed, may be null. The content area shows the settings
     /// page exactly when it is set.
     QObject* settingsController = nullptr;
-    QString hostLabel; ///< The attached host; empty for a local window.
+    QString hostLabel;        ///< The attached host; empty for a local window.
+    QString hostingNotice {}; ///< The hosting notice the window starts with; empty for none.
     /// When the tab strip is shown, resolved against @c tabCount into the initial tabBarShouldShow.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
 };
@@ -103,7 +104,8 @@ class MockMainController: public MainWindowControllerMock
     /// @param scene What the window holds; see MainWindowScene. Its pointers must outlive the mock.
     explicit MockMainController(MainWindowScene scene = {}):
         _scene { std::move(scene) },
-        _tabBarShouldShow { config::isTabBarShown(_scene.tabBarVisibility, _scene.tabCount) }
+        _tabBarShouldShow { config::isTabBarShown(_scene.tabBarVisibility, _scene.tabCount) },
+        _hostingNotice { _scene.hostingNotice }
     {
         attachedHost = _scene.hostLabel;
     }

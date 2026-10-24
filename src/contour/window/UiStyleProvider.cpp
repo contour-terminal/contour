@@ -307,16 +307,6 @@ QColor UiStyleProvider::dotGlyphColor() const
     return atOpacity(QColor(Qt::black), config::ChromeTokens::DotGlyphPercent);
 }
 
-qreal UiStyleProvider::hostingNoticeFillAlpha() const noexcept
-{
-    return config::ChromeTokens::HostingNoticeFillPercent / 100.0;
-}
-
-qreal UiStyleProvider::hostingNoticeBorderAlpha() const noexcept
-{
-    return config::ChromeTokens::HostingNoticeBorderPercent / 100.0;
-}
-
 QColor UiStyleProvider::errorColor() const
 {
     return progressColor(static_cast<int>(vtbackend::ProgressState::Error));

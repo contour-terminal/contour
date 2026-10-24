@@ -176,6 +176,7 @@ class ChromeSnapshotScene
             .commandPalette = _paletteModel.get(),
             .settingsController = _settings.get(),
             .hostLabel = QString::fromUtf8(scriptRow(variant.script).hostLabel),
+            .hostingNotice = hostingNoticeFor(scriptRow(variant.script).banner),
             .tabBarVisibility = _look.tabBarVisibility,
         } },
         _root { load() }
@@ -324,6 +325,19 @@ class ChromeSnapshotScene
         model->setShortcuts(command::shortcutIndex(config, shortcuts));
         model->refresh();
         return model;
+    }
+
+    /// The hosting notice a script's banner column asks for.
+    /// @param banner The script's banner.
+    /// @return The notice text, or an empty string when the script shows none.
+    [[nodiscard]] static QString hostingNoticeFor(SnapshotBanner banner)
+    {
+        switch (banner)
+        {
+            case SnapshotBanner::None: break;
+            case SnapshotBanner::Hosting: return QString::fromUtf8(SnapshotHostingNotice);
+        }
+        return {};
     }
 
     /// The settings page's controller over a store in a temporary directory, or null unless @p page

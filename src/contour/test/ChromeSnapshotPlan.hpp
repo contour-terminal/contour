@@ -42,6 +42,7 @@ enum class SnapshotScript : uint8_t
     RemoteReconnecting,
     Toast,
     KitDialog,
+    HostingBanner,
 };
 
 /// How a script's active tab is divided into panes.
@@ -74,6 +75,18 @@ enum class HostConnection : uint8_t
     Reconnecting,
 };
 
+/// The banner a script shows above the content.
+enum class SnapshotBanner : uint8_t
+{
+    None = 0,
+    Hosting, //!< The daemon-hosting notice.
+};
+
+/// The text of the hosting notice a script with SnapshotBanner::Hosting shows.
+inline constexpr std::string_view SnapshotHostingNotice =
+    "Contour could not reach its daemon (refused). This window runs its shells itself; they end when it "
+    "closes.";
+
 /// One row of the script table.
 struct SnapshotScriptRow
 {
@@ -85,6 +98,7 @@ struct SnapshotScriptRow
     ScriptAction action = ScriptAction::None;          ///< What is done after showing the window.
     HostConnection connection = HostConnection::Local; ///< The attached host's state.
     std::string_view hostLabel {};                     ///< The attached host's label; empty when local.
+    SnapshotBanner banner = SnapshotBanner::None;      ///< The banner shown above the content.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -96,7 +110,8 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
-                        .hostLabel = "" },
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
     SnapshotScriptRow { .script = SnapshotScript::ThreeTabs,
                         .name = "three-tabs",
                         .tabCount = 3,
@@ -104,7 +119,8 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
-                        .hostLabel = "" },
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
     SnapshotScriptRow { .script = SnapshotScript::SplitThree,
                         .name = "split-three",
                         .tabCount = 1,
@@ -112,7 +128,8 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
-                        .hostLabel = "" },
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
     SnapshotScriptRow { .script = SnapshotScript::Palette,
                         .name = "palette",
                         .tabCount = 1,
@@ -120,7 +137,8 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::OpenPalette,
                         .connection = HostConnection::Local,
-                        .hostLabel = "" },
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
     SnapshotScriptRow { .script = SnapshotScript::Settings,
                         .name = "settings",
                         .tabCount = 1,
@@ -128,7 +146,8 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Settings,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
-                        .hostLabel = "" },
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
     SnapshotScriptRow { .script = SnapshotScript::RemoteReconnecting,
                         .name = "remote-reconnecting",
                         .tabCount = 1,
@@ -136,7 +155,8 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Reconnecting,
-                        .hostLabel = "build-01" },
+                        .hostLabel = "build-01",
+                        .banner = SnapshotBanner::None },
     SnapshotScriptRow { .script = SnapshotScript::Toast,
                         .name = "toast",
                         .tabCount = 1,
@@ -144,7 +164,8 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::ShowToast,
                         .connection = HostConnection::Local,
-                        .hostLabel = "" },
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
     SnapshotScriptRow { .script = SnapshotScript::KitDialog,
                         .name = "kit-dialog",
                         .tabCount = 1,
@@ -152,7 +173,17 @@ inline constexpr auto SnapshotScripts = std::array {
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::OpenKitDialog,
                         .connection = HostConnection::Local,
-                        .hostLabel = "" },
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
+    SnapshotScriptRow { .script = SnapshotScript::HostingBanner,
+                        .name = "hosting-banner",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .page = ContentPage::Terminal,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::Hosting },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
@@ -160,7 +191,7 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotSc
                                       return static_cast<std::size_t>(SnapshotScripts[i].script) == i;
                                   }),
               "SnapshotScripts must list one row per SnapshotScript, in enumerator order");
-static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::KitDialog) + 1,
+static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::HostingBanner) + 1,
               "every SnapshotScript needs a row");
 
 /// The row describing @p script.

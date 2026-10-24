@@ -348,8 +348,6 @@ TEST_CASE("UiStyleProvider publishes the pane-dim, notice and font-scale tokens"
     CHECK(provider.paneDimColor().rgb() == QColor(Qt::black).rgb());
     CHECK(provider.paneDimColor().alpha() == 153);
     CHECK(provider.dotGlyphColor().alpha() == 153);
-    CHECK(provider.hostingNoticeFillAlpha() == Catch::Approx(0.92));
-    CHECK(provider.hostingNoticeBorderAlpha() == Catch::Approx(0.25));
     CHECK(provider.captionFont().pointSizeF() < font.pointSizeF());
     CHECK(provider.headlineFont().pointSizeF() > font.pointSizeF());
 }

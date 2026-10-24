@@ -378,8 +378,16 @@ TEST_CASE("Main.qml remote chrome: a window attached to a host names it (offscre
     }
 }
 
-TEST_CASE("Main.qml hosting notice: shown while the window runs its shells itself (offscreen)",
-          "[contour][gui][qml][mainwindow][hosting]")
+namespace
+{
+QString const HostingNotice =
+    QStringLiteral("Contour could not reach its daemon (refused). This window runs its "
+                   "shells itself; they end when it closes.");
+} // namespace
+
+TEST_CASE(
+    "Main.qml hosting notice: a Banner that pushes the content down and gives the room back (offscreen)",
+    "[contour][gui][qml][mainwindow][hosting]")
 {
     QQmlEngine engine;
     MockMainController controller;
@@ -387,29 +395,96 @@ TEST_CASE("Main.qml hosting notice: shown while the window runs its shells itsel
     auto root = loadMainWindow(engine, controller, warnings);
 
     auto* bar = root->findChild<QQuickItem*>(QStringLiteral("hostingNoticeBar"));
+    auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    auto const* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
     REQUIRE(bar != nullptr);
+    REQUIRE(titleBar != nullptr);
+    REQUIRE(content != nullptr);
+
     // Nothing to say while the sessions run where the launch wanted them.
     CHECK_FALSE(bar->isVisible());
+    CHECK(content->y() == titleBar->height());
+    auto const contentY = content->y();
+    auto const contentHeight = content->height();
 
-    auto const notice = QStringLiteral("Contour could not reach its daemon (refused). This window runs its "
-                                       "shells itself; they end when it closes.");
-    controller.setHostingNotice(notice);
+    controller.setHostingNotice(HostingNotice);
     QCoreApplication::processEvents();
     CHECK(bar->isVisible());
-    auto const* text = root->findChild<QObject*>(QStringLiteral("hostingNoticeText"));
+    CHECK(bar->height() > 0);
+    auto const* text = bar->findChild<QObject*>(QStringLiteral("bannerText"));
     REQUIRE(text != nullptr);
-    CHECK(text->property("text").toString() == notice);
+    CHECK(text->property("text").toString() == HostingNotice);
+    CHECK(content->y() == titleBar->height() + bar->height());
+    CHECK(content->height() == contentHeight - bar->height());
 
-    // Dismissed through the bar's own button: the controller is told, and the bar goes.
-    auto* dismiss = root->findChild<QObject*>(QStringLiteral("hostingNoticeDismiss"));
+    // Dismissed through the banner's own button: the controller is told, the bar goes, and the
+    // content gets back exactly the room it gave.
+    auto* dismiss = bar->findChild<QObject*>(QStringLiteral("bannerDismiss"));
     REQUIRE(dismiss != nullptr);
     REQUIRE(QMetaObject::invokeMethod(dismiss, "clicked"));
     QCoreApplication::processEvents();
     CHECK(controller.hostingNotice().isEmpty());
     CHECK_FALSE(bar->isVisible());
+    CHECK(content->y() == contentY);
+    CHECK(content->height() == contentHeight);
 
     for (auto const& w: warnings.messages())
         UNSCOPED_INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml hosting notice: with the tab bar at the bottom the banner is at the top (offscreen)",
+          "[contour][gui][qml][mainwindow][hosting]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    controller.setTabBarPosition(1);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto* bar = root->findChild<QQuickItem*>(QStringLiteral("hostingNoticeBar"));
+    auto const* stack = root->findChild<QQuickItem*>(QStringLiteral("bannerStack"));
+    auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    auto const* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
+    auto const* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(bar != nullptr);
+    REQUIRE(stack != nullptr);
+    REQUIRE(titleBar != nullptr);
+    REQUIRE(content != nullptr);
+    REQUIRE(window != nullptr);
+
+    controller.setHostingNotice(HostingNotice);
+    QCoreApplication::processEvents();
+    REQUIRE(bar->isVisible());
+    CHECK(stack->y() == 0);
+    CHECK(content->y() == bar->height());
+    CHECK(titleBar->y() + titleBar->height() == window->height());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml hosting notice: the Terminal row's banner is the scheme's palette[0] (offscreen)",
+          "[contour][gui][qml][mainwindow][hosting]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Bar)] =
+        vtbackend::RGBColor { 0x2A2D35u };
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+
+    controller.setHostingNotice(HostingNotice);
+    QCoreApplication::processEvents();
+    auto const* bar = root->findChild<QQuickItem*>(QStringLiteral("hostingNoticeBar"));
+    REQUIRE(bar != nullptr);
+    REQUIRE(bar->isVisible());
+    auto const* background = bar->property("background").value<QQuickItem*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("color").value<QColor>() == QColor(0x2A, 0x2D, 0x35));
+
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

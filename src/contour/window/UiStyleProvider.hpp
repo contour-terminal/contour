@@ -143,8 +143,6 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QColor paneDimColor READ paneDimColor CONSTANT)
     Q_PROPERTY(QColor paneDimTextColor READ paneDimTextColor CONSTANT)
     Q_PROPERTY(QColor dotGlyphColor READ dotGlyphColor CONSTANT)
-    Q_PROPERTY(qreal hostingNoticeFillAlpha READ hostingNoticeFillAlpha CONSTANT)
-    Q_PROPERTY(qreal hostingNoticeBorderAlpha READ hostingNoticeBorderAlpha CONSTANT)
 
     Q_PROPERTY(qreal cellWidth READ cellWidth CONSTANT)
     Q_PROPERTY(qreal cellHeight READ cellHeight CONSTANT)
@@ -270,12 +268,6 @@ class UiStyleProvider: public QObject
     /// The colour of the glyph drawn on a traffic-light dot. Dark and translucent: the dots are
     /// saturated in every theme, so the glyph contrasts with the dot, not with the window.
     [[nodiscard]] QColor dotGlyphColor() const;
-
-    /// Opacity, 0 to 1, of the hosting-notice bar's palette-derived fill.
-    [[nodiscard]] qreal hostingNoticeFillAlpha() const noexcept;
-
-    /// Opacity, 0 to 1, of the hosting-notice bar's palette-derived border.
-    [[nodiscard]] qreal hostingNoticeBorderAlpha() const noexcept;
 
     [[nodiscard]] qreal cellWidth() const noexcept { return _metrics.cellWidth; }
     [[nodiscard]] qreal cellHeight() const noexcept { return _metrics.cellHeight; }

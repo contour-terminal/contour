@@ -7,7 +7,7 @@ src/contour/qml/CommandPalette.qml 19
 src/contour/qml/ConfirmDialog.qml 13
 src/contour/qml/DaemonDriftBadge.qml 4
 src/contour/qml/LinkPatternList.qml 8
-src/contour/qml/Main.qml 6
+src/contour/qml/Main.qml 1
 src/contour/qml/PopupSurface.qml 1
 src/contour/qml/SaveLayoutDialog.qml 5
 src/contour/qml/SearchBar.qml 2

@@ -174,6 +174,33 @@ ApplicationWindow
         nativeControlsInset: (appWindow.win && appWindow.win.nativeControlsInset) || 0
     }
 
+    // The banners, in a stack above the content: the content starts below them, so a banner pushes the
+    // terminal down (and back up when it goes) instead of covering its first line. With the tab strip
+    // at the top the stack sits below it; at the bottom it is the window's topmost row. A banner with no
+    // text collapses to zero height, so an empty stack takes no room.
+    Column {
+        id: bannerStack
+        objectName: "bannerStack" // so offscreen tests can findChild() it
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: appWindow.tabBarPosition === 0 ? titleBar.height : 0
+        // The banners' own extent, taken at once: the Column's implicit height follows only when the
+        // window next polishes, and the content below is anchored to this edge.
+        height: childrenRect.height
+        z: 1
+
+        // Shown while this window runs its shells itself because the daemon the launch wanted could not be
+        // had (WindowController.hostingNotice): they end when the window closes, which a daemon-hosted
+        // window's do not.
+        Banner {
+            objectName: "hostingNoticeBar" // so offscreen tests can findChild() it
+            width: parent.width
+            // `|| ""` for the reason the gates above use `!!`: a lightweight mock `win` lacks the property.
+            text: (appWindow.win && appWindow.win.hostingNotice) || ""
+            onDismissed: appWindow.win.dismissHostingNotice()
+        }
+    }
+
     // Content area: the active tab's pane tree is the SOLE renderer for every case — a single unsplit
     // terminal is just a single-leaf tree (one TerminalPane), and a split is a multi-leaf tree. There is no
     // separate single-pane display: this removes the vtui<->pane-tree session hand-off that caused a series
@@ -186,7 +213,7 @@ ApplicationWindow
         // the top, content runs from titleBar.bottom to the window bottom; with the strip at the bottom,
         // content runs from the window top to titleBar.top. When the strip is hidden, titleBar's height
         // is 0, so content reclaims the full window either way.
-        anchors.top: appWindow.tabBarPosition === 0 ? titleBar.bottom : parent.top
+        anchors.top: bannerStack.bottom
         anchors.bottom: appWindow.tabBarPosition === 1 ? titleBar.top : parent.bottom
         anchors.left: parent.left
         anchors.right: parent.right
@@ -222,55 +249,6 @@ ApplicationWindow
             sourceComponent: SettingsPage {
                 controller: appWindow.win ? appWindow.win.settingsController : null
                 windowController: appWindow.win
-            }
-        }
-
-        // Shown while this window runs its shells itself because the daemon the launch wanted could not be
-        // had (WindowController.hostingNotice): they end when the window closes, which a daemon-hosted
-        // window's do not. Over the top of the content rather than beside it, so the terminal is not
-        // resized for a line the user dismisses.
-        Rectangle {
-            id: hostingNoticeBar
-            objectName: "hostingNoticeBar" // so offscreen tests can findChild() it
-            // `|| ""` for the reason the gates above use `!!`: a lightweight mock `win` lacks the property.
-            readonly property string text: (appWindow.win && appWindow.win.hostingNotice) || ""
-            visible: text.length > 0
-            z: 11
-            anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.right: parent.right
-            implicitHeight: Math.max(hostingNoticeLabel.implicitHeight, hostingNoticeDismiss.implicitHeight) + 8
-            height: visible ? implicitHeight : 0
-            color: Qt.rgba(noticePalette.window.r, noticePalette.window.g, noticePalette.window.b, chromeStyle.hostingNoticeFillAlpha)
-            border.color: Qt.rgba(noticePalette.windowText.r, noticePalette.windowText.g, noticePalette.windowText.b, chromeStyle.hostingNoticeBorderAlpha)
-            border.width: 1
-
-            SystemPalette {
-                id: noticePalette
-                colorGroup: SystemPalette.Active
-            }
-
-            Label {
-                id: hostingNoticeLabel
-                objectName: "hostingNoticeText"
-                anchors.left: parent.left
-                anchors.right: hostingNoticeDismiss.left
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 8
-                anchors.rightMargin: 8
-                text: hostingNoticeBar.text
-                wrapMode: Text.WordWrap
-                color: noticePalette.windowText
-            }
-
-            ToolButton {
-                id: hostingNoticeDismiss
-                objectName: "hostingNoticeDismiss"
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.rightMargin: 4
-                text: qsTr("Dismiss")
-                onClicked: appWindow.win.dismissHostingNotice()
             }
         }
 
