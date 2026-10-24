@@ -1563,6 +1563,20 @@ jobs:
         # private headless weston instance provides a stable Wayland compositor without GPU or X.
         continue-on-error: true
         run: ./scripts/run-display-tests.sh out/gcc-debug/src/contour/contour_gui_test
+      - name: "chrome snapshots (headless weston)"
+        # Review artefacts, never acceptance: every chrome row, edition and appearance as a PNG.
+        # Non-gating like the display step above.
+        if: ${{ matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04' }}
+        continue-on-error: true
+        run: ./scripts/run-chrome-snapshots.sh out/gcc-debug/src/contour/contour_gui_test chrome-snapshots
+      - name: "Upload chrome snapshots"
+        if: ${{ always() && matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-snapshots
+          path: chrome-snapshots/
+          if-no-files-found: warn
+          retention-days: 14
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 15' && matrix.cxx == '23' && matrix.runner == 'ubuntu-24.04'}}
         uses: actions/upload-artifact@v4
