@@ -1,6 +1,7 @@
 set(text_shaper_SRC
     ClusterSpans.hpp
     Font.cpp Font.hpp
+    BundledFonts.cpp BundledFonts.hpp
     FontLocator.hpp
     FontLocatorProvider.cpp FontLocatorProvider.hpp
     MockFontLocator.cpp MockFontLocator.hpp
@@ -88,7 +89,7 @@ message(STATUS "[text_shaper] Libraries: ${TEXT_SHAPER_LIBS}")
 
 if(CONTOUR_TESTING)
     enable_testing()
-    add_executable(text_shaper_test test_main.cpp ClusterSpans_test.cpp Font_test.cpp FontHash_test.cpp OpenShaper_test.cpp Scale_test.cpp)
+    add_executable(text_shaper_test test_main.cpp ClusterSpans_test.cpp Font_test.cpp FontHash_test.cpp FontLocatorProvider_test.cpp OpenShaper_test.cpp Scale_test.cpp)
     if(APPLE)
         target_sources(text_shaper_test PRIVATE CoreTextLocator_test.cpp)
     endif()
@@ -96,6 +97,7 @@ if(CONTOUR_TESTING)
         target_sources(text_shaper_test PRIVATE DirectWrite_test.cpp DirectWriteLocator_test.cpp)
     endif()
     target_link_libraries(text_shaper_test PRIVATE text_shaper Catch2::Catch2 Microsoft.GSL::GSL unicode::unicode boxed-cpp::boxed-cpp crispy::core core::testing)
+    target_compile_definitions(text_shaper_test PRIVATE CONTOUR_BUNDLED_FONTS_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src/contour/res/fonts")
     add_test(NAME text_shaper_test COMMAND $<TARGET_FILE:text_shaper_test>)
     if(NOT WIN32)
         target_compile_options(text_shaper_test PRIVATE -Wno-c2y-extensions)

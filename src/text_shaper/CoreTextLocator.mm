@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/CoreTextLocator.hpp>
 
 #include <ft2build.h>
@@ -340,4 +341,38 @@ FontSourceList CoreTextLocator::resolve(gsl::span<char32_t const> codepoints)
         return fonts;
     }
 }
+
+std::expected<void, FontRegistrationError> registerBundledFonts(BundledFontDirectories const& directories)
+{
+    auto result = std::expected<void, FontRegistrationError> {};
+    for (auto const& directory: directories.paths)
+    {
+        auto const files = listBundledFontFiles(directory);
+        if (!files)
+        {
+            if (result)
+                result = std::unexpected { files.error() };
+            continue;
+        }
+        for (auto const& file: *files)
+        {
+            auto const url = CFObject<CFURLRef>(CFURLCreateFromFileSystemRepresentation(
+                kCFAllocatorDefault,
+                reinterpret_cast<UInt8 const*>(file.c_str()),
+                static_cast<CFIndex>(file.native().size()),
+                false));
+            CFErrorRef rawError = nullptr;
+            auto const registered =
+                url && CTFontManagerRegisterFontsForURL(url.get(), kCTFontManagerScopeProcess, &rawError);
+            auto const error = CFObject<CFErrorRef>(rawError);
+            // Registering the same file twice is harmless: the font is already usable.
+            auto const alreadyRegistered =
+                error && CFErrorGetCode(error.get()) == kCTFontManagerErrorAlreadyRegistered;
+            if (!registered && !alreadyRegistered && result)
+                result = std::unexpected { FontRegistrationError::RegistrationFailed };
+        }
+    }
+    return result;
+}
+
 } // namespace text

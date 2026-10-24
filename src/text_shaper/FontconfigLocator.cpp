@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <text_shaper/FontconfigLocator.hpp>
 
+#include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/Font.hpp>
 
 #include <core/Assert.hpp>
@@ -229,16 +230,19 @@ struct FontconfigLocator::PrivateTag
         return installedCoverage.get();
     }
 
-    PrivateTag(): ftConfig(FcInitLoadConfigAndFonts())
+    PrivateTag()
     {
         auto const start = std::chrono::steady_clock::now();
+        // Share the process-wide configuration rather than building a private one, so fonts registered
+        // through registerBundledFonts() (which adds them to that configuration) are visible here.
         FcInit();
+        ftConfig = FcConfigReference(nullptr);
 
         auto const elapsed = std::chrono::steady_clock::now() - start;
         auto const ms =
             static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
             / 1000.0;
-        locatorLog()("FcInitLoadConfigAndFonts: {:.1f} ms", ms);
+        locatorLog()("FcInit: {:.1f} ms", ms);
     }
 
     ~PrivateTag()
@@ -548,6 +552,25 @@ FontSourceList FontconfigLocator::resolve(gsl::span<char32_t const> codepoints)
 
     locatorLog()("Resolved {} font(s) covering {} codepoint(s).", output.size(), codepoints.size());
     return output;
+}
+
+std::expected<void, FontRegistrationError> registerBundledFonts(BundledFontDirectories const& directories)
+{
+    FcInit();
+    auto result = std::expected<void, FontRegistrationError> {};
+    for (auto const& directory: directories.paths)
+    {
+        auto const files = listBundledFontFiles(directory);
+        if (!files)
+        {
+            if (result)
+                result = std::unexpected { files.error() };
+            continue;
+        }
+        if (!FcConfigAppFontAddDir(nullptr, (FcChar8 const*) directory.c_str()) && result)
+            result = std::unexpected { FontRegistrationError::RegistrationFailed };
+    }
+    return result;
 }
 
 } // namespace text

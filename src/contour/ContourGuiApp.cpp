@@ -48,6 +48,7 @@
     #include <vthost/client/DaemonGrantReplies.hpp>
 #endif
 
+#include <text_shaper/BundledFonts.hpp>
 #include <text_shaper/FontLocator.hpp>
 
 #include <crispy/ScopedTimer.hpp>
@@ -1122,6 +1123,22 @@ std::expected<void, std::string> ContourGuiApp::startTmuxAttach(ClientRequest co
 
 namespace
 {
+    /// Where the fonts shipped with the application live, relative to the running executable:
+    /// `Contents/Resources/fonts` in the macOS bundle, `<prefix>/share/contour/fonts` on Linux
+    /// (the executable being `<prefix>/bin/contour`). Windows ships none; it uses Cascadia Mono.
+    [[nodiscard]] text::BundledFontDirectories bundledFontDirectories(fs::path const& executableDirectory)
+    {
+#if defined(__APPLE__)
+        return { .paths = { (executableDirectory / ".." / "Resources" / "fonts").lexically_normal() } };
+#elif defined(_WIN32)
+        (void) executableDirectory;
+        return {};
+#else
+        return { .paths = {
+                     (executableDirectory / ".." / "share" / "contour" / "fonts").lexically_normal() } };
+#endif
+    }
+
     /// Where a native attach connects, and what it follows there.
     struct NativeAttachTarget
     {
@@ -2033,6 +2050,13 @@ int ContourGuiApp::terminalGuiAction()
 #endif
     } };
     setupQCoreApplication();
+
+    // Once, before any font lookup. A missing directory (a build tree that was never installed) is not
+    // fatal: the configured fonts, or the system's, are used instead.
+    if (auto const registered = text::registerBundledFonts(
+            bundledFontDirectories(fs::path { QCoreApplication::applicationDirPath().toStdU16String() }));
+        !registered)
+        startupLog()("Bundled fonts not registered (error {}).", static_cast<int>(registered.error()));
     if (startupLog.isEnabled())
     {
         auto const elapsed = std::chrono::steady_clock::now() - qtInitStart;

@@ -1479,6 +1479,9 @@ elseif(CONTOUR_MACOS_APP_BUNDLE)
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
     install(DIRECTORY "cli/shell-integration" DESTINATION "${INSTALL_CMAKE_DIR}")
+    # JetBrains Mono (SIL OFL 1.1), registered with CoreText at startup. The file names contain brackets,
+    # which install(DIRECTORY ... FILES_MATCHING) would read as globs, so the directory is copied whole.
+    install(DIRECTORY "res/fonts/" DESTINATION "${INSTALL_CMAKE_DIR}/fonts" PATTERN "README.md" EXCLUDE)
     # Before the deployment step below, which signs the bundle with them inside.
     contour_install_bundled_extensions("${INSTALL_CMAKE_DIR}/extensions")
 
@@ -1576,6 +1579,7 @@ else()
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
     install(DIRECTORY "cli/shell-integration" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
+    install(DIRECTORY "res/fonts/" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour/fonts" PATTERN "README.md" EXCLUDE)
     contour_install_bundled_extensions("${CMAKE_INSTALL_DATADIR}/contour/extensions")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
