@@ -312,7 +312,8 @@ class NativeClient final
     /// @param onPermissionRequest Invoked when a daemon's extension asks this client's user; none for a
     ///        client that shows no prompt, whose questions wait for another.
     /// @param liveness When a silent daemon is probed and given up on, timed by @p loop's clock; applied
-    ///        only when both ends share Capability::Heartbeat.
+    ///        only when both ends share Capability::Heartbeat, save for its handshake deadline, which
+    ///        applies to every daemon.
     NativeClient(core::net::EventLoop& loop,
                  std::unique_ptr<core::net::ISocket> connection,
                  HandshakeOptions handshake,
@@ -380,7 +381,11 @@ class NativeClient final
     void createWindow(std::string profileName);
     /// @param profileName The host profile the new pane's session runs; empty for this client's.
     void splitPane(uint64_t session, uint8_t orientation, uint16_t ratio, std::string profileName);
-    void closePane(uint64_t session);
+    /// Asks the daemon to close @p session's pane.
+    /// @param session The session whose pane is closed.
+    /// @return Sent, or Unsupported -- nothing written -- once the connection is ending or the daemon refuses
+    ///         the request.
+    Delivery closePane(uint64_t session);
 
     /// Tells the daemon how the user changed a tab's presentation, so its model and every other client
     /// follow.
@@ -454,8 +459,8 @@ class NativeClient final
     /// @return The daemon's identity.
     [[nodiscard]] vtbackend::HostIdentity const& daemonIdentity() const noexcept { return _daemonIdentity; }
 
-    /// @return Why the connection was given up on — the daemon stopped answering — or nullopt while it was
-    ///         not. run() ends once it is set.
+    /// @return Why the connection was given up on — the daemon stopped answering, or never answered the
+    ///         handshake — or nullopt while it was not. run() ends once it is set.
     [[nodiscard]] std::optional<std::string> lossReason() const { return _lossReason; }
 
     /// @return The daemon's release as its ServerHello stated it; empty until connected(), and for a
@@ -498,6 +503,11 @@ class NativeClient final
     /// One liveness tick: probes a silent daemon, or gives up on one silent for too long.
     /// @param self The NativeClient.
     static void livenessTick(void* self);
+
+    /// The handshake deadline passed: gives up on a daemon that has not answered the ClientHello, so the
+    /// attempt ends unaccepted and a reconnecting supervisor retries.
+    /// @param self The NativeClient.
+    static void handshakeExpired(void* self);
 
     /// Records what the daemon's ServerHello negotiated, or why it did not; only the first counts.
     /// @param hello The daemon's answer to this client's ClientHello.
@@ -558,6 +568,9 @@ class NativeClient final
     /// The once-a-second liveness tick; armed while both ends share Capability::Heartbeat and the
     /// connection is open, disarmed as run() closes it.
     std::optional<core::net::DeadlineTimer> _livenessTimer;
+    /// LivenessPolicy::handshakeDeadline from the ClientHello; armed as run() sends it, disarmed by the
+    /// daemon's answer and as run() closes the connection.
+    std::optional<core::net::DeadlineTimer> _handshakeTimer;
     bool _detached = false;
     bool _closing = false; ///< Set once run() has begun its orderly close; send() then writes nothing.
 };

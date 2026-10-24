@@ -4814,6 +4814,42 @@ TEST_CASE("a client without the AttachIntent capability sees every window, inclu
     CHECK(layoutWindows(fromOne).contains(first));
 }
 
+TEST_CASE("a permission question is not asked of a client that does not show its pane",
+          "[vthost][native][attach-intent][extensions]")
+{
+    // Asked in its pane, so a client following only another window has nowhere to ask it.
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
+    std::ignore = newSession(h.host);
+    auto const* other = h.host.createWindow();
+    REQUIRE(other != nullptr);
+    auto const shown = other->id().value;
+    REQUIRE(hosting->sessions.size() == 2);
+    hosting->sessions.front()->askPermission(proto::PermissionRequest { .session = 0,
+                                                                        .hostId = "git@/x.wasm",
+                                                                        .name = "git",
+                                                                        .version = 1,
+                                                                        .digest = "5f3c",
+                                                                        .commands = {} });
+    auto const asking = std::chrono::steady_clock::now();
+    h.loop.blockOn(core::net::pollUntil(&h.loop, [&] {
+        return !h.host.pendingPermissionRequests().empty()
+               || std::chrono::steady_clock::now() - asking > CollectBudget;
+    }));
+    REQUIRE(h.host.pendingPermissionRequests().size() == 1);
+
+    auto hello = intentHello(proto::AttachIntentKind::Windows, { shown });
+    hello.capabilities = proto::CapabilitySet::of(
+        { proto::Capability::AttachIntent, proto::Capability::ExtensionPermissions });
+    auto const received =
+        h.exchangeUntil({ hello }, [](auto const& got) { return snapshotRunCount(got) >= 1; });
+
+    REQUIRE(snapshotRunCount(received) >= 1);
+    CHECK(layoutWindows(received) == std::set<uint64_t> { shown });
+    CHECK_FALSE(std::ranges::any_of(received, isPermissionRequest));
+    CHECK(h.host.pendingPermissionRequests().size() == 1); // still waiting for a client that shows it
+}
+
 TEST_CASE("a window this connection creates joins its follow set", "[vthost][native][attach-intent]")
 {
     auto h = NativeHarness {};

@@ -259,6 +259,14 @@ struct HostedSessionExtensions
     std::function<void()> onForegroundFollowingChanged {};
 };
 
+/// Where a hosted session's emulation settings came from, which decides whether a profile reload reaches it.
+enum class SettingsOrigin : uint8_t
+{
+    Profile =
+        0, ///< The host's own: a profile it resolved, or its factory settings. A reload re-resolves them.
+    Client = 1, ///< Stated by a client that named no profile: a reload leaves them as the client stated.
+};
+
 /// One hosted session: the terminal (owning its PTY) plus the pump thread
 /// feeding it, mirroring the GUI's TerminalSession::mainLoop.
 class HostedSession
@@ -281,6 +289,7 @@ class HostedSession
     /// @param extensions The session's status-line extensions, started once the terminal exists; none by
     ///        default.
     /// @param profileName The host profile the session was spawned under; empty for none named.
+    /// @param settingsOrigin Where @p settings came from.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -295,7 +304,8 @@ class HostedSession
                   std::function<void()> onClosed,
                   SessionSignalCallback onSignal,
                   HostedSessionExtensions extensions = {},
-                  std::string profileName = {});
+                  std::string profileName = {},
+                  SettingsOrigin settingsOrigin = SettingsOrigin::Profile);
 
     /// Joins the pump thread; the PTY must have been closed first (terminate()).
     ~HostedSession();
@@ -336,6 +346,9 @@ class HostedSession
     /// @return The host profile the session was spawned under — the one resolved, so the default's name
     ///         when the name asked for was unknown — or empty when it was spawned under none.
     [[nodiscard]] std::string const& profileName() const noexcept { return _profileName; }
+
+    /// @return Where the session's emulation settings came from.
+    [[nodiscard]] SettingsOrigin settingsOrigin() const noexcept { return _settingsOrigin; }
 
     /// @return The child process behind the session's PTY; nullptr for a PTY that is no process (a test's
     ///         MockPty).
@@ -494,7 +507,8 @@ class HostedSession
     void deliverPending();
 
     vtworkspace::SessionId _id;
-    std::string _profileName; ///< @see profileName
+    std::string _profileName;       ///< @see profileName
+    SettingsOrigin _settingsOrigin; ///< @see settingsOrigin
     /// The session's status-line extensions; null without any. Declared before _terminal, which it outlives:
     /// ~Terminal revokes the sink their workers publish through before they are destroyed.
     std::unique_ptr<ISessionExtensions> _extensions;
@@ -1010,6 +1024,7 @@ class SessionHost final: public vtworkspace::ModelEvents
         std::optional<vtpty::Process::ExecInfo> commandOverride; ///< The shell, or the pane's override.
         std::string profileName {};              ///< The named profile resolved; empty for none.
         std::optional<SandboxEscape> sandbox {}; ///< The profile's policy; nullopt without one.
+        SettingsOrigin settingsOrigin {};        ///< Whether @c settings are a client's own.
     };
 
     /// Resolves @p request in the host's profiles (@see SessionHostConfig::profiles).

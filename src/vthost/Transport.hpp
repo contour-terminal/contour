@@ -15,7 +15,10 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <vthost/Daemon.hpp>
 
@@ -39,6 +42,8 @@ enum class TransportErrorKind : uint8_t
     Protocol = 6,               ///< The other end answered, but not in the expected way.
     Cancelled = 7,              ///< The attempt was cancelled.
     DaemonAbsent = 8, ///< Nothing listens there: the socket file is gone, or the connection was refused.
+    /// This end's own settings cannot be used (a CA that does not parse): the user must fix them first.
+    Misconfigured = 9,
 };
 
 /// A failed transport.
@@ -76,6 +81,8 @@ namespace detail
         { .kind = TransportErrorKind::Cancelled, .retry = TransportRetry::Permanent },
         // A daemon that crashed or restarts comes back: reconnecting is how a client finds it again.
         { .kind = TransportErrorKind::DaemonAbsent, .retry = TransportRetry::Transient },
+        // A setting of this end's own reads the same on the next attempt.
+        { .kind = TransportErrorKind::Misconfigured, .retry = TransportRetry::Permanent },
     });
 } // namespace detail
 
@@ -128,6 +135,11 @@ class ITransportFactory
 };
 
 /// The local daemon over its AF_UNIX socket.
+///
+/// Threading: connect() runs on the loop's thread, as every factory's does, but the daemon start it begins
+/// with does not -- it may wait seconds for a spawned daemon to serve, and the loop it would block is the
+/// client's reactor, which must keep servicing timers, posted verbs and stop(). The start runs on a worker
+/// thread of this factory's own, and its result is handed back to the loop.
 class UnixTransportFactory final: public ITransportFactory
 {
   public:
@@ -135,9 +147,19 @@ class UnixTransportFactory final: public ITransportFactory
     using EnsureDaemon = std::function<std::expected<void, TransportError>()>;
 
     /// @param socketPath The daemon's control socket; the native socket beside it is connected.
-    /// @param ensureDaemon Called before every attempt, synchronously on the loop's thread; empty for a
-    ///        caller that must never start a daemon (a status probe).
+    /// @param ensureDaemon Called before every attempt, on a worker thread rather than the loop's, and never
+    ///        twice at once; empty for a caller that must never start a daemon (a status probe). An attempt
+    ///        cancelled meanwhile stops waiting for it at once, the call itself running to its end.
     UnixTransportFactory(std::filesystem::path socketPath, EnsureDaemon ensureDaemon);
+
+    /// Waits for a daemon start still under way: it cannot be interrupted, and it calls what this factory
+    /// holds.
+    ~UnixTransportFactory() override;
+
+    UnixTransportFactory(UnixTransportFactory const&) = delete;
+    UnixTransportFactory& operator=(UnixTransportFactory const&) = delete;
+    UnixTransportFactory(UnixTransportFactory&&) = delete;
+    UnixTransportFactory& operator=(UnixTransportFactory&&) = delete;
 
     [[nodiscard]] core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> connect(
         core::net::EventLoop& loop) override;
@@ -153,8 +175,30 @@ class UnixTransportFactory final: public ITransportFactory
     [[nodiscard]] core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> connectOn(
         core::net::EventLoop* loop);
 
+    /// One daemon start: where its worker hands the result back to the loop.
+    struct EnsureRun;
+
+    /// One daemon start's worker, and the run it reports to.
+    struct EnsureWorker
+    {
+        std::shared_ptr<EnsureRun> run;
+        std::jthread thread;
+    };
+
+    /// Runs @c _ensureDaemon on a worker and waits for its result without blocking @p loop.
+    /// @param loop The loop the attempt runs on.
+    /// @return What @c _ensureDaemon answered.
+    /// @throws core::async::OperationCancelled if the attempt is cancelled first.
+    [[nodiscard]] core::async::Task<std::expected<void, TransportError>> ensureOffLoop(
+        core::net::EventLoop* loop);
+
     std::filesystem::path _socketPath;
     EnsureDaemon _ensureDaemon;
+    std::mutex _ensureMutex;  ///< Held by a worker while it calls @c _ensureDaemon.
+    std::mutex _workersMutex; ///< Guards @c _workers.
+    /// The workers started and not joined yet. Declared after what they call, so that it is destroyed --
+    /// every thread joined -- first.
+    std::vector<EnsureWorker> _workers;
 };
 
 /// A daemon over TCP, always TLS-encrypted, authenticated by the endpoint's token.

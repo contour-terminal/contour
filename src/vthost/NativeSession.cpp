@@ -426,9 +426,11 @@ void NativeSession::sessionCopyToClipboard(SessionId session, std::string const&
     emitSessionEvent(proto::SessionClipboard { .session = session.value, .selection = "c", .data = data });
 }
 
-void NativeSession::sessionPermissionRequested(SessionId /*session*/, proto::PermissionRequest const& request)
+void NativeSession::sessionPermissionRequested(SessionId session, proto::PermissionRequest const& request)
 {
-    if (!asksPermissions() || _closed)
+    // A question is asked in its pane: one in a window this client does not show waits for a client that
+    // does.
+    if (!asksPermissions() || _closed || !followsSession(session))
         return;
     send(0, proto::DecodedPdu { request });
 }
@@ -1918,7 +1920,8 @@ void NativeSession::attachClient(uint64_t serial,
     // one that cannot answer is sent none, and they wait for another, as with no client attached.
     if (asksPermissions())
         for (auto const& request: _host.pendingPermissionRequests())
-            send(0, proto::DecodedPdu { request });
+            if (followsSession(SessionId { request.session }))
+                send(0, proto::DecodedPdu { request });
 }
 
 void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)

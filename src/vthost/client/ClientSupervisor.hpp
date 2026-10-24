@@ -13,9 +13,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -83,7 +85,8 @@ class ClientSupervisor
     /// Connects, serves, and reconnects until a connection fails for good or stop() is called.
     [[nodiscard]] core::async::Task<void> run();
 
-    /// Ends run(): detaches the current client, or cancels a pending backoff wait at once. Call on the loop's
+    /// Ends run(): detaches the current client, or cancels a pending backoff wait or connect at once -- a
+    /// daemon start the transport has under way included, which is not waited out. Call on the loop's
     /// thread, where the client lives.
     void stop();
 
@@ -96,9 +99,11 @@ class ClientSupervisor
     {
         TransportFailed = 0, ///< No connection was opened.
         Refused = 1,         ///< The daemon refused the handshake.
-        Unaccepted = 2,      ///< The connection ended before the daemon answered the handshake.
-        Lost = 3,            ///< The connection ended after the daemon accepted it.
-        Stopped = 4,         ///< stop() ended it.
+        /// The connection ended before the daemon answered the handshake, or the daemon did not answer it
+        /// within LivenessPolicy::handshakeDeadline.
+        Unaccepted = 2,
+        Lost = 3,    ///< The connection ended after the daemon accepted it.
+        Stopped = 4, ///< stop() ended it.
     };
 
     /// How one connection ended, and why.
@@ -108,6 +113,16 @@ class ClientSupervisor
         /// Why, in words for the user; the kind matters for Ending::TransportFailed only.
         TransportError error = {};
     };
+
+    /// What opening one connection gave.
+    using ConnectResult = std::expected<std::unique_ptr<Connection>, TransportError>;
+
+    /// Opens a connection through the transport.
+    /// @param result Where to put what it gave; left empty when the open is cancelled.
+    [[nodiscard]] core::async::Task<void> connectInto(std::optional<ConnectResult>* result);
+
+    /// Returns once stop() was called; what an open connection is raced against.
+    [[nodiscard]] core::async::Task<void> untilStopped();
 
     /// Opens one connection and serves it to its end.
     /// @param intent What this connection asks to follow.

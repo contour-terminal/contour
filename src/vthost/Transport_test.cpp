@@ -10,9 +10,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <expected>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -57,6 +61,7 @@ TEST_CASE("only unreachable and protocol errors are retried", "[vthost][transpor
     static_assert(retryOf(TransportErrorKind::Cancelled) == TransportRetry::Permanent);
     // A daemon that went away comes back (C2): an absent one is retried too.
     static_assert(retryOf(TransportErrorKind::DaemonAbsent) == TransportRetry::Transient);
+    static_assert(retryOf(TransportErrorKind::Misconfigured) == TransportRetry::Permanent);
 }
 
 TEST_CASE("a connection releases its lifetime only after its socket", "[vthost][transport]")
@@ -125,6 +130,50 @@ TEST_CASE("the unix factory does not connect when the daemon cannot be ensured",
     CHECK(connection.error().message == "no contour binary");
 }
 
+TEST_CASE("the unix factory contains a daemon start that throws a non-std type", "[vthost][transport]")
+{
+    // An exception leaving the worker thread would be std::terminate.
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto factory =
+        vthost::UnixTransportFactory { "/nonexistent/contour/control",
+                                       []() -> std::expected<void, vthost::TransportError> { throw 42; } };
+    auto const connection = loop.blockOn(factory.connect(loop));
+    REQUIRE_FALSE(connection.has_value());
+    CHECK(connection.error().kind == TransportErrorKind::Unreachable);
+    CHECK(connection.error().message == "the daemon start threw");
+}
+
+TEST_CASE("the unix factory starts the daemon off the loop's thread", "[vthost][transport][threading]")
+{
+    // The start may wait seconds for a spawned daemon; the loop it would block is a client's reactor.
+    using namespace std::chrono_literals;
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const loopThread = std::this_thread::get_id();
+    auto ensuredOn = std::thread::id {};
+    auto loopTurned = false;
+    auto turned = std::promise<void> {};
+    auto factory = vthost::UnixTransportFactory {
+        "/nonexistent/contour/control",
+        [&] {
+            ensuredOn = std::this_thread::get_id();
+            // Blocks until the loop runs what it is posted, which it could not if this ran on it.
+            loop.post([&turned] { turned.set_value(); });
+            loopTurned = turned.get_future().wait_for(5s) == std::future_status::ready;
+            return std::expected<void, vthost::TransportError> { std::unexpected { vthost::TransportError {
+                .kind = TransportErrorKind::ProgramNotFound, .message = "no contour binary" } } };
+        }
+    };
+    auto const connection = loop.blockOn(factory.connect(loop));
+
+    CHECK(ensuredOn != loopThread);
+    CHECK(loopTurned);
+    REQUIRE_FALSE(connection.has_value());
+    CHECK(connection.error().kind == TransportErrorKind::ProgramNotFound);
+    CHECK(connection.error().message == "no contour binary");
+}
+
 TEST_CASE("a unix socket nobody serves reads as an absent daemon", "[vthost][transport][afunix]")
 {
     auto const tmp = core::testing::ScopedTempDir { "contour-transport" };
@@ -134,6 +183,20 @@ TEST_CASE("a unix socket nobody serves reads as an absent daemon", "[vthost][tra
     auto const connection = loop.blockOn(factory.connect(loop));
     REQUIRE_FALSE(connection.has_value());
     CHECK(connection.error().kind == TransportErrorKind::DaemonAbsent);
+}
+
+TEST_CASE("a CA the TLS factory cannot use is not retried", "[vthost][transport]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto listener = core::net::listen(loop, "127.0.0.1", 0);
+    REQUIRE(listener.has_value());
+    auto factory = vthost::TlsTransportFactory { vthost::TcpEndpoint {
+        .host = "127.0.0.1", .port = (*listener)->boundPort(), .token = {}, .caPem = "not a certificate" } };
+    auto const connection = loop.blockOn(factory.connect(loop));
+    REQUIRE_FALSE(connection.has_value());
+    CHECK(connection.error().kind == TransportErrorKind::Misconfigured);
+    CHECK(retryOf(connection.error().kind) == TransportRetry::Permanent);
 }
 
 TEST_CASE("the TLS factory names its endpoint", "[vthost][transport]")

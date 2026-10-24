@@ -51,6 +51,7 @@
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <cstdint>
+#include <expected>
 
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/LoopDrain.hpp>
@@ -333,6 +334,14 @@ struct DaemonFixture
     template <typename F>
     void whileDisconnected(F change)
     {
+        refuseConnections();
+        serveAgain(std::move(change));
+    }
+
+    /// Drops every connection and closes each new one as it is accepted, until serveAgain(): a client
+    /// reconnecting meanwhile keeps retrying.
+    void refuseConnections()
+    {
         onDaemon([this] {
             native = [](vthost::ConnectionId,
                         std::unique_ptr<core::net::ISocket> socket) -> core::async::Task<void> {
@@ -345,6 +354,12 @@ struct DaemonFixture
         });
         // The connections' flows hold the host until they ended.
         REQUIRE(waitUntilOnDaemon([this] { return live.empty(); }));
+    }
+
+    /// Runs @p change on the daemon's thread, then serves connections again (@see refuseConnections).
+    template <typename F = void (*)()>
+    void serveAgain(F change = [] {})
+    {
         onDaemon([this, &change] {
             change();
             native = vthost::makeNativeHandler(loop, *host, services);
@@ -1942,6 +1957,147 @@ TEST_CASE("keys typed while reconnecting are dropped", "[attach][controller][rec
     pane.terminal.reset();
 }
 
+TEST_CASE("a pane closed while reconnecting is closed on the daemon once it answers again",
+          "[attach][controller][reconnect]")
+{
+    // A close is an intent that outlives the gap, unlike a keystroke: dropped, the shell would keep running
+    // on the daemon, tombstoned here and so never shown by this client again.
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    std::ignore = daemon.seedSession("closed");
+    auto const liveSessions = [&daemon] {
+        return daemon.onDaemon([&daemon] { return daemon.host->sessionCount(); });
+    };
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto const closed = controller.sessionForPty(&pane.pty());
+    REQUIRE(closed.has_value());
+    REQUIRE(liveSessions() == 2);
+
+    daemon.refuseConnections();
+    REQUIRE(waitUntil([&] { return controller.connectionState() == ConnectionState::Reconnecting; }));
+    route.router.requestRemoteClose(&pane.pty());
+    // Long enough for the close to reach the reactor while no connection is up; nothing reached the daemon.
+    std::this_thread::sleep_for(100ms);
+    CHECK(controller.connectionState() == ConnectionState::Reconnecting);
+    CHECK(liveSessions() == 2);
+
+    daemon.serveAgain();
+    REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
+    CHECK(waitUntil([&] { return liveSessions() == 1; }));
+    CHECK(daemon.onDaemon(
+        [&] { return daemon.host->terminal(vtworkspace::SessionId { *closed }) == nullptr; }));
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
+namespace contour::remote
+{
+
+/// Reaches the reactor-owned client of a controller (@see NativeController's friend declaration).
+struct NativeControllerTestAccess
+{
+    /// Runs @p action on the reactor thread with the controller's current client, and waits for it.
+    template <typename F>
+    static void onReactor(contour::remote::NativeController& controller, F action)
+    {
+        auto done = std::promise<void> {};
+        controller._reactor.post([&] {
+            action(*controller._client);
+            done.set_value();
+        });
+        done.get_future().wait();
+    }
+
+    /// Ends the current client's connection and, in the same reactor turn, closes @p session's pane.
+    static void closeWhileEnding(contour::remote::NativeController& controller, uint64_t session)
+    {
+        onReactor(controller, [&](auto& client) {
+            client.detach();
+            controller.closePaneOnReactor(session);
+        });
+    }
+};
+
+} // namespace contour::remote
+
+TEST_CASE("a pane closed as its connection ends is closed once the same daemon answers again",
+          "[attach][controller][reconnect]")
+{
+    // The close is issued with the client still current but its connection ending, so the client writes
+    // nothing; the state change that would park it in _pendingCloses has not been delivered yet.
+    using vthost::client::ConnectionState;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    std::ignore = daemon.seedSession("closed");
+    auto const liveSessions = [&daemon] {
+        return daemon.onDaemon([&daemon] { return daemon.host->sessionCount(); });
+    };
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.pendingCount() == 2; }));
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto const closed = controller.sessionForPty(&pane.pty());
+    REQUIRE(closed.has_value());
+    REQUIRE(liveSessions() == 2);
+
+    // The close lands on the reactor in the same turn as the detach, ahead of the state change it provokes.
+    contour::remote::NativeControllerTestAccess::closeWhileEnding(controller, *closed);
+
+    REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 2000));
+    CHECK(waitUntil([&] { return liveSessions() == 1; }));
+    CHECK(daemon.onDaemon(
+        [&] { return daemon.host->terminal(vtworkspace::SessionId { *closed }) == nullptr; }));
+
+    controller.stop();
+    pane.terminal.reset();
+}
+
+TEST_CASE("a reconnect takes the handshake of the daemon that answered", "[attach][controller][reconnect]")
+{
+    // The daemon may have been upgraded or downgraded meanwhile: what was agreed is the new connection's.
+    using vthost::client::ConnectionState;
+    using vthost::proto::Capability;
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("upgraded");
+
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    auto const log = StateLog { controller };
+    requireConnected(controller);
+    REQUIRE(controller.negotiated().has_value());
+    REQUIRE(controller.negotiated()->shared.contains(Capability::TabEdits));
+
+    daemon.whileDisconnected([&] {
+        daemon.services.handshake.capabilities =
+            vthost::proto::CapabilitySet::of({ Capability::ExtensionPermissions,
+                                               Capability::InitialClientArea,
+                                               Capability::AttachIntent,
+                                               Capability::Heartbeat });
+    });
+    REQUIRE(waitUntil([&] { return log.count(ConnectionState::Connected) == 2; }, 1000));
+    REQUIRE(controller.negotiated().has_value());
+    CHECK_FALSE(controller.negotiated()->shared.contains(Capability::TabEdits));
+    CHECK(controller.negotiated()->shared.contains(Capability::AttachIntent));
+
+    controller.stop();
+}
+
 TEST_CASE("windows the daemon no longer has are reported lost", "[attach][controller][reconnect]")
 {
     // Review focus 2: the daemon restarted, and none of the windows exists any more.
@@ -2079,6 +2235,40 @@ TEST_CASE("a daemon that states no instance is judged by its window ids alone",
     CHECK(log.windowsLost().empty());
 
     controller.stop();
+}
+
+TEST_CASE("stop() during a slow daemon start returns promptly", "[attach][controller][threading]")
+{
+    // The start runs on the transport's worker, not on the reactor stop() has to join: quitting while a
+    // daemon is being started does not wait for it to serve.
+    auto started = std::atomic<bool> { false };
+    auto release = std::promise<void> {};
+    auto const transport = std::make_shared<vthost::UnixTransportFactory>(
+        "/nonexistent/contour/control", [&started, released = release.get_future().share()] {
+            started = true;
+            std::ignore = released.wait_for(10s);
+            return std::expected<void, vthost::TransportError> {};
+        });
+    auto timeline = TestTimeline {};
+    auto controller = contour::remote::NativeController {
+        transport,
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::Launch, .windows = {} },
+        std::string {},
+        std::nullopt,
+        {},
+        core::platform::defaultSteadyClock(),
+        timeline.timeline
+    };
+    controller.startConnecting();
+    REQUIRE(waitUntil([&] { return started.load(); }));
+
+    auto const began = std::chrono::steady_clock::now();
+    controller.stop();
+    auto const stoppedIn = std::chrono::steady_clock::now() - began;
+    release.set_value();
+
+    CHECK(stoppedIn < 1s);
+    CHECK(controller.connectionState() == vthost::client::ConnectionState::Stopped);
 }
 
 TEST_CASE("NativeController shows the refusal text", "[contour][remote]")

@@ -24,12 +24,12 @@
 namespace contour::cli
 {
 
-/// How an attempt to attach to the daemon ended.
+/// How an attempt to attach to the daemon ended. A daemon that answered and refused this client is
+/// Unreachable too: no decision tells the two apart, so no enumerator does until one has to.
 enum class AttachResult : uint8_t
 {
     Attached = 0,    ///< The daemon accepted the connection.
-    Unreachable = 1, ///< No daemon answered, or none could be started.
-    Refused = 2,     ///< A daemon answered and refused this client: its version, token or capabilities.
+    Unreachable = 1, ///< No daemon answered or none could be started, or the one that answered refused.
 };
 
 /// Where a launch hosts its sessions.

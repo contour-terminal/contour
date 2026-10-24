@@ -12,11 +12,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -29,6 +31,7 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/ClientSupervisor.hpp>
+#include <vthost/client/Liveness.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 
@@ -89,6 +92,7 @@ struct Daemon
     std::unique_ptr<vthost::SessionHost> host = makeHost();
     std::vector<std::unique_ptr<vthost::NativeSession>> sessions;
     std::vector<core::net::ISocket*> serverSockets; ///< Each connection's daemon end, to drop it.
+    std::vector<std::unique_ptr<core::net::ISocket>> unanswered; ///< The daemon ends silent() holds open.
 
     Daemon() { std::ignore = vthost::testing::newSession(*host); }
 
@@ -136,6 +140,19 @@ struct Daemon
         };
     }
 
+    /// @return An attempt whose connection is accepted and then never answered: the daemon's end is held
+    ///         open, and nothing reads or writes it.
+    [[nodiscard]] Step silent()
+    {
+        return [this](core::net::EventLoop& clientLoop)
+                   -> std::expected<std::unique_ptr<Connection>, TransportError> {
+            auto pair = *core::net::testing::makeSocketPair(clientLoop);
+            unanswered.push_back(std::move(pair.first));
+            return std::make_unique<Connection>(
+                Connection { .lifetime = {}, .socket = std::move(pair.second), .token = {} });
+        };
+    }
+
     /// Drops the daemon's end of the latest connection, as a crashing daemon would.
     void dropConnection() const { serverSockets.back()->close(); }
 
@@ -172,13 +189,14 @@ struct Supervised
     Supervised(Daemon& daemon,
                std::vector<Step> steps,
                BackoffSchedule backoff = { .first = 1ms, .ceiling = 4ms },
-               proto::AttachIntent firstIntent = { .kind = proto::AttachIntentKind::Launch, .windows = {} }):
+               proto::AttachIntent firstIntent = { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+               vthost::client::LivenessPolicy liveness = {}):
         loop(daemon.loop), transport(std::make_shared<ScriptedTransport>(std::move(steps)))
     {
         supervisor.emplace(
             loop,
             transport,
-            [this](std::unique_ptr<Connection> connection, proto::AttachIntent intent) {
+            [this, liveness](std::unique_ptr<Connection> connection, proto::AttachIntent intent) {
                 intents.push_back(intent);
                 return std::make_unique<NativeClient>(
                     loop,
@@ -191,7 +209,9 @@ struct Supervised
                     NativeClient::UpdateHandler {},
                     NativeClient::ImageHandler {},
                     NativeClient::SessionEventHandler {},
-                    NativeClient::LayoutHandler {});
+                    NativeClient::LayoutHandler {},
+                    NativeClient::PermissionHandler {},
+                    liveness);
             },
             std::move(firstIntent),
             backoff,
@@ -354,6 +374,27 @@ TEST_CASE("transport failures during reconnect keep retrying", "[vthost][reconne
     CHECK(h.transport->calls() == 4); // the first connect, then three during the reconnect
 }
 
+TEST_CASE("a reconnect the daemon accepts and never answers is retried", "[vthost][reconnect]")
+{
+    // Half-open mid-handshake: without a deadline the attempt would wait for the hello's answer for good.
+    auto daemon = Daemon {};
+    auto h = Supervised { daemon,
+                          { daemon.serving(), daemon.silent(), daemon.serving() },
+                          { .first = 1ms, .ceiling = 4ms },
+                          { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+                          { .idleBeforeProbe = 5s, .deadAfter = 15s, .handshakeDeadline = 50ms } };
+    h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
+        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        daemon->dropConnection();
+        REQUIRE(co_await h->reached(ConnectionState::Connected, 2));
+        h->supervisor->stop();
+    }(&h, &daemon));
+
+    CHECK(h.count(ConnectionState::Reconnecting) == 1);
+    CHECK(h.transport->calls() == 3); // the first connect, the unanswered one, and the one that took
+    CHECK(h.states.back().state == ConnectionState::Stopped);
+}
+
 TEST_CASE("a refusal after reconnect stops retrying and names both versions", "[vthost][reconnect]")
 {
     auto daemon = Daemon {};
@@ -387,6 +428,47 @@ TEST_CASE("stop during backoff ends run promptly", "[vthost][reconnect]")
     CHECK(std::chrono::steady_clock::now() - began < 1s);
     CHECK(h.states.back().state == ConnectionState::Stopped);
     CHECK(h.transport->calls() == 1);
+}
+
+TEST_CASE("stop during a slow daemon start ends run promptly", "[vthost][reconnect][threading]")
+{
+    // The start runs on the transport's worker, which stop() does not wait for.
+    auto daemon = Daemon {};
+    auto started = std::atomic<bool> { false };
+    auto release = std::promise<void> {};
+    auto transport = std::make_shared<vthost::UnixTransportFactory>(
+        "/nonexistent/contour/control", [&started, released = release.get_future().share()] {
+            started = true;
+            std::ignore = released.wait_for(10s);
+            return std::expected<void, TransportError> {};
+        });
+    auto states = std::vector<ConnectionState> {};
+    auto supervisor = ClientSupervisor {
+        daemon.loop,
+        transport,
+        [](std::unique_ptr<Connection>, proto::AttachIntent const&) -> std::unique_ptr<NativeClient> {
+            return nullptr;
+        },
+        { .kind = proto::AttachIntentKind::Launch, .windows = {} },
+        { .first = 1ms, .ceiling = 4ms },
+        [&states](ConnectionState state, std::string const&) { states.push_back(state); }
+    };
+    auto stopAt = std::chrono::steady_clock::time_point {};
+    daemon.loop.blockOn(core::net::testing::allOf(
+        supervisor.run(),
+        [](ClientSupervisor* supervisor,
+           core::net::EventLoop* loop,
+           std::atomic<bool>* started,
+           std::chrono::steady_clock::time_point* stopAt) -> Task<void> {
+            REQUIRE(co_await core::net::testing::waitUntil(loop, [started] { return started->load(); }));
+            *stopAt = std::chrono::steady_clock::now();
+            supervisor->stop();
+        }(&supervisor, &daemon.loop, &started, &stopAt)));
+    auto const stoppedIn = std::chrono::steady_clock::now() - stopAt;
+    release.set_value();
+
+    CHECK(stoppedIn < 1s);
+    CHECK(states == std::vector { ConnectionState::Connecting, ConnectionState::Stopped });
 }
 
 TEST_CASE("a permanent transport error during reconnect stops retrying", "[vthost][reconnect]")

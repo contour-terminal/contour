@@ -1143,7 +1143,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         // Before every connect, the first and each reconnect alike, so a daemon that crashed or was stopped
         // is started again. Spawned, if it must be, from this version's own copy where an upgrade would
         // disturb the installed binary, and that copy held leased until the daemon serves. Runs on the
-        // attach's reactor thread, which is all that uses it.
+        // transport's worker thread, one call at a time, so the attach's reactor goes on serving -- and
+        // stop() does not wait -- while a spawned daemon comes up; nothing else uses what it captures.
         auto ensureDaemon =
             [start = std::make_shared<LocalDaemonStart>(processEnvironment(), fileSystem(), programPath()),
              placement = _processPlacement,
@@ -1239,8 +1240,9 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // The connect, hello, first spawn and first snapshot run on the reactor while the GUI boots;
     // terminalGuiAction() waits for them through _awaitAttach just before the first window, by when booting
     // has already spent part of the budget, and settles the hosting there. The signals above are connected
-    // first, so nothing the connection emits meanwhile is lost. A cold start's daemon start runs there too,
-    // in the transport's ensureDaemon, while the GUI boots.
+    // first, so nothing the connection emits meanwhile is lost. A cold start's daemon start is part of the
+    // connect, in the transport's ensureDaemon, on a worker thread of the transport's own while the GUI
+    // boots.
     _nativeController->startConnecting();
     _awaitAttach = [this] {
         return awaitNativeAttach();

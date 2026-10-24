@@ -15,6 +15,11 @@
 namespace vthost::client
 {
 
+/// How long a daemon may take to answer a ClientHello before the attempt is given up on: long enough for a
+/// daemon busy restoring its sessions, short enough that a connection gone half-open mid-handshake is
+/// retried instead of waited on for good.
+inline constexpr auto DefaultHandshakeDeadline = std::chrono::milliseconds { 10000 };
+
 /// The thresholds of the liveness decision.
 struct LivenessPolicy
 {
@@ -22,6 +27,9 @@ struct LivenessPolicy
     std::chrono::milliseconds idleBeforeProbe { 5000 };
     /// How long it may stay silent before the connection is declared lost.
     std::chrono::milliseconds deadAfter { 15000 };
+    /// How long it may take to answer the ClientHello. Applies to every daemon, whether or not it shares
+    /// Capability::Heartbeat: an old daemon answers the hello too.
+    std::chrono::milliseconds handshakeDeadline { DefaultHandshakeDeadline };
 };
 
 /// What the connection should do now.

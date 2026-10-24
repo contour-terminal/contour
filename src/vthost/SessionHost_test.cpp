@@ -2232,6 +2232,25 @@ TEST_CASE("replaceProfiles re-limits running sessions and serves new ones from t
     CHECK(h.programs == std::vector<std::string> { "/bin/zsh", "/bin/zsh-next" });
 }
 
+TEST_CASE("replaceProfiles leaves the limits a client stated for an unnamed session",
+          "[vthost][profiles][reload]")
+{
+    // A client that shares no ProfileByName states its own settings; the host's default profile is not its.
+    auto h = ProfileHost {};
+    auto stated = vtbackend::Settings {};
+    stated.historyLimits =
+        vtbackend::HistoryLimits::plain(vtbackend::MaxHistoryLineCount { vtbackend::LineCount(200) });
+    auto const* tab = h.host.createTab({ .settings = stated });
+    REQUIRE(tab != nullptr);
+    auto* terminal = h.host.terminal(h.sessionOf(*tab));
+    auto const before = terminal->settings().historyLimits;
+    REQUIRE(before.guaranteed == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(200) });
+
+    h.host.replaceProfiles(profileCatalog("/bin/zsh-next", vtbackend::LineCount(3000)));
+
+    CHECK(terminal->settings().historyLimits == before);
+}
+
 TEST_CASE("the reload watcher hands each catalog its hook yields to the host", "[vthost][profiles][reload]")
 {
     using namespace std::chrono_literals;

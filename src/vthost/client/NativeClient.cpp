@@ -381,6 +381,20 @@ void NativeClient::armLivenessTick()
         _loop, _loop.clock().now() + std::chrono::seconds { 1 }, &NativeClient::livenessTick, this);
 }
 
+void NativeClient::handshakeExpired(void* self)
+{
+    auto& client = *static_cast<NativeClient*>(self);
+    if (client._closing || client._detached || client._negotiated || client._refusal)
+        return;
+    client._lossReason = std::format(
+        "the daemon did not answer the handshake within {} s",
+        std::chrono::duration_cast<std::chrono::seconds>(client._liveness.policy().handshakeDeadline)
+            .count());
+    errorLog()("attach: {}; closing the connection", *client._lossReason);
+    // As the liveness tick gives up: the parked read is retired and run() closes the connection in order.
+    client._connection->cancelRead();
+}
+
 void NativeClient::livenessTick(void* self)
 {
     auto& client = *static_cast<NativeClient*>(self);
@@ -434,7 +448,8 @@ RemoteScreen& NativeClient::screenFor(uint64_t session)
 
 uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
 {
-    if (_closing)
+    // A detached client is ending its connection in order: what it writes now would race the close.
+    if (_closing || _detached)
         return 0;
     if (_unsupported.peerRefused(proto::typeOf(pdu)))
     {
@@ -534,9 +549,10 @@ void NativeClient::resizeSplit(uint64_t firstSession, uint64_t secondSession, ui
         .firstSession = firstSession, .secondSession = secondSession, .ratio = ratio } });
 }
 
-void NativeClient::closePane(uint64_t session)
+Delivery NativeClient::closePane(uint64_t session)
 {
-    send(proto::DecodedPdu { proto::ClosePane { .session = session } });
+    return send(proto::DecodedPdu { proto::ClosePane { .session = session } }) != 0 ? Delivery::Sent
+                                                                                    : Delivery::Unsupported;
 }
 
 void NativeClient::performOperation(proto::PerformOperation request)
@@ -753,6 +769,7 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
     _daemonInstance = hello.daemonInstance;
     _followedWindows = hello.followedWindows;
     _negotiated = std::move(*outcome);
+    _handshakeTimer.reset();
     clientLog()("attach: connected (protocol v{})", _negotiated->version);
     // Only a daemon that echoes is probed: an older one would answer every Heartbeat Unsupported.
     if (shares(proto::Capability::Heartbeat))
@@ -774,8 +791,12 @@ void NativeClient::reportPumpOutcome(PumpResult const& outcome)
 
 core::async::Task<void> NativeClient::run()
 {
-    // Silence is measured from the hello: a daemon that never answers it is given up on too.
-    _liveness.noteInbound(_loop.clock().now());
+    // Silence is measured from the hello, once the daemon answered it; until then the handshake deadline is
+    // what gives up on a daemon that never does.
+    auto const now = _loop.clock().now();
+    _liveness.noteInbound(now);
+    _handshakeTimer.emplace(
+        _loop, now + _liveness.policy().handshakeDeadline, &NativeClient::handshakeExpired, this);
     send(proto::DecodedPdu { proto::ClientHello { .versions = _handshake.versions,
                                                   .capabilities = _handshake.capabilities,
                                                   .token = _handshake.token,
@@ -800,6 +821,7 @@ core::async::Task<void> NativeClient::run()
     reportPumpOutcome(outcome);
 
     _closing = true;
+    _handshakeTimer.reset();
     _livenessTimer.reset();
     co_await closeGracefully(&_loop, &_writer, _connection.get());
 }

@@ -57,9 +57,11 @@ HostedSession::HostedSession(SessionId id,
                              std::function<void()> onClosed,
                              SessionSignalCallback onSignal,
                              HostedSessionExtensions extensions,
-                             std::string profileName):
+                             std::string profileName,
+                             SettingsOrigin settingsOrigin):
     _id(id),
     _profileName(std::move(profileName)),
+    _settingsOrigin(settingsOrigin),
     _extensions(std::move(extensions.extensions)),
     _events(std::move(identity),
             std::move(onScreenUpdated),
@@ -343,11 +345,14 @@ SessionHost::ResolvedSpawn SessionHost::resolveSpawn(SessionSpawnRequest const& 
     // sandbox policy rather than the default's. A layout pane's own command and directory still overlay
     // that shell. A named profile's settings replace the requested ones; an unnamed spawn keeps the settings
     // a client stated, else takes the default profile's.
-    auto spawn = ResolvedSpawn { .settings = request.settings, .commandOverride = request.commandOverride };
+    auto const named = !request.profileName.empty();
+    auto spawn = ResolvedSpawn { .settings = request.settings,
+                                 .commandOverride = request.commandOverride,
+                                 .settingsOrigin = !named && request.settings ? SettingsOrigin::Client
+                                                                              : SettingsOrigin::Profile };
     if (!_profiles)
         return spawn;
     auto resolved = _profiles->resolve(request.profileName);
-    auto const named = !request.profileName.empty();
     if (named && resolved.match == ProfileMatch::Default)
         sessionLog()("session {}: profile '{}' is unknown here; using '{}'",
                      id.value,
@@ -518,7 +523,8 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
             });
         },
         makeSessionExtensions(id),
-        std::move(profileName));
+        std::move(profileName),
+        spawn.settingsOrigin);
 
     // Before the pump starts: the seed assumes nothing else writes to the terminal.
     if (request.restoredHistory)
@@ -1073,6 +1079,9 @@ void SessionHost::replaceProfiles(std::shared_ptr<ProfileCatalog const> profiles
     auto relimited = std::vector<SessionId> {};
     for (auto const& [id, session]: _sessions)
     {
+        // A client that named no profile stated its own settings, which no profile of this host's replaces.
+        if (session->settingsOrigin() == SettingsOrigin::Client)
+            continue;
         // Normalized as a spawn's settings are, so a reload cannot hand a running session a limit no new
         // session could have.
         auto const limits =

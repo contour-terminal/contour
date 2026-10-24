@@ -20,8 +20,6 @@ TEST_CASE("decideHosting covers every mode and outcome", "[cli][hosting]")
     static_assert(decideHosting(InProcess, std::nullopt) == HostingDecision::InProcess);
     static_assert(decideHosting(Auto, AttachResult::Attached) == HostingDecision::Attached);
     static_assert(decideHosting(Auto, AttachResult::Unreachable) == HostingDecision::InProcessWithNotice);
-    static_assert(decideHosting(Auto, AttachResult::Refused) == HostingDecision::InProcessWithNotice);
-    static_assert(decideHosting(Required, AttachResult::Refused) == HostingDecision::Fail);
     static_assert(decideHosting(Required, AttachResult::Attached) == HostingDecision::Attached);
     // The rows a launch reaches less often: an attach never made, and a failure under `required`.
     static_assert(decideHosting(Required, AttachResult::Unreachable) == HostingDecision::Fail);

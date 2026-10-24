@@ -2093,7 +2093,7 @@ constexpr StringLiteral DaemonWeb {
     "section decides whether sessions are hosted by a daemon process, so they outlive the window.\n"
     "``` yaml\n"
     "daemon:\n"
-    "  mode: auto\n"
+    "  mode: in_process\n"
     "  socket: \"\"\n"
     "  size_policy: latest\n"
     "  history_limit: 1000\n"

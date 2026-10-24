@@ -2335,7 +2335,9 @@ Task<void> daemonToEnd(Task<void> daemon, bool* ended)
         NativeClient::SessionEventHandler {},
         NativeClient::LayoutHandler {},
         NativeClient::PermissionHandler {},
-        vthost::client::LivenessPolicy { .idleBeforeProbe = 5s, .deadAfter = 15s });
+        vthost::client::LivenessPolicy { .idleBeforeProbe = 5s,
+                                         .deadAfter = 15s,
+                                         .handshakeDeadline = vthost::client::DefaultHandshakeDeadline });
 }
 
 /// A loop on a manual clock, a client on it, and a scripted daemon answering it with @p answer — driven by
@@ -2399,6 +2401,22 @@ TEST_CASE("a client whose daemon stops answering ends with a loss reason", "[vth
     CHECK(turnUntil(h.loop, [&h] { return h.clientEnded; }));
     CHECK(h.client->lossReason() == "no answer from the daemon for 15 s");
     CHECK(std::ranges::any_of(h.seen, carries<proto::Heartbeat>)); // it was probed first
+    h.settle();
+}
+
+TEST_CASE("a client whose daemon never answers the hello gives up at the handshake deadline",
+          "[vthost][attach][liveness]")
+{
+    // A connection that went half-open mid-handshake: accepted, read, and never answered.
+    auto h = ManualClockAttach { [](proto::DecodedFrame const&) { return Script {}; } };
+    REQUIRE(turnUntil(h.loop, [&h] { return std::ranges::any_of(h.seen, carries<proto::ClientHello>); }));
+    h.letTimePass(9);
+    CHECK_FALSE(h.clientEnded);
+    h.letTimePass(2);
+
+    CHECK(turnUntil(h.loop, [&h] { return h.clientEnded; }));
+    CHECK_FALSE(h.client->connected());
+    CHECK(h.client->lossReason() == "the daemon did not answer the handshake within 10 s");
     h.settle();
 }
 

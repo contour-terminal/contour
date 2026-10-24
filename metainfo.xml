@@ -110,6 +110,10 @@
           <li>Daemon: every window, tab and pane has a stable UUID, and each hosted shell finds its own with $CONTOUR_PANE, $CONTOUR_TAB, $CONTOUR_WINDOW and $CONTOUR_DAEMON.</li>
           <li>Daemon: serves a typed control API on its native socket: list, capture and label windows, tabs and panes, open tabs and splits, type into panes, read and wait for command blocks, and subscribe to events.</li>
           <li>Daemon: contour daemon --access-file FILE issues TCP tokens with narrower control API grants (read, screen, input, write); a call outside them is refused as forbidden, and a narrow token cannot attach.</li>
+          <li>Daemon: a new <code>daemon:</code> configuration section, and <code>--daemon-mode</code> per launch, choose where sessions are hosted: <code>in_process</code> (the default) in the window's own process, <code>auto</code> in a daemon with an in-process fallback and a notice when none can be reached, <code>required</code> in a daemon or not at all; <code>socket</code>, <code>size_policy</code> and <code>history_limit</code> configure the daemon itself.</li>
+          <li>Daemon: a window attached to a daemon survives a lost connection: its panes show "Reconnecting…" while it reconnects with backoff, a connection gone half-open is noticed by a heartbeat, input typed meanwhile is dropped rather than replayed, and a pane closed meanwhile is closed on the daemon once it answers.</li>
+          <li>Daemon: <code>contour client --window N</code> shows one daemon window; a tab's profile is resolved in the daemon's configuration, and its active pane, zoom, title and color reach every other attached client; a client smaller than the shared grid follows the cursor.</li>
+          <li>Daemon: picks up edits of its configuration file without a restart: new sessions use the edited profiles, and running ones take the new scrollback limits.</li>
         </ul>
       </description>
     </release>

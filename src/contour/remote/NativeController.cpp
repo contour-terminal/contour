@@ -192,6 +192,8 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
             case ConnectionState::Connecting: break;
             case ConnectionState::Connected:
                 _client = _supervisor != nullptr ? _supervisor->current() : nullptr;
+                // Each connection's own: a reconnect can reach an upgraded or downgraded daemon.
+                _negotiated.reset();
                 captureHandshake();
                 if (_acceptedConnections != 0)
                     adoptReconnect();
@@ -246,7 +248,7 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
 
 void NativeController::adoptReconnect()
 {
-    auto const* client = _client;
+    auto* client = _client;
     if (client == nullptr)
         return;
     auto const mapped = std::ranges::to<std::vector>(_layouts | std::views::keys);
@@ -254,6 +256,7 @@ void NativeController::adoptReconnect()
     // holds name nothing of the new run, however many of them it reuses.
     auto const restarted =
         _daemonInstance != 0 && client->daemonInstance() != 0 && _daemonInstance != client->daemonInstance();
+    auto const sameInstance = _daemonInstance != 0 && _daemonInstance == client->daemonInstance();
     _daemonInstance = client->daemonInstance();
     if (restarted)
     {
@@ -263,6 +266,9 @@ void NativeController::adoptReconnect()
         _bindings.clear();
         _closedSessions.clear();
         _pending.clear();
+        // Closes of the old run's sessions: the ids name the new run's, if anything.
+        _pendingCloses.clear();
+        _unsentCloses.clear();
     }
     else
     {
@@ -278,6 +284,14 @@ void NativeController::adoptReconnect()
         for (auto& binding: _bindings | std::views::values)
             if (binding.mirror)
                 binding.mirror->restart();
+        // The panes the user closed meanwhile are still tombstoned, so the layout this connection pushes
+        // does not bring them back; the daemon is told now, and its next push drops them.
+        for (auto const session: std::exchange(_pendingCloses, {}))
+            std::ignore = client->closePane(session);
+        // A legacy daemon (instance 0) may be a restarted one whose ids were reused, so the closes it never
+        // got are dropped as a restarted daemon's are; only a daemon that names its run is trusted with them.
+        if (!sameInstance)
+            _unsentCloses.clear();
     }
     // Replaced by what the new connection pushes; what was reported against them was told another daemon,
     // or a connection that may not have delivered it.
@@ -400,6 +414,7 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
         _lastReportedArea.reset();
         _lastReportedPaneSizes.clear();
     }
+    replayUnsentCloses(layout);
     if (!lost.empty())
         emit windowsLost(std::move(lost));
     // The GUI (on its own thread, via a queued connection) reconciles each daemon
@@ -581,12 +596,43 @@ void NativeController::reportTabPresentation(contour::session::LocalTabPresentat
     });
 }
 
+void NativeController::replayUnsentCloses(vthost::proto::LayoutState const& layout)
+{
+    if (_client == nullptr || _unsentCloses.empty())
+        return;
+    auto const resend = [&](auto const& self, vthost::proto::WirePane const& pane) -> void {
+        if (pane.isSplit())
+        {
+            for (auto const& child: pane.children)
+                self(self, child);
+            return;
+        }
+        if (std::erase(_unsentCloses, pane.session) != 0)
+            std::ignore = _client->closePane(pane.session);
+    };
+    for (auto const& tab: layout.tabs)
+        resend(resend, tab.root);
+}
+
 void NativeController::requestClosePane(uint64_t session)
 {
-    _reactor.post([this, session] {
-        if (_client != nullptr)
-            _client->closePane(session);
-    });
+    _reactor.post([this, session] { closePaneOnReactor(session); });
+}
+
+void NativeController::closePaneOnReactor(uint64_t session)
+{
+    // A close is an intent, not a keystroke: one issued while the connection is down is sent once the
+    // same daemon answers again (adoptReconnect), rather than leave its shell running where no window of
+    // this client can ever show it.
+    if (_client == nullptr)
+    {
+        _pendingCloses.push_back(session);
+        return;
+    }
+    // The connection can be dying with no state change delivered yet, and a close it never wrote is
+    // sent again if the same daemon still lists the pane (replayUnsentCloses).
+    if (_client->closePane(session) == vthost::client::Delivery::Unsupported)
+        _unsentCloses.push_back(session);
 }
 
 void NativeController::onPermissionRequest(vthost::proto::PermissionRequest const& request)

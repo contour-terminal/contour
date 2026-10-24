@@ -994,6 +994,12 @@ int ContourApp::daemonAction()
         cerr << std::format("contour daemon: {}\n", installed.error());
         return EXIT_FAILURE;
     }
+    // Loaded again, now that there is a log: what the load has to say -- a key it does not know, a value it
+    // corrects -- was said to the default sink the first time, which for a --background daemon is nowhere a
+    // user looks. The socket stays the one derived above; a file that no longer loads keeps the first load.
+    if (auto reloaded = config::tryLoadConfigNamed(parameters().get<string>("contour.daemon.config"));
+        reloaded)
+        hostConfig = std::move(reloaded);
 
     auto const daemonProfile = parameters().get<string>("contour.daemon.profile");
     auto const resolved = config::resolvedSessionConfigFor(*hostConfig, daemonProfile);

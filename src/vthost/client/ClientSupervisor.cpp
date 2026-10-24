@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/client/ClientSupervisor.hpp>
 
+#include <core/async/WhenAny.hpp>
 #include <core/net/InterruptibleSleep.hpp>
 
+#include <chrono>
+#include <optional>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 #include <vthost/Logging.hpp>
@@ -51,16 +55,35 @@ void ClientSupervisor::stop()
         _current->detach();
 }
 
+core::async::Task<void> ClientSupervisor::connectInto(std::optional<ConnectResult>* result)
+{
+    *result = co_await _transport->connect(_loop);
+}
+
+core::async::Task<void> ClientSupervisor::untilStopped()
+{
+    // Woken by stop() alone; the deadline bounds one park, and is renewed.
+    while (co_await core::net::interruptibleSleepUntil(
+               &_loop, _stop.get_token(), _loop.clock().now() + std::chrono::hours { 1 })
+           == core::net::WakeReason::Deadline)
+    {
+    }
+}
+
 core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::AttachIntent intent)
 {
-    auto connection = co_await _transport->connect(_loop);
-    if (!connection)
-        co_return Outcome { .ending = Ending::TransportFailed, .error = std::move(connection.error()) };
-    if (_stop.stop_requested())
+    // Raced against stop(): opening a connection can take seconds -- a daemon being started, a TCP connect
+    // timing out -- and stop() must not wait that out. The loser is cancelled, and unwound before this goes
+    // on.
+    auto connection = std::optional<ConnectResult> {};
+    std::ignore = co_await core::async::whenAny(connectInto(&connection), untilStopped());
+    if (_stop.stop_requested() || !connection)
         co_return Outcome {};
+    if (!*connection)
+        co_return Outcome { .ending = Ending::TransportFailed, .error = std::move(connection->error()) };
 
-    _currentLifetime = (*connection)->lifetime;
-    _current = _makeClient(std::move(*connection), std::move(intent));
+    _currentLifetime = (**connection)->lifetime;
+    _current = _makeClient(std::move(**connection), std::move(intent));
     // Once the daemon accepted the hello: what it follows now is what a reconnect resumes.
     _current->setHandshakeHandler([this] { enter(ConnectionState::Connected); });
     co_await _current->run();
@@ -78,9 +101,12 @@ core::async::Task<ClientSupervisor::Outcome> ClientSupervisor::attempt(proto::At
                                        .message = _current->lossReason().value_or(
                                            "the connection to the daemon was lost") } };
     else
+        // Transient (Protocol), whether the daemon closed the connection or never answered the hello within
+        // the handshake deadline: a reconnect retries either.
         outcome = Outcome { .ending = Ending::Unaccepted,
                             .error = { .kind = TransportErrorKind::Protocol,
-                                       .message = "the connection closed before the daemon answered" } };
+                                       .message = _current->lossReason().value_or(
+                                           "the connection closed before the daemon answered") } };
     if (_current->connected())
         _followed = _current->followedWindows();
 
