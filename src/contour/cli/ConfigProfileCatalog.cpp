@@ -23,8 +23,9 @@ vthost::ResolvedProfile ConfigProfileCatalog::resolve(std::string_view name) con
     auto const match = named != nullptr ? vthost::ProfileMatch::Named : vthost::ProfileMatch::Default;
     auto const& resolvedName = named != nullptr ? asked : _defaultProfile;
     // The daemon refuses to start under a default profile its configuration lacks, and a reload that lost
-    // it still runs the built-in defaults rather than refusing a session.
-    static auto const builtIn = config::TerminalProfile {};
+    // it still runs the built-in defaults rather than refusing a session -- those of the configuration's own
+    // edition, so a Classic configuration does not fall back to the Native2026 look.
+    auto const builtIn = config::TerminalProfile { .defaultsEdition = _config.defaultsEdition };
     auto const* profile = named != nullptr ? named : _config.findProfile(_defaultProfile);
     if (profile == nullptr)
         profile = &builtIn;

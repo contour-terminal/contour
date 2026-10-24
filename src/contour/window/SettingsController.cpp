@@ -2112,7 +2112,8 @@ void SettingsController::newProfile(QString const& basedOn)
     auto const* base = cfg.findProfile(basedOn.toStdString());
     if (base == nullptr)
         base = cfg.findProfile(cfg.defaultProfileName.value());
-    _draft = base != nullptr ? *base : TerminalProfile {};
+    // With no profile to copy, the built-in defaults of the configuration's own edition.
+    _draft = base != nullptr ? *base : TerminalProfile { .defaultsEdition = cfg.defaultsEdition };
     _editingProfile.clear(); // unsaved: needs Save As
     _hasDraft = true;
     _editingReadOnly = _locked;

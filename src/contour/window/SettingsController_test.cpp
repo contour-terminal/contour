@@ -222,6 +222,23 @@ TEST_CASE("SettingsController: new profile -> Save As creates an editable side-f
     CHECK(rowNamed(fx.controller->profiles(), "work").value("editable").toBool() == true);
 }
 
+TEST_CASE("SettingsController: a new profile with nothing to copy takes the config's edition", "[settings]")
+{
+    // BasicConfig states no defaults_edition, so it is Classic. With neither the named profile nor the
+    // default one to copy, the draft is the built-in defaults -- of that edition, not of the newest.
+    auto fx = Fixture(BasicConfig);
+    REQUIRE(fx.cfg.defaultsEdition == config::DefaultsEdition::Classic);
+    fx.cfg.defaultProfileName = std::string { "missing" };
+    fx.controller->newProfile("also-missing");
+
+    auto const fields = fx.controller->profileFields();
+    CHECK(rowWithKey(fields, "terminal_size_columns").value("value").toInt() == 80);
+    CHECK(rowWithKey(fields, "terminal_size_lines").value("value").toInt() == 25);
+    CHECK(rowWithKey(fields, "dim_unfocused").value("value").toDouble() == Catch::Approx(0.0));
+    CHECK(rowWithKey(fields, "bell_sound").value("value").toString() == "default");
+    CHECK(rowWithKey(fields, "history_max_lines").value("value").toInt() == 1000);
+}
+
 TEST_CASE("SettingsController: Save As refuses to shadow a contour.yml profile", "[settings]")
 {
     auto fx = Fixture(BasicConfig);

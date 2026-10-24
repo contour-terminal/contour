@@ -1508,7 +1508,7 @@ constexpr StringLiteral HyperlinkDecorationConfig {
     "{comment}   hover    - only the one under the pointer\n"
     "{comment}   modifier - all of them while the follow modifier (Ctrl of Ctrl+click) is held; the\n"
     "{comment}              native2026 default, which follows with Command+click on macOS\n"
-    "{comment}   never    - never; Ctrl+click still opens them\n"
+    "{comment}   never    - never; the follow gesture still opens them\n"
     "{comment} normal, hover: the decorator for a link at rest and under the pointer: underline,\n"
     "{comment} dotted-underline, double-underline, curly-underline, dashed-underline, overline,\n"
     "{comment} crossed-out, framed, encircle.\n"
