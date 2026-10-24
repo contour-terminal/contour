@@ -704,6 +704,114 @@ TEST_CASE("the layout and the working directory are events", "[vthost][control][
         }
 }
 
+TEST_CASE("control subscribers see pane.programStatusChanged and ls shows it",
+          "[vthost][control][programstatus]")
+{
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    std::ignore = subscribe(h);
+
+    h.terminal(session).writeToScreen("\033]7501;state=working:app=deploy:progress=10\033\\"
+                                      "\033]7501;state=blocked:id=eu:kind=permission:msg=QXBwbHk/\033\\");
+    h.drain();
+    auto const events = delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink);
+    REQUIRE(events.size() == 2);
+    CHECK(h.context.sink.deliveries.back().event.origin.pane == h.paneId(session));
+    // Each event carries the whole set as it reads when the loop gets to it.
+    CHECK(events.back().reason == vtcontrol::ProgramStatusReason::Report);
+    REQUIRE(events.back().records.size() == 2);
+    auto const& blocked = events.back().records.back();
+    CHECK(blocked.id == "eu");
+    CHECK(blocked.state == vtcontrol::ProgramState::Blocked);
+    CHECK(blocked.kind == vtcontrol::BlockedKind::Permission);
+    CHECK(blocked.app == "deploy"); // inherited from the root
+    CHECK(blocked.message == "Apply?");
+
+    auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+    REQUIRE(list.has_value());
+    auto const& pane = list->windows.at(0).tabs.at(0).panes.at(0);
+    REQUIRE(pane.programStatus.size() == 2);
+    CHECK(pane.programStatus.front().state == vtcontrol::ProgramState::Working);
+    CHECK(pane.programStatus.front().progress == uint8_t { 10 });
+
+    // A prompt drops both, and says why.
+    h.terminal(session).writeToScreen("\033]133;A\007");
+    h.drain();
+    REQUIRE(delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink).size() == 3);
+    CHECK(delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink).back().reason
+          == vtcontrol::ProgramStatusReason::Prompt);
+    CHECK(delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink).back().records.empty());
+}
+
+TEST_CASE("program status needs screen, in its event as in ls", "[vthost][control][programstatus][grants]")
+{
+    // A record names the program and what it is doing, as a command line does: `read` lists the pane, not it.
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    h.context.granted = vtcontrol::ControlGrants::of({ vtcontrol::Permission::Read });
+    auto const report = [&] {
+        h.terminal(session).writeToScreen(
+            "\033]7501;state=blocked:app=deploy:kind=permission:msg=QXBwbHk/\033\\");
+        h.drain();
+    };
+    auto const listedRecords = [&] {
+        auto const list = callSync<vtcontrol::ListReply>(h.service, h.context, vtcontrol::ListRequest {});
+        REQUIRE(list.has_value());
+        return list->windows.at(0).tabs.at(0).panes.at(0).programStatus;
+    };
+
+    SECTION("read alone: refused by name, left out of every kind and of ls")
+    {
+        auto const refused = callSync<vtcontrol::SubscribeReply>(
+            h.service,
+            h.context,
+            vtcontrol::SubscribeRequest { .kinds = { "pane.programStatusChanged" }, .pane = {} });
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().code == ControlErrorCode::Forbidden);
+        CHECK(refused.error().message.contains("'screen'"));
+
+        std::ignore = subscribe(h);
+        report();
+        CHECK(delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink).empty());
+        CHECK(listedRecords().empty());
+    }
+
+    SECTION("with screen, both carry it")
+    {
+        h.context.granted = h.context.granted.with(vtcontrol::Permission::Screen);
+        std::ignore = subscribe(h);
+        report();
+        CHECK(delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink).size() == 1);
+        REQUIRE(listedRecords().size() == 1);
+        CHECK(listedRecords().front().message == "Apply?");
+    }
+}
+
+TEST_CASE("program status reported on another thread reaches the subscriber on the loop",
+          "[vthost][control][programstatus][threading]")
+{
+    // The parser thread changes the set and raises the signal under the terminal lock; the host posts it, and
+    // the loop thread -- this one -- reads the set back under the lock and publishes it.
+    auto h = ControlHarness {};
+    auto const session = h.openTab();
+    std::ignore = subscribe(h);
+    auto& terminal = h.terminal(session);
+    auto parser = std::thread { [&terminal] {
+        for (auto const index: std::views::iota(0, 50))
+            terminal.writeToScreen(std::format("\033]7501;state=working:id=job{}\033\\", index));
+    } };
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+    while (delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink).size() < 50
+           && std::chrono::steady_clock::now() < deadline)
+        std::ignore = h.loop.runOnce(std::chrono::milliseconds { 1 });
+    parser.join();
+    h.drain();
+
+    auto const events = delivered<vtcontrol::ProgramStatusChangedEvent>(h.context.sink);
+    REQUIRE(events.size() == 50);
+    CHECK(events.back().records.size() == 50);
+}
+
 TEST_CASE("unsubscribing an unknown subscription is NotFound", "[vthost][control][events]")
 {
     auto h = ControlHarness {};

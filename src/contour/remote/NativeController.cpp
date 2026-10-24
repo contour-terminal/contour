@@ -93,7 +93,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             // Heartbeat so that a connection gone half-open is noticed and replaced. ProfileByName because
             // the hello and every spawning verb name a profile for the daemon to resolve in its own
             // configuration. TabEdits because the user's changes to a tab's presentation are reported
-            // (reportTabPresentation).
+            // (reportTabPresentation). ProgramStatus because the mirrors take the OSC 7501 records the daemon
+            // pushes, for the tab strip to show.
             .capabilities =
                 vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
                                                    vthost::proto::Capability::ControlPermissions,
@@ -101,7 +102,8 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
                                                    vthost::proto::Capability::AttachIntent,
                                                    vthost::proto::Capability::Heartbeat,
                                                    vthost::proto::Capability::ProfileByName,
-                                                   vthost::proto::Capability::TabEdits }),
+                                                   vthost::proto::Capability::TabEdits,
+                                                   vthost::proto::Capability::ProgramStatus }),
             // The profile's terminal size, so the first session spawns at it rather than at the daemon's
             // default; the ResizeRequest sent once the window is realized corrects any difference.
             .clientArea = _attachSettings.transform([](auto const& s) {

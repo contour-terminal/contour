@@ -86,7 +86,15 @@ struct HandshakePolicy
                                                                    proto::Capability::AttachIntent,
                                                                    proto::Capability::TabEdits,
                                                                    proto::Capability::Heartbeat,
+                                                                   proto::Capability::ProgramStatus,
                                                                    proto::Capability::ControlPermissions });
+};
+
+/// When a connection sends a session's program-status set.
+enum class ProgramStatusPush : uint8_t
+{
+    Always = 0, ///< It changed: even an empty set is news, since it says the records are gone.
+    IfAny,      ///< A snapshot: an empty set says nothing a fresh mirror does not already hold.
 };
 
 /// The collaborators and policy a native connection is constructed with.
@@ -209,6 +217,10 @@ class NativeSession final: public SessionStreamEvents
                        std::string const& body,
                        std::optional<vtbackend::DisplayOccasion> occasion) override;
     void sessionCopyToClipboard(vtworkspace::SessionId session, std::string const& data) override;
+
+    /// A session's program-status records changed: marked, and pushed whole by the next debounced flush to a
+    /// viewer sharing Capability::ProgramStatus. Every other signal is the control service's.
+    void sessionSignal(vtworkspace::SessionId session, SessionSignal const& signal) override;
 
     /// Asks this client's user, whose GUI shows the prompt in @p session's pane. Sent as the question opens;
     /// a client attaching later is asked from SessionHost::pendingPermissionRequests() instead.
@@ -618,6 +630,14 @@ class NativeSession final: public SessionStreamEvents
     /// when an increment turns out not to be able to describe the batch.
     void pushDelta(vtworkspace::SessionId session);
 
+    /// Whether this connection is a viewer that mirrors program status (shares Capability::ProgramStatus).
+    [[nodiscard]] bool mirrorsProgramStatus() const noexcept;
+
+    /// Sends @p session's whole program-status set, read under its terminal lock.
+    /// @param session The session.
+    /// @param when Whether an empty set is news (a change emptied it) or not worth a PDU (a snapshot).
+    void pushProgramStatus(vtworkspace::SessionId session, ProgramStatusPush when);
+
     /// Queues a full-grid snapshot of @p session and starts the streamer if it is idle.
     ///
     /// Queued rather than sent: a snapshot is the whole grid, several of them are asked for at
@@ -837,6 +857,8 @@ class NativeSession final: public SessionStreamEvents
     proto::UnsupportedTracker _unsupported;
     std::unordered_map<uint64_t, FollowState> _followed;
     std::unordered_set<uint64_t> _pendingSessions;
+    /// Sessions whose program-status records changed since the last flush. @see sessionSignal
+    std::unordered_set<uint64_t> _programStatusPending;
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
     std::deque<uint64_t> _snapshotQueue;
     /// The session @ref streamSnapshots is emitting right now; engaged exactly while a streamer

@@ -11,6 +11,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -130,6 +131,12 @@ class WindowController:
         //!< value (0 = inactive, i.e. nothing to paint). @see vtbackend::ProgressState.
         ProgressStateRole = Qt::UserRole + 8,
         ProgressPercentageRole = Qt::UserRole + 9, //!< The active pane's progress percentage, 0..100.
+        //!< The tab's OSC 7501 program-status badge, as the BadgeKind enumerator's value (0 = none), from the
+        //!< records of all its panes. @see ProgramStatusBadge.hpp.
+        ProgramStatusRole = Qt::UserRole + 10,
+        ProgramStatusTextRole = Qt::UserRole + 11, //!< The badge's tooltip, disarmed; empty for none.
+        //!< The progress of a Working badge, 0..100, or -1 when the program gave none (a plain spinner).
+        ProgramStatusProgressRole = Qt::UserRole + 12,
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -722,6 +729,11 @@ class WindowController:
     [[nodiscard]] int rowOfTab(vtworkspace::TabId tab) const noexcept;
     /// The strip's label for list-model row @p row, through the model's own TitleRole.
     [[nodiscard]] std::string titleAtRow(int row) const;
+    /// The program-status badge @p row's tab shows, from the records of all its panes, each read under its
+    /// terminal's lock.
+    [[nodiscard]] ProgramStatusBadge programStatusBadge(vtworkspace::Tab const& tab, int row) const;
+    /// programStatusBadge(), computed once until the row or the tab in front changes (@ref _badges).
+    [[nodiscard]] ProgramStatusBadge cachedProgramStatusBadge(vtworkspace::Tab const& tab, int row) const;
     /// Resolves the label shown on @p row's tab.
     [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab,
                                            session::TerminalSession* session,
@@ -831,6 +843,9 @@ class WindowController:
     // }}}
 
     QString _hostingNotice; ///< @see hostingNotice
+
+    /// Each tab's badge, computed once for the three roles that show it. Mutable: data() fills it.
+    mutable TabBadgeCache _badges;
 
     // {{{ Terminal context menu
     /// The menu as QML sees it, rebuilt on every right-click.

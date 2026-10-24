@@ -246,6 +246,7 @@ namespace
             sessionLog()("ExitWatcherThread: Started.");
             _session.terminal().device().waitForClosed();
             sessionLog()("ExitWatcherThread: Terminal device closed.");
+            _session.deviceClosed();
             platform::postToObject(&_session, [&]() { _session.onClosed(); });
         }
 
@@ -747,6 +748,13 @@ void TerminalSession::mainLoop()
     }
 
     sessionLog()("Event loop terminating (PTY {}).", _terminal.device().isClosed() ? "closed" : "open");
+}
+
+void TerminalSession::deviceClosed()
+{
+    // A requested close ends the session, and its records with it: nothing is left to drop.
+    if (!_terminationRequested)
+        _terminal.markProcessExited();
 }
 
 void TerminalSession::terminate()
@@ -2133,6 +2141,22 @@ void TerminalSession::progressChanged(vtbackend::Progress /*progress*/)
     // strip cannot paint a state older than the one in effect when the posted call finally runs.
     postToManager([id = modelSessionId()](TerminalSessionManager& manager) {
         manager.refreshTabProgressForSession(id);
+    });
+}
+
+void TerminalSession::programStatusChanged(vtbackend::ProgramStatusChange const& /*change*/)
+{
+    // OSC 7501, a mirror's replacement, a prompt or the process's exit. The threading constraint of
+    // progressChanged() above, and its answer: the badge reads the records back, under the lock, on the GUI
+    // thread, so it never paints a set older than the one in effect when the posted call runs. That is also
+    // what lets a program reporting in a loop cost one queued call, not one per report: while one is queued,
+    // another would read the same records. postToObject targets `this`, so Qt drops it if the session goes.
+    if (_isProgramStatusRefreshPending.exchange(true))
+        return;
+    platform::postToObject(this, [this]() {
+        _isProgramStatusRefreshPending = false;
+        if (_manager != nullptr)
+            _manager->refreshTabProgramStatusForSession(modelSessionId());
     });
 }
 

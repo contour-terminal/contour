@@ -5,6 +5,7 @@
 
 #include <vtpty/MockPty.hpp>
 
+#include <core/Base64.hpp>
 #include <core/async/WhenAll.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
@@ -35,6 +36,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1977,6 +1979,156 @@ TEST_CASE("a window-title change is carried in the following incremental delta",
     CHECK(delta->snapshot == 0);
     CHECK(delta->titleChanged == 1);
     CHECK(delta->title == "my-title");
+}
+
+namespace
+{
+/// The ProgramStatus frames among @p frames.
+std::vector<proto::ProgramStatus> programStatusFrames(std::vector<proto::DecodedFrame> const& frames)
+{
+    auto found = std::vector<proto::ProgramStatus> {};
+    for (auto const& frame: frames)
+        if (auto const* status = std::get_if<proto::ProgramStatus>(&frame.pdu))
+            found.push_back(*status);
+    return found;
+}
+
+/// A hello from a viewer that mirrors program status.
+proto::ClientHello programStatusHello()
+{
+    return proto::ClientHello { .capabilities =
+                                    proto::CapabilitySet::of({ proto::Capability::ProgramStatus }) };
+}
+
+/// Once @p gate holds: a program reporting in a loop, @p bursts times ten fresh ids of maximum-size records,
+/// one burst every 30 ms -- longer than the debounce, so every burst earns a flush of its own.
+Task<void> reportInBursts(NativeHarness* h, vtworkspace::SessionId id, int bursts, StepGate gate)
+{
+    co_await awaitGate(&h->loop, std::move(gate));
+    auto const encoded = core::base64::encode(std::string(2048, 'x')); // the longest message there is
+    for (auto const burst: std::views::iota(0, bursts))
+    {
+        auto bytes = std::string {};
+        for (auto const index: std::views::iota(0, 10))
+            bytes +=
+                std::format("\033]7501;state=working:id=job{}:msg={}\033\\", (burst * 10) + index, encoded);
+        h->host.terminal(id)->writeToScreen(bytes);
+        co_await h->loop.delay(30ms);
+    }
+}
+
+/// Reads nothing for @p stall, then collects until @p done holds.
+Task<void> stallThenCollect(NativeHarness* h,
+                            std::chrono::milliseconds stall,
+                            CollectDone done,
+                            std::vector<proto::DecodedFrame>* out)
+{
+    co_await h->loop.delay(stall);
+    co_await collectUntil(&h->loop, h->pair.second.get(), std::move(done), out);
+}
+} // namespace
+
+TEST_CASE("a viewer sharing ProgramStatus receives the set", "[vthost][native][programstatus]")
+{
+    auto const hasProgramStatus = [](auto const& got) {
+        return std::ranges::any_of(got, [](proto::DecodedFrame const& frame) {
+            return std::holds_alternative<proto::ProgramStatus>(frame.pdu);
+        });
+    };
+
+    SECTION("a report after the attach arrives with the next flush, once")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        auto const received = h.exchangeUntil(
+            { proto::DecodedPdu { programStatusHello() } },
+            [&](auto const& got) {
+                // The set, and the increment the text written beside it earns, both from one flush.
+                return hasProgramStatus(got) && got.size() >= AttachSnapshotFrames + 2;
+            },
+            writeOnce(
+                &h,
+                sessionId,
+                "\033]7501;state=working:app=brew:progress=30\033\\\033]7501;state=working:app=brew:progress="
+                "40\033\\text",
+                holdsFrames(&h.received, AttachSnapshotFrames)));
+        auto const sets = programStatusFrames(received);
+        // Two reports inside one coalescing window are one set, read when it goes: the newest.
+        REQUIRE(sets.size() == 1);
+        CHECK(sets.front().session == sessionId.value);
+        REQUIRE(sets.front().records.size() == 1);
+        CHECK(sets.front().records.front().state == std::to_underlying(vtbackend::ProgramState::Working));
+        CHECK(sets.front().records.front().app == "brew");
+        CHECK(sets.front().records.front().progress == 40);
+    }
+
+    SECTION("a viewer without the capability gets none")
+    {
+        auto h = NativeHarness { HarnessOptions { .collectBudget = std::chrono::milliseconds { 300 } } };
+        auto const sessionId = newSession(h.host);
+        auto const received = h.exchangeUntil({ proto::DecodedPdu { proto::ClientHello {} } },
+                                              hasProgramStatus,
+                                              writeOnce(&h,
+                                                        sessionId,
+                                                        "\033]7501;state=working\033\\",
+                                                        holdsFrames(&h.received, AttachSnapshotFrames)));
+        CHECK(received.size() >= AttachSnapshotFrames);
+        CHECK(programStatusFrames(received).empty());
+    }
+
+    SECTION("a viewer attaching later gets the current set in its snapshot")
+    {
+        auto h = NativeHarness {};
+        auto const sessionId = newSession(h.host);
+        h.host.terminal(sessionId)->writeToScreen("\033]7501;state=done:id=build:app=make\033\\");
+        // ServerHello, LayoutState, SessionState, ProgramStatus, then the rows.
+        auto const received =
+            h.exchange({ proto::DecodedPdu { programStatusHello() } }, AttachSnapshotFrames + 1);
+        REQUIRE(received.size() == AttachSnapshotFrames + 1);
+        auto const* status = std::get_if<proto::ProgramStatus>(&received[3].pdu);
+        REQUIRE(status != nullptr);
+        REQUIRE(status->records.size() == 1);
+        CHECK(status->records.front().id == "build");
+        CHECK(std::get_if<proto::Delta>(&received[4].pdu) != nullptr);
+    }
+
+    SECTION("an empty set says nothing in a snapshot")
+    {
+        auto h = NativeHarness {};
+        std::ignore = newSession(h.host);
+        auto const received =
+            h.exchange({ proto::DecodedPdu { programStatusHello() } }, AttachSnapshotFrames);
+        CHECK(programStatusFrames(received).empty());
+    }
+}
+
+TEST_CASE("program status waits for a client that stopped reading instead of costing the connection",
+          "[vthost][native][programstatus]")
+{
+    // A full set of maximum-size records is twice this queue's bound. Pushed every debounce window
+    // regardless, a client that reads nothing for a while would have the sets fill the pipe and then the
+    // backlog, until the queue refused one and the connection went. Gated on room, they wait; the newest set
+    // arrives once the client reads again, and the viewer is not otherwise affected.
+    auto capture = core::log::ScopedCapture {};
+    auto h = NativeHarness { smallQueueOptions() };
+    auto const sessionId = newSession(h.host);
+    auto const hello = encodeRequest({ proto::DecodedPdu { programStatusHello() } });
+    auto const newestArrived = [](std::vector<proto::DecodedFrame> const& got) {
+        auto const sets = programStatusFrames(got);
+        return !sets.empty() && sets.back().records.size() == vtbackend::MaxProgramStatusRecords
+               && sets.back().records.back().id == "job199";
+    };
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(
+        core::net::testing::allOf(h.session->run(),
+                                  feedBytes(h.pair.second.get(), &hello),
+                                  stallThenCollect(&h, 800ms, newestArrived, &received),
+                                  reportInBursts(&h, sessionId, 20, followsSession(&h, sessionId))));
+
+    CHECK_FALSE(capture.contains("send queue overflow"));
+    CHECK(newestArrived(received));
+    // The host never held more than its cap, whatever the program sent.
+    CHECK(h.host.terminal(sessionId)->programStatus().records().size() == vtbackend::MaxProgramStatusRecords);
 }
 
 TEST_CASE("a hyperlink URI is delivered on first reference", "[vthost][native]")

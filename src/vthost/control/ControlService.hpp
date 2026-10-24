@@ -15,6 +15,7 @@
 #include <string_view>
 #include <vector>
 
+#include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/ControlApi.hpp>
 #include <vtcontrol/ControlError.hpp>
 #include <vtcontrol/Target.hpp>
@@ -228,15 +229,20 @@ class ControlService final:
     [[nodiscard]] std::expected<vtcontrol::BlockReadReply, vtcontrol::ControlError> readBlock(
         BlockTarget const& block, vtcontrol::BlockPart part) const;
 
+    /// @param grants What the asking connection holds, which says what its panes' records may carry.
     /// @return The API record of one window, as the model has it now.
     [[nodiscard]] vtcontrol::WindowInfo windowInfoOf(vtworkspace::Window const& window,
-                                                     uint32_t position) const;
+                                                     uint32_t position,
+                                                     vtcontrol::ControlGrants grants) const;
 
     /// @param session The pane's session.
     /// @param tab The tab it is a leaf of, which says whether it is the active one.
+    /// @param grants What the asking connection holds: program status only for the permission its event
+    /// needs.
     /// @return The API record of one pane, read under its terminal's lock.
     [[nodiscard]] vtcontrol::PaneInfo paneInfoOf(vtworkspace::SessionId session,
-                                                 vtworkspace::Tab const& tab) const;
+                                                 vtworkspace::Tab const& tab,
+                                                 vtcontrol::ControlGrants grants) const;
 
     /// @return The ids of @p session's pane, tab and window, as far as they still exist.
     [[nodiscard]] vtcontrol::EventOrigin originOf(vtworkspace::SessionId session) const;

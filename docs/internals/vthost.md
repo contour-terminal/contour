@@ -983,6 +983,31 @@ for ssh, which checks the host key, and `Unverified` for TLS without a trust anc
 but would hand the token to an active machine-in-the-middle. A control client refuses an `Unverified`
 transport before it connects; the interactive `contour client` keeps attaching over it.
 
+### Program status
+
+A session's OSC 7501 records (`vtbackend::ProgramStatusSet`, at most 64) travel to viewers as one
+PDU, gated on `Capability::ProgramStatus` (`program-status`, 10):
+
+| PDU | Tag | Direction | Carries |
+| --- | --- | --- | --- |
+| `ProgramStatus` | 33 | daemon → client | a session id and its whole set, least recently updated first |
+
+The set is state, not an event, so it is always sent whole and replaces what the mirror held; an
+empty set says every record is gone. A change raises `ProgramStatusChangedSignal` on the parser
+thread, which the host posts to the loop like every `SessionSignal`; a `Viewing` connection that
+shares the capability marks the session and sends its set at the next debounced flush, read under
+the terminal lock when it goes, so a program reporting in a loop costs one PDU per coalescing window.
+A snapshot sends the set before its rows whenever it is not empty. On the client the set is kept on
+the `RemoteScreen`, so a mirror bound later (or replayed after a reconnect) catches up from it, and
+`ScreenMirror` hands it to `Terminal::replaceProgramStatus()`. A record whose state the client does
+not know is dropped (`control::fromWire`); `control/ProgramStatusConvert.hpp` holds the one table per
+enum that bridges `vtbackend`'s and `vtcontrol`'s spellings. The control API reads the same set for
+`PaneInfo.programStatus` and publishes `pane.programStatusChanged` with the whole set and its reason,
+both only to a connection granted `screen`: a record names a program and what it is doing, as the
+command line `block.finished` keeps behind `screen` does.
+
+The text is never traced (`ProgramStatus session=1 records=2`).
+
 ### Who configures a daemon session
 
 The host's configuration owns what runs; the client's owns how it looks. A client names a

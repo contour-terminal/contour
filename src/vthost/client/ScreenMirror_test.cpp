@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <format>
 #include <functional>
 #include <limits>
@@ -203,7 +204,9 @@ struct MirrorHarness
         client = std::make_unique<NativeClient>(
             loop,
             std::move(pair.second),
-            NativeClient::HandshakeOptions {},
+            // ProgramStatus, as the GUI offers it: the set rides only a connection that shares it.
+            NativeClient::HandshakeOptions {
+                .capabilities = proto::CapabilitySet::of({ proto::Capability::ProgramStatus }) },
             mirrorBlockLimits,
             NativeClient::UpdateHandler {
                 [this](vthost::client::RemoteScreen const& screen, proto::Delta const& delta) {
@@ -244,9 +247,49 @@ Task<void> waitUntil(core::net::EventLoop* loop, std::function<bool()> ready)
         co_await loop->delay(1ms);
 }
 
+/// The longest a scenario may take before the client is detached under it.
+constexpr auto ScenarioDeadline = std::chrono::seconds { 30 };
+
+/// Runs @p scenario, detaching the client when it fails: a REQUIRE that throws leaves the scenario before its
+/// own detach(), and the client's run() would wait for the daemon forever, with blockOn parked under it.
+Task<void> detachOnFailure(MirrorHarness* h, Task<void> scenario, bool* finished)
+{
+    auto failure = std::exception_ptr {};
+    try
+    {
+        co_await std::move(scenario);
+    }
+    catch (...)
+    {
+        failure = std::current_exception();
+    }
+    *finished = true;
+    if (!failure)
+        co_return;
+    h->client->detach();
+    std::rethrow_exception(failure);
+}
+
+/// Detaches the client once ScenarioDeadline passes with the scenario still running: the bound on a scenario
+/// that awaits something that never comes.
+Task<void> scenarioWatchdog(MirrorHarness* h, bool const* finished)
+{
+    auto const deadline = std::chrono::steady_clock::now() + ScenarioDeadline;
+    while (!*finished && std::chrono::steady_clock::now() < deadline)
+        co_await h->loop.delay(10ms);
+    if (*finished)
+        co_return;
+    FAIL_CHECK("the scenario did not finish in time");
+    h->client->detach();
+}
+
 Task<void> drive(MirrorHarness* h, Task<void> scenario)
 {
-    co_await core::async::whenAll(h->server->run(), h->client->run(), std::move(scenario));
+    auto finished = false;
+    co_await core::async::whenAll(h->server->run(),
+                                  h->client->run(),
+                                  detachOnFailure(h, std::move(scenario), &finished),
+                                  scenarioWatchdog(h, &finished));
 }
 
 /// Writes @p bytes on the server terminal and pushes the resulting delta.
@@ -1297,6 +1340,57 @@ TEST_CASE("the progress indicator mirrors", "[vthost][mirror]")
         co_await waitUntil(&h->loop, [&] { return !h->mirror->isAlternateScreen(); });
         REQUIRE(h->serverTerminal(session)->progress() == vtbackend::Progress {});
         CHECK(h->mirror->progress() == vtbackend::Progress {});
+
+        h->client->detach();
+    }(&h, session);
+
+    h.loop.blockOn(drive(&h, std::move(scenario)));
+}
+
+namespace
+{
+/// The ids of the mirror terminal's program-status records, read under its lock.
+std::vector<std::string> mirroredIds(MirrorHarness* h)
+{
+    auto const _ = std::lock_guard { *h->mirror };
+    auto ids = std::vector<std::string> {};
+    for (auto const& record: h->mirror->programStatus().records())
+        ids.push_back(record.id);
+    return ids;
+}
+} // namespace
+
+TEST_CASE("ScreenMirror applies ProgramStatus to the mirror terminal", "[vthost][client][programstatus]")
+{
+    auto h = MirrorHarness {};
+    auto const session = newSession(h.host);
+    // In flight before the client attaches: the snapshot carries it.
+    h.serverTerminal(session)->writeToScreen("\033]7501;state=done:id=build:app=make\033\\shell-ready");
+
+    // Captureless: the coroutine outlives the closure that started it.
+    auto scenario = [](MirrorHarness* h, vtworkspace::SessionId session) -> Task<void> {
+        co_await waitUntil(&h->loop, [&] { return mirroredIds(h) == std::vector<std::string> { "build" }; });
+        REQUIRE(mirroredIds(h) == std::vector<std::string> { "build" });
+
+        // A report after the attach, with an ancestor's app to inherit.
+        serverWrites(h, session, "\033]7501;state=blocked:id=build/test:kind=question:progress=60\033\\");
+        co_await waitUntil(&h->loop, [&] { return mirroredIds(h).size() == 2; });
+        {
+            auto const _ = std::lock_guard { *h->mirror };
+            auto const& set = h->mirror->programStatus();
+            REQUIRE(set.records().size() == 2);
+            auto const& blocked = set.records().back();
+            CHECK(blocked.id == "build/test");
+            CHECK(blocked.state == vtbackend::ProgramState::Blocked);
+            CHECK(blocked.kind == vtbackend::BlockedKind::Question);
+            CHECK(blocked.progress == uint8_t { 60 });
+            CHECK(set.appOf(blocked) == "make");
+        }
+
+        // A clear empties the mirror too: an empty set is news.
+        serverWrites(h, session, "\033]7501;state=clear\033\\");
+        co_await waitUntil(&h->loop, [&] { return mirroredIds(h).empty(); });
+        CHECK(mirroredIds(h).empty());
 
         h->client->detach();
     }(&h, session);

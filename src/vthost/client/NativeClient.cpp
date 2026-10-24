@@ -116,6 +116,13 @@ namespace
     }
 } // namespace
 
+void RemoteScreen::apply(proto::ProgramStatus const& status)
+{
+    auto const& records = status.records;
+    auto const kept = std::min(records.size(), vtbackend::MaxProgramStatusRecords);
+    programStatus.assign(records.end() - static_cast<std::ptrdiff_t>(kept), records.end());
+}
+
 void RemoteScreen::apply(proto::SessionState const& state)
 {
     session = state.session;
@@ -683,8 +690,12 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
     // a fourth transient event joins the catalog.
     if (auto const event = proto::asSessionEvent(pdu))
     {
+        auto& screen = screenFor(proto::sessionOf(*event));
+        // The program-status set is state, not an event: the screen keeps it for a mirror bound later.
+        if (auto const* status = std::get_if<proto::ProgramStatus>(&*event))
+            screen.apply(*status);
         if (_onSessionEvent)
-            _onSessionEvent(screenFor(proto::sessionOf(*event)), *event);
+            _onSessionEvent(screen, *event);
         return;
     }
     if (auto const* layout = std::get_if<proto::LayoutState>(&pdu))

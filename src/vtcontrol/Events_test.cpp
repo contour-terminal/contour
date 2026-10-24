@@ -70,5 +70,6 @@ TEST_CASE("every event names the permission a subscriber needs", "[vtcontrol][ev
 {
     CHECK(vtcontrol::eventPermission("block.finished") == vtcontrol::Permission::Screen);
     CHECK(vtcontrol::eventPermission("pane.bell") == vtcontrol::Permission::Read);
+    CHECK(vtcontrol::eventPermission("pane.programStatusChanged") == vtcontrol::Permission::Screen);
     CHECK_FALSE(vtcontrol::eventPermission("pane.teleported"));
 }

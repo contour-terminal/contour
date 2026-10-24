@@ -589,6 +589,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose hosting tab should refresh its progress indicator.
     void refreshTabProgressForSession(vtworkspace::SessionId session);
 
+    /// Repaints the program-status badge (OSC 7501) of the tab hosting @p session, which pools the records
+    /// of all its panes. No-op if no tab hosts @p session. MUST be called on the GUI thread.
+    /// @param session The session whose records changed.
+    void refreshTabProgramStatusForSession(vtworkspace::SessionId session);
+
     /// What the OS taskbar should show right now, aggregated across every reporting session.
     ///
     /// The staleness policy is read from the config here, at the point of use, rather than pushed

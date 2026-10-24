@@ -61,7 +61,10 @@ namespace
     {
         auto connection = co_await transport->connect(*loop);
         if (!connection)
-            co_return fail(ControlFailure::Unreachable, std::move(connection.error().message));
+            co_return fail(connection.error().kind == TransportErrorKind::Misconfigured
+                               ? ControlFailure::Misconfigured
+                               : ControlFailure::Unreachable,
+                           std::move(connection.error().message));
         auto client = std::make_unique<ControlClient>(*loop, std::move(*connection));
         if (auto handshaken = co_await client->handshake(); !handshaken)
             co_return std::unexpected(std::move(handshaken.error()));

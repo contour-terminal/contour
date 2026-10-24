@@ -51,8 +51,8 @@ enum class Capability : uint8_t
     /// them at its next start, and honours StopReason::UserKeepingWorkspace. A daemon offers it while its
     /// persistence is on.
     WorkspaceRestore = 8,
-    ControlApi = 9, ///< The peer serves ControlRequest, ControlReply and ControlEvent.
-    // 10 is ProgramStatus, which phase 7b allocates.
+    ControlApi = 9,     ///< The peer serves ControlRequest, ControlReply and ControlEvent.
+    ProgramStatus = 10, ///< The peer pushes, or mirrors, a session's OSC 7501 records (PDU ProgramStatus).
     /// The peer shows a PermissionRequest's control permissions in its prompt. A daemon sends a question
     /// that asks for any only to a client sharing it: one that would prompt without them would have its user
     /// grant what they were never shown.
@@ -77,6 +77,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::Heartbeat, .name = "heartbeat" },
     CapabilityRow { .capability = Capability::WorkspaceRestore, .name = "workspace-restore" },
     CapabilityRow { .capability = Capability::ControlApi, .name = "control-api" },
+    CapabilityRow { .capability = Capability::ProgramStatus, .name = "program-status" },
     CapabilityRow { .capability = Capability::ControlPermissions, .name = "control-permissions" },
 };
 

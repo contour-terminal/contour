@@ -123,6 +123,7 @@ add_library(vthost STATIC
     control/LoopControlBridge.hpp
     control/PaneText.cpp
     control/PaneText.hpp
+    control/ProgramStatusConvert.hpp
     client/DaemonRestart.cpp
     client/DaemonRestart.hpp
     client/ReleaseDrift.cpp
@@ -306,6 +307,7 @@ if(VTHOST_TESTING)
         control/LoopControlBridge_test.cpp
         control/EventHub_test.cpp
         control/PaneText_test.cpp
+        control/ProgramStatusConvert_test.cpp
         client/DaemonRestart_test.cpp
         client/ReleaseDrift_test.cpp
         client/Liveness_test.cpp

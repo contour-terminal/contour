@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vtcontrol/Dispatch.hpp>
@@ -44,6 +45,7 @@
 #include <vthost/PermissionWire.hpp>
 #include <vthost/TabEdits.hpp>
 #include <vthost/TimeWire.hpp>
+#include <vthost/control/ProgramStatusConvert.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -385,6 +387,7 @@ void NativeSession::sessionClosed(SessionId session)
     // be dropped in ONE place, or the next one added is dropped in none.
     std::erase(_snapshotQueue, session.value);
     _recordsAwaitingRoom.erase(session.value);
+    _programStatusPending.erase(session.value);
 }
 
 void NativeSession::sessionResized(SessionId session)
@@ -424,6 +427,39 @@ void NativeSession::sessionCopyToClipboard(SessionId session, std::string const&
         return;
     // "c" = the CLIPBOARD selection; the client applies its own write permission.
     emitSessionEvent(proto::SessionClipboard { .session = session.value, .selection = "c", .data = data });
+}
+
+void NativeSession::sessionSignal(SessionId session, SessionSignal const& signal)
+{
+    if (!std::holds_alternative<ProgramStatusChangedSignal>(signal) || _phase != ConnectionPhase::Viewing
+        || _closed || !mirrorsProgramStatus() || !followsSession(session))
+        return;
+    // Debounced like an increment: a loop reporting progress sends one set per coalescing window, not one
+    // per report, and the set is read when it goes, so it is the newest.
+    _programStatusPending.insert(session.value);
+    auto const now = _loop.clock().now();
+    scheduleFlush(flushDeadline(_services.flush, FlushReason::Coalesce, now));
+}
+
+bool NativeSession::mirrorsProgramStatus() const noexcept
+{
+    return _negotiated && _negotiated->shared.contains(proto::Capability::ProgramStatus);
+}
+
+void NativeSession::pushProgramStatus(SessionId session, ProgramStatusPush when)
+{
+    auto* const terminal = _host.terminal(session);
+    if (terminal == nullptr)
+        return;
+    auto pdu = proto::ProgramStatus { .session = session.value, .records = {} };
+    {
+        auto const guard = std::lock_guard { std::as_const(*terminal) };
+        for (auto const& record: terminal->programStatus().records())
+            pdu.records.push_back(control::toWire(record));
+    }
+    if (pdu.records.empty() && when == ProgramStatusPush::IfAny)
+        return;
+    emitSessionEvent(std::move(pdu));
 }
 
 void NativeSession::sessionPermissionRequested(SessionId session, proto::PermissionRequest const& request)
@@ -517,10 +553,17 @@ core::async::Task<void> NativeSession::flushAt(core::platform::SteadyTimePoint d
             _pendingSessions.insert(session);
         else
             pushDelta(SessionId { session });
+    // Not held back by a snapshot: the set replaces whatever the mirror holds whole, whenever it lands,
+    // and a mirror not bound yet keeps it on its RemoteScreen. Held back by a backlog, though: a set can
+    // be large, a program reporting in a loop must not cost a slow client its connection, and the set is
+    // read when it goes, so waiting loses nothing but the reports it overtook.
+    if (hasSendRoom())
+        for (auto const session: std::exchange(_programStatusPending, {}))
+            pushProgramStatus(SessionId { session }, ProgramStatusPush::Always);
     // Something was held back and nothing else will re-arm the flush: a session whose output
     // has stopped raises no further screen update, so without this its last increment would wait
     // for one that never comes.
-    if (!_pendingSessions.empty())
+    if (!_pendingSessions.empty() || !_programStatusPending.empty())
         scheduleFlush(_loop.clock().now() + _services.flush.coalesceDelay);
 }
 
@@ -1296,6 +1339,9 @@ core::async::Task<void> NativeSession::streamSnapshots()
         // the optional it is, so the invariant lives in ONE place rather than in every consumer.
         if (built->state)
             send(0, proto::DecodedPdu { *std::move(built->state) }, session.value);
+        // Before the rows, so that the screen holds the set by the time the completing piece replays it.
+        if (mirrorsProgramStatus())
+            pushProgramStatus(session, ProgramStatusPush::IfAny);
         // A snapshot that stated only the newest records that fit had buildPush queue the older
         // remainder as increments, which the debounce holds back until this run is off the wire.
         co_await sendSnapshotPieces(std::move(built->delta), session);

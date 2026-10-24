@@ -244,6 +244,7 @@ constexpr inline auto ITERM2 = FunctionDocumentation { .mnemonic = "ITERM2", .co
 constexpr inline auto TEXTSIZING = FunctionDocumentation { .mnemonic = "TEXTSIZING", .comment = "Kitty text sizing protocol: sized/scaled text.", .parameters = "metadata ; text" };
 constexpr inline auto KITTYCLIPBOARD = FunctionDocumentation { .mnemonic = "KITTYCLIPBOARD", .comment = "Kitty clipboard protocol: chunked, MIME-typed clipboard read/write.", .parameters = "metadata ; base64" };
 constexpr inline auto POINTERSHAPE = FunctionDocumentation { .mnemonic = "POINTERSHAPE", .comment = "Kitty pointer shape protocol: set, push, pop or query the mouse pointer shape.", .parameters = "=|>|<|? name[,name...]" };
+constexpr inline auto PROGRAMSTATUS = FunctionDocumentation { .mnemonic = "PROGRAMSTATUS", .comment = "Program status (program-status rev 0.4): a program reports whether it is idle, working, done, blocked on the user, or failed.", .parameters = "? | key=value [: key=value ...]", .description = "Keys: state (idle, working, done, blocked, error, clear), id (a slash-separated record path), kind (permission, question, auth; with blocked), progress (0..100; with working or blocked), app, title and msg (both base64 UTF-8). A report replaces its id's record whole; `?` asks the terminal to list the states and kinds it accepts.", .examples = "OSC 7501 ; state=working : app=cargo : progress=40 ST\nOSC 7501 ; state=clear : id=build ST" };
 constexpr inline auto HIERCONTEXT = FunctionDocumentation { .mnemonic = "HIERCONTEXT", .comment = "Hierarchical context signalling (UAPI.15): the nesting a shell, run0, ssh or a container runtime opens around what runs inside it.", .parameters = "start=CTXID|end=CTXID [; field=value ...]", .description = "Maintains a stack of contexts, each carrying metadata about the component in control of the terminal. `start=` initiates, updates or returns to a context; `end=` terminates one. Ordinary reset sequences deliberately do NOT clear the stack.", .examples = "OSC 3008 ; start=bed86fab ; type=container ; container=foobar ST\nOSC 3008 ; end=bed86fab ; exit=success ST" };
 
 // DEC Multi-Page Navigation (VT420)
@@ -266,7 +267,7 @@ constexpr inline auto SL = FunctionDocumentation { .mnemonic = "SL", .comment = 
 constexpr inline auto SR = FunctionDocumentation { .mnemonic = "SR", .comment = "Scroll Right" };
 constexpr inline auto XTMODKEYS = FunctionDocumentation { .mnemonic = "XTMODKEYS", .comment = "Set/reset key modifier options", .parameters = "Pp;Pv", .description = "Selects how much modifier information the terminal folds into the escape sequence it sends for a key. Pp names the RESOURCE, Pv the value assigned to it:\n\n* 0: modifyKeyboard\n* 1: modifyCursorKeys\n* 2: modifyFunctionKeys\n* 3: modifyKeypadKeys\n* 4: modifyOtherKeys\n* 6: modifyModifierKeys\n* 7: modifySpecialKeys\n\nOmitting Pv resets that one resource to its initial value; omitting both resets every resource. Contour implements modifyOtherKeys (Pp = 4), whose value 1 encodes control- and shift-modified keys as `CSI 27 ; modifier ; codepoint ~` and value 2 extends that to every modifier; the remaining resources are accepted and ignored. The Kitty keyboard protocol supersedes this whenever its flag stack is non-empty.", .examples = "CSI > 4 ; 2 m" };
 constexpr inline auto XTRMMODKEYS = FunctionDocumentation { .mnemonic = "XTRMMODKEYS", .comment = "Disable key modifier options", .parameters = "Ps", .description = "Disables the key-modifier resource Ps names (the same numbering XTMODKEYS uses), which is the resource value -1 that XTMODKEYS itself cannot express. An omitted Ps disables modifyFunctionKeys. For modifyOtherKeys (Ps = 4) this returns Contour to the legacy encoding.", .examples = "CSI > 4 n" };
-constexpr inline auto SBQUERY = FunctionDocumentation { .mnemonic = "SBQUERY", .comment = "Query semantic command blocks." };
+constexpr inline auto SBQUERY = FunctionDocumentation { .mnemonic = "SBQUERY", .comment = "Query semantic command blocks: the last, the last N, the one in progress, or one by id.", .parameters = "Ps ; Pn ; T1 ; T2 ; T3 ; T4 [; Ph]" };
 
 } // namespace documentation
 
@@ -834,7 +835,7 @@ constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VT
 // @see ctlseqs.txt "Set/reset key modifier options (XTMODKEYS)".
 constexpr inline auto XTMODKEYS   = detail::CSI('>', 0, 2, std::nullopt, 'm', VTExtension::XTerm, documentation::XTMODKEYS);
 constexpr inline auto XTRMMODKEYS = detail::CSI('>', 0, 1, std::nullopt, 'n', VTExtension::XTerm, documentation::XTRMMODKEYS);
-constexpr inline auto SBQUERY         = detail::CSI('>', 0, 6, std::nullopt, 'b', VTExtension::Contour, documentation::SBQUERY);
+constexpr inline auto SBQUERY         = detail::CSI('>', 0, 7, std::nullopt, 'b', VTExtension::Contour, documentation::SBQUERY);
 
 // DEC Multi-Page Navigation (VT420)
 constexpr inline auto NP              = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'U', VTType::VT420, documentation::NP);
@@ -895,6 +896,7 @@ constexpr inline auto TEXTSIZING       = detail::OSC(66, VTExtension::Unknown, d
 constexpr inline auto KITTYCLIPBOARD   = detail::OSC(5522, VTExtension::Unknown, documentation::KITTYCLIPBOARD);
 constexpr inline auto POINTERSHAPE     = detail::OSC(22, VTExtension::Unknown, documentation::POINTERSHAPE);
 constexpr inline auto HIERCONTEXT      = detail::OSC(3008, VTExtension::Unknown, documentation::HIERCONTEXT);
+constexpr inline auto PROGRAMSTATUS    = detail::OSC(7501, VTExtension::Unknown, documentation::PROGRAMSTATUS);
 
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
@@ -1163,6 +1165,7 @@ constexpr static auto allFunctionsArray() noexcept
         KITTYCLIPBOARD,
         POINTERSHAPE,
         HIERCONTEXT,
+        PROGRAMSTATUS,
         DUMPSTATE,
     };
     return funcs;

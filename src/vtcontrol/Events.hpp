@@ -166,8 +166,10 @@ inline constexpr auto EventCatalog = std::tuple {
     EventRow<BellEvent> { "pane.bell", "A pane rang the bell.", Permission::Read },
     EventRow<TitleChangedEvent> { "pane.titleChanged", "A pane's title changed.", Permission::Read },
     EventRow<CwdChangedEvent> { "pane.cwdChanged", "A pane's working directory changed.", Permission::Read },
+    // Screen, not Read: a record names the program and says what it is doing (the file it edits, the
+    // question it waits on), which is what `block.finished`'s command line is kept behind `screen` for.
     EventRow<ProgramStatusChangedEvent> {
-        "pane.programStatusChanged", "A pane's program status changed.", Permission::Read },
+        "pane.programStatusChanged", "A pane's program status changed.", Permission::Screen },
     EventRow<PaneCreatedEvent> { "pane.created", "A pane was created.", Permission::Read },
     EventRow<PaneClosedEvent> { "pane.closed", "A pane was closed.", Permission::Read },
     EventRow<TabCreatedEvent> { "tab.created", "A tab was created.", Permission::Read },

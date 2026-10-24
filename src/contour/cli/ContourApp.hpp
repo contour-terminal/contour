@@ -24,6 +24,7 @@ namespace contour::cli
 {
 
 enum class DaemonVerb : std::uint8_t; // DaemonVerbs.hpp
+struct ControlVerb;                   // ControlVerbs.hpp
 
 /// What `contour daemon-service <verb>` was asked to do.
 enum class DaemonServiceAction : std::uint8_t
@@ -86,6 +87,13 @@ class ContourApp: public core::cli::App
     int catAction();
     /// Runs the headless terminal multiplexer daemon.
     int daemonAction();
+    /// Writes the agent skill: `contour agent setup`.
+    /// @return The process exit code.
+    int agentSetupAction();
+    /// Runs one control verb (`contour ls`, `contour send`, ...) against the daemon its flags name.
+    /// @param verb The verb's row.
+    /// @return The process exit code.
+    int controlVerbAction(ControlVerb const& verb);
     /// Runs one `contour daemon <sub-verb>`, which talks to a running daemon instead of becoming one.
     /// @param verb Which sub-verb was invoked.
     /// @param prefix That sub-verb's dotted flag prefix, e.g. "contour.daemon.status".

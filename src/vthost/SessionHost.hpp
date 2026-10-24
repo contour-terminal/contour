@@ -136,13 +136,20 @@ struct WorkingDirectoryChangedSignal
 {
 };
 
+/// The session's program-status records (OSC 7501) changed; the records are read back under the lock.
+struct ProgramStatusChangedSignal
+{
+    vtbackend::ProgramStatusReason reason = vtbackend::ProgramStatusReason::Report; ///< Why they changed.
+};
+
 /// One terminal event a hosted session forwards to the host beyond the bell and notifications: a value copy,
 /// made on the parser thread without reading terminal state, which the host marshals to the loop. A further
 /// mirrored event is one more alternative here, not another callback.
 using SessionSignal = std::variant<CommandBlockFinishedSignal,
                                    CommandBlockChangedSignal,
                                    TitleChangedSignal,
-                                   WorkingDirectoryChangedSignal>;
+                                   WorkingDirectoryChangedSignal,
+                                   ProgramStatusChangedSignal>;
 
 /// What a hosted session hands a SessionSignal on through. Invoked on the PARSER thread with the terminal's
 /// state mutex held: it must neither block nor read terminal state (the host posts it to the loop).
@@ -454,7 +461,7 @@ class HostedSession
             if (onCopyToClipboard)
                 onCopyToClipboard(std::string { data });
         }
-        // The four below run on the parser thread under the terminal lock: each copies what it was handed
+        // The five below run on the parser thread under the terminal lock: each copies what it was handed
         // into a signal and reads no terminal state.
         void commandBlockFinished(vtbackend::CommandBlockSummary const& summary) override
         {
@@ -469,6 +476,10 @@ class HostedSession
             raise(TitleChangedSignal { .title = std::string { title } });
         }
         void workingDirectoryChanged() override { raise(WorkingDirectoryChangedSignal {}); }
+        void programStatusChanged(vtbackend::ProgramStatusChange const& change) override
+        {
+            raise(ProgramStatusChangedSignal { .reason = change.reason });
+        }
         void raise(SessionSignal signal) const
         {
             if (onSignal)
@@ -496,6 +507,11 @@ class HostedSession
 
     /// Asks the child, once the PTY closed, how it ended. Pump thread.
     [[nodiscard]] SessionEnd observeEnd() const;
+    /// @return Whether terminate() asked the pump to end.
+    [[nodiscard]] bool terminateRequested() const noexcept
+    {
+        return _pumpEnd.load(std::memory_order_acquire) == PumpEnd::Terminated;
+    }
 
     /// What a client handed over, waiting for the pump. @see deliverOnPump()
     struct PendingDelivery
@@ -524,9 +540,15 @@ class HostedSession
     /// load or subscribe later hear it from the terminal, which remembers it. Loop thread only.
     std::string _foregroundProcessName;
     std::function<void()> _onClosed;
-    /// Set by terminate(): the host closing the PTY is not the program ending, so the pump does not wait for
-    /// an exit status.
-    std::atomic<bool> _terminateRequested { false };
+    /// Why the pump loop ends: the process exiting by itself, or terminate().
+    enum class PumpEnd : uint8_t
+    {
+        ProcessExited = 0, ///< The PTY reached its end: the process exited.
+        Terminated,        ///< The host closed the PTY on purpose.
+    };
+    /// Written by terminate() on any thread, read by the pump thread. Terminated says the host closing the
+    /// PTY is not the program ending, so the pump neither waits for an exit status nor drops program status.
+    std::atomic<PumpEnd> _pumpEnd { PumpEnd::ProcessExited };
     std::atomic<SessionEnd> _endCause { SessionEnd::Exited }; ///< @see endCause
     std::unique_ptr<std::thread> _pumpThread;
     /// Guards _pending and _pendingBytes: the loop thread queues, the pump thread delivers.

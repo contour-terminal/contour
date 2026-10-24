@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/cli/AgentSkill.hpp>
 #include <contour/cli/CaptureScreen.hpp>
 #include <contour/cli/CatImageArgs.hpp>
 #include <contour/cli/ConfigProfileCatalog.hpp>
 #include <contour/cli/ConfigReloadPoller.hpp>
 #include <contour/cli/ContourApp.hpp>
+#include <contour/cli/ControlVerbs.hpp>
 #include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/Hosting.hpp>
 #include <contour/cli/ShellIntegration.hpp>
@@ -17,19 +19,23 @@
 #include <vtparser/Parser.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/ProgramLookup.hpp>
 
 #include <crispy/StackTrace.hpp>
 
 #include <core/Base64.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/async/StopToken.hpp>
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
 #include <core/log/LogSink.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <csignal>
@@ -57,9 +63,6 @@
 
     #include <vtpty/CommandCapture.hpp>
 
-    #include <core/async/StopToken.hpp>
-    #include <core/platform/Clock.hpp>
-
     #include <vtextension/BundledExtensions.hpp>
     #include <vtextension/ExtensionGrantStore.hpp>
     #include <vtextension/ExtensionWorkerPool.hpp>
@@ -81,6 +84,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/StatePath.hpp>
 #include <vthost/StdioAttach.hpp>
+#include <vthost/StdioChild.hpp>
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
@@ -93,6 +97,7 @@
 
 #ifdef _WIN32
     #include <Windows.h>
+    #include <io.h>
 #endif
 
 using std::bind;
@@ -347,6 +352,129 @@ namespace
         return text;
     }
 
+    /// Whether SIGINT arrived since the last InterruptStop was made; set from the signal handler.
+    std::atomic<bool> interruptPending { false };
+
+    void onInterrupt(int signal)
+    {
+        interruptPending.store(true);
+        // The first Ctrl+C asks the stream to end; should that stall, the second ends the process, as it
+        // would any other. Re-registering the signal being handled is allowed in a handler.
+        std::signal(signal, SIG_DFL);
+    }
+
+    /// Turns the first Ctrl+C into a stop request for as long as it lives, so a verb that follows a stream
+    /// can end it cleanly instead of being killed mid-line; a second one kills it.
+    ///
+    /// std::signal rather than core::platform::SignalHandler, which covers SIGCHLD, SIGTSTP and SIGCONT
+    /// only.
+    class InterruptStop
+    {
+      public:
+        InterruptStop():
+            _previous { arm() }, _watcher { [this](std::stop_token const& done) {
+                while (!done.stop_requested() && !interruptPending.load())
+                    std::this_thread::sleep_for(std::chrono::milliseconds { 25 });
+                if (interruptPending.load())
+                    _source.request_stop();
+            } }
+        {
+        }
+
+        InterruptStop(InterruptStop const&) = delete;
+        InterruptStop(InterruptStop&&) = delete;
+        InterruptStop& operator=(InterruptStop const&) = delete;
+        InterruptStop& operator=(InterruptStop&&) = delete;
+
+        ~InterruptStop()
+        {
+            _watcher.request_stop();
+            _watcher.join();
+            std::signal(SIGINT, _previous);
+        }
+
+        /// @return A token that is stopped once Ctrl+C was pressed.
+        [[nodiscard]] core::async::StopToken token() const { return _source.get_token(); }
+
+      private:
+        /// @return The handler SIGINT had before.
+        [[nodiscard]] static void (*arm())(int)
+        {
+            interruptPending.store(false);
+            return std::signal(SIGINT, &onInterrupt);
+        }
+
+        core::async::StopSource _source {};
+        void (*_previous)(int);
+        std::jthread _watcher;
+    };
+
+    /// @return The `agent` command, whose `setup` writes the skill that teaches coding agents Contour's
+    /// verbs.
+    [[nodiscard]] core::cli::Command agentCommand()
+    {
+        namespace CLI = core::cli;
+        return CLI::Command {
+            .name = "agent",
+            .helpText = "Sets up coding agents to operate Contour.",
+            .options = {},
+            .children = CLI::CommandList { CLI::Command {
+                .name = "setup",
+                .helpText = "Writes the Contour skill into the agents' skill directories "
+                            "(~/.claude/skills/contour, ~/.agents/skills/contour); rerun it after upgrading.",
+                .options =
+                    CLI::OptionList {
+                        CLI::Option {
+                            "agent",
+                            CLI::Value { ""s },
+                            "Sets up only these agents, a comma-separated list of claude and agents; "
+                            "all by default.",
+                            "NAME" },
+                        CLI::Option { "dry-run", CLI::Value { false }, "Reports what would be written." },
+                        CLI::Option { "force",
+                                      CLI::Value { false },
+                                      "Replaces a skill file that Contour did not generate." },
+                        CLI::Option { "json", CLI::Value { false }, "Prints the outcomes as JSON." },
+                    } } },
+        };
+    }
+
+    /// Builds the commands of the control verbs from @ref contour::cli::controlVerbs, nesting the dotted
+    /// paths (`block.list`) under their groups.
+    /// @return The commands, to be added at the top level.
+    [[nodiscard]] core::cli::CommandList controlVerbCommands()
+    {
+        auto commands = core::cli::CommandList {};
+        for (auto const& verb: contour::cli::controlVerbs())
+        {
+            auto const dot = verb.path.find('.');
+            auto command =
+                core::cli::Command { .name = verb.path.substr(dot == string_view::npos ? 0 : dot + 1),
+                                     .helpText = verb.summary,
+                                     .options = verb.options(),
+                                     .children = {},
+                                     .select = core::cli::CommandSelect::Explicit,
+                                     .verbatim = verb.verbatim };
+            if (dot == string_view::npos)
+            {
+                commands.emplace_back(std::move(command));
+                continue;
+            }
+            auto const groupName = verb.path.substr(0, dot);
+            auto group = std::ranges::find(commands, groupName, &core::cli::Command::name);
+            if (group == commands.end())
+            {
+                auto const groups = contour::cli::controlVerbGroups();
+                auto const row = std::ranges::find(groups, groupName, &contour::cli::ControlVerbGroup::name);
+                commands.emplace_back(core::cli::Command {
+                    .name = groupName, .helpText = row != groups.end() ? row->helpText : string_view {} });
+                group = std::prev(commands.end());
+            }
+            group->children.emplace_back(std::move(command));
+        }
+        return commands;
+    }
+
 } // namespace
 // }}}
 
@@ -405,6 +533,9 @@ ContourApp::ContourApp(core::Environment const& env):
     link("contour.documentation.configuration.profile", bind(&ContourApp::documentationProfileConfig, this));
     link("contour.cat", bind(&ContourApp::catAction, this));
     link("contour.daemon", bind(&ContourApp::daemonAction, this));
+    link("contour.agent.setup", bind(&ContourApp::agentSetupAction, this));
+    for (auto const& verb: contour::cli::controlVerbs())
+        link(std::format("contour.{}", verb.path), [this, &verb] { return controlVerbAction(verb); });
     // One handler per verb rather than one that switches: core::cli::App dispatches on the first
     // true flag, so the verb IS the dispatch.
     for (auto const& verb: DaemonServiceVerbs)
@@ -1317,6 +1448,74 @@ int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
                                   vthost::makeLocalDaemonConnector(socketPath, *spawner, std::move(starter)));
 }
 
+int ContourApp::agentSetupAction()
+{
+    constexpr auto Prefix = "contour.agent.setup"sv;
+    auto const key = [&](std::string_view option) {
+        return std::format("{}.{}", Prefix, option);
+    };
+    auto const& env = processEnvironment();
+    auto const homeText = env.get("HOME").or_else([&] { return env.get("USERPROFILE"); });
+    auto const home = homeText ? core::pathFromUtf8(*homeText).value_or(std::filesystem::path {})
+                               : std::filesystem::path {};
+    if (home.empty())
+    {
+        cerr << "Error: cannot tell your home directory ($HOME is not set)\n";
+        return exitCode(ExitStatus::Failed);
+    }
+    auto const mode = parameters().get<bool>(key("dry-run")) ? SetupMode::DryRun : SetupMode::Write;
+    auto const foreign = parameters().get<bool>(key("force")) ? ForeignSkill::Replace : ForeignSkill::Keep;
+    auto const agents = parseAgentList(parameters().get<string>(key("agent")));
+    auto const outcomes = setupAgentSkills(core::platform::NativeFileSystem::instance(),
+                                           env,
+                                           home,
+                                           agents,
+                                           mode,
+                                           foreign,
+                                           renderAgentSkill(CONTOUR_VERSION_STRING));
+    if (!outcomes)
+    {
+        cerr << "Error: " << outcomes.error() << '\n';
+        return exitCode(ExitStatus::Failed);
+    }
+    cout << formatSkillOutcomes(
+        *outcomes, mode, parameters().get<bool>(key("json")) ? OutcomeFormat::Json : OutcomeFormat::Text);
+    return exitCode(ExitStatus::Ok);
+}
+
+int ContourApp::controlVerbAction(ControlVerb const& verb)
+{
+#ifdef _WIN32
+    auto const target = _isatty(_fileno(stdout)) != 0 ? OutputTarget::Terminal : OutputTarget::Pipe;
+#else
+    auto const target = isatty(STDOUT_FILENO) != 0 ? OutputTarget::Terminal : OutputTarget::Pipe;
+#endif
+    auto const wallClock = core::platform::SystemWallClock {};
+    // Only a stream is ended by Ctrl+C; every other verb is short enough to be killed.
+    auto interrupt = std::optional<InterruptStop> {};
+    if (verb.mode == VerbMode::Stream)
+        interrupt.emplace();
+    // Viewed by the spawner, so it lives as long as the call.
+    auto const sshSearchPath = vtpty::execSearchPath(processEnvironment().get("PATH"));
+    auto& fileSystem = core::platform::NativeFileSystem::instance();
+    auto resolveSavedHost = makeSavedHostResolver(
+        [](std::string_view nameOrUrl) { return config::resolveHost(std::string {}, nameOrUrl); },
+        fileSystem,
+        vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
+            .path = sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem }));
+    return runControlVerb(verb,
+                          parameters(),
+                          ControlIo { .env = processEnvironment(),
+                                      .fs = core::platform::NativeFileSystem::instance(),
+                                      .in = std::cin,
+                                      .out = cout,
+                                      .err = cerr,
+                                      .clock = wallClock,
+                                      .target = target,
+                                      .stop = interrupt ? interrupt->token() : core::async::StopToken {},
+                                      .resolveSavedHost = std::move(resolveSavedHost) });
+}
+
 int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
 {
     // `daemon --socket X status` and `daemon status --socket X` both mean X.
@@ -1674,7 +1873,7 @@ int ContourApp::profileAction()
 core::cli::Command ContourApp::parameterDefinition() const
 {
     // NOLINTBEGIN
-    return CLI::Command {
+    auto command = CLI::Command {
         "contour",
         "Contour Terminal Emulator " CONTOUR_VERSION_STRING
         " - https://github.com/contour-terminal/contour/ ;-)",
@@ -1959,6 +2158,10 @@ core::cli::Command ContourApp::parameterDefinition() const
                                        "NAME" } } } } } }
     };
     // NOLINTEND
+    for (auto& verbCommand: controlVerbCommands())
+        command.children.emplace_back(std::move(verbCommand));
+    command.children.emplace_back(agentCommand());
+    return command;
 }
 
 } // namespace contour::cli

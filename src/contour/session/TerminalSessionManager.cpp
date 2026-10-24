@@ -1439,6 +1439,19 @@ void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId
         recordProgress(session, s->terminal().resolvedProgress(), _app.terminalClocks().steady.now());
 }
 
+void TerminalSessionManager::refreshTabProgramStatusForSession(vtworkspace::SessionId session)
+{
+    // Only the badge's roles, for the reason refreshTabProgressForSession gives.
+    auto* tab = findTabHostingSession(session);
+    if (tab == nullptr)
+        return;
+    if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
+        c->notifyTabRowChanged(tab->id(),
+                               { window::WindowController::Roles::ProgramStatusRole,
+                                 window::WindowController::Roles::ProgramStatusTextRole,
+                                 window::WindowController::Roles::ProgramStatusProgressRole });
+}
+
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(
     std::chrono::steady_clock::time_point now) const
 {

@@ -11,6 +11,7 @@
 
 #include <vtbackend/core/TerminalContext.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/vt/ProgramStatus.hpp>
 
 #include <core/async/Task.hpp>
 #include <core/net/DeadlineTimer.hpp>
@@ -168,6 +169,12 @@ struct RemoteScreen
     /// mirror synced before it has records to drop.
     uint64_t commandBlocksRetiredAt = 0;
 
+    /// The session's OSC 7501 program-status records, least recently updated first, as the last
+    /// ProgramStatus stated them whole. Kept here, not only handed on, so that a mirror bound after it
+    /// arrived -- or replayed afresh -- catches up from it. Held to vtbackend::MaxProgramStatusRecords, the
+    /// newest kept, for the peer chooses what it sends.
+    std::vector<proto::WireProgramStatusRecord> programStatus;
+
     /// Whether a chunked snapshot is still arriving: set by a piece that opens or continues a
     /// run, cleared by the one that completes it.
     ///
@@ -222,6 +229,9 @@ struct RemoteScreen
 
     /// Applies one delta (or snapshot) and evicts rows past the history cap.
     void apply(proto::Delta const& delta);
+
+    /// Replaces the program-status records with the set @p status states.
+    void apply(proto::ProgramStatus const& status);
 
     /// @return The row currently at viewport row @p line (0-based), or nullptr
     ///         for a row the client has no data for (render as blank).

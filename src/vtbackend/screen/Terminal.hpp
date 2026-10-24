@@ -24,6 +24,7 @@
 #include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/LinkPresentation.hpp>
+#include <vtbackend/screen/ProgramStatusSet.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -42,6 +43,7 @@
 #include <vtbackend/vt/DesktopNotification.hpp>
 #include <vtbackend/vt/MacroDefinition.hpp>
 #include <vtbackend/vt/PointerShape.hpp>
+#include <vtbackend/vt/ProgramStatus.hpp>
 #include <vtbackend/vt/ProgressState.hpp>
 #include <vtbackend/vt/Sequence.hpp>
 #include <vtbackend/vt/SequenceBuilder.hpp>
@@ -599,6 +601,17 @@ class Terminal: public IStatusLinePublishTarget
         /// re-reports the same URL at every prompt raises nothing.
         virtual void workingDirectoryChanged() {}
 
+        /// The terminal's program-status records (OSC 7501) changed: a report, a new prompt, the process's
+        /// exit, RIS, or a daemon mirror's replacement. Never raised for a change that did nothing.
+        ///
+        /// Raised with Terminal::_stateMutex ALREADY HELD -- on the parser thread, or on the thread that
+        /// called Terminal::markProcessExited() or Terminal::replaceProgramStatus() -- with the consequence
+        /// progressChanged() documents: do not read terminal state here; defer instead. @p change is a value
+        /// a listener may copy across threads; the records themselves are read back under the lock through
+        /// Terminal::programStatus().
+        /// @param change The ids set and removed, and why.
+        virtual void programStatusChanged(ProgramStatusChange const& /*change*/) {}
+
         /// A shell command block finished with a REPORTED end (OSC 133;D, or an OSC 3008 `end=` while OSC
         /// 3008 owns the marks) -- never for a block a newer prompt closed implicitly, such as the `ssh`
         /// the user is still inside.
@@ -752,6 +765,7 @@ class Terminal: public IStatusLinePublishTarget
         void progressChanged(Progress /*progress*/) override {}
         void contextChanged(ContextId /*activeContext*/) override {}
         void workingDirectoryChanged() override {}
+        void programStatusChanged(ProgramStatusChange const& /*change*/) override {}
         void commandBlockFinished(CommandBlockSummary const& /*summary*/) override {}
         void commandBlockChanged(CommandBlockChange const& /*change*/) override {}
         [[nodiscard]] LocalIdentity localIdentity() const noexcept override { return {}; }
@@ -3308,6 +3322,35 @@ class Terminal: public IStatusLinePublishTarget
     /// dispatch in Screen, which runs inside writeToScreen()'s _stateMutex hold.
     void setProgress(Progress progress);
 
+    /// The program-status records of this terminal (OSC 7501), least recently updated first.
+    ///
+    /// Does NOT take the lock, for the reason commandBlocks() gives: the parser thread changes the set under
+    /// it, so the caller holds the lock for as long as it reads the set.
+    [[nodiscard]] ProgramStatusSet const& programStatus() const noexcept { return _programStatus; }
+
+    /// Acts on one decoded OSC 7501 report: sets or clears records, or answers a query with
+    /// programStatusDetectionReply().
+    ///
+    /// Lock-free for the reason setProgress() gives: the only caller is the OSC 7501 dispatch in Screen,
+    /// inside writeToScreen()'s _stateMutex hold.
+    /// @param report The decoded report.
+    void applyProgramStatus(ProgramStatusReport const& report);
+
+    /// The terminal's process exited: drops its working and blocked records, as the spec says, and keeps
+    /// done, error and idle.
+    ///
+    /// Takes the lock. Called by the owner of the PTY when it sees the process end, strictly before it
+    /// announces the close -- never for a close it asked for, which ends the terminal and its records with
+    /// it.
+    void markProcessExited();
+
+    /// The mirror seam: replaces every record with a daemon host's, as setProgress() takes the host's
+    /// progress indicator.
+    ///
+    /// Does NOT take the lock: the caller holds it, as a mirror applying a host's frame does.
+    /// @param records The host's records, least recently updated first.
+    void replaceProgramStatus(std::vector<ProgramStatusRecord> records);
+
     /// @return The progress indicator state, WITHOUT taking the lock. Parser thread only; the GUI
     ///         thread must use resolvedProgress().
     [[nodiscard]] Progress const& progress() const noexcept { return _progress; }
@@ -3982,6 +4025,10 @@ class Terminal: public IStatusLinePublishTarget
     /// away first: a row stamped before would name a block minted after.
     /// @param idEpochBefore CommandBlockStore::idEpoch() as it was before the transition.
     void publishActiveBlock(uint64_t idEpochBefore) noexcept;
+
+    /// Tells the listener of @p change, unless it did nothing. The caller holds _stateMutex.
+    /// @param change What a change to _programStatus did.
+    void announceProgramStatus(ProgramStatusChange const& change);
 
     /// Scroll the viewport to the bottom if `settings().autoScrollOnUpdate` is enabled.
     /// Intended for PTY/app-caused code paths only (e.g. key/char forwarding,
@@ -5042,6 +5089,10 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The application's progress indicator state (OSC 9;4). @see setProgress(), resolvedProgress().
     Progress _progress {};
+
+    /// The program-status records (OSC 7501). Terminal-global, not per screen: an alternate-screen switch
+    /// and DECSTR leave it alone; RIS empties it. Written under _stateMutex. @see programStatus().
+    ProgramStatusSet _programStatus {};
 
     /// The icon (or tab) title. Set by `OSC 0` and `OSC 1`, reported by `CSI 20 t`.
     std::string _iconTitle {};

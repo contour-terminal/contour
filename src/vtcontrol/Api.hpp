@@ -229,7 +229,7 @@ struct Position
     uint32_t column = 0; ///< Column, 0 being the leftmost.
 };
 
-/// One program-status record of a pane (filled in by phase 7b; empty until then).
+/// One OSC 7501 program-status record of a pane.
 struct ProgramStatusInfo
 {
     using ApiRecordTag = void;
@@ -254,7 +254,7 @@ struct PaneInfo
     std::string cwd {};    ///< The shell's working directory, or empty when unknown.
     bool isActive = false; ///< Whether it is its tab's active pane.
     Size size {};          ///< Its size in cells.
-    std::vector<ProgramStatusInfo> programStatus {}; ///< Program-status records; empty until phase 7b.
+    std::vector<ProgramStatusInfo> programStatus {}; ///< Its OSC 7501 program-status records.
 };
 
 /// A tab.

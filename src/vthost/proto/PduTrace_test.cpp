@@ -285,3 +285,12 @@ TEST_CASE("a control reply and event are traced by size only", "[vthost][proto][
     CHECK(summarize(DecodedPdu { ControlEvent { .subscription = 3, .event = "secret pane text" } })
           == "subscription=3 event=16B");
 }
+
+TEST_CASE("the ProgramStatus trace counts records and never shows their text",
+          "[vthost][proto][programstatus]")
+{
+    auto const summary = summarize(DecodedPdu { ProgramStatus {
+        .session = 2,
+        .records = { WireProgramStatusRecord { .id = "x", .title = "secret", .message = "secret" } } } });
+    CHECK(summary == "session=2 records=1");
+}

@@ -1903,6 +1903,42 @@ TEST_CASE("control PDUs round-trip", "[vthost][proto][control]")
     CHECK_FALSE(decodePdu(encodeWithoutTrailingField(DecodedPdu { event }, 1)).has_value());
 }
 
+TEST_CASE("ProgramStatus PDU round-trips", "[vthost][proto][programstatus]")
+{
+    auto const pdu = ProgramStatus { .session = 4,
+                                     .records = { WireProgramStatusRecord { .id = "",
+                                                                            .state = 1,
+                                                                            .kind = 0,
+                                                                            .progress = 40,
+                                                                            .app = "cargo",
+                                                                            .title = "Build",
+                                                                            .message = "" },
+                                                  WireProgramStatusRecord { .id = "build/test",
+                                                                            .state = 3,
+                                                                            .kind = 2,
+                                                                            .progress = 255,
+                                                                            .app = "",
+                                                                            .title = "",
+                                                                            .message = "Continue?" } } };
+    CHECK(roundTrip(DecodedPdu { pdu }) == DecodedPdu { pdu });
+    // The empty set is how a viewer hears every record is gone.
+    CHECK(roundTrip(DecodedPdu { ProgramStatus { .session = 4 } })
+          == DecodedPdu { ProgramStatus { .session = 4 } });
+    CHECK_FALSE(decodePdu(encodeWithoutTrailingField(DecodedPdu { pdu }, 1)).has_value());
+}
+
+TEST_CASE("the ProgramStatus tag and capability are pinned", "[vthost][proto][programstatus]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ProgramStatus) == 33);
+    STATIC_CHECK(std::to_underlying(Capability::ProgramStatus) == 10);
+    CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
+        return row.capability == Capability::ProgramStatus && row.name == "program-status";
+    }));
+    // The rows stay in value order.
+    CHECK(
+        std::ranges::is_sorted(CapabilityTable, {}, [](CapabilityRow const& row) { return row.capability; }));
+}
+
 TEST_CASE("an unknown ControlOutcome reads as Error, never as Ok", "[vthost][proto][control]")
 {
     auto const future = encodeWithFieldsEdited(

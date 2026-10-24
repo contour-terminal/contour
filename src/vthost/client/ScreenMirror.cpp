@@ -31,6 +31,7 @@
 #include <vthost/StatusWire.hpp>
 #include <vthost/TimeWire.hpp>
 #include <vthost/client/ViewportOrigin.hpp>
+#include <vthost/control/ProgramStatusConvert.hpp>
 
 namespace vthost::client
 {
@@ -582,6 +583,9 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
         syncHostClock(screen);  // before any record: it says how to read the record's instants
         // And before any row for the same reason: a head row needs its record.
         syncCommandBlocks(screen, blockSync);
+        // Not grid state, but a replay re-asserts everything: after a reconnect the set the old connection
+        // left may be one the host has since emptied.
+        syncProgramStatus(screen.programStatus);
         // The page has to be the right one BEFORE _screenType is adopted: activePage() reads it.
         auto const wantAlternate = screen.screenType == 1;
         if (_terminal->isAlternateScreen() != wantAlternate)
@@ -957,6 +961,16 @@ void ScreenMirror::applyImage(RemoteScreen const& screen, uint32_t imageId)
     _terminal->screenUpdated();
 }
 
+void ScreenMirror::syncProgramStatus(std::span<proto::WireProgramStatusRecord const> records)
+{
+    auto converted = std::vector<vtbackend::ProgramStatusRecord> {};
+    converted.reserve(records.size());
+    for (auto const& wire: records)
+        if (auto record = control::fromWire(wire))
+            converted.push_back(std::move(*record));
+    _terminal->replaceProgramStatus(std::move(converted));
+}
+
 void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
 {
     // One overload per event shape, so each reads only the fields it has. The visit is exhaustive by
@@ -983,6 +997,10 @@ void ScreenMirror::applyEvent(proto::SessionEventPdu const& event)
                        // Under the CLIENT's own write permission, which is the point of routing it
                        // through the terminal rather than to the clipboard directly.
                        _terminal->copyToClipboard(clipboard.data);
+                   },
+                   [this](proto::ProgramStatus const& status) {
+                       auto const guard = std::lock_guard { *_terminal };
+                       syncProgramStatus(status.records);
                    },
                },
                event);

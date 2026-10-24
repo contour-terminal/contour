@@ -38,11 +38,13 @@ add_custom_command(
 # The generated header is listed as a source so that building this target runs the custom command
 # that produces it; nothing compiles it on its own.
 add_library(contour_cli STATIC
+    AgentSkill.cpp AgentSkill.hpp
     CaptureScreen.cpp CaptureScreen.hpp
     CatImageArgs.hpp
     ConfigProfileCatalog.cpp ConfigProfileCatalog.hpp
     ConfigReloadPoller.cpp ConfigReloadPoller.hpp
     ContourApp.cpp ContourApp.hpp
+    ControlVerbs.cpp ControlVerbs.hpp
     DaemonVerbs.cpp DaemonVerbs.hpp
     ExitStatus.hpp
     Hosting.hpp
@@ -53,7 +55,7 @@ add_library(contour_cli STATIC
 
 target_link_libraries(contour_cli
     PUBLIC contour_config core::cli
-    PRIVATE vthost
+    PRIVATE vthost vtcontrol glaze::glaze
 )
 # `contour daemon` runs its profile's status-line extensions, built from contour::config's declarations. As a
 # composition root it also links the WebAssembly runtime backend it creates (makeDefaultBackend()).

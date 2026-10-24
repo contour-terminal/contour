@@ -248,6 +248,10 @@ namespace
     {
         return std::to_underlying(PduType::ControlEvent);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(ProgramStatus const&) noexcept
+    {
+        return std::to_underlying(PduType::ProgramStatus);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -802,6 +806,22 @@ namespace
     {
         out.varint(pdu.subscription);
         out.string(pdu.event);
+    }
+
+    void encodeBody(Writer& out, ProgramStatus const& pdu)
+    {
+        out.varint(pdu.session);
+        out.varint(pdu.records.size());
+        for (auto const& record: pdu.records)
+        {
+            out.string(record.id);
+            out.u8(record.state);
+            out.u8(record.kind);
+            out.u8(record.progress);
+            out.string(record.app);
+            out.string(record.title);
+            out.string(record.message);
+        }
     }
 
     void encodeBody(Writer& out, ResizeSplit const& pdu)
@@ -1625,6 +1645,29 @@ namespace
         return pdu;
     }
 
+    [[nodiscard]] std::expected<WireProgramStatusRecord, DecodeError> decodeProgramStatusRecord(Reader& in)
+    {
+        auto record = WireProgramStatusRecord {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), record.id, error) || !assign(in.u8(), record.state, error)
+            || !assign(in.u8(), record.kind, error) || !assign(in.u8(), record.progress, error)
+            || !assign(in.string(), record.app, error) || !assign(in.string(), record.title, error)
+            || !assign(in.string(), record.message, error))
+            return std::unexpected(error);
+        return record;
+    }
+
+    DecodeResult decodeProgramStatus(Reader& in)
+    {
+        auto pdu = ProgramStatus {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.session, error))
+            return std::unexpected(error);
+        if (auto const decoded = decodeVector(in, pdu.records, decodeProgramStatusRecord); !decoded)
+            return std::unexpected(decoded.error());
+        return pdu;
+    }
+
     DecodeResult decodeResizeSplit(Reader& in)
     {
         auto pdu = ResizeSplit {};
@@ -1740,6 +1783,7 @@ namespace
         DecodeRow { PduType::ControlRequest, decodeControlRequest },
         DecodeRow { PduType::ControlReply, decodeControlReply },
         DecodeRow { PduType::ControlEvent, decodeControlEvent },
+        DecodeRow { PduType::ProgramStatus, decodeProgramStatus },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

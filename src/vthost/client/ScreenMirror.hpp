@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -145,10 +146,17 @@ class ScreenMirror
 
     /// Reproduces a transient session event (bell / desktop notification / OSC 52 clipboard write)
     /// on the mirror terminal, so the frontend's own bell, notify and clipboard handling — and its
-    /// permissions — apply. Stateless: the event carries everything it needs.
+    /// permissions — apply; and replaces the program-status records with a ProgramStatus set, under the
+    /// terminal lock. Stateless: the event carries everything it needs.
     void applyEvent(proto::SessionEventPdu const& event);
 
   private:
+    /// Replaces the mirror terminal's program-status records with the host's
+    /// (Terminal::replaceProgramStatus), dropping each record whose state this build does not know. The
+    /// caller holds the terminal lock.
+    /// @param records The host's whole set, least recently updated first.
+    void syncProgramStatus(std::span<proto::WireProgramStatusRecord const> records);
+
     /// Brings the mirror's INPUT-encoding state in line with the server's: the mirrored DEC modes
     /// (each an independent boolean) and then the resolved mouse protocol, coordinate encoding and
     /// wheel mode, which are not modes at all. The order is load-bearing — @see the definition.

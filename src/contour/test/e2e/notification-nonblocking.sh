@@ -25,7 +25,9 @@ readonly WORK_DIR="$(mktemp -d)"
 bus_pid=""
 
 cleanup() {
-    [[ -n "$bus_pid" ]] && kill "$bus_pid" 2>/dev/null
+    # The whole process group: the services the bus activated (the two /bin/sleep 600 below) share it,
+    # since --fork leads a session of its own, and killing the bus alone would orphan them for ten minutes.
+    [[ -n "$bus_pid" ]] && kill -- "-$bus_pid" 2>/dev/null
     rm -rf "$WORK_DIR"
     return 0
 }

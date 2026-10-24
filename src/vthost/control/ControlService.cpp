@@ -14,9 +14,11 @@
 #include <utility>
 #include <variant>
 
+#include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
 #include <vtcontrol/ObjectRef.hpp>
 #include <vthost/control/PaneText.hpp>
+#include <vthost/control/ProgramStatusConvert.hpp>
 #include <vthost/proto/Negotiation.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -50,6 +52,12 @@ namespace
         "unknown"
 #endif
     };
+
+    /// What a pane's program-status records need, in a listing as in their event: they name programs and say
+    /// what those are doing, as a command line does, so a listing hands them out by the same rule.
+    constexpr auto ProgramStatusPermission =
+        std::get<vtcontrol::EventRow<vtcontrol::ProgramStatusChangedEvent>>(vtcontrol::EventCatalog)
+            .permission;
 
     [[nodiscard]] ControlError notFound(std::string message)
     {
@@ -306,7 +314,9 @@ std::expected<WindowId, ControlError> ControlService::resolveWindow(vtcontrol::C
 // }}}
 // {{{ Records
 
-vtcontrol::PaneInfo ControlService::paneInfoOf(SessionId session, vtworkspace::Tab const& tab) const
+vtcontrol::PaneInfo ControlService::paneInfoOf(SessionId session,
+                                               vtworkspace::Tab const& tab,
+                                               vtcontrol::ControlGrants grants) const
 {
     auto const uuid = _host.objects().uuidOf(session).value_or(vtcontrol::Uuid {});
     auto const ref = ObjectRef { .kind = ObjectKind::Pane, .uuid = uuid };
@@ -323,11 +333,15 @@ vtcontrol::PaneInfo ControlService::paneInfoOf(SessionId session, vtworkspace::T
         auto const size = terminal->pageSize();
         info.size = vtcontrol::Size { .columns = unbox<uint32_t>(size.columns),
                                       .lines = unbox<uint32_t>(size.lines) };
+        if (grants.contains(ProgramStatusPermission))
+            info.programStatus = toApi(terminal->programStatus());
     }
     return info;
 }
 
-vtcontrol::WindowInfo ControlService::windowInfoOf(vtworkspace::Window const& window, uint32_t position) const
+vtcontrol::WindowInfo ControlService::windowInfoOf(vtworkspace::Window const& window,
+                                                   uint32_t position,
+                                                   vtcontrol::ControlGrants grants) const
 {
     auto const windowRef =
         ObjectRef { .kind = ObjectKind::Window,
@@ -357,7 +371,7 @@ vtcontrol::WindowInfo ControlService::windowInfoOf(vtworkspace::Window const& wi
         tabInfo.position = static_cast<uint32_t>(index + 1);
         tabInfo.isActive = window.activeTab() == tab;
         forEachLeaf(*tab, [&](vtworkspace::Pane const& leaf) {
-            tabInfo.panes.push_back(paneInfoOf(leaf.session(), *tab));
+            tabInfo.panes.push_back(paneInfoOf(leaf.session(), *tab, grants));
         });
         info.tabs.push_back(std::move(tabInfo));
     }
@@ -450,7 +464,8 @@ std::expected<vtcontrol::ListReply, ControlError> ControlService::list(
     {
         auto const* window = model.windowAt(index);
         if (!only || window->id() == *only)
-            reply.windows.push_back(windowInfoOf(*window, static_cast<uint32_t>(index + 1)));
+            reply.windows.push_back(
+                windowInfoOf(*window, static_cast<uint32_t>(index + 1), context.grants()));
     }
     return reply;
 }
@@ -948,7 +963,7 @@ std::optional<vtcontrol::BlockInfo> ControlService::blockInfoFor(SessionId sessi
 }
 
 // The source-to-event mapping: each host event below is one row, and so is each SessionSignal alternative in
-// sessionSignal(). Phase 7b's program status is one more alternative there.
+// sessionSignal().
 
 void ControlService::sessionSignal(SessionId session, SessionSignal const& signal)
 {
@@ -1004,6 +1019,20 @@ void ControlService::sessionSignal(SessionId session, SessionSignal const& signa
                        _hub.publish(vtcontrol::Event {
                            .origin = originOf(session),
                            .payload = vtcontrol::CwdChangedEvent { .cwd = std::move(cwd) } });
+                   },
+                   [&](ProgramStatusChangedSignal const& changed) {
+                       // The whole set as it reads now: a subscriber holds what a pane says, not a diff.
+                       auto records = std::vector<vtcontrol::ProgramStatusInfo> {};
+                       if (auto const* terminal = _host.terminal(session))
+                       {
+                           auto const guard = std::lock_guard { std::as_const(*terminal) };
+                           records = toApi(terminal->programStatus());
+                       }
+                       _hub.publish(vtcontrol::Event {
+                           .origin = originOf(session),
+                           .payload = vtcontrol::ProgramStatusChangedEvent {
+                               .records = std::move(records),
+                               .reason = toApi(ProgramStatusReasonBridge, changed.reason) } });
                    },
                },
                signal);

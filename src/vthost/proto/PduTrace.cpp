@@ -417,6 +417,13 @@ namespace
                        return std::format(
                            "subscription={} event={}B", value.subscription, value.event.size());
                    } },
+        // A program's text is counted, never transcribed.
+        TraceRow { PduType::ProgramStatus,
+                   "ProgramStatus",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<ProgramStatus>(pdu);
+                       return std::format("session={} records={}", value.session, value.records.size());
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

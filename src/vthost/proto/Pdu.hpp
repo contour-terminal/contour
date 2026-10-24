@@ -77,6 +77,7 @@ enum class PduType : uint8_t
     ControlRequest = 30,
     ControlReply = 31,
     ControlEvent = 32,
+    ProgramStatus = 33,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -924,9 +925,39 @@ struct SessionClipboard
     bool operator==(SessionClipboard const&) const = default;
 };
 
-/// Any transient session event, as a type-safe alternative set: what a consumer handling "a session
-/// did something transient" dispatches over, without enumerating the catalog's tags itself.
-using SessionEventPdu = std::variant<SessionBell, SessionNotify, SessionClipboard>;
+/// One OSC 7501 program-status record on the wire. The enums travel as their bytes; a reader that does
+/// not know a state drops the record (vthost::control::fromWire), one that does not know a kind reads none.
+struct WireProgramStatusRecord
+{
+    /// The `progress` byte that says the record has no progress.
+    static constexpr uint8_t AbsentProgress = 255;
+
+    std::string id = {};               ///< The record's path; empty for the root.
+    uint8_t state = 0;                 ///< vtbackend::ProgramState.
+    uint8_t kind = 0;                  ///< vtbackend::BlockedKind.
+    uint8_t progress = AbsentProgress; ///< Percent done, 0..100, or AbsentProgress.
+    std::string app = {};              ///< The record's own app (not an inherited one).
+    std::string title = {};            ///< Decoded UTF-8.
+    std::string message = {};          ///< Decoded UTF-8.
+
+    bool operator==(WireProgramStatusRecord const&) const = default;
+};
+
+/// Server→client push (Capability::ProgramStatus): a session's whole set of program-status records, least
+/// recently updated first, replacing what the client mirrored before. An empty list clears it. Not
+/// transient like the events above, but pushed per session like them, so it reaches a mirror the same way;
+/// a snapshot repeats it. Its text is what a program sent, so the trace never shows it.
+struct ProgramStatus
+{
+    uint64_t session = 0;                              ///< The session the records belong to.
+    std::vector<WireProgramStatusRecord> records = {}; ///< The whole set.
+    bool operator==(ProgramStatus const&) const = default;
+};
+
+/// Any per-session push a mirror applies as it arrives -- the transient events, and the program-status set --
+/// as a type-safe alternative set: what a consumer handling "a session did something" dispatches over,
+/// without enumerating the catalog's tags itself.
+using SessionEventPdu = std::variant<SessionBell, SessionNotify, SessionClipboard, ProgramStatus>;
 
 /// One node of a tab's split tree on the wire (pre-order): a leaf carries a
 /// session and no children; a split carries a ratio and exactly two children.
@@ -1291,7 +1322,8 @@ using DecodedPdu = std::variant<Invalid,
                                 Heartbeat,
                                 ControlRequest,
                                 ControlReply,
-                                ControlEvent>;
+                                ControlEvent,
+                                ProgramStatus>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

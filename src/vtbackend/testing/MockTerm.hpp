@@ -403,6 +403,15 @@ class MockTerm: public Terminal::NullEvents
 
     void workingDirectoryChanged() override { ++workingDirectoryChanges; }
 
+    /// Every change to the program-status records the terminal told of, in order.
+    /// @see Terminal::Events::programStatusChanged
+    std::vector<ProgramStatusChange> programStatusChanges;
+
+    void programStatusChanged(ProgramStatusChange const& change) override
+    {
+        programStatusChanges.push_back(change);
+    }
+
     /// The screen type of every page the terminal announced as coming on display, in order.
     /// @see Terminal::Events::bufferChanged
     std::vector<ScreenType> bufferChanges;

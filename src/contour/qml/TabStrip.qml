@@ -113,6 +113,9 @@ Row {
                 required property bool zoomed
                 required property int progressState
                 required property int progressPercentage
+                required property int programStatus
+                required property string programStatusText
+                required property int programStatusProgress
 
                 height: list.height
                 controller: root.controller
@@ -126,6 +129,9 @@ Row {
                 tabZoomed: zoomed
                 tabProgressState: progressState
                 tabProgressPercentage: progressPercentage
+                tabProgramStatus: programStatus
+                tabProgramStatusText: programStatusText
+                tabProgramStatusProgress: programStatusProgress
             }
 
             // Animate reordering when a tab is moved.

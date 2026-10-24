@@ -42,6 +42,9 @@ enum class ControlFailure : uint8_t
     Disconnected,    ///< The connection ended, or broke, before the answer arrived.
     TimedOut,        ///< The daemon did not answer in time.
     Remote,          ///< The daemon answered with an error: `ControlClientError::remote`.
+    /// This end's own settings cannot be used (a pinned CA that does not parse): retrying cannot help, the
+    /// user must fix them first.
+    Misconfigured,
 };
 
 /// A failed control call.

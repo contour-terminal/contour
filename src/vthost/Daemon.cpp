@@ -458,6 +458,7 @@ namespace
                                                        proto::Capability::TabEdits,
                                                        proto::Capability::Heartbeat,
                                                        proto::Capability::ControlApi,
+                                                       proto::Capability::ProgramStatus,
                                                        proto::Capability::ControlPermissions });
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)

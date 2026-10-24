@@ -235,6 +235,7 @@ endif()
 
 set(_header_files
     session/HyperlinkTooltip.hpp
+    window/ProgramStatusBadge.hpp
     window/TabLabel.hpp
 )
 
@@ -1124,8 +1125,10 @@ if(CONTOUR_TESTING)
         command/FuzzyFilter_test.cpp
         command/Shortcut_test.cpp
         command/TitleBarContextMenu_test.cpp
+        cli/AgentSkill_test.cpp
         cli/CaptureScreen_test.cpp
         cli/ContourApp_test.cpp
+        cli/ControlVerbs_test.cpp
         cli/DaemonVerbs_test.cpp
         cli/Hosting_test.cpp
         cli/HostTransport_test.cpp
@@ -1143,6 +1146,7 @@ if(CONTOUR_TESTING)
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
         platform/SessionVisibility_test.cpp
+        window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
@@ -1156,10 +1160,17 @@ if(CONTOUR_TESTING)
         contour_cli
         contour_local_file
         vthost
+        vtcontrol
+        glaze::glaze
         vtbackend
         core::testing
         Catch2::Catch2)
     target_include_directories(contour_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    # `contour api wit` must print the checked-in WIT package, and the exit statuses the docs list must be the
+    # skill's; the tests compare against the files themselves.
+    target_compile_definitions(contour_test PRIVATE
+        CONTOUR_CONTROL_WIT="${PROJECT_SOURCE_DIR}/wit/control/world.wit"
+        CONTOUR_CONTROL_API_DOC="${PROJECT_SOURCE_DIR}/docs/control-api.md")
     if(NOT WIN32)
         # Catch2's TEST_CASE expands __COUNTER__, which Clang flags as a C2y extension under -Werror.
         target_compile_options(contour_test PRIVATE -Wno-c2y-extensions)

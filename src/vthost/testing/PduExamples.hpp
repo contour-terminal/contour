@@ -148,6 +148,16 @@ namespace vthost::testing
         { proto::PduType::ControlEvent,
           proto::DecodedPdu {
               proto::ControlEvent { .subscription = 3, .event = R"({"type":"pane.bell"})" } } },
+        { proto::PduType::ProgramStatus,
+          proto::DecodedPdu { proto::ProgramStatus {
+              .session = 4,
+              .records = { proto::WireProgramStatusRecord { .id = "build/test",
+                                                            .state = 3,
+                                                            .kind = 2,
+                                                            .progress = 40,
+                                                            .app = "cargo",
+                                                            .title = "Tests",
+                                                            .message = "Continue?" } } } } },
     };
 }
 

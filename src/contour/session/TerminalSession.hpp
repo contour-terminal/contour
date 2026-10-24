@@ -921,6 +921,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void focusTerminalWindow() override;
     void onClosed() override;
 
+    /// The PTY device closed. Unless this session asked for it (terminate()), the process exited by
+    /// itself, so its working and blocked program-status records go (Terminal::markProcessExited()).
+    /// Called by the exit watcher on its own thread, strictly before it posts onClosed().
+    void deviceClosed();
+
     void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
     void requestWindowResize(vtbackend::LineCount, vtbackend::ColumnCount) override;
@@ -930,6 +935,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void setWindowFrameColor(vtbackend::RGBColor color) override;
     void resetWindowFrameColor() override;
     void progressChanged(vtbackend::Progress progress) override;
+    /// OSC 7501: posted to the GUI thread as progressChanged() is, where the tab strip reads the records
+    /// back.
+    void programStatusChanged(vtbackend::ProgramStatusChange const& change) override;
 
     /// A shell command block finished (OSC 133;D, or an OSC 3008 end while OSC 3008 owns the marks).
     ///
@@ -1995,6 +2003,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// early-exit "shell terminated too quickly" notice, which exists only for shells dying on their
     /// own shortly after startup.
     std::atomic<bool> _terminationRequested = false;
+    /// Whether a tab-strip refresh for this session's program status is queued on the GUI thread, so that
+    /// a program reporting in a loop queues one. Set on the parser thread, cleared on the GUI thread.
+    std::atomic<bool> _isProgramStatusRefreshPending = false;
 
     /// @see noteTransportLost.
     std::atomic<bool> _transportLost = false;

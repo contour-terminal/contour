@@ -43,6 +43,9 @@ set(vtbackend_HEADERS
     screen/Gutter.hpp
     screen/GutterSettings.hpp
     vt/HierarchicalContext.hpp
+    vt/ProgramStatus.hpp
+    vt/SemanticBlockQuery.hpp
+    screen/ProgramStatusSet.hpp
     vt/JsonString.hpp
     input/vi/HintModeHandler.hpp
     core/Hyperlink.hpp
@@ -144,6 +147,8 @@ set(vtbackend_SOURCES
     core/ColorPalette.cpp
     core/TerminalContext.cpp
     vt/HierarchicalContext.cpp
+    vt/ProgramStatus.cpp
+    screen/ProgramStatusSet.cpp
     vt/JsonString.cpp
     core/WorkingDirectory.cpp
     shell/CommandBlock.cpp
@@ -285,6 +290,9 @@ if(LIBTERMINAL_TESTING)
         core/ColorPalette_test.cpp
         core/TerminalContext_test.cpp
         vt/HierarchicalContext_test.cpp
+        vt/ProgramStatus_test.cpp
+        screen/ProgramStatusSet_test.cpp
+        screen/Terminal_programStatus_test.cpp
         vt/JsonString_test.cpp
         screen/Screen_context_test.cpp
         shell/MarkArbiter_test.cpp

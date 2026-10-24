@@ -373,6 +373,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Applies one `OSC 3008` (hierarchical context signalling) sequence.
     [[nodiscard]] ApplyResult processHierarchicalContext(std::string_view payload);
 
+    /// Applies one `OSC 7501` (program status) report: a rejected one changes nothing and is logged.
+    [[nodiscard]] ApplyResult processProgramStatus(std::string_view payload);
+
     /// Stamps the OSC-133-equivalent marks an OSC 3008 transition stands in for, when the arbiter says
     /// this session's marks are OSC 3008's to stamp, and feeds the command block store once OSC 3008 owns
     /// the session. While OSC 133 owns it, a command context's end only enriches the matching block.

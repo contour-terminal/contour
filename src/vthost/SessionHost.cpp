@@ -153,7 +153,7 @@ void HostedSession::start()
 
 void HostedSession::terminate()
 {
-    _terminateRequested = true;
+    _pumpEnd.store(PumpEnd::Terminated, std::memory_order_release);
     if (!_terminal.device().isClosed())
         _terminal.device().close();
     // Unconditionally, even when someone else closed the device first: close() wakes a blocked
@@ -185,6 +185,10 @@ void HostedSession::pumpLoop()
         _terminal.flushInput();
     }
     _endCause = observeEnd();
+    // Strictly before the close is announced, and only for a process that ended by itself: a close the
+    // host asked for (terminate()) ends the session, and its program-status records with it.
+    if (!terminateRequested())
+        _terminal.markProcessExited();
     if (_onClosed)
         _onClosed();
 }
@@ -194,14 +198,14 @@ SessionEnd HostedSession::observeEnd() const
     // The host closing the PTY says nothing of how the program ended; and without a process there is nothing
     // to ask.
     auto const* const child = process();
-    if (child == nullptr || _terminateRequested)
+    if (child == nullptr || terminateRequested())
         return SessionEnd::Exited;
     // The PTY reports its hangup before the child is necessarily reaped: give the status a moment to land.
     constexpr auto Patience = std::chrono::milliseconds { 200 };
     constexpr auto Interval = std::chrono::milliseconds { 10 };
     auto const deadline = std::chrono::steady_clock::now() + Patience;
     auto status = child->checkStatus();
-    while (!status && !_terminateRequested && std::chrono::steady_clock::now() < deadline)
+    while (!status && !terminateRequested() && std::chrono::steady_clock::now() < deadline)
     {
         std::this_thread::sleep_for(Interval);
         status = child->checkStatus();

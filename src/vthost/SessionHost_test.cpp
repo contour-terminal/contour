@@ -207,6 +207,86 @@ class BlockingPty final: public vtpty::Pty
     int _reads = 0;
 };
 
+/// A PTY whose program prints @p output, then waits until it exits (EOF) or the host closes the device.
+///
+/// What tells a process that exited by itself from a close the host asked for: the first reads EOF, the
+/// second reads `EAGAIN` on a closed device, as `BlockingPty` documents of the real thing.
+class ExitingPty final: public vtpty::Pty
+{
+  public:
+    ExitingPty(vtbackend::PageSize size, std::string output): _size(size), _output(std::move(output)) {}
+
+    [[nodiscard]] vtpty::StartResult start() override { return vtpty::StartOutcome {}; }
+    [[nodiscard]] vtpty::PtySlave& slave() noexcept override { return _slave; }
+    void close() override
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _closed = true;
+        }
+        _wake.notify_all();
+    }
+    [[nodiscard]] bool isClosed() const noexcept override
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _closed;
+    }
+    void wakeupReader() override { _wake.notify_all(); }
+
+    /// The program exits: the next read reports EOF.
+    void exitProcess()
+    {
+        {
+            auto const lock = std::lock_guard { _mutex };
+            _exited = true;
+        }
+        _wake.notify_all();
+    }
+
+    [[nodiscard]] std::optional<ReadResult> read(crispy::BufferObject<char>& storage,
+                                                 std::optional<std::chrono::milliseconds> timeout,
+                                                 size_t /*size*/) override
+    {
+        auto lock = std::unique_lock { _mutex };
+        if (!_output.empty())
+        {
+            auto const pooled = storage.writeAtEnd(_output);
+            _output.clear();
+            return ReadResult { .data = std::string_view(pooled.data(), pooled.size()),
+                                .fromStdoutFastPipe = false };
+        }
+        // The timeout is honoured: the parser reads ahead with a zero one while another thread holds
+        // the terminal, and a read that blocked there would park the pump before it parsed anything.
+        auto const ended = [this] {
+            return _exited || _closed;
+        };
+        if (timeout)
+            std::ignore = _wake.wait_for(lock, *timeout, ended);
+        else
+            _wake.wait(lock, ended);
+        errno = _exited ? EIO : EAGAIN;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] int write(std::string_view data) override { return static_cast<int>(data.size()); }
+    [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _size; }
+    void resizeScreen(vtpty::PageSize size, std::optional<vtpty::ImageSize>) override { _size = size; }
+    void waitForClosed() override
+    {
+        auto lock = std::unique_lock { _mutex };
+        _wake.wait(lock, [this] { return _closed; });
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    std::condition_variable _wake;
+    vtpty::PtySlaveDummy _slave;
+    vtpty::PageSize _size;
+    std::string _output;
+    bool _closed = false;
+    bool _exited = false;
+};
+
 /// Stands in for one attached client. The client-area registry is keyed by stream observer, so a
 /// test that reports an area has to be somebody — and these tests are about what the host does with
 /// the report, not about who made it.
@@ -853,6 +933,68 @@ TEST_CASE("a hosted session whose program reads no input terminates at once", "[
     CHECK(terminated == std::future_status::ready);
 }
 #endif
+
+TEST_CASE("a hosted session's process exit drops its working program status before it closes",
+          "[vthost][host][programstatus]")
+{
+    // What the pump reads, then the exit or the close: the root is working, "lint" has failed.
+    auto ownedPty = std::make_unique<ExitingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) },
+        "\033]7501;state=working\033\\\033]7501;state=error:id=lint\033\\");
+    auto* const pty = ownedPty.get();
+    auto closed = std::promise<std::vector<std::string>> {};
+    auto* session = static_cast<vthost::HostedSession*>(nullptr);
+    auto hosted = vthost::HostedSession { vtworkspace::SessionId { 1 },
+                                          core::defaultEnvironment(),
+                                          std::move(ownedPty),
+                                          vtbackend::Settings {},
+                                          vtbackend::HostIdentity {},
+                                          vtbackend::TerminalClocks::system(),
+                                          core::platform::NativeFileSystem::instance(),
+                                          {},
+                                          {},
+                                          {},
+                                          {},
+                                          [&] {
+                                              // What the records are as the close is announced.
+                                              auto& terminal = session->terminal();
+                                              auto const _ = std::lock_guard { terminal };
+                                              auto ids = std::vector<std::string> {};
+                                              for (auto const& record: terminal.programStatus().records())
+                                                  ids.push_back(record.id);
+                                              closed.set_value(std::move(ids));
+                                          },
+                                          {} };
+    session = &hosted;
+    hosted.start();
+
+    // Both records are in before the program goes.
+    auto const parsed = [&] {
+        auto const _ = std::lock_guard { hosted.terminal() };
+        return hosted.terminal().programStatus().records().size() == 2;
+    };
+    for ([[maybe_unused]] auto const tick: std::views::iota(0, 500))
+    {
+        if (parsed())
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 5 });
+    }
+    REQUIRE(parsed());
+
+    auto announced = closed.get_future();
+    SECTION("the program exits by itself: the working record goes, the error stays")
+    {
+        pty->exitProcess();
+        REQUIRE(announced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+        CHECK(announced.get() == std::vector<std::string> { "lint" });
+    }
+    SECTION("the host closes the session: nothing is dropped, the records go with it")
+    {
+        hosted.terminate();
+        REQUIRE(announced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+        CHECK(announced.get() == std::vector<std::string> { "", "lint" });
+    }
+}
 
 TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")
 {
