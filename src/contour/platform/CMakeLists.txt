@@ -13,7 +13,9 @@
 # classes declare Q_OBJECT, but their moc output is referenced by the very code that emits their
 # signals, so the archive keeps it.
 add_library(contour_platform STATIC
+    AccessibilityPreferenceSource.cpp AccessibilityPreferenceSource.hpp
     Announcer.hpp
+    AppearanceServices.hpp
     Audio.cpp Audio.hpp
     AudioNote.hpp
     MultimediaEnvironment.hpp
@@ -31,6 +33,7 @@ add_library(contour_platform STATIC
     FreeDesktopNotifier.cpp FreeDesktopNotifier.hpp
     PortalCall.cpp PortalCall.hpp
     PortalExternalLauncher.cpp PortalExternalLauncher.hpp
+    PlatformAppearance.cpp PlatformAppearance.hpp
     PortalNotificationTransport.cpp PortalNotificationTransport.hpp
     GuiTheme.hpp
     NotificationIdMap.hpp
@@ -79,8 +82,15 @@ if(APPLE)
     set_target_properties(contour_platform PROPERTIES
         OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
         OBJCXX_STANDARD_REQUIRED ON)
-    target_sources(contour_platform PRIVATE CocoaWindowFrame.mm CocoaWindowResizeGrid.mm CocoaTaskbarProgressSink.mm)
-    set_source_files_properties(CocoaTaskbarProgressSink.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_sources(contour_platform PRIVATE
+        CocoaAccessibilityPreferenceSource.mm
+        CocoaPlatformAppearance.mm
+        CocoaTaskbarProgressSink.mm
+        CocoaWindowFrame.mm
+        CocoaWindowResizeGrid.mm)
+    set_source_files_properties(
+        CocoaAccessibilityPreferenceSource.mm CocoaPlatformAppearance.mm CocoaTaskbarProgressSink.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
 endif()
 
