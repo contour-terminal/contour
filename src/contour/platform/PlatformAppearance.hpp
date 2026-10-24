@@ -26,6 +26,7 @@ class IPlatformAppearance
     virtual ~IPlatformAppearance() = default;
 
     /// @return The appearance as the operating system reports it now.
+    /// @pre Called on the GUI thread.
     [[nodiscard]] virtual PlatformAppearance current() const = 0;
 };
 

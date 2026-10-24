@@ -19,6 +19,7 @@ class IAccessibilityPreferenceSource
     virtual ~IAccessibilityPreferenceSource() = default;
 
     /// @return The preferences as the operating system reports them now.
+    /// @pre Called on the GUI thread.
     [[nodiscard]] virtual config::AccessibilityPreferences current() const = 0;
 };
 

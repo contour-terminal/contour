@@ -51,28 +51,44 @@ struct AppearanceSwitch
 class SwitchedAccessibilityPreferenceSource final: public platform::IAccessibilityPreferenceSource
 {
   public:
-    /// @param source The switch to read; it must outlive this source.
-    explicit SwitchedAccessibilityPreferenceSource(AccessibilitySwitch const& source): _source { source } {}
+    /// @param source The switch to read and to detach from on destruction; it must outlive this source.
+    explicit SwitchedAccessibilityPreferenceSource(AccessibilitySwitch& source): _source { source } {}
+
+    SwitchedAccessibilityPreferenceSource(SwitchedAccessibilityPreferenceSource const&) = delete;
+    SwitchedAccessibilityPreferenceSource& operator=(SwitchedAccessibilityPreferenceSource const&) = delete;
+    SwitchedAccessibilityPreferenceSource(SwitchedAccessibilityPreferenceSource&&) = delete;
+    SwitchedAccessibilityPreferenceSource& operator=(SwitchedAccessibilityPreferenceSource&&) = delete;
+
+    /// Detaches from the switch, so a later set() reports to nobody, as a destroyed OS source would.
+    ~SwitchedAccessibilityPreferenceSource() override { _source.notify = nullptr; }
 
     /// @return The switch's current preferences.
     [[nodiscard]] config::AccessibilityPreferences current() const override { return _source.preferences; }
 
   private:
-    AccessibilitySwitch const& _source;
+    AccessibilitySwitch& _source;
 };
 
 /// A platform appearance source that reads an AppearanceSwitch.
 class SwitchedPlatformAppearance final: public platform::IPlatformAppearance
 {
   public:
-    /// @param source The switch to read; it must outlive this source.
-    explicit SwitchedPlatformAppearance(AppearanceSwitch const& source): _source { source } {}
+    /// @param source The switch to read and to detach from on destruction; it must outlive this source.
+    explicit SwitchedPlatformAppearance(AppearanceSwitch& source): _source { source } {}
+
+    SwitchedPlatformAppearance(SwitchedPlatformAppearance const&) = delete;
+    SwitchedPlatformAppearance& operator=(SwitchedPlatformAppearance const&) = delete;
+    SwitchedPlatformAppearance(SwitchedPlatformAppearance&&) = delete;
+    SwitchedPlatformAppearance& operator=(SwitchedPlatformAppearance&&) = delete;
+
+    /// Detaches from the switch, so a later set() reports to nobody, as a destroyed OS source would.
+    ~SwitchedPlatformAppearance() override { _source.notify = nullptr; }
 
     /// @return The switch's current appearance.
     [[nodiscard]] platform::PlatformAppearance current() const override { return _source.appearance; }
 
   private:
-    AppearanceSwitch const& _source;
+    AppearanceSwitch& _source;
 };
 
 /// Services whose factories attach to the given switches: each stores the callback it is handed into

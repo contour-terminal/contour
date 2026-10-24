@@ -69,6 +69,29 @@ TEST_CASE("appearanceServicesWith drives sources from the switches", "[appearanc
     CHECK(appearances.front() == accented);
 }
 
+TEST_CASE("A destroyed switched source no longer receives changes", "[appearance-source]")
+{
+    auto accessibilitySwitch = contour::test::AccessibilitySwitch {};
+    auto appearanceSwitch = contour::test::AppearanceSwitch {};
+    auto const services = contour::test::appearanceServicesWith(accessibilitySwitch, appearanceSwitch);
+    auto accessibilityCalls = 0;
+    auto appearanceCalls = 0;
+    auto accessibility = services.accessibility([&](AccessibilityPreferences) { ++accessibilityCalls; });
+    auto appearance = services.appearance([&](PlatformAppearance) { ++appearanceCalls; });
+    accessibility.reset();
+    appearance.reset();
+
+    accessibilitySwitch.set({ .motion = MotionPreference::Reduced,
+                              .transparency = TransparencyPreference::Allowed,
+                              .contrast = ContrastPreference::Standard });
+    appearanceSwitch.set({ .accent = vtbackend::RGBColor { 0x0A, 0x84, 0xFF }, .windowCornerRadius = 10 });
+    CHECK(accessibilityCalls == 0);
+    CHECK(appearanceCalls == 0);
+    CHECK_FALSE(accessibilitySwitch.notify);
+    CHECK_FALSE(appearanceSwitch.notify);
+    CHECK(accessibilitySwitch.preferences.motion == MotionPreference::Reduced);
+}
+
 TEST_CASE("A switch with no source attached only stores", "[appearance-source]")
 {
     auto accessibilitySwitch = contour::test::AccessibilitySwitch {};
