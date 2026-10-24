@@ -133,6 +133,7 @@ Item {
         // Delete (trashcan) — editable rows only, revealed on hover / when selected.
         AbstractButton {
             id: trashButton
+            readonly property color danger: chromeStyle.statusColor(chromeStyle.Danger)
             objectName: "deleteEntryButton"
             visible: root.editable && !root.locked && (rowHover.hovered || root.selected)
             implicitWidth: 22
@@ -145,13 +146,13 @@ Item {
                 text: "🗑"
                 Accessible.name: qsTr("Delete")
                 font.pointSize: 11
-                color: trashButton.hovered ? Qt.lighter(chromeStyle.statusColor(0), 1.15) : chromeStyle.statusColor(0)
+                color: trashButton.hovered ? Qt.lighter(trashButton.danger, 1.15) : trashButton.danger
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
             background: Rectangle {
                 radius: 4
-                color: trashButton.hovered ? Qt.rgba(chromeStyle.statusColor(0).r, chromeStyle.statusColor(0).g, chromeStyle.statusColor(0).b, 0.16) : "transparent"
+                color: trashButton.hovered ? Qt.rgba(trashButton.danger.r, trashButton.danger.g, trashButton.danger.b, 0.16) : "transparent"
             }
         }
     }

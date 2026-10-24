@@ -96,6 +96,19 @@ class UiStyleProvider: public QObject
 {
     Q_OBJECT
 
+  public:
+    /// The status roles, for QML to name (`chromeStyle.Danger`). Mirrors
+    /// config::StatusColorRole value for value; a static_assert in UiStyleProvider.cpp keeps them equal.
+    enum class StatusRole : uint8_t
+    {
+        Danger = 0, ///< config::StatusColorRole::Danger
+        Warning,    ///< config::StatusColorRole::Warning
+        Success,    ///< config::StatusColorRole::Success
+        Running,    ///< config::StatusColorRole::Running
+    };
+    Q_ENUM(StatusRole)
+
+  private:
     /// Which token row is active: "macos", "fluent", "linux" or "terminal".
     Q_PROPERTY(QString chromeStyle READ chromeStyleName CONSTANT)
     Q_PROPERTY(QFont font READ font CONSTANT)
@@ -108,6 +121,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QFont headlineFont READ headlineFont CONSTANT)
 
     Q_PROPERTY(QColor paneDimColor READ paneDimColor CONSTANT)
+    Q_PROPERTY(QColor paneDimTextColor READ paneDimTextColor CONSTANT)
     Q_PROPERTY(QColor dotGlyphColor READ dotGlyphColor CONSTANT)
     Q_PROPERTY(qreal hostingNoticeFillAlpha READ hostingNoticeFillAlpha CONSTANT)
     Q_PROPERTY(qreal hostingNoticeBorderAlpha READ hostingNoticeBorderAlpha CONSTANT)
@@ -177,6 +191,10 @@ class UiStyleProvider: public QObject
 
     /// The scrim laid over a pane to dim it (an unfocused or reconnecting one).
     [[nodiscard]] QColor paneDimColor() const;
+
+    /// The colour of text drawn on the pane-dim scrim: whichever of black and white contrasts more
+    /// with the scrim's black, so it is legible in every theme (a palette's bright-text role is not).
+    [[nodiscard]] QColor paneDimTextColor() const;
 
     /// The colour of the glyph drawn on a traffic-light dot. Dark and translucent: the dots are
     /// saturated in every theme, so the glyph contrasts with the dot, not with the window.
@@ -248,6 +266,16 @@ class UiStyleProvider: public QObject
     /// @param role A config::StatusColorRole as its underlying value, as QML passes it.
     /// @return The colour; transparent for a role outside the table.
     [[nodiscard]] Q_INVOKABLE QColor statusColor(int role) const;
+
+    /// Black or white, whichever has the higher contrast ratio against @p background.
+    /// @param background The fill the text is drawn on.
+    /// @return The legible text colour for that fill.
+    [[nodiscard]] Q_INVOKABLE QColor onColor(QColor const& background) const;
+
+    /// The text colour to draw on statusColor(@p role).
+    /// @param role A StatusRole as its underlying value.
+    /// @return Black or white, see onColor().
+    [[nodiscard]] Q_INVOKABLE QColor onStatusColor(int role) const;
 
     /// The colour this style says "this failed" in.
     ///

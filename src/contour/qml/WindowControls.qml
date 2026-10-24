@@ -276,7 +276,7 @@ RowLayout {
                             text: control.text
                             font: control.font
                             color: control.hovered && slot.modelData.hoverFill !== ""
-                                 ? systemPalette.highlightedText : systemPalette.windowText
+                                 ? chromeStyle.onColor(slot.modelData.hoverFill) : systemPalette.windowText
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }

@@ -236,6 +236,44 @@ QColor UiStyleProvider::statusColor(int role) const
     return QColor::fromRgb(dark ? row.dark : row.light);
 }
 
+namespace
+{
+    static_assert(static_cast<int>(UiStyleProvider::StatusRole::Danger)
+                      == static_cast<int>(config::StatusColorRole::Danger)
+                  && static_cast<int>(UiStyleProvider::StatusRole::Warning)
+                         == static_cast<int>(config::StatusColorRole::Warning)
+                  && static_cast<int>(UiStyleProvider::StatusRole::Success)
+                         == static_cast<int>(config::StatusColorRole::Success)
+                  && static_cast<int>(UiStyleProvider::StatusRole::Running)
+                         == static_cast<int>(config::StatusColorRole::Running));
+
+    [[nodiscard]] vtbackend::RGBColor toRgb(QColor const& color) noexcept
+    {
+        return vtbackend::RGBColor(static_cast<uint8_t>(color.red()),
+                                   static_cast<uint8_t>(color.green()),
+                                   static_cast<uint8_t>(color.blue()));
+    }
+} // namespace
+
+QColor UiStyleProvider::onColor(QColor const& background) const
+{
+    auto const rgb = toRgb(background);
+    auto const black = vtbackend::RGBColor(0, 0, 0);
+    auto const white = vtbackend::RGBColor(255, 255, 255);
+    return vtbackend::contrastRatio(rgb, black) >= vtbackend::contrastRatio(rgb, white) ? QColor(Qt::black)
+                                                                                        : QColor(Qt::white);
+}
+
+QColor UiStyleProvider::onStatusColor(int role) const
+{
+    return onColor(statusColor(role));
+}
+
+QColor UiStyleProvider::paneDimTextColor() const
+{
+    return onColor(QColor(Qt::black));
+}
+
 QColor UiStyleProvider::paneDimColor() const
 {
     return atOpacity(QColor(Qt::black), config::ChromeTokens::PaneDimPercent);

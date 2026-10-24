@@ -12,6 +12,8 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <text_shaper/Font.hpp>
 
 #include <QtGui/QColor>
@@ -331,4 +333,26 @@ TEST_CASE("UiStyleProvider publishes the pane-dim, notice and font-scale tokens"
     CHECK(provider.hostingNoticeBorderAlpha() == Catch::Approx(0.25));
     CHECK(provider.captionFont().pointSizeF() < font.pointSizeF());
     CHECK(provider.headlineFont().pointSizeF() > font.pointSizeF());
+}
+
+TEST_CASE("UiStyleProvider.onStatusColor picks the more legible of black and white", "[contour][uistyle]")
+{
+    using contour::config::StatusColorRole;
+    auto const provider = contour::window::UiStyleProvider(rowOf(UiStyle::Native), QGuiApplication::font());
+    auto const danger = static_cast<int>(StatusColorRole::Danger);
+
+    auto const ratio = [](QColor const& a, QColor const& b) {
+        return vtbackend::contrastRatio(vtbackend::RGBColor(a.red(), a.green(), a.blue()),
+                                        vtbackend::RGBColor(b.red(), b.green(), b.blue()));
+    };
+
+    withWindowColor(QColor(0x1E, 0x1E, 0x1E), [&] {
+        CHECK(provider.onStatusColor(danger) == QColor(Qt::black));
+        CHECK(ratio(provider.onStatusColor(danger), provider.statusColor(danger)) >= 4.5);
+    });
+    withWindowColor(QColor(0xF6, 0xF6, 0xF6), [&] {
+        CHECK(provider.onStatusColor(danger) == QColor(Qt::white));
+        CHECK(ratio(provider.onStatusColor(danger), provider.statusColor(danger)) >= 4.5);
+    });
+    CHECK(provider.paneDimTextColor() == QColor(Qt::white));
 }

@@ -217,7 +217,7 @@ ContourTerminal {
             id: reconnectingLabel
             anchors.centerIn: parent
             text: qsTr("Reconnecting\u2026")
-            color: pane.palette.brightText
+            color: chromeStyle.paneDimTextColor
             font: chromeStyle.headlineFont
         }
     }
