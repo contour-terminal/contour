@@ -133,8 +133,8 @@ constexpr StringLiteral WindowShadowConfig {
 constexpr StringLiteral DimUnfocusedConfig {
     "{comment} Dims a pane while it is not the focused one — an inactive pane of a split, or any\n"
     "{comment} pane of an unfocused window — by blending it toward its own background color.\n"
-    "{comment} The value is the blend amount between 0.0 (dimming disabled; the default) and 1.0\n"
-    "{comment} (fully blended to the background color).\n"
+    "{comment} The value is the blend amount between 0.0 (dimming disabled; the classic default) and\n"
+    "{comment} 1.0 (fully blended to the background color). The native2026 default is 0.15.\n"
     "dim_unfocused: {}\n"
     "\n"
 };
@@ -284,9 +284,10 @@ constexpr StringLiteral TabBarPositionConfig {
 
 constexpr StringLiteral TabBarVisibilityConfig {
     "{comment} When the GUI tab strip (tab bar) is shown (ignore-case):\n"
-    "{comment}   Always   = always show the tab strip (default).\n"
+    "{comment}   Always   = always show the tab strip (the classic default).\n"
     "{comment}   Never    = never show the tab strip.\n"
-    "{comment}   Multiple = show the tab strip only when the window has more than one tab.\n"
+    "{comment}   Multiple = show the tab strip only when the window has more than one tab (the\n"
+    "{comment}              native2026 default).\n"
     "tab_bar_visibility: {}\n"
     "\n"
 };
@@ -653,7 +654,8 @@ constexpr StringLiteral FontsConfig {
     "    {comment} weight/slant applied automatically).\n"
     "    regular:\n"
     "        {comment} Font family defines the font family name, such as:\n"
-    "        {comment} \"\"Fira Code\", \"Courier New\", or \"monospace\" (default).\n"
+    "        {comment} \"Fira Code\", \"Courier New\", or \"monospace\" (the classic default; native2026\n"
+    "        {comment} uses the bundled \"JetBrains Mono\", and \"Cascadia Mono\" on Windows).\n"
     "        family: {}\n"
     "\n"
     "        {comment} Font weight can be one of:\n"
@@ -928,6 +930,20 @@ constexpr StringLiteral LiveConfig {
     "{comment} Determines whether the instance is reloading the configuration files "
     "whenever it is changing or not.\n"
     "live_config: {}\n"
+    "\n"
+};
+
+constexpr StringLiteral DefaultsEditionConfig {
+    "{comment} The generation of built-in defaults this file is written against, so that a setting the\n"
+    "{comment} file does not spell out keeps the value it had when the file was written.\n"
+    "{comment}   classic    = the defaults of every release before the 2026 redesign. A file without\n"
+    "{comment}                this key is read as classic.\n"
+    "{comment}   native2026 = the 2026 redesign's defaults: JetBrains Mono (Cascadia Mono on Windows),\n"
+    "{comment}                a 100x30 page with margins, the contour-dark/contour-light schemes, a\n"
+    "{comment}                silent bell, 10000 lines of scrollback and a tab bar shown for two or\n"
+    "{comment}                more tabs.\n"
+    "{comment} A settings.yml beside this file may set it too, and wins.\n"
+    "defaults_edition: {}\n"
     "\n"
 };
 
@@ -1490,7 +1506,8 @@ constexpr StringLiteral HyperlinkDecorationConfig {
     "{comment} mode: when they are decorated\n"
     "{comment}   always   - always\n"
     "{comment}   hover    - only the one under the pointer\n"
-    "{comment}   modifier - all of them while the follow modifier (Ctrl of Ctrl+click) is held\n"
+    "{comment}   modifier - all of them while the follow modifier (Ctrl of Ctrl+click) is held; the\n"
+    "{comment}              native2026 default, which follows with Command+click on macOS\n"
     "{comment}   never    - never; Ctrl+click still opens them\n"
     "{comment} normal, hover: the decorator for a link at rest and under the pointer: underline,\n"
     "{comment} dotted-underline, double-underline, curly-underline, dashed-underline, overline,\n"
@@ -1973,6 +1990,18 @@ constexpr StringLiteral GitDrawingsConfig {
     "    branch_style:       {}\n"
     "    arc_style:          {}\n"
     "    merge_commit_style: {}\n"
+};
+
+constexpr StringLiteral DefaultsEditionWeb {
+    "option names the generation of built-in defaults the configuration file is written against, so a "
+    "setting the file does not spell out keeps the value it had when the file was written. `classic` is "
+    "the defaults of every release before the 2026 redesign, and is what a file without the key gets. "
+    "`native2026` is the redesign's: JetBrains Mono (Cascadia Mono on Windows) at 13pt on macOS and 12pt "
+    "elsewhere, a 100x30 page with 8x6 margins, the `contour-dark`/`contour-light` color schemes, the "
+    "status line without hard-coded colors, a silent bell, 10000 lines of scrollback, a steady block "
+    "cursor, links decorated while the follow modifier (Command on macOS) is held, unfocused panes dimmed, "
+    "and a tab bar shown only for two or more tabs. A freshly generated configuration states "
+    "`native2026`. A `settings.yml` beside the file may set the key too, and wins."
 };
 
 constexpr StringLiteral PlatformPluginWeb {
@@ -2485,10 +2514,10 @@ constexpr StringLiteral TabBarVisibilityWeb {
     "\n"
     "Selects when the GUI tab strip (tab bar) is shown. Valid values (ignore-case):\n"
     "\n"
-    "- `Always` — the tab strip is always shown. This is the default.\n"
+    "- `Always` — the tab strip is always shown. This is the `classic` default.\n"
     "- `Never` — the tab strip is never shown.\n"
     "- `Multiple` — the tab strip is shown only when the window has more than one tab, and hidden while a "
-    "single tab remains.\n"
+    "single tab remains. This is the `native2026` default.\n"
     "\n"
 };
 
@@ -2876,7 +2905,7 @@ constexpr StringLiteral FontsWeb {
     "      emoji: \"emoji\"\n"
     "```\n"
     ":octicons-horizontal-rule-16: ==size== Specifies the initial font size in pixels. The default value is "
-    "12. <br/>\n"
+    "12, and 13 on macOS under the `native2026` defaults. <br/>\n"
     ":octicons-horizontal-rule-16: ==locator==  Determines the font locator engine to use for locating font "
     "files and font fallback. Possible values are `native` and `mock`.<br/> `native` will use the "
     "operating-system native font location service (e.g. CoreText on macOS and DirectWrite on Windows), "
@@ -3231,8 +3260,8 @@ constexpr StringLiteral WindowShadowWeb {
 constexpr StringLiteral DimUnfocusedWeb {
     "configuration option dims a pane while it is not the focused one (an inactive pane of a split, or "
     "any pane of an unfocused window) by blending it toward its own background color. The value is the "
-    "blend amount between 0.0 (dimming disabled; the default) and 1.0 (fully blended to the "
-    "background).\n"
+    "blend amount between 0.0 (dimming disabled; the `classic` default) and 1.0 (fully blended to the "
+    "background). The `native2026` default is 0.15.\n"
     "``` yaml\n"
     "profiles:\n"
     "  profile_name:\n"
@@ -3431,7 +3460,7 @@ constexpr StringLiteral ScreenTransitionStyleWeb {
     "\n"
     "Valid values are:\n"
     "- `classic` - instant switch (no animation)\n"
-    "- `fade` - smooth fade-out/fade-in (default 250ms)\n"
+    "- `fade` - smooth fade-out/fade-in (250ms by default; 150ms under the `native2026` defaults)\n"
     "\n"
     "``` yaml\n"
     "profiles:\n"
@@ -3504,6 +3533,7 @@ using Background = DocumentationEntry<BackgroundConfig, BackgroundWeb>;
 using Bell = DocumentationEntry<BellConfig, BellWeb>;
 using FrozenDecMode = DocumentationEntry<FrozenDecModeConfig, Dummy>;
 using Live = DocumentationEntry<LiveConfig, LiveWeb>;
+using DefaultsEdition = DocumentationEntry<DefaultsEditionConfig, DefaultsEditionWeb>;
 using PlatformPlugin = DocumentationEntry<PlatformPluginConfig, PlatformPluginWeb>;
 using Renderer = DocumentationEntry<RendererConfig, RendererWeb>;
 using CommandPaletteRecentCount =

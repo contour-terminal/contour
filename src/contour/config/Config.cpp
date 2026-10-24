@@ -548,6 +548,75 @@ static std::string createString(Config const& c)
     return createString<YAMLConfigWriter>(c);
 }
 
+namespace
+{
+    /// The font configuration @p edition ships.
+    /// @param edition The edition whose font to describe.
+    /// @return Every face in the edition's family, at its size.
+    [[nodiscard]] vtrasterizer::FontDescriptions makeDefaultFont(DefaultsEdition edition)
+    {
+        auto const& defaults = editionDefaults(edition);
+        auto const face = [&](text::FontWeight weight, text::FontSlant slant) {
+            return text::FontDescription { .familyName = std::string { defaults.fontFamily },
+                                           .weight = weight,
+                                           .slant = slant,
+                                           .spacing = text::FontSpacing::Mono,
+                                           .strictSpacing = false,
+                                           .features = {} };
+        };
+        return vtrasterizer::FontDescriptions {
+            .dpiScale = 1.0,
+            .dpi = { 0, 0 },
+            .size = { defaults.fontSize },
+            .regular = face(text::FontWeight::Normal, text::FontSlant::Normal),
+            .bold = face(text::FontWeight::Bold, text::FontSlant::Normal),
+            .italic = face(text::FontWeight::Normal, text::FontSlant::Italic),
+            .boldItalic = face(text::FontWeight::Bold, text::FontSlant::Italic),
+            .emoji = text::FontDescription { .familyName = { "emoji" } },
+            .renderMode = text::RenderMode::Gray,
+            .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
+            .fontLocator = vtrasterizer::FontLocatorEngine::Native,
+            .builtinBoxDrawing = true,
+            .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
+            .textOutline = {},
+        };
+    }
+
+    /// The palette a built-in scheme name stands for, resolved as the loader resolves a name that no
+    /// `color_schemes:` entry or side file overrides.
+    /// @param name A built-in scheme name, or "default".
+    /// @return The scheme's palette; the default palette for a name no built-in scheme answers to.
+    [[nodiscard]] vtbackend::ColorPalette builtinPalette(std::string_view name)
+    {
+        auto palette = vtbackend::ColorPalette {};
+        (void) vtbackend::defaultColorPalettes(name, palette);
+        return palette;
+    }
+} // namespace
+
+vtrasterizer::FontDescriptions const& defaultFont(DefaultsEdition edition)
+{
+    static auto const values = std::array {
+        makeDefaultFont(DefaultsEdition::Classic),
+        makeDefaultFont(DefaultsEdition::Native2026),
+    };
+    static_assert(std::tuple_size_v<decltype(values)> == configEnumValues<DefaultsEdition>().size(),
+                  "every DefaultsEdition needs its font");
+    return values[static_cast<size_t>(edition)];
+}
+
+ColorConfig defaultColors(DefaultsEdition edition)
+{
+    auto const& defaults = editionDefaults(edition);
+    if (defaults.darkColorScheme == defaults.lightColorScheme)
+        return SimpleColorConfig { .colorScheme = std::string { defaults.darkColorScheme },
+                                   .colors = builtinPalette(defaults.darkColorScheme) };
+    return DualColorConfig { .colorSchemeLight = std::string { defaults.lightColorScheme },
+                             .colorSchemeDark = std::string { defaults.darkColorScheme },
+                             .darkMode = builtinPalette(defaults.darkColorScheme),
+                             .lightMode = builtinPalette(defaults.lightColorScheme) };
+}
+
 std::string defaultConfigString()
 {
     Config const config {};
@@ -592,9 +661,52 @@ Config loadConfig()
     return loadConfigFromFile(configHome() / "contour.yml");
 }
 
+namespace
+{
+    /// The `defaults_edition` one configuration document states.
+    /// @param path The document: contour.yml or settings.yml.
+    /// @return The edition it names; nothing when the file is absent, unreadable or names none. A
+    ///         value no edition answers to is reported and is the same as none.
+    [[nodiscard]] std::optional<DefaultsEdition> statedDefaultsEdition(fs::path const& path)
+    {
+        std::error_code ec;
+        if (!fs::exists(path, ec) || ec)
+            return std::nullopt;
+        auto const document = YAMLConfigReader::parseSideFile(path);
+        if (!document)
+            return std::nullopt; // The full load reports a broken file; the scan only looks for its key.
+        auto const node = (*document)[std::string { DefaultsEditionKey }];
+        if (!node || !node.IsScalar())
+            return std::nullopt;
+        auto const token = node.as<std::string>();
+        auto const edition = configEnumFromToken<DefaultsEdition>(token);
+        if (!edition)
+            errorLog()("{}: {} '{}' names no edition; ignoring it.",
+                       core::pathToUtf8(path),
+                       DefaultsEditionKey,
+                       token);
+        return edition;
+    }
+} // namespace
+
+DefaultsEdition scanDefaultsEdition(fs::path const& configFile)
+{
+    // settings.yml is read second so that it wins: it is where the GUI records a switch to new
+    // defaults, and the hand-maintained contour.yml is never rewritten for it.
+    auto edition = DefaultsEdition::Classic;
+    for (auto const& path: { configFile, configFile.parent_path() / "settings.yml" })
+        if (auto const stated = statedDefaultsEdition(path))
+            edition = *stated;
+    return edition;
+}
+
 Config loadConfigFromFile(fs::path const& fileName)
 {
-    Config config {};
+    // Created first, so the scan always finds a file: a fresh install's is the generated one, which
+    // states the newest edition, and a file that predates the key states none and so stays Classic.
+    createFileIfNotExists(fileName);
+
+    auto config = Config { .defaultsEdition = scanDefaultsEdition(fileName) };
 
     loadConfigFromFile(config, fileName);
 
@@ -996,6 +1108,8 @@ void compareEntries(Config& config, auto const& output)
     // compare entries in config and default config and log differences
     auto defaultConfig = YAML::Load(defaultConfigString());
     auto userConfig = YAML::Load(readFile(config.configFile).value_or(std::string {}));
+    // A file that predates the key is the Classic edition by its absence, not a file missing a setting.
+    defaultConfig.remove(std::string { DefaultsEditionKey });
 
     std::vector<std::string> existingEntries;
     std::vector<std::string> userEntries;
@@ -1106,7 +1220,7 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
 
     // Inheritance base for GUI profiles: the resolved default profile, captured BEFORE any side file
     // can replace it in the map, so a GUI profile inherits the same defaults an inline one would.
-    auto base = TerminalProfile {};
+    auto base = TerminalProfile { .defaultsEdition = config.defaultsEdition };
     if (auto const* def = config.findProfile(config.defaultProfileName.value()))
         base = *def;
 
@@ -1205,7 +1319,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     // stale provenance would keep the settings page treating a contour.yml entry as GUI-owned. The loaders
     // assume the built-in seeds exist (the "main" profile is the inheritance base; the "default" color
     // palette is the fallback), so restore those — exactly a first load's initial Config state.
-    config.profiles.value() = { { "main", TerminalProfile {} } };
+    config.profiles.value() = { { "main", TerminalProfile { .defaultsEdition = config.defaultsEdition } } };
     config.colorschemes.value() = { { "default", vtbackend::ColorPalette {} } };
     config.profileOrigins.clear();
     config.colorSchemeOrigins.clear();
@@ -1470,7 +1584,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("bypass_mouse_protocol_modifier", c.bypassMouseProtocolModifiers);
         loadFromEntry("on_mouse_select", c.onMouseSelection);
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
-        loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
+        loadFromEntry("profiles", c.profiles, c.defaultProfileName.value(), c.defaultsEdition);
         loadFromEntry("layouts", c.layouts);
         loadFromEntry("hosts", c.hosts);
         loadFromEntry("git_drawings", c.gitDrawings);
@@ -4839,9 +4953,16 @@ static std::string createForGlobal(Config const& c)
             doc.append(writer.processEntry(writer.whichDoc(v), name, escapeSequence(v.value())));
         };
 
+    // Not a ConfigEntry: the edition is fixed before the file is read, so no loader assigns it. It is
+    // written all the same, so that a generated file names the defaults it was generated with.
+    auto const processDefaultsEdition = [&](auto const& name, DefaultsEdition const& edition) {
+        doc.append(writer.processEntry(writer.whichDoc(documentation::DefaultsEdition {}), name, edition));
+    };
+
     auto completeOverload = core::Overloaded {
         processConfigEntry,
         processConfigEntryWithEscape,
+        processDefaultsEdition,
         // Ignored entries
         [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>,

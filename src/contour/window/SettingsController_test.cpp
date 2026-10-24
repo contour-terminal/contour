@@ -98,16 +98,15 @@ struct Fixture
     explicit Fixture(std::string_view yaml, std::shared_ptr<display::IGpuInventory const> gpus = nullptr)
     {
         configPath = writeConfig(dir, yaml);
-        config::loadConfigFromFile(cfg, configPath);
+        // Through the path overload, as production loads: it reads the file's defaults_edition first.
+        cfg = config::loadConfigFromFile(configPath);
         store =
             std::make_shared<config::FileGuiConfigStore>(std::filesystem::path(dir.path().toStdU16String()));
-        controller = std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
-                                                          store,
-                                                          [this]() {
-                                                              cfg = config::Config {};
-                                                              config::loadConfigFromFile(cfg, configPath);
-                                                          },
-                                                          std::move(gpus));
+        controller =
+            std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
+                                                 store,
+                                                 [this]() { cfg = config::loadConfigFromFile(configPath); },
+                                                 std::move(gpus));
         QObject::connect(controller.get(),
                          &SettingsController::errorOccurred,
                          [this](QString const& message) { errors.push_back(message); });

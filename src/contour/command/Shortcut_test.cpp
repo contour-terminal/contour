@@ -168,7 +168,10 @@ TEST_CASE("shortcutIndex maps commands to the chord that runs them", "[contour][
 TEST_CASE("describeLinkGesture spells the follow gesture as the shortcut column spells a chord",
           "[contour][links]")
 {
-    CHECK(describeLinkGesture(config::Config {}, ShortcutStyle::Text)
+    // Classic: the edition whose follow modifier is Ctrl on every platform (Native2026's is Command on
+    // macOS).
+    auto const classic = config::Config { .defaultsEdition = config::DefaultsEdition::Classic };
+    CHECK(describeLinkGesture(classic, ShortcutStyle::Text)
           == "Ctrl+Click (Shift+Ctrl+Click inside applications that use the mouse)");
     CHECK(describeLinkGesture(
               contour::test::loadConfigFromYaml(
@@ -211,6 +214,12 @@ TEST_CASE("Shortcut.indexAndLinkGestureFollowStyle", "[command]")
 {
     auto const index = shortcutIndex(config::defaultInputMappings(), ShortcutStyle::MacGlyphs);
     CHECK(index.at("CreateNewTab") == "⌃⇧T");
-    CHECK(describeLinkGesture(config::Config {}, ShortcutStyle::MacGlyphs)
+    auto const classic = config::Config { .defaultsEdition = config::DefaultsEdition::Classic };
+    CHECK(describeLinkGesture(classic, ShortcutStyle::MacGlyphs)
           == "⌃Click (⇧⌃Click inside applications that use the mouse)");
+#ifdef __APPLE__
+    // The Native2026 defaults follow links with Command on macOS.
+    CHECK(describeLinkGesture(config::Config {}, ShortcutStyle::MacGlyphs)
+          == "⌘Click (⇧⌘Click inside applications that use the mouse)");
+#endif
 }

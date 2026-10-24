@@ -6,6 +6,7 @@
 #include <contour/config/ConfigDocumentation.hpp>
 #include <contour/config/ConfigEnum.hpp>
 #include <contour/config/ConfigEnumReader.hpp>
+#include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
 #include <contour/config/HostUrl.hpp>
@@ -627,20 +628,58 @@ struct MouseConfig
     bool hideWhileTyping { true };
 };
 
+/// The three segments of an indicator status line template, as constants an edition's default table
+/// can hold.
+struct IndicatorTemplate
+{
+    std::string_view left;   ///< The left-aligned segment.
+    std::string_view middle; ///< The centred segment.
+    std::string_view right;  ///< The right-aligned segment.
+};
+
+/// The indicator status line every release before the 2026 redesign shipped (DefaultsEdition::Classic).
+///
+/// It keeps the {Tabs} segment so the in-terminal tab list is still shown even when the GUI tab strip is
+/// hidden or unavailable. (Tabs are also surfaced as first-class GUI tabs in the window title bar; the
+/// two are complementary.)
+inline constexpr auto ClassicIndicatorTemplate = IndicatorTemplate {
+    .left = " {InputMode:Bold,Color=#FFFF00}"
+            "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
+            "{Tabs:ActiveColor=#FFFF00,Left= │ }"
+            "{ProtectedMode:Bold,Left= │ }"
+            // Draws NOTHING until a privilege or machine boundary is in force, so an
+            // ordinary session is unchanged by its presence.
+            "{Context:Left= │ }",
+    .middle = "« {Title} »",
+    .right = "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}",
+};
+
+/// The 2026 redesign's interim indicator status line (DefaultsEdition::Native2026).
+///
+/// No {Tabs}, because the GUI tab strip shows them, and no `Color=` literal, so every colour comes from
+/// the color scheme's `indicatorStatusLine*` pairs and follows a light or dark scheme. A later phase of
+/// the redesign replaces it with the full template.
+inline constexpr auto Native2026IndicatorTemplate = IndicatorTemplate {
+    .left = " {InputMode:Bold}{Context:Left=  }",
+    .middle = "{Title}",
+    .right = "{HistoryLineCount:Faint}  {Clock:Faint} ",
+};
+
 struct IndicatorConfig
 {
-    // The default indicator status line keeps the {Tabs} segment so the in-terminal tab list is still
-    // shown even when the GUI tab strip is hidden or unavailable. (Tabs are also surfaced as first-class
-    // GUI tabs in the window title bar; the two are complementary.)
-    std::string left { " {InputMode:Bold,Color=#FFFF00}"
-                       "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
-                       "{Tabs:ActiveColor=#FFFF00,Left= │ }"
-                       "{ProtectedMode:Bold,Left= │ }"
-                       // Draws NOTHING until a privilege or machine boundary is in force, so an
-                       // ordinary session is unchanged by its presence.
-                       "{Context:Left= │ }" };
-    std::string middle { "« {Title} »" };
-    std::string right { "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" };
+    std::string left { ClassicIndicatorTemplate.left };
+    std::string middle { ClassicIndicatorTemplate.middle };
+    std::string right { ClassicIndicatorTemplate.right };
+
+    /// The indicator configuration @p segments spells.
+    /// @param segments The template to copy.
+    /// @return An indicator configuration holding a copy of each segment.
+    [[nodiscard]] static IndicatorConfig from(IndicatorTemplate const& segments)
+    {
+        return IndicatorConfig { .left = std::string { segments.left },
+                                 .middle = std::string { segments.middle },
+                                 .right = std::string { segments.right } };
+    }
 };
 
 struct StatusLineConfig
@@ -976,57 +1015,132 @@ struct Bell
     float volume = 1.0f;
 };
 
+/// Every default that differs between two editions (@see DefaultsEdition), one row per edition.
+///
+/// A default that is the same in every edition stays at its own member. One that changes is a column
+/// here, so a third edition is a third row rather than a third branch at each member, and the members
+/// that read a column cannot disagree about which edition they are in.
+struct EditionDefaults
+{
+    DefaultsEdition edition;                            ///< The edition this row describes.
+    std::string_view fontFamily;                        ///< Every face of the profile's font.
+    double fontSize;                                    ///< The font size in points.
+    vtbackend::PageSize terminalSize;                   ///< The initial page size.
+    WindowMargins margins;                              ///< The padding around the grid.
+    IndicatorTemplate statusLine;                       ///< The indicator status line's template.
+    vtbackend::LinkDecorationMode linkDecoration;       ///< When detected links are decorated.
+    double dimUnfocused;                                ///< How far an unfocused pane is dimmed.
+    std::string_view bellSound;                         ///< Bell::sound; "off" is silent.
+    vtbackend::LineCount scrollback;                    ///< The scrollback depth that always survives.
+    vtbackend::CursorShape insertCursorShape;           ///< The cursor's shape in insert mode.
+    vtbackend::CursorDisplay insertCursorDisplay;       ///< Whether the insert-mode cursor blinks.
+    std::chrono::milliseconds screenTransitionDuration; ///< How long a screen switch animates.
+    /// The color scheme a dark system uses. When it equals @ref lightColorScheme the profile names one
+    /// scheme (`colors: <name>`) rather than a dark/light pair.
+    std::string_view darkColorScheme;
+    std::string_view lightColorScheme;           ///< The color scheme a light system uses.
+    TabBarVisibility tabBarVisibility;           ///< When the window's tab strip is shown.
+    vtbackend::Modifier followHyperlinkModifier; ///< The modifier a click opens a link with.
+};
+
+namespace detail
+{
 #ifdef __APPLE__
-inline auto defaultFamilyName = "Monaco";
+    inline constexpr std::string_view ClassicFontFamily = "Monaco";
 #else
-inline auto defaultFamilyName = "monospace";
+    inline constexpr std::string_view ClassicFontFamily = "monospace";
 #endif
 
-/// The built-in font configuration, used when the config file does not override it.
+#if defined(_WIN32)
+    inline constexpr std::string_view Native2026FontFamily = "Cascadia Mono";
+#else
+    // Bundled with Contour on macOS and Linux and registered before the first font lookup, so the
+    // name resolves on a machine that never installed it.
+    inline constexpr std::string_view Native2026FontFamily = "JetBrains Mono";
+#endif
+
+#ifdef __APPLE__
+    // macOS sets type a point larger at the same legibility, and opens links with Command (which
+    // Contour spells Super: Qt's Control/Meta swap is turned off, @see AA_MacDontSwapCtrlAndMeta).
+    inline constexpr double Native2026FontSize = 13.0;
+    inline constexpr auto Native2026FollowHyperlinkModifier = vtbackend::Modifier::Super;
+#else
+    inline constexpr double Native2026FontSize = 12.0;
+    inline constexpr auto Native2026FollowHyperlinkModifier = vtbackend::Modifier::Control;
+#endif
+
+    /// The rows of EditionDefaults, in enumerator order.
+    inline constexpr auto EditionDefaultsTable = std::array {
+        EditionDefaults {
+            .edition = DefaultsEdition::Classic,
+            .fontFamily = ClassicFontFamily,
+            .fontSize = 12.0,
+            .terminalSize = { .lines = vtbackend::LineCount(25), .columns = vtbackend::ColumnCount(80) },
+            .margins = { .horizontal = HorizontalMargin { 0u }, .vertical = VerticalMargin { 0u } },
+            .statusLine = ClassicIndicatorTemplate,
+            .linkDecoration = vtbackend::LinkDecorationMode::Always,
+            .dimUnfocused = 0.0,
+            .bellSound = "default",
+            .scrollback = vtbackend::LineCount(1000),
+            .insertCursorShape = vtbackend::CursorShape::Bar,
+            .insertCursorDisplay = vtbackend::CursorDisplay::Steady,
+            .screenTransitionDuration = std::chrono::milliseconds { 250 },
+            .darkColorScheme = "default",
+            .lightColorScheme = "default",
+            .tabBarVisibility = TabBarVisibility::Always,
+            .followHyperlinkModifier = vtbackend::Modifier::Control,
+        },
+        EditionDefaults {
+            .edition = DefaultsEdition::Native2026,
+            .fontFamily = Native2026FontFamily,
+            .fontSize = Native2026FontSize,
+            .terminalSize = { .lines = vtbackend::LineCount(30), .columns = vtbackend::ColumnCount(100) },
+            .margins = { .horizontal = HorizontalMargin { 8u }, .vertical = VerticalMargin { 6u } },
+            .statusLine = Native2026IndicatorTemplate,
+            .linkDecoration = vtbackend::LinkDecorationMode::Modifier,
+            .dimUnfocused = 0.15,
+            .bellSound = "off",
+            .scrollback = vtbackend::LineCount(10000),
+            .insertCursorShape = vtbackend::CursorShape::Block,
+            .insertCursorDisplay = vtbackend::CursorDisplay::Steady,
+            .screenTransitionDuration = std::chrono::milliseconds { 150 },
+            .darkColorScheme = "contour-dark",
+            .lightColorScheme = "contour-light",
+            .tabBarVisibility = TabBarVisibility::Multiple,
+            .followHyperlinkModifier = Native2026FollowHyperlinkModifier,
+        },
+    };
+
+    static_assert(std::ranges::all_of(std::views::iota(size_t { 0 }, EditionDefaultsTable.size()),
+                                      [](size_t i) {
+                                          return static_cast<size_t>(EditionDefaultsTable[i].edition) == i;
+                                      }),
+                  "EditionDefaultsTable must list one row per DefaultsEdition, in enumerator order");
+    static_assert(EditionDefaultsTable.size() == configEnumValues<DefaultsEdition>().size(),
+                  "every DefaultsEdition needs a row of defaults");
+} // namespace detail
+
+/// The defaults @p edition ships.
+/// @param edition The edition to look up.
+/// @return Its row of the default table.
+[[nodiscard]] constexpr EditionDefaults const& editionDefaults(DefaultsEdition edition) noexcept
+{
+    return detail::EditionDefaultsTable[static_cast<size_t>(edition)];
+}
+
+/// The built-in font configuration of @p edition, used when the config file does not override it.
 ///
 /// A function-local static rather than a namespace-scope object: its construction allocates, so a
 /// throw here is catchable by the caller instead of terminating during static initialization.
+/// @param edition The edition whose font to describe.
 /// @return The default font descriptions (constructed on first use).
-[[nodiscard]] inline vtrasterizer::FontDescriptions const& defaultFont()
-{
-    static auto const value = vtrasterizer::FontDescriptions {
-        .dpiScale = 1.0,
-        .dpi = { 0, 0 },
-        .size = { 12 },
-        .regular = text::FontDescription { .familyName = { defaultFamilyName },
-                                           .weight = text::FontWeight::Normal,
-                                           .slant = text::FontSlant::Normal,
-                                           .spacing = text::FontSpacing::Mono,
-                                           .strictSpacing = false,
-                                           .features = {} },
-        .bold = text::FontDescription { .familyName = { defaultFamilyName },
-                                        .weight = text::FontWeight::Bold,
-                                        .slant = text::FontSlant::Normal,
-                                        .spacing = text::FontSpacing::Mono,
-                                        .strictSpacing = false,
-                                        .features = {} },
-        .italic = text::FontDescription { .familyName = { defaultFamilyName },
-                                          .weight = text::FontWeight::Normal,
-                                          .slant = text::FontSlant::Italic,
-                                          .spacing = text::FontSpacing::Mono,
-                                          .strictSpacing = false,
-                                          .features = {} },
-        .boldItalic = text::FontDescription { .familyName = { defaultFamilyName },
-                                              .weight = text::FontWeight::Bold,
-                                              .slant = text::FontSlant::Italic,
-                                              .spacing = text::FontSpacing::Mono,
-                                              .strictSpacing = false,
-                                              .features = {} },
-        .emoji = text::FontDescription { .familyName = { "emoji" } },
-        .renderMode = text::RenderMode::Gray,
-        .textShapingEngine = vtrasterizer::TextShapingEngine::OpenShaper,
-        .fontLocator = vtrasterizer::FontLocatorEngine::Native,
-        .builtinBoxDrawing = true,
-        .maxFallbackCount = vtrasterizer::DefaultMaxFallbackCount,
-        .textOutline = {},
-    };
-    return value;
-}
+[[nodiscard]] vtrasterizer::FontDescriptions const& defaultFont(DefaultsEdition edition);
+
+/// The color configuration @p edition ships, with each scheme's palette resolved from the built-in
+/// schemes as the loader resolves a scheme name.
+/// @param edition The edition whose colors to describe.
+/// @return A single scheme, or a dark/light pair when the edition names two.
+[[nodiscard]] ColorConfig defaultColors(DefaultsEdition edition);
 
 /// The layout tree model (structs + realize/serialize helpers) lives in vtworkspace::LayoutTree so the
 /// Qt-free daemon shares it; these aliases keep the config-side spellings working.
@@ -1036,6 +1150,10 @@ using Layout = vtworkspace::Layout;
 
 struct TerminalProfile
 {
+    /// The edition whose defaults the members below start from. First, so that every later default
+    /// can read it and `TerminalProfile { .defaultsEdition = e }` builds a profile of edition @c e.
+    /// Fixed at construction: changing it afterwards changes no default already taken.
+    DefaultsEdition defaultsEdition { DefaultsEdition::Native2026 };
     ConfigEntry<vtpty::Process::ExecInfo, documentation::Shell> shell { {
         .program =
             []() {
@@ -1063,12 +1181,17 @@ struct TerminalProfile
     // Blend amount (0.0 = off .. 1.0 = fully background-colored) applied to a pane while it is not
     // the focused one: an inactive pane of a split, or any pane of an unfocused window. Composited
     // in QML (TerminalPane.qml); the renderer is untouched.
-    ConfigEntry<double, documentation::DimUnfocused> dimUnfocused { 0.0 };
+    ConfigEntry<double, documentation::DimUnfocused> dimUnfocused {
+        editionDefaults(defaultsEdition).dimUnfocused
+    };
     ConfigEntry<bool, documentation::ShowIndicatorOnResize> sizeIndicatorOnResize { true };
     ConfigEntry<bool, documentation::Fullscreen> fullscreen { false };
     ConfigEntry<bool, documentation::Maximized> maximized { false };
     ConfigEntry<bool, documentation::InsertAfterYank> insertAfterYank { false };
-    ConfigEntry<Bell, documentation::Bell> bell { { .sound = "default", .alert = true, .volume = 1.0f } };
+    ConfigEntry<Bell, documentation::Bell> bell { Bell {
+        .sound = std::string { editionDefaults(defaultsEdition).bellSound },
+        .alert = true,
+        .volume = 1.0f } };
     ConfigEntry<FinishNotificationConfig, documentation::NotifyOnCommandFinish> notifyOnCommandFinish {};
     ConfigEntry<vtbackend::VTType, documentation::TerminalId> terminalId { vtbackend::VTType::VT525 };
     ConfigEntry<PixelReporting, documentation::PixelReporting> pixelReporting { PixelReporting::Device };
@@ -1076,20 +1199,19 @@ struct TerminalProfile
     ConfigEntry<std::chrono::milliseconds, documentation::SmoothLineScrolling> smoothLineScrolling { 100 };
     ConfigEntry<bool, documentation::SmoothScrolling> smoothScrolling { true };
     ConfigEntry<bool, documentation::MomentumScrolling> momentumScrolling { true };
-    ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize { {
-        .lines = vtbackend::LineCount(25),
-        .columns = vtbackend::ColumnCount(80),
-    } };
-    ConfigEntry<WindowMargins, documentation::Margins> margins { { .horizontal = HorizontalMargin { 0u },
-                                                                   .vertical = VerticalMargin { 0u } } };
-    ConfigEntry<HistoryConfig, documentation::History> history {};
+    ConfigEntry<vtbackend::PageSize, documentation::TerminalSize> terminalSize {
+        editionDefaults(defaultsEdition).terminalSize
+    };
+    ConfigEntry<WindowMargins, documentation::Margins> margins { editionDefaults(defaultsEdition).margins };
+    ConfigEntry<HistoryConfig, documentation::History> history { HistoryConfig {
+        .maxHistoryLineCount = editionDefaults(defaultsEdition).scrollback } };
     ConfigEntry<ScrollBarConfig, documentation::Scrollbar> scrollbar {};
     ConfigEntry<StickyHeaderConfig, documentation::StickyHeader> stickyHeader {};
     ConfigEntry<MouseConfig, documentation::Mouse> mouse { true };
     ConfigEntry<PermissionsConfig, documentation::Permissions> permissions {};
     ConfigEntry<bool, documentation::InputMethodEditorSupport> inputMethodEditor { true };
     ConfigEntry<bool, documentation::HighlightDoubleClickerWord> highlightDoubleClickedWord { true };
-    ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont() };
+    ConfigEntry<vtrasterizer::FontDescriptions, documentation::Fonts> fonts { defaultFont(defaultsEdition) };
     ConfigEntry<bool, documentation::DrawBoldTextWithBrightColors> drawBoldTextWithBrightColors { false };
     ConfigEntry<vtbackend::SearchCaseSensitivity, documentation::SearchCaseSensitivity>
         searchCaseSensitivity { vtbackend::SearchCaseSensitivity::Smart };
@@ -1099,13 +1221,13 @@ struct TerminalProfile
     ConfigEntry<vtbackend::ScreenTransitionStyle, documentation::ScreenTransitionStyle>
         screenTransitionStyle { vtbackend::ScreenTransitionStyle::Fade };
     ConfigEntry<std::chrono::milliseconds, documentation::ScreenTransitionDuration> screenTransitionDuration {
-        std::chrono::milliseconds { 250 }
+        editionDefaults(defaultsEdition).screenTransitionDuration
     };
     ConfigEntry<std::chrono::milliseconds, documentation::CursorMotionAnimationDuration>
         cursorMotionAnimationDuration { std::chrono::milliseconds { 80 } };
     ConfigEntry<InputModeConfig, documentation::ModeInsert> modeInsert { CursorConfig {
-        .cursorShape = vtbackend::CursorShape::Bar,
-        .cursorDisplay = vtbackend::CursorDisplay::Steady,
+        .cursorShape = editionDefaults(defaultsEdition).insertCursorShape,
+        .cursorDisplay = editionDefaults(defaultsEdition).insertCursorDisplay,
         .cursorBlinkInterval = std::chrono::milliseconds { 500 } } };
     ConfigEntry<InputModeConfig, documentation::ModeNormal> modeNormal {
         CursorConfig { .cursorShape = vtbackend::CursorShape::Block,
@@ -1121,11 +1243,14 @@ struct TerminalProfile
     ConfigEntry<vtbackend::LineCount, documentation::ModalCursorScrollOff> modalCursorScrollOff {
         vtbackend::LineCount { 8 }
     };
-    ConfigEntry<StatusLineConfig, documentation::StatusLine> statusLine {};
+    ConfigEntry<StatusLineConfig, documentation::StatusLine> statusLine { StatusLineConfig {
+        .indicator = IndicatorConfig::from(editionDefaults(defaultsEdition).statusLine) } };
     ConfigEntry<std::vector<ExtensionConfig>, documentation::Extensions> extensions {};
     ConfigEntry<BackgroundConfig, documentation::Background> background {};
-    ConfigEntry<ColorConfig, documentation::Colors> colors { SimpleColorConfig {} };
-    ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {};
+    ConfigEntry<ColorConfig, documentation::Colors> colors { defaultColors(defaultsEdition) };
+    ConfigEntry<HyperlinkDecorationConfig, documentation::HyperlinkDecoration> hyperlinkDecoration {
+        HyperlinkDecorationConfig { .mode = editionDefaults(defaultsEdition).linkDecoration }
+    };
     ConfigEntry<LinkDetectionConfig, documentation::LinkDetection> linkDetection {};
     ConfigEntry<FileOpenerConfig, documentation::FileOpener> fileOpener {};
     ConfigEntry<std::vector<HintPatternConfig>, documentation::HintPatterns> hintPatterns {};
@@ -1139,14 +1264,12 @@ struct TerminalProfile
     ConfigEntry<bool, documentation::OptionKeyAsAlt> optionKeyAsAlt { false };
 };
 
-/// The built-in key/mouse bindings, used when the config file does not override them.
-///
-/// A function-local static rather than a namespace-scope object: its construction allocates, so a
-/// throw here is catchable by the caller instead of terminating during static initialization.
-/// @return The default input mappings (constructed on first use).
-[[nodiscard]] inline InputMappings const& defaultInputMappings()
+/// The built-in key/mouse bindings of @p edition, built afresh.
+/// @param edition The edition whose bindings to build; only the FollowHyperlink modifier differs.
+/// @return The bindings.
+[[nodiscard]] inline InputMappings makeDefaultInputMappings(DefaultsEdition edition)
 {
-    static auto const value = InputMappings {
+    return InputMappings {
         .keyMappings {
             KeyInputMapping { .modes { vtbackend::MatchModes {} },
                               .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Alt } },
@@ -1209,9 +1332,9 @@ struct TerminalProfile
                               .modifiers { vtbackend::Modifier::Shift },
                               .input = vtbackend::Key::RightArrow,
                               .binding = { { actions::SwitchToTabRight {} } } },
-            // The browser chords for the same thing. They are ALSO in builtinFallbackKeyMappings(), which is
-            // what carries them to anyone whose contour.yml predates them; listing them here is what puts
-            // them in a freshly generated one, where they can be seen and rebound.
+            // The browser chords for the same thing. They are ALSO in builtinFallbackKeyMappings(), which
+            // is what carries them to anyone whose contour.yml predates them; listing them here is what
+            // puts them in a freshly generated one, where they can be seen and rebound.
             KeyInputMapping { .modes { vtbackend::MatchModes {} },
                               .modifiers { vtbackend::Modifier::Control },
                               .input = vtbackend::Key::PageUp,
@@ -1345,8 +1468,8 @@ struct TerminalProfile
                                .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                                .input = 'T',
                                .binding = { { actions::CreateNewTab {} } } },
-            // Reads the selection aloud. Does nothing where no speech engine is installed, and the context
-            // menu hides its row there, so the binding is harmless on a machine without a voice.
+            // Reads the selection aloud. Does nothing where no speech engine is installed, and the
+            // context menu hides its row there, so the binding is harmless on a machine without a voice.
             CharInputMapping { .modes { vtbackend::MatchModes {} },
                                .modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift },
                                .input = 'S',
@@ -1532,10 +1655,11 @@ struct TerminalProfile
                                    .patterns = "url", .hintAction = vtbackend::HintAction::Open } } } },
         },
         .mouseMappings {
-            MouseInputMapping { .modes { vtbackend::MatchModes {} },
-                                .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control } },
-                                .input = vtbackend::MouseButton::Left,
-                                .binding = { { actions::FollowHyperlink {} } } },
+            MouseInputMapping {
+                .modes { vtbackend::MatchModes {} },
+                .modifiers { vtbackend::Modifiers { editionDefaults(edition).followHyperlinkModifier } },
+                .input = vtbackend::MouseButton::Left,
+                .binding = { { actions::FollowHyperlink {} } } },
             MouseInputMapping { .modes { vtbackend::MatchModes {} },
                                 .modifiers { vtbackend::Modifiers { vtbackend::Modifier::None } },
                                 .input = vtbackend::MouseButton::Middle,
@@ -1574,11 +1698,40 @@ struct TerminalProfile
                                 .binding = { { actions::ScrollPageUp {} } } },
         }
     };
-    return value;
+}
+
+/// The built-in key/mouse bindings of @p edition, used when the config file does not override them.
+///
+/// A function-local static rather than a namespace-scope object: its construction allocates, so a
+/// throw here is catchable by the caller instead of terminating during static initialization.
+/// @param edition The edition whose bindings to return.
+/// @return The default input mappings (constructed on first use).
+[[nodiscard]] inline InputMappings const& defaultInputMappings(DefaultsEdition edition)
+{
+    static auto const values = std::array {
+        makeDefaultInputMappings(DefaultsEdition::Classic),
+        makeDefaultInputMappings(DefaultsEdition::Native2026),
+    };
+    static_assert(std::tuple_size_v<decltype(values)> == configEnumValues<DefaultsEdition>().size(),
+                  "every DefaultsEdition needs its bindings");
+    return values[static_cast<size_t>(edition)];
+}
+
+/// The built-in key/mouse bindings a configuration without an edition of its own gets: the newest.
+/// @return The default input mappings of DefaultsEdition::Native2026.
+[[nodiscard]] inline InputMappings const& defaultInputMappings()
+{
+    return defaultInputMappings(DefaultsEdition::Native2026);
 }
 
 struct Config
 {
+    /// The edition whose defaults the members below start from. First, so that every later default
+    /// can read it and `Config { .defaultsEdition = e }` builds a configuration of edition @c e; a
+    /// plain `Config {}` is the newest edition. It is not read by the typed loader:
+    /// loadConfigFromFile(path) scans `defaults_edition` before it constructs the Config.
+    /// Fixed at construction: changing it afterwards changes no default already taken.
+    DefaultsEdition defaultsEdition { DefaultsEdition::Native2026 };
     std::filesystem::path configFile {};
     ConfigEntry<std::string, documentation::PlatformPlugin> platformPlugin { "auto" };
     ConfigEntry<RendererConfig, documentation::Renderer> renderer {};
@@ -1628,7 +1781,7 @@ struct Config
     // sits had no answer when they disagreed.
     ConfigEntry<TabBarPosition, documentation::TabBarPosition> tabBarPosition { TabBarPosition::Top };
     ConfigEntry<TabBarVisibility, documentation::TabBarVisibility> tabBarVisibility {
-        TabBarVisibility::Always
+        editionDefaults(defaultsEdition).tabBarVisibility
     };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
     ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme {
@@ -1675,7 +1828,7 @@ struct Config
     ConfigEntry<CommandBlocksConfig, documentation::CommandBlocks> commandBlocks {};
 
     ConfigEntry<std::unordered_map<std::string, TerminalProfile>, documentation::Profiles> profiles {
-        { { "main", TerminalProfile {} } }
+        { { "main", TerminalProfile { .defaultsEdition = defaultsEdition } } }
     };
     ConfigEntry<std::unordered_map<std::string, Layout>, documentation::Layouts> layouts {};
     ConfigEntry<std::string, documentation::DefaultLayout> defaultLayoutName { "" };
@@ -1698,7 +1851,8 @@ struct Config
     /// above (e.g. @ref defaultProfileName), this simply records what the GUI had persisted.
     GuiManagedSettings guiManagedSettings {};
 
-    ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings() };
+    ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings(
+        defaultsEdition) };
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::GitDrawingsStyle, documentation::GitDrawings>
         gitDrawings {};
     ConfigEntry<vtrasterizer::BoxDrawingRenderer::ArcStyle, documentation::BoxArcStyle> boxArcStyle {
@@ -1936,14 +2090,22 @@ struct YAMLConfigReader
         logger()("Loading entry: {}, value {}", entry, where.template as<V>());
     }
 
+    /// Reads `profiles:`. The default profile is read first and every other one starts as a copy of it.
+    /// @param node The mapping that holds @p entry.
+    /// @param entry The key to read (`profiles`).
+    /// @param where Receives the profiles.
+    /// @param defaultProfileName The profile the others inherit from.
+    /// @param edition The defaults a default profile that is not seeded yet starts from.
     void loadFromEntry(YAML::Node const& node,
                        std::string const& entry,
                        std::unordered_map<std::string, TerminalProfile>& where,
-                       std::string const& defaultProfileName)
+                       std::string const& defaultProfileName,
+                       DefaultsEdition edition)
     {
         if (auto const child = node[entry]; child && child.IsMap())
         {
             logger()("Loading default profile: {}", defaultProfileName);
+            where.try_emplace(defaultProfileName, TerminalProfile { .defaultsEdition = edition });
             // Guarded one profile at a time, so a profile that is not a map costs no other profile.
             loadGuarded(child, defaultProfileName, where[defaultProfileName]);
             for (auto entry: child)
@@ -2820,6 +2982,24 @@ struct YAMLConfigWriter: Writer
         return std::regex_replace(std::string { doc }, std::regex(".+\n"), offset + "$&");
     }
 
+    /// Writes a color configuration. A dark/light pair is a block map, so its keys are indented one level
+    /// deeper than the `colors:` key itself: process() indents the documentation template, never the
+    /// lines a value brings with it.
+    /// @param doc The entry's documentation, with one placeholder for the value.
+    /// @param v The color configuration.
+    /// @return @p doc filled in.
+    [[nodiscard]] std::string format(std::string_view doc, ColorConfig const& v)
+    {
+        auto const* dual = std::get_if<DualColorConfig>(&v);
+        if (dual == nullptr)
+            return Writer::format(doc, v);
+        auto const indent = std::string((static_cast<size_t>(Offset::Levels) + 1) * OneOffset, ' ');
+        return Writer::format(
+            doc,
+            std::format(
+                "\n{0}light: {1}\n{0}dark: {2}", indent, dual->colorSchemeLight, dual->colorSchemeDark));
+    }
+
     template <typename... T>
     std::string process(std::string_view doc, T const&... val)
     {
@@ -2952,7 +3132,26 @@ std::filesystem::path configHome(std::string const& programName);
 
 std::optional<std::string> readConfigFile(std::string const& filename);
 
+/// The key a configuration states its DefaultsEdition under, in contour.yml or settings.yml.
+inline constexpr std::string_view DefaultsEditionKey = "defaults_edition";
+
+/// The edition of defaults the configuration at @p configFile is written against.
+///
+/// Read before the configuration is, because the edition decides the defaults it is read onto: the
+/// `defaults_edition` of @p configFile, then that of the `settings.yml` beside it, which wins. Neither
+/// stating one is a file from before the key existed, and so DefaultsEdition::Classic.
+/// @param configFile The contour.yml to scan.
+/// @return The edition that applies.
+[[nodiscard]] DefaultsEdition scanDefaultsEdition(std::filesystem::path const& configFile);
+
+/// Loads @p fileName into @p config, whose defaults (and so its edition) are already fixed.
+/// @param config The configuration to load into.
+/// @param fileName The contour.yml to load; created with the default configuration if absent.
 void loadConfigFromFile(Config& config, std::filesystem::path const& fileName);
+
+/// Loads @p fileName onto the defaults of the edition it states (@see scanDefaultsEdition).
+/// @param fileName The contour.yml to load; created with the default configuration if absent.
+/// @return The loaded configuration.
 Config loadConfigFromFile(std::filesystem::path const& fileName);
 Config loadConfig();
 

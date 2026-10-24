@@ -4,6 +4,8 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/Notifier.hpp>
@@ -649,6 +651,14 @@ class TestApp
     /// (profile, dump-state-at-exit, ...) that TerminalSession reads during construction.
     void parseTerminalVerb()
     {
+        // The GUI suite drives mechanisms (link following, the bell, page sizing, ...) from the app's
+        // configuration before any file is loaded, and it was written against the defaults every release
+        // before the 2026 redesign shipped: Ctrl follows links, the bell sounds, a page is 80x25. A plain
+        // Config is DefaultsEdition::Native2026, so the fixture states the edition its expectations are
+        // in. The Native2026 values themselves are pinned by Config.firstLaunchDefaults.
+        _app.config() =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+
         char const* argv[] = { "contour", "terminal" };
         REQUIRE(_app.parseParametersForTesting(2, argv));
     }

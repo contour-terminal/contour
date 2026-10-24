@@ -1086,7 +1086,9 @@ color_schemes:
         // commented example whatever the scheme said, so a configured fold column did not survive a
         // write. Emitting the full block instead would be the opposite error -- it would PIN colours
         // an unset pair deliberately derives.
-        auto config = contour::config::Config {};
+        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
+        auto config =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
         auto& scheme = config.colorschemes.value()["default"];
         scheme.foldMarker = vtbackend::RGBColorPair { .foreground = vtbackend::RGBColor(0x90, 0x90, 0x90),
                                                       .background = vtbackend::RGBColor(0x1A, 0x1A, 0x1A) };
@@ -1117,7 +1119,9 @@ TEST_CASE("Config: a scheme's context tints are written back", "[config]")
 
     SECTION("in the configuration file")
     {
-        auto config = contour::config::Config {};
+        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
+        auto config =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
         config.colorschemes.value()["default"].contextTints[elevate] = tint;
 
         auto const tints =
@@ -3602,7 +3606,7 @@ profiles:
 )"sv);
     REQUIRE(config.profile("main") != nullptr);
     CHECK(config.tabBarPosition.value() == TabBarPosition::Top);
-    CHECK(config.tabBarVisibility.value() == TabBarVisibility::Always);
+    CHECK(config.tabBarVisibility.value() == TabBarVisibility::Multiple); // the Native2026 default
 }
 
 TEST_CASE("Config: invalid tab_bar_* values fall back to the defaults", "[config]")
@@ -3611,7 +3615,7 @@ TEST_CASE("Config: invalid tab_bar_* values fall back to the defaults", "[config
     using contour::config::TabBarVisibility;
 
     QTemporaryDir dir;
-    // Unrecognized tokens must leave the fields at their ConfigEntry defaults (Top / Always), not throw
+    // Unrecognized tokens must leave the fields at their ConfigEntry defaults (Top / Multiple), not throw
     // or zero them out — the loadFromEntry overloads only write on a successful parse.
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
@@ -3622,7 +3626,7 @@ profiles:
         shell: /bin/sh
 )"sv);
     CHECK(config.tabBarPosition.value() == TabBarPosition::Top);
-    CHECK(config.tabBarVisibility.value() == TabBarVisibility::Always);
+    CHECK(config.tabBarVisibility.value() == TabBarVisibility::Multiple); // the Native2026 default
 }
 
 TEST_CASE("Config: window_control_style parses each value (ignore-case)", "[config]")
@@ -3878,6 +3882,296 @@ TEST_CASE("Config: loadConfigFromFile creates the file when it does not exist", 
     auto const config = contour::config::loadConfigFromFile(path);
     CHECK(std::filesystem::exists(path));
     CHECK(config.profile(config.defaultProfileName.value()) != nullptr);
+}
+
+namespace
+{
+
+/// What one DefaultsEdition must give a configuration that does not override anything, written out
+/// literally rather than read back from the edition table: the table is what is under test.
+struct ExpectedEditionDefaults
+{
+    contour::config::DefaultsEdition edition;
+    std::string_view fontFamily;
+    double fontSize;
+    int lines;
+    int columns;
+    unsigned horizontalMargin;
+    unsigned verticalMargin;
+    std::string_view statusLineLeft;
+    std::string_view statusLineMiddle;
+    std::string_view statusLineRight;
+    vtbackend::LinkDecorationMode linkDecoration;
+    double dimUnfocused;
+    std::string_view bellSound;
+    int scrollback;
+    vtbackend::CursorShape insertCursorShape;
+    std::chrono::milliseconds screenTransitionDuration;
+    std::string_view darkColorScheme; ///< Equal to lightColorScheme for a single `colors: <name>`.
+    std::string_view lightColorScheme;
+    contour::config::TabBarVisibility tabBarVisibility;
+    vtbackend::Modifier followHyperlinkModifier;
+};
+
+/// Every value the releases before the 2026 redesign shipped.
+constexpr auto ClassicExpectation = ExpectedEditionDefaults {
+    .edition = contour::config::DefaultsEdition::Classic,
+#ifdef __APPLE__
+    .fontFamily = "Monaco",
+#else
+    .fontFamily = "monospace",
+#endif
+    .fontSize = 12.0,
+    .lines = 25,
+    .columns = 80,
+    .horizontalMargin = 0,
+    .verticalMargin = 0,
+    .statusLineLeft = " {InputMode:Bold,Color=#FFFF00}"
+                      "{TraceMode:Bold,Color=#FFFF00,Left= │ }"
+                      "{Tabs:ActiveColor=#FFFF00,Left= │ }"
+                      "{ProtectedMode:Bold,Left= │ }"
+                      "{Context:Left= │ }",
+    .statusLineMiddle = "« {Title} »",
+    .statusLineRight = "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}",
+    .linkDecoration = vtbackend::LinkDecorationMode::Always,
+    .dimUnfocused = 0.0,
+    .bellSound = "default",
+    .scrollback = 1000,
+    .insertCursorShape = vtbackend::CursorShape::Bar,
+    .screenTransitionDuration = std::chrono::milliseconds { 250 },
+    .darkColorScheme = "default",
+    .lightColorScheme = "default",
+    .tabBarVisibility = contour::config::TabBarVisibility::Always,
+    .followHyperlinkModifier = vtbackend::Modifier::Control,
+};
+
+/// Every first-launch value of the 2026 redesign.
+constexpr auto Native2026Expectation = ExpectedEditionDefaults {
+    .edition = contour::config::DefaultsEdition::Native2026,
+#if defined(_WIN32)
+    .fontFamily = "Cascadia Mono",
+#else
+    .fontFamily = "JetBrains Mono",
+#endif
+#ifdef __APPLE__
+    .fontSize = 13.0,
+#else
+    .fontSize = 12.0,
+#endif
+    .lines = 30,
+    .columns = 100,
+    .horizontalMargin = 8,
+    .verticalMargin = 6,
+    .statusLineLeft = " {InputMode:Bold}{Context:Left=  }",
+    .statusLineMiddle = "{Title}",
+    .statusLineRight = "{HistoryLineCount:Faint}  {Clock:Faint} ",
+    .linkDecoration = vtbackend::LinkDecorationMode::Modifier,
+    .dimUnfocused = 0.15,
+    .bellSound = "off",
+    .scrollback = 10000,
+    .insertCursorShape = vtbackend::CursorShape::Block,
+    .screenTransitionDuration = std::chrono::milliseconds { 150 },
+    .darkColorScheme = "contour-dark",
+    .lightColorScheme = "contour-light",
+    .tabBarVisibility = contour::config::TabBarVisibility::Multiple,
+#ifdef __APPLE__
+    .followHyperlinkModifier = vtbackend::Modifier::Super, // Command: Qt's Control/Meta swap is off
+#else
+    .followHyperlinkModifier = vtbackend::Modifier::Control,
+#endif
+};
+
+/// The palette a built-in scheme name resolves to.
+[[nodiscard]] vtbackend::ColorPalette builtinPaletteNamed(std::string_view name)
+{
+    auto palette = vtbackend::ColorPalette {};
+    (void) vtbackend::defaultColorPalettes(name, palette);
+    return palette;
+}
+
+/// Checks @p profile against every profile-level default of @p expected.
+void checkProfileDefaults(contour::config::TerminalProfile const& profile,
+                          ExpectedEditionDefaults const& expected)
+{
+    auto const& fonts = profile.fonts.value();
+    CHECK(fonts.regular.familyName == expected.fontFamily);
+    CHECK(fonts.bold.familyName == expected.fontFamily);
+    CHECK(fonts.italic.familyName == expected.fontFamily);
+    CHECK(fonts.boldItalic.familyName == expected.fontFamily);
+    CHECK(fonts.size.pt == Catch::Approx(expected.fontSize));
+    CHECK(profile.terminalSize.value().lines == vtbackend::LineCount(expected.lines));
+    CHECK(profile.terminalSize.value().columns == vtbackend::ColumnCount(expected.columns));
+    CHECK(profile.margins.value().horizontal
+          == contour::config::HorizontalMargin { expected.horizontalMargin });
+    CHECK(profile.margins.value().vertical == contour::config::VerticalMargin { expected.verticalMargin });
+
+    auto const& statusLine = profile.statusLine.value();
+    CHECK(statusLine.initialType == vtbackend::StatusDisplayType::Indicator);
+    CHECK(statusLine.indicator.left == expected.statusLineLeft);
+    CHECK(statusLine.indicator.middle == expected.statusLineMiddle);
+    CHECK(statusLine.indicator.right == expected.statusLineRight);
+
+    CHECK(profile.hyperlinkDecoration.value().mode == expected.linkDecoration);
+    CHECK(profile.dimUnfocused.value() == Catch::Approx(expected.dimUnfocused));
+    CHECK(profile.bell.value().sound == expected.bellSound);
+    CHECK(profile.bell.value().alert);
+    CHECK(profile.history.value().maxHistoryLineCount
+          == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(expected.scrollback) });
+    CHECK(profile.modeInsert.value().cursor.cursorShape == expected.insertCursorShape);
+    CHECK(profile.modeInsert.value().cursor.cursorDisplay == vtbackend::CursorDisplay::Steady);
+    CHECK(profile.screenTransitionDuration.value() == expected.screenTransitionDuration);
+    CHECK(profile.tabLabel.value() == "{WindowTitle}");
+
+    auto const& colors = profile.colors.value();
+    if (expected.darkColorScheme == expected.lightColorScheme)
+    {
+        REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(colors));
+        CHECK(std::get<contour::config::SimpleColorConfig>(colors).colorScheme == expected.darkColorScheme);
+    }
+    else
+    {
+        REQUIRE(std::holds_alternative<contour::config::DualColorConfig>(colors));
+        auto const& dual = std::get<contour::config::DualColorConfig>(colors);
+        CHECK(dual.colorSchemeDark == expected.darkColorScheme);
+        CHECK(dual.colorSchemeLight == expected.lightColorScheme);
+        // The palettes are resolved, not left at the default palette under a new name.
+        auto const dark = builtinPaletteNamed(expected.darkColorScheme);
+        auto const light = builtinPaletteNamed(expected.lightColorScheme);
+        CHECK(dark.defaultBackground != vtbackend::ColorPalette {}.defaultBackground);
+        CHECK(dual.darkMode.defaultBackground == dark.defaultBackground);
+        CHECK(dual.darkMode.defaultForeground == dark.defaultForeground);
+        CHECK(dual.lightMode.defaultBackground == light.defaultBackground);
+        CHECK(dual.lightMode.defaultForeground == light.defaultForeground);
+    }
+}
+
+/// Checks @p config, its default profile included, against every default of @p expected.
+void checkEditionDefaults(contour::config::Config const& config, ExpectedEditionDefaults const& expected)
+{
+    CHECK(config.defaultsEdition == expected.edition);
+    CHECK(config.tabBarVisibility.value() == expected.tabBarVisibility);
+
+    auto const& mice = config.inputMappings.value().mouseMappings;
+    auto const follow = std::ranges::find_if(mice, [](auto const& mapping) {
+        return mapping.input == vtbackend::MouseButton::Left && !mapping.binding.empty()
+               && std::holds_alternative<contour::actions::FollowHyperlink>(mapping.binding.at(0));
+    });
+    REQUIRE(follow != mice.end());
+    CHECK(follow->modifiers == vtbackend::Modifiers { expected.followHyperlinkModifier });
+
+    checkProfileDefaults(config.profile(), expected);
+}
+
+/// A contour.yml from before `defaults_edition` existed: it spells out none of the defaults that changed.
+constexpr auto PartialConfigWithoutEdition = "profiles:\n"
+                                             "    main:\n"
+                                             "        shell: /bin/sh\n"
+                                             "    work:\n"
+                                             "        shell: /bin/sh\n"sv;
+
+} // namespace
+
+TEST_CASE("Config.firstLaunchDefaults", "[config]")
+{
+    SECTION("a plain Config is the newest edition")
+    {
+        checkEditionDefaults(contour::config::Config {}, Native2026Expectation);
+    }
+
+    SECTION("a partial contour.yml without defaults_edition keeps every pre-redesign value")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(dir, PartialConfigWithoutEdition);
+        auto const config = contour::config::loadConfigFromFile(path);
+        checkEditionDefaults(config, ClassicExpectation);
+        // A profile that inherits from the default one inherits its edition too.
+        auto const* work = config.findProfile("work");
+        REQUIRE(work != nullptr);
+        checkProfileDefaults(*work, ClassicExpectation);
+    }
+
+    SECTION("a default profile that the seed does not hold starts from the file's edition too")
+    {
+        QTemporaryDir dir;
+        auto const config = contour::config::loadConfigFromFile(writeConfig(dir,
+                                                                            "default_profile: work\n"
+                                                                            "profiles:\n"
+                                                                            "    work:\n"
+                                                                            "        shell: /bin/sh\n"sv));
+        REQUIRE(config.defaultProfileName.value() == "work");
+        checkEditionDefaults(config, ClassicExpectation);
+    }
+
+    SECTION("a settings.yml stating native2026 switches a partial contour.yml to the new values")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(dir, PartialConfigWithoutEdition);
+        writeSideFile(dir, "settings.yml", "defaults_edition: native2026\n");
+        auto const config = contour::config::loadConfigFromFile(path);
+        checkEditionDefaults(config, Native2026Expectation);
+        auto const* work = config.findProfile("work");
+        REQUIRE(work != nullptr);
+        checkProfileDefaults(*work, Native2026Expectation);
+    }
+
+    SECTION("settings.yml wins over contour.yml")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(
+            dir, "defaults_edition: native2026\nprofiles:\n    main:\n        shell: /bin/sh\n"sv);
+        writeSideFile(dir, "settings.yml", "defaults_edition: classic\n");
+        checkEditionDefaults(contour::config::loadConfigFromFile(path), ClassicExpectation);
+    }
+
+    SECTION("a value naming no edition is reported and read as none")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(
+            dir, "defaults_edition: future3000\nprofiles:\n    main:\n        shell: /bin/sh\n"sv);
+        auto capture = core::log::ScopedCapture { "error" };
+        checkEditionDefaults(contour::config::loadConfigFromFile(path), ClassicExpectation);
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.contains("future3000"));
+    }
+
+    SECTION("a generated config is Native2026")
+    {
+        QTemporaryDir const dir;
+        auto const path = std::filesystem::path(dir.path().toStdU16String()) / "fresh" / "contour.yml";
+        REQUIRE_FALSE(std::filesystem::exists(path));
+        auto const config = contour::config::loadConfigFromFile(path);
+        checkEditionDefaults(config, Native2026Expectation);
+
+        // What `contour generate config` emits.
+        auto const generated = contour::config::defaultConfigString();
+        CHECK(generated.contains("defaults_edition: native2026\n"));
+        CHECK(generated.contains("dark: contour-dark\n"));
+        auto const document = YAML::Load(generated);
+        CHECK(document["defaults_edition"].as<std::string>() == "native2026");
+        CHECK(document["profiles"]["main"]["colors"]["dark"].as<std::string>() == "contour-dark");
+        CHECK(document["profiles"]["main"]["colors"]["light"].as<std::string>() == "contour-light");
+    }
+
+    SECTION("a Classic configuration writes the edition it has")
+    {
+        auto const classic =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+        checkEditionDefaults(classic, ClassicExpectation);
+        auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(classic);
+        CHECK(written.contains("defaults_edition: classic\n"));
+        CHECK(written.contains("colors: default\n"));
+    }
+
+    SECTION("a file without the key is not reported as missing it")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(dir, PartialConfigWithoutEdition);
+        auto capture = core::log::ScopedCapture { "config" };
+        (void) contour::config::loadConfigFromFile(path);
+        INFO("captured config log:\n" << capture.text());
+        CHECK(capture.contains("is missing in user config file")); // the diff ran
+        CHECK_FALSE(capture.contains("Entry defaults_edition is missing"));
+    }
 }
 
 TEST_CASE("Config: defaultConfigFilePath and the documentation generators produce content", "[config]")
@@ -6049,7 +6343,9 @@ color_schemes:
 
     SECTION("the writer emits what was set, and only that")
     {
-        auto config = contour::config::Config {};
+        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
+        auto config =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
         auto& scheme = config.colorschemes.value()["default"];
         scheme.blockStatus[static_cast<size_t>(vtbackend::CommandBlockOutcome::Failure)] =
             vtbackend::RGBColor(0xE0, 0x20, 0x20);
@@ -6121,7 +6417,9 @@ TEST_CASE("Config: each gutter color a scheme sets is written back on its own", 
     for (auto const& [name, slot]: Slots)
     {
         INFO("set: " << name);
-        auto config = contour::config::Config {};
+        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
+        auto config =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
         slot(config.colorschemes.value()["default"]) = color;
 
         auto const reloaded =
@@ -7303,16 +7601,17 @@ constexpr auto MalformedEntryCases = std::array {
                                         && scheme->cursor.color == vtbackend::ColorPalette {}.cursor.color;
                              } },
     // A map whose malformed key comes after a good one: the entry is put back whole, not left half read.
-    MalformedEntryCase { .topLevel = {},
-                         .inProfile = "        history:\n"
-                                      "            limit: 4242\n"
-                                      "            auto_scroll_on_update: [yes]\n",
-                         .key = "profiles.main.history",
-                         .keptDefault =
-                             [](contour::config::Config const& config) {
-                                 return mainProfile(config).history.value().maxHistoryLineCount
-                                        == contour::config::HistoryConfig {}.maxHistoryLineCount;
-                             } },
+    MalformedEntryCase {
+        .topLevel = {},
+        .inProfile = "        history:\n"
+                     "            limit: 4242\n"
+                     "            auto_scroll_on_update: [yes]\n",
+        .key = "profiles.main.history",
+        .keptDefault =
+            [](contour::config::Config const& config) {
+                return mainProfile(config).history.value().maxHistoryLineCount
+                       == contour::config::TerminalProfile {}.history.value().maxHistoryLineCount;
+            } },
     // An enum key given a list.
     MalformedEntryCase { .topLevel = "tab_bar_position: [bottom]\n",
                          .inProfile = {},
@@ -7349,14 +7648,17 @@ constexpr auto MalformedEntryCases = std::array {
                                         && policy.outcome == contour::config::NotifyOutcome::Failure;
                              } },
     // Nested map-valued keys that are no config entries of their own: each costs itself, not its profile.
-    MalformedEntryCase { .topLevel = {},
-                         .inProfile = "        cursor: block\n",
-                         .key = "profiles.main.cursor",
-                         .keptDefault =
-                             [](contour::config::Config const& config) {
-                                 return mainProfile(config).modeInsert.value().cursor.cursorShape
-                                        == vtbackend::CursorShape::Bar;
-                             } },
+    MalformedEntryCase {
+        .topLevel = {},
+        // Not `block`: that is the insert cursor's default now, and a value equal to the default could
+        // not tell a skipped entry from a misread one.
+        .inProfile = "        cursor: underscore\n",
+        .key = "profiles.main.cursor",
+        .keptDefault =
+            [](contour::config::Config const& config) {
+                return mainProfile(config).modeInsert.value().cursor.cursorShape
+                       == contour::config::TerminalProfile {}.modeInsert.value().cursor.cursorShape;
+            } },
     MalformedEntryCase { .topLevel = {},
                          .inProfile = "        normal_mode: block\n",
                          .key = "profiles.main.normal_mode",
@@ -7725,7 +8027,9 @@ TEST_CASE("Config: the sticky header's colors load and are written back", "[conf
 
     SECTION("the writer emits what was set, and only that")
     {
-        auto config = contour::config::Config {};
+        // Classic: its profile names the "default" scheme this edits (Native2026 names contour-dark/-light).
+        auto config =
+            contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
         config.colorschemes.value()["default"].stickyHeaderSeparator = vtbackend::RGBColor(0x50, 0x60, 0x70);
 
         auto const written = contour::config::createString<contour::config::YAMLConfigWriter>(config);
@@ -8136,14 +8440,18 @@ TEST_CASE("Config: hyperlink_decoration.mode reads, writes and defaults", "[conf
     REQUIRE(profile != nullptr);
     CHECK(profile->hyperlinkDecoration.value().mode == vtbackend::LinkDecorationMode::Modifier);
     CHECK(contour::config::TerminalProfile {}.hyperlinkDecoration.value().mode
+          == vtbackend::LinkDecorationMode::Modifier);
+    CHECK(contour::config::TerminalProfile { .defaultsEdition = contour::config::DefaultsEdition::Classic }
+              .hyperlinkDecoration.value()
+              .mode
           == vtbackend::LinkDecorationMode::Always);
 
     auto const generated = contour::config::defaultConfigString();
-    CHECK(generated.contains("mode: always"));
+    CHECK(generated.contains("mode: modifier"));
     CHECK(generated.contains("normal: dotted-underline"));
 }
 
-TEST_CASE("Config: an unknown hyperlink_decoration.mode is reported and keeps always", "[config][links]")
+TEST_CASE("Config: an unknown hyperlink_decoration.mode is reported and keeps the default", "[config][links]")
 {
     auto const capture = core::log::ScopedCapture { "error" };
     QTemporaryDir dir;
@@ -8154,7 +8462,7 @@ TEST_CASE("Config: an unknown hyperlink_decoration.mode is reported and keeps al
     CHECK(capture.contains("hyperlink_decoration.mode"));
     auto const* profile = config.profile("main");
     REQUIRE(profile != nullptr);
-    CHECK(profile->hyperlinkDecoration.value().mode == vtbackend::LinkDecorationMode::Always);
+    CHECK(profile->hyperlinkDecoration.value().mode == vtbackend::LinkDecorationMode::Modifier); // Native2026
 }
 
 TEST_CASE("Config: the generated hyperlink_decoration comment lists the names the parser accepts",
@@ -8266,7 +8574,16 @@ TEST_CASE("Config: sessionSettings hands the terminal the profile's compiled lin
 TEST_CASE("Config: the follow gesture's modifiers come from the mouse bindings", "[config][links]")
 {
     auto const defaults = contour::config::Config {};
+#ifdef __APPLE__
     CHECK(contour::config::followHyperlinkModifiers(defaults)
+          == vtbackend::Modifiers { vtbackend::Modifier::Super }); // Command, under the Native2026 defaults
+#else
+    CHECK(contour::config::followHyperlinkModifiers(defaults)
+          == vtbackend::Modifiers { vtbackend::Modifier::Control });
+#endif
+    auto const classic =
+        contour::config::Config { .defaultsEdition = contour::config::DefaultsEdition::Classic };
+    CHECK(contour::config::followHyperlinkModifiers(classic)
           == vtbackend::Modifiers { vtbackend::Modifier::Control });
 
     auto const alt = contour::test::loadConfigFromYaml(
