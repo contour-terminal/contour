@@ -1244,7 +1244,8 @@ struct TerminalProfile
         vtbackend::LineCount { 8 }
     };
     ConfigEntry<StatusLineConfig, documentation::StatusLine> statusLine { StatusLineConfig {
-        .indicator = IndicatorConfig::from(editionDefaults(defaultsEdition).statusLine) } };
+        .indicator = IndicatorConfig::from(editionDefaults(defaultsEdition).statusLine),
+        .extension = std::nullopt } };
     ConfigEntry<std::vector<ExtensionConfig>, documentation::Extensions> extensions {};
     ConfigEntry<BackgroundConfig, documentation::Background> background {};
     ConfigEntry<ColorConfig, documentation::Colors> colors { defaultColors(defaultsEdition) };
