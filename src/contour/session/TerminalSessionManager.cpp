@@ -739,6 +739,8 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
     // Once per reload, not per session: with `theme: terminal` the chrome's light/dark follows the
     // terminal background, so a hand-edited colour change must re-evaluate it as well as the terminals.
     _app.applyGuiTheme(_app.config().theme.value(), _app.defaultProfileColors());
+    // And the chrome tokens: a reload may change the chrome font and the scheme the Terminal row paints with.
+    _app.refreshChromeStyle();
 
     // The settings page reads through the app config just reloaded above, but each OS window owns its
     // own SettingsController with model caches rebuilt only by refresh(). The controller that triggered

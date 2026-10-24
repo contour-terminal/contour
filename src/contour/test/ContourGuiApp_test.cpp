@@ -8,6 +8,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/TempDir.hpp>
 
@@ -397,3 +398,41 @@ TEST_CASE("ContourGuiApp places what it starts through the placement it was give
     CHECK(placement->pids().size() == 1);
 }
 #endif
+
+TEST_CASE("ContourGuiApp reads accessibility through its injected source", "[contour][app][appearance]")
+{
+    using contour::config::AccessibilityPreferences;
+    using contour::config::ContrastPreference;
+    using contour::config::MotionPreference;
+    using contour::config::TransparencyPreference;
+
+    // Declared before the app, so the switches outlive the sources reading them.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    accessibility.preferences.motion = MotionPreference::Reduced;
+
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance));
+    CHECK(app.app().accessibilityPreferences().motion == MotionPreference::Reduced);
+
+    // Before the GUI exists there is no chromeStyle to rebuild; the change must still be safe.
+    accessibility.set(AccessibilityPreferences { .motion = MotionPreference::Full,
+                                                 .transparency = TransparencyPreference::Allowed,
+                                                 .contrast = ContrastPreference::Standard });
+    CHECK(app.app().accessibilityPreferences().motion == MotionPreference::Full);
+    CHECK(static_cast<bool>(accessibility.notify));
+}
+
+TEST_CASE("A default TestApp never reads the host's accessibility settings", "[contour][app][appearance]")
+{
+    auto app = TestApp {};
+    CHECK(app.app().accessibilityPreferences() == contour::config::AccessibilityPreferences {});
+    CHECK(app.app().platformAppearance() == contour::platform::PlatformAppearance {});
+}

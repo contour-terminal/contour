@@ -407,6 +407,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::optional<vtbackend::LinkDetectionServices> linkServices,
                              std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress,
                              std::unique_ptr<window::WindowPositionStore> windowPositionStore,
+                             platform::AppearanceServices const& appearanceServices,
                              core::platform::SteadyTimePoint processStart):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
@@ -443,6 +444,12 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     *_commandHistoryStore,
                     QDir::homePath().toStdString(),
                     *_taskbarProgressSink),
+    _accessibilitySource(
+        appearanceServices.accessibility([this](config::AccessibilityPreferences preferences) {
+            onAccessibilityPreferencesChanged(preferences);
+        })),
+    _platformAppearance(appearanceServices.appearance(
+        [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
     _gpuInventory { display::makePlatformGpuInventory() }
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
@@ -1740,6 +1747,46 @@ void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
         _windowControlStyleProvider->setStyle(resolved);
 }
 
+config::AccessibilityPreferences ContourGuiApp::accessibilityPreferences() const
+{
+    return _accessibilitySource->current();
+}
+
+platform::PlatformAppearance ContourGuiApp::platformAppearance() const
+{
+    return _platformAppearance->current();
+}
+
+window::ChromeInputs ContourGuiApp::chromeInputs() const
+{
+    auto const* palette = config::preferredColorPalette(defaultProfileColors(), _colorPreference);
+    return window::ChromeInputs {
+        .row = _chromeStyle,
+        .font = window::resolveChromeFont(_config, _chromeStyle, profileName()),
+        .accessibility = accessibilityPreferences(),
+        .appearance = platformAppearance(),
+        .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
+    };
+}
+
+void ContourGuiApp::refreshChromeStyle()
+{
+    // Guarded as applyWindowControlStyle() is: the host is built partway through terminalGuiAction(),
+    // and a reload or an OS change may arrive before it (or without it, in a headless test).
+    if (_chromeStyleHost)
+        _chromeStyleHost->update(chromeInputs());
+}
+
+void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPreferences /*preferences*/)
+{
+    refreshChromeStyle();
+}
+
+void ContourGuiApp::onPlatformAppearanceChanged(platform::PlatformAppearance /*appearance*/)
+{
+    refreshChromeStyle();
+}
+
 int ContourGuiApp::checkConfig()
 {
     _config = contour::config::loadConfigNamed(parameters().get<string>("contour.terminal.config"));
@@ -2120,6 +2167,8 @@ int ContourGuiApp::terminalGuiAction()
             _colorPreference = newValue;
             display::displayLog()("Color preference changed to {} mode\n", _colorPreference);
             sessionsManager().updateColorPreference(_colorPreference);
+            // The Terminal row paints with the scheme the new preference selects.
+            refreshChromeStyle();
         });
 #endif
 
@@ -2215,12 +2264,6 @@ int ContourGuiApp::terminalGuiAction()
     qRegisterMetaType<window::SettingsController*>("SettingsController*");
     // clang-format on
 
-    // The chrome's design tokens. An injected instance rather than a QML-created singleton, because
-    // it is configured entirely at construction (see AGENT.md's complete-constructor rule) and its
-    // configuration is this app's, not the engine's -- there is nothing for QML to build it from.
-    _uiStyleProvider = make_unique<window::UiStyleProvider>(
-        _chromeStyle, window::resolveChromeFont(_config, _chromeStyle, profileName()));
-
     // Constructed with the resolved style rather than default-constructed and then applied: a
     // constructed object is a usable object, and the first frame must already draw the right
     // controls. applyWindowControlStyle() below exists for the reloads that follow.
@@ -2260,7 +2303,11 @@ int ContourGuiApp::terminalGuiAction()
         // the style module import this application's own C++ URI, which a style that Qt resolves by
         // name must not do. It also gives each test engine its own style (see test/QmlChromeStyle.h).
         // See UiStyleProvider.h for the price this trade pays.
-        context->setContextProperty("chromeStyle", _uiStyleProvider.get());
+        //
+        // An injected instance rather than a QML-created singleton, because it is configured entirely
+        // at construction (see AGENT.md's complete-constructor rule) and its configuration is this
+        // app's, not the engine's. The host republishes a new provider when an input changes.
+        _chromeStyleHost = make_unique<window::ChromeStyleHost>(*context, chromeInputs());
         // A second provider beside chromeStyle rather than more properties on it: this one changes
         // live and chromeStyle's are CONSTANT by contract. See WindowControlStyleProvider.hpp.
         context->setContextProperty("windowControls", _windowControlStyleProvider.get());

@@ -94,7 +94,9 @@ struct ChromeColorSource
 /// The terminal colour scheme reduced to the slots the chrome reads, indexed by @c SchemeSlot.
 struct ChromeSchemeColors
 {
-    std::array<vtbackend::RGBColor, SchemeSlotCount> slots {}; ///< One colour per @c SchemeSlot.
+    /// One colour per @c SchemeSlot. Not named `slots`: Qt defines that as a keyword macro, and this
+    /// header reaches Qt translation units through the chrome provider.
+    std::array<vtbackend::RGBColor, SchemeSlotCount> bySlot {};
 
     [[nodiscard]] bool operator==(ChromeSchemeColors const&) const = default;
 };
@@ -450,15 +452,15 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
     }();
 
     auto colors = ChromeSchemeColors {};
-    colors.slots[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
-    colors.slots[static_cast<size_t>(SchemeSlot::Foreground)] = palette.defaultForeground;
-    colors.slots[static_cast<size_t>(SchemeSlot::Bar)] = palette.normalColor(0);
-    colors.slots[static_cast<size_t>(SchemeSlot::Secondary)] = palette.brightColor(0);
-    colors.slots[static_cast<size_t>(SchemeSlot::Selection)] = selection;
-    colors.slots[static_cast<size_t>(SchemeSlot::Accent)] = palette.normalColor(4);
-    colors.slots[static_cast<size_t>(SchemeSlot::Danger)] = palette.normalColor(1);
-    colors.slots[static_cast<size_t>(SchemeSlot::Success)] = palette.normalColor(2);
-    colors.slots[static_cast<size_t>(SchemeSlot::Warning)] = palette.normalColor(3);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Foreground)] = palette.defaultForeground;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = palette.normalColor(0);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Secondary)] = palette.brightColor(0);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Selection)] = selection;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Accent)] = palette.normalColor(4);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Danger)] = palette.normalColor(1);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Success)] = palette.normalColor(2);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Warning)] = palette.normalColor(3);
     return colors;
 }
 

@@ -163,16 +163,47 @@ namespace
     }
 } // namespace
 
-UiStyleProvider::UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent):
+ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
+{
+    return ChromeInputs { .row = row,
+                          .font = font,
+                          .accessibility = {},
+                          .appearance = {},
+                          .scheme = config::chromeSchemeColorsOf(vtbackend::ColorPalette {}) };
+}
+
+UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     QObject { parent },
-    _row { row },
-    _tokens { config::uiStyleTokens(row) },
-    _fonts { chromeFontsFor(_tokens, chromeFont) },
-    _metrics { chromeMetricsFor(_tokens, chromeFont) },
-    _glyphs { chromeGlyphsFor(_tokens) }
+    _inputs { std::move(inputs) },
+    _row { _inputs.row },
+    _tokens { config::uiStyleTokens(_row) },
+    _fonts { chromeFontsFor(_tokens, _inputs.font) },
+    _metrics { chromeMetricsFor(_tokens, _inputs.font) },
+    _glyphs { chromeGlyphsFor(_tokens) },
+    _groups { config::resolveChromeTokens(_row, _inputs.accessibility) },
+    // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
+    // legacy one land on the same grid.
+    _units { .horizontal = _metrics.widthQuantum,
+             .vertical = _tokens.unit == config::LengthUnit::Cell ? _metrics.cellHeight : 1.0 },
+    _size { _groups.size, _units, this },
+    _space { _groups.space, _units, this },
+    _radii { _groups.radii, _units, this },
+    _type { _groups.type, _inputs.font, this },
+    _motion { _groups.motion, _units, this },
+    _elevation { _groups.elevation, _units, this },
+    _material { _groups.material, this },
+    _contrast { _groups.contrast, this },
+    _tui { _groups.tui, this },
+    _layout { _groups.layout, this },
+    _colors { _groups.colors, _inputs.scheme, *this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);
+}
+
+UiStyleProvider::UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent):
+    UiStyleProvider { chromeInputsFor(row, chromeFont), parent }
+{
 }
 
 bool UiStyleProvider::eventFilter(QObject* watched, QEvent* event)
@@ -231,13 +262,20 @@ QColor UiStyleProvider::statusColor(int role) const
     auto const palette = QGuiApplication::palette();
     switch (row.source)
     {
-        case config::StatusColorSource::PaletteAccent: return palette.color(QPalette::Highlight);
+        case config::StatusColorSource::PaletteAccent: return accentColor();
         case config::StatusColorSource::Fixed: break;
     }
 
     auto const dark = platform::colorSchemeOfBackground(platform::toRGBColor(palette.color(QPalette::Window)))
                       == Qt::ColorScheme::Dark;
     return QColor::fromRgb(dark ? row.dark : row.light);
+}
+
+QColor UiStyleProvider::accentColor() const
+{
+    if (auto const& accent = _inputs.appearance.accent)
+        return platform::toQColor(*accent);
+    return QGuiApplication::palette().color(QPalette::Highlight);
 }
 
 QColor UiStyleProvider::onColor(QColor const& background) const

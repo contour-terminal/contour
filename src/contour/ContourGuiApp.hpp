@@ -8,12 +8,16 @@
 #include <contour/config/LayoutStore.hpp>
 #include <contour/display/GpuSelection.hpp>
 #include <contour/display/Logging.hpp>
+#include <contour/platform/AccessibilityPreferenceSource.hpp>
+#include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
@@ -233,6 +237,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param windowPositionStore Last-window location persistence; null uses the atomic file adapter.
     /// @param env            The process environment every part of the application reads through.
     /// @param taskbarProgress Native taskbar adapter; null wires the production one.
+    /// @param appearanceServices Builds the OS accessibility and appearance sources the chrome follows.
+    ///                     The default is the native ones; tests pass platform::nullAppearanceServices()
+    ///                     so they never read the host's settings.
     /// @param processStart When the process began, sampled first thing in main(): the origin of the
     ///                     startup timeline. The default is the moment of construction, for tests.
     explicit ContourGuiApp(
@@ -250,6 +257,7 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         std::optional<vtbackend::LinkDetectionServices> linkServices = std::nullopt,
         std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress = nullptr,
         std::unique_ptr<window::WindowPositionStore> windowPositionStore = nullptr,
+        platform::AppearanceServices const& appearanceServices = {},
         core::platform::SteadyTimePoint processStart = core::platform::defaultSteadyClock().now());
     ~ContourGuiApp() override;
 
@@ -483,7 +491,32 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @param style The configured window-control style, @c Auto included.
     void applyWindowControlStyle(config::WindowControlStyle style);
 
+    /// @return The OS accessibility preferences as the injected source reports them now.
+    [[nodiscard]] config::AccessibilityPreferences accessibilityPreferences() const;
+
+    /// @return The OS appearance as the injected source reports it now.
+    [[nodiscard]] platform::PlatformAppearance platformAppearance() const;
+
+    /// Rebuilds the `chromeStyle` context property from the current inputs, if any changed.
+    ///
+    /// Called wherever an input may have moved: a reload (font, scheme), the OS light/dark flip
+    /// (scheme), and the two OS appearance sources. Safe before the GUI exists, like
+    /// applyWindowControlStyle(): there is nothing to rebuild yet.
+    void refreshChromeStyle();
+
   private:
+    /// @return What the chrome is built from now: the row, the resolved chrome font, both OS sources'
+    ///         current values, and the scheme of the terminal palette in effect.
+    [[nodiscard]] window::ChromeInputs chromeInputs() const;
+
+    /// The OS reported new accessibility preferences.
+    /// @param preferences The preferences now in effect.
+    void onAccessibilityPreferencesChanged(config::AccessibilityPreferences preferences);
+
+    /// The OS reported a new appearance.
+    /// @param appearance The appearance now in effect.
+    void onPlatformAppearanceChanged(platform::PlatformAppearance appearance);
+
     /// @p configured with @c Auto resolved against this host.
     ///
     /// The one place that resolves, so the style the first frame draws and the style a later reload
@@ -750,6 +783,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<vtextension::IGrantStore, void (*)(vtextension::IGrantStore*)> _daemonGrants { nullptr,
                                                                                                    nullptr };
     session::TerminalSessionManager _sessionManager;
+    // The OS appearance sources the chrome follows. Declared after _sessionManager so they die first:
+    // nothing they call back into is torn down while they can still report a change.
+    std::unique_ptr<platform::IAccessibilityPreferenceSource> _accessibilitySource;
+    std::unique_ptr<platform::IPlatformAppearance> _platformAppearance;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI
     // provider this needs no Qt application, so it is built eagerly with the app.
@@ -867,10 +904,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The chrome token row, resolved once at startup from `ui_style` and the host platform.
     config::ChromeStyle _chromeStyle = config::ChromeStyle::ContourLinux;
 
-    /// The chrome's design tokens, handed to QML as the `chromeStyle` context property. Declared
-    /// BEFORE the engine so it outlives it: a context property is a borrowed pointer the engine keeps
-    /// dereferencing, and members are destroyed in reverse declaration order.
-    std::unique_ptr<window::UiStyleProvider> _uiStyleProvider;
+    /// The chrome's design tokens, handed to QML as the `chromeStyle` context property and rebuilt
+    /// by refreshChromeStyle(). Declared BEFORE the engine so its provider outlives it: a context
+    /// property is a borrowed pointer the engine keeps dereferencing, and members are destroyed in
+    /// reverse declaration order.
+    std::unique_ptr<window::ChromeStyleHost> _chromeStyleHost;
 
     /// What the window controls are and where they go, handed to QML as the `windowControls` context
     /// property. Declared before the engine for the same borrowed-pointer reason as above.

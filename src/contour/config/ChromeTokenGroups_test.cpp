@@ -303,7 +303,7 @@ TEST_CASE("chromeTokens.schemeColours", "[chrometokens]")
     palette.selection.background = 0x090909_rgb;
 
     auto const slotOf = [](ChromeSchemeColors const& colors, SchemeSlot slot) {
-        return colors.slots[static_cast<size_t>(slot)];
+        return colors.bySlot[static_cast<size_t>(slot)];
     };
 
     auto const colors = chromeSchemeColorsOf(palette);

@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/AccessibilityPreferences.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/PlatformAppearance.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
+
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
@@ -22,6 +27,10 @@ struct ChromeSetup
     config::ChromeStyle row;                   ///< The resolved chrome token row.
     QFont font;                                ///< The application font the tokens derive text sizes from.
     config::WindowControlStyle windowControls; ///< Which window controls the QML sees.
+    config::AccessibilityPreferences accessibility {}; ///< The OS accessibility choices the tokens apply.
+    platform::PlatformAppearance appearance {};        ///< What the OS publishes about its own look.
+    /// The terminal scheme the Terminal row paints with: the default palette's unless a test names one.
+    config::ChromeSchemeColors scheme { config::chromeSchemeColorsOf(vtbackend::ColorPalette {}) };
 };
 
 /// Installs the chrome's design tokens on @p engine, as ContourGuiApp does for the real one.
@@ -41,7 +50,13 @@ struct ChromeSetup
 /// @param setup              The row, font and window controls to install.
 inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
 {
-    auto* provider = new contour::window::UiStyleProvider(setup.row, setup.font, &engine);
+    auto* provider = new contour::window::UiStyleProvider(
+        contour::window::ChromeInputs { .row = setup.row,
+                                        .font = setup.font,
+                                        .accessibility = setup.accessibility,
+                                        .appearance = setup.appearance,
+                                        .scheme = setup.scheme },
+        &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
 
     auto* controls = new contour::window::WindowControlStyleProvider(setup.windowControls, &engine);

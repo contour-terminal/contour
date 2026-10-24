@@ -231,6 +231,7 @@ int main(int argc, char const* argv[])
                                  std::nullopt, // linkServices
                                  nullptr,      // taskbarProgress
                                  nullptr,      // windowPositionStore
+                                 contour::platform::AppearanceServices {},
                                  processStart };
 #else
     // Without the GUI frontend there is no window to open, so `contour client` is gone with it;

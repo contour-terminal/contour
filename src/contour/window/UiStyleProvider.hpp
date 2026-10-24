@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/AccessibilityPreferences.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/platform/PlatformAppearance.hpp>
+#include <contour/window/ChromeTokenObjects.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -77,14 +81,39 @@ struct ChromeGlyphs
     QString submenu;
 };
 
+/// Everything a UiStyleProvider is built from.
+///
+/// A value type: two providers built from equal inputs are the same chrome, which is how
+/// ChromeStyleHost tells a rebuild that changes nothing from one that does.
+struct ChromeInputs
+{
+    config::ChromeStyle row = config::ChromeStyle::Terminal; ///< The chrome token row.
+    QFont font {}; ///< The chrome font, already resolved (see resolveChromeFont).
+    config::AccessibilityPreferences accessibility {}; ///< The OS accessibility choices to apply.
+    platform::PlatformAppearance appearance {};        ///< What the OS publishes about its own look.
+    config::ChromeSchemeColors scheme {};              ///< The terminal scheme the Terminal row paints with.
+
+    [[nodiscard]] bool operator==(ChromeInputs const&) const = default;
+};
+
+/// The inputs for @p row and @p font with nothing else set: default accessibility, no platform
+/// appearance, and the default terminal palette's scheme.
+/// @param row  The chrome token row.
+/// @param font The chrome font.
+/// @return The inputs.
+[[nodiscard]] ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font);
+
 /// The GUI chrome's design tokens, published to QML as the @c chromeStyle context property.
 ///
 /// Every number the chrome QML used to carry as a literal comes from here, already resolved (see
 /// ChromeMetrics), so a QML file never learns which style is active.
 ///
-/// Everything but @ref paletteRevision is CONSTANT because the style cannot change within a process: the Qt
-/// Quick Controls half of it is chosen once, before the first control exists (see ContourGuiApp), so a
-/// live-updating geometry half would only produce a half-switched window. @see UiStyle.
+/// Everything but @ref paletteRevision (and what derives from the palette) is CONSTANT: the row cannot
+/// change within a process -- the Qt Quick Controls half of it is chosen once, before the first control
+/// exists (see ContourGuiApp), so a live-updating geometry half would only produce a half-switched
+/// window. What can change -- the font on reload, the OS accessibility and appearance, the terminal
+/// scheme -- is answered by building a NEW provider from new ChromeInputs and republishing it
+/// (ChromeStyleHost), so every binding re-reads at once. @see UiStyle.
 ///
 /// Deliberately a context property rather than a registered QML singleton. Two separate QML modules
 /// read these tokens -- @c Contour.Ui and the @c ContourTui Quick Controls style -- and a singleton
@@ -152,6 +181,23 @@ class UiStyleProvider: public QObject
 
     Q_PROPERTY(QColor errorColor READ errorColor CONSTANT)
 
+    /// The 1a token groups, each a sub-object whose extents are already in logical pixels.
+    Q_PROPERTY(QObject* size READ size CONSTANT)
+    Q_PROPERTY(QObject* space READ space CONSTANT)
+    Q_PROPERTY(QObject* radii READ radii CONSTANT)
+    Q_PROPERTY(QObject* type READ type CONSTANT)
+    Q_PROPERTY(QObject* motion READ motion CONSTANT)
+    Q_PROPERTY(QObject* elevation READ elevation CONSTANT)
+    Q_PROPERTY(QObject* material READ material CONSTANT)
+    Q_PROPERTY(QObject* contrast READ contrast CONSTANT)
+    Q_PROPERTY(QObject* tui READ tui CONSTANT)
+    Q_PROPERTY(QObject* layout READ layout CONSTANT)
+    /// The chrome colour roles. The object is CONSTANT; its own properties notify.
+    Q_PROPERTY(QObject* colors READ colors CONSTANT)
+
+    /// The accent the chrome highlights with: the platform's when it publishes one, else the palette's.
+    Q_PROPERTY(QColor accentColor READ accentColor NOTIFY paletteRevisionChanged)
+
     /// Bumped whenever the application palette changes. statusColor() and onStatusColor() read that
     /// palette, and a binding cannot see through an invokable, so each QML call site reads this first,
     /// using it rather than merely mentioning it (a bare read is dropped by the JS engine):
@@ -167,10 +213,14 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString submenuGlyph READ submenuGlyph CONSTANT)
 
   public:
+    /// @param inputs What the chrome is built from. @c inputs.font is the font the chrome is drawn
+    ///               with, already resolved against its fallbacks (see resolveChromeFont); its metrics
+    ///               define the cell every terminal-style extent is counted in.
+    /// @param parent Qt ownership.
+    explicit UiStyleProvider(ChromeInputs inputs, QObject* parent = nullptr);
+
     /// @param row        The chrome token row, see config::resolveChromeStyle.
-    /// @param chromeFont The font the chrome is drawn with, already resolved against its fallbacks
-    ///                   (see resolveChromeFont). Its metrics define the cell every terminal-style
-    ///                   extent is counted in.
+    /// @param chromeFont The font the chrome is drawn with. @see chromeInputsFor for the rest.
     /// @param parent     Qt ownership.
     UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent = nullptr);
 
@@ -305,6 +355,25 @@ class UiStyleProvider: public QObject
     /// meaning, and a theme-picked one could render a failure green. @see UiStyleTokens.
     [[nodiscard]] QColor errorColor() const;
 
+    /// The accent the chrome highlights with, and the colour of @c Running.
+    /// @return The platform accent when the OS publishes one, else the palette's Highlight.
+    [[nodiscard]] QColor accentColor() const;
+
+    /// The token groups for QML. Non-const because QML receives them as mutable QObject pointers; the
+    /// objects themselves expose only CONSTANT (or palette-notifying) properties.
+    /// @return This provider's group object, owned by it.
+    [[nodiscard]] QObject* size() noexcept { return &_size; }
+    [[nodiscard]] QObject* space() noexcept { return &_space; }
+    [[nodiscard]] QObject* radii() noexcept { return &_radii; }
+    [[nodiscard]] QObject* type() noexcept { return &_type; }
+    [[nodiscard]] QObject* motion() noexcept { return &_motion; }
+    [[nodiscard]] QObject* elevation() noexcept { return &_elevation; }
+    [[nodiscard]] QObject* material() noexcept { return &_material; }
+    [[nodiscard]] QObject* contrast() noexcept { return &_contrast; }
+    [[nodiscard]] QObject* tui() noexcept { return &_tui; }
+    [[nodiscard]] QObject* layout() noexcept { return &_layout; }
+    [[nodiscard]] QObject* colors() noexcept { return &_colors; }
+
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
     [[nodiscard]] QString const& trafficLightGlyph() const noexcept { return _glyphs.trafficLight; }
     [[nodiscard]] QString const& closeGlyph() const noexcept { return _glyphs.close; }
@@ -356,11 +425,26 @@ class UiStyleProvider: public QObject
   private:
     // By value rather than by reference: the rows have static storage duration, but a reference member
     // would delete move-assignment for no gain -- the row is a handful of ints and string_views.
+    ChromeInputs _inputs; ///< What this provider was built from.
     config::ChromeStyle _row;
     config::UiStyleTokens _tokens;
     ChromeFonts _fonts;
     ChromeMetrics _metrics;
     ChromeGlyphs _glyphs;
+    config::ChromeTokenRow _groups {}; ///< The 1a row, resolved against accessibility.
+    ChromeUnits _units {};             ///< What one token unit is, in pixels.
+    // The group objects, children of this provider by value: they die with it, before ~QObject runs.
+    ChromeSizeTokens _size;
+    ChromeSpaceTokens _space;
+    ChromeRadiusTokens _radii;
+    ChromeTypeTokens _type;
+    ChromeMotionTokens _motion;
+    ChromeElevationTokens _elevation;
+    ChromeMaterialTokens _material;
+    ChromeContrastTokens _contrast;
+    ChromeTuiTokens _tui;
+    ChromeLayoutTokens _layout;
+    ChromeColorTokens _colors;
     int _paletteRevision = 0;
 };
 

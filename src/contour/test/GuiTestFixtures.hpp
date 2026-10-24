@@ -7,6 +7,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
 #include <contour/platform/Notifier.hpp>
 #include <contour/session/CommandOutputFiles.hpp>
@@ -477,6 +478,8 @@ class TestApp
     ///                fixture's own in-memory one, fileSystem(). Borrowed.
     /// @param environment The environment variables the app reads as the test sets them.
     /// @param taskbarProgress Optional native taskbar sink override.
+    /// @param appearance The OS accessibility and appearance sources. The null ones by default, so a test
+    ///                never reads the host's settings; pass test::appearanceServicesWith() to drive them.
     explicit TestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
                      std::unique_ptr<contour::config::LayoutStore> layoutStore = nullptr,
                      std::unique_ptr<contour::command::CommandHistoryStore> commandHistoryStore = nullptr,
@@ -484,7 +487,9 @@ class TestApp
                      vtbackend::HostIdentity identity = testHostIdentity(),
                      core::platform::FileSystem const* fileSystem = nullptr,
                      TestEnvironment::Overrides environment = {},
-                     std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr):
+                     std::unique_ptr<contour::platform::TaskbarProgressSink> taskbarProgress = nullptr,
+                     contour::platform::AppearanceServices const& appearance =
+                         contour::platform::nullAppearanceServices()):
         _environment { std::move(environment) },
         _sessionFiles { fileSystem ? fileSystem : &_fileSystem },
         _app(_environment,
@@ -500,7 +505,8 @@ class TestApp
              nullptr,
              linkServices(),
              std::move(taskbarProgress),
-             std::make_unique<InMemoryWindowPositionStore>())
+             std::make_unique<InMemoryWindowPositionStore>(),
+             appearance)
     {
         parseTerminalVerb();
     }
@@ -530,7 +536,8 @@ class TestApp
              std::move(placement),
              linkServices(),
              nullptr,
-             std::make_unique<InMemoryWindowPositionStore>())
+             std::make_unique<InMemoryWindowPositionStore>(),
+             contour::platform::nullAppearanceServices())
     {
         parseTerminalVerb();
     }
@@ -577,7 +584,8 @@ class TestApp
              nullptr,
              linkServices(),
              nullptr,
-             std::make_unique<InMemoryWindowPositionStore>())
+             std::make_unique<InMemoryWindowPositionStore>(),
+             contour::platform::nullAppearanceServices())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);

@@ -275,6 +275,8 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsController.hpp
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
+        window/ChromeStyleHost.hpp
+        window/ChromeTokenObjects.hpp
         window/UiStyleProvider.hpp
         window/WindowControlStyleProvider.hpp
         session/SessionInput.hpp
@@ -320,6 +322,8 @@ if(CONTOUR_FRONTEND_GUI)
         display/SysfsGpuInventory.cpp
         session/TerminalSessionManager.cpp
         window/PopupShadowImageProvider.cpp
+        window/ChromeStyleHost.cpp
+        window/ChromeTokenObjects.cpp
         window/UiStyleProvider.cpp
         window/WindowControlStyleProvider.cpp
         window/WindowController.cpp

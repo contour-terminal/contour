@@ -12,6 +12,9 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
+#include <contour/window/ChromeStyleHost.hpp>
+#include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -19,7 +22,11 @@
 #include <text_shaper/Font.hpp>
 
 #include <QtCore/QByteArrayView>
+#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
 #include <QtCore/QMetaProperty>
+#include <QtCore/QPointer>
+#include <QtCore/QVariant>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QFontMetricsF>
@@ -33,7 +40,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <utility>
 
@@ -436,4 +445,166 @@ TEST_CASE("chromeStyle.statusColor bindings re-evaluate on a palette change", "[
             CHECK(object->property("danger").value<QColor>() == QColor(0xFF, 0x69, 0x61));
         });
     });
+}
+
+namespace
+{
+
+/// @return @p provider's group @p group, as QML reaches it through `chromeStyle.<group>`.
+[[nodiscard]] QObject* groupOf(contour::window::UiStyleProvider const& provider, char const* group)
+{
+    auto* object = provider.property(group).value<QObject*>();
+    REQUIRE(object != nullptr);
+    return object;
+}
+
+/// @return Token @p name of @p provider's group @p group.
+[[nodiscard]] QVariant tokenOf(contour::window::UiStyleProvider const& provider,
+                               char const* group,
+                               char const* name)
+{
+    auto const value = groupOf(provider, group)->property(name);
+    REQUIRE(value.isValid());
+    return value;
+}
+
+} // namespace
+
+TEST_CASE("UiStyleProvider publishes the 1a token groups per row", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "size", "toast").toReal() == 36.0);
+    CHECK(tokenOf(mac, "radii", "toast").toReal() == 18.0);
+    CHECK(tokenOf(mac, "motion", "standard").toInt() == 160);
+    CHECK(tokenOf(mac, "space", "s10").toReal() == 32.0);
+    CHECK(tokenOf(mac, "material", "titleBand").toInt() == tokenOf(mac, "material", "glass").toInt());
+    CHECK(tokenOf(mac, "layout", "dialog").toInt() == tokenOf(mac, "layout", "sheet").toInt());
+    CHECK(tokenOf(mac, "contrast", "separatorAlpha").toReal() == Catch::Approx(0.10));
+    CHECK(tokenOf(mac, "type", "body").value<QFont>().pixelSize() == 13);
+    auto* e2 = tokenOf(mac, "elevation", "e2").value<QObject*>();
+    REQUIRE(e2 != nullptr);
+    CHECK(e2->property("blur").toReal() == 16.0);
+    CHECK(e2->property("opacity").toReal() == Catch::Approx(0.25));
+
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    CHECK(tokenOf(terminal, "size", "toast").toReal() == terminal.cellHeight());
+    CHECK(tokenOf(terminal, "size", "dialogWidth").toReal() == Catch::Approx(32 * terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "radii", "toast").toReal() == 0.0);
+    CHECK(tokenOf(terminal, "tui", "toastStyle").toInt() == tokenOf(terminal, "tui", "inverse").toInt());
+    CHECK(tokenOf(terminal, "tui", "inactivePaneOpacity").toReal() == Catch::Approx(0.62));
+    // A zero type size is the chrome font itself, which keeps the Terminal row on the grid.
+    CHECK(tokenOf(terminal, "type", "title").value<QFont>() == font);
+}
+
+TEST_CASE("UiStyleProvider applies Reduce Motion", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::MotionPreference;
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font());
+    inputs.accessibility.motion = MotionPreference::Reduced;
+    auto const provider = contour::window::UiStyleProvider(inputs);
+
+    CHECK(tokenOf(provider, "motion", "fast").toInt() == 100);
+    CHECK(tokenOf(provider, "motion", "standard").toInt() == 100);
+    CHECK(tokenOf(provider, "motion", "emphasized").toInt() == 100);
+    CHECK(tokenOf(provider, "motion", "travel").toReal() == 0.0);
+}
+
+TEST_CASE("UiStyleProvider takes Running from the platform accent", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+    using vtbackend::operator""_rgb;
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font());
+
+    SECTION("with a platform accent")
+    {
+        inputs.appearance.accent = 0xFF00AA_rgb;
+        auto const provider = UiStyleProvider(inputs);
+        CHECK(provider.statusColor(UiStyleProvider::statusRunning()) == QColor(0xFF, 0x00, 0xAA));
+        CHECK(provider.accentColor() == QColor(0xFF, 0x00, 0xAA));
+        CHECK(provider.property("accentColor").value<QColor>() == QColor(0xFF, 0x00, 0xAA));
+    }
+
+    SECTION("without one")
+    {
+        auto const provider = UiStyleProvider(inputs);
+        auto const highlight = QGuiApplication::palette().color(QPalette::Highlight);
+        CHECK(provider.statusColor(UiStyleProvider::statusRunning()) == highlight);
+        CHECK(provider.accentColor() == highlight);
+    }
+}
+
+TEST_CASE("UiStyleProvider resolves the colour roles", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::SchemeSlot;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto terminalInputs = contour::window::chromeInputsFor(ChromeStyle::Terminal, font);
+    terminalInputs.scheme.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = vtbackend::RGBColor(0x123456);
+    auto const terminal = UiStyleProvider(terminalInputs);
+    CHECK(tokenOf(terminal, "colors", "bannerFill").value<QColor>() == QColor(0x12, 0x34, 0x56));
+
+    auto const mac = UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::MacOS, font));
+    auto const toastFill = tokenOf(mac, "colors", "toastFill").value<QColor>();
+    CHECK(toastFill.rgb() == QColor(0x28, 0x28, 0x2C).rgb());
+    CHECK(toastFill.alphaF() == Catch::Approx(0.92).margin(0.005));
+
+    // A palette source follows the application palette, and says so.
+    auto notified = 0;
+    auto const* colors = qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(mac, "colors"));
+    REQUIRE(colors != nullptr);
+    QObject::connect(colors, &contour::window::ChromeColorTokens::changed, [&] { ++notified; });
+    withWindowColor(QColor(0x1E, 0x1E, 0x1E), [&] {
+        CHECK(tokenOf(mac, "colors", "bannerFill").value<QColor>() == QColor(0x1E, 0x1E, 0x1E));
+    });
+    CHECK(notified >= 2);
+}
+
+TEST_CASE("ChromeStyleHost republishes chromeStyle and keeps the old provider alive for the event",
+          "[contour][chromehost][qml]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::MotionPreference;
+    using contour::window::ChromeStyleHost;
+
+    // Declared before the engine so the host, and the provider the engine borrows, outlive it.
+    auto host = std::optional<ChromeStyleHost>();
+    auto engine = QQmlEngine();
+
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font());
+    host.emplace(*engine.rootContext(), inputs);
+    // After the first provider: its font metrics may log Qt's one-off font-alias notice, which says
+    // nothing about the QML under test.
+    auto const capture = contour::test::QmlMessageCapture();
+
+    auto component = QQmlComponent(&engine);
+    component.setData("import QtQuick\nItem { property int d: chromeStyle.motion.standard }\n", QUrl());
+    auto const object = std::unique_ptr<QObject>(component.create());
+    REQUIRE(object);
+    CHECK(object->property("d").toInt() == 160);
+
+    auto* const unchanged = &host->provider();
+    host->update(inputs);
+    CHECK(&host->provider() == unchanged);
+
+    auto const first = QPointer<contour::window::UiStyleProvider>(&host->provider());
+    inputs.accessibility.motion = MotionPreference::Reduced;
+    host->update(inputs);
+    CHECK(object->property("d").toInt() == 100);
+    CHECK(host->inputs() == inputs);
+    CHECK(&host->provider() != first.data());
+    CHECK(!first.isNull());
+
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(first.isNull());
+    INFO(capture.messages().join(QStringLiteral("\n")).toStdString());
+    CHECK(capture.messages().isEmpty());
 }

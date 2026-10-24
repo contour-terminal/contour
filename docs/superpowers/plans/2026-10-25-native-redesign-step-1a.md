@@ -191,7 +191,7 @@ Standard status colours under Increased Contrast, since they are already their A
   - `enum class ColorSourceKind : uint8_t { Fixed = 0, PaletteWindow, PaletteWindowText, Status, Scheme };`
   - `enum class SchemeSlot : uint8_t { Background = 0, Foreground, Bar, Secondary, Selection, Accent, Danger, Success, Warning };`
   - `struct ChromeColorSource { ColorSourceKind kind = ColorSourceKind::Fixed; uint32_t rgb = 0; StatusColorRole status = StatusColorRole::Danger; SchemeSlot slot = SchemeSlot::Background; int alphaPercent = 100; [[nodiscard]] bool operator==(ChromeColorSource const&) const = default; };`
-  - `struct ChromeSchemeColors { std::array<vtbackend::RGBColor, SchemeSlotCount> slots {}; [[nodiscard]] bool operator==(ChromeSchemeColors const&) const = default; };`
+  - `struct ChromeSchemeColors { std::array<vtbackend::RGBColor, SchemeSlotCount> bySlot {}; [[nodiscard]] bool operator==(ChromeSchemeColors const&) const = default; };`
   - Group structs, every member defaulted to 0 / the zero enumerator:
     `SizeTokens { int titleBar, tabWell, tab, control, paneHeader, toast, dialogWidth; }`,
     `SpaceTokens { int paneGap, splitHit, paneInset; std::array<int, 10> scale; }`,
