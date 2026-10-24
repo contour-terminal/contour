@@ -107,6 +107,14 @@
     <release version="0.9.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes a configuration with separate light and dark color schemes being saved as YAML that did not load back</li>
+          <li>Changes the first-launch defaults, for a newly generated configuration only (<code>defaults_edition: native2026</code>): JetBrains Mono (Cascadia Mono on Windows) at 13 pt on macOS and 12 pt elsewhere, a 100×30 window with small margins, the contour-light and contour-dark color schemes following the system appearance, the indicator status line, the tab bar once there is a second tab, a silent bell, 10000 lines of scrollback, a steady block cursor and Command+click to follow links on macOS. An existing configuration without the key keeps every previous default</li>
+          <li>Changes the default <code>theme</code> to <code>terminal</code>: the window chrome turns light or dark with the default profile's background</li>
+          <li>Changes the focus frame to appear only in a split tab, where it tells the active pane apart, and to use the system highlight color</li>
+          <li>Changes a running command block's derived status color from yellow to blue, so it no longer reads as a search match</li>
+          <li>Adds the built-in color schemes <code>contour-dark</code>, <code>contour-light</code> and <code>contour-classic</code>, every color of which stays readable on its background</li>
+          <li>Adds Command, Option, Shift and Control glyphs (⌘⌥⇧⌃) to shortcuts shown in menus and the command palette on macOS</li>
+          <li>Bundles the JetBrains Mono font (SIL Open Font License 1.1) on macOS and Linux, so the default font is present without installing it</li>
           <li>Daemon: every window, tab and pane has a stable UUID, and each hosted shell finds its own with $CONTOUR_PANE, $CONTOUR_TAB, $CONTOUR_WINDOW and $CONTOUR_DAEMON.</li>
           <li>Daemon: serves a typed control API on its native socket: list, capture and label windows, tabs and panes, open tabs and splits, type into panes, read and wait for command blocks, and subscribe to events.</li>
           <li>Daemon: contour daemon --access-file FILE issues TCP tokens with narrower control API grants (read, screen, input, write); a call outside them is refused as forbidden, and a narrow token cannot attach.</li>
