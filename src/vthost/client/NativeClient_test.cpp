@@ -16,6 +16,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -53,6 +54,7 @@
     #include <vthost/client/DaemonGrantReplies.hpp>
 #endif
 #include <vthost/testing/FakeExtensionHosting.hpp>
+#include <vthost/testing/PreNegotiationCodec.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -72,6 +74,13 @@ using namespace std::chrono_literals;
 
 namespace
 {
+
+/// @param token The preshared token each connection must present.
+/// @return The services of a native endpoint guarded by @p token.
+vthost::NativeSessionServices tokenGuarded(std::string token)
+{
+    return vthost::NativeSessionServices { .handshake = { .expectedToken = std::move(token) } };
+}
 
 /// The full server<->client pair over one in-memory socket: the REAL
 /// NativeSession serves what the REAL NativeClient mirrors.
@@ -499,6 +508,15 @@ void enqueuePdu(core::net::WriteQueue& writer, uint64_t serial, proto::DecodedPd
     REQUIRE(writer.enqueue(std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() }));
 }
 
+/// @param capabilities What the daemon offers.
+/// @return A daemon's answer accepting a client of this build's range.
+[[nodiscard]] proto::ServerHello acceptingHello(proto::CapabilitySet capabilities = {})
+{
+    return proto::ServerHello { .agreedVersion = proto::SupportedVersions.max,
+                                .versions = proto::SupportedVersions,
+                                .capabilities = std::move(capabilities) };
+}
+
 /// A hand-driven server: answers the handshake, pushes a snapshot whose single
 /// row carries an image cell (id 7), then serves the client's FetchImage with
 /// @p reply. Exercises the serial-correlated (session-less) image reply path
@@ -509,7 +527,7 @@ Task<void> fakeImageServer(core::net::EventLoop* loop, core::net::ISocket* socke
     co_await vthost::pumpPdus(socket, [&](proto::DecodedFrame const& frame) {
         if (std::holds_alternative<proto::ClientHello>(frame.pdu))
         {
-            enqueuePdu(writer, frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+            enqueuePdu(writer, frame.serial, proto::DecodedPdu { acceptingHello() });
             auto delta = proto::Delta {};
             delta.session = 1;
             delta.snapshot = 1;
@@ -610,7 +628,7 @@ void tokenAttach(std::string serverToken, std::string clientToken, bool* gotSnap
                                   vthost::ConnectionId { .endpoint = "test", .index = 1 },
                                   std::move(pair.first),
                                   NativeSession::DefaultWriteQueueBytes,
-                                  std::move(serverToken) };
+                                  tokenGuarded(std::move(serverToken)) };
     auto client = NativeClient { loop,
                                  std::move(pair.second),
                                  NativeClient::HandshakeOptions { .token = std::move(clientToken) },
@@ -709,9 +727,12 @@ TEST_CASE("a client meets a daemon of contour 0.7.0 with the version message", "
     auto helloVersion = std::optional<uint32_t> {};
     loop.blockOn(core::net::testing::allOf(client.run(), shippedDaemon(daemonSocket, &helloVersion)));
 
-    CHECK(helloVersion == proto::CodecVersion);
-    CHECK(client.versionMismatch());
-    CHECK(capture.contains(std::format("daemon speaks codec v{}", vthost::testing::ShippedCodecVersion)));
+    CHECK(helloVersion == proto::NegotiatingHelloMarker);
+    auto const shipped = vthost::testing::ShippedProtocolVersion;
+    CHECK(client.refusal()
+          == proto::HandshakeRefusal { .ours = proto::SupportedVersions, .theirs = { shipped, shipped } });
+    CHECK_FALSE(client.connected());
+    CHECK(capture.contains(std::format("the daemon speaks protocol {}, from a release before", shipped)));
 }
 
 TEST_CASE("parseHostPort accepts HOST:PORT and rejects malformed input", "[vthost][attach]")
@@ -796,7 +817,7 @@ TEST_CASE("attach mirrors over a real TCP transport with token auth", "[vthost][
     REQUIRE(listener.has_value());
     auto const port = (*listener)->boundPort();
     auto server = vthost::ConnectionAcceptor {
-        loop, "test", std::move(*listener), vthost::makeNativeHandler(loop, host, "tok")
+        loop, "test", std::move(*listener), vthost::makeNativeHandler(loop, host, tokenGuarded("tok"))
     };
 
     auto saw = false;
@@ -865,7 +886,7 @@ TEST_CASE("attach mirrors over TLS-encrypted TCP with token auth", "[vthost][att
 
     // A TLS-wrapping native handler: each accepted socket is encrypted (server
     // role) before the native protocol runs over it — the daemon's TCP path.
-    auto nativeHandler = vthost::makeNativeHandler(loop, host, "tok");
+    auto nativeHandler = vthost::makeNativeHandler(loop, host, tokenGuarded("tok"));
     auto const& tlsContext = *serverTls;
     auto handler = [tlsContext, nativeHandler, &loop](vthost::ConnectionId id,
                                                       std::unique_ptr<core::net::ISocket> socket) {
@@ -908,7 +929,7 @@ TEST_CASE("a clean TLS detach ends the connection as a disconnect rather than an
     REQUIRE(listener.has_value());
     auto const port = (*listener)->boundPort();
 
-    auto nativeHandler = vthost::makeNativeHandler(loop, host, "tok");
+    auto nativeHandler = vthost::makeNativeHandler(loop, host, tokenGuarded("tok"));
     auto const& tlsContext = *serverTls;
     auto handler = [tlsContext, nativeHandler, &loop](vthost::ConnectionId id,
                                                       std::unique_ptr<core::net::ISocket> socket) {
@@ -967,7 +988,7 @@ TEST_CASE("attach mirrors over TLS with a generated self-signed dev certificate"
     REQUIRE(listener.has_value());
     auto const port = (*listener)->boundPort();
 
-    auto nativeHandler = vthost::makeNativeHandler(loop, host, "tok");
+    auto nativeHandler = vthost::makeNativeHandler(loop, host, tokenGuarded("tok"));
     auto const& tlsContext = *serverTls;
     auto handler = [tlsContext, nativeHandler, &loop](vthost::ConnectionId id,
                                                       std::unique_ptr<core::net::ISocket> socket) {
@@ -1466,7 +1487,9 @@ TEST_CASE("NativeClient.extension.permission", "[vthost][attach][extensions]")
     client = std::make_unique<NativeClient>(
         loop,
         std::move(pair.second),
-        NativeClient::HandshakeOptions {},
+        // Offered by whoever passes the handler, as the composition root does.
+        NativeClient::HandshakeOptions {
+            .capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions }) },
         vtbackend::CommandBlockStoreLimits {},
         NativeClient::UpdateHandler {},
         NativeClient::ImageHandler {},
@@ -1523,3 +1546,471 @@ TEST_CASE("DaemonGrantReplies sends each answer, and remembers it", "[vthost][at
     CHECK(replies.lookup("git@/x.wasm", "d2") == vtextension::GrantState::Denied);
 }
 #endif
+
+namespace
+{
+/// What a scripted daemon writes: each PDU under its serial, none standing for the serial of the frame
+/// answered.
+using Script = std::vector<std::pair<std::optional<uint64_t>, proto::DecodedPdu>>;
+
+/// What a scripted daemon writes in answer to each frame the client sends.
+using ScriptFor = std::function<Script(proto::DecodedFrame const&)>;
+
+/// A hand-driven daemon that writes what @p answer gives for each frame the client sends and records every
+/// such frame into @p seen, until the client hangs up.
+Task<void> scriptedDaemon(core::net::EventLoop* loop,
+                          core::net::ISocket* socket,
+                          ScriptFor answer,
+                          std::vector<proto::DecodedFrame>* seen)
+{
+    auto writer = core::net::WriteQueue { *loop, socket, std::size_t { 1 } * 1024 * 1024 };
+    co_await vthost::pumpPdus(socket, [&](proto::DecodedFrame const& frame) {
+        seen->push_back(frame);
+        for (auto const& [serial, pdu]: answer(frame))
+            enqueuePdu(writer, serial.value_or(frame.serial), pdu);
+        return true;
+    });
+}
+
+/// @return What a scripted daemon writes: @p script in answer to the hello, nothing to anything else.
+[[nodiscard]] ScriptFor answeringHello(Script script)
+{
+    return [script = std::move(script)](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::ClientHello>(frame.pdu) ? script : Script {};
+    };
+}
+
+/// @return A client of @p loop over @p socket, with no handlers.
+[[nodiscard]] std::unique_ptr<NativeClient> bareClient(core::net::EventLoop& loop,
+                                                       std::unique_ptr<core::net::ISocket> socket)
+{
+    return std::make_unique<NativeClient>(loop,
+                                          std::move(socket),
+                                          NativeClient::HandshakeOptions {},
+                                          vtbackend::CommandBlockStoreLimits {},
+                                          NativeClient::UpdateHandler {},
+                                          NativeClient::ImageHandler {},
+                                          NativeClient::SessionEventHandler {},
+                                          NativeClient::LayoutHandler {});
+}
+
+/// @return Whether @p frame carries a PDU of type @p T.
+template <typename T>
+[[nodiscard]] bool carries(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<T>(frame.pdu);
+}
+} // namespace
+
+TEST_CASE("a PDU the daemon refused is not sent again", "[vthost][negotiation]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = bareClient(loop, std::move(pair.second));
+
+    // The hello's answer goes under the hello's serial; the refusal is pushed, as an unsolicited frame.
+    auto script = Script {
+        { std::nullopt, acceptingHello() },
+        { 7,
+          proto::Unsupported { .refusedSerial = 3,
+                               .ident = std::to_underlying(proto::PduType::ResizePane) } },
+    };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<proto::DecodedFrame> const* seen) -> Task<void> {
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return client->peerRefused(proto::PduType::ResizePane); });
+        client->resizePane(1, 80, 24);
+        // A PDU the daemon did not refuse, behind it: once it arrives, the ResizePane would have.
+        client->createTab(0);
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
+        client->detach();
+    }(&loop, client.get(), &seen);
+    loop.blockOn(core::net::testing::allOf(
+        client->run(),
+        scriptedDaemon(&loop, daemonSocket, answeringHello(std::move(script)), &seen),
+        std::move(scenario)));
+
+    CHECK(client->peerRefused(proto::PduType::ResizePane));
+    CHECK_FALSE(client->peerRefused(proto::PduType::CreateTab));
+    CHECK(std::ranges::any_of(seen, carries<proto::CreateTab>));
+    CHECK_FALSE(std::ranges::any_of(seen, carries<proto::ResizePane>));
+}
+
+TEST_CASE("a client answers a daemon's unknown PDU with Unsupported, after the handshake only",
+          "[vthost][negotiation]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = bareClient(loop, std::move(pair.second));
+
+    auto script = Script {
+        { 8, proto::Invalid { .ident = 201 } }, // before the ServerHello: not answered
+        { std::nullopt, acceptingHello() },
+        { 9, proto::Invalid { .ident = 200 } },
+    };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       std::vector<proto::DecodedFrame> const* seen) -> Task<void> {
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return std::ranges::any_of(*seen, carries<proto::Unsupported>); });
+        client->detach();
+    }(&loop, client.get(), &seen);
+    loop.blockOn(core::net::testing::allOf(
+        client->run(),
+        scriptedDaemon(&loop, daemonSocket, answeringHello(std::move(script)), &seen),
+        std::move(scenario)));
+
+    // A reply to the first would have been written before the reply to the second.
+    REQUIRE(std::ranges::count_if(seen, carries<proto::Unsupported>) == 1);
+    CHECK(std::ranges::find_if(seen, carries<proto::Unsupported>)->pdu
+          == proto::DecodedPdu { proto::Unsupported { .refusedSerial = 9, .ident = 200 } });
+    CHECK(client->connected());
+}
+
+TEST_CASE("a client applies no session PDU sent before the ServerHello", "[vthost][negotiation]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto layouts = 0;
+    auto client =
+        NativeClient { loop,
+                       std::move(pair.second),
+                       NativeClient::HandshakeOptions {},
+                       vtbackend::CommandBlockStoreLimits {},
+                       NativeClient::UpdateHandler {},
+                       NativeClient::ImageHandler {},
+                       NativeClient::SessionEventHandler {},
+                       NativeClient::LayoutHandler { [&](proto::LayoutState const&) { ++layouts; } } };
+
+    // Session 5's PDUs come before the ServerHello and must not be applied; session 6's come after it, and
+    // once it is mirrored, the earlier ones would have been.
+    auto const stateOf = [](uint64_t session) {
+        auto state = proto::SessionState {};
+        state.session = session;
+        state.columns = 80;
+        state.lines = 24;
+        return state;
+    };
+    auto delta = proto::Delta {};
+    delta.session = 5;
+    auto script = Script {
+        { 0, stateOf(5) }, { 0, delta }, { 0, proto::LayoutState {} }, { std::nullopt, acceptingHello() },
+        { 0, stateOf(6) },
+    };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop, NativeClient* client) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->screens().contains(6); });
+        client->detach();
+    }(&loop, &client);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(),
+        scriptedDaemon(&loop, daemonSocket, answeringHello(std::move(script)), &seen),
+        std::move(scenario)));
+
+    CHECK(client.screens().contains(6));
+    CHECK_FALSE(client.screens().contains(5));
+    CHECK(layouts == 0);
+    CHECK(capture.contains("ignoring SessionState before the handshake"));
+    CHECK(capture.contains("ignoring Delta before the handshake"));
+    CHECK(capture.contains("ignoring LayoutState before the handshake"));
+}
+
+namespace
+{
+/// A daemon that answers the client's first frame with the bytes @p reply makes for its serial, and hangs up.
+Task<void> rawDaemon(core::net::ISocket* socket, std::function<std::vector<std::byte>(uint64_t)> reply)
+{
+    auto buffer = std::vector<std::byte> {};
+    auto scratch = std::vector<std::byte>(4096);
+    auto frame = proto::readFrame(buffer);
+    while (!frame && frame.error() == proto::DecodeError::NeedMoreData)
+    {
+        auto const n = co_await socket->read(scratch);
+        if (!n.has_value() || *n == 0)
+            co_return;
+        buffer.insert(buffer.end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
+        frame = proto::readFrame(buffer);
+    }
+    if (frame)
+    {
+        auto const bytes = reply(frame->serial);
+        std::ignore = co_await socket->write(std::span<std::byte const> { bytes });
+    }
+    socket->close();
+}
+
+/// @return The capabilities of a client that can answer an extension's permission question.
+[[nodiscard]] proto::CapabilitySet answeringPermissions()
+{
+    return proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions });
+}
+} // namespace
+
+TEST_CASE("the client reports an old daemon's refusal with both versions", "[vthost][negotiation]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = bareClient(loop, std::move(pair.second));
+
+    loop.blockOn(core::net::testing::allOf(client->run(), rawDaemon(daemonSocket, [](uint64_t serial) {
+                                               return vthost::testing::codec3ServerHello(serial);
+                                           })));
+
+    CHECK(client->refusal() == proto::HandshakeRefusal { .ours = { 4, 4 }, .theirs = { 3, 3 } });
+    CHECK_FALSE(client->negotiated().has_value());
+    CHECK_FALSE(client->connected());
+}
+
+TEST_CASE("the client reports a disjoint range", "[vthost][negotiation]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = bareClient(loop, std::move(pair.second));
+
+    auto script = Script {
+        { std::nullopt,
+          proto::ServerHello { .agreedVersion = 0, .versions = { .min = 6, .max = 8 }, .capabilities = {} } },
+    };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    // No detach: run() ends on its own, once the refusal arrived.
+    loop.blockOn(core::net::testing::allOf(
+        client->run(), scriptedDaemon(&loop, daemonSocket, answeringHello(std::move(script)), &seen)));
+
+    REQUIRE(client->refusal().has_value());
+    CHECK(client->refusal()->ours == proto::SupportedVersions);
+    CHECK(client->refusal()->theirs == proto::VersionRange { .min = 6, .max = 8 });
+    CHECK_FALSE(client->negotiated().has_value());
+    CHECK_FALSE(client->connected());
+}
+
+TEST_CASE("the client takes any agreed version both ends speak, and no other", "[vthost][negotiation]")
+{
+    /// What the client makes of the agreed version.
+    enum class Verdict : uint8_t
+    {
+        Refused,
+        Accepted,
+    };
+    struct Row
+    {
+        std::string_view name;
+        uint32_t agreed;
+        Verdict verdict;
+    };
+    // The client speaks 4-6 and the daemon 4-9: the daemon may pick lower than the highest common version.
+    auto const rows = std::array {
+        Row { .name = "a lower common version", .agreed = 5, .verdict = Verdict::Accepted },
+        Row { .name = "one only the daemon speaks", .agreed = 9, .verdict = Verdict::Refused },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
+        auto const source = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *source };
+        auto pair = *core::net::testing::makeSocketPair(loop);
+        auto* daemonSocket = pair.first.get();
+        auto client = NativeClient { loop,
+                                     std::move(pair.second),
+                                     NativeClient::HandshakeOptions { .versions = { .min = 4, .max = 6 } },
+                                     vtbackend::CommandBlockStoreLimits {},
+                                     NativeClient::UpdateHandler {},
+                                     NativeClient::ImageHandler {},
+                                     NativeClient::SessionEventHandler {},
+                                     NativeClient::LayoutHandler {} };
+
+        auto script = Script {
+            { std::nullopt,
+              proto::ServerHello {
+                  .agreedVersion = row.agreed, .versions = { .min = 4, .max = 9 }, .capabilities = {} } },
+        };
+        auto seen = std::vector<proto::DecodedFrame> {};
+        auto scenario = [](core::net::EventLoop* loop, NativeClient* client) -> Task<void> {
+            co_await core::net::testing::waitUntil(
+                loop, [&] { return client->connected() || client->refusal().has_value(); });
+            client->detach();
+        }(&loop, &client);
+        loop.blockOn(core::net::testing::allOf(
+            client.run(),
+            scriptedDaemon(&loop, daemonSocket, answeringHello(std::move(script)), &seen),
+            std::move(scenario)));
+
+        if (row.verdict == Verdict::Accepted)
+        {
+            REQUIRE(client.negotiated().has_value());
+            CHECK(client.negotiated()->version == row.agreed);
+            CHECK_FALSE(client.refusal().has_value());
+            continue;
+        }
+        CHECK_FALSE(client.negotiated().has_value());
+        REQUIRE(client.refusal().has_value());
+        CHECK(
+            *client.refusal()
+            == proto::HandshakeRefusal { .ours = { .min = 4, .max = 6 }, .theirs = { .min = 9, .max = 9 } });
+        CHECK(proto::describe(*client.refusal(), proto::PeerRole::Daemon)
+              == "the daemon speaks protocol 9-9, this client speaks 4-6");
+    }
+}
+
+TEST_CASE("a live client and daemon agree on the highest common version", "[vthost][negotiation]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto host = SessionHost { loop,
+                              [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                                  return std::make_unique<vtpty::MockPty>(size);
+                              },
+                              vtbackend::Settings {},
+                              core::defaultEnvironment(),
+                              vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual } };
+    host.createTab();
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto server = NativeSession {
+        loop,
+        host,
+        vthost::ConnectionId { .endpoint = "test", .index = 1 },
+        std::move(pair.first),
+        NativeSession::DefaultWriteQueueBytes,
+        vthost::NativeSessionServices { .handshake = { .versions = { .min = 4, .max = 6 } } },
+    };
+    auto client = NativeClient {
+        loop,
+        std::move(pair.second),
+        NativeClient::HandshakeOptions { .versions = { .min = 5, .max = 7 },
+                                         .capabilities = answeringPermissions() },
+        vtbackend::CommandBlockStoreLimits {},
+        NativeClient::UpdateHandler {},
+        NativeClient::ImageHandler {},
+        NativeClient::SessionEventHandler {},
+        NativeClient::LayoutHandler {},
+        NativeClient::PermissionHandler { [](proto::PermissionRequest const&) {} },
+    };
+
+    auto scenario = [](core::net::EventLoop* loop, NativeClient* client) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        client->detach();
+    }(&loop, &client);
+    loop.blockOn(core::net::testing::allOf(server.run(), client.run(), std::move(scenario)));
+
+    REQUIRE(client.negotiated().has_value());
+    REQUIRE(server.negotiated().has_value());
+    CHECK(client.negotiated()->version == 6);
+    CHECK(server.negotiated()->version == 6);
+    CHECK(client.negotiated()->shared == answeringPermissions());
+    CHECK_FALSE(client.refusal().has_value());
+}
+
+TEST_CASE("a permission answer is sent only to a daemon that offered to ask", "[vthost][negotiation]")
+{
+    /// Whether the answer reaches the daemon.
+    enum class Answer : uint8_t
+    {
+        Withheld,
+        Sent,
+    };
+    struct Row
+    {
+        std::string_view name;
+        proto::CapabilitySet daemon;
+        Answer answer;
+    };
+    auto const rows = std::array {
+        Row { .name = "the daemon offers it", .daemon = answeringPermissions(), .answer = Answer::Sent },
+        Row { .name = "the daemon does not", .daemon = {}, .answer = Answer::Withheld },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
+        auto const source = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *source };
+        auto pair = *core::net::testing::makeSocketPair(loop);
+        auto* daemonSocket = pair.first.get();
+        auto client = NativeClient {
+            loop,
+            std::move(pair.second),
+            NativeClient::HandshakeOptions { .capabilities = answeringPermissions() },
+            vtbackend::CommandBlockStoreLimits {},
+            NativeClient::UpdateHandler {},
+            NativeClient::ImageHandler {},
+            NativeClient::SessionEventHandler {},
+            NativeClient::LayoutHandler {},
+            NativeClient::PermissionHandler { [](proto::PermissionRequest const&) {} },
+        };
+        auto seen = std::vector<proto::DecodedFrame> {};
+        auto scenario = [](core::net::EventLoop* loop,
+                           NativeClient* client,
+                           std::vector<proto::DecodedFrame> const* seen) -> Task<void> {
+            co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+            client->answerPermission("git@/x/git.wasm", "5f3c", vthost::GrantState::Granted);
+            // Behind it: once this arrived, the answer would have.
+            client->createTab(0);
+            co_await core::net::testing::waitUntil(
+                loop, [&] { return std::ranges::any_of(*seen, carries<proto::CreateTab>); });
+            client->detach();
+        }(&loop, &client, &seen);
+        loop.blockOn(core::net::testing::allOf(
+            client.run(),
+            scriptedDaemon(
+                &loop, daemonSocket, answeringHello({ { std::nullopt, acceptingHello(row.daemon) } }), &seen),
+            std::move(scenario)));
+
+        REQUIRE(std::ranges::any_of(seen, carries<proto::CreateTab>));
+        CHECK(std::ranges::any_of(seen, carries<proto::PermissionReply>) == (row.answer == Answer::Sent));
+    }
+}
+
+TEST_CASE("an image fetch that was not sent awaits no reply", "[vthost][negotiation]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = bareClient(loop, std::move(pair.second));
+
+    // The daemon does not know FetchImage; and once the client creates a tab, it pushes an ImageData
+    // unsolicited, under serial 0 -- the serial a fetch that was never sent would have recorded.
+    auto const answer = [](proto::DecodedFrame const& frame) {
+        if (std::holds_alternative<proto::ClientHello>(frame.pdu))
+            return Script {
+                { std::nullopt, acceptingHello() },
+                { 7,
+                  proto::Unsupported { .refusedSerial = 2,
+                                       .ident = std::to_underlying(proto::PduType::FetchImage) } },
+            };
+        if (std::holds_alternative<proto::CreateTab>(frame.pdu))
+            return Script { { 0, proto::ImageData { .imageId = 7, .width = 0, .height = 0, .data = {} } } };
+        return Script {};
+    };
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop,
+                       NativeClient* client,
+                       core::log::ScopedCapture* capture) -> Task<void> {
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return client->peerRefused(proto::PduType::FetchImage); });
+        client->fetchImage(1, 7);
+        client->createTab(0);
+        co_await core::net::testing::waitUntil(
+            loop, [&] { return client->screens().contains(1) || capture->contains("unrouted ImageData"); });
+        client->detach();
+    }(&loop, client.get(), &capture);
+    loop.blockOn(core::net::testing::allOf(
+        client->run(), scriptedDaemon(&loop, daemonSocket, answer, &seen), std::move(scenario)));
+
+    CHECK(capture.contains("unrouted ImageData"));
+    CHECK_FALSE(client->screens().contains(1));
+}

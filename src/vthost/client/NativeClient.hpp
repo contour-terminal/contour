@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <map>
 #include <memory>
@@ -33,7 +34,9 @@
 
 #include <vthost/PduPump.hpp>
 #include <vthost/PermissionWire.hpp>
+#include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/Unsupported.hpp>
 
 namespace vthost::client
 {
@@ -258,6 +261,11 @@ class NativeClient final
         /// The emulation settings to ask for the sessions THIS client creates; absent means
         /// "whatever the daemon hosts with". @see proto::WireSessionSettings.
         std::optional<proto::WireSessionSettings> sessionSettings = std::nullopt;
+        /// The protocol versions this client speaks; the daemon agrees on the highest it shares.
+        proto::VersionRange versions = proto::SupportedVersions;
+        /// The optional features this client offers. The composition root offers
+        /// proto::Capability::ExtensionPermissions exactly when it passes a PermissionHandler.
+        proto::CapabilitySet capabilities = {};
     };
 
     /// @param loop The event loop everything runs on.
@@ -358,11 +366,25 @@ class NativeClient final
     /// @return All mirrored screens, keyed by session id.
     [[nodiscard]] std::map<uint64_t, RemoteScreen> const& screens() const noexcept { return _screens; }
 
-    /// @return True once the ServerHello arrived with a matching version.
-    [[nodiscard]] bool connected() const noexcept { return _connected; }
+    /// @return True once the ServerHello agreed on a version this client speaks.
+    [[nodiscard]] bool connected() const noexcept { return _negotiated.has_value(); }
 
-    /// @return True if the server answered with an incompatible codec version.
-    [[nodiscard]] bool versionMismatch() const noexcept { return _versionMismatch; }
+    /// @return The outcome of the handshake once the daemon accepted this client; empty until then, and
+    ///         for good once it refused.
+    [[nodiscard]] std::optional<proto::Negotiated> const& negotiated() const noexcept { return _negotiated; }
+
+    /// Why the daemon would not have this client, naming both ranges: a pre-negotiation daemon's codec
+    /// `v` as `{ v, v }`, a negotiating one's own range. Ranges that overlap mean the version was not the
+    /// reason (proto::describe phrases that). Empty unless the daemon refused; run() then ends.
+    /// @return The refusal.
+    [[nodiscard]] std::optional<proto::HandshakeRefusal> const& refusal() const noexcept { return _refusal; }
+
+    /// @param type A PDU type this client may send.
+    /// @return Whether the daemon answered it with Unsupported, so it is no longer sent.
+    [[nodiscard]] bool peerRefused(proto::PduType type) const noexcept
+    {
+        return _unsupported.peerRefused(type);
+    }
 
     /// The machine the daemon runs on, as its ServerHello stated it: what every record's locality was
     /// judged against, so "local" in a record means local to THAT machine, which need not be this one.
@@ -384,10 +406,17 @@ class NativeClient final
 
   private:
     void handlePdu(proto::DecodedFrame const& frame);
+    /// Records what the daemon's ServerHello negotiated, or why it did not; only the first counts.
+    /// @param hello The daemon's answer to this client's ClientHello.
+    void handleServerHello(proto::ServerHello const& hello);
+    /// @return The handshake's outcome, or the refusal it amounts to.
+    [[nodiscard]] std::expected<proto::Negotiated, proto::HandshakeRefusal> judge(
+        proto::ServerHello const& hello) const;
     /// Encodes @p pdu with the next serial, enqueues it, and returns that serial
     /// so image fetches can correlate the (session-less) ImageData/ImageGone reply.
     /// Once run() has begun to close the connection nothing more is written, so no write can
-    /// start under its half-close; the answer is then 0, which no request carries.
+    /// start under its half-close; the answer is then 0, which no request carries. A PDU the daemon
+    /// answered with Unsupported is not written either, and also answers 0.
     uint64_t send(proto::DecodedPdu const& pdu);
 
     /// Records why the read loop ended. A protocol or transport failure is the only
@@ -420,10 +449,12 @@ class NativeClient final
     /// Outstanding image fetches: request serial → (session, imageId). The reply
     /// carries no session, so the serial is what routes it to the right screen.
     std::unordered_map<uint64_t, std::pair<uint64_t, uint32_t>> _pendingImages;
+    /// Answers the daemon's unknown PDUs, and holds back the ones it said it does not know.
+    proto::UnsupportedTracker _unsupported;
     uint64_t _nextSerial = 1;
-    vtbackend::HostIdentity _daemonIdentity; ///< @see daemonIdentity()
-    bool _connected = false;
-    bool _versionMismatch = false;
+    vtbackend::HostIdentity _daemonIdentity;         ///< @see daemonIdentity()
+    std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
+    std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
     bool _detached = false;
     bool _closing = false; ///< Set once run() has begun its orderly close; send() then writes nothing.
 };

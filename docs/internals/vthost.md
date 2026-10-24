@@ -100,26 +100,46 @@ A mirror binds the verdict into its terminal as the terminal's replica role
 its application reports — a command block's, an OSC 3008 context's, the OSC 7 one — as foreign,
 showing it but never opening or spawning into it.
 
-The handshake is an **exact match**, not a negotiation: a peer of another revision is refused, and the
-two ends must therefore speak the same one. The refusal is the same `ServerHello` whether the version
-or the token was wrong — the daemon's version and nothing else, then the drop — so a peer probing it
-learns which revision the daemon speaks, but not whether its token was right. That version is the
+Two limits ride here as well, both applying in BOTH directions: `MaxFrameSize` bounds a declared
+payload, and `MaxGridExtent` bounds an announced or proposed grid — an announced one because the
+client sizes a repaint buffer from it. Integral fields are decoded with a range check rather than a
+narrowing cast, so an out-of-range value is a `MalformedPdu` instead of a plausible small one.
+
+### Version negotiation
+
+The handshake **negotiates**: each hello states the range of protocol versions its end speaks, and the
+daemon agrees on the highest one both ranges contain (`HandshakePolicy::versions`, by default
+`proto::SupportedVersions`, today `{ 4, 4 }`), along with the capabilities both ends offer. The client
+takes any agreed version inside both ranges; the outcome is `NativeSession::negotiated()` on one end and
+`NativeClient::negotiated()` on the other. A peer whose range does not meet the daemon's is refused, and
+`proto::describe` phrases the refusal for whichever end reports it.
+
+**The refusal discloses the daemon's supported range.** It is the same `ServerHello`, byte for byte,
+whether the version or the token was wrong — for a peer from before negotiation (codecs 1 to 3) the
+version alone, for any other an agreed version of 0 beside the daemon's range, then the drop — so a
+peer probing it learns which versions the daemon speaks, but not whether its token was right. That
+discloses the daemon's whole supported *range* where a pre-negotiation daemon disclosed one `u32`;
+accepted, since the range is fixed per release and so public knowledge of it. The range is the
 diagnosis a user needs who upgraded and left an old daemon running: each end reports the other's
-(`daemon speaks codec v1, we speak v2`).
+(`the daemon speaks protocol 3, from a release before version negotiation; this client speaks 4-4`). When the two ranges
+overlap, the refusal was not about the version, and the text says so: wrong token or insufficient
+rights.
 
-The diagnosis has to survive the revisions between the two ends, so the hellos keep two layout rules.
-**Each starts with its version, and a hello of another revision is decoded no further**: whatever a
-later revision adds after the version is never read. **And each stays readable to contour 0.7.0**,
-whose daemon decodes a hello whole before it checks the version and refuses a byte too many: a
-`ClientHello` carries its fields as one blob followed by a zero byte, which that daemon reads as a
-token and no session settings, and a refusing `ServerHello` is the version alone, all of one that
-release reads. `vthost/testing/ShippedCodec.hpp` holds both hellos to that release's reader.
+**The hello layouts.** The diagnosis has to survive the revisions between the two ends, so both hellos
+lead with a `u32`, and every negotiating hello's is `proto::NegotiatingHelloMarker` (4). A hello leading
+with any other value is a pre-negotiation peer's, decoded no further than that version.
 
-**The protocol is experimental since 0.7.0**, which shipped `CodecVersion` 1. Experimental means no
-compatibility across revisions beyond that handshake. The version moves with **every change to the
-wire**: a released peer exists — a 0.7.0 daemon keeps running across an upgrade — so two builds whose
-bytes differ must refuse each other at the handshake rather than pass it and then mis-read every PDU
-after it. The revisions so far:
+| PDU | Layout |
+|-----|--------|
+| `ClientHello` | `u32 4`, one blob of `varint min, varint max, varint count + varint idents, string token, optional session settings` and whatever a later version appends, then one zero byte |
+| `ServerHello` (negotiating) | `u32 4`, one blob of `varint agreed, varint min, varint max, varint count + varint idents, string machineId, string hostname` and whatever a later version appends |
+| `ServerHello` (version alone) | the `u32` alone: the refusal a pre-negotiation client (0.7.0 on codec 1, 0.8.0 on codec 2, or codec 3) reads |
+
+Each stays readable to contour 0.7.0, whose daemon decodes a hello whole before it checks the version
+and refuses a byte too many: it reads the `ClientHello`'s blob as a token and the zero as "no session
+settings", and answers with its version. Codecs 2 and 3 consume everything after a version not their
+own. `vthost/testing/ShippedCodec.hpp` holds both hellos to 0.7.0's reader, and
+`PreNegotiationCodec.hpp` to those of codecs 2 and 3. The pre-negotiation revisions were:
 
 - 1: contour 0.7.0.
 - 2: command blocks (#1010) — each row's block id and birth time, the block records and their id
@@ -127,16 +147,64 @@ after it. The revisions so far:
 - 3: status-line extensions — a `Delta`'s status rows name the display they are for, and the
   `PermissionRequest` and `PermissionReply` PDUs.
 
-The same reasoning applies to `PduType`: the catalog is kept **contiguous** and may be renumbered with
-a version bump, so a retired PDU leaves no gap. A gap exists to keep a tag from being reused while a
-peer still remembers the old meaning, and the handshake refuses a peer of another revision before it
-sends any other PDU. The two hellos are the exception: their tags are how two revisions meet, so they
-keep 0.7.0's.
+A peer of any of them gets only the readable refusal; no old codec is kept for them.
 
-Two limits ride here as well, both applying in BOTH directions: `MaxFrameSize` bounds a declared
-payload, and `MaxGridExtent` bounds an announced or proposed grid — an announced one because the
-client sizes a repaint buffer from it. Integral fields are decoded with a range check rather than a
-narrowing cast, so an out-of-range value is a `MalformedPdu` instead of a plausible small one.
+**Capabilities gate new features; a version step is for a changed meaning.** An optional feature is a
+`proto::Capability`, offered in the hello by the end that supports it and used only when both did
+(`Negotiated::shared`). Adding one is a row in `proto::CapabilityTable`:
+
+| `Capability` | Ident | Name | Gates |
+|--------------|-------|------|-------|
+| `ExtensionPermissions` | 1 | `extension-permissions` | `PermissionRequest` / `PermissionReply`: the daemon asks an extension's permission question only of a client with which it shares it; one that did not offer it is never asked, and the question waits for another client, as it does while none is attached |
+
+A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
+costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
+meaning.
+
+**PDU bodies are append-only.** A body grows only by appending fields at its end; a decoder ignores the
+bytes after the fields it knows and gives a field missing at the end its default, so a peer older or
+newer by one appended field still reads the PDU. A field that is itself a growing record travels as a
+blob, so its own appended fields stay inside it. Both hellos' blobs follow the same rule: a new hello
+field goes at the end of the blob, gated by a capability. The catalog of `PduType` tags is kept
+**contiguous**; renumbering or retiring a tag changes existing PDUs' meaning, so it takes a version
+step. The two hellos keep 0.7.0's tags, as they are how two versions meet at all.
+
+**`Unsupported` (tag 24) answers a PDU a peer does not know.** After the handshake, a frame whose tag
+the receiver does not know is answered with `Unsupported { refusedSerial, ident }`, and the connection
+continues. Its receiver stops sending that tag for the rest of the connection
+(`NativeSession::peerRefused()`, `NativeClient::peerRefused()`, both kept by `proto::UnsupportedTracker`)
+and never answers an `Unsupported` with another. Before the handshake no PDU is answered with one: the
+daemon answers anything but a `ClientHello` with a version-alone `ServerHello` and ends the connection,
+as it did before negotiation, and the client ignores anything but the `ServerHello` — a session PDU
+arriving first is logged, not applied.
+
+**The compatibility window.** A release speaks at least the protocol versions of the previous two
+releases, counted from the first release that ships the range handshake. `proto/ReleasedVersions.hpp`
+holds the data: `ReleasedProtocols`, one row per release that shipped negotiation with the range it
+speaks, oldest first, always followed by the row `{ "unreleased", SupportedVersions }` — the build under
+development, and until the first such release the only row (a `static_assert` pins it last and to
+`SupportedVersions`) — and `LastReleaseBeforeNegotiation` (`0.8.0`). `compatibilityFloor()` is the highest
+version of the row two before the newest — the older of this build's previous two releases — or of the
+oldest row while fewer exist, and `Compatibility_test.cpp` holds
+`SupportedVersions.min` at or below it: raising the floor of what this build speaks past that is a test
+failure. `vthost/testing/RecordedTranscripts.hpp` holds, per version, the bytes that version's client
+and daemon wrote for an attach — a `ClientHello`, an accepting `ServerHello`, a `ResizeRequest` and an
+`Input` — recorded once and **never regenerated** for a shipped version; every transcript of a version
+inside `SupportedVersions` must still be served: the daemon agrees on its version, answers no
+`Unsupported`, applies the resize and the input and keeps the connection open, and a client attaches to
+its `ServerHello`.
+
+**Cutting a release: add a `ReleasedProtocols` row and record its transcripts.** Insert
+`{ "<version>", <range> }` just before the `"unreleased"` row, which stays last, and, when the
+release ships a version without a transcript, run `vthost_test "[.dump]"`, which prints this build's
+attach PDUs in the header's layout, and append them to `RecordedTranscripts.hpp`. The `[release]` test
+enforces the step: it reads `metainfo.xml` (`CONTOUR_METAINFO_PATH`) and takes the newest `<release>`
+carrying a `date=` — undated `type="development"` entries and commented-out templates are not releases.
+While that is `LastReleaseBeforeNegotiation`, the only row may be `"unreleased"`; otherwise the row
+just before the trailing `"unreleased"` one must name it, and no other `"unreleased"` row may exist,
+or the test fails with `add a ReleasedProtocols
+row for <N> and record its transcripts`. `/draft-release` stamps the date, so the test turns red on the
+release branch exactly when the row is missing.
 
 ### Status-line extensions and the font
 
@@ -169,9 +237,9 @@ absence looks like an oversight:
   session's follow state and pending-delta entry — a dead session cannot accumulate work.
 
 Adding the verb later is not a compatibility event, which is why it is not rushed in ahead of a
-release: a new tag decodes to `Invalid{ident}` on an older peer, and the exact-match handshake above
-means both ends speak the same revision regardless. What genuinely costs a version bump is changing an
-existing PDU's fields.
+release: it is a new PDU behind a capability (see [Version negotiation](#version-negotiation)), and an
+older peer that receives it anyway answers `Unsupported`. What genuinely costs a version step is changing
+an existing PDU's meaning.
 
 ### Where a split ratio lives
 
@@ -887,8 +955,8 @@ the transport knows one — so a whole connection reads as one story:
 
 ```
 [vthost.conn]        native#3: accepted
-[vthost.trace.proto] native#3 recv #1 ClientHello version=2 token=yes settings=yes (60 bytes)
-[vthost.conn]        native#3: handshake complete (codec v2)
+[vthost.trace.proto] native#3 recv #1 ClientHello versions=4-4 caps=1 token=yes settings=yes (60 bytes)
+[vthost.conn]        native#3: handshake complete (protocol v4)
 [vthost.trace.proto] native#3 send #0 Delta session=1 gen=3 seq=98 lines=7 (412 bytes)
 [error]              native#3: malformed frame (MalformedVarint); dropping the connection
 ```

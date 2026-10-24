@@ -7,13 +7,17 @@
 #include <cstdint>
 #include <limits>
 #include <ranges>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <vthost/PermissionWire.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/testing/PduExamples.hpp>
+#include <vthost/testing/PreNegotiationCodec.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 
 using namespace vthost::proto;
@@ -31,6 +35,136 @@ DecodedPdu roundTrip(DecodedPdu const& pdu, uint64_t serial = 5)
     CHECK(decoded->serial == serial);
     CHECK(decoded->consumed == stream.size());
     return decoded->pdu;
+}
+
+/// @return The bytes of @p text.
+std::vector<std::byte> bytes(std::string_view text)
+{
+    auto const view = text | std::views::transform([](char c) { return static_cast<std::byte>(c); });
+    return { view.begin(), view.end() };
+}
+
+/// @return The body of the one frame @p pdu encodes to.
+std::vector<std::byte> bodyOf(DecodedPdu const& pdu)
+{
+    auto stream = Writer {};
+    encodePdu(stream, 1, pdu);
+    auto const frame = readFrame(stream.view());
+    REQUIRE(frame.has_value());
+    return { frame->body.begin(), frame->body.end() };
+}
+
+/// A complete frame around a hand-made body.
+/// @param type The PDU type the frame carries.
+/// @param body The body bytes, as a test made them.
+/// @param serial The frame's serial.
+/// @return The frame's bytes.
+std::vector<std::byte> frameOf(PduType type, std::span<std::byte const> body, uint64_t serial = 5)
+{
+    auto stream = Writer {};
+    writeFrame(stream, serial, std::to_underlying(type), body);
+    return stream.take();
+}
+
+/// Decodes @p frame and takes the PDU of type @p T out of it, failing the test if it is anything else.
+/// @param frame One complete frame.
+/// @return The decoded PDU.
+template <typename T>
+T decodeAs(std::span<std::byte const> frame)
+{
+    auto const decoded = decodePdu(frame);
+    REQUIRE(decoded.has_value());
+    REQUIRE(std::holds_alternative<T>(decoded->pdu));
+    return std::get<T>(decoded->pdu);
+}
+
+/// Encodes @p pdu with its fields rewritten, as a peer of another revision would send them. A negotiating
+/// hello keeps its fields in a length-prefixed blob: the blob is rewritten and its length prefix with it.
+/// Any other PDU's fields are its whole body.
+/// @param pdu The PDU, as this version encodes it.
+/// @param edit Given the fields, the fields that peer sends instead.
+/// @return The frame's bytes.
+template <typename EditFn>
+std::vector<std::byte> encodeWithFieldsEdited(DecodedPdu const& pdu, EditFn edit)
+{
+    auto stream = Writer {};
+    encodePdu(stream, 1, pdu);
+    auto const frame = readFrame(stream.view());
+    REQUIRE(frame.has_value());
+    auto const type = static_cast<PduType>(frame->ident);
+
+    auto const* server = std::get_if<ServerHello>(&pdu);
+    auto const inBlob = std::holds_alternative<ClientHello>(pdu)
+                        || (server != nullptr && server->layout == HelloLayout::Negotiating);
+    if (!inBlob)
+        return frameOf(type, edit(frame->body));
+    auto in = Reader { frame->body };
+    auto const marker = in.u32();
+    auto const fields = in.blob();
+    REQUIRE(marker.has_value());
+    REQUIRE(fields.has_value());
+    auto const rest = in.bytes(in.remaining());
+    REQUIRE(rest.has_value());
+
+    auto out = Writer {};
+    out.u32(*marker);
+    out.blob(edit(*fields));
+    out.bytes(*rest);
+    return frameOf(type, out.view());
+}
+
+/// Encodes @p pdu with the tail of its fields cut off, as a peer from before they were appended would.
+/// @param pdu The PDU, as this version encodes it.
+/// @param bytesToCut Given the fields, how many bytes from their end the older peer did not send.
+/// @return The frame's bytes.
+template <typename CutFn>
+std::vector<std::byte> encodeWithFieldsCut(DecodedPdu const& pdu, CutFn bytesToCut)
+{
+    return encodeWithFieldsEdited(pdu, [&](std::span<std::byte const> fields) {
+        auto const cut = bytesToCut(fields);
+        REQUIRE(cut <= fields.size());
+        auto const kept = fields.first(fields.size() - cut);
+        return std::vector<std::byte>(kept.begin(), kept.end());
+    });
+}
+
+/// Encodes @p pdu with one byte appended to its fields, as a peer that appended a field would.
+/// @param pdu The PDU, as this version encodes it.
+/// @return The frame's bytes.
+std::vector<std::byte> encodeWithFieldAppended(DecodedPdu const& pdu)
+{
+    return encodeWithFieldsEdited(pdu, [](std::span<std::byte const> fields) {
+        auto grown = std::vector<std::byte>(fields.begin(), fields.end());
+        grown.push_back(std::byte { 0x2A });
+        return grown;
+    });
+}
+
+/// The frame as a peer from before the last appended field would send it.
+/// @param pdu The PDU, as this version encodes it.
+/// @param bytesToDrop How many bytes from the end of its fields (a hello's blob, else the body) to drop.
+/// @return The frame's bytes.
+std::vector<std::byte> encodeWithoutTrailingField(DecodedPdu const& pdu, std::size_t bytesToDrop)
+{
+    return encodeWithFieldsCut(pdu, [&](std::span<std::byte const>) { return bytesToDrop; });
+}
+
+/// The frame as a peer from before the last appended `string` field would send it: that string's varint
+/// length and its bytes dropped. Exact, not guessed: the caller names the string, and the test fails
+/// loudly unless the PDU's fields end in precisely that string.
+/// @param pdu The PDU, as this version encodes it.
+/// @param last The value of the PDU's last field, a string.
+/// @return The frame's bytes.
+std::vector<std::byte> encodeWithoutTrailingString(DecodedPdu const& pdu, std::string_view last)
+{
+    return encodeWithFieldsCut(pdu, [last](std::span<std::byte const> fields) {
+        auto encoded = Writer {};
+        encoded.string(last);
+        auto const view = encoded.view();
+        REQUIRE(fields.size() >= view.size());
+        REQUIRE(std::ranges::equal(fields.last(view.size()), view));
+        return view.size();
+    });
 }
 
 /// A Delta body up to (but excluding) its lines-count varint: the ten fixed
@@ -146,9 +280,10 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
         std::vector<DecodedPdu> {
             // Both ClientHello shapes: the settings block is optional, so the presence byte needs a
             // round trip in each direction, not just the interesting one.
-            ClientHello { .codecVersion = CodecVersion, .token = "s3cr3t-token" },
+            ClientHello { .token = "s3cr3t-token" },
             ClientHello {
-                .codecVersion = CodecVersion,
+                .versions = { 4, 7 },
+                .capabilities = CapabilitySet::of({ Capability::ExtensionPermissions }),
                 .token = "s3cr3t-token",
                 .sessionSettings =
                     WireSessionSettings { .historyLineCount = -1, // unlimited
@@ -160,8 +295,13 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                                           .wordDelimiters = " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?",
                                           .frozenModes = { WireFrozenMode { .mode = 2027, .frozenAs = 1 },
                                                            WireFrozenMode { .mode = 12, .frozenAs = 0 } } } },
-            ServerHello { .codecVersion = CodecVersion, .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" },
-            ServerHello {}, // a refusal, which names no machine
+            ServerHello { .agreedVersion = 4,
+                          .capabilities = CapabilitySet::of({ Capability::ExtensionPermissions }),
+                          .machineId = "3deb5353d3ba43d08201c136a47ead7b",
+                          .hostname = "zeta" },
+            ServerHello {}, // a negotiating refusal: agreed version 0, and no machine
+            // A refusal to a pre-negotiation client: the version alone, read back as a range of it.
+            ServerHello { .layout = HelloLayout::VersionAlone, .versions = { NegotiatingHelloMarker, NegotiatingHelloMarker } },
             Input { .session = 9, .data = { std::byte { 0x1B }, std::byte { '[' }, std::byte { 'A' } } },
             ResizeRequest { .columns = 120, .lines = 40 },
             ResizePane { .session = 9, .columns = 50, .lines = 30 },
@@ -290,6 +430,7 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
             PermissionReply { .hostId = "git@/usr/share/contour/extensions/git.wasm",
                               .digest = "5f3c",
                               .grantState = 1 },
+            Unsupported { .refusedSerial = 9, .ident = 200 },
             SessionSettingsChanged {}, // back to the daemon's own
             SessionSettingsChanged { .sessionSettings = WireSessionSettings {
                                          .historyLineCount = -1,
@@ -542,126 +683,380 @@ TEST_CASE("an unknown ident decodes to Invalid and keeps the stream in sync", "[
     CHECK(second->pdu == DecodedPdu { FetchImage { .imageId = 1 } });
 }
 
-TEST_CASE("trailing bytes after a known body are a protocol error", "[vthost][proto]")
+TEST_CASE("an Unsupported names the refused frame and its tag", "[vthost][proto][negotiation]")
 {
+    auto const unsupported = Unsupported { .refusedSerial = 9, .ident = 200 };
     auto body = Writer {};
-    body.varint(0); // FetchImage's body: session ...
-    body.u32(1);    // ... then imageId ...
-    body.u8(0);     // ... plus a stray byte
-    auto stream = Writer {};
-    writeFrame(stream, 1, std::to_underlying(PduType::FetchImage), body.view());
+    body.varint(9);
+    body.varint(200);
+    CHECK(bodyOf(DecodedPdu { unsupported })
+          == std::vector<std::byte>(body.view().begin(), body.view().end()));
+    CHECK(decodeAs<Unsupported>(frameOf(PduType::Unsupported, body.view())) == unsupported);
+    CHECK(std::to_underlying(PduType::Unsupported) == 24);
+}
 
-    CHECK(decodePdu(stream.view()).error() == DecodeError::TrailingBytes);
+TEST_CASE("a known PDU with bytes appended by a newer peer decodes as the PDU",
+          "[vthost][proto][negotiation]")
+{
+    for (auto const& [tag, pdu]: vthost::testing::everyAlternative())
+    {
+        INFO("PDU " << std::to_underlying(tag));
+        auto const frame = encodeWithFieldAppended(pdu);
+        auto const decoded = decodePdu(frame);
+        REQUIRE(decoded);
+        CHECK(decoded->pdu == pdu);
+        CHECK(decoded->consumed == frame.size());
+    }
+}
+
+TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]")
+{
+    auto const input = Input { .session = 7, .data = bytes("ls\r") };
+    auto const body = bodyOf(input);
+
+    SECTION("frameOf and decodeAs")
+    {
+        auto const frame = frameOf(PduType::Input, body, 9);
+        CHECK(decodeAs<Input>(frame) == input);
+        CHECK(decodePdu(frame)->serial == 9);
+        CHECK(decodePdu(frameOf(PduType::Input, body))->serial == 5);
+    }
+    SECTION("encodeWithoutTrailingField cuts a plain body at its end")
+    {
+        auto const frame = encodeWithoutTrailingField(input, 2);
+        auto const shortened = readFrame(frame);
+        REQUIRE(shortened);
+        CHECK(shortened->body.size() == body.size() - 2);
+        CHECK(std::ranges::equal(shortened->body, std::span { body }.first(body.size() - 2)));
+    }
+    SECTION("encodeWithoutTrailingField cuts a hello's blob and rewrites its length")
+    {
+        auto const hello =
+            ServerHello { .agreedVersion = 4, .versions = { 4, 4 }, .machineId = "m", .hostname = "zeta" };
+        auto const frame = encodeWithoutTrailingField(hello, 5); // "zeta" and its length
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 5);
+        auto expected = hello;
+        expected.hostname.clear();
+        CHECK(decodeAs<ServerHello>(frame) == expected);
+    }
+    SECTION("encodeWithoutTrailingField on a ClientHello keeps its closing byte")
+    {
+        auto const hello =
+            ClientHello { .versions = { 4, 6 },
+                          .capabilities = { .idents = { 1, 77 } },
+                          .token = "tok",
+                          .sessionSettings = WireSessionSettings { .historyLineCount = 5000 } };
+        auto const settingsSize =
+            bodyOf(
+                ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 77 } }, .token = "tok" })
+                .size();
+        auto const dropped = bodyOf(hello).size() - settingsSize + 1; // the settings, less the absent byte
+        auto expected = hello;
+        expected.sessionSettings.reset();
+        CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, dropped)) == expected);
+
+        auto const noToken = encodeWithoutTrailingField(hello, dropped + 4); // and the token "tok"
+        expected.token.clear();
+        CHECK(decodeAs<ClientHello>(noToken) == expected);
+    }
+    SECTION("encodeWithoutTrailingString drops exactly the named last string")
+    {
+        auto const hello =
+            ServerHello { .agreedVersion = 4, .versions = { 4, 4 }, .machineId = "m", .hostname = "zeta" };
+        auto const frame = encodeWithoutTrailingString(hello, "zeta");
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 5);
+        auto expected = hello;
+        expected.hostname.clear();
+        CHECK(decodeAs<ServerHello>(frame) == expected);
+    }
+    SECTION("encodeWithFieldAppended grows a plain body at its end, and a hello's blob")
+    {
+        auto const frame = encodeWithFieldAppended(input);
+        auto const grown = readFrame(frame);
+        REQUIRE(grown);
+        CHECK(grown->body.size() == body.size() + 1);
+        CHECK(grown->body.back() == std::byte { 0x2A });
+
+        auto const hello = ServerHello { .agreedVersion = 4, .versions = { 4, 4 }, .hostname = "zeta" };
+        auto const helloBody = bodyOf(hello);
+        auto const helloFrame = encodeWithFieldAppended(hello);
+        auto const grownHello = readFrame(helloFrame);
+        REQUIRE(grownHello);
+        CHECK(grownHello->body.size() == helloBody.size() + 1);
+        auto in = Reader { grownHello->body };
+        CHECK(in.u32() == NegotiatingHelloMarker);
+        auto const fields = in.blob();
+        REQUIRE(fields);
+        CHECK(fields->back() == std::byte { 0x2A });
+    }
+    SECTION("the surviving fields of a shortened plain body still decode")
+    {
+        auto const frame = encodeWithoutTrailingField(input, 0);
+        CHECK(decodeAs<Input>(frame) == input);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
-// The handshake across codec revisions: contour 0.7.0 shipped revision 1, and a daemon of that release
-// keeps running across an upgrade.
+// The handshake across protocol versions. Codecs 1 (contour 0.7.0), 2 (contour 0.8.0) and 3 predate
+// negotiation, and a daemon of any of them keeps running across an upgrade: each must read a negotiating
+// hello far enough to refuse it, and a client of each must read the refusal it is sent.
 // ---------------------------------------------------------------------------------------------
 
 namespace
 {
-/// @return The body of the one frame @p pdu encodes to.
-std::vector<std::byte> bodyOf(DecodedPdu const& pdu)
+/// @return The frame @p pdu, a negotiating hello, encodes to, with a field a newer peer appended at the
+///         end of its field blob.
+std::vector<std::byte> withAppendedField(PduType tag, DecodedPdu const& pdu)
 {
-    auto stream = Writer {};
-    encodePdu(stream, 1, pdu);
-    auto const frame = readFrame(stream.view());
-    REQUIRE(frame.has_value());
-    return { frame->body.begin(), frame->body.end() };
-}
+    auto const body = bodyOf(pdu);
+    auto in = Reader { body };
+    auto const marker = in.u32();
+    auto const fields = in.blob();
+    REQUIRE(marker.has_value());
+    REQUIRE(fields.has_value());
+    auto const rest = in.bytes(in.remaining());
+    REQUIRE(rest.has_value());
 
-/// @return A hello frame of the revision after this one, which says more after its version than this
-///         revision knows how to read.
-std::vector<std::byte> futureHello(PduType tag)
-{
-    auto body = Writer {};
-    body.u32(CodecVersion + 1);
-    body.string("a field this revision has never heard of");
-    body.u8(7);
-    auto stream = Writer {};
-    writeFrame(stream, 1, std::to_underlying(tag), body.view());
-    return stream.take();
+    auto grown = Writer {};
+    grown.bytes(*fields);
+    grown.string("a field this version has never heard of");
+    grown.varint(4711);
+    auto out = Writer {};
+    out.u32(*marker);
+    out.blob(grown.view());
+    out.bytes(*rest);
+    return frameOf(tag, out.view());
 }
 } // namespace
 
-TEST_CASE("a ClientHello reads as one to the daemon of contour 0.7.0", "[vthost][proto][handshake]")
+TEST_CASE("a negotiating ClientHello round-trips with ranges and capabilities",
+          "[vthost][proto][negotiation]")
 {
-    // That daemon reads a hello in full before it checks the version, and refuses a byte too many: only a
-    // hello it can read gets its version back, and with it the client's "daemon speaks codec v1".
-    using vthost::testing::shippedClientHelloVersion;
-    CHECK(shippedClientHelloVersion(bodyOf(ClientHello {})) == CodecVersion);
-    CHECK(shippedClientHelloVersion(bodyOf(ClientHello {
-              .token = "s3cr3t",
-              .sessionSettings = WireSessionSettings { .historyLineCount = 5000, .sixelScrolling = 0 } }))
-          == CodecVersion);
+    auto const hello =
+        ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 4711 } }, .token = "t" };
+    CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
 }
 
-TEST_CASE("a refusing ServerHello reads as one to a client of contour 0.7.0", "[vthost][proto][handshake]")
+TEST_CASE("a negotiating ServerHello round-trips with ranges and capabilities",
+          "[vthost][proto][negotiation]")
 {
-    // A refusal names no machine, so it is the version alone: what that client reads, and reports.
-    CHECK(vthost::testing::shippedServerHelloVersion(bodyOf(ServerHello {})) == CodecVersion);
+    auto const hello = ServerHello { .agreedVersion = 4,
+                                     .versions = { 4, 6 },
+                                     .capabilities = { .idents = { 1, 4711 } },
+                                     .machineId = "3deb5353d3ba43d08201c136a47ead7b",
+                                     .hostname = "zeta" };
+    CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
 }
 
-TEST_CASE("a hello of another revision decodes as far as its version", "[vthost][proto][handshake]")
+TEST_CASE("every pre-negotiation daemon reads our ClientHello far enough to refuse it",
+          "[vthost][proto][negotiation]")
 {
-    // The version is the one field every revision's hello shares; what follows it is that revision's own, and
-    // the handshake refuses the peer on the version alone.
-    SECTION("contour 0.7.0's ClientHello, its settings in that release's layout")
+    // Each reads a hello whole before it checks the version, 0.7.0 refusing a byte too many: only a hello
+    // it reads gets its version back, and with it the client's "daemon speaks codec vN".
+    auto const body = bodyOf(ClientHello {});
+    CHECK(vthost::testing::shippedClientHelloVersion(body) == NegotiatingHelloMarker); // 0.7.0
+    CHECK(vthost::testing::codec2ClientHelloVersion(body) == NegotiatingHelloMarker);
+    CHECK(vthost::testing::codec3ClientHelloVersion(body) == NegotiatingHelloMarker);
+
+    // Session settings and capabilities change nothing about that.
+    auto const full = bodyOf(ClientHello {
+        .capabilities = CapabilitySet::of({ Capability::ExtensionPermissions }),
+        .token = "s3cr3t",
+        .sessionSettings = WireSessionSettings { .historyLineCount = 5000, .sixelScrolling = 0 } });
+    CHECK(vthost::testing::shippedClientHelloVersion(full) == NegotiatingHelloMarker);
+    CHECK(vthost::testing::codec2ClientHelloVersion(full) == NegotiatingHelloMarker);
+    CHECK(vthost::testing::codec3ClientHelloVersion(full) == NegotiatingHelloMarker);
+}
+
+TEST_CASE("a pre-negotiation client reads a VersionAlone ServerHello", "[vthost][proto][negotiation]")
+{
+    auto const body = bodyOf(ServerHello { .layout = HelloLayout::VersionAlone });
+    CHECK(vthost::testing::shippedServerHelloVersion(body) == NegotiatingHelloMarker);
+    CHECK(vthost::testing::codec2ServerHelloVersion(body) == NegotiatingHelloMarker);
+    CHECK(vthost::testing::codec3ServerHelloVersion(body) == NegotiatingHelloMarker);
+}
+
+TEST_CASE("a VersionAlone ServerHello is its version and nothing else", "[vthost][proto][negotiation]")
+{
+    // Whatever else the struct holds stays off the wire: a refusal names no machine.
+    auto const body =
+        bodyOf(ServerHello { .layout = HelloLayout::VersionAlone,
+                             .agreedVersion = 4,
+                             .capabilities = CapabilitySet::of({ Capability::ExtensionPermissions }),
+                             .machineId = "3deb5353d3ba43d08201c136a47ead7b",
+                             .hostname = "zeta" });
+    CHECK(body.size() == sizeof(uint32_t));
+}
+
+TEST_CASE("an old daemon's answer decodes as VersionAlone with its version", "[vthost][proto][negotiation]")
+{
+    auto const answerOf = [](std::vector<std::byte> const& frame) {
+        auto const decoded = decodePdu(frame);
+        REQUIRE(decoded);
+        return std::get<ServerHello>(decoded->pdu);
+    };
+    SECTION("codec 3")
     {
-        auto const decoded = decodePdu(vthost::testing::shippedClientHello(4));
-        REQUIRE(decoded.has_value());
-        CHECK(decoded->pdu
-              == DecodedPdu { ClientHello { .codecVersion = vthost::testing::ShippedCodecVersion } });
+        auto const hello = answerOf(vthost::testing::codec3ServerHello(1));
+        CHECK(hello.layout == HelloLayout::VersionAlone);
+        CHECK(hello.codecVersion == 3u);
+        CHECK(hello.versions == VersionRange { 3, 3 });
+        CHECK(hello.agreedVersion == 0u);
     }
-    SECTION("contour 0.7.0's ServerHello")
+    SECTION("codec 2")
     {
-        auto const decoded = decodePdu(vthost::testing::shippedServerHello(4));
-        REQUIRE(decoded.has_value());
-        CHECK(decoded->pdu
-              == DecodedPdu { ServerHello { .codecVersion = vthost::testing::ShippedCodecVersion } });
+        auto const hello = answerOf(vthost::testing::codec2ServerHello(1));
+        CHECK(hello.layout == HelloLayout::VersionAlone);
+        CHECK(hello.codecVersion == 2u);
     }
-    SECTION("a later revision's ClientHello")
+    SECTION("contour 0.7.0")
     {
-        auto const decoded = decodePdu(futureHello(PduType::ClientHello));
-        REQUIRE(decoded.has_value());
-        CHECK(decoded->pdu == DecodedPdu { ClientHello { .codecVersion = CodecVersion + 1 } });
+        auto const hello = answerOf(vthost::testing::shippedServerHello(1));
+        CHECK(hello.layout == HelloLayout::VersionAlone);
+        CHECK(hello.codecVersion == vthost::testing::ShippedProtocolVersion);
     }
-    SECTION("a later revision's ServerHello")
+    SECTION("a codec 3 daemon that names its machine")
     {
-        auto const decoded = decodePdu(futureHello(PduType::ServerHello));
-        REQUIRE(decoded.has_value());
-        CHECK(decoded->pdu == DecodedPdu { ServerHello { .codecVersion = CodecVersion + 1 } });
+        // What follows another codec's version is that codec's own, consumed unread.
+        auto body = Writer {};
+        body.u32(3);
+        body.string("3deb5353d3ba43d08201c136a47ead7b");
+        body.string("zeta");
+        auto const hello = answerOf(frameOf(PduType::ServerHello, body.view()));
+        CHECK(hello.layout == HelloLayout::VersionAlone);
+        CHECK(hello.codecVersion == 3u);
+        CHECK(hello.machineId.empty());
+    }
+    SECTION("our marker with nothing after it")
+    {
+        auto body = Writer {};
+        body.u32(NegotiatingHelloMarker);
+        auto const hello = answerOf(frameOf(PduType::ServerHello, body.view()));
+        CHECK(hello.layout == HelloLayout::VersionAlone);
+        CHECK(hello.codecVersion == NegotiatingHelloMarker);
+        CHECK(hello.agreedVersion == 0u);
     }
 }
 
-TEST_CASE("a hello of this revision is still read to its last byte", "[vthost][proto][handshake]")
+TEST_CASE("an old client's hello decodes with a single-version range", "[vthost][proto][negotiation]")
 {
-    // Leniency is for another revision's fields only: this revision's own hello is held to its layout.
+    auto const versionsOf = [](std::vector<std::byte> const& frame) {
+        auto const decoded = decodePdu(frame);
+        REQUIRE(decoded);
+        auto const& hello = std::get<ClientHello>(decoded->pdu);
+        // Nothing past the version is read: a token or settings of another codec are not ours to judge.
+        CHECK(hello.token.empty());
+        CHECK_FALSE(hello.sessionSettings.has_value());
+        CHECK(hello.capabilities.idents.empty());
+        return hello.versions;
+    };
+    CHECK(versionsOf(vthost::testing::codec3ClientHello(1)) == VersionRange { 3, 3 });
+    CHECK(versionsOf(vthost::testing::codec2ClientHello(1)) == VersionRange { 2, 2 });
+    CHECK(versionsOf(vthost::testing::shippedClientHello(1)) == VersionRange { 1, 1 });
+}
+
+TEST_CASE("a ClientHello leading with any value but the marker decodes as that version alone",
+          "[vthost][proto][negotiation]")
+{
+    // Not only the smaller values of codecs 1 to 3: the marker is the one value that announces the
+    // negotiating layout, and anything else is read no further than its version.
     auto body = Writer {};
+    body.u32(NegotiatingHelloMarker + 1);
+    body.string("a layout this version has never heard of");
+    auto const decoded = decodePdu(frameOf(PduType::ClientHello, body.view()));
+    REQUIRE(decoded.has_value());
+    auto const& hello = std::get<ClientHello>(decoded->pdu);
+    CHECK(hello.codecVersion == 5u);
+    CHECK(hello.versions == VersionRange { 5, 5 });
+    CHECK(hello.token.empty());
+}
+
+TEST_CASE("a hello with fields appended by a newer peer still decodes", "[vthost][proto][negotiation]")
+{
+    SECTION("ClientHello")
+    {
+        auto const hello =
+            ClientHello { .versions = { 4, 9 },
+                          .capabilities = { .idents = { 1, 77 } },
+                          .token = "s3cr3t",
+                          .sessionSettings = WireSessionSettings { .historyLineCount = 5000 } };
+        auto const decoded = decodePdu(withAppendedField(PduType::ClientHello, hello));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->pdu == DecodedPdu { hello });
+    }
+    SECTION("ServerHello")
+    {
+        auto const hello = ServerHello { .agreedVersion = 4,
+                                         .versions = { 4, 9 },
+                                         .capabilities = { .idents = { 1, 77 } },
+                                         .machineId = "3deb5353d3ba43d08201c136a47ead7b",
+                                         .hostname = "zeta" };
+        auto const decoded = decodePdu(withAppendedField(PduType::ServerHello, hello));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded->pdu == DecodedPdu { hello });
+    }
+}
+
+TEST_CASE("a negotiating hello is still held to its frame", "[vthost][proto][negotiation]")
+{
+    // What the frame says around the blob is checked; only bytes AFTER the fields it knows are skipped.
     auto fields = Writer {};
+    fields.varint(4); // min
+    fields.varint(4); // max
+    fields.varint(0); // no capabilities
     fields.string("s3cr3t");
     fields.u8(0); // no session settings
+    auto body = Writer {};
+    auto tag = PduType::ClientHello;
 
     SECTION("a ClientHello whose closing byte is not zero")
     {
-        body.u32(CodecVersion);
+        body.u32(NegotiatingHelloMarker);
         body.blob(fields.view());
         body.u8(1);
     }
-    SECTION("a ClientHello whose fields run past their blob")
+    SECTION("a ClientHello claiming more capabilities than its blob holds")
     {
-        fields.u8(0);
-        body.u32(CodecVersion);
-        body.blob(fields.view());
+        auto lying = Writer {};
+        lying.varint(4);
+        lying.varint(4);
+        lying.varint(1000);
+        body.u32(NegotiatingHelloMarker);
+        body.blob(lying.view());
         body.u8(0);
     }
-    auto stream = Writer {};
-    writeFrame(stream, 1, std::to_underlying(PduType::ClientHello), body.view());
-
-    auto const decoded = decodePdu(stream.view());
+    SECTION("a ClientHello whose version does not fit 32 bits")
+    {
+        auto wide = Writer {};
+        wide.varint(4);
+        wide.varint(uint64_t { 1 } << 40);
+        wide.varint(0);
+        wide.string("");
+        wide.u8(0);
+        body.u32(NegotiatingHelloMarker);
+        body.blob(wide.view());
+        body.u8(0);
+    }
+    auto const decoded = decodePdu(frameOf(tag, body.view()));
     REQUIRE_FALSE(decoded.has_value());
     CHECK(decoded.error() != DecodeError::NeedMoreData);
+}
+
+TEST_CASE("bytes after a hello's known fields are a newer peer's", "[vthost][proto][negotiation]")
+{
+    SECTION("a ClientHello with bytes after its closing byte")
+    {
+        auto body = bodyOf(ClientHello { .token = "tok" });
+        body.push_back(std::byte { 0x2A });
+        CHECK(decodeAs<ClientHello>(frameOf(PduType::ClientHello, body)).token == "tok");
+    }
+    SECTION("a ServerHello with bytes after its blob")
+    {
+        auto const hello = ServerHello { .agreedVersion = 4, .versions = { 4, 4 }, .machineId = "m" };
+        auto body = bodyOf(hello);
+        body.push_back(std::byte { 0x2A });
+        CHECK(decodeAs<ServerHello>(frameOf(PduType::ServerHello, body)) == hello);
+    }
 }
 
 TEST_CASE("a complete frame whose body runs short is malformed, not incomplete", "[vthost][proto]")
@@ -1141,9 +1536,9 @@ TEST_CASE("a command-block record's optional fields travel only when present", "
 
 TEST_CASE("a record naming a presence bit this build does not assign is malformed", "[vthost][proto][blocks]")
 {
-    // The handshake admits only a peer of this CodecVersion, which assigns no such bit: one comes from a
-    // broken or hostile peer, and whatever it wrote for that bit would put every later read out of step.
-    // The encoder writes the mask as given, and fields only for the bits it knows.
+    // The handshake admits only a peer of a version this build speaks, which assigns no such bit: one comes
+    // from a broken or hostile peer, and whatever it wrote for that bit would put every later read out of
+    // step. The encoder writes the mask as given, and fields only for the bits it knows.
     auto const decodeOf = [](DecodedPdu const& pdu) {
         auto stream = Writer {};
         encodePdu(stream, 1, pdu);

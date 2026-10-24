@@ -911,12 +911,11 @@ Grants are per-extension-version-and-permission, listable and revocable through
 ## 7. Versioning and compatibility
 
 Extensions are third-party, which makes this the one place where the design must *not* copy the
-daemon protocol. `vthost`'s handshake is deliberately an **exact match** — a peer one version
-away is refused — and that is correct there, because both ends are the same build. That protocol is
-experimental since 0.7.0, which shipped `CodecVersion` 1, and the version moves once per release whose
-wire differs — it is 2 now — so a daemon and its clients are rebuilt together; only the handshake stays
-readable across revisions, so that a refusal can say which one each end speaks. Extensions cannot be
-the same build as the terminal, so this handshake **negotiates**.
+daemon protocol. `vthost`'s handshake negotiates the highest protocol version both ends' ranges
+share, but a release need only speak the versions of the previous two releases
+(`proto::ReleasedProtocols`) — correct there, because a daemon and its clients are contour builds,
+upgraded together. Extensions cannot be the same build as the terminal, so this handshake
+**negotiates** per world, by semantic version.
 
 - **Per-world semantic version.** `contour:terminal@0.1.0` and `contour:ui@0.1.0` version
   independently, so a UI addition does not invalidate every session-side extension.

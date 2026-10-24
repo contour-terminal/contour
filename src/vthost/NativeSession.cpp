@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstddef>
 #include <expected>
+#include <format>
 #include <functional>
 #include <iterator>
 #include <mutex>
@@ -220,6 +221,22 @@ namespace
         }
     }
 
+    /// The answer to a hello refused for its version or its token -- the same for both, so a peer
+    /// probing the daemon cannot tell which it got wrong.
+    /// @param hello The refused hello.
+    /// @param ours The versions this endpoint speaks.
+    /// @return The version alone for a pre-negotiation peer, which reads nothing more; otherwise the
+    ///         agreed version 0 and @p ours, which name no capability and no machine.
+    [[nodiscard]] proto::ServerHello refusalFor(proto::ClientHello const& hello, proto::VersionRange ours)
+    {
+        if (proto::isPreNegotiation(hello.versions))
+            return proto::ServerHello { .layout = proto::HelloLayout::VersionAlone };
+        return proto::ServerHello { .layout = proto::HelloLayout::Negotiating,
+                                    .agreedVersion = 0,
+                                    .versions = ours,
+                                    .capabilities = {} };
+    }
+
 } // namespace
 
 NativeSession::NativeSession(core::net::EventLoop& loop,
@@ -227,14 +244,14 @@ NativeSession::NativeSession(core::net::EventLoop& loop,
                              ConnectionId id,
                              std::unique_ptr<core::net::ISocket> connection,
                              std::size_t maxWriteQueueBytes,
-                             std::string expectedToken):
+                             NativeSessionServices services):
     _loop(loop),
     _host(host),
     _connection(std::move(connection)),
     _writer(loop, _connection.get(), maxWriteQueueBytes),
     _snapshotPieceBytes(snapshotPieceBytes(maxWriteQueueBytes)),
     _id(std::move(id)),
-    _expectedToken(std::move(expectedToken))
+    _services(std::move(services))
 {
     // Every model change (the host fans them here once subscribed) re-pushes the
     // whole layout — infrequent, so a full resend beats a granular diff.
@@ -247,6 +264,12 @@ void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t
 {
     if (_closed)
         return;
+    if (_unsupported.peerRefused(proto::typeOf(pdu)))
+    {
+        if (protocolTraceLog)
+            protocolTraceLog()("{} not sending {}: the client does not know it", _id, proto::describe(pdu));
+        return;
+    }
     auto sink = proto::Writer {};
     proto::encodePdu(sink, serial, pdu);
     auto const bytes = sink.view();
@@ -279,7 +302,7 @@ void NativeSession::send(uint64_t serial, proto::DecodedPdu const& pdu, uint64_t
 
 void NativeSession::sessionScreenUpdated(SessionId session)
 {
-    if (!_handshaken || _closed)
+    if (!_negotiated || _closed)
         return;
     queueIncrement(session);
 }
@@ -316,7 +339,7 @@ void NativeSession::sessionResized(SessionId session)
     // inline, and not through the 20ms debounce either: one client's resize re-projects every
     // pane of every window, so this arrives once PER PANE within a single callback. Pushing each
     // one inline is the same burst the attach walk used to be, with the same outcome.
-    if (!_handshaken || _closed || !_followed.contains(session.value))
+    if (!_negotiated || _closed || !_followed.contains(session.value))
         return;
     requestSnapshot(session);
 }
@@ -343,14 +366,14 @@ void NativeSession::sessionCopyToClipboard(SessionId session, std::string const&
 
 void NativeSession::sessionPermissionRequested(SessionId /*session*/, proto::PermissionRequest const& request)
 {
-    if (!_handshaken || _closed)
+    if (!asksPermissions() || _closed)
         return;
     send(0, proto::DecodedPdu { request });
 }
 
 void NativeSession::emitSessionEvent(proto::SessionEventPdu const& event)
 {
-    if (!_handshaken || _closed)
+    if (!_negotiated || _closed)
         return;
     // Widening the narrow event set into the catalog variant the encoder speaks.
     std::visit([this](auto const& alternative) { send(0, proto::DecodedPdu { alternative }); }, event);
@@ -358,7 +381,7 @@ void NativeSession::emitSessionEvent(proto::SessionEventPdu const& event)
 
 void NativeSession::pushLayout()
 {
-    if (!_handshaken || _closed)
+    if (!_negotiated || _closed)
         return;
     // One LayoutState per daemon window (B4) — the client opens a GUI window for
     // each and reconciles its tabs/splits independently.
@@ -1046,7 +1069,7 @@ bool NativeSession::snapshotPending(SessionId session) const noexcept
 
 void NativeSession::requestSnapshot(SessionId session)
 {
-    if (!_handshaken || _closed)
+    if (!_negotiated || _closed)
         return;
     // Coalesced against the QUEUE only, not against the session being streamed: a request that
     // arrives mid-run describes state the run in flight was captured before, so it earns a fresh
@@ -1236,6 +1259,22 @@ core::async::Task<void> NativeSession::sendSnapshotPieces(proto::Delta delta, Se
 
 void NativeSession::handlePdu(proto::DecodedFrame const& frame)
 {
+    // An unknown PDU from a newer client is answered rather than dropped, and an Unsupported it sent is
+    // taken note of -- neither is dispatched further.
+    auto const handling = _unsupported.handle(frame);
+    switch (handling.verdict)
+    {
+        case proto::UnsupportedVerdict::NotConcerned: break;
+        case proto::UnsupportedVerdict::Answer:
+            send(frame.serial, proto::DecodedPdu { handling.pdu });
+            return;
+        case proto::UnsupportedVerdict::Refused:
+            connectionLog()("{}: the client does not know PDU {}; not sending it again",
+                            _id,
+                            proto::nameOfIdent(handling.pdu.ident));
+            return;
+        case proto::UnsupportedVerdict::AlreadyRefused: return;
+    }
     if (auto const* input = std::get_if<proto::Input>(&frame.pdu))
     {
         if (_host.terminal(SessionId { input->session }) == nullptr)
@@ -1423,32 +1462,36 @@ void NativeSession::adoptClientSessionSettings(std::optional<proto::WireSessionS
 
 bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
 {
+    auto const& policy = _services.handshake;
     auto const* hello = std::get_if<proto::ClientHello>(&frame.pdu);
-    if (hello == nullptr || hello->codecVersion != proto::CodecVersion)
+    if (hello == nullptr)
     {
-        if (hello == nullptr)
-            errorLog()("{}: handshake rejected: expected ClientHello, got {}",
-                       _id,
-                       proto::toString(proto::typeOf(frame.pdu)));
-        else
-            errorLog()("{}: handshake rejected: peer speaks codec v{}, we speak v{}",
-                       _id,
-                       hello->codecVersion,
-                       proto::CodecVersion);
-        // Answer with our version so the peer can report the mismatch, then close.
-        send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+        errorLog()("{}: handshake rejected: expected ClientHello, got {}",
+                   _id,
+                   proto::toString(proto::typeOf(frame.pdu)));
+        // Whatever sent it, the version alone is what every pre-negotiation client reads.
+        send(frame.serial,
+             proto::DecodedPdu { proto::ServerHello { .layout = proto::HelloLayout::VersionAlone } });
         return false;
     }
-    // Preshared-token auth (empty _expectedToken accepts any — the AF_UNIX default,
-    // where the socket's permissions are the gate). A mismatch answers the version
-    // handshake and drops, exactly as a version mismatch does, revealing nothing.
-    if (!_expectedToken.empty() && !core::net::constantTimeEquals(hello->token, _expectedToken))
+    auto const agreed = proto::negotiate(policy.versions, hello->versions);
+    if (!agreed)
     {
-        // Server-side only, and WITHOUT either token: the wire answer above deliberately makes
+        errorLog()(
+            "{}: handshake rejected: {}", _id, proto::describe(agreed.error(), proto::PeerRole::Client));
+        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, policy.versions) });
+        return false;
+    }
+    // Preshared-token auth (an empty token accepts any — the AF_UNIX default, where the socket's
+    // permissions are the gate). A mismatch is answered with the very bytes a version refusal of this
+    // hello is, and dropped, revealing nothing.
+    if (!policy.expectedToken.empty() && !core::net::constantTimeEquals(hello->token, policy.expectedToken))
+    {
+        // Server-side only, and WITHOUT either token: the wire answer deliberately makes
         // this indistinguishable from a version mismatch, so the log must not undo on disk what
         // the protocol is careful not to reveal on the network.
         errorLog()("{}: handshake rejected: preshared token mismatch", _id);
-        send(frame.serial, proto::DecodedPdu { proto::ServerHello {} });
+        send(frame.serial, proto::DecodedPdu { refusalFor(*hello, policy.versions) });
         return false;
     }
     // Only an accepted client learns which machine the daemon runs on: what every record's locality was
@@ -1456,11 +1499,15 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     // id derived for this application, never the machine's own, which machine-id(5) keeps confidential.
     auto stated = appSpecificIdentity(_host.identity().view());
     send(frame.serial,
-         proto::DecodedPdu { proto::ServerHello { .codecVersion = proto::CodecVersion,
+         proto::DecodedPdu { proto::ServerHello { .agreedVersion = *agreed,
+                                                  .versions = policy.versions,
+                                                  .capabilities = policy.capabilities,
                                                   .machineId = std::move(stated.machineId),
                                                   .hostname = std::move(stated.hostname) } });
-    _handshaken = true;
-    connectionLog()("{}: handshake complete (codec v{})", _id, proto::CodecVersion);
+    _negotiated = proto::Negotiated { .version = *agreed,
+                                      .peerCapabilities = hello->capabilities,
+                                      .shared = proto::intersect(policy.capabilities, hello->capabilities) };
+    connectionLog()("{}: handshake complete (protocol v{})", _id, *agreed);
 
     // Adopted BEFORE the spawn below: that session exists because THIS client attached, so it
     // inherits this client's profile like any tab the client goes on to open.
@@ -1489,9 +1536,11 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
 
     // The questions still open: asked while no client was attached, or left unanswered by one that was --
     // a dismissed prompt sends nothing. A status-line extension waits for an answer, its command calls
-    // failing as pending meanwhile. A client is sent each once, as it opens or as the client attaches.
-    for (auto const& request: _host.pendingPermissionRequests())
-        send(0, proto::DecodedPdu { request });
+    // failing as pending meanwhile. A client is sent each once, as it opens or as the client attaches --
+    // one that cannot answer is sent none, and they wait for another, as with no client attached.
+    if (asksPermissions())
+        for (auto const& request: _host.pendingPermissionRequests())
+            send(0, proto::DecodedPdu { request });
     return true;
 }
 
@@ -1521,7 +1570,7 @@ core::async::Task<void> NativeSession::run()
                     "{} {}",
                     _id,
                     proto::traceLine(proto::Direction::Recv, frame.serial, frame.pdu, frame.consumed));
-            if (!_handshaken)
+            if (!_negotiated)
                 return completeHandshake(frame);
             handlePdu(frame);
             return true;
@@ -1558,27 +1607,29 @@ namespace
                                               SessionHost* host,
                                               ConnectionId id,
                                               std::unique_ptr<core::net::ISocket> connection,
-                                              std::string expectedToken)
+                                              NativeSessionServices services)
     {
         auto session = std::make_unique<NativeSession>(*loop,
                                                        *host,
                                                        std::move(id),
                                                        std::move(connection),
                                                        NativeSession::DefaultWriteQueueBytes,
-                                                       std::move(expectedToken));
+                                                       std::move(services));
         auto const subscription = makeScopedStreamSubscription(*host, *session);
         auto const layoutSubscription = makeScopedModelSubscription(*host, session->layoutObserver());
         co_await session->run();
     }
 } // namespace
 
-ConnectionHandler makeNativeHandler(core::net::EventLoop& loop, SessionHost& host, std::string expectedToken)
+ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
+                                    SessionHost& host,
+                                    NativeSessionServices services)
 {
     // NOT a coroutine itself: it merely constructs the free coroutine's task,
     // so the captures never outlive an activation frame.
-    return [&loop, &host, expectedToken = std::move(expectedToken)](
-               ConnectionId id, std::unique_ptr<core::net::ISocket> connection) {
-        return serveNativeClient(&loop, &host, std::move(id), std::move(connection), expectedToken);
+    return [&loop, &host, services = std::move(services)](ConnectionId id,
+                                                          std::unique_ptr<core::net::ISocket> connection) {
+        return serveNativeClient(&loop, &host, std::move(id), std::move(connection), services);
     };
 }
 

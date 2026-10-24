@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <string>
 #include <utility>
 #include <variant>
 
@@ -12,6 +13,23 @@ namespace vthost::proto
 
 namespace
 {
+    /// @return @p range as `min-max`.
+    [[nodiscard]] std::string formatRange(VersionRange range)
+    {
+        return std::format("{}-{}", range.min, range.max);
+    }
+
+    /// @return The idents of @p capabilities, comma-separated, or `none`.
+    [[nodiscard]] std::string formatCapabilities(CapabilitySet const& capabilities)
+    {
+        if (capabilities.idents.empty())
+            return "none";
+        auto text = std::string {};
+        for (auto const ident: capabilities.idents)
+            text += std::format("{}{}", text.empty() ? "" : ",", ident);
+        return text;
+    }
+
     /// The trace half of the catalog: one row per tag, carrying BOTH the name and how to
     /// summarise the payload — so adding a PDU is one row here, not a row in one table and an
     /// overload somewhere else. The captureless lambdas decay to plain function pointers via
@@ -36,8 +54,9 @@ namespace
                        // The token authenticates the peer: report its PRESENCE, never its bytes. The
                        // session settings get the same treatment for a different reason -- they are
                        // a block of the user's configuration, and a trace is not a config dump.
-                       return std::format("version={} token={} settings={}",
-                                          value.codecVersion,
+                       return std::format("versions={} caps={} token={} settings={}",
+                                          formatRange(value.versions),
+                                          formatCapabilities(value.capabilities),
                                           value.token.empty() ? "no" : "yes",
                                           value.sessionSettings ? "yes" : "no");
                    } },
@@ -45,7 +64,17 @@ namespace
                    "ServerHello",
                    +[](DecodedPdu const& pdu) {
                        // The daemon's machine id and host name name a machine: left out altogether.
-                       return std::format("version={}", std::get<ServerHello>(pdu).codecVersion);
+                       auto const& value = std::get<ServerHello>(pdu);
+                       switch (value.layout)
+                       {
+                           case HelloLayout::VersionAlone:
+                               return std::format("layout=version-alone version={}", value.codecVersion);
+                           case HelloLayout::Negotiating: break;
+                       }
+                       return std::format("layout=negotiating agreed={} versions={} caps={}",
+                                          value.agreedVersion,
+                                          formatRange(value.versions),
+                                          formatCapabilities(value.capabilities));
                    } },
         TraceRow { PduType::Input,
                    "Input",
@@ -239,6 +268,12 @@ namespace
                        auto const& value = std::get<PermissionReply>(pdu);
                        return std::format("digest={} grant={}", value.digest, value.grantState);
                    } },
+        TraceRow { PduType::Unsupported,
+                   "Unsupported",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<Unsupported>(pdu);
+                       return std::format("refused={} ident={}", value.refusedSerial, value.ident);
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,
@@ -257,6 +292,15 @@ std::string_view toString(PduType type) noexcept
 {
     auto const* const row = findRow(type);
     return row != nullptr ? row->name : std::string_view { "Unknown" };
+}
+
+std::string nameOfIdent(std::uint64_t ident)
+{
+    // Invalid stands for an off-catalog ident; it is no tag of its own.
+    auto const row = std::ranges::find_if(TraceTable, [ident](TraceRow const& candidate) {
+        return candidate.tag != PduType::Invalid && std::to_underlying(candidate.tag) == ident;
+    });
+    return row != TraceTable.end() ? std::string { row->name } : std::to_string(ident);
 }
 
 std::string summarize(DecodedPdu const& pdu)

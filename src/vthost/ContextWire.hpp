@@ -94,8 +94,9 @@ namespace detail
 
 static_assert(detail::contextFieldBitsAreAsPinned(),
               "A ContextField's bit value changed. Those bits travel on the native wire verbatim "
-              "inside a context record's `present`, so an older peer would read the wrong field: bump "
-              "proto::CodecVersion (or restore the bit) and update the pin above.");
+              "inside a context record's `present`, so an older peer would read the wrong field: add a "
+              "protocol version step and gate by the negotiated version (or restore the bit), and "
+              "update the pin above.");
 static_assert(PinnedContextFieldBits.size() == vtbackend::ContextFieldList.size(),
               "A ContextField was added or removed. Add (or drop) its row in PinnedContextFieldBits "
               "and in proto::ContextStringFields/ContextVarintFields, which together freeze the wire "

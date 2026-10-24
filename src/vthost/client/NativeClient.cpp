@@ -398,6 +398,12 @@ uint64_t NativeClient::send(proto::DecodedPdu const& pdu)
 {
     if (_closing)
         return 0;
+    if (_unsupported.peerRefused(proto::typeOf(pdu)))
+    {
+        if (protocolTraceLog)
+            protocolTraceLog()("attach not sending {}: the daemon does not know it", proto::describe(pdu));
+        return 0;
+    }
     auto const serial = _nextSerial++;
     auto sink = proto::Writer {};
     proto::encodePdu(sink, serial, pdu);
@@ -438,6 +444,10 @@ void NativeClient::fetchImage(uint64_t session, uint32_t imageId)
 {
     auto const serial =
         send(proto::DecodedPdu { proto::FetchImage { .session = session, .imageId = imageId } });
+    // A fetch that was not sent awaits nothing -- and 0 is the serial of every frame the daemon pushes
+    // unasked, so recording it would route one of those to this screen.
+    if (serial == 0)
+        return;
     // The ImageData/ImageGone answer carries no session — remember which one this
     // serial belongs to so the reply lands in the right screen's cache.
     _pendingImages.insert_or_assign(serial, std::pair { session, imageId });
@@ -486,6 +496,12 @@ void NativeClient::performOperation(proto::PerformOperation request)
 
 void NativeClient::answerPermission(std::string hostId, std::string digest, GrantState answer)
 {
+    // Only a daemon that offered to ask reads an answer; to any other it is a PDU it did not expect.
+    if (!_negotiated || !_negotiated->shared.contains(proto::Capability::ExtensionPermissions))
+    {
+        clientLog()("attach: not answering {}: the daemon did not offer to ask", hostId);
+        return;
+    }
     send(proto::DecodedPdu { proto::PermissionReply { .hostId = std::move(hostId),
                                                       .digest = std::move(digest),
                                                       .grantState = std::to_underlying(answer) } });
@@ -509,24 +525,30 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
 
     if (auto const* hello = std::get_if<proto::ServerHello>(&pdu))
     {
-        if (hello->codecVersion == proto::CodecVersion)
-        {
-            // From the first hello only: the identity is the connection's, and a mirror already judged
-            // by it must not see it change under its feet.
-            if (!_connected)
-                _daemonIdentity =
-                    vtbackend::HostIdentity { .machineId = hello->machineId, .hostname = hello->hostname };
-            _connected = true;
-            clientLog()("attach: connected (codec v{})", proto::CodecVersion);
-        }
-        else
-        {
-            errorLog()("attach: daemon speaks codec v{}, we speak v{}; detaching",
-                       hello->codecVersion,
-                       proto::CodecVersion);
-            _versionMismatch = true;
-        }
+        handleServerHello(*hello);
         return;
+    }
+    // Before a ServerHello negotiated, nothing is applied and nothing is answered: the handshake has not
+    // said what either end speaks, so a session PDU might be read in a protocol the daemon does not speak.
+    if (!_negotiated)
+    {
+        errorLog()("attach: ignoring {} before the handshake (serial {})",
+                   proto::toString(proto::typeOf(pdu)),
+                   frame.serial);
+        return;
+    }
+    // An unknown PDU from a newer daemon is answered rather than dropped, and an Unsupported the daemon
+    // sent is taken note of -- neither is dispatched further.
+    auto const handling = _unsupported.handle(frame);
+    switch (handling.verdict)
+    {
+        case proto::UnsupportedVerdict::NotConcerned: break;
+        case proto::UnsupportedVerdict::Answer: send(proto::DecodedPdu { handling.pdu }); return;
+        case proto::UnsupportedVerdict::Refused:
+            clientLog()("attach: the daemon does not know PDU {}; not sending it again",
+                        proto::nameOfIdent(handling.pdu.ident));
+            return;
+        case proto::UnsupportedVerdict::AlreadyRefused: return;
     }
     if (auto const* state = std::get_if<proto::SessionState>(&pdu))
     {
@@ -615,6 +637,56 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         "attach: ignoring unexpected {} (serial {})", proto::toString(proto::typeOf(pdu)), frame.serial);
 }
 
+std::expected<proto::Negotiated, proto::HandshakeRefusal> NativeClient::judge(
+    proto::ServerHello const& hello) const
+{
+    auto const ours = _handshake.versions;
+    // A pre-negotiation daemon states its codec version alone, and with it refuses this client.
+    if (hello.layout == proto::HelloLayout::VersionAlone)
+        return std::unexpected { proto::HandshakeRefusal {
+            .ours = ours, .theirs = { .min = hello.codecVersion, .max = hello.codecVersion } } };
+    auto const refused =
+        std::unexpected { proto::HandshakeRefusal { .ours = ours, .theirs = hello.versions } };
+    if (hello.agreedVersion == 0)
+        return refused;
+    // Which version both ends speak the daemon picks, by a policy of its own; what this end holds it to is
+    // that both do. A pick outside either range is refused as what it is: a daemon of that version alone.
+    auto const agreed = hello.agreedVersion;
+    auto const within = [agreed](proto::VersionRange range) {
+        return range.min <= agreed && agreed <= range.max;
+    };
+    if (!within(ours) || !within(hello.versions))
+    {
+        errorLog()("attach: the daemon agreed on protocol v{}, which not both ends speak", agreed);
+        return std::unexpected { proto::HandshakeRefusal { .ours = ours,
+                                                           .theirs = { .min = agreed, .max = agreed } } };
+    }
+    return proto::Negotiated { .version = hello.agreedVersion,
+                               .peerCapabilities = hello.capabilities,
+                               .shared = proto::intersect(_handshake.capabilities, hello.capabilities) };
+}
+
+void NativeClient::handleServerHello(proto::ServerHello const& hello)
+{
+    // From the first hello only: the handshake, and the identity with it, is the connection's, and a mirror
+    // already judged by that identity must not see it change under its feet.
+    if (_negotiated || _refusal)
+    {
+        errorLog()("attach: ignoring a second ServerHello");
+        return;
+    }
+    auto outcome = judge(hello);
+    if (!outcome)
+    {
+        _refusal = outcome.error();
+        errorLog()("attach: {}; detaching", proto::describe(*_refusal, proto::PeerRole::Daemon));
+        return;
+    }
+    _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
+    _negotiated = std::move(*outcome);
+    clientLog()("attach: connected (protocol v{})", _negotiated->version);
+}
+
 void NativeClient::reportPumpOutcome(PumpResult const& outcome)
 {
     if (auto const reason = describe(outcome))
@@ -628,7 +700,8 @@ void NativeClient::reportPumpOutcome(PumpResult const& outcome)
 
 core::async::Task<void> NativeClient::run()
 {
-    send(proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion,
+    send(proto::DecodedPdu { proto::ClientHello { .versions = _handshake.versions,
+                                                  .capabilities = _handshake.capabilities,
                                                   .token = _handshake.token,
                                                   .sessionSettings = _handshake.sessionSettings } });
 
@@ -636,7 +709,7 @@ core::async::Task<void> NativeClient::run()
         _connection.get(),
         [this](proto::DecodedFrame const& frame) {
             handlePdu(frame);
-            return !_detached && !_versionMismatch;
+            return !_detached && !_refusal;
         },
         [this] { return _detached; });
     // detach() retires the read it parked on, which the pump reports as a cancelled read. That is

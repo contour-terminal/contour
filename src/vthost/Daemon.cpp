@@ -185,7 +185,8 @@ namespace
                                                          std::shared_ptr<core::net::ITlsContext> tls,
                                                          std::string token)
     {
-        auto base = makeNativeHandler(loop, host, std::move(token));
+        auto base = makeNativeHandler(
+            loop, host, NativeSessionServices { .handshake = { .expectedToken = std::move(token) } });
         return [tls = std::move(tls), base = std::move(base), &loop](
                    ConnectionId id, std::unique_ptr<core::net::ISocket> socket) {
             return base(std::move(id), tls->wrap(std::move(socket), loop));

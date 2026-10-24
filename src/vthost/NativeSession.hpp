@@ -46,10 +46,34 @@
 #include <vthost/ConnectionAcceptor.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/Unsupported.hpp>
 
 namespace vthost
 {
+
+/// What the daemon side of the handshake admits: the token, versions and capabilities it requires
+/// and offers.
+struct HandshakePolicy
+{
+    /// The preshared token every ClientHello must carry; empty accepts any (the AF_UNIX default, where
+    /// the socket's permissions are the gate).
+    std::string expectedToken = {};
+    /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
+    proto::VersionRange versions = proto::SupportedVersions;
+    /// The optional features this endpoint offers on top of the agreed version.
+    proto::CapabilitySet capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions });
+};
+
+/// The collaborators and policy a native connection is constructed with.
+///
+/// Later phases append members, every one with a default, so a test or an embedded host names only
+/// what it needs, and no phase adds a constructor parameter.
+struct NativeSessionServices
+{
+    HandshakePolicy handshake = {}; ///< What the handshake admits.
+};
 
 /// One connected native-protocol client.
 class NativeSession final: public SessionStreamEvents
@@ -110,15 +134,13 @@ class NativeSession final: public SessionStreamEvents
     /// @param maxWriteQueueBytes Send-queue byte bound; a client whose backlog
     ///        exceeds it is disconnected rather than under-served (its delta
     ///        cursor has already moved past what an overflow would drop).
-    /// @param expectedToken The preshared token this endpoint requires in the
-    ///        ClientHello; empty accepts any (the AF_UNIX default, where the
-    ///        socket permissions are the gate).
+    /// @param services The collaborators and policy of this connection, its handshake's among them.
     NativeSession(core::net::EventLoop& loop,
                   SessionHost& host,
                   ConnectionId id,
                   std::unique_ptr<core::net::ISocket> connection,
                   std::size_t maxWriteQueueBytes = DefaultWriteQueueBytes,
-                  std::string expectedToken = {});
+                  NativeSessionServices services = {});
 
     /// The connection flow: handshake, initial snapshot, then serve until the
     /// peer disconnects.
@@ -183,6 +205,16 @@ class NativeSession final: public SessionStreamEvents
     /// The layout observer to subscribe to the host's model fan-out (see
     /// serveNativeClient) so live tab/pane changes reach this connection.
     [[nodiscard]] LayoutObserver& layoutObserver() noexcept { return _layoutObserver; }
+
+    /// @param type A PDU type this connection may send.
+    /// @return Whether the client answered it with Unsupported, so it is no longer sent.
+    [[nodiscard]] bool peerRefused(proto::PduType type) const noexcept
+    {
+        return _unsupported.peerRefused(type);
+    }
+
+    /// @return What the handshake agreed on; nullopt until a ClientHello was accepted.
+    [[nodiscard]] std::optional<proto::Negotiated> const& negotiated() const noexcept { return _negotiated; }
 
   private:
     friend struct NativeSessionFollowTester; ///< Test-only view of _followed.
@@ -307,7 +339,8 @@ class NativeSession final: public SessionStreamEvents
 
     void handlePdu(proto::DecodedFrame const& frame);
 
-    /// Encodes @p pdu and hands it to the write queue, disconnecting on refusal.
+    /// Encodes @p pdu and hands it to the write queue, disconnecting on refusal. A PDU the client answered
+    /// with Unsupported is not sent at all.
     /// @param serial The request serial to answer, or 0 for an unsolicited push.
     /// @param pdu What to send.
     /// @param sessionTag The session this frame describes, or 0 when it describes none
@@ -552,6 +585,16 @@ class NativeSession final: public SessionStreamEvents
         return SessionSpawnRequest { .settings = _clientSessionSettings };
     }
 
+    /// Tells whether this client is asked extensions' permission questions: both ends offered
+    /// proto::Capability::ExtensionPermissions. A client that did not stays unasked, and the questions
+    /// wait for another, as they do while no client is attached.
+    /// @return true once a handshake shared the capability.
+    [[nodiscard]] bool asksPermissions() const noexcept
+    {
+        return _negotiated.has_value()
+               && _negotiated->shared.contains(proto::Capability::ExtensionPermissions);
+    }
+
     [[nodiscard]] core::async::Task<void> flushSoon();
 
     core::net::EventLoop& _loop;
@@ -561,8 +604,11 @@ class NativeSession final: public SessionStreamEvents
     /// What a snapshot is cut into, and the backlog each piece waits to get under before it is
     /// enqueued: @ref snapshotPieceBytes of this connection's bound.
     std::size_t _snapshotPieceBytes;
-    ConnectionId _id;           ///< Prefixes this connection's every log line.
-    std::string _expectedToken; ///< Required ClientHello token; empty accepts any.
+    ConnectionId _id;                ///< Prefixes this connection's every log line.
+    NativeSessionServices _services; ///< The handshake's policy, and later phases' collaborators.
+    /// What the handshake agreed on; engaged once a ClientHello was accepted, which is what "handshaken"
+    /// means everywhere below.
+    std::optional<proto::Negotiated> _negotiated;
     /// The emulation settings this client asked the sessions IT creates to have, layered onto the
     /// host's own in completeHandshake; nullopt when the client stated no preference.
     ///
@@ -571,6 +617,8 @@ class NativeSession final: public SessionStreamEvents
     /// sessions. An application that already read DA1 cannot be told its terminal changed identity.
     std::optional<vtbackend::Settings> _clientSessionSettings;
     LayoutObserver _layoutObserver;
+    /// Answers the client's unknown PDUs, and holds back the ones it said it does not know.
+    proto::UnsupportedTracker _unsupported;
     std::unordered_map<uint64_t, FollowState> _followed;
     std::unordered_set<uint64_t> _pendingSessions;
     /// Sessions awaiting a full-grid snapshot, in the order they were asked for.
@@ -589,7 +637,6 @@ class NativeSession final: public SessionStreamEvents
     /// apart from the set, which a closed session leaves while the waiter still holds `this`.
     RoomWaiter _roomWaiter = RoomWaiter::Idle;
     bool _flushScheduled = false;
-    bool _handshaken = false;
     bool _closed = false;
     /// The session this connection's input backed up in, past the high-water mark: the connection is read
     /// no further until it drains. @see awaitInputRoom
@@ -597,10 +644,12 @@ class NativeSession final: public SessionStreamEvents
 };
 
 /// The daemon's connection-handler factory for native-protocol clients.
-/// @param expectedToken The preshared token required in each ClientHello (empty
-///        accepts any — the AF_UNIX default).
+/// @param loop The event loop every connection runs on.
+/// @param host The session host every connection serves (not owned; outlives the handler).
+/// @param services What each connection is constructed with.
+/// @return The handler.
 [[nodiscard]] ConnectionHandler makeNativeHandler(core::net::EventLoop& loop,
                                                   SessionHost& host,
-                                                  std::string expectedToken = {});
+                                                  NativeSessionServices services = {});
 
 } // namespace vthost

@@ -20,8 +20,9 @@ namespace vthost
 // proto::WireCell::flags), which is only sound while those bits are FROZEN. The tables below are a
 // deliberately INDEPENDENT copy of the bit assignments: they exist to disagree. Renumbering a flag
 // in VTBACKEND_LINE_FLAGS or VTBACKEND_CELL_FLAGS then fails to compile here, which is where the
-// question "does this need a proto::CodecVersion bump?" has to be answered — instead of a peer on
-// the old numbering silently decoding a curly underline as a dotted one.
+// question "does this need a protocol version step, gated by the negotiated version?" has to be
+// answered — instead of a peer on the old numbering silently decoding a curly underline as a dotted
+// one.
 //
 // Asserting against the generating macro itself would be tautological (it defines the enumerator AS
 // `1U << Bit`), so these numbers are written out on purpose. Adding a flag needs one row here too;
@@ -77,15 +78,15 @@ namespace
 
 static_assert(bitsAreAsPinned(PinnedLineFlagBits),
               "A LineFlag's bit value changed. Those bits travel on the native wire verbatim, so an "
-              "older peer would mis-decode them: bump proto::CodecVersion (or restore the bit) and "
-              "update the pin above.");
+              "older peer would mis-decode them: add a protocol version step and gate by the "
+              "negotiated version (or restore the bit), and update the pin above.");
 static_assert(PinnedLineFlagBits.size() == vtbackend::LineFlagList.size(),
               "A LineFlag was added or removed. Add (or drop) its row in PinnedLineFlagBits, which is "
               "what freezes the wire encoding.");
 static_assert(bitsAreAsPinned(PinnedCellFlagBits),
               "A CellFlag's bit value changed. Those bits travel on the native wire verbatim, so an "
-              "older peer would mis-decode them: bump proto::CodecVersion (or restore the bit) and "
-              "update the pin above.");
+              "older peer would mis-decode them: add a protocol version step and gate by the "
+              "negotiated version (or restore the bit), and update the pin above.");
 static_assert(PinnedCellFlagBits.size() == vtbackend::CellFlagList.size(),
               "A CellFlag was added or removed. Add (or drop) its row in PinnedCellFlagBits, which is "
               "what freezes the wire encoding.");

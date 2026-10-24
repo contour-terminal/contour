@@ -44,6 +44,7 @@
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
+#include <vthost/testing/PreNegotiationCodec.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
 #include <vthost/testing/TestHelpers.hpp>
 #include <vtworkspace/LayoutTree.hpp>
@@ -302,6 +303,8 @@ struct HarnessOptions
     std::shared_ptr<vthost::IExtensionHosting> extensions {};
     /// What the hosted terminals' settings differ in from hostSettings()'s; nothing by default.
     std::function<void(vtbackend::Settings&)> adjustSettings {};
+    /// What the connection is constructed with: its handshake policy among them.
+    vthost::NativeSessionServices services {};
 };
 
 /// @param options What the harness is built with.
@@ -372,7 +375,8 @@ struct NativeHarness
                                         host,
                                         vthost::ConnectionId { .endpoint = "test", .index = 1 },
                                         std::move(pair.first),
-                                        options.writeQueueBytes);
+                                        options.writeQueueBytes,
+                                        options.services);
 
     /// What `serveNativeClient` installs in production, and what a resize resync now rides: the
     /// host announces a moved grid to its stream subscribers rather than the receiving connection
@@ -402,7 +406,17 @@ struct NativeHarness
                                                    CollectDone done,
                                                    Alongside... alongside)
     {
-        auto const bytes = encodeRequest(pdus);
+        return exchangeBytesUntil(encodeRequest(pdus), std::move(done), std::move(alongside)...);
+    }
+
+    /// Writes @p bytes as they are, runs the exchange until @p done holds of what arrived, and returns what
+    /// did: for frames no catalog PDU encodes to.
+    /// @param alongside Run beside the exchange: writes and events, each gated on what arrived.
+    template <typename... Alongside>
+    std::vector<proto::DecodedFrame> exchangeBytesUntil(std::vector<std::byte> bytes,
+                                                        CollectDone done,
+                                                        Alongside... alongside)
+    {
         received.clear();
         loop.blockOn(core::net::testing::allOf(
             session->run(),
@@ -1098,7 +1112,7 @@ TEST_CASE("the native handshake answers ServerHello and a full snapshot", "[vtho
 
     auto const* hello = std::get_if<proto::ServerHello>(&received[0].pdu);
     REQUIRE(hello != nullptr);
-    CHECK(hello->codecVersion == proto::CodecVersion);
+    CHECK(hello->codecVersion == proto::NegotiatingHelloMarker);
 
     // The layout leads the snapshot so the client builds its tabs before content.
     auto const* layout = std::get_if<proto::LayoutState>(&received[1].pdu);
@@ -2295,40 +2309,6 @@ TEST_CASE("other panes' output during a long snapshot run does not pile up into 
 // pass: the daemon dropped the connection and said nothing, which is precisely
 // the class of bug these regression tests exist to prevent recurring.
 
-TEST_CASE("a codec-version mismatch is reported with both versions", "[vthost][native][diagnostics]")
-{
-    auto capture = core::log::ScopedCapture {};
-    auto harness = NativeHarness {};
-    auto const received = harness.exchange(
-        { proto::DecodedPdu { proto::ClientHello { .codecVersion = proto::CodecVersion - 1 } } }, 1);
-
-    // The peer still gets its ServerHello so it can report the mismatch itself.
-    REQUIRE(received.size() == 1);
-    CHECK(std::holds_alternative<proto::ServerHello>(received[0].pdu));
-
-    CHECK(capture.contains("test#1"));
-    CHECK(capture.contains("handshake rejected"));
-    CHECK(capture.contains(std::format("v{}", proto::CodecVersion - 1)));
-    CHECK(capture.contains(std::format("v{}", proto::CodecVersion)));
-}
-
-TEST_CASE("a peer of the command-block revision is refused", "[vthost][native][handshake]")
-{
-    // Revision 2 (#1010) lays a Delta out without the status rows' display byte, and knows neither
-    // permission PDU: past a handshake it would mis-read every Delta, so the handshake must refuse it.
-    constexpr auto CommandBlockRevision = uint32_t { 2 };
-    auto capture = core::log::ScopedCapture {};
-    auto harness = NativeHarness {};
-    auto const received = harness.exchange(
-        { proto::DecodedPdu { proto::ClientHello { .codecVersion = CommandBlockRevision } } }, 1);
-
-    REQUIRE(received.size() == 1);
-    auto const* hello = std::get_if<proto::ServerHello>(&received[0].pdu);
-    REQUIRE(hello != nullptr);
-    CHECK(hello->machineId.empty()); // a refusal names no machine
-    CHECK(capture.contains("handshake rejected"));
-}
-
 namespace
 {
 /// Collects every byte the server writes until it closes the connection, or CollectBudget runs out.
@@ -2367,9 +2347,74 @@ TEST_CASE("a client of contour 0.7.0 is refused with a ServerHello it reads", "[
     auto const frame = proto::readFrame(reply);
     REQUIRE(frame.has_value());
     CHECK(frame->ident == vthost::testing::ShippedServerHelloTag);
-    CHECK(vthost::testing::shippedServerHelloVersion(frame->body) == proto::CodecVersion);
+    CHECK(vthost::testing::shippedServerHelloVersion(frame->body) == proto::NegotiatingHelloMarker);
     CHECK(frame->consumed == reply.size()); // and nothing follows it: no snapshot for a refused client
-    CHECK(capture.contains(std::format("peer speaks codec v{}", vthost::testing::ShippedCodecVersion)));
+    CHECK(capture.contains(std::format("the client speaks protocol {}, from a release before",
+                                       vthost::testing::ShippedProtocolVersion)));
+}
+
+namespace
+{
+/// Feeds @p hello to a fresh session and reads everything it writes until it closes.
+/// @param hello The ClientHello frame's bytes.
+/// @param options What the session's harness is built with.
+/// @return The bytes the session wrote.
+std::vector<std::byte> answerTo(std::vector<std::byte> const& hello, HarnessOptions options = {})
+{
+    auto h = NativeHarness { std::move(options) };
+    h.host.createTab();
+    auto reply = std::vector<std::byte> {};
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &hello),
+                                             readUntilClosed(&h.loop, h.pair.second.get(), &reply)));
+    return reply;
+}
+
+/// Feeds @p hello, a pre-negotiation client's ClientHello frame, to a fresh session and reads the one
+/// frame it answers with.
+/// @param hello The frame's bytes, as that client writes them.
+/// @return The answer's body, after checking it is a lone ServerHello the session sends before closing.
+std::vector<std::byte> refusalOf(std::vector<std::byte> const& hello)
+{
+    auto const reply = answerTo(hello);
+    auto const frame = proto::readFrame(reply);
+    REQUIRE(frame.has_value());
+    CHECK(frame->ident == std::to_underlying(proto::PduType::ServerHello));
+    CHECK(frame->consumed == reply.size()); // nothing follows it: no snapshot for a refused client
+    auto const decoded = proto::decodePdu(reply);
+    REQUIRE(decoded.has_value());
+    auto const* answer = std::get_if<proto::ServerHello>(&decoded->pdu);
+    REQUIRE(answer != nullptr);
+    CHECK(answer->layout == proto::HelloLayout::VersionAlone);
+    CHECK(answer->machineId.empty()); // a refusal names no machine
+    return { frame->body.begin(), frame->body.end() };
+}
+} // namespace
+
+TEST_CASE("a codec-version mismatch is reported with both versions", "[vthost][native][diagnostics]")
+{
+    // A codec 3 (status-line extensions) client, the release before negotiation: it reads the refusal and
+    // reports it, and the daemon's log names both versions.
+    auto capture = core::log::ScopedCapture {};
+    auto const body = refusalOf(vthost::testing::codec3ClientHello(1));
+    CHECK(vthost::testing::codec3ServerHelloVersion(body) == proto::NegotiatingHelloMarker);
+
+    CHECK(capture.contains("test#1"));
+    CHECK(capture.contains("handshake rejected"));
+    CHECK(capture.contains(std::format("speaks protocol {}", vthost::testing::StatusLineExtensionCodec)));
+    CHECK(capture.contains(
+        std::format("this daemon speaks {}-{}", proto::SupportedVersions.min, proto::SupportedVersions.max)));
+}
+
+TEST_CASE("a peer of the command-block revision is refused", "[vthost][native][handshake]")
+{
+    // Revision 2 (#1010) lays a Delta out without the status rows' display byte, and knows neither
+    // permission PDU: past a handshake it would mis-read every Delta, so the handshake must refuse it,
+    // in the one ServerHello layout that client reads.
+    auto capture = core::log::ScopedCapture {};
+    auto const body = refusalOf(vthost::testing::codec2ClientHello(1));
+    CHECK(vthost::testing::codec2ServerHelloVersion(body) == proto::NegotiatingHelloMarker);
+    CHECK(capture.contains("handshake rejected"));
 }
 
 TEST_CASE("a missing ClientHello names what arrived instead", "[vthost][native][diagnostics]")
@@ -2405,10 +2450,10 @@ TEST_CASE("a token mismatch is reported without either token", "[vthost][native]
         vthost::ConnectionId { .endpoint = "native-tcp", .index = 3, .peer = "10.0.0.7" },
         std::move(pair.first),
         NativeSession::DefaultWriteQueueBytes,
-        "the-right-token");
+        vthost::NativeSessionServices { .handshake = { .expectedToken = "the-right-token" } });
 
-    auto const bytes = encodeRequest({ proto::DecodedPdu {
-        proto::ClientHello { .codecVersion = proto::CodecVersion, .token = "the-wrong-token" } } });
+    auto const bytes =
+        encodeRequest({ proto::DecodedPdu { proto::ClientHello { .token = "the-wrong-token" } } });
     auto received = std::vector<proto::DecodedFrame> {};
     loop.blockOn(driveExchange(&loop, session.get(), pair.second.get(), &bytes, 1, &received));
 
@@ -3355,8 +3400,25 @@ TEST_CASE("NativeSession.extension.reattachSnapshot", "[vthost][native][extensio
     CHECK(extensions->starts == 1);
 }
 
+namespace
+{
+/// @return Whether @p frame carries a PermissionRequest.
+[[nodiscard]] bool isPermissionRequest(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::PermissionRequest>(frame.pdu);
+}
+
+/// @return The capabilities of a client that can answer an extension's permission question.
+[[nodiscard]] proto::CapabilitySet answeringPermissions()
+{
+    return proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions });
+}
+
+} // namespace
+
 TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
 {
+    // Every client below can answer: one that cannot is never asked (see the [negotiation] cases).
     auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
     auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
     auto const session = newSession(h.host);
@@ -3367,9 +3429,6 @@ TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
         .version = 1,
         .digest = "5f3c",
         .commands = { proto::WireDeclaredCommand { .name = "status", .argv = { "git", "status" } } },
-    };
-    auto const isRequest = [](proto::DecodedFrame const& frame) {
-        return std::holds_alternative<proto::PermissionRequest>(frame.pdu);
     };
 
     // Asked while no client is attached: the question waits, and is asked of the client that attaches.
@@ -3386,14 +3445,14 @@ TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
     SECTION("an attaching client is asked, and its answer is recorded for every session")
     {
         auto const received = h.exchangeUntil(
-            { proto::ClientHello {},
+            { proto::ClientHello { .capabilities = answeringPermissions() },
               proto::PermissionReply { .hostId = asked.hostId,
                                        .digest = asked.digest,
                                        .grantState = std::to_underlying(vthost::GrantState::Granted) } },
             [&](auto const& got) {
-                return std::ranges::any_of(got, isRequest) && hosting->answers.size() == 1;
+                return std::ranges::any_of(got, isPermissionRequest) && hosting->answers.size() == 1;
             });
-        auto const request = std::ranges::find_if(received, isRequest);
+        auto const request = std::ranges::find_if(received, isPermissionRequest);
         REQUIRE(request != received.end());
         auto expected = asked;
         expected.session = session.value;
@@ -3418,7 +3477,7 @@ TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
     {
         hosting->sessions.front()->askPermission(sentinel);
         std::ignore = h.exchangeUntil(
-            { proto::ClientHello {},
+            { proto::ClientHello { .capabilities = answeringPermissions() },
               proto::PermissionReply { .hostId = asked.hostId, .digest = asked.digest, .grantState = 7 },
               sentinelReply },
             sentinelAnswered);
@@ -3435,7 +3494,7 @@ TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
         // close.
         hosting->sessions.front()->askPermission(sentinel);
         std::ignore = h.exchangeUntil(
-            { proto::ClientHello {},
+            { proto::ClientHello { .capabilities = answeringPermissions() },
               proto::PermissionReply { .hostId = "other@/x.wasm",
                                        .digest = "never-asked",
                                        .grantState = std::to_underlying(vthost::GrantState::Granted) },
@@ -3450,7 +3509,7 @@ TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
     {
         hosting->sessions.front()->askPermission(sentinel);
         std::ignore = h.exchangeUntil(
-            { proto::ClientHello {},
+            { proto::ClientHello { .capabilities = answeringPermissions() },
               proto::PermissionReply { .hostId = asked.hostId,
                                        .digest = asked.digest,
                                        .grantState = std::to_underlying(vthost::GrantState::Pending) },
@@ -3477,4 +3536,332 @@ TEST_CASE("NativeSession.extension.permission", "[vthost][native][extensions]")
         REQUIRE(h.host.pendingPermissionRequests().size() == 1);
         CHECK(h.host.pendingPermissionRequests().front().digest == sentinel.digest);
     }
+}
+
+namespace
+{
+/// @return Whether @p frame carries an Unsupported.
+[[nodiscard]] bool isUnsupported(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::Unsupported>(frame.pdu);
+}
+} // namespace
+
+TEST_CASE("an unknown PDU mid-session is answered Unsupported and the session continues",
+          "[vthost][negotiation]")
+{
+    auto h = NativeHarness {};
+    auto const sessionId = newSession(h.host);
+
+    // A newer client's PDU with ident 200 at serial 9, between the hello and an Input.
+    auto request = proto::Writer {};
+    proto::encodePdu(request, 1, proto::DecodedPdu { proto::ClientHello {} });
+    proto::writeFrame(request, 9, 200, {});
+    proto::encodePdu(request, 10, inputRequest(sessionId.value, "ls\r"));
+    auto const received = h.exchangeBytesUntil(request.take(), [](auto const& got) {
+        return std::ranges::any_of(got, isUnsupported) && std::ranges::any_of(got, endsSnapshotRun);
+    });
+
+    auto const reply = std::ranges::find_if(received, isUnsupported);
+    REQUIRE(reply != received.end());
+    CHECK(reply->pdu == proto::DecodedPdu { proto::Unsupported { .refusedSerial = 9, .ident = 200 } });
+    CHECK(std::ranges::count_if(received, isUnsupported) == 1);
+    // The connection stayed up: the PDU behind the unknown one was served, and the snapshot followed.
+    auto& tapped = dynamic_cast<vthost::TappingPty&>(h.host.terminal(sessionId)->device());
+    CHECK(dynamic_cast<vtpty::MockPty&>(tapped.inner()).stdinBuffer() == "ls\r");
+    CHECK(std::ranges::any_of(received, endsSnapshotRun));
+}
+
+TEST_CASE("Unsupported is never answered with Unsupported", "[vthost][negotiation]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+
+    // The FetchImage behind it is answered, so anything the Unsupported drew would have arrived first.
+    auto const received =
+        h.exchangeUntil({ proto::ClientHello {},
+                          proto::DecodedPdu { proto::Unsupported { .refusedSerial = 1, .ident = 200 } },
+                          proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } },
+                        imageGoneArrived);
+
+    CHECK(imageGoneArrived(received));
+    CHECK_FALSE(std::ranges::any_of(received, isUnsupported));
+}
+
+TEST_CASE("a PDU the client refused is not sent to it again", "[vthost][negotiation]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+    auto const layoutSubscription = vthost::makeScopedModelSubscription(h.host, h.session->layoutObserver());
+    auto const isLayout = [](proto::DecodedFrame const& frame) {
+        return std::holds_alternative<proto::LayoutState>(frame.pdu);
+    };
+
+    // The hello's LayoutState goes out before the refusal; the CreateTab's, after it, must not.
+    auto const received = h.exchangeUntil(
+        { proto::ClientHello {},
+          proto::DecodedPdu { proto::Unsupported {
+              .refusedSerial = 2, .ident = std::to_underlying(proto::PduType::LayoutState) } },
+          proto::DecodedPdu { proto::CreateTab {} },
+          proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } },
+        imageGoneArrived);
+
+    REQUIRE(imageGoneArrived(received));
+    CHECK(h.host.model().window(h.host.windowId())->tabCount() == 2);
+    CHECK(std::ranges::count_if(received, isLayout) == 1);
+    CHECK(h.session->peerRefused(proto::PduType::LayoutState));
+    CHECK_FALSE(h.session->peerRefused(proto::PduType::Delta));
+}
+
+TEST_CASE("an unknown PDU before the handshake still ends the connection", "[vthost][negotiation]")
+{
+    auto h = NativeHarness {};
+    h.host.createTab();
+
+    auto const received =
+        h.exchange({ proto::DecodedPdu { proto::Invalid { .ident = 200 } }, proto::ClientHello {} }, 2);
+
+    // The refusal every pre-negotiation peer reads, and nothing after it: neither an Unsupported nor the
+    // hello behind it is answered.
+    REQUIRE(received.size() == 1);
+    auto const* hello = std::get_if<proto::ServerHello>(&received[0].pdu);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->layout == proto::HelloLayout::VersionAlone);
+}
+
+// ---------------------------------------------------------------------------
+// Version and capability negotiation, daemon side.
+
+namespace
+{
+/// @param versions The versions the session's handshake admits.
+/// @param token The token it requires; empty requires none.
+/// @return Harness options whose session admits @p versions and requires @p token.
+[[nodiscard]] HarnessOptions admitting(proto::VersionRange versions, std::string token = {})
+{
+    return HarnessOptions { .services = vthost::NativeSessionServices {
+                                .handshake = { .expectedToken = std::move(token), .versions = versions } } };
+}
+
+/// @param hello The ClientHello to encode.
+/// @return Its frame, as a client writes it.
+[[nodiscard]] std::vector<std::byte> helloFrame(proto::ClientHello hello)
+{
+    return encodeRequest({ proto::DecodedPdu { std::move(hello) } });
+}
+
+/// The question the cases below have an extension ask.
+[[nodiscard]] proto::PermissionRequest gitQuestion()
+{
+    return proto::PermissionRequest {
+        .session = 0,
+        .hostId = "git@/usr/share/contour/extensions/git.wasm",
+        .name = "git",
+        .version = 1,
+        .digest = "5f3c",
+        .commands = { proto::WireDeclaredCommand { .name = "status", .argv = { "git", "status" } } },
+    };
+}
+
+/// Waits, bounded, until @p h's host holds an open question.
+void awaitOpenQuestion(NativeHarness& h)
+{
+    auto const asking = std::chrono::steady_clock::now();
+    h.loop.blockOn(core::net::pollUntil(&h.loop, [&] {
+        return !h.host.pendingPermissionRequests().empty()
+               || std::chrono::steady_clock::now() - asking > CollectBudget;
+    }));
+}
+
+/// Once the attach snapshot has landed: has @p extensions ask @p question, then, once it is open, writes
+/// @p sentinel, whose answer arrives after anything the question sent.
+Task<void> askWhileAttached(NativeHarness* h,
+                            vthost::testing::FakeSessionExtensions* extensions,
+                            proto::PermissionRequest question,
+                            std::vector<std::byte> const* sentinel)
+{
+    co_await awaitGate(&h->loop, holdsFrames(&h->received, AttachSnapshotFrames));
+    extensions->askPermission(question);
+    co_await awaitGate(&h->loop, [h] { return !h->host.pendingPermissionRequests().empty(); });
+    std::ignore =
+        co_await h->pair.second->write(std::span<std::byte const> { sentinel->data(), sentinel->size() });
+}
+} // namespace
+
+TEST_CASE("the daemon agrees on the highest common version", "[vthost][negotiation]")
+{
+    auto h = NativeHarness { admitting({ .min = 4, .max = 6 }) };
+    h.host.createTab();
+
+    auto const received = h.exchange(
+        { proto::ClientHello { .versions = { .min = 5, .max = 7 }, .capabilities = answeringPermissions() } },
+        AttachSnapshotFrames);
+
+    REQUIRE(received.size() == AttachSnapshotFrames);
+    auto const* hello = std::get_if<proto::ServerHello>(&received[0].pdu);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->layout == proto::HelloLayout::Negotiating);
+    CHECK(hello->agreedVersion == 6);
+    CHECK(hello->versions == proto::VersionRange { .min = 4, .max = 6 });
+    CHECK(hello->capabilities == answeringPermissions());
+    REQUIRE(h.session->negotiated().has_value());
+    CHECK(h.session->negotiated()->version == 6);
+    CHECK(h.session->negotiated()->peerCapabilities == answeringPermissions());
+    CHECK(h.session->negotiated()->shared == answeringPermissions());
+}
+
+TEST_CASE("the daemon refuses a disjoint range with its own range", "[vthost][negotiation]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto const reply = answerTo(helloFrame(proto::ClientHello { .versions = { .min = 6, .max = 8 } }),
+                                admitting({ .min = 4, .max = 4 }));
+
+    auto const decoded = proto::decodePdu(reply);
+    REQUIRE(decoded.has_value());
+    CHECK(decoded->consumed == reply.size()); // and the connection closed behind it
+    CHECK(decoded->pdu
+          == proto::DecodedPdu { proto::ServerHello { .layout = proto::HelloLayout::Negotiating,
+                                                      .agreedVersion = 0,
+                                                      .versions = { .min = 4, .max = 4 },
+                                                      .capabilities = {} } });
+    CHECK(capture.contains("handshake rejected: the client speaks protocol 6-8, this daemon speaks 4-4"));
+}
+
+TEST_CASE("a codec 3 client is refused in a layout it reads", "[vthost][negotiation]")
+{
+    auto capture = core::log::ScopedCapture {};
+    auto const body = refusalOf(vthost::testing::codec3ClientHello(1));
+
+    CHECK(vthost::testing::codec3ServerHelloVersion(body) == proto::NegotiatingHelloMarker);
+    CHECK(capture.contains("handshake rejected: the client speaks protocol 3, from a release before version "
+                           "negotiation; this daemon speaks 4-4"));
+}
+
+TEST_CASE("a wrong token is refused with the bytes of a version refusal", "[vthost][negotiation]")
+{
+    auto capture = core::log::ScopedCapture {};
+
+    SECTION("a negotiating hello")
+    {
+        // The same hello but for its range: once refused for the version alone, once for the token alone.
+        auto const versionRefused =
+            answerTo(helloFrame(proto::ClientHello { .versions = { .min = 6, .max = 8 }, .token = "right" }),
+                     admitting(proto::SupportedVersions, "right"));
+        auto const tokenRefused = answerTo(helloFrame(proto::ClientHello { .token = "wrong" }),
+                                           admitting(proto::SupportedVersions, "right"));
+        REQUIRE_FALSE(versionRefused.empty());
+        CHECK(tokenRefused == versionRefused);
+        auto const decoded = proto::decodePdu(tokenRefused);
+        REQUIRE(decoded.has_value());
+        auto const* hello = std::get_if<proto::ServerHello>(&decoded->pdu);
+        REQUIRE(hello != nullptr);
+        CHECK(hello->layout == proto::HelloLayout::Negotiating);
+        CHECK(hello->agreedVersion == 0);
+    }
+
+    SECTION("a pre-negotiation hello")
+    {
+        auto const versionRefused = answerTo(vthost::testing::codec3ClientHello(1));
+        auto const alsoTokenGuarded =
+            answerTo(vthost::testing::codec3ClientHello(1), admitting(proto::SupportedVersions, "right"));
+        REQUIRE_FALSE(versionRefused.empty());
+        CHECK(alsoTokenGuarded == versionRefused);
+    }
+
+    CHECK(capture.contains("handshake rejected"));
+}
+
+TEST_CASE("permission questions wait for a client that can answer them", "[vthost][negotiation]")
+{
+    SECTION("asked before the client attached")
+    {
+        // One row per way the capability can fail to be shared: the client lacks it, or the daemon does.
+        struct Row
+        {
+            std::string_view name;
+            proto::CapabilitySet daemon;
+            proto::CapabilitySet client;
+        };
+        auto const rows = std::array {
+            Row { .name = "the client cannot answer", .daemon = answeringPermissions(), .client = {} },
+            Row { .name = "the daemon does not offer it", .daemon = {}, .client = answeringPermissions() },
+        };
+        for (auto const& row: rows)
+        {
+            INFO(row.name);
+            auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+            auto options = HarnessOptions { .extensions = hosting };
+            options.services.handshake.capabilities = row.daemon;
+            auto h = NativeHarness { std::move(options) };
+            std::ignore = newSession(h.host);
+            hosting->sessions.front()->askPermission(gitQuestion());
+            awaitOpenQuestion(h);
+            REQUIRE(h.host.pendingPermissionRequests().size() == 1);
+
+            auto const received =
+                h.exchangeUntil({ proto::ClientHello { .capabilities = row.client } },
+                                [](auto const& got) { return std::ranges::any_of(got, endsSnapshotRun); });
+
+            REQUIRE(std::ranges::any_of(received, endsSnapshotRun));
+            CHECK_FALSE(std::ranges::any_of(received, isPermissionRequest));
+            CHECK(h.host.pendingPermissionRequests().size() == 1); // still open, for another client
+        }
+    }
+
+    SECTION("asked while it is attached")
+    {
+        auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+        auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
+        std::ignore = newSession(h.host);
+        auto const fetch = encodeRequest({ proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } });
+
+        auto const received =
+            h.exchangeUntil({ proto::ClientHello {} },
+                            imageGoneArrived,
+                            askWhileAttached(&h, hosting->sessions.front(), gitQuestion(), &fetch));
+
+        REQUIRE(imageGoneArrived(received));
+        CHECK_FALSE(std::ranges::any_of(received, isPermissionRequest));
+        CHECK(h.host.pendingPermissionRequests().size() == 1);
+    }
+}
+
+TEST_CASE("a permission question one client could not answer is asked of the next that can",
+          "[vthost][negotiation]")
+{
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
+    std::ignore = newSession(h.host);
+    hosting->sessions.front()->askPermission(gitQuestion());
+    awaitOpenQuestion(h);
+    REQUIRE(h.host.pendingPermissionRequests().size() == 1);
+
+    // A client that cannot answer attaches, and is passed over.
+    auto const passedOver = h.exchangeUntil(
+        { proto::ClientHello {} }, [](auto const& got) { return std::ranges::any_of(got, endsSnapshotRun); });
+    REQUIRE(std::ranges::any_of(passedOver, endsSnapshotRun));
+    CHECK_FALSE(std::ranges::any_of(passedOver, isPermissionRequest));
+
+    // One that can attaches after it, on a connection of its own, and is asked.
+    auto pair = makeConnection(h.loop, std::nullopt);
+    auto capable = std::make_unique<NativeSession>(h.loop,
+                                                   h.host,
+                                                   vthost::ConnectionId { .endpoint = "capable", .index = 2 },
+                                                   std::move(pair.first),
+                                                   NativeSession::DefaultWriteQueueBytes);
+    auto const subscription = makeScopedStreamSubscription(h.host, *capable);
+    auto const hello = encodeRequest({ proto::ClientHello { .capabilities = answeringPermissions() } });
+    auto received = std::vector<proto::DecodedFrame> {};
+    h.loop.blockOn(core::net::testing::allOf(
+        capable->run(),
+        feedBytes(pair.second.get(), &hello),
+        collectUntil(
+            &h.loop,
+            pair.second.get(),
+            [](auto const& got) { return std::ranges::any_of(got, isPermissionRequest); },
+            &received)));
+
+    auto const request = std::ranges::find_if(received, isPermissionRequest);
+    REQUIRE(request != received.end());
+    CHECK(std::get<proto::PermissionRequest>(request->pdu).digest == gitQuestion().digest);
 }

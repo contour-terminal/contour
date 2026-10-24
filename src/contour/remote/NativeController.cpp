@@ -87,6 +87,9 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
             // that already exists; postSessionCreation() restates it when the configuration changed.
             .sessionSettings =
                 _attachSettings.transform([](auto const& s) { return vthost::toWireSessionSettings(s); }),
+            // Offered because this client passes a PermissionHandler below: its panes ask the user.
+            .capabilities =
+                vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions }),
         },
         // What the panes' own stores keep (`command_blocks.max_records`), resolved from the same
         // configuration: a mirror holds no more records than the terminal it feeds.
@@ -134,10 +137,10 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
         auto const lock = std::lock_guard { _mutex };
         if (_state == State::Connecting || _state == State::Ready)
         {
-            if (client.versionMismatch())
+            if (auto const& refusal = client.refusal())
             {
                 _state = State::Failed;
-                _failure = "daemon speaks an incompatible protocol version";
+                _failure = vthost::proto::describe(*refusal, vthost::proto::PeerRole::Daemon);
             }
             else
                 _state = State::Closed;

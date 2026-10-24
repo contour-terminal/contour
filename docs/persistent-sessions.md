@@ -269,15 +269,25 @@ everywhere. On Windows, sessions are backed by ConPTY, the socket directory is g
 ACLs rather than POSIX permission bits, and the tmux-binary (`<socket>-tmux`) endpoint is absent —
 it needs file-descriptor passing, which Windows sockets do not have.
 
-## After upgrading Contour, restart the daemon
+## After upgrading Contour
 
-The client and the daemon must be the **same build**. The protocol handshake requires an exact
-version match, so a daemon left running from before an upgrade will refuse the new client — and it
-refuses in a way that is deliberately indistinguishable from a wrong token, so that a
-network attacker learns nothing from probing. The cost of that choice is that the error cannot tell
-you which of the two it was.
+A daemon keeps running across an upgrade, so the client you start next may be newer than the daemon
+it attaches to. The two **negotiate a protocol version** when they connect: each states the range of
+versions it speaks, and they agree on the newest one both know. Every release speaks the protocols of
+at least the previous two releases, so a client from a newer release attaches to an older daemon —
+and an older client to a newer daemon — as long as the two are within that window. Features the older
+side does not know are simply not used on that connection.
 
-So if a client will not attach right after an upgrade, stop the daemon and let it start again:
+Outside the window, or against a daemon from Contour 0.7.0 or another release before version
+negotiation, the client is refused, and it tells you both sides' versions:
+
+```text
+the daemon speaks protocol 3, from a release before version negotiation; this client speaks 4-4
+```
+
+A wrong token is reported as such instead (`wrong token or insufficient rights`): the refusal names
+the daemon's versions either way, so a probe learns nothing more from it. To move past a version
+refusal, stop the daemon and let it start again:
 
 ```sh
 kill "$(pgrep -f 'contour daemon')"   # or Ctrl+C in its terminal

@@ -34,6 +34,11 @@ enum class Direction : std::uint8_t
 /// @return Its catalog name ("Delta", "ClientHello", …); "Unknown" for an off-catalog value.
 [[nodiscard]] std::string_view toString(PduType type) noexcept;
 
+/// Names a wire ident for diagnostics, such as one an Unsupported refuses.
+/// @param ident The ident as the wire carries it.
+/// @return Its catalog name when the ident is a catalog tag, else the number.
+[[nodiscard]] std::string nameOfIdent(std::uint64_t ident);
+
 /// Renders @p pdu's identifying fields as a compact `k=v k=v` fragment.
 ///
 /// Reports SIZES, never payloads: a trace of a busy session must not become a transcript of

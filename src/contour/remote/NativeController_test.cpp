@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -54,6 +55,7 @@
 #include <vthost/SocketPath.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
+#include <vthost/proto/Negotiation.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -146,7 +148,9 @@ struct DaemonFixture
     bool cancelled = false; ///< Whether teardown unwound the accept loop.
 
     /// @param extensions The status-line extensions the hosted sessions run; none by default.
-    explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {})
+    /// @param services What each native connection is served with: what its handshake admits.
+    explicit DaemonFixture(std::shared_ptr<vthost::IExtensionHosting> extensions = {},
+                           vthost::NativeSessionServices services = {})
     {
         host = std::make_unique<vthost::SessionHost>(
             loop,
@@ -166,7 +170,7 @@ struct DaemonFixture
         // which NativeClient's concurrent read+write drives.
         auto tls = core::net::makeSelfSignedServerContext();
         REQUIRE(tls.has_value());
-        auto native = vthost::makeNativeHandler(loop, *host);
+        auto native = vthost::makeNativeHandler(loop, *host, std::move(services));
         auto const& context = *tls;
         auto handler = [context, native, &loop = loop](vthost::ConnectionId id,
                                                        std::unique_ptr<core::net::ISocket> socket) {
@@ -1503,6 +1507,40 @@ TEST_CASE("a closed mirrored tab does not resurrect on later remote output", "[a
     CHECK(!controller.canCreateSession());
 
     controller.stop();
+}
+
+TEST_CASE("NativeController shows the refusal text", "[contour][remote]")
+{
+    struct Row
+    {
+        std::string_view name;
+        vthost::HandshakePolicy policy;
+        vthost::proto::VersionRange daemonVersions;
+    };
+    auto const rows = std::array {
+        Row { .name = "a daemon of other versions",
+              .policy = { .versions = { .min = 6, .max = 8 } },
+              .daemonVersions = { .min = 6, .max = 8 } },
+        // The ranges overlap: the daemon refused for the token, and the text says so.
+        Row { .name = "a daemon wanting another token",
+              .policy = { .expectedToken = "right" },
+              .daemonVersions = vthost::proto::SupportedVersions },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
+        auto daemon = DaemonFixture { {}, vthost::NativeSessionServices { .handshake = row.policy } };
+        std::ignore = daemon.seedSession("refused");
+
+        auto controller = contour::remote::NativeController { daemon.endpoint(), std::nullopt, nullptr };
+        auto const connected = controller.connectAndWait(10s);
+        REQUIRE_FALSE(connected.has_value());
+        CHECK(connected.error()
+              == vthost::proto::describe(
+                  { .ours = vthost::proto::SupportedVersions, .theirs = row.daemonVersions },
+                  vthost::proto::PeerRole::Daemon));
+        controller.stop();
+    }
 }
 
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")

@@ -12,107 +12,12 @@
 
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/PduTrace.hpp>
+#include <vthost/testing/PduExamples.hpp>
 
 using namespace vthost::proto;
 using namespace std::string_view_literals;
 
-namespace
-{
-/// A SessionState carrying content the trace must not leak. Built field-by-field rather than
-/// with designated initializers: the interesting fields straddle several the test does not care
-/// about, and the pedantic build requires designators to be contiguous.
-[[nodiscard]] SessionState sampleSessionState()
-{
-    auto value = SessionState {};
-    value.session = 4;
-    value.columns = 80;
-    value.lines = 24;
-    value.title = "secret-project";
-    value.cwd = "file:///home/user/secret";
-    auto block = WireCommandBlock {};
-    block.commandLine = "secret-command";
-    block.workingDirectory = "/home/user/secret-dir";
-    value.commandBlocks = { block };
-    return value;
-}
-
-/// A one-line Delta with a distinctive cursor, built for the same reason as above.
-[[nodiscard]] Delta sampleDelta()
-{
-    auto value = Delta {};
-    value.session = 7;
-    value.generation = 3;
-    value.seqno = 98;
-    value.lines = std::vector<WireLine>(1);
-    auto block = WireCommandBlock {};
-    block.commandLine = "secret-command";
-    value.commandBlocks = { block };
-    value.retiredCommandBlocks = { 3 };
-    return value;
-}
-
-/// One example of every catalog alternative, so the tests below can sweep the whole variant
-/// instead of naming alternatives one at a time (and silently missing the 18th).
-[[nodiscard]] std::vector<std::pair<PduType, DecodedPdu>> everyAlternative()
-{
-    return {
-        { PduType::Invalid, DecodedPdu { Invalid { .ident = 250 } } },
-        { PduType::ClientHello,
-          DecodedPdu { ClientHello { .codecVersion = 12,
-                                     .token = "s3cr3t",
-                                     // The settings block is the user's configuration; the sweep below proves
-                                     // the trace summarizes rather than transcribes it.
-                                     .sessionSettings =
-                                         WireSessionSettings { .historyLineCount = 5000,
-                                                               .wordDelimiters = "secret-delimiters" } } } },
-        { PduType::ServerHello,
-          DecodedPdu { ServerHello {
-              .codecVersion = 12, .machineId = "secret-machine-id", .hostname = "secret-host" } } },
-        { PduType::Input,
-          DecodedPdu {
-              Input { .session = 4, .data = { std::byte { 'h' }, std::byte { 'i' }, std::byte { '!' } } } } },
-        { PduType::ResizeRequest, DecodedPdu { ResizeRequest { .columns = 120, .lines = 40 } } },
-        { PduType::ResizePane, DecodedPdu { ResizePane { .session = 4, .columns = 60, .lines = 20 } } },
-        { PduType::FetchImage, DecodedPdu { FetchImage { .session = 4, .imageId = 9 } } },
-        { PduType::ImageData,
-          DecodedPdu { ImageData {
-              .imageId = 9, .format = 1, .width = 32, .height = 16, .data = std::vector<std::byte>(64) } } },
-        { PduType::ImageGone, DecodedPdu { ImageGone { .imageId = 9 } } },
-        { PduType::SessionState, DecodedPdu { sampleSessionState() } },
-        { PduType::Delta, DecodedPdu { sampleDelta() } },
-        { PduType::SessionBell, DecodedPdu { SessionBell { .session = 4 } } },
-        { PduType::SessionNotify,
-          DecodedPdu { SessionNotify { .session = 4, .title = "secret-title", .body = "secret-body" } } },
-        { PduType::SessionClipboard,
-          DecodedPdu { SessionClipboard { .session = 4, .selection = "c", .data = "/home/user/secret" } } },
-        { PduType::LayoutState,
-          DecodedPdu { LayoutState { .window = 1, .activeTab = 0, .tabs = std::vector<WireTab>(2) } } },
-        { PduType::CreateTab, DecodedPdu { CreateTab { .session = 4 } } },
-        { PduType::SplitPane, DecodedPdu { SplitPane { .session = 4, .orientation = 1, .ratio = 5000 } } },
-        { PduType::ClosePane, DecodedPdu { ClosePane { .session = 4 } } },
-        { PduType::NewWindow, DecodedPdu { NewWindow {} } },
-        { PduType::ResizeSplit,
-          DecodedPdu { ResizeSplit { .firstSession = 4, .secondSession = 7, .ratio = 6000 } } },
-        { PduType::SessionSettingsChanged,
-          DecodedPdu { SessionSettingsChanged {
-              .sessionSettings = WireSessionSettings { .wordDelimiters = "secret-delimiters" } } } },
-        { PduType::PerformOperation,
-          DecodedPdu { PerformOperation {
-              .session = 4, .operation = EngineOperation::WriteScreen, .text = "secret-screen-text" } } },
-        { PduType::PermissionRequest,
-          DecodedPdu { PermissionRequest { .session = 4,
-                                           .hostId = "secret-key@/home/user/secret.wasm",
-                                           .name = "secret-name",
-                                           .version = 1,
-                                           .digest = "5f3c",
-                                           .commands = { WireDeclaredCommand {
-                                               .name = "secret-command", .argv = { "secret-argv" } } } } } },
-        { PduType::PermissionReply,
-          DecodedPdu { PermissionReply {
-              .hostId = "secret-key@/home/user/secret.wasm", .digest = "5f3c", .grantState = 1 } } },
-    };
-}
-} // namespace
+using vthost::testing::everyAlternative;
 
 TEST_CASE("typeOf maps every alternative onto its catalog tag", "[vthost][proto]")
 {
@@ -142,6 +47,16 @@ TEST_CASE("every PDU type has a distinct trace name", "[vthost][proto]")
 TEST_CASE("an off-catalog PDU type renders as Unknown", "[vthost][proto]")
 {
     CHECK(toString(static_cast<PduType>(200)) == "Unknown"sv);
+}
+
+TEST_CASE("nameOfIdent names a catalog tag, and numbers any other ident", "[vthost][proto]")
+{
+    for (auto const& [tag, pdu]: everyAlternative())
+        if (tag != PduType::Invalid)
+            CHECK(nameOfIdent(std::to_underlying(tag)) == toString(tag));
+    CHECK(nameOfIdent(0) == "0");
+    CHECK(nameOfIdent(200) == "200");
+    CHECK(nameOfIdent(uint64_t { 1 } << 40) == "1099511627776");
 }
 
 TEST_CASE("summarize renders each PDU's identifying fields", "[vthost][proto]")
@@ -253,6 +168,21 @@ TEST_CASE("the PDU trace never reveals payload contents", "[vthost][proto]")
     CHECK(summarize(DecodedPdu { ClientHello { .sessionSettings = WireSessionSettings {} } })
               .contains("settings=yes"));
     CHECK(summarize(DecodedPdu { ClientHello {} }).contains("settings=no"));
+}
+
+TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][negotiation]")
+{
+    CHECK(summarize(DecodedPdu {
+              ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 4711 } }, .token = "t" } })
+          == "versions=4-6 caps=1,4711 token=yes settings=no");
+    CHECK(summarize(DecodedPdu { ClientHello {} }) == "versions=4-4 caps=none token=no settings=no");
+    CHECK(summarize(DecodedPdu { ServerHello {
+              .agreedVersion = 4, .capabilities = { .idents = { 1 } }, .machineId = "m", .hostname = "h" } })
+          == "layout=negotiating agreed=4 versions=4-4 caps=1");
+    CHECK(summarize(DecodedPdu { ServerHello { .layout = HelloLayout::VersionAlone, .codecVersion = 3 } })
+          == "layout=version-alone version=3");
+    CHECK(summarize(DecodedPdu { Unsupported { .refusedSerial = 9, .ident = 200 } })
+          == "refused=9 ident=200");
 }
 
 TEST_CASE("traceLine pins the one-line trace format", "[vthost][proto]")

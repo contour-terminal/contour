@@ -25,26 +25,25 @@
 namespace vthost::proto
 {
 
-/// The protocol revision exchanged in the Hello handshake before anything else.
-///
-/// **Experimental since 0.7.0**, which shipped revision 1. Experimental means no compatibility
-/// across revisions: the handshake admits only its own and refuses any other, and each end reports
-/// the other's version. A daemon keeps running across an upgrade, so that refusal is what a user
-/// meets, and it must stay readable to every revision: each hello keeps a layout rule for it.
-/// @see ClientHello
-/// @see ServerHello
-///
-/// It moves with every change to the wire. A released peer exists -- a 0.7.0 daemon keeps running
-/// across an upgrade -- so two builds that differ in their bytes must refuse each other at the
-/// handshake, never pass it and then mis-read every PDU after it.
-///
-/// - 1: contour 0.7.0.
-/// - 2: command blocks (#1010): each row's block id and birth time, the block records and the epochs
-///   their ids count in, the daemon's machine in the ServerHello, and engine operations; and the hello
-///   layout 0.7.0 reads.
-/// - 3: status-line extensions: a Delta's status rows name the display they are for, and the
-///   PermissionRequest and PermissionReply PDUs.
-constexpr uint32_t CodecVersion = 3;
+// The protocol version is negotiated in the Hello handshake before anything else
+// (@see vthost::proto::SupportedVersions, vthost::proto::negotiate): each end states the inclusive range
+// of versions it speaks and the optional capabilities it offers, and the connection continues in the
+// highest version both ranges contain. A new optional feature is gated by a Capability; a version step is
+// reserved for a change to an existing PDU's meaning. A release keeps speaking at least the previous two
+// releases' versions, counted from the first release that ships the range handshake.
+//
+// Before negotiation each build spoke exactly one codec revision and refused every other:
+//
+// - 1: contour 0.7.0.
+// - 2: command blocks (#1010): each row's block id and birth time, the block records and the epochs
+//   their ids count in, the daemon's machine in the ServerHello, and engine operations; and the hello
+//   layout 0.7.0 reads.
+// - 3: status-line extensions: a Delta's status rows name the display they are for, and the
+//   PermissionRequest and PermissionReply PDUs.
+//
+// Version 4 is the first negotiating one. A daemon keeps running across an upgrade, so a peer of codec
+// 1, 2 or 3 is still met: it gets no old codec, only a refusal it can read, which is why each hello
+// keeps a layout rule for it (@see ClientHello, ServerHello in Pdu.hpp).
 
 /// The largest frame payload the decoder will accept. A peer-declared length
 /// beyond this is rejected outright (FrameTooLarge) rather than treated as
@@ -104,8 +103,6 @@ enum class DecodeError : uint8_t
     MalformedVarint, ///< A varint ran past its maximum width.
     CompressedFrame, ///< The reserved compression bit was set (not supported yet).
     Truncated,       ///< A declared length exceeds the remaining payload.
-    TrailingBytes,   ///< A PDU body decoded fine but left bytes over.
-    VersionMismatch, ///< The peer speaks an incompatible CodecVersion.
     FrameTooLarge,   ///< A frame's declared payload exceeds MaxFrameSize: a fatal
                      ///< protocol violation, NOT "read more" — a peer must never
                      ///< make the reader buffer an unbounded declared length.
@@ -131,8 +128,6 @@ enum class DecodeError : uint8_t
         case DecodeError::MalformedVarint: return "MalformedVarint";
         case DecodeError::CompressedFrame: return "CompressedFrame";
         case DecodeError::Truncated: return "Truncated";
-        case DecodeError::TrailingBytes: return "TrailingBytes";
-        case DecodeError::VersionMismatch: return "VersionMismatch";
         case DecodeError::FrameTooLarge: return "FrameTooLarge";
         case DecodeError::MalformedPdu: return "MalformedPdu";
     }

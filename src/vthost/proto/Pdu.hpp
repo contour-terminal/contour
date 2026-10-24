@@ -8,11 +8,16 @@
 /// so a newer peer's PDU is carried rather than fatal. Adding a PDU is: a struct, a tag in PduType,
 /// one row in each of the encode/decode tables in Pdu.cpp.
 ///
-/// While the protocol is experimental the catalog is kept CONTIGUOUS and may be renumbered with a
-/// CodecVersion bump: a retired tag leaves no gap, because the handshake refuses a peer of another
-/// revision before it sends a single other PDU. The two hellos are the exception: their tags are how
-/// two revisions meet at all, so every revision keeps 0.7.0's.
-/// @see CodecVersion
+/// The catalog is kept CONTIGUOUS. A new PDU is gated by a Capability; renumbering or retiring a tag
+/// changes existing PDUs' meaning, so it takes a protocol version step, and the handshake keeps a peer
+/// that speaks no version in common from sending a single other PDU. The two hellos are the exception:
+/// their tags are how two versions meet at all, so every version keeps 0.7.0's.
+/// @see SupportedVersions
+///
+/// A PDU body grows only by appending fields at its end. A decoder ignores the bytes left after the fields
+/// it knows, and gives a field it finds missing at the end its default, so a peer older or newer by one
+/// appended field still reads the PDU. A field that is itself a growing record travels as a blob, so its
+/// own appended fields stay inside it and the fields after it keep their place.
 ///
 /// The structs are deliberately wire-level (raw u32 colors, raw flag words,
 /// std-only types): the codec is shared by the server, the attach client, and
@@ -29,6 +34,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Wire.hpp>
 
 namespace vthost::proto
@@ -62,6 +68,7 @@ enum class PduType : uint8_t
     PerformOperation = 21,
     PermissionRequest = 22,
     PermissionReply = 23,
+    Unsupported = 24,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -145,17 +152,37 @@ struct WireSessionSettings
     bool operator==(WireSessionSettings const&) const = default;
 };
 
-/// Client's first PDU: its codec revision, (for TCP) a preshared auth token, and optionally the
-/// emulation settings it wants the sessions it creates to have. Anything before it is a protocol
-/// error.
+/// How a ServerHello is laid out on the wire.
+enum class HelloLayout : uint8_t
+{
+    /// NegotiatingHelloMarker, then one blob of the agreed version, our range, our capabilities, the
+    /// daemon's machine, and whatever a later version appends. What a negotiating client reads.
+    Negotiating = 0,
+    /// The version alone: all of a ServerHello a pre-negotiation client (codec 1 = contour 0.7.0, 2, 3)
+    /// reads, so it can tell its user which version refused it.
+    VersionAlone = 1,
+};
+
+/// Client's first PDU: the protocol versions and capabilities it speaks, (for TCP) a preshared auth
+/// token, and optionally the emulation settings it wants the sessions it creates to have. Anything
+/// before it is a protocol error.
 ///
-/// On the wire, the version comes first and everything else after it. A hello of another revision is
-/// decoded as far as its version, the one field every revision shares, and the handshake refuses it on
-/// that. The layout after the version is kept readable to contour 0.7.0, whose daemon reads a hello
-/// whole before it checks the version, as the encoder in Pdu.cpp explains.
+/// On the wire: `u32 NegotiatingHelloMarker`, one blob of `varint min, varint max, varint count +
+/// varint idents, string token, optional session settings` and whatever a later version appends, then
+/// a zero byte. A daemon of contour 0.7.0 reads that blob as its token and the zero as "no session
+/// settings", and codecs 2 and 3 consume everything after a version not their own: each reads this
+/// hello far enough to answer with its version, as the encoder in Pdu.cpp explains.
+///
+/// A hello whose leading `u32` is not the marker is a pre-negotiation peer's: it decodes as far as that
+/// version, into a range of it alone, and the rest is consumed unread.
 struct ClientHello
 {
-    uint32_t codecVersion = CodecVersion;
+    /// The hello's leading `u32`: NegotiatingHelloMarker, or a pre-negotiation peer's codec version.
+    uint32_t codecVersion = NegotiatingHelloMarker;
+    /// The protocol versions the client speaks; `{ v, v }` for a pre-negotiation peer of codec `v`.
+    VersionRange versions = SupportedVersions;
+    /// The optional features the client offers on top of the negotiated version.
+    CapabilitySet capabilities = {};
     /// Preshared token authenticating the client on the opt-in TCP transport.
     /// Empty over AF_UNIX, where the hardened socket's permissions are the gate.
     std::string token = {};
@@ -165,15 +192,24 @@ struct ClientHello
     bool operator==(ClientHello const&) const = default;
 };
 
-/// Server's answer to ClientHello: its codec revision and, when it accepts the client, the machine it
-/// runs on.
+/// Server's answer to ClientHello: the version it agreed on (0 refuses the client), the range and
+/// capabilities it speaks and, when it accepts the client, the machine it runs on.
 ///
-/// A hello of another revision is decoded as far as its version, as a ClientHello is. One naming no
-/// machine -- every refusal -- is the version alone on the wire: the whole of the ServerHello contour
-/// 0.7.0 reads, so a client of that release learns which revision refused it.
+/// Laid out as @ref layout says. Decoding yields HelloLayout::VersionAlone for a leading `u32` other than
+/// NegotiatingHelloMarker -- a pre-negotiation daemon's, the rest consumed unread -- and for the marker with
+/// nothing after it; either way `versions` is then the range of that version alone.
 struct ServerHello
 {
-    uint32_t codecVersion = CodecVersion;
+    /// Which of the two layouts this hello travels in.
+    HelloLayout layout = HelloLayout::Negotiating;
+    /// The hello's leading `u32`: NegotiatingHelloMarker, or a pre-negotiation daemon's codec version.
+    uint32_t codecVersion = NegotiatingHelloMarker;
+    /// The version both ends speak and the connection continues in; 0 is a refusal.
+    uint32_t agreedVersion = 0;
+    /// The protocol versions the daemon speaks.
+    VersionRange versions = SupportedVersions;
+    /// The optional features the daemon offers on top of the agreed version.
+    CapabilitySet capabilities = {};
     /// The machine the daemon runs on (vtbackend::HostIdentity), which every WireCommandBlock::locality
     /// was judged against: "local" there means local to the DAEMON, and a client attached from another
     /// machine must not take it for its own. Stated once per connection, as a connection never moves to
@@ -271,8 +307,8 @@ struct MouseState
 /// instead of a silent protocol change.
 ///
 /// A record naming a bit outside the mask is refused on decode (DecodeError::MalformedPdu), never
-/// masked. The handshake admits only a peer of this CodecVersion, which assigns these bits and no
-/// others, so an unknown one can only come from a broken or hostile peer -- and clearing it would
+/// masked. The handshake admits only a peer of a version this build speaks, which assigns these bits
+/// and no others, so an unknown one can only come from a broken or hostile peer -- and clearing it would
 /// leave the reads that follow out of step with whatever field that peer wrote for it.
 constexpr inline uint16_t ContextPresentMask = 0x7FFF; // bits 0..14: fifteen fields
 
@@ -1017,6 +1053,19 @@ struct PermissionReply
     bool operator==(PermissionReply const&) const = default;
 };
 
+/// Either direction, after the handshake: the frame with serial @ref refusedSerial carried a PDU tag this
+/// peer does not know. Its receiver stops sending that tag for the rest of the connection, and never answers
+/// an Unsupported itself. Before the handshake no PDU is answered with one: the daemon answers anything but a
+/// ClientHello with a version-alone ServerHello and ends the connection, and the client ignores anything but
+/// the ServerHello.
+/// @see UnsupportedTracker
+struct Unsupported
+{
+    uint64_t refusedSerial = 0; ///< The serial of the frame that carried the unknown tag.
+    uint64_t ident = 0;         ///< The tag this peer does not know.
+    bool operator==(Unsupported const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -1040,7 +1089,8 @@ using DecodedPdu = std::variant<Invalid,
                                 SessionSettingsChanged,
                                 PerformOperation,
                                 PermissionRequest,
-                                PermissionReply>;
+                                PermissionReply,
+                                Unsupported>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

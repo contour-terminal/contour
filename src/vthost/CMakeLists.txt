@@ -42,10 +42,15 @@ add_library(vthost STATIC
     client/ScreenMirror.hpp
     GridWire.cpp
     GridWire.hpp
+    proto/Negotiation.cpp
+    proto/Negotiation.hpp
     proto/Pdu.cpp
     proto/Pdu.hpp
     proto/PduTrace.cpp
     proto/PduTrace.hpp
+    proto/ReleasedVersions.hpp
+    proto/Unsupported.cpp
+    proto/Unsupported.hpp
     proto/Wire.cpp
     proto/Wire.hpp
     tmux/ControlModeParser.cpp
@@ -126,6 +131,9 @@ if(VTHOST_TESTING)
         testing/GridParity.cpp
         testing/GridParity.hpp
         testing/ShippedCodec.hpp
+        testing/PduExamples.hpp
+        testing/PreNegotiationCodec.hpp
+        testing/RecordedTranscripts.hpp
         testing/FakeExtensionHosting.hpp
         testing/GatedFileSystem.hpp
         testing/TestHelpers.hpp
@@ -133,8 +141,11 @@ if(VTHOST_TESTING)
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp
         imsg/ImsgCodec_test.cpp
+        proto/Compatibility_test.cpp
+        proto/Negotiation_test.cpp
         proto/Pdu_test.cpp
         proto/PduTrace_test.cpp
+        proto/Unsupported_test.cpp
         proto/Wire_test.cpp
         tmux/ControlModeParser_test.cpp
         tmux/ControlModeSpawn_test.cpp
@@ -150,6 +161,8 @@ if(VTHOST_TESTING)
     if(CONTOUR_EXTENSIONS)
         target_link_libraries(vthost_test vtextension_runtime)
     endif()
+    # The release check reads which releases metainfo.xml names (@see proto/ReleasedVersions.hpp).
+    target_compile_definitions(vthost_test PRIVATE CONTOUR_METAINFO_PATH="${PROJECT_SOURCE_DIR}/metainfo.xml")
     # The daemon's extensions are tested end to end with a guest that runs a command, where guests are built.
     if(CONTOUR_EXTENSIONS AND TARGET spawner_wasm)
         target_compile_definitions(vthost_test PRIVATE
