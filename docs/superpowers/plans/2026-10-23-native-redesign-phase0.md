@@ -27,6 +27,22 @@ geometry. This means:
 **Spec:** `docs/superpowers/specs/2026-10-23-native-redesign-design.md` (canvas:
 https://claude.ai/artifact/6cp7tcSnurTSMbhSDePWqH)
 
+## Status board and handoff
+
+This run is tracked on a private status board. It is a page published from the untracked
+`STATUS.md` at the root of the working tree.
+- **Find it** by running `/status-board` in this worktree. The skill reads the remembered URL from
+  the worktree's git dir (`status_page.py --url`). The URL is deliberately not written here,
+  because the board is private and this plan is public.
+- **Every agent that continues this plan must update the board, using `/status-board update`.** Do
+  it in the same turn as each state change: a task started, in review, committed, blocked or
+  unblocked, a test count that moved, or a ruling.
+- If the worktree has no `STATUS.md`, ask the owner for the board rather than creating a second one.
+
+Implementation design: `docs/superpowers/specs/2026-10-24-native-redesign-implementation-design.md`
+(§3.0 records the changes to this plan from its review). Plans index:
+`docs/superpowers/plans/2026-10-24-native-redesign-plans-index.md`.
+
 ## Global Constraints
 
 - Follow AGENT.md:
@@ -46,7 +62,12 @@ https://claude.ai/artifact/6cp7tcSnurTSMbhSDePWqH)
 - **Existing users:** a generated `contour.yml` pins old values. New defaults only change `Config{}`.
   Never edit `DefaultColorPalette` or the `contour` scheme in place: RIS / XTPOPCOLORS depend on them.
 - After the code changes, run `/simplify`.
-- Run the suite with `ctest --preset appleclang-debug` (on Linux, `ctest --preset clang-asan`).
+- Each task runs **its own test filter** (owner ruling, 2026-10-24). The full suite runs in CI on
+  Linux, macOS and Windows.
+- On a machine without `cargo`, configure with `-DCONTOUR_EXTENSIONS_BUNDLED=OFF`. That skips only
+  the bundled WebAssembly status-line extensions.
+- **Existing configs keep their look** through the `DefaultsEdition` gate (Task 8; implementation
+  design §2.7).
 - Work on a branch from `master`. The uncommitted ⌘ binding prototype is **not** part of this plan:
   see #2175.
 
@@ -213,7 +234,7 @@ rendering walks the same table.
 
 **Interfaces:**
 - Produces:
-  - `[[nodiscard]] double relativeLuminance(vtbackend::RGBColor color) noexcept;` in `src/vtbackend/core/Color.hpp` (WCAG 2.x; test `#000000` → 0.0 and `#FFFFFF` → 1.0).
+  - Consumes the existing `relativeLuminance` (`src/vtbackend/core/Color.hpp:109`). Do not add a second one.
   - `[[nodiscard]] constexpr Qt::ColorScheme colorSchemeOfBackground(vtbackend::RGBColor background) noexcept;`, which returns `Dark` when `relativeLuminance` is below 0.18, and `Light` otherwise.
   - `[[nodiscard]] constexpr std::optional<Qt::ColorScheme> qtColorSchemeFor(config::GuiTheme theme, config::ColorConfig const& colors) noexcept;`, which replaces the one-argument form.
 
@@ -285,14 +306,12 @@ TEST_CASE("ColorPalette.classicIsTodaysPalette", "[vtbackend]")
 }
 ```
 
-The test needs `contrastRatio`. Add it to `src/vtbackend/core/Color.hpp`:
-
-`[[nodiscard]] double contrastRatio(RGBColor a, RGBColor b) noexcept;` (WCAG 2.x), built on Task 3's `relativeLuminance`.
+The test uses the existing `contrastRatio` (`src/vtbackend/core/Color.hpp:116`).
 
 Use whatever accessor `defaultColorPalettes` actually exposes. If it takes a palette by reference, adapt the test shape, not the assertions.
 
 - [ ] **Step 2: Run and see it fail.** Run: `cmake --build --preset appleclang-debug --target vtbackend_test && out/appleclang-debug/src/vtbackend/vtbackend_test "ColorPalette.*"`
-- [ ] **Step 3: Implement** the three rows and `contrastRatio`. contour-dark and contour-light also set the four `indicatorStatusLine*` pairs, because the status line is on by default and must never be white on `#0270C0` in these schemes:
+- [ ] **Step 3: Implement** the three rows. Also change `ColorPalette::blockStatusColor`'s Running fallback (`ColorPalette.hpp:396-406`) from `normalColor(3)` (yellow) to `normalColor(4)` (blue), and pin it with a test, because yellow means search. contour-dark and contour-light set `block_status.running` to blue explicitly as well. contour-dark and contour-light also set the four `indicatorStatusLine*` pairs, because the status line is on by default and must never be white on `#0270C0` in these schemes:
   - Inactive and Insert: fg = white (index 7), bg = black (index 0).
   - Normal: fg = scheme background, bg = blue (index 4).
   - Visual: fg = scheme background, bg = magenta (index 5).
@@ -408,12 +427,27 @@ Use whatever accessor `defaultColorPalettes` actually exposes. If it takes a pal
 | `:965` | bell | `.sound = "off"`, alert true |
 | `:374` | scrollback | 10000 |
 | `:1000-1013` | cursor (insert mode) | block, steady |
-| (by name) | `hyperlink_hover_tooltip` | false |
 | (by name) | `screen_transition_duration` | 150 ms |
 | `TabLabel` | tab label fallback | `{WindowTitle}`, or the foreground process name when the title is empty |
 | `:1020` | colors | `DualColorConfig { .colorSchemeLight = "contour-light", .colorSchemeDark = "contour-dark" }`, with the palettes resolved the way the loader resolves names |
 
 - Modify `src/contour/config/ConfigDocumentation.hpp` so that every generated value above matches.
+- **The `DefaultsEdition` gate** (implementation design §2.7):
+  - `enum class DefaultsEdition : uint8_t { Classic = 0, Native2026 };`, with one default table
+    per edition.
+  - The path overload of `loadConfigFromFile` hoists `createFileIfNotExists`, then pre-scans
+    `defaults_edition` from `contour.yml` and then `settings.yml` (`settings.yml` wins).
+  - It constructs `Config{edition}` and `TerminalProfile{edition}`.
+  - The key is excluded from the typed-loader pass and from `compareEntries`.
+  - `defaultConfigString()` writes `defaults_edition: native2026`.
+  - Plain `Config{}` is `Native2026`.
+  - Every new value in the table above goes into the `Native2026` table only.
+- **Fixtures, loaded through the path overload:**
+  - a partial `contour.yml` without the key keeps every pre-redesign value;
+  - a `settings.yml` with `native2026` switches to the new values;
+  - a generated config is `Native2026`.
+- **Not in this task:** `hyperlink_hover_tooltip: false` moves to Step 3e, where the link pill
+  replaces the tooltip.
 - Not in this task, because each needs its consumer first: `chrome_density` (Phase 2), the overlay scrollbar (Phase 3), Reduce Motion for the cursor glide and screen transition (Phase 1, with the motion tokens), and per-side `option_as_alt` (Phase 4).
 - Test: `src/contour/config/Config_test.cpp`
 
