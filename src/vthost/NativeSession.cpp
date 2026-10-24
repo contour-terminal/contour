@@ -30,6 +30,7 @@
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/ContextWire.hpp>
 #include <vthost/CursorStyle.hpp>
+#include <vthost/DaemonControlWire.hpp>
 #include <vthost/GracefulClose.hpp>
 #include <vthost/GridWire.hpp>
 #include <vthost/HostIdentity.hpp>
@@ -1275,6 +1276,16 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
             return;
         case proto::UnsupportedVerdict::AlreadyRefused: return;
     }
+    if (serveDaemonRequest(frame) == DaemonRequest::Served)
+        return;
+    switch (_role)
+    {
+        case proto::ConnectionRole::Attach: break;
+        case proto::ConnectionRole::Control:
+            // Not a client: nothing that reads or changes the sessions is a Control connection's to send.
+            refuse(frame);
+            return;
+    }
     if (auto const* input = std::get_if<proto::Input>(&frame.pdu))
     {
         if (_host.terminal(SessionId { input->session }) == nullptr)
@@ -1447,6 +1458,44 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     errorLog()("{}: ignoring unexpected {} (serial {})", _id, proto::describe(frame.pdu), frame.serial);
 }
 
+NativeSession::DaemonRequest NativeSession::serveDaemonRequest(proto::DecodedFrame const& frame)
+{
+    auto& daemon = _services.daemon.get();
+    if (std::holds_alternative<proto::DaemonStatusRequest>(frame.pdu))
+    {
+        if (auto const status = daemon.status())
+            send(frame.serial, proto::DecodedPdu { *status });
+        else
+            refuse(frame);
+        return DaemonRequest::Served;
+    }
+    if (auto const* stop = std::get_if<proto::StopDaemon>(&frame.pdu))
+    {
+        // Read, never cast: a reason no enumerator has stops nothing.
+        auto const reason = stopReasonFrom(stop->reason);
+        if (!reason)
+        {
+            errorLog()("{}: refusing a StopDaemon with reason {}", _id, stop->reason);
+            refuse(frame);
+        }
+        else if (auto const stopped = daemon.requestStop(*reason); !stopped)
+            refuse(frame);
+        else
+            connectionLog()("{}: the client asked the daemon to stop (reason {})", _id, stop->reason);
+        return DaemonRequest::Served;
+    }
+    return DaemonRequest::None;
+}
+
+void NativeSession::refuse(proto::DecodedFrame const& frame)
+{
+    auto const type = proto::typeOf(frame.pdu);
+    connectionLog()("{}: answering {} (serial {}) Unsupported", _id, proto::toString(type), frame.serial);
+    send(frame.serial,
+         proto::DecodedPdu {
+             proto::Unsupported { .refusedSerial = frame.serial, .ident = std::to_underlying(type) } });
+}
+
 void NativeSession::adoptClientSessionSettings(std::optional<proto::WireSessionSettings> const& stated)
 {
     if (!stated)
@@ -1499,19 +1548,42 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     // id derived for this application, never the machine's own, which machine-id(5) keeps confidential.
     auto stated = appSpecificIdentity(_host.identity().view());
     send(frame.serial,
-         proto::DecodedPdu { proto::ServerHello { .agreedVersion = *agreed,
-                                                  .versions = policy.versions,
-                                                  .capabilities = policy.capabilities,
-                                                  .machineId = std::move(stated.machineId),
-                                                  .hostname = std::move(stated.hostname) } });
+         proto::DecodedPdu { proto::ServerHello {
+             .agreedVersion = *agreed,
+             .versions = policy.versions,
+             .capabilities = policy.capabilities,
+             .machineId = std::move(stated.machineId),
+             .hostname = std::move(stated.hostname),
+             .releaseVersion = std::string { _services.daemon.get().releaseVersion() } } });
     _negotiated = proto::Negotiated { .version = *agreed,
                                       .peerCapabilities = hello->capabilities,
                                       .shared = proto::intersect(policy.capabilities, hello->capabilities) };
-    connectionLog()("{}: handshake complete (protocol v{})", _id, *agreed);
+    _role = hello->role;
+    switch (_role)
+    {
+        case proto::ConnectionRole::Attach:
+            connectionLog()("{}: handshake complete (protocol v{})", _id, *agreed);
+            attachClient(*hello);
+            break;
+        case proto::ConnectionRole::Control:
+            // A probe or a command to the daemon itself: shown nothing, spawning nothing, counted as no one.
+            connectionLog()("{}: handshake complete (protocol v{}, control connection)", _id, *agreed);
+            break;
+    }
+    return true;
+}
+
+void NativeSession::attachClient(proto::ClientHello const& hello)
+{
+    // Counted, and subscribed, first: the spawn below fans out to the subscribers, as it did when every
+    // connection subscribed before its hello.
+    _clientTicket = _services.daemon.get().admitClient();
+    _streamSubscription.emplace(_host, *this, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream);
+    _layoutSubscription.emplace(_host, _layoutObserver, &SessionHost::subscribe, &SessionHost::unsubscribe);
 
     // Adopted BEFORE the spawn below: that session exists because THIS client attached, so it
     // inherits this client's profile like any tab the client goes on to open.
-    adoptClientSessionSettings(hello->sessionSettings);
+    adoptClientSessionSettings(hello.sessionSettings);
 
     // Attaching to an empty daemon spawns the first session.
     if (_host.model().window(_host.windowId())->tabCount() == 0)
@@ -1541,7 +1613,6 @@ bool NativeSession::completeHandshake(proto::DecodedFrame const& frame)
     if (asksPermissions())
         for (auto const& request: _host.pendingPermissionRequests())
             send(0, proto::DecodedPdu { request });
-    return true;
 }
 
 void NativeSession::reportPumpOutcome(PumpResult const& outcome) const
@@ -1609,14 +1680,13 @@ namespace
                                               std::unique_ptr<core::net::ISocket> connection,
                                               NativeSessionServices services)
     {
+        // The session subscribes itself to the host, once its hello says it is a client.
         auto session = std::make_unique<NativeSession>(*loop,
                                                        *host,
                                                        std::move(id),
                                                        std::move(connection),
                                                        NativeSession::DefaultWriteQueueBytes,
                                                        std::move(services));
-        auto const subscription = makeScopedStreamSubscription(*host, *session);
-        auto const layoutSubscription = makeScopedModelSubscription(*host, session->layoutObserver());
         co_await session->run();
     }
 } // namespace

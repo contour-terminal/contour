@@ -740,6 +740,10 @@ overridable per flag and `$CONTOUR_MUX`. The socket directory hardening
 mirrors tmux exactly: 0700 directory, owner check, refuse **world**-rwx
 (group is permitted — tmux's `TMUX_SOCK_PERM == 7`).
 
+The socket directory is made `0700` **before** the daemon opens its log: the log sink used to create
+it first with the default mode, after which the listener's owner-only check refused the bind
+(`--background` and every on-demand spawn into a fresh socket directory failed that way).
+
 `vthost::daemonLogPath` derives `<socket>.log` beside the socket, as the default destination
 for a daemon with no console to write to (`--background`, and anything `contour daemon-service`
 installs). It sits with `nativeSocketPath`/`tmuxSocketPath` because it is the same kind of fact:
@@ -752,17 +756,84 @@ user's own client never looks. `daemonServiceCommandLine` pins both the socket a
 
 ## Daemon lifetime
 
-A daemon stops for one of three reasons: `SIGINT`/`SIGTERM` (POSIX), a console-control event
-(Windows), or — with `--exit-with-last-session` — its last hosted session going away. All three
-funnel into one `requestDaemonShutdown`, which closes every listener and then unwinds the loop.
+Every shutdown carries a `ShutdownCause` (`DaemonLifecycle.hpp`), one row per trigger, and the
+single shutdown log line names it:
 
-`--exit-with-last-session` is **off by default**, because a daemon started by hand exists precisely
-to outlive its sessions and still be there for the next client. `ensureDaemon` turns it **on** for
-the daemon it auto-spawns: that one belongs to the client that needed it, and "make sure a daemon
-exists" must not mean "leave one behind". The policy rides on the *daemon*, not on the spawning
-client — a second client attaching inherits it, and the daemon ends when every session across every
-client is gone. Reference-counting attached clients (tmux's separate `exit-unattached`) is not
-implemented.
+| `ShutdownCause`     | Trigger                                                                       | Log text                         |
+|---------------------|-------------------------------------------------------------------------------|----------------------------------|
+| `Signal`            | `SIGINT`/`SIGTERM` (POSIX) or a console-control event (Windows)               | `signal received`                |
+| `LastSessionClosed` | with `--lifecycle=exit-with-last-session`, the last hosted session going away | `the last hosted session closed` |
+| `Idle`              | an `ExitWhenIdle` daemon with nothing to serve for its grace period           | `idle`                           |
+| `StopRequested`     | a Control connection's `StopDaemon` with reason `User`                        | `stop requested`                 |
+| `UpgradeRestart`    | a Control connection's `StopDaemon` with reason `UpgradeRestart`              | `restart for upgrade`            |
+
+All of them funnel into one `ShutdownFunnel`, which runs on the loop thread and runs once: a second
+request — a `SIGTERM` racing a `StopDaemon` — logs nothing and does nothing. The shutdown first calls
+`DaemonConfig::beforeShutdown` with the cause, while every listener still accepts and every session
+is alive, then closes every listener and unwinds the loop. A trigger off the loop thread (the signal
+watch, the console-control handler) or inside a connection's PDU handler (a `StopDaemon`) posts its
+request rather than running it there, for the reasons `LastSessionWatcher` posts.
+
+The signals come through `DaemonConfig::shutdownSignals`. Its default is the process's own — a
+sigwait thread on POSIX, the console-control handler on Windows — and a test that runs `runDaemon`
+in-process sets `NoShutdownSignals`, so the daemon neither takes the test process's signals nor sends
+the `SIGTERM` that unblocks its sigwait thread into it.
+
+`runDaemon` arms that watch before it constructs the `SessionHost`. The sigwait watch blocks
+`SIGINT`/`SIGTERM` on the calling thread only, and a thread inherits the mask it was started under:
+the host starts a pump thread for each session of a startup layout in its constructor, and a
+process-directed `SIGTERM` that reaches a thread not blocking it kills the daemon by the default
+action — before the listeners unlink their sockets, and as a failure a service manager restarts.
+Declared first, the watch is also destroyed last, after `~SessionHost` has joined every pump thread,
+so the `SIGTERM` it sends itself after a `StopDaemon` has only its own thread to reach.
+
+The daemon itself is a `DaemonRuntime`, the `DaemonControl` behind every native endpoint. Besides an
+Attach connection — a terminal client, shown the sessions — a native connection may say in its
+`ClientHello` that it has the **Control** role: it asks the daemon about itself (`DaemonStatusRequest`,
+`StopDaemon`) and is sent nothing else. The daemon's ServerHello offers `Capability::DaemonControl`
+for it; an embedded host, whose null daemon control serves no such request, does not. A Control
+connection is no client: the `ClientCensus` counts Attach connections and every tmux control-mode
+and imsg connection, so a status probe never keeps an idle daemon alive.
+
+The lifecycle is `--lifecycle` (`DaemonLifecycle`): `Persistent` is the default, because a daemon
+started by hand or by a service exists precisely to outlive its sessions and still be there for the
+next client. `--exit-with-last-session` survives as an alias for `ExitWhenEmpty`. `ensureDaemon`
+starts the daemon it spawns on demand with `ExitWhenIdle` (no longer `--exit-with-last-session`): that
+one belongs to the clients that needed it, and "make sure a daemon exists" must not mean "leave one
+behind". The policy rides on the *daemon*, not on the spawning client.
+
+`ExitWhenIdle` is the `IdleExitWatcher`, which sits beside `LastSessionWatcher` (and, like it, answers
+`mirrorsScreens() == false`). It reads two things: the session count, from `sessionClosed`, and the
+**client census**. `ClientCensus` counts every connection that is a client — a native Attach
+connection, a tmux control-mode connection, an imsg connection — through `countedHandler(...)`, which
+wraps each endpoint's handler; a Control connection is deliberately not wrapped. When both counts reach
+zero the watcher arms a timer for `DefaultIdleExitGrace` (10 s); anything that arrives re-arms it. The
+decision is re-checked **at fire time**, not only when the timer was armed: a client admitted, or a
+session created, in the very turn the deadline passed but before the loop ran the timer must keep the
+daemon, and a session creation fires no event the watcher hears. The re-arm is edge-driven — after a
+fire-time "busy" the watcher waits for the next `clientCountChanged` or `sessionClosed`.
+
+A service-managed daemon (`contour daemon-service`, the packaged unit) starts with
+`--lifecycle=persistent` and so has no watcher at all.
+
+The **Control role** (`proto::ConnectionRole::Control`, `ClientHello::role`) is for connections that
+ask the daemon about itself: no session is spawned for it (an unknown role byte decodes as Control, so
+a future role can never spawn one), it is not counted in the census and it does not subscribe to the
+host's stream. It carries `DaemonStatusRequest` (tag 25), answered by `DaemonStatusReply` (tag 26:
+process id, release, uptime, socket, executable, log file, sessions, clients, lifecycle) and
+`StopDaemon` (tag 27) with a `StopReason` (`User` or `UpgradeRestart`). `ServerHello::releaseVersion`
+is appended to the hello and tells a client which release it met, which is what drives the GUI's drift
+badge (`vthost::client::assessDrift`). Bodies are append-only: a daemon that predates a field leaves it
+at the decoder's default, and a PDU tag it does not know is answered with `Unsupported`.
+`contour daemon status|stop|logs` and the GUI's restart reach the daemon through
+`client::DaemonControlPort` (`makeDaemonControl`), whose connect failure is typed
+(`ControlErrorCode::NotRunning` for a missing or refused socket) rather than a string the caller
+parses.
+
+`DaemonConfig::beforeShutdown` is the seam for persistent workspaces (phase 6): the funnel calls it
+with the `ShutdownCause` before any listener closes, so a snapshot of the layout is written there, and
+`workspaceFor(ShutdownCause)` will decide whether the cause keeps or discards it. Until then a restart
+ends the sessions, which is what `layoutSurvivesRestart` reports and the GUI's confirmation says.
 
 Sessions leave through exactly one funnel, `SessionHost::handleSessionExit`: a shell exiting (the
 pump thread's posted completion), the native `ClosePane` PDU, or control mode's `kill-pane`. The
@@ -792,6 +863,50 @@ path.
 One consequence worth knowing when shutting a daemon down by signal: a session whose shell is still
 running blocks teardown, because `~HostedSession` joins a pump thread parked in a blocking PTY read.
 The last-session path is unaffected (its sessions are already gone by then).
+
+### Where a daemon runs from
+
+Where an upgrade would disturb the running binary — an AppImage, a macOS `.app`, a Windows install —
+a daemon runs from this version's copy under `<state-dir>/bin/` (`DaemonBinary.hpp`, over
+`DaemonImage.hpp`'s store); a packaged Linux install runs in place. A launcher (`ensureDaemon`,
+`--background`) spawns from the copy and keeps it leased until the daemon serves; a daemon started
+from the installed binary re-executes from the copy before it binds (`relocationFor`), keeping its
+process id, with the lease handed across the `execv`. `contour daemon --in-place` refuses the move.
+
+Which layouts stage is a table (`stagingPlan(StagingInputs)` → `StagingLayout`): an AppImage stages the AppImage
+file, macOS the whole `.app` (symbolic links such as a framework's `Versions/Current` are preserved,
+because a flattened bundle can fail code-signature validation), Windows the install tree (`bin` and
+`share/contour`), and a **packaged Linux install does not stage at all** — `/usr/…` and a Flatpak's
+`/app/…` are replaced atomically by the package manager, which a running daemon survives, and copying
+~474 MB per release for nothing would be a cost without a benefit. The state directory
+(`daemonStateDirectory`, `StatePath.hpp`) decides where copies go; when it is the temporary fallback
+the store stages nothing, since that directory is shared with other local users and a launcher must not
+execute a binary one of them could have planted.
+
+Publishing is the rename of a **complete** directory: two launchers staging the same release at once
+each copy into their own partial directory and rename it into place; the loser finds the target
+complete and uses it. An incomplete target (no `.complete` marker) is removed under the held lease
+before the rename is retried once.
+
+A **lease** is a file beside the image (`<release>-<fingerprint>.lease`, a sibling so that removing
+the image never removes the lock). Whoever runs from an image, or is about to, holds its lease; on
+POSIX that is an advisory `flock`, re-checked against the path's device and inode after it is taken
+so a concurrent prune cannot slip between the open and the lock. `prune` takes a `claim()` — an
+exclusive, non-blocking lock — and removes the image, its partial copies and the lease file only
+while holding it; a held lease stops the prune. A launcher takes the lease when it stages the image
+and holds it until the daemon it spawned serves (or the spawn fails), so a second, newer launcher
+pruning in that window cannot remove it; the daemon then holds its own for its lifetime. Each of
+them prunes once its own lease is held: the launcher after staging, the daemon in
+`leaseRunningImage`. The daemon's prune is the only one a daemon started by a service manager gets,
+since no launcher runs for it. Leases open `O_CLOEXEC`, so shells and `xdg-open` do not inherit
+them; the flag is cleared just before a daemon's re-`execv` from the copy and set again by the
+re-executed daemon.
+
+Manual check for an AppImage, which no CI job runs: start `Contour.AppImage daemon` and confirm that
+the pid started is still the daemon, that `APPIMAGE` in its `/proc/<pid>/environ` names
+`$XDG_STATE_HOME/contour/bin/<release>-<hash>/Contour.AppImage`, that the `.lease` beside that
+directory is listed by `ls -l /proc/<pid>/fd`, and that deleting the original AppImage file leaves
+the daemon serving.
 
 ## Binary imsg IPC (the real tmux binary as a client)
 
@@ -885,6 +1000,15 @@ under LocalSystem, whose different `%TEMP%`/`%USERNAME%` would bind a socket no 
 The logon trigger is bound to the installing user's SAM name, not left blank — a blank one fires
 on *any* user's logon.
 
+Each backend declares a `DaemonLaunchStyle`. A **SelfDetaching** backend (the Task Scheduler: it
+starts a launcher, and the daemon backgrounds itself, so the OS does not track the daemon's process)
+cannot stop the daemon by ending a unit. For such a backend `daemon-service stop`, `restart` and
+`uninstall` stop the daemon through `StopDaemon` on a Control connection, chosen by the table
+`stopVia(DaemonLaunchStyle)`; a tracked backend (systemd, launchd) is stopped through the service
+manager, which also keeps it from restarting a daemon that was stopped on purpose. The decision is
+portable code and tested on Linux with fakes; the Task Scheduler calls themselves are compiled only on
+Windows. The Windows image store (`DaemonImageLeases_win32.cpp`) is likewise compiled only there.
+
 The client side is the GUI (`contour client`) on Windows as everywhere else.
 There was briefly a console client here — `runAttach`, raw VT console mode plus
 a dedicated blocking stdin-reader thread, since console handles cannot park on
@@ -944,7 +1068,7 @@ Three behaviours worth knowing:
 `contour client` accepts both options and **passes them to a daemon it auto-spawns**. That
 matters more than it looks: the auto-spawned daemon is the common case, and without this it is
 the one instance nobody can configure, whose standard error lands in the client's terminal. The
-whole spawn command line — the socket, these two options and `--exit-with-last-session` — is built
+whole spawn command line — the socket, these two options and `--lifecycle=exit-when-idle` — is built
 once in `daemonSpawnArgs`, so the POSIX `execv` argv and the Windows `CreateProcess` command line
 cannot drift apart.
 

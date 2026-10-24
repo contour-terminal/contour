@@ -54,16 +54,18 @@ namespace
                        // The token authenticates the peer: report its PRESENCE, never its bytes. The
                        // session settings get the same treatment for a different reason -- they are
                        // a block of the user's configuration, and a trace is not a config dump.
-                       return std::format("versions={} caps={} token={} settings={}",
+                       return std::format("versions={} caps={} token={} settings={} role={}",
                                           formatRange(value.versions),
                                           formatCapabilities(value.capabilities),
                                           value.token.empty() ? "no" : "yes",
-                                          value.sessionSettings ? "yes" : "no");
+                                          value.sessionSettings ? "yes" : "no",
+                                          value.role == ConnectionRole::Control ? "control" : "attach");
                    } },
         TraceRow { PduType::ServerHello,
                    "ServerHello",
                    +[](DecodedPdu const& pdu) {
-                       // The daemon's machine id and host name name a machine: left out altogether.
+                       // The daemon's machine id and host name name a machine: left out altogether. Its
+                       // release version names no one, and is how a drift between the ends is diagnosed.
                        auto const& value = std::get<ServerHello>(pdu);
                        switch (value.layout)
                        {
@@ -71,10 +73,11 @@ namespace
                                return std::format("layout=version-alone version={}", value.codecVersion);
                            case HelloLayout::Negotiating: break;
                        }
-                       return std::format("layout=negotiating agreed={} versions={} caps={}",
+                       return std::format("layout=negotiating agreed={} versions={} caps={} release={}",
                                           value.agreedVersion,
                                           formatRange(value.versions),
-                                          formatCapabilities(value.capabilities));
+                                          formatCapabilities(value.capabilities),
+                                          value.releaseVersion.empty() ? "unknown" : value.releaseVersion);
                    } },
         TraceRow { PduType::Input,
                    "Input",
@@ -273,6 +276,25 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        auto const& value = std::get<Unsupported>(pdu);
                        return std::format("refused={} ident={}", value.refusedSerial, value.ident);
+                   } },
+        TraceRow { PduType::DaemonStatusRequest, "DaemonStatusRequest", nullptr },
+        TraceRow { PduType::DaemonStatusReply,
+                   "DaemonStatusReply",
+                   +[](DecodedPdu const& pdu) {
+                       // The socket, executable and log paths name the user's home: left out.
+                       auto const& value = std::get<DaemonStatusReply>(pdu);
+                       return std::format("release={} pid={} uptime={}s sessions={} clients={} lifecycle={}",
+                                          value.releaseVersion,
+                                          value.processId,
+                                          value.uptimeSeconds,
+                                          value.sessions,
+                                          value.clients,
+                                          value.lifecycle);
+                   } },
+        TraceRow { PduType::StopDaemon,
+                   "StopDaemon",
+                   +[](DecodedPdu const& pdu) {
+                       return std::format("reason={}", std::get<StopDaemon>(pdu).reason);
                    } },
     };
 

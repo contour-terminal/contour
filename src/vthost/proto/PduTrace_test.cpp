@@ -174,15 +174,36 @@ TEST_CASE("the hellos trace their ranges and capabilities", "[vthost][proto][neg
 {
     CHECK(summarize(DecodedPdu {
               ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 4711 } }, .token = "t" } })
-          == "versions=4-6 caps=1,4711 token=yes settings=no");
-    CHECK(summarize(DecodedPdu { ClientHello {} }) == "versions=4-4 caps=none token=no settings=no");
+          == "versions=4-6 caps=1,4711 token=yes settings=no role=attach");
+    CHECK(summarize(DecodedPdu { ClientHello {} })
+          == "versions=4-4 caps=none token=no settings=no role=attach");
+    CHECK(summarize(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }).contains("role=control"));
     CHECK(summarize(DecodedPdu { ServerHello {
               .agreedVersion = 4, .capabilities = { .idents = { 1 } }, .machineId = "m", .hostname = "h" } })
-          == "layout=negotiating agreed=4 versions=4-4 caps=1");
+          == "layout=negotiating agreed=4 versions=4-4 caps=1 release=unknown");
+    CHECK(summarize(DecodedPdu { ServerHello { .agreedVersion = 4, .releaseVersion = "0.8.1" } })
+              .contains("release=0.8.1"));
     CHECK(summarize(DecodedPdu { ServerHello { .layout = HelloLayout::VersionAlone, .codecVersion = 3 } })
           == "layout=version-alone version=3");
     CHECK(summarize(DecodedPdu { Unsupported { .refusedSerial = 9, .ident = 200 } })
           == "refused=9 ident=200");
+}
+
+TEST_CASE("the daemon-control PDUs are named, and a status reply never shows a path", "[vthost][proto]")
+{
+    CHECK(toString(PduType::StopDaemon) == "StopDaemon");
+    CHECK(toString(PduType::DaemonStatusRequest) == "DaemonStatusRequest");
+    CHECK(summarize(DecodedPdu { StopDaemon { .reason = 1 } }) == "reason=1");
+    auto const text = summarize(DecodedPdu { DaemonStatusReply { .releaseVersion = "0.8.1",
+                                                                 .processId = 4242,
+                                                                 .socketPath = "/run/user/1000/contour/x",
+                                                                 .executablePath = "/home/u/bin/contour",
+                                                                 .logFile = "/home/u/x.log",
+                                                                 .sessions = 3,
+                                                                 .clients = 1 } });
+    CHECK(text.contains("sessions=3 clients=1"));
+    CHECK_FALSE(text.contains("/run/user"));
+    CHECK_FALSE(text.contains("/home/u"));
 }
 
 TEST_CASE("traceLine pins the one-line trace format", "[vthost][proto]")

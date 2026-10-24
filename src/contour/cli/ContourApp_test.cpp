@@ -3,6 +3,7 @@
 // The CLI verbs' options as a command line spells them, read through the verbs' own definitions.
 
 #include <contour/cli/ContourApp.hpp>
+#include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/ShellIntegration.hpp>
 
 #include <core/Environment.hpp>
@@ -15,6 +16,7 @@
 #include <array>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -111,4 +113,51 @@ TEST_CASE("ContourApp: generate integration writes no file for a shell it has no
         CHECK(generateIntegration(shell, file) != EXIT_SUCCESS);
         CHECK_FALSE(std::filesystem::exists(file));
     }
+}
+
+TEST_CASE("ContourApp: `daemon logs` dispatches the logs verb, not the --log option",
+          "[contour][cli][daemon]")
+{
+    SECTION("a sub-verb")
+    {
+        auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+        auto argv =
+            std::array<char const*, 5> { "contour", "daemon", "logs", "--socket", "/tmp/contour-sock" };
+        REQUIRE(app.parseParametersForTesting(static_cast<int>(argv.size()), argv.data()));
+        CHECK(app.parameters().get<bool>("contour.daemon.logs"));
+        CHECK(app.parameters().get<std::string>("contour.daemon.log").empty());
+        CHECK(app.parameters().get<std::string>("contour.daemon.logs.socket") == "/tmp/contour-sock");
+        CHECK(!app.parameters().get<bool>("contour.daemon.status"));
+        CHECK(!app.parameters().get<bool>("contour.daemon.stop"));
+    }
+
+    SECTION("the sub-verbs' own options")
+    {
+        auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+        auto argv = std::array<char const*, 6> { "contour", "daemon", "logs", "--follow", "--lines", "7" };
+        REQUIRE(app.parseParametersForTesting(static_cast<int>(argv.size()), argv.data()));
+        CHECK(app.parameters().get<bool>("contour.daemon.logs.follow"));
+        CHECK(app.parameters().get<unsigned>("contour.daemon.logs.lines") == 7);
+    }
+
+    SECTION("bare `daemon` stays the daemon")
+    {
+        auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+        auto argv = std::array<char const*, 4> { "contour", "daemon", "--socket", "/tmp/contour-sock" };
+        REQUIRE(app.parseParametersForTesting(static_cast<int>(argv.size()), argv.data()));
+        CHECK(app.parameters().get<bool>("contour.daemon"));
+        CHECK(app.parameters().get<std::string>("contour.daemon.socket") == "/tmp/contour-sock");
+        for (auto const& row: contour::cli::DaemonSubVerbs)
+            CHECK(!app.parameters().get<bool>(std::format("contour.daemon.{}", row.name)));
+    }
+}
+
+TEST_CASE("ContourApp: `daemon --socket X status` keeps X in the daemon scope", "[contour][cli][daemon]")
+{
+    auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+    auto argv = std::array<char const*, 5> { "contour", "daemon", "--socket", "/tmp/x.sock", "status" };
+    REQUIRE(app.parseParametersForTesting(static_cast<int>(argv.size()), argv.data()));
+    CHECK(app.parameters().get<bool>("contour.daemon.status"));
+    CHECK(app.parameters().get<std::string>("contour.daemon.socket") == "/tmp/x.sock");
+    CHECK(app.parameters().get<std::string>("contour.daemon.status.socket").empty());
 }

@@ -2,6 +2,7 @@
 #include <contour/cli/CaptureScreen.hpp>
 #include <contour/cli/CatImageArgs.hpp>
 #include <contour/cli/ContourApp.hpp>
+#include <contour/cli/DaemonVerbs.hpp>
 #include <contour/cli/ShellIntegration.hpp>
 #include <contour/config/Config.hpp>
 
@@ -22,18 +23,25 @@
 #include <core/cli/App.hpp>
 #include <core/cli/CLI.hpp>
 #include <core/log/LogSink.hpp>
+#include <core/platform/NativeFileSystem.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdio>
 #include <expected>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
+#include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #ifdef CONTOUR_EXTENSIONS
     #include <contour/config/ExtensionDeclarations.hpp>
@@ -42,10 +50,6 @@
 
     #include <core/async/StopToken.hpp>
     #include <core/platform/Clock.hpp>
-    #include <core/platform/NativeFileSystem.hpp>
-
-    #include <filesystem>
-    #include <thread>
 
     #include <vtextension/BundledExtensions.hpp>
     #include <vtextension/ExtensionGrantStore.hpp>
@@ -54,10 +58,15 @@
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
 #endif
+#include <vthost/CommandRunner.hpp>
 #include <vthost/Daemon.hpp>
+#include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonImage.hpp>
+#include <vthost/DaemonStarter.hpp>
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/Token.hpp>
+#include <vthost/client/DaemonControlClient.hpp>
 
 #ifndef _WIN32
     #include <sys/ioctl.h>
@@ -208,11 +217,12 @@ namespace
                                            "PATH" });
         options.emplace_back(CLI::Option { "start",
                                            CLI::Value { "logon"s },
-                                           "When the daemon starts: `logon` (a Scheduled Task "
-                                           "triggered by your logon, running as you, needing no "
-                                           "elevation and no password — the default), `boot` or "
-                                           "`manual` (an SCM service; not implemented yet, since a "
-                                           "service under a named account needs its password).",
+                                           "When the daemon starts: `logon` (with your session, "
+                                           "running as you and needing no elevation: a systemd user "
+                                           "unit, a launchd LaunchAgent, or a Windows Scheduled Task "
+                                           "— the default), `boot` or `manual` (Windows only, an SCM "
+                                           "service; not implemented yet, since a service under a "
+                                           "named account needs its password).",
                                            "MODE" });
         options.emplace_back(CLI::Option { "config",
                                            CLI::Value { ""s },
@@ -246,6 +256,58 @@ namespace
                 .name = verb.name,
                 .helpText = verb.helpText,
                 .options = daemonServiceOptions(verb.action == contour::cli::DaemonServiceAction::Install) });
+        return commands;
+    }
+
+    /// The option set each `daemon` sub-verb carries, mounted per verb for the reason
+    /// @ref daemonServiceOptions gives.
+    /// @param verb Which sub-verb.
+    /// @return The option list.
+    [[nodiscard]] core::cli::OptionList daemonVerbOptions(contour::cli::DaemonVerb verb)
+    {
+        namespace CLI = core::cli;
+        using contour::cli::DaemonVerb;
+
+        auto options = CLI::OptionList {
+            CLI::Option { "label",
+                          CLI::Value { std::string { vthost::DefaultSocketLabel } },
+                          "Socket label distinguishing daemon instances.",
+                          "NAME" },
+            CLI::Option { "socket",
+                          CLI::Value { ""s },
+                          "Path of the control socket file. Defaults to "
+                          "$XDG_RUNTIME_DIR/contour/LABEL (respecting $CONTOUR_MUX).",
+                          "PATH" },
+        };
+        switch (verb)
+        {
+            case DaemonVerb::Stop:
+                options.emplace_back(CLI::Option {
+                    "yes", CLI::Value { false }, "Ends the daemon's sessions without asking first." });
+                break;
+            case DaemonVerb::Logs:
+                options.emplace_back(CLI::Option {
+                    "follow", CLI::Value { false }, "Keeps printing as the log grows (end with Ctrl+C)." });
+                options.emplace_back(CLI::Option { "lines",
+                                                   CLI::Value { 100u },
+                                                   "How many trailing lines to print first; 0 prints all "
+                                                   "of the last 256 KiB.",
+                                                   "N" });
+                break;
+            case DaemonVerb::Run:
+            case DaemonVerb::Status: break;
+        }
+        return options;
+    }
+
+    /// Builds the `daemon` sub-verbs from @ref contour::cli::DaemonSubVerbs.
+    /// @return One command per verb, each carrying the options it needs.
+    [[nodiscard]] core::cli::CommandList daemonVerbCommands()
+    {
+        auto commands = core::cli::CommandList {};
+        for (auto const& row: contour::cli::DaemonSubVerbs)
+            commands.emplace_back(core::cli::Command {
+                .name = row.name, .helpText = row.helpText, .options = daemonVerbOptions(row.verb) });
         return commands;
     }
 
@@ -797,11 +859,83 @@ namespace
     }
 #endif
 
+    /// Moves a daemon about to serve onto its staged image, or leases the staged image it already runs
+    /// from.
+    ///
+    /// A daemon that moves does not come back from here: its process image is replaced by the staged
+    /// copy, which keeps the process id (what systemd and launchd supervise) and enters here again, now
+    /// Staged. Any failure is logged and the daemon runs in place.
+    /// @param images This process's image store.
+    /// @param request Whether `--in-place` refused the move.
+    /// @param commandLine This process's argv, which the staged copy is run with.
+    /// @return The lease to hold until the daemon is done serving; null when it runs in place.
+    [[nodiscard]] std::unique_ptr<vthost::ImageLease> settleDaemonImage(vthost::NativeDaemonImages& images,
+                                                                        vthost::RelocationRequest request,
+                                                                        std::vector<std::string> commandLine)
+    {
+        auto const placement = vthost::imagePlacementOf(images.store(), images.inputs());
+        if (placement == vthost::ImagePlacement::Staged)
+        {
+            // Taken before the listener binds, so that the launcher's lease may end once this serves; it
+            // also prunes the images nobody leases, which a service-started daemon has no launcher to do.
+            auto lease = vthost::leaseRunningImage(images.store(), images.leases(), images.inputs());
+            if (!lease)
+            {
+                errorLog()("cannot lease the image this daemon runs from ({}); a prune may remove it",
+                           lease.error().toString());
+                return nullptr;
+            }
+            return std::move(*lease);
+        }
+        if (vthost::relocationFor(images.store().layout(), vthost::NativeHostPlatform, placement, request)
+            == vthost::Relocation::ExecStaged)
+        {
+            auto const failure = vthost::execFromStagedImage(images.store(),
+                                                             images.leases(),
+                                                             *vthost::makeNativeProcessImageReplacer(),
+                                                             std::move(commandLine));
+            errorLog()("cannot run from a per-version copy ({}); running in place", failure);
+        }
+        return nullptr;
+    }
+
+    /// @return Whether `--in-place` refuses a move onto a staged image.
+    [[nodiscard]] vthost::RelocationRequest relocationRequestOf(bool inPlace) noexcept
+    {
+        return inPlace ? vthost::RelocationRequest::Refused : vthost::RelocationRequest::Allowed;
+    }
+} // namespace
+
+namespace
+{
+    /// How often a followed daemon log is polled for new output.
+    constexpr auto LogFollowInterval = std::chrono::milliseconds { 250 };
 } // namespace
 
 int ContourApp::daemonAction()
 {
-    // Logging is installed FIRST, so every diagnostic below — socket binds, TLS setup — is
+    // core::cli::App dispatches the first true flag in name order, and `contour.daemon` sorts before
+    // `contour.daemon.status`, so the daemon's own handler is the one that runs for a sub-verb too.
+    for (auto const& row: DaemonSubVerbs)
+    {
+        auto const prefix = std::format("contour.daemon.{}", row.name);
+        if (parameters().get<bool>(prefix))
+            return daemonVerbAction(row.verb, prefix);
+    }
+
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = vthost::muxSocketPath(parameters().get<string>("contour.daemon.label"),
+                                              parameters().get<string>("contour.daemon.socket"));
+
+    // Before logging, whose default file lies beside the socket: a log sink creating the socket's
+    // directory would give it the umask's 0755, which the listener refuses as world-accessible.
+    if (auto const prepared = vthost::prepareSocketDirectory(config.socketPath); !prepared)
+    {
+        cerr << std::format("contour daemon: {}\n", prepared.error());
+        return EXIT_FAILURE;
+    }
+
+    // Logging is installed next, so every diagnostic below — socket binds, TLS setup — is
     // captured. The app owns it, so it outlives runDaemon (categories hold a reference into its
     // sink) and every thread runDaemon spawns has been joined by the time it returns.
     if (auto const installed = installLogging("contour.daemon", /*showProcessId=*/true); !installed)
@@ -809,10 +943,6 @@ int ContourApp::daemonAction()
         cerr << std::format("contour daemon: {}\n", installed.error());
         return EXIT_FAILURE;
     }
-
-    auto config = vthost::DaemonConfig {};
-    config.socketPath = vthost::muxSocketPath(parameters().get<string>("contour.daemon.label"),
-                                              parameters().get<string>("contour.daemon.socket"));
 
     // The hosted terminals' full session configuration: emulation settings, presentation/color
     // fields, the shell to run and its sandbox policy. The profile's `history.limit` is
@@ -854,8 +984,30 @@ int ContourApp::daemonAction()
     if (auto label = parameters().get<string>("contour.daemon.tmux-compat-socket"); !label.empty())
         config.tmuxCompatLabel = std::move(label);
 
+    // Rejected rather than defaulted, as --size-policy is below.
+    auto const lifecycleText = parameters().get<string>("contour.daemon.lifecycle");
+    if (auto const lifecycle = vthost::daemonLifecycleFrom(lifecycleText))
+        config.lifecycle = *lifecycle;
+    else
+    {
+        cerr << std::format("contour daemon: unknown --lifecycle '{}' (expected one of: {})\n",
+                            lifecycleText,
+                            core::joinHumanReadable(vthost::DaemonLifecycleNames | std::views::keys));
+        return EXIT_FAILURE;
+    }
+
+    // The alias for --lifecycle=exit-with-last-session; stating both only conflicts when they differ.
     if (parameters().get<bool>("contour.daemon.exit-with-last-session"))
+    {
+        if (config.lifecycle != vthost::DaemonLifecycle::Persistent
+            && config.lifecycle != vthost::DaemonLifecycle::ExitWhenEmpty)
+        {
+            cerr << "contour daemon: --exit-with-last-session conflicts with --lifecycle=" << lifecycleText
+                 << "\n";
+            return EXIT_FAILURE;
+        }
         config.lifecycle = vthost::DaemonLifecycle::ExitWhenEmpty;
+    }
 
     // Rejected rather than defaulted: silently serving `latest` to someone who asked for
     // `smallest` would look like the feature does not work.
@@ -916,7 +1068,83 @@ int ContourApp::daemonAction()
     if (parameters().get<bool>("contour.daemon.background"))
         return runDaemonInBackground(config.socketPath);
 
+    // What this daemon states about itself, in every hello and status reply.
+    config.releaseVersion = CONTOUR_VERSION_STRING;
+    if (auto logFile = parameters().get<string>("contour.daemon.log-file"); logFile != "-")
+        config.logFile = core::pathFromUtf8(logFile).value_or(std::filesystem::path {});
+
+    // Where it runs from: a per-version copy wherever an upgrade would disturb the installed binary.
+    // Held until runDaemon returns.
+    auto runningLease = std::unique_ptr<vthost::ImageLease> {};
+    auto images = vthost::NativeDaemonImages::ofThisProcess(
+        processEnvironment(), core::platform::NativeFileSystem::instance(), CONTOUR_VERSION_STRING);
+    if (images)
+    {
+        runningLease = settleDaemonImage(
+            **images, relocationRequestOf(parameters().get<bool>("contour.daemon.in-place")), commandLine());
+        config.executablePath = vthost::stagedImageOf((*images)->store(), (*images)->inputs())
+                                    .value_or(vthost::launchedImage((*images)->inputs()));
+    }
+    else
+    {
+        errorLog()("cannot locate the running executable ({}); running in place", images.error().message());
+        config.executablePath = std::filesystem::absolute(
+            core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}));
+    }
+
     return vthost::runDaemon(config);
+}
+
+int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
+{
+    // `daemon --socket X status` and `daemon status --socket X` both mean X.
+    auto const label = mergeSharedOption("label",
+                                         parameters().get<string>("contour.daemon.label"),
+                                         parameters().get<string>(prefix + ".label"),
+                                         string { vthost::DefaultSocketLabel });
+    auto const socketOption = mergeSharedOption("socket",
+                                                parameters().get<string>("contour.daemon.socket"),
+                                                parameters().get<string>(prefix + ".socket"),
+                                                string {});
+    if (!label || !socketOption)
+    {
+        cerr << std::format("contour daemon: {}\n", !label ? label.error() : socketOption.error());
+        return exitCode(ExitStatus::BadUsage);
+    }
+    auto const socket = vthost::muxSocketPath(*label, *socketOption);
+    auto control =
+        vthost::client::makeDaemonControl(vthost::AttachEndpoint { vthost::UnixEndpoint { socket } });
+
+    switch (verb)
+    {
+        case DaemonVerb::Status: return exitCode(daemonStatusVerb(*control, socket, cout, cerr));
+        case DaemonVerb::Stop: {
+            auto prompt = makeTerminalPrompt(std::cin, cout);
+            auto const consent =
+                parameters().get<bool>(prefix + ".yes") ? StopConsent::Given : StopConsent::Ask;
+            return exitCode(daemonStopVerb(*control, socket, consent, *prompt, cout, cerr));
+        }
+        case DaemonVerb::Logs: {
+            auto const lines = parameters().get<unsigned>(prefix + ".lines");
+            auto const options = LogsOptions {
+                .lines = static_cast<std::size_t>(lines),
+                .follow = parameters().get<bool>(prefix + ".follow") ? FollowMode::Follow : FollowMode::Once,
+            };
+            auto const waitTick = std::function<FollowStep()> { [] {
+                std::this_thread::sleep_for(LogFollowInterval);
+                return FollowStep::Continue; // Ctrl+C ends the process.
+            } };
+            return exitCode(daemonLogsVerb(*control,
+                                           vthost::daemonLogPath(socket),
+                                           options,
+                                           core::platform::NativeFileSystem::instance(),
+                                           waitTick,
+                                           cout,
+                                           cerr));
+        }
+        case DaemonVerb::Run: break;
+    }
+    return exitCode(ExitStatus::BadUsage);
 }
 
 int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
@@ -946,6 +1174,19 @@ int ContourApp::runDaemonInBackground(std::filesystem::path const& socketPath)
         logFile = core::pathToUtf8(vthost::daemonLogPath(socketPath));
         childArgs.push_back(std::format("--log-file={}", logFile));
     }
+
+    // Started from this version's own copy, unless --in-place asks otherwise, and that copy held leased
+    // until the child serves: by then it has leased the copy itself.
+    auto const argv0 = core::pathFromUtf8(childArgs.front()).value_or(std::filesystem::path {});
+    auto const binary = relocationRequestOf(parameters().get<bool>("contour.daemon.in-place"))
+                                == vthost::RelocationRequest::Allowed
+                            ? vthost::makeOwnDaemonBinary(processEnvironment(),
+                                                          core::platform::NativeFileSystem::instance(),
+                                                          CONTOUR_VERSION_STRING,
+                                                          argv0)
+                            : std::make_unique<vthost::InstalledDaemonBinary>(argv0);
+    auto const image = binary->imageForSpawn();
+    childArgs.front() = core::pathToUtf8(image.executable);
 
     // Placed, as a session's shell is: typed into a tab, it would otherwise live in that tab's scope.
     auto const placement = vtpty::makeDefaultProcessPlacement();
@@ -980,24 +1221,25 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
         return EXIT_FAILURE;
     }
 
-    auto const name = vthost::serviceNameForLabel(label);
+    auto const commands = vthost::makeNativeCommandRunner();
+    auto const services =
+        vthost::ServiceBackendServices { .fileSystem = core::platform::NativeFileSystem::instance(),
+                                         .commands = *commands,
+                                         .environment = processEnvironment() };
 
-    // For a non-install verb the registration decides which backend owns it: `status` on a
-    // logon task must not report "not installed" merely because it asked the SCM.
+    // For a non-install verb the registration decides which backend owns it, and under which name: a
+    // task registered by an older release carries the older name, so `status` must not report "not
+    // installed" merely because it asked the newer name or the SCM.
+    auto name = vthost::serviceNameForLabel(label);
     auto backend = std::unique_ptr<vthost::ServiceBackend> {};
     if (mode)
-        backend = vthost::makeServiceBackend(*mode, name);
+        backend = vthost::makeServiceBackend(*mode, name, services);
     else
     {
-        for (auto const& [_, candidate]: vthost::ServiceStartModeNames)
+        if (auto found = vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)))
         {
-            auto probe = vthost::makeServiceBackend(candidate, name);
-            if (auto const found = probe->status();
-                found && found->state != vthost::ServiceRunState::NotInstalled)
-            {
-                backend = std::move(probe);
-                break;
-            }
+            backend = std::move(found->backend);
+            name = std::move(found->name);
         }
         if (!backend)
         {
@@ -1007,6 +1249,29 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
             return EXIT_FAILURE;
         }
     }
+
+    // The socket the registration serves on: the one its command line names, which install pinned, else
+    // the label's default.
+    auto const socketOf = [&](vthost::ServiceStatus const& status) {
+        return vthost::registeredSocketPath(status.commandLine).value_or(vthost::muxSocketPath(label, {}));
+    };
+
+    // A daemon the OS did not start itself (a Task Scheduler task only runs the launcher that
+    // backgrounds it) is stopped over its socket: stopping the service would stop nothing.
+    auto const stopDaemon = [&]() -> std::expected<void, vthost::ServiceError> {
+        if (vthost::stopVia(backend->launchStyle()) == vthost::StopRoute::ServiceManager)
+            return backend->stop();
+        auto const status = backend->status();
+        if (!status)
+            return std::unexpected(status.error());
+        auto const control = vthost::client::makeDaemonControl(
+            vthost::AttachEndpoint { vthost::UnixEndpoint { socketOf(*status) } });
+        if (auto const stopped = control->stop(vthost::proto::StopReason::User);
+            !stopped && stopped.error().code != vthost::client::ControlErrorCode::NotRunning)
+            return std::unexpected(vthost::ServiceError { .code = vthost::ServiceErrorCode::Backend,
+                                                          .context = stopped.error().toString() });
+        return {};
+    };
 
     auto const report = [&](std::expected<void, vthost::ServiceError> const& result, std::string_view verb) {
         if (result)
@@ -1022,7 +1287,7 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
     switch (action)
     {
         case DaemonServiceAction::Install: {
-            auto commandLineOrError = daemonServiceCommandLine(prefix, label);
+            auto commandLineOrError = daemonServiceCommandLine(prefix, label, backend->launchStyle());
             if (!commandLineOrError)
             {
                 cerr << std::format("contour daemon-service: {}\n", commandLineOrError.error());
@@ -1045,13 +1310,15 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
                 "contour daemon-service: {} installed, starting at {}\n", name, vthost::nameOf(*mode));
             return EXIT_SUCCESS;
         }
-        case DaemonServiceAction::Uninstall: return report(backend->uninstall(), "uninstalled");
+        case DaemonServiceAction::Uninstall:
+            std::ignore = stopDaemon();
+            return report(backend->uninstall(), "uninstalled");
         case DaemonServiceAction::Start: return report(backend->start(), "started");
-        case DaemonServiceAction::Stop: return report(backend->stop(), "stopped");
+        case DaemonServiceAction::Stop: return report(stopDaemon(), "stopped");
         case DaemonServiceAction::Restart:
             // A stop that finds nothing running is not a failure here: restart's contract is
             // "be running afterwards", which a stopped registration already satisfies halfway.
-            std::ignore = backend->stop();
+            std::ignore = stopDaemon();
             return report(backend->start(), "restarted");
         case DaemonServiceAction::Status: {
             auto const status = backend->status();
@@ -1061,8 +1328,18 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
                     "contour daemon-service: could not query {}: {}\n", name, status.error().toString());
                 return EXIT_FAILURE;
             }
-            cout << std::format(
-                "{}: {} (starts at {})\n", name, vthost::nameOf(status->state), vthost::nameOf(status->mode));
+            // The socket decides whether it runs: a task that backgrounded its daemon reads "Ready".
+            auto const socket = socketOf(*status);
+            auto const live = vthost::makeNativeDaemonSpawner()->probe(socket);
+            cout << std::format("{}: {} (starts at {})\n",
+                                name,
+                                vthost::nameOf(vthost::effectiveRunState(status->state, live)),
+                                vthost::nameOf(status->mode));
+            if (live == vthost::DaemonPresence::Serving)
+                if (auto const daemon = vthost::client::makeDaemonControl(
+                                            vthost::AttachEndpoint { vthost::UnixEndpoint { socket } })
+                                            ->status())
+                    cout << std::format("  version: {}\n", daemon->releaseVersion);
             if (!status->commandLine.empty())
                 cout << std::format("  runs: {}\n", status->commandLine);
             return EXIT_SUCCESS;
@@ -1072,7 +1349,7 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
 }
 
 std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCommandLine(
-    std::string const& prefix, std::string const& label) const
+    std::string const& prefix, std::string const& label, vthost::DaemonLaunchStyle launchStyle) const
 {
     // Absolute, and resolved NOW: a registration outlives the shell that created it, and a
     // service's %TEMP%/%USERNAME% need not match the interactive user's — so a path left to be
@@ -1100,16 +1377,21 @@ std::expected<std::vector<std::string>, std::string> ContourApp::daemonServiceCo
     // by one path and silently dropped by the other. Persistent, not ExitWhenEmpty: an installed
     // daemon exists precisely to still be there for the next client.
     auto const program = core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {});
-    return vthost::daemonSpawnArgs(core::pathToUtf8(std::filesystem::absolute(program)),
-                                   socketPath,
-                                   vthost::DaemonSpawnOptions {
-                                       .filter = parameters().get<string>(prefix + ".log"),
-                                       .logFile = std::move(logFile),
-                                       .configPath = parameters().get<string>(prefix + ".config"),
-                                       .profileName = parameters().get<string>(prefix + ".profile"),
-                                       .sizePolicy = *sizePolicy,
-                                   },
-                                   vthost::DaemonLifecycle::Persistent);
+    auto arguments = vthost::daemonSpawnArgs(core::pathToUtf8(std::filesystem::absolute(program)),
+                                             socketPath,
+                                             vthost::DaemonSpawnOptions {
+                                                 .filter = parameters().get<string>(prefix + ".log"),
+                                                 .logFile = std::move(logFile),
+                                                 .configPath = parameters().get<string>(prefix + ".config"),
+                                                 .profileName = parameters().get<string>(prefix + ".profile"),
+                                                 .sizePolicy = *sizePolicy,
+                                             },
+                                             vthost::DaemonLifecycle::Persistent);
+    // A supervisor that tracks the process it started (systemd, launchd) must see the daemon itself; one
+    // that only starts a launcher (the Task Scheduler) is given a daemon that detaches.
+    if (launchStyle == vthost::DaemonLaunchStyle::SelfDetaching)
+        arguments.emplace_back("--background");
+    return arguments;
 }
 
 int ContourApp::catAction()
@@ -1312,13 +1594,23 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "its diagnostics to. On Linux the daemon runs in a systemd scope of "
                                   "its own where systemd answers before this command returns; "
                                   "otherwise it stays where it was started." },
+                    CLI::Option { "in-place",
+                                  CLI::Value { false },
+                                  "Runs from the installed binary instead of a per-version copy; a "
+                                  "package upgrade may then replace it under the running daemon." },
+                    CLI::Option {
+                        "lifecycle",
+                        CLI::Value { std::string { vthost::nameOf(vthost::DaemonLifecycle::Persistent) } },
+                        "When the daemon ends on its own: `persistent` (the default; keeps "
+                        "serving with no sessions, so a daemon started by hand is still there "
+                        "for the next client), `exit-with-last-session` (ends once its last "
+                        "hosted session is gone; tmux spells this `exit-empty`) or "
+                        "`exit-when-idle` (ends 10 s after it has no session and no client; "
+                        "what `contour client` starts on demand).",
+                        "POLICY" },
                     CLI::Option { "exit-with-last-session",
                                   CLI::Value { false },
-                                  "Terminates the daemon once its last hosted session is gone "
-                                  "instead of waiting for further clients (tmux spells this "
-                                  "`exit-empty`). Off by default, so a daemon started by hand "
-                                  "keeps serving with no sessions; `contour client` passes this "
-                                  "to a daemon it auto-spawns, which belongs to that client." },
+                                  "Alias for --lifecycle=exit-with-last-session." },
                     CLI::Option { "size-policy",
                                   CLI::Value { "latest"s },
                                   "Which attached client's size the shared grid takes when several "
@@ -1373,7 +1665,8 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "Appends log output to FILE instead of standard error. If - "
                                   "(dash) is given, standard error is used explicitly.",
                                   "FILE" },
-                } },
+                },
+                daemonVerbCommands() },
             CLI::Command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",

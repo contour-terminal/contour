@@ -69,6 +69,9 @@ enum class PduType : uint8_t
     PermissionRequest = 22,
     PermissionReply = 23,
     Unsupported = 24,
+    DaemonStatusRequest = 25,
+    DaemonStatusReply = 26,
+    StopDaemon = 27,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -163,6 +166,16 @@ enum class HelloLayout : uint8_t
     VersionAlone = 1,
 };
 
+/// What a connection is for. A Control connection asks the daemon about itself (DaemonStatusRequest,
+/// StopDaemon): it is no client, so it is shown no layout, spawns no first session and keeps nothing alive.
+/// Decoding fails closed: a role byte this version does not know reads as Control, so a future role never
+/// spawns a session.
+enum class ConnectionRole : uint8_t
+{
+    Attach = 0,  ///< A terminal client: it is shown the daemon's sessions and layout.
+    Control = 1, ///< A probe or a command to the daemon itself.
+};
+
 /// Client's first PDU: the protocol versions and capabilities it speaks, (for TCP) a preshared auth
 /// token, and optionally the emulation settings it wants the sessions it creates to have. Anything
 /// before it is a protocol error.
@@ -189,6 +202,8 @@ struct ClientHello
     /// The client's preference for sessions it creates; absent means "whatever the daemon hosts
     /// with", which is what a client with no configuration of its own wants.
     std::optional<WireSessionSettings> sessionSettings = std::nullopt;
+    /// What the connection is for; absent on the wire means Attach.
+    ConnectionRole role = ConnectionRole::Attach;
     bool operator==(ClientHello const&) const = default;
 };
 
@@ -220,6 +235,8 @@ struct ServerHello
     /// /etc/machine-id itself; empty where the daemon has none.
     std::string machineId = {};
     std::string hostname = {}; ///< The daemon's host name; empty when unknown.
+    /// The daemon's release (e.g. "0.8.1"); empty when unknown, and in every refusal.
+    std::string releaseVersion = {};
     bool operator==(ServerHello const&) const = default;
 };
 
@@ -1054,16 +1071,55 @@ struct PermissionReply
 };
 
 /// Either direction, after the handshake: the frame with serial @ref refusedSerial carried a PDU tag this
-/// peer does not know. Its receiver stops sending that tag for the rest of the connection, and never answers
-/// an Unsupported itself. Before the handshake no PDU is answered with one: the daemon answers anything but a
-/// ClientHello with a version-alone ServerHello and ends the connection, and the client ignores anything but
-/// the ServerHello.
+/// peer does not know, or knows but cannot serve (a Control connection's attach-only request, a daemon
+/// control request on an endpoint with no daemon behind it). Its receiver stops sending that tag for the rest
+/// of the connection, and never answers an Unsupported itself. Before the handshake no PDU is answered with
+/// one: the daemon answers anything but a ClientHello with a version-alone ServerHello and ends the
+/// connection, and the client ignores anything but the ServerHello.
 /// @see UnsupportedTracker
 struct Unsupported
 {
     uint64_t refusedSerial = 0; ///< The serial of the frame that carried the unknown tag.
-    uint64_t ident = 0;         ///< The tag this peer does not know.
+    uint64_t ident = 0;         ///< The tag this peer does not know or cannot serve.
     bool operator==(Unsupported const&) const = default;
+};
+
+/// Client→server: asks for a DaemonStatusReply. It carries nothing. Served on a connection of either
+/// role; a Control connection exists to send it without becoming a client.
+struct DaemonStatusRequest
+{
+    bool operator==(DaemonStatusRequest const&) const = default;
+};
+
+/// Server→client: the answer to a DaemonStatusRequest.
+struct DaemonStatusReply
+{
+    std::string releaseVersion = {}; ///< The daemon's release.
+    uint64_t processId = 0;          ///< The daemon's process id.
+    uint64_t uptimeSeconds = 0;      ///< Seconds since the daemon started serving.
+    std::string socketPath = {};     ///< The endpoint it listens on.
+    std::string executablePath = {}; ///< The image it runs from.
+    std::string logFile = {};        ///< Where it logs; empty when it does not log to a file.
+    uint32_t sessions = 0;           ///< How many sessions it hosts.
+    uint32_t clients = 0;            ///< How many attached clients it counts (Control connections excluded).
+    uint8_t lifecycle = 0;           ///< Its DaemonLifecycle, as the wire spells it: when it ends on its own.
+    bool operator==(DaemonStatusReply const&) const = default;
+};
+
+/// Why a daemon is asked to stop.
+enum class StopReason : uint8_t
+{
+    User = 0,           ///< The user asked.
+    UpgradeRestart = 1, ///< It is replaced by a newer release.
+};
+
+/// Client→server: asks the daemon to shut down. Served on a connection of either role, as a
+/// DaemonStatusRequest is.
+struct StopDaemon
+{
+    /// A StopReason as the wire spells it; read through vthost::stopReasonFrom().
+    uint8_t reason = 0;
+    bool operator==(StopDaemon const&) const = default;
 };
 
 using DecodedPdu = std::variant<Invalid,
@@ -1090,7 +1146,10 @@ using DecodedPdu = std::variant<Invalid,
                                 PerformOperation,
                                 PermissionRequest,
                                 PermissionReply,
-                                Unsupported>;
+                                Unsupported,
+                                DaemonStatusRequest,
+                                DaemonStatusReply,
+                                StopDaemon>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

@@ -121,6 +121,15 @@ namespace vthost::testing
               .hostId = "secret-key@/home/user/secret.wasm", .digest = "5f3c", .grantState = 1 } } },
         { proto::PduType::Unsupported,
           proto::DecodedPdu { proto::Unsupported { .refusedSerial = 9, .ident = 200 } } },
+        { proto::PduType::DaemonStatusRequest, proto::DecodedPdu { proto::DaemonStatusRequest {} } },
+        { proto::PduType::DaemonStatusReply,
+          proto::DecodedPdu { proto::DaemonStatusReply { .releaseVersion = "0.8.1",
+                                                         .processId = 4242,
+                                                         .uptimeSeconds = 7385,
+                                                         .socketPath = "/run/user/1000/contour/default",
+                                                         .sessions = 3,
+                                                         .clients = 1 } } },
+        { proto::PduType::StopDaemon, proto::DecodedPdu { proto::StopDaemon { .reason = 1 } } },
     };
 }
 

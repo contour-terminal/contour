@@ -118,11 +118,6 @@ struct EndToEndHarness
                                        NativeClient::ImageHandler {},
                                        NativeClient::SessionEventHandler {},
                                        NativeClient::LayoutHandler {});
-
-    /// What `serveNativeClient` installs in production. Without it the session hears none of the
-    /// host's stream events, so a resize the host applies and announces reaches nobody — the
-    /// scenario below asserts on exactly that announcement.
-    vthost::ScopedStreamSubscription subscription = makeScopedStreamSubscription(host, *server);
 };
 
 Task<void> scenario(EndToEndHarness* h, vtworkspace::SessionId sessionId)
@@ -1099,10 +1094,6 @@ TEST_CASE("a client authors a tab, honored by the daemon and mirrored back", "[v
     auto server = NativeSession {
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
     };
-    // Subscribe the session's layout observer so the tab the client authors below
-    // fans back out as a fresh LayoutState — production wires this in
-    // serveNativeClient; the socket-pair tests construct NativeSession directly.
-    auto subscription = vthost::makeScopedModelSubscription(host, server.layoutObserver());
 
     auto mirroredTabs = int {};
     auto client =
@@ -1141,8 +1132,6 @@ TEST_CASE("a client authors a new window, honored by the daemon (B4)", "[vthost]
     auto server = NativeSession {
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first)
     };
-    auto subscription = vthost::makeScopedModelSubscription(host, server.layoutObserver());
-
     // Every LayoutState the client receives names its window; collect the ids.
     auto windows = std::set<uint64_t> {};
     auto client =
@@ -1481,7 +1470,6 @@ TEST_CASE("NativeClient.extension.permission", "[vthost][attach][extensions]")
     auto pair = *core::net::testing::makeSocketPair(loop);
     auto server = std::make_unique<NativeSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(pair.first));
-    auto const subscription = makeScopedStreamSubscription(host, *server);
     auto asked = std::vector<proto::PermissionRequest> {};
     auto client = std::unique_ptr<NativeClient> {};
     client = std::make_unique<NativeClient>(
@@ -2013,4 +2001,35 @@ TEST_CASE("an image fetch that was not sent awaits no reply", "[vthost][negotiat
 
     CHECK(capture.contains("unrouted ImageData"));
     CHECK_FALSE(client->screens().contains(1));
+}
+
+TEST_CASE("a client reports the release its daemon stated", "[vthost][negotiation]")
+{
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto pair = *core::net::testing::makeSocketPair(loop);
+    auto* daemonSocket = pair.first.get();
+    auto client = NativeClient { loop,
+                                 std::move(pair.second),
+                                 NativeClient::HandshakeOptions {},
+                                 vtbackend::CommandBlockStoreLimits {},
+                                 NativeClient::UpdateHandler {},
+                                 NativeClient::ImageHandler {},
+                                 NativeClient::SessionEventHandler {},
+                                 NativeClient::LayoutHandler {} };
+    CHECK(client.daemonRelease().empty()); // nothing is known before the ServerHello
+
+    auto hello = acceptingHello();
+    hello.releaseVersion = "0.8.1";
+    auto seen = std::vector<proto::DecodedFrame> {};
+    auto scenario = [](core::net::EventLoop* loop, NativeClient* client) -> Task<void> {
+        co_await core::net::testing::waitUntil(loop, [&] { return client->connected(); });
+        client->detach();
+    }(&loop, &client);
+    loop.blockOn(core::net::testing::allOf(
+        client.run(),
+        scriptedDaemon(&loop, daemonSocket, answeringHello(Script { { std::nullopt, hello } }), &seen),
+        std::move(scenario)));
+
+    CHECK(client.daemonRelease() == "0.8.1");
 }

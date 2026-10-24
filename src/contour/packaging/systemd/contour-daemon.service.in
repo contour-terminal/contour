@@ -1,0 +1,15 @@
+# Installed by Contour: the daemon that hosts persistent terminal sessions, as a systemd user service.
+#
+# Not enabled by the package. `contour daemon-service install` writes the user's own copy under
+# ~/.config/systemd/user, which takes precedence over this one, and enables it.
+[Unit]
+Description=Contour daemon
+Documentation=https://contour-terminal.org/persistent-sessions/
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/contour daemon --lifecycle=persistent
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

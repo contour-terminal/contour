@@ -302,6 +302,7 @@ if(CONTOUR_FRONTEND_GUI)
     list(APPEND _core_source_files
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
+        window/DaemonDriftModel.cpp
         ContourGuiApp.cpp
         session/PaneProxy.cpp
         config/LayoutBuilder.cpp
@@ -386,6 +387,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SettingsNavItem.qml
         qml/SettingsListItem.qml
         qml/ConfirmDialog.qml
+        qml/DaemonDriftBadge.qml
         qml/ContourMenu.qml
         qml/PopupSurface.qml
         qml/SettingRow.qml
@@ -791,6 +793,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/ContourTuiStyle_test.cpp
             window/WindowControlStyleProvider_test.cpp
             window/TabLabel_test.cpp
+            window/DaemonDriftModel_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
             platform/WindowResizeGrid_test.cpp
@@ -1101,6 +1104,7 @@ if(CONTOUR_TESTING)
         command/TitleBarContextMenu_test.cpp
         cli/CaptureScreen_test.cpp
         cli/ContourApp_test.cpp
+        cli/DaemonVerbs_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ShellIntegration_test.cpp
         cli/ShellIntegrationShells_test.cpp
@@ -1124,6 +1128,7 @@ if(CONTOUR_TESTING)
         contour_command_output
         contour_cli
         contour_local_file
+        vthost
         vtbackend
         core::testing
         Catch2::Catch2)
@@ -1609,6 +1614,13 @@ else()
                 install(FILES "packaging/systemd/oom-policy-scope.conf"
                         DESTINATION "${_systemdUserUnitDir}/${_unit}.d" RENAME "50-oom-policy.conf")
             endforeach()
+
+            # The daemon that hosts persistent sessions, as a user service. Shipped, not enabled:
+            # `contour daemon-service install` writes the user's own copy and enables it.
+            configure_file("packaging/systemd/contour-daemon.service.in"
+                           "${CMAKE_CURRENT_BINARY_DIR}/contour-daemon.service" @ONLY)
+            install(FILES "${CMAKE_CURRENT_BINARY_DIR}/contour-daemon.service"
+                    DESTINATION "${_systemdUserUnitDir}")
         endif()
     endif()
 endif()

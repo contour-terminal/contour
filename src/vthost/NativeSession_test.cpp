@@ -43,6 +43,7 @@
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/proto/PduTrace.hpp>
+#include <vthost/testing/FakeDaemonControl.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
 #include <vthost/testing/PreNegotiationCodec.hpp>
 #include <vthost/testing/ShippedCodec.hpp>
@@ -377,12 +378,6 @@ struct NativeHarness
                                         std::move(pair.first),
                                         options.writeQueueBytes,
                                         options.services);
-
-    /// What `serveNativeClient` installs in production, and what a resize resync now rides: the
-    /// host announces a moved grid to its stream subscribers rather than the receiving connection
-    /// resyncing itself. Screen updates still come from the helpers above, because the harness
-    /// runs with the pumps stopped.
-    vthost::ScopedStreamSubscription subscription = makeScopedStreamSubscription(host, *session);
 
     /// What the client has decoded in the current exchange, as it arrives: what a step run beside
     /// the exchange waits on.
@@ -777,9 +772,6 @@ std::vector<proto::DecodedFrame> exchangeAll(NativeHarness* h, std::vector<proto
 /// One host, TWO connections — the shape every multi-client property needs, and which the
 /// single-connection harness above cannot express: a claim about what the OTHER client received
 /// has no other client to receive it.
-///
-/// Both sessions are subscribed to the host's stream events here, because `serveNativeClient` is
-/// what does that in production and nothing in NativeSession does it for itself.
 struct TwoClientHarness
 {
     std::unique_ptr<core::net::IoBackend> source = core::net::makeDefaultBackend();
@@ -797,8 +789,6 @@ struct TwoClientHarness
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 1 }, std::move(firstPair.first));
     std::unique_ptr<NativeSession> serverTwo = std::make_unique<NativeSession>(
         loop, host, vthost::ConnectionId { .endpoint = "test", .index = 2 }, std::move(secondPair.first));
-    vthost::ScopedStreamSubscription subscriptionOne = makeScopedStreamSubscription(host, *serverOne);
-    vthost::ScopedStreamSubscription subscriptionTwo = makeScopedStreamSubscription(host, *serverTwo);
 };
 
 /// Feeds @p bytes to @p client once @p ready holds for what another client has received, so a request
@@ -1411,7 +1401,6 @@ TEST_CASE("a client streaming input into a session that reads none is paused whi
                                                  vthost::ConnectionId { .endpoint = "other", .index = 2 },
                                                  std::move(otherPair.first),
                                                  NativeSession::DefaultWriteQueueBytes);
-    auto const otherSubscription = makeScopedStreamSubscription(h.host, *other);
     auto const otherRequest =
         encodeRequest({ proto::ClientHello {}, proto::DecodedPdu { proto::FetchImage { .imageId = 4242 } } });
     auto otherReceived = std::vector<proto::DecodedFrame> {};
@@ -1935,12 +1924,10 @@ TEST_CASE("a closed session's follow state is pruned", "[vthost][native]")
     std::ignore = h.exchange({ proto::ClientHello {} }, 3);
     REQUIRE(vthost::NativeSessionFollowTester::follows(*h.session, sessionId));
 
-    // The host learning its own session closed must fan out to stream subscribers,
-    // and the session must drop the per-session follow state (otherwise it leaks
-    // for the connection's whole lifetime -- one entry per session ever opened).
-    h.host.subscribeStream(h.session.get());
+    // The host learning its own session closed must fan out to stream subscribers, the attached
+    // connection among them, and the session must drop the per-session follow state (otherwise it
+    // leaks for the connection's whole lifetime -- one entry per session ever opened).
     h.host.handleSessionExit(sessionId);
-    h.host.unsubscribeStream(h.session.get());
 
     CHECK_FALSE(vthost::NativeSessionFollowTester::follows(*h.session, sessionId));
     CHECK(vthost::NativeSessionFollowTester::followedCount(*h.session) == 0);
@@ -3290,7 +3277,6 @@ Task<void> publishOnce(NativeHarness* h,
     auto pair = makeConnection(h.loop, std::nullopt);
     auto session = std::make_unique<NativeSession>(
         h.loop, h.host, vthost::ConnectionId { .endpoint = "test", .index = 2 }, std::move(pair.first));
-    auto const subscription = makeScopedStreamSubscription(h.host, *session);
     auto const bytes = encodeRequest({ proto::ClientHello {} });
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(
@@ -3592,7 +3578,6 @@ TEST_CASE("a PDU the client refused is not sent to it again", "[vthost][negotiat
 {
     auto h = NativeHarness {};
     h.host.createTab();
-    auto const layoutSubscription = vthost::makeScopedModelSubscription(h.host, h.session->layoutObserver());
     auto const isLayout = [](proto::DecodedFrame const& frame) {
         return std::holds_alternative<proto::LayoutState>(frame.pdu);
     };
@@ -3849,7 +3834,6 @@ TEST_CASE("a permission question one client could not answer is asked of the nex
                                                    vthost::ConnectionId { .endpoint = "capable", .index = 2 },
                                                    std::move(pair.first),
                                                    NativeSession::DefaultWriteQueueBytes);
-    auto const subscription = makeScopedStreamSubscription(h.host, *capable);
     auto const hello = encodeRequest({ proto::ClientHello { .capabilities = answeringPermissions() } });
     auto received = std::vector<proto::DecodedFrame> {};
     h.loop.blockOn(core::net::testing::allOf(
@@ -3864,4 +3848,196 @@ TEST_CASE("a permission question one client could not answer is asked of the nex
     auto const request = std::ranges::find_if(received, isPermissionRequest);
     REQUIRE(request != received.end());
     CHECK(std::get<proto::PermissionRequest>(request->pdu).digest == gitQuestion().digest);
+}
+
+namespace
+{
+
+/// @return Whether @p frame is a SessionBell.
+[[nodiscard]] bool isBell(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::SessionBell>(frame.pdu);
+}
+
+/// @return Whether @p frame is a DaemonStatusReply.
+[[nodiscard]] bool isStatusReply(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::DaemonStatusReply>(frame.pdu);
+}
+
+/// Once @p gate holds: writes @p bytes into @p id the way its application would, so that the host fans
+/// the screen update and any bell out to every connection subscribed to it.
+/// @param size Receives @p id's page size as it was just before the write.
+Task<void> writeThroughHost(
+    NativeHarness* h, vtworkspace::SessionId id, std::string bytes, StepGate gate, vtbackend::PageSize* size)
+{
+    co_await awaitGate(&h->loop, std::move(gate));
+    *size = h->host.terminal(id)->pageSize();
+    h->host.terminal(id)->writeToScreen(bytes);
+}
+
+} // namespace
+
+TEST_CASE("a Control-role hello neither spawns a session nor counts as a client", "[vthost][native][control]")
+{
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    auto const received = h.exchange(
+        { proto::ClientHello { .role = proto::ConnectionRole::Control }, proto::DaemonStatusRequest {} }, 2);
+    REQUIRE(received.size() == 2);
+    REQUIRE(std::holds_alternative<proto::ServerHello>(received[0].pdu));
+    CHECK(std::get<proto::ServerHello>(received[0].pdu).releaseVersion == "9.9.9"); // the fake's release
+    REQUIRE(std::holds_alternative<proto::DaemonStatusReply>(received[1].pdu));
+    CHECK(received[1].serial == 2); // answered under the request's serial
+    CHECK(std::get<proto::DaemonStatusReply>(received[1].pdu).releaseVersion == "9.9.9");
+    CHECK(h.host.sessionCount() == 0);
+    CHECK(control.census.count() == 0);
+    CHECK(control.peakClients == 0);
+}
+
+TEST_CASE("a Control connection hears nothing from the host's sessions", "[vthost][native][control]")
+{
+    // A second, Attach connection on the same host drives a resize, output and a bell into a session while
+    // the Control connection is handshaken. The Control connection is sent nothing but the answers to its own
+    // requests, and a client area it was never allowed to report leaves the session's size as it was.
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    auto const sessionId = newSession(h.host);
+
+    auto attachPair = makeConnection(h.loop, std::nullopt);
+    auto attach = std::make_unique<NativeSession>(h.loop,
+                                                  h.host,
+                                                  vthost::ConnectionId { .endpoint = "attach", .index = 2 },
+                                                  std::move(attachPair.first));
+    auto attachReceived = std::vector<proto::DecodedFrame> {};
+    auto controlReceived = std::vector<proto::DecodedFrame> {};
+
+    auto const controlHello =
+        encodeRequest({ proto::ClientHello { .role = proto::ConnectionRole::Control } });
+    auto const attachRequest =
+        encodeRequest({ proto::ClientHello {}, proto::ResizeRequest { .columns = 100, .lines = 30 } });
+    auto const controlRequest =
+        encodeRequest({ proto::ResizeRequest { .columns = 60, .lines = 10 }, proto::DaemonStatusRequest {} });
+    auto const attachHeard = [](std::vector<proto::DecodedFrame> const& got) {
+        return std::ranges::any_of(got, isBell) && std::ranges::any_of(got, isIncrement);
+    };
+    auto sizeBeforeOutput = vtbackend::PageSize {};
+
+    h.loop.blockOn(core::net::testing::allOf(
+        h.session->run(),
+        feedBytes(h.pair.second.get(), &controlHello),
+        attach->run(),
+        feedOnce(&h.loop,
+                 attachPair.second.get(),
+                 &attachRequest,
+                 &controlReceived,
+                 [](auto const& got) { return !got.empty(); }),
+        writeThroughHost(
+            &h,
+            sessionId,
+            "output\a",
+            [&attachReceived] { return std::ranges::any_of(attachReceived, endsSnapshotRun); },
+            &sizeBeforeOutput),
+        collectUntil(&h.loop, attachPair.second.get(), attachHeard, &attachReceived),
+        feedOnce(&h.loop, h.pair.second.get(), &controlRequest, &attachReceived, attachHeard),
+        collectUntil(
+            &h.loop,
+            h.pair.second.get(),
+            [](auto const& got) { return std::ranges::any_of(got, isStatusReply); },
+            &controlReceived)));
+
+    REQUIRE(attachHeard(attachReceived));
+    REQUIRE(controlReceived.size() == 3);
+    CHECK(std::holds_alternative<proto::ServerHello>(controlReceived[0].pdu));
+    REQUIRE(std::holds_alternative<proto::Unsupported>(controlReceived[1].pdu));
+    CHECK(std::get<proto::Unsupported>(controlReceived[1].pdu).ident
+          == std::to_underlying(proto::PduType::ResizeRequest));
+    CHECK(std::holds_alternative<proto::DaemonStatusReply>(controlReceived[2].pdu));
+    CHECK(sizeBeforeOutput.columns == vtbackend::ColumnCount(100));
+    CHECK(h.host.terminal(sessionId)->pageSize() == sizeBeforeOutput);
+}
+
+TEST_CASE("an Attach hello is admitted to the census for the connection's life", "[vthost][native][control]")
+{
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    std::ignore = h.attach(4); // ServerHello, LayoutState, SessionState, Delta
+    CHECK(control.peakClients == 1);
+    CHECK(control.census.count() == 1);
+    h.session.reset();
+    CHECK(control.census.count() == 0);
+}
+
+TEST_CASE("StopDaemon reaches the daemon control with its reason", "[vthost][native][control]")
+{
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    SECTION("a known reason is passed on, and answered with nothing")
+    {
+        auto const got = h.exchange({ proto::ClientHello { .role = proto::ConnectionRole::Control },
+                                      proto::StopDaemon { .reason = 1 },
+                                      proto::DaemonStatusRequest {} },
+                                    2);
+        CHECK(control.stops == std::vector { proto::StopReason::UpgradeRestart });
+        REQUIRE(got.size() == 2);
+        CHECK(std::holds_alternative<proto::DaemonStatusReply>(got[1].pdu));
+    }
+    SECTION("a reason no enumerator has is answered Unsupported")
+    {
+        auto const got = h.exchange({ proto::ClientHello { .role = proto::ConnectionRole::Control },
+                                      proto::StopDaemon { .reason = 200 } },
+                                    2);
+        CHECK(control.stops.empty());
+        REQUIRE(got.size() == 2);
+        REQUIRE(std::holds_alternative<proto::Unsupported>(got[1].pdu));
+        CHECK(std::get<proto::Unsupported>(got[1].pdu)
+              == proto::Unsupported { .refusedSerial = 2,
+                                      .ident = std::to_underlying(proto::PduType::StopDaemon) });
+    }
+}
+
+TEST_CASE("an Attach connection may ask after the daemon too", "[vthost][native][control]")
+{
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    auto const got =
+        h.exchangeUntil({ proto::ClientHello {}, proto::DaemonStatusRequest {} },
+                        [](auto const& frames) { return std::ranges::any_of(frames, isStatusReply); });
+    auto const reply = std::ranges::find_if(got, isStatusReply);
+    REQUIRE(reply != got.end());
+    CHECK(reply->serial == 2);
+    CHECK(h.host.sessionCount() == 1);
+}
+
+TEST_CASE("a Control connection is answered Unsupported for an attach-only request",
+          "[vthost][native][control]")
+{
+    auto control = vthost::testing::FakeDaemonControl {};
+    auto h = NativeHarness { HarnessOptions { .services = { .daemon = control } } };
+    auto const got =
+        h.exchange({ proto::ClientHello { .role = proto::ConnectionRole::Control }, proto::CreateTab {} }, 2);
+    REQUIRE(got.size() == 2);
+    REQUIRE(std::holds_alternative<proto::Unsupported>(got.at(1).pdu));
+    CHECK(
+        std::get<proto::Unsupported>(got.at(1).pdu)
+        == proto::Unsupported { .refusedSerial = 2, .ident = std::to_underlying(proto::PduType::CreateTab) });
+    CHECK(h.host.sessionCount() == 0);
+}
+
+TEST_CASE("with the null daemon control, status and stop are answered Unsupported",
+          "[vthost][native][control]")
+{
+    auto h = NativeHarness {}; // services.daemon defaults to nullDaemonControl()
+    auto const got = h.exchange({ proto::ClientHello { .role = proto::ConnectionRole::Control },
+                                  proto::DaemonStatusRequest {},
+                                  proto::StopDaemon { .reason = 0 } },
+                                3);
+    REQUIRE(got.size() == 3);
+    CHECK(std::get<proto::ServerHello>(got.at(0).pdu).releaseVersion.empty());
+    CHECK(std::get<proto::Unsupported>(got.at(1).pdu)
+          == proto::Unsupported { .refusedSerial = 2,
+                                  .ident = std::to_underlying(proto::PduType::DaemonStatusRequest) });
+    CHECK(std::get<proto::Unsupported>(got.at(2).pdu)
+          == proto::Unsupported { .refusedSerial = 3,
+                                  .ident = std::to_underlying(proto::PduType::StopDaemon) });
 }

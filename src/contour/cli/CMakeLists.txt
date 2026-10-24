@@ -41,6 +41,8 @@ add_library(contour_cli STATIC
     CaptureScreen.cpp CaptureScreen.hpp
     CatImageArgs.hpp
     ContourApp.cpp ContourApp.hpp
+    DaemonVerbs.cpp DaemonVerbs.hpp
+    ExitStatus.hpp
     ShellIntegration.cpp ShellIntegration.hpp
     "${_shell_integration_data}"
 )

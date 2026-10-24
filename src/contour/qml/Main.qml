@@ -223,6 +223,14 @@ ApplicationWindow
                 windowController: appWindow.win
             }
         }
+
+        // Shown only while the daemon runs another release than this client (see DaemonDriftModel).
+        DaemonDriftBadge {
+            z: 10
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: 8
+        }
     }
 
     // The command palette (Ctrl+Shift+P). Opened by the OpenCommandPalette action, which routes

@@ -42,12 +42,26 @@ The distinction matters, because the two daemons have different lifetimes:
 
 | How it started | When it exits |
 | --- | --- |
-| Auto-started by `contour client` | Once its **last session** is gone — it belongs to the client that needed it, so nothing is left behind |
+| Auto-started by `contour client` | **10 seconds after it has no sessions and no clients** — it belongs to the clients that needed it, so nothing is left behind |
 | Started by you (`contour daemon`) | Never on its own. It keeps serving with zero sessions, ready for the next client |
+| Started by the OS (`contour daemon-service`) | Never on its own, see [Starting the daemon at login](#starting-the-daemon-at-login) |
 
-`contour daemon --exit-with-last-session` opts a hand-started daemon into the first behaviour
-(tmux spells this `exit-empty`). The policy rides on the *daemon*, so a second client attaching
-inherits it, and the daemon ends only when every session across every client is gone.
+Closing the last window therefore keeps your sessions: the auto-started daemon stays up as long as
+any session lives, and for 10 seconds after the last one is gone and the last client has
+disconnected. A client that attaches within those 10 seconds keeps the daemon alive.
+
+The policy is the daemon's `--lifecycle` option, and it rides on the *daemon*, not on the client
+that started it:
+
+| `--lifecycle` | The daemon ends |
+| --- | --- |
+| `persistent` (default for `contour daemon`) | never on its own |
+| `exit-with-last-session` | once its last hosted session is gone (tmux spells this `exit-empty`) |
+| `exit-when-idle` (what `contour client` starts on demand) | 10 seconds after it has no session and no client |
+
+`--exit-with-last-session` is kept as an alias for `--lifecycle=exit-with-last-session`. Stating
+both is an error only when they differ. A status probe (`contour daemon status`) is not a client and
+never keeps an idle daemon alive.
 
 !!! note "`contour daemon` does not detach by itself"
     It runs in the foreground and logs to standard error, which is what you want under a service
@@ -116,7 +130,11 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 | `--label NAME` | Socket label distinguishing daemon instances. Default `default`. |
 | `--config FILE` | Configuration file whose profile supplies the hosted sessions' terminal settings — including `history.limit`, which is how much scrollback a session keeps for clients that attach later. |
 | `--profile NAME` | Which profile of that configuration to take them from. Defaults to the configuration's default profile. |
-| `--exit-with-last-session` | Terminates the daemon once its last hosted session is gone (tmux's `exit-empty`). Off by default. |
+| `--lifecycle POLICY` | When the daemon ends on its own: `persistent` (the default), `exit-with-last-session` or `exit-when-idle`. See [Quick start](#quick-start). |
+| `--exit-with-last-session` | Alias for `--lifecycle=exit-with-last-session`. |
+| `--size-policy POLICY` | Which attached client's size the shared grid takes when clients of different sizes are attached: `latest` (default), `smallest` or `largest`. Mirrors tmux's `window-size`. |
+| `--background` | Relaunches the command detached and returns once the daemon accepts connections. Without `--log-file` the daemon logs beside its socket (`SOCKET.log`), since a detached process has no console. |
+| `--in-place` | Runs from the installed binary instead of a per-version copy. See [After upgrading Contour](#after-upgrading-contour). |
 | `--tmux-compat-socket LABEL` | Additionally binds tmux's own discovery path `/tmp/tmux-<uid>/<LABEL>`, so a plain `tmux -L LABEL -C attach-session` finds this daemon. |
 | `--listen-tcp HOST:PORT` | Also serve the native protocol over TCP. Opt-in; always TLS-encrypted and token-authenticated. See [Remote access](#remote-access-over-tcp). |
 | `--token TOKEN` | Preshared token every TCP client must present. Required with `--listen-tcp`. Visible to other local users through the process list — prefer `--token-file`. |
@@ -216,13 +234,67 @@ Properties worth knowing before you open a port:
 - **Bind deliberately.** `127.0.0.1` reaches only the local machine; `0.0.0.0` reaches everyone who
   can route to you. Prefer forwarding the loopback port over SSH to exposing it directly.
 
+## Starting the daemon at login
+
+Instead of letting `contour client` start a daemon when it is needed, you can have the operating
+system start one for you when you log in:
+
+```sh
+contour daemon-service install      # register it (and start it with your next login)
+contour daemon-service status       # registered? running? what does it run?
+contour daemon-service start        # start it now
+contour daemon-service stop         # stop it, leaving it registered
+contour daemon-service restart
+contour daemon-service uninstall    # stop it and remove the registration
+```
+
+Each verb takes `--label NAME` (default `default`). `install` additionally takes `--socket`,
+`--config`, `--profile`, `--size-policy`, `--log` and `--log-file`, which are recorded in the
+registration. A socket path is made absolute at install time, because the registration outlives the
+shell that wrote it. Unless you give `--log-file` the daemon logs to `SOCKET.log`.
+
+| OS | What is registered | Runs as |
+| --- | --- | --- |
+| Linux | the systemd user unit `contour-daemon.service` (`contour-daemon-LABEL.service` for other labels), written to `~/.config/systemd/user` and enabled | you, no elevation |
+| macOS | the LaunchAgent `org.contourterminal.contour-daemon` in `~/Library/LaunchAgents` | you, no elevation |
+| Windows | a Scheduled Task triggered by your logon | you, no elevation |
+
+Packages for Linux also ship a `contour-daemon.service` unit file. It is **not enabled** by the
+package; `contour daemon-service install` writes your own copy, which takes precedence.
+
+A service-managed daemon runs with `--lifecycle=persistent`: it **never exits on its own**, not even
+with zero sessions and zero clients. `contour client` finds the registration and starts it before it
+falls back to spawning a daemon on demand. A registration made by an older release under another
+name is found as well.
+
+`--start boot` and `--start manual` (a Windows service) are not implemented yet.
+
 ## Stopping a daemon
 
-Send it `SIGINT` or `SIGTERM` — <kbd>Ctrl</kbd>+<kbd>C</kbd> if it is in the foreground, or
-`kill <pid>`. On Windows, a console-control event does the same.
+Ask it to stop, from anywhere:
 
-There is deliberately **no** `contour daemon --stop` verb, no pid file, and no bundled systemd
-unit; use your service manager if you want supervision.
+```sh
+contour daemon stop           # asks first when the daemon hosts sessions
+contour daemon stop --yes     # does not ask
+contour daemon status         # is one running? version, uptime, socket, sessions, clients
+contour daemon logs           # the last 100 lines of its log
+contour daemon logs --follow --lines 20
+```
+
+All of them accept `--label` and `--socket`, written before or after the verb. Giving the same option
+before and after the verb with different values is a usage error, so that `stop` never silently
+targets another daemon than the one you named. When no daemon answers, `status` and `stop` exit with
+status 4. `stop` asks for confirmation only when sessions exist; without a terminal it refuses unless
+you pass `--yes`. `logs` shows the file the daemon reports as its log; if none is running it falls back
+to the default `SOCKET.log` beside the socket, and says so.
+
+A daemon started from a terminal also stops on `SIGINT` or `SIGTERM` — <kbd>Ctrl</kbd>+<kbd>C</kbd>
+if it is in the foreground, or `kill <pid>`. On Windows, a console-control event does the same. A
+daemon that predates `contour daemon stop` answers that it does not support it; stop it where it
+runs, or end its process.
+
+For a service-managed daemon, prefer `contour daemon-service stop`, which lets the service manager
+know it was stopped on purpose rather than restarting it.
 
 !!! warning "Sessions do not survive the daemon"
     Persistence is against the *client*, not against the daemon process. Stopping the daemon ends
@@ -264,6 +336,17 @@ transcript of what you typed.
 
 ## Platform notes
 
+Contour keeps what outlives a daemon in a per-user **state directory**, separate from the runtime
+directory the sockets live in:
+
+| OS | State directory |
+| --- | --- |
+| Linux, macOS, BSD | `$XDG_STATE_HOME/contour` when set and absolute, otherwise `~/.local/state/contour` |
+| Windows | `%LOCALAPPDATA%\contour` |
+
+Without a usable home directory the fallback is `<temp>/contour-state-<user>`. That directory is
+shared ground, so a daemon never runs from a copy staged there: it runs in place instead.
+
 Daemon mode works on Linux, macOS, BSD and Windows 10 1803 or newer, over Unix domain sockets
 everywhere. On Windows, sessions are backed by ConPTY, the socket directory is governed by NTFS
 ACLs rather than POSIX permission bits, and the tmux-binary (`<socket>-tmux`) endpoint is absent —
@@ -271,12 +354,41 @@ it needs file-descriptor passing, which Windows sockets do not have.
 
 ## After upgrading Contour
 
-A daemon keeps running across an upgrade, so the client you start next may be newer than the daemon
-it attaches to. The two **negotiate a protocol version** when they connect: each states the range of
+**An upgrade never touches the running daemon.** The daemon keeps serving, and the client you start
+next may be newer than the daemon it attaches to.
+
+Where an upgrade would disturb a running binary, the daemon does not run from the installed binary
+at all. On **Windows** (the installer replaces `contour.exe` and the Restart Manager kills whoever
+holds it), on **macOS** (swapping the `.app` breaks the lazy loading of its frameworks) and for an
+**AppImage** (its mount vanishes when the AppImage process exits), a daemon runs from a copy of its
+own release under `<state-dir>/bin/<version>-<id>/`. It is made the first time that release starts a
+daemon, and removed again once no daemon runs from it.
+
+!!! note "What the copy costs"
+    A release `contour` binary is about 474 MB. On Windows the copy is the whole install folder, on
+    macOS the whole `.app`, and one such copy exists per release that has a daemon running or about to
+    start, until it is unused. Old copies are pruned automatically, never while a daemon runs from them.
+
+A packaged **Linux** install (`/usr/...`, Flatpak `/app/...`) runs in place, which a package upgrade
+cannot disturb. `contour daemon --in-place` opts out of the copy; a package upgrade may then replace
+the binary under the running daemon. A hand-started foreground `contour daemon` on Windows also runs
+from the installed binary.
+
+The two **negotiate a protocol version** when they connect: each states the range of
 versions it speaks, and they agree on the newest one both know. Every release speaks the protocols of
 at least the previous two releases, so a client from a newer release attaches to an older daemon —
 and an older client to a newer daemon — as long as the two are within that window. Features the older
 side does not know are simply not used on that connection.
+
+When the daemon's release differs from the client's, the window shows a quiet chip at the bottom
+right, for instance `daemon 0.8.1 is older than this client`. Clicking it offers **Restart daemon on
+the new version**. The confirmation says what that costs: it **ends every shell the daemon hosts**,
+and a fresh one opens on the new daemon, because the layout is not kept across a restart yet. After
+the restart a new Contour window attaches to the new daemon, and this one closes. The chip is shown
+only for the local daemon: a remote one (`--connect-tcp`) is not yours to restart.
+
+The restart stops the daemon for an upgrade, then starts one the same way a client would: through the
+registered service when there is one, on demand otherwise.
 
 Outside the window, or against a daemon from Contour 0.7.0 or another release before version
 negotiation, the client is refused, and it tells you both sides' versions:
@@ -290,12 +402,12 @@ the daemon's versions either way, so a probe learns nothing more from it. To mov
 refusal, stop the daemon and let it start again:
 
 ```sh
-kill "$(pgrep -f 'contour daemon')"   # or Ctrl+C in its terminal
+contour daemon stop
 contour client                        # starts a matching daemon
 ```
 
-Remember that this ends the sessions it was hosting. An auto-started daemon avoids the problem
-entirely, since it exits with its last session.
+Remember that this ends the sessions it was hosting. An auto-started daemon rarely has the problem,
+since it exits 10 seconds after its last session and client are gone.
 
 ## Current limitations
 

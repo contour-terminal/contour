@@ -13,6 +13,7 @@
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -45,8 +46,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <vthost/Daemon.hpp>
 
 class QQuickWindow;
 
@@ -473,6 +477,22 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return true if @p controller's window was bound to a pending daemon window.
     bool bindPendingAttachWindow(window::WindowController* controller);
 
+    /// Shows the daemon-drift badge when the daemon @p controller met runs another release than this
+    /// client, and wires the badge's restart action to restartLocalDaemon().
+    /// @param controller The controller connected to the local daemon.
+    void offerDaemonRestartIfDrifted(remote::NativeController const& controller);
+
+    /// Stops the local daemon for an upgrade and starts one on this release, the way a client would.
+    /// Runs off the GUI thread.
+    /// @param label The socket label.
+    /// @param controlPath The daemon's control socket.
+    /// @param options What a daemon spawned on demand is told.
+    /// @return Nothing once a daemon serves, or why none does.
+    [[nodiscard]] std::expected<void, std::string> restartLocalDaemon(
+        std::string const& label,
+        std::filesystem::path const& controlPath,
+        vthost::DaemonSpawnOptions const& options);
+
     /// Records the daemon-window → OS-window mapping and immediately reconciles that daemon window's
     /// tab/pane tree into @p osWindow — the one place the "a mapping always implies a reconcile"
     /// invariant lives (shared by the primary-window and spawned-window paths).
@@ -636,6 +656,15 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     int _argc = 0;
     char const** _argv = nullptr;
+
+    /// What the daemon-drift badge shows; fed after the native controller connects to a local daemon.
+    window::DaemonDriftModel _daemonDrift;
+    /// Restarts the local daemon on this release (stop, then start the way a client would); empty
+    /// unless this run attaches to a local daemon, since a remote one is not ours to restart. Runs
+    /// on @ref _daemonRestartThread, so it touches nothing the GUI thread owns.
+    std::function<std::expected<void, std::string>()> _restartDaemon;
+    /// The thread running @ref _restartDaemon; declared after what it reaches so it is joined first.
+    std::jthread _daemonRestartThread;
     ExitStatus _exitStatus;
 
     // The CLI-verbatim/--execute command of this run, if any (see cliCommand()).

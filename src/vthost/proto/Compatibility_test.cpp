@@ -174,7 +174,6 @@ struct ServingHarness
     core::net::testing::SocketPair pair = *core::net::testing::makeSocketPair(loop);
     std::unique_ptr<vthost::NativeSession> session = std::make_unique<vthost::NativeSession>(
         loop, host, vthost::ConnectionId { .endpoint = "recorded", .index = 1 }, std::move(pair.first));
-    vthost::ScopedStreamSubscription subscription = makeScopedStreamSubscription(host, *session);
 };
 
 /// @return Whether @p frame terminates a snapshot run.

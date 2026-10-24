@@ -1,6 +1,22 @@
 add_library(vthost STATIC
+    ClientCensus.hpp
     ClientSizePolicy.hpp
+    IdleExitWatcher.hpp
     CommandBlockWire.hpp
+    DaemonControl.cpp
+    DaemonControl.hpp
+    DaemonControlWire.hpp
+    DaemonBinary.cpp
+    DaemonBinary.hpp
+    DaemonImage.cpp
+    DaemonImage.hpp
+    DaemonImageLeases_posix.cpp
+    DaemonImageLeases_win32.cpp
+    DaemonLifecycle.hpp
+    DaemonRuntime.cpp
+    DaemonStarter.cpp
+    DaemonStarter.hpp
+    DaemonRuntime.hpp
     ExtensionHosting.hpp
     PermissionWire.hpp
     ImageWire.hpp
@@ -14,6 +30,7 @@ add_library(vthost STATIC
     HostIdentity.cpp
     HostIdentity.hpp
     LoopDrain.hpp
+    ProcessImage_native.cpp
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
     NativeSession.cpp
@@ -21,13 +38,31 @@ add_library(vthost STATIC
     PduPump.hpp
     SessionHost.cpp
     SessionHost.hpp
+    CommandRunner.hpp
+    CommandRunner_posix.cpp
+    CommandRunner_win32.cpp
     ServiceControl.cpp
     ServiceControl.hpp
+    ServiceControl_launchd.cpp
+    ServiceControl_launchd.hpp
+    ServiceControl_systemd.cpp
+    ServiceControl_systemd.hpp
     ServiceControl_win32.cpp
     SessionSettings.cpp
     SessionSettings.hpp
+    ShutdownFunnel.cpp
+    ShutdownFunnel.hpp
+    ShutdownSignals.cpp
+    ShutdownSignals.hpp
     SocketPath.hpp
+    StatePath.hpp
     TappingPty.hpp
+    client/DaemonControlClient.cpp
+    client/DaemonControlClient.hpp
+    client/DaemonRestart.cpp
+    client/DaemonRestart.hpp
+    client/ReleaseDrift.cpp
+    client/ReleaseDrift.hpp
     client/NativeClient.cpp
     client/NativeClient.hpp
     client/LayoutReconstruction.cpp
@@ -117,16 +152,27 @@ if(VTHOST_TESTING)
         SessionSettings_test.cpp
         ConnectionAcceptor_test.cpp
         CommandBlockWire_test.cpp
+        CommandRunner_test.cpp
+        DaemonControl_test.cpp
+        DaemonRuntime_test.cpp
+        DaemonControlWire_test.cpp
+        DaemonBinary_test.cpp
+        DaemonImage_test.cpp
+        DaemonStarter_test.cpp
         Daemon_test.cpp
         ImageWire_test.cpp
         NotifyWire_test.cpp
         TimeWire_test.cpp
         WireEnum_test.cpp
+        IdleExitWatcher_test.cpp
         LastSessionWatcher_test.cpp
         NativeSession_test.cpp
         PduPump_test.cpp
+        ServiceControl_launchd_test.cpp
+        ServiceControl_systemd_test.cpp
         ServiceControl_test.cpp
         SocketPath_test.cpp
+        StatePath_test.cpp
         Token_test.cpp
         testing/GridParity.cpp
         testing/GridParity.hpp
@@ -134,9 +180,17 @@ if(VTHOST_TESTING)
         testing/PduExamples.hpp
         testing/PreNegotiationCodec.hpp
         testing/RecordedTranscripts.hpp
+        testing/FakeCommandRunner.hpp
+        testing/FakeDaemonControl.hpp
         testing/FakeExtensionHosting.hpp
+        testing/FakeImageLeases.hpp
+        testing/ForwardingFileSystem.hpp
         testing/GatedFileSystem.hpp
+        testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
+        client/DaemonControlClient_test.cpp
+        client/DaemonRestart_test.cpp
+        client/ReleaseDrift_test.cpp
         client/NativeClient_test.cpp
         client/LayoutReconstruction_test.cpp
         client/ScreenMirror_test.cpp

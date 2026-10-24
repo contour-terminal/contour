@@ -25,6 +25,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/TabColorScheme.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
@@ -5827,5 +5828,88 @@ TEST_CASE("The find bar hands its open state over when the pane is rebound (offs
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
+
+namespace
+{
+/// A drift badge shown in a window, with the model it reads.
+struct DriftBadgeFixture
+{
+    QQmlEngine engine;
+    contour::window::DaemonDriftModel model;
+    QQuickWindow window;
+    std::unique_ptr<QObject> object;
+    QQuickItem* badge = nullptr;
+
+    DriftBadgeFixture()
+    {
+        contour::test::installChromeStyle(engine);
+        engine.rootContext()->setContextProperty("daemonDrift", &model);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml")));
+        REQUIRE(component.isReady());
+        object.reset(component.create());
+        badge = qobject_cast<QQuickItem*>(object.get());
+        REQUIRE(badge != nullptr);
+        window.resize(400, 300);
+        badge->setParentItem(window.contentItem());
+        badge->setPosition({ 10, 10 });
+    }
+
+    /// Clicks the middle of the badge.
+    void click()
+    {
+        window.show();
+        auto const centre = badge->mapToScene(QPointF { badge->width() / 2, badge->height() / 2 });
+        QTest::mouseClick(&window, Qt::LeftButton, Qt::NoModifier, centre.toPoint());
+    }
+
+    [[nodiscard]] QObject* dialog() const
+    {
+        return badge->findChild<QObject*>(QStringLiteral("daemonDriftConfirm"));
+    }
+};
+} // namespace
+
+TEST_CASE("the drift badge shows the model's text and confirms before restarting", "[contour][qml][drift]")
+{
+    auto fixture = DriftBadgeFixture {};
+    CHECK_FALSE(fixture.badge->isVisible());
+
+    fixture.model.show(
+        vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost));
+    CHECK(fixture.badge->isVisible());
+    auto* label = fixture.badge->findChild<QObject*>(QStringLiteral("daemonDriftLabel"));
+    REQUIRE(label != nullptr);
+    CHECK(label->property("text").toString() == fixture.model.text());
+
+    auto* dialog = fixture.dialog();
+    REQUIRE(dialog != nullptr);
+    CHECK_FALSE(dialog->property("visible").toBool());
+
+    // A click opens the confirmation; nothing restarts until it is confirmed.
+    auto spy = QSignalSpy { &fixture.model, &contour::window::DaemonDriftModel::restartRequested };
+    fixture.click();
+    CHECK(dialog->property("visible").toBool());
+    CHECK(dialog->property("heading").toString() == QStringLiteral("Restart daemon on the new version"));
+    CHECK(dialog->property("message").toString() == fixture.model.confirmation());
+    CHECK(spy.count() == 0);
+
+    REQUIRE(QMetaObject::invokeMethod(dialog, "confirmed"));
+    CHECK(spy.count() == 1);
+}
+
+TEST_CASE("the drift badge ignores clicks while a restart runs", "[contour][qml][drift]")
+{
+    auto fixture = DriftBadgeFixture {};
+    fixture.model.show(
+        vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost));
+    fixture.model.requestRestart();
+    REQUIRE(fixture.model.isRestarting());
+
+    fixture.click();
+    CHECK_FALSE(fixture.dialog()->property("visible").toBool());
+    auto* label = fixture.badge->findChild<QObject*>(QStringLiteral("daemonDriftLabel"));
+    REQUIRE(label != nullptr);
+    CHECK(label->property("text").toString() == QStringLiteral("Restarting daemon…"));
+}
 
 #include <QmlComponents_test.moc>

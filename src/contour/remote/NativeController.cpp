@@ -135,6 +135,7 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
     {
         // _client is cleared by `forgetClient` above, on this path and on every other.
         auto const lock = std::lock_guard { _mutex };
+        captureHandshake();
         if (_state == State::Connecting || _state == State::Ready)
         {
             if (auto const& refusal = client.refusal())
@@ -150,9 +151,30 @@ core::async::Task<void> NativeController::runClient(core::net::EventLoop* loop)
     emit connectionClosed();
 }
 
+void NativeController::captureHandshake()
+{
+    if (_negotiated || _client == nullptr || !_client->negotiated())
+        return;
+    _negotiated = _client->negotiated();
+    _daemonRelease = _client->daemonRelease();
+}
+
+std::string NativeController::daemonRelease() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _daemonRelease;
+}
+
+std::optional<vthost::proto::Negotiated> NativeController::negotiated() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _negotiated;
+}
+
 void NativeController::onUpdate(RemoteScreen const& screen, vthost::proto::Delta const& delta)
 {
     auto lock = std::unique_lock { _mutex };
+    captureHandshake();
 
     // Ordered by precedence: a live binding always consumes the delta, a
     // tombstoned session is ignored, a pending one refreshes its geometry, and
@@ -193,6 +215,7 @@ void NativeController::onLayout(vthost::proto::LayoutState const& layout)
 {
     {
         auto const lock = std::lock_guard { _mutex };
+        captureHandshake();
         _layouts[layout.window] = layout;
         // A layout push follows a daemon-side re-projection, which discards the per-pane grids this
         // client reported (@see vthost::SessionHost::applyPaneSize). Forget what was sent, so the

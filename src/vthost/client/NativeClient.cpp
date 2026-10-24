@@ -637,10 +637,9 @@ void NativeClient::handlePdu(proto::DecodedFrame const& frame)
         "attach: ignoring unexpected {} (serial {})", proto::toString(proto::typeOf(pdu)), frame.serial);
 }
 
-std::expected<proto::Negotiated, proto::HandshakeRefusal> NativeClient::judge(
-    proto::ServerHello const& hello) const
+std::expected<proto::Negotiated, proto::HandshakeRefusal> judgeServerHello(
+    proto::VersionRange const ours, proto::CapabilitySet const& offered, proto::ServerHello const& hello)
 {
-    auto const ours = _handshake.versions;
     // A pre-negotiation daemon states its codec version alone, and with it refuses this client.
     if (hello.layout == proto::HelloLayout::VersionAlone)
         return std::unexpected { proto::HandshakeRefusal {
@@ -663,7 +662,13 @@ std::expected<proto::Negotiated, proto::HandshakeRefusal> NativeClient::judge(
     }
     return proto::Negotiated { .version = hello.agreedVersion,
                                .peerCapabilities = hello.capabilities,
-                               .shared = proto::intersect(_handshake.capabilities, hello.capabilities) };
+                               .shared = proto::intersect(offered, hello.capabilities) };
+}
+
+std::expected<proto::Negotiated, proto::HandshakeRefusal> NativeClient::judge(
+    proto::ServerHello const& hello) const
+{
+    return judgeServerHello(_handshake.versions, _handshake.capabilities, hello);
 }
 
 void NativeClient::handleServerHello(proto::ServerHello const& hello)
@@ -683,6 +688,7 @@ void NativeClient::handleServerHello(proto::ServerHello const& hello)
         return;
     }
     _daemonIdentity = vtbackend::HostIdentity { .machineId = hello.machineId, .hostname = hello.hostname };
+    _daemonRelease = hello.releaseVersion;
     _negotiated = std::move(*outcome);
     clientLog()("attach: connected (protocol v{})", _negotiated->version);
 }

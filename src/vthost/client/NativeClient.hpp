@@ -49,6 +49,15 @@ namespace vthost::client
 /// @param cell The wire cell whose cluster to emit.
 void appendCluster(std::string& out, proto::WireCell const& cell);
 
+/// Judges a daemon's ServerHello from the client's side: whether it agreed on a version both ends speak.
+/// Shared by every client that handshakes (the mirroring client and the daemon-control client).
+/// @param ours The protocol versions this client speaks.
+/// @param offered The optional features this client offered.
+/// @param hello The daemon's answer to this client's ClientHello.
+/// @return The handshake's outcome, or the refusal it amounts to.
+[[nodiscard]] std::expected<proto::Negotiated, proto::HandshakeRefusal> judgeServerHello(
+    proto::VersionRange ours, proto::CapabilitySet const& offered, proto::ServerHello const& hello);
+
 /// One command-block record a mirror holds, and the RemoteScreen revision it last changed at — so a
 /// consumer that remembers the revision it last synced at adopts only what moved since.
 struct MirroredCommandBlock
@@ -394,6 +403,10 @@ class NativeClient final
     /// @return The daemon's identity.
     [[nodiscard]] vtbackend::HostIdentity const& daemonIdentity() const noexcept { return _daemonIdentity; }
 
+    /// @return The daemon's release as its ServerHello stated it; empty until connected(), and for a
+    ///         daemon that predates the field.
+    [[nodiscard]] std::string const& daemonRelease() const noexcept { return _daemonRelease; }
+
     /// How many rows above the viewport a mirror keeps; `nullopt` is unbounded.
     ///
     /// Public because it is a pure decision about @p handshake with no state behind it, and one
@@ -453,6 +466,7 @@ class NativeClient final
     proto::UnsupportedTracker _unsupported;
     uint64_t _nextSerial = 1;
     vtbackend::HostIdentity _daemonIdentity;         ///< @see daemonIdentity()
+    std::string _daemonRelease;                      ///< @see daemonRelease()
     std::optional<proto::Negotiated> _negotiated;    ///< @see negotiated()
     std::optional<proto::HandshakeRefusal> _refusal; ///< @see refusal()
     bool _detached = false;

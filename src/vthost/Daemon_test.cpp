@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
@@ -7,6 +8,7 @@
 
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
 #include <core/net/IoResult.hpp>
@@ -17,18 +19,40 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
 #include <random>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
+#include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <vthost/Daemon.hpp>
+#include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonLifecycle.hpp>
+#include <vthost/ShutdownSignals.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/proto/Pdu.hpp>
+#include <vthost/proto/Wire.hpp>
+#include <vtworkspace/LayoutTree.hpp>
+
+#ifndef _WIN32
+    #include <csignal>
+
+    #include <pthread.h>
+    #include <unistd.h>
+#endif
 
 #ifdef _WIN32
     #include <core/WideString.hpp>
@@ -80,7 +104,8 @@ TEST_CASE("ensureDaemon: a TCP endpoint is a no-op", "[vthost][daemon]")
     auto const endpoint = vthost::AttachEndpoint { vthost::TcpEndpoint {
         .host = "192.0.2.1", .port = 1, .token = {}, .caPem = {} } };
     auto placement = vtpty::NoPlacement {};
-    REQUIRE(vthost::ensureDaemon(endpoint, "contour", placement, {}, std::chrono::seconds { 0 })
+    auto binary = vthost::InstalledDaemonBinary { "contour" };
+    REQUIRE(vthost::ensureDaemon(endpoint, binary, placement, {}, std::chrono::seconds { 0 })
             == EXIT_SUCCESS);
 }
 
@@ -117,9 +142,9 @@ TEST_CASE("ensureDaemon: a listening daemon is detected, nothing is spawned", "[
     // failure this guards against, and a zero timeout leaves no room to recover.
     auto const endpoint = vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = controlSocket } };
     auto placement = vtpty::NoPlacement {};
-    REQUIRE(
-        vthost::ensureDaemon(endpoint, "contour-no-such-binary", placement, {}, std::chrono::seconds { 0 })
-        == EXIT_SUCCESS);
+    auto binary = vthost::InstalledDaemonBinary { "contour-no-such-binary" };
+    REQUIRE(vthost::ensureDaemon(endpoint, binary, placement, {}, std::chrono::seconds { 0 })
+            == EXIT_SUCCESS);
 }
 
 #ifndef _WIN32
@@ -132,10 +157,284 @@ TEST_CASE("ensureDaemon: the daemon it spawns is placed as a session is", "[vtho
     auto const endpoint =
         vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = tmp.path / "control" } };
     auto placement = vtpty::testing::ReleasingPlacement {};
-    REQUIRE(
-        vthost::ensureDaemon(endpoint, "contour-no-such-binary", placement, {}, std::chrono::seconds { 0 })
-        == EXIT_FAILURE);
+    auto binary = vthost::InstalledDaemonBinary { "contour-no-such-binary" };
+    REQUIRE(vthost::ensureDaemon(endpoint, binary, placement, {}, std::chrono::seconds { 0 })
+            == EXIT_FAILURE);
     CHECK(placement.pids().size() == 1);
+}
+
+namespace
+{
+
+/// A Control client's whole conversation: sends @p request and collects every frame until the daemon hangs
+/// up, or ten seconds pass without a byte.
+core::async::Task<void> converseAsControl(core::net::EventLoop* loop,
+                                          std::string socketPath,
+                                          std::vector<std::byte> request,
+                                          std::vector<vthost::proto::DecodedFrame>* received)
+{
+    auto connected = co_await core::net::connectUnix(loop, socketPath);
+    REQUIRE(connected.has_value());
+    auto const socket = std::move(*connected);
+    // A daemon that never hangs up fails the test instead of hanging it.
+    socket->setReceiveDeadline(std::chrono::seconds { 10 });
+    REQUIRE((co_await socket->write(request)).has_value());
+
+    auto pending = std::vector<std::byte> {};
+    auto buffer = std::vector<std::byte>(4096);
+    while (true)
+    {
+        auto const read = co_await socket->read(buffer);
+        if (!read.has_value() || *read == 0)
+            co_return;
+        pending.insert(pending.end(), buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(*read));
+        while (true)
+        {
+            auto frame = vthost::proto::decodePdu(pending);
+            if (!frame.has_value())
+                break;
+            pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(frame->consumed));
+            received->push_back(std::move(*frame));
+        }
+    }
+}
+
+/// A signal source the test fires by hand: what stops a daemon whose test failed before it could, so the
+/// failure is reported rather than waited on forever. A fire before the watch starts is kept for it.
+class ManualShutdownSignals final: public vthost::ShutdownSignals
+{
+  public:
+    [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal) override
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _onSignal = std::move(onSignal);
+        if (_fired)
+            _onSignal();
+        return std::make_unique<ManualWatch>(*this);
+    }
+
+    /// Asks the watching daemon to end, now or as soon as it watches.
+    void fire()
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        _fired = true;
+        if (_onSignal)
+            _onSignal();
+    }
+
+  private:
+    class ManualWatch final: public Watch
+    {
+      public:
+        explicit ManualWatch(ManualShutdownSignals& source): _source { source } {}
+        ~ManualWatch() override
+        {
+            auto const lock = std::scoped_lock { _source._mutex };
+            _source._onSignal = nullptr;
+        }
+
+      private:
+        ManualShutdownSignals& _source;
+    };
+
+    std::mutex _mutex;
+    std::function<void()> _onSignal;
+    bool _fired = false; ///< Whether fire() was called, so a watch started later fires at once.
+};
+
+/// Fires @p signals on destruction: declared after the daemon's future, it stops the daemon before the
+/// future's destructor waits for it, on every path out of the test.
+struct StopOnExit
+{
+    ManualShutdownSignals& signals;
+    explicit StopOnExit(ManualShutdownSignals& source): signals { source } {}
+    StopOnExit(StopOnExit const&) = delete;
+    StopOnExit& operator=(StopOnExit const&) = delete;
+    StopOnExit(StopOnExit&&) = delete;
+    StopOnExit& operator=(StopOnExit&&) = delete;
+    ~StopOnExit() { signals.fire(); }
+};
+
+/// Waits for a daemon to accept on @p socketPath, for up to five seconds.
+[[nodiscard]] bool awaitAccepting(core::net::EventLoop& loop, std::string const& socketPath)
+{
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 500))
+    {
+        if (loop.blockOn(core::net::connectUnix(&loop, socketPath)).has_value())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds { 10 });
+    }
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("a StopDaemon ends runDaemon with a StopRequested shutdown", "[vthost][daemon][afunix]")
+{
+    auto const tmp = TempDir {};
+    auto causes = std::vector<vthost::ShutdownCause> {};
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = tmp.path / "control";
+    // Signals stay the test process's own: the daemon's sigwait thread would take this whole process down.
+    // The manual source stands in, fired only on the way out, where the StopDaemon has already stopped it.
+    auto const signals = std::make_shared<ManualShutdownSignals>();
+    config.shutdownSignals = signals;
+    // Run on the daemon's loop thread; read here only once runDaemon has returned.
+    config.beforeShutdown = [&causes](vthost::ShutdownCause cause) {
+        causes.push_back(cause);
+    };
+
+    auto daemon = std::async(std::launch::async, [&config] { return vthost::runDaemon(config); });
+    auto const stopOnExit = StopOnExit { *signals };
+
+    auto const nativePath = core::pathToUtf8(vthost::nativeSocketPath(config.socketPath));
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, nativePath));
+
+    auto request = vthost::proto::Writer {};
+    vthost::proto::encodePdu(
+        request, 1, vthost::proto::ClientHello { .role = vthost::proto::ConnectionRole::Control });
+    vthost::proto::encodePdu(request, 2, vthost::proto::StopDaemon { .reason = 0 });
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(
+        converseAsControl(&loop, nativePath, { request.view().begin(), request.view().end() }, &received));
+
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+    CHECK(causes == std::vector { vthost::ShutdownCause::StopRequested });
+    CHECK_FALSE(fs::exists(nativePath));
+
+    // The daemon offers what it serves: a Control connection is answered, not refused.
+    REQUIRE_FALSE(received.empty());
+    auto const* const hello = std::get_if<vthost::proto::ServerHello>(&received.front().pdu);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->capabilities.contains(vthost::proto::Capability::DaemonControl));
+    CHECK(hello->capabilities.contains(vthost::proto::Capability::ExtensionPermissions));
+}
+
+namespace
+{
+
+/// Blocks SIGINT and SIGTERM on the calling thread for its lifetime, restoring the previous mask after.
+class BlockedShutdownSignals
+{
+  public:
+    BlockedShutdownSignals()
+    {
+        auto const blocked = shutdownSignalSet();
+        pthread_sigmask(SIG_BLOCK, &blocked, &_previous);
+    }
+    ~BlockedShutdownSignals() { pthread_sigmask(SIG_SETMASK, &_previous, nullptr); }
+    BlockedShutdownSignals(BlockedShutdownSignals const&) = delete;
+    BlockedShutdownSignals& operator=(BlockedShutdownSignals const&) = delete;
+    BlockedShutdownSignals(BlockedShutdownSignals&&) = delete;
+    BlockedShutdownSignals& operator=(BlockedShutdownSignals&&) = delete;
+
+    /// @return SIGINT and SIGTERM.
+    [[nodiscard]] static sigset_t shutdownSignalSet() noexcept
+    {
+        auto signals = sigset_t {};
+        sigemptyset(&signals);
+        sigaddset(&signals, SIGINT);
+        sigaddset(&signals, SIGTERM);
+        return signals;
+    }
+
+  private:
+    sigset_t _previous {};
+};
+
+/// Sends the process a SIGTERM on destruction unless @p daemon has already returned: what stops a daemon
+/// watching the process's real signals whose test failed before it could.
+struct TerminateOnExit
+{
+    std::future<int>& daemon;
+    explicit TerminateOnExit(std::future<int>& future): daemon { future } {}
+    TerminateOnExit(TerminateOnExit const&) = delete;
+    TerminateOnExit& operator=(TerminateOnExit const&) = delete;
+    TerminateOnExit(TerminateOnExit&&) = delete;
+    TerminateOnExit& operator=(TerminateOnExit&&) = delete;
+    ~TerminateOnExit()
+    {
+        if (daemon.valid() && daemon.wait_for(std::chrono::seconds { 0 }) != std::future_status::ready)
+            std::ignore = ::kill(::getpid(), SIGTERM);
+    }
+};
+
+} // namespace
+
+TEST_CASE("a StopDaemon ends a daemon with a startup layout cleanly under the process's signals",
+          "[vthost][daemon][afunix]")
+{
+    // The daemon watches the process's real SIGINT/SIGTERM, as `contour daemon` does: its pump thread for
+    // the startup tab must inherit the watch's mask, or the SIGTERM ~SigwaitWatch sends itself after the
+    // StopDaemon lands on that thread and kills the process (here: Catch2 reports the fatal signal).
+    //
+    // This test thread blocks both signals, so the only threads able to take one are the daemon's own;
+    // the daemon's thread unblocks them again, starting out as a real daemon's main thread does.
+    auto const blocked = BlockedShutdownSignals {};
+    auto const tmp = TempDir {};
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = tmp.path / "control";
+    config.shell.program = "/bin/sh";
+    config.escapeSandbox = false;
+    config.startupLayout = vtworkspace::Layout { .tabs = { vtworkspace::LayoutTab {} } };
+    config.shutdownSignals = vthost::processShutdownSignals();
+
+    auto daemon = std::async(std::launch::async, [&config] {
+        auto const signals = BlockedShutdownSignals::shutdownSignalSet();
+        pthread_sigmask(SIG_UNBLOCK, &signals, nullptr);
+        return vthost::runDaemon(config);
+    });
+    auto const terminateOnExit = TerminateOnExit { daemon };
+
+    auto const nativePath = core::pathToUtf8(vthost::nativeSocketPath(config.socketPath));
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, nativePath));
+
+    auto request = vthost::proto::Writer {};
+    vthost::proto::encodePdu(
+        request, 1, vthost::proto::ClientHello { .role = vthost::proto::ConnectionRole::Control });
+    vthost::proto::encodePdu(request, 2, vthost::proto::DaemonStatusRequest {});
+    vthost::proto::encodePdu(request, 3, vthost::proto::StopDaemon { .reason = 0 });
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(
+        converseAsControl(&loop, nativePath, { request.view().begin(), request.view().end() }, &received));
+
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+    CHECK_FALSE(fs::exists(config.socketPath));
+    CHECK_FALSE(fs::exists(nativePath));
+
+    // The startup tab really was realized, so a pump thread existed when the daemon stopped.
+    auto const status = std::ranges::find_if(received, [](auto const& frame) {
+        return std::holds_alternative<vthost::proto::DaemonStatusReply>(frame.pdu);
+    });
+    REQUIRE(status != received.end());
+    CHECK(std::get<vthost::proto::DaemonStatusReply>(status->pdu).sessions == 1);
+}
+#endif
+
+#ifndef _WIN32
+TEST_CASE("a daemon's socket directory is made owner-only before anything else creates it",
+          "[vthost][daemon]")
+{
+    // The default log file lies beside the socket, and a log sink creating that directory gives it the
+    // umask's 0755, which the listener then refuses. Prepared first, it is the listener's own 0700.
+    auto const tmp = TempDir {};
+    auto const socket = tmp.path / "control";
+    REQUIRE(vthost::prepareSocketDirectory(socket).has_value());
+    CHECK(fs::status(tmp.path).permissions() == fs::perms::owner_all);
+    CHECK(vthost::prepareSocketDirectory(socket).has_value()); // and again, once it exists
+
+    fs::permissions(tmp.path, fs::perms::owner_all | fs::perms::others_read | fs::perms::others_exec);
+    auto const refused = vthost::prepareSocketDirectory(socket);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().contains("world-accessible"));
+
+    CHECK(vthost::prepareSocketDirectory("control").has_value()); // the current directory is the caller's
 }
 #endif
 
@@ -148,9 +447,9 @@ TEST_CASE("ensureDaemon: an unreachable socket fails once the timeout elapses", 
     auto const endpoint =
         vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = tmp.path / "control" } };
     auto placement = vtpty::NoPlacement {};
-    REQUIRE(
-        vthost::ensureDaemon(endpoint, "contour-no-such-binary", placement, {}, std::chrono::seconds { 0 })
-        == EXIT_FAILURE);
+    auto binary = vthost::InstalledDaemonBinary { "contour-no-such-binary" };
+    REQUIRE(vthost::ensureDaemon(endpoint, binary, placement, {}, std::chrono::seconds { 0 })
+            == EXIT_FAILURE);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,24 +466,75 @@ TEST_CASE("daemonSpawnArgs spells the daemon verb and its socket", "[vthost][spa
     CHECK(args[2] == "--socket=/run/user/1000/mux");
 }
 
-TEST_CASE("daemonSpawnArgs marks an exit-when-empty daemon", "[vthost][spawn]")
+TEST_CASE("a registration's socket is read back out of the command line its backend reports",
+          "[vthost][spawn]")
+{
+    using vthost::registeredSocketPath;
+
+    SECTION("as the Task Scheduler joins it, quoted where the path has a blank")
+    {
+        auto const socket = fs::path { "/Users/A B/contour/work" };
+        auto const args =
+            vthost::daemonSpawnArgs("/opt/contour", socket, {}, vthost::DaemonLifecycle::Persistent);
+        CHECK(registeredSocketPath(vthost::joinCommandLine(args)) == socket);
+    }
+    SECTION("as the Task Scheduler quotes a Windows path, whose backslashes escape nothing")
+    {
+        auto const args =
+            std::vector<std::string> { "C:/contour.exe", "daemon", R"(--socket=C:\Users\A B\mux)" };
+        CHECK(registeredSocketPath(vthost::joinCommandLine(args)) == fs::path { R"(C:\Users\A B\mux)" });
+    }
+    SECTION("as the Task Scheduler joins it, bare where nothing needs quoting")
+    {
+        auto const args = vthost::daemonSpawnArgs(
+            "/opt/contour", fs::path { "/run/contour/work" }, {}, vthost::DaemonLifecycle::Persistent);
+        CHECK(registeredSocketPath(vthost::joinCommandLine(args)) == fs::path { "/run/contour/work" });
+    }
+    SECTION("as a systemd unit quotes every argument")
+    {
+        CHECK(registeredSocketPath(
+                  R"("/usr/bin/contour" "daemon" "--socket=/run/user/1000/a b" "--lifecycle=persistent")")
+              == fs::path { "/run/user/1000/a b" });
+    }
+    SECTION("as launchd joins it, unquoted")
+    {
+        CHECK(registeredSocketPath("/Applications/Contour.app/Contents/MacOS/contour daemon --socket=/tmp/x")
+              == fs::path { "/tmp/x" });
+    }
+    SECTION("absent: the daemon serves on its label's default socket")
+    {
+        CHECK(registeredSocketPath(R"("/usr/bin/contour" "daemon")") == std::nullopt);
+        CHECK(registeredSocketPath("") == std::nullopt);
+        CHECK(registeredSocketPath("contour daemon --socket=") == std::nullopt);
+    }
+}
+
+TEST_CASE("daemonSpawnArgs spells the lifecycle as --lifecycle=<name>", "[vthost][spawn]")
 {
     auto const transient =
         vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, vthost::DaemonLifecycle::ExitWhenEmpty);
-    CHECK(std::ranges::contains(transient, "--exit-with-last-session"));
+    CHECK(std::ranges::contains(transient, "--lifecycle=exit-with-last-session"));
 
-    // A persistent daemon must NOT be told to end with its last session — that asymmetry is the
-    // whole point of the flag.
-    auto const persistent =
-        vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, vthost::DaemonLifecycle::Persistent);
-    CHECK_FALSE(std::ranges::contains(persistent, "--exit-with-last-session"));
+    auto const onDemand =
+        vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, vthost::DaemonLifecycle::ExitWhenIdle);
+    CHECK(std::ranges::contains(onDemand, "--lifecycle=exit-when-idle"));
+
+    for (auto const lifecycle: { vthost::DaemonLifecycle::Persistent,
+                                 vthost::DaemonLifecycle::ExitWhenEmpty,
+                                 vthost::DaemonLifecycle::ExitWhenIdle })
+    {
+        auto const args = vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, lifecycle);
+        CHECK_FALSE(std::ranges::contains(args, "--exit-with-last-session"));
+        CHECK(std::ranges::contains(args, std::format("--lifecycle={}", vthost::nameOf(lifecycle))));
+    }
 }
 
-TEST_CASE("daemonSpawnArgs omits logging options that were not given", "[vthost][spawn]")
+TEST_CASE("daemonSpawnArgs always names a log file", "[vthost][spawn]")
 {
     auto const bare =
         vthost::daemonSpawnArgs("contour", fs::path { "/tmp/s" }, {}, vthost::DaemonLifecycle::Persistent);
-    CHECK_FALSE(std::ranges::any_of(bare, [](auto const& a) { return a.starts_with("--log"); }));
+    CHECK_FALSE(std::ranges::any_of(bare, [](auto const& a) { return a.starts_with("--log="); }));
+    CHECK(std::ranges::contains(bare, "--log-file=/tmp/s.log"));
 
     auto const logged =
         vthost::daemonSpawnArgs("contour",
@@ -291,7 +641,7 @@ TEST_CASE("joinCommandLine quotes the program and the arguments that need it", "
     auto const line = vthost::joinCommandLine(args);
 
     CHECK(line.starts_with(R"("C:\Program Files\contour\contour.exe" daemon )"));
-    CHECK(line.contains(" --exit-with-last-session"));
+    CHECK(line.contains(" --lifecycle=exit-with-last-session"));
     CHECK(vthost::joinCommandLine({}).empty());
 }
 

@@ -431,6 +431,17 @@ TEST_CASE("every catalog PDU round-trips", "[vthost][proto]")
                               .digest = "5f3c",
                               .grantState = 1 },
             Unsupported { .refusedSerial = 9, .ident = 200 },
+            DaemonStatusRequest {},
+            DaemonStatusReply { .releaseVersion = "0.8.1",
+                                .processId = 4242,
+                                .uptimeSeconds = 7385,
+                                .socketPath = "/run/user/1000/contour/default",
+                                .executablePath = "/s/bin/0.8.1-1a2b3c4d/bin/contour",
+                                .logFile = "/run/user/1000/contour/default.log",
+                                .sessions = 3,
+                                .clients = 1,
+                                .lifecycle = 2 },
+            StopDaemon { .reason = 1 },
             SessionSettingsChanged {}, // back to the daemon's own
             SessionSettingsChanged { .sessionSettings = WireSessionSettings {
                                          .historyLineCount = -1,
@@ -695,6 +706,61 @@ TEST_CASE("an Unsupported names the refused frame and its tag", "[vthost][proto]
     CHECK(std::to_underlying(PduType::Unsupported) == 24);
 }
 
+TEST_CASE("a Control-role ClientHello round-trips and an absent role reads as Attach", "[vthost][proto]")
+{
+    auto const hello = ClientHello { .role = ConnectionRole::Control };
+    CHECK(roundTrip(DecodedPdu { hello }) == DecodedPdu { hello });
+    // A hello encoded before the field existed: everything up to the role, nothing after.
+    auto const legacy = encodeWithoutTrailingField(
+        DecodedPdu { ClientHello { .role = ConnectionRole::Control } }, /*bytesToDrop=*/1);
+    CHECK(decodeAs<ClientHello>(legacy).role == ConnectionRole::Attach);
+}
+
+TEST_CASE("an unknown ConnectionRole byte reads as Control, never as Attach", "[vthost][proto]")
+{
+    auto const future = encodeWithFieldsEdited(DecodedPdu { ClientHello { .role = ConnectionRole::Control } },
+                                               [](std::span<std::byte const> fields) {
+                                                   auto edited =
+                                                       std::vector<std::byte>(fields.begin(), fields.end());
+                                                   edited.back() = std::byte { 7 };
+                                                   return edited;
+                                               });
+    CHECK(decodeAs<ClientHello>(future).role == ConnectionRole::Control);
+}
+
+TEST_CASE("ServerHello carries the daemon's release version, defaulting to empty", "[vthost][proto]")
+{
+    auto const hello = ServerHello { .releaseVersion = "0.8.1" };
+    CHECK(std::get<ServerHello>(roundTrip(DecodedPdu { hello })).releaseVersion == "0.8.1");
+    auto const legacy = encodeWithoutTrailingString(DecodedPdu { hello }, "0.8.1");
+    CHECK(decodeAs<ServerHello>(legacy).releaseVersion.empty());
+}
+
+TEST_CASE("the daemon-control PDUs round-trip", "[vthost][proto]")
+{
+    auto const request = DecodedPdu { DaemonStatusRequest {} };
+    CHECK(roundTrip(request) == request);
+    auto const reply = DecodedPdu { DaemonStatusReply { .releaseVersion = "0.8.1",
+                                                        .processId = 4242,
+                                                        .uptimeSeconds = 7385,
+                                                        .socketPath = "/run/user/1000/contour/default",
+                                                        .executablePath = "/s/bin/0.8.1-1a2b3c4d/bin/contour",
+                                                        .logFile = "/run/user/1000/contour/default.log",
+                                                        .sessions = 3,
+                                                        .clients = 1,
+                                                        .lifecycle = 2 } };
+    CHECK(roundTrip(reply) == reply);
+    auto const stop = DecodedPdu { StopDaemon { .reason = 1 } };
+    CHECK(roundTrip(stop) == stop);
+}
+
+TEST_CASE("the daemon-control tags are pinned", "[vthost][proto]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::DaemonStatusRequest) == 25);
+    STATIC_CHECK(std::to_underlying(PduType::DaemonStatusReply) == 26);
+    STATIC_CHECK(std::to_underlying(PduType::StopDaemon) == 27);
+}
+
 TEST_CASE("a known PDU with bytes appended by a newer peer decodes as the PDU",
           "[vthost][proto][negotiation]")
 {
@@ -731,12 +797,16 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
     }
     SECTION("encodeWithoutTrailingField cuts a hello's blob and rewrites its length")
     {
-        auto const hello =
-            ServerHello { .agreedVersion = 4, .versions = { 4, 4 }, .machineId = "m", .hostname = "zeta" };
-        auto const frame = encodeWithoutTrailingField(hello, 5); // "zeta" and its length
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 5);
+        auto const hello = ServerHello { .agreedVersion = 4,
+                                         .versions = { 4, 4 },
+                                         .machineId = "m",
+                                         .hostname = "zeta",
+                                         .releaseVersion = "r" };
+        auto const frame = encodeWithoutTrailingField(hello, 7); // "r", "zeta" and their lengths
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 7);
         auto expected = hello;
         expected.hostname.clear();
+        expected.releaseVersion.clear();
         CHECK(decodeAs<ServerHello>(frame) == expected);
     }
     SECTION("encodeWithoutTrailingField on a ClientHello keeps its closing byte")
@@ -750,7 +820,8 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
             bodyOf(
                 ClientHello { .versions = { 4, 6 }, .capabilities = { .idents = { 1, 77 } }, .token = "tok" })
                 .size();
-        auto const dropped = bodyOf(hello).size() - settingsSize + 1; // the settings, less the absent byte
+        auto const dropped =
+            bodyOf(hello).size() - settingsSize + 2; // the settings, less the absent byte, and the role
         auto expected = hello;
         expected.sessionSettings.reset();
         CHECK(decodeAs<ClientHello>(encodeWithoutTrailingField(hello, dropped)) == expected);
@@ -761,12 +832,15 @@ TEST_CASE("the frame helpers build what they say", "[vthost][proto][negotiation]
     }
     SECTION("encodeWithoutTrailingString drops exactly the named last string")
     {
-        auto const hello =
-            ServerHello { .agreedVersion = 4, .versions = { 4, 4 }, .machineId = "m", .hostname = "zeta" };
-        auto const frame = encodeWithoutTrailingString(hello, "zeta");
-        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 5);
+        auto const hello = ServerHello { .agreedVersion = 4,
+                                         .versions = { 4, 4 },
+                                         .machineId = "m",
+                                         .hostname = "zeta",
+                                         .releaseVersion = "0.8.1" };
+        auto const frame = encodeWithoutTrailingString(hello, "0.8.1");
+        CHECK(readFrame(frame)->body.size() == bodyOf(hello).size() - 6);
         auto expected = hello;
-        expected.hostname.clear();
+        expected.releaseVersion.clear();
         CHECK(decodeAs<ServerHello>(frame) == expected);
     }
     SECTION("encodeWithFieldAppended grows a plain body at its end, and a hello's blob")

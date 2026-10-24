@@ -37,6 +37,7 @@ constexpr VersionRange SupportedVersions { .min = 4, .max = 4 };
 enum class Capability : uint8_t
 {
     ExtensionPermissions = 1,
+    DaemonControl = 2, ///< The peer serves DaemonStatusRequest and StopDaemon.
 };
 
 /// One row of the table naming a Capability.
@@ -49,6 +50,7 @@ struct CapabilityRow
 /// Every known Capability, with its name.
 constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ExtensionPermissions, .name = "extension-permissions" },
+    CapabilityRow { .capability = Capability::DaemonControl, .name = "daemon-control" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

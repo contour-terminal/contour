@@ -219,14 +219,13 @@ struct MirrorHarness
                     populator->applyEvent(event);
                 } },
             NativeClient::LayoutHandler {});
-        // Deliver the host's stream fan-out (bell / notify / clipboard, and screen
-        // updates) to the session, exactly as the daemon's serveNativeClient does —
-        // so the transient-event path (Terminal::Events -> host -> NativeSession) is
-        // exercised, not just the manually-poked sessionScreenUpdated.
-        host.subscribeStream(server.get());
+        // The session subscribes itself to the host's stream fan-out (bell / notify / clipboard,
+        // and screen updates) as its hello is accepted, so the transient-event path
+        // (Terminal::Events -> host -> NativeSession) is exercised, not just the manually-poked
+        // sessionScreenUpdated.
     }
 
-    ~MirrorHarness() { host.unsubscribeStream(server.get()); }
+    ~MirrorHarness() = default;
 
     MirrorHarness(MirrorHarness const&) = delete;
     MirrorHarness& operator=(MirrorHarness const&) = delete;
@@ -4719,7 +4718,6 @@ struct AttachedClient
     /// @param host The host to attach to.
     /// @param index The connection's number, for the host's log.
     AttachedClient(core::net::EventLoop& loop, SessionHost& host, uint64_t index):
-        attachedTo { &host },
         pair { *core::net::testing::makeSocketPair(loop) },
         server { std::make_unique<NativeSession>(
             loop, host, vthost::ConnectionId { .endpoint = "test", .index = index }, std::move(pair.first)) }
@@ -4746,17 +4744,15 @@ struct AttachedClient
             NativeClient::ImageHandler {},
             NativeClient::SessionEventHandler {},
             NativeClient::LayoutHandler {});
-        host.subscribeStream(server.get());
     }
 
-    ~AttachedClient() { attachedTo->unsubscribeStream(server.get()); }
+    ~AttachedClient() = default;
 
     AttachedClient(AttachedClient const&) = delete;
     AttachedClient& operator=(AttachedClient const&) = delete;
     AttachedClient(AttachedClient&&) = delete;
     AttachedClient& operator=(AttachedClient&&) = delete;
 
-    SessionHost* attachedTo; ///< The host it is attached to, which outlives it.
     core::net::testing::SocketPair pair;
     std::unique_ptr<NativeSession> server;
     RecordingEvents events;

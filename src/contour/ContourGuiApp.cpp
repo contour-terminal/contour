@@ -29,6 +29,7 @@
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/WindowController.hpp>
+#include <contour/window/WindowLiveness.hpp>
 
 #include <vtbackend/vt/DesktopNotification.hpp>
 
@@ -65,9 +66,15 @@
 #include <QtNetwork/QHostInfo>
 #include <QtQml/qqmlextensionplugin.h>
 
+#include <vthost/CommandRunner.hpp>
 #include <vthost/Daemon.hpp>
+#include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonStarter.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/Token.hpp>
+#include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/client/DaemonRestart.hpp>
+#include <vthost/client/ReleaseDrift.hpp>
 #if !defined(__APPLE__) && !defined(_WIN32)
     #include <QtDBus/QDBusConnection>
 #endif
@@ -254,6 +261,69 @@ namespace
         return vtbackend::readHostIdentity(core::platform::NativeFileSystem::instance(),
                                            QHostInfo::localHostName().toStdString());
     }
+
+    /// Ends the app when no window is left to show anything: quit-on-last-window-closed was suspended
+    /// for a daemon restart, and a failed restart must not leave a windowless process behind.
+    void quitIfWindowless()
+    {
+        auto facts = std::vector<window::WindowFacts> {};
+        for (auto const* topLevel: QGuiApplication::topLevelWindows())
+            facts.push_back({ .visibility = topLevel->isVisible() ? window::WindowVisibility::Shown
+                                                                  : window::WindowVisibility::Hidden,
+                              .transience = topLevel->transientParent() != nullptr
+                                                ? window::WindowTransience::Transient
+                                                : window::WindowTransience::Independent });
+        if (!window::anyWindowKeepsAppAlive(facts))
+            QCoreApplication::quit();
+    }
+
+    /// What starting this client's local daemon needs: this release's binary, the spawner, and the
+    /// command runner the service backends reach the OS through. Shared by the first connect and by the
+    /// drift badge's restart, so the two start a daemon the same way.
+    struct LocalDaemonStart
+    {
+        std::unique_ptr<vthost::DaemonBinarySource> binary;
+        std::unique_ptr<vthost::DaemonSpawner> spawner;
+        std::unique_ptr<vthost::CommandRunner> commands;
+        vthost::ServiceBackendServices services;
+
+        /// @param env The process environment.
+        /// @param fileSystem The file system the binary source reads.
+        /// @param programPath The running executable as it was started.
+        LocalDaemonStart(core::Environment const& env,
+                         core::platform::FileSystem const& fileSystem,
+                         std::string const& programPath):
+            binary { vthost::makeOwnDaemonBinary(env, fileSystem, CONTOUR_VERSION_STRING, programPath) },
+            spawner { vthost::makeNativeDaemonSpawner() },
+            commands { vthost::makeNativeCommandRunner() },
+            services { .fileSystem = core::platform::NativeFileSystem::instance(),
+                       .commands = *commands,
+                       .environment = env }
+        {
+        }
+
+        /// @param label The socket label.
+        /// @param endpoint Where the daemon listens.
+        /// @param placement Places a daemon spawned on demand.
+        /// @param options What a spawned daemon is told.
+        /// @return A registered service when there is one, spawning on demand otherwise. Valid while
+        ///         this object lives.
+        [[nodiscard]] std::unique_ptr<vthost::DaemonStarter> starter(
+            std::string_view label,
+            vthost::UnixEndpoint const& endpoint,
+            vtpty::ProcessPlacement& placement,
+            vthost::DaemonSpawnOptions const& options)
+        {
+            return vthost::chooseDaemonStarter(
+                vthost::findRegisteredService(label, vthost::nativeServiceBackendFactory(services)),
+                vthost::OnDemandSpawn { .endpoint = endpoint,
+                                        .spawner = *spawner,
+                                        .binary = *binary,
+                                        .placement = placement,
+                                        .options = options,
+                                        .timeout = std::chrono::seconds(5) });
+        }
+    };
 } // namespace
 
 VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachablePredicate isReachable)
@@ -660,6 +730,62 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 #endif
 }
 
+void ContourGuiApp::offerDaemonRestartIfDrifted(remote::NativeController const& controller)
+{
+    auto const layout = controller.negotiated()
+                            .transform(vthost::client::layoutSurvivesRestart)
+                            .value_or(vthost::client::LayoutAfterRestart::Lost);
+    _daemonDrift.show(
+        vthost::client::assessDrift(CONTOUR_VERSION_STRING, controller.daemonRelease(), layout));
+    connect(&_daemonDrift, &window::DaemonDriftModel::restartRequested, this, [this] {
+        // Stopping the daemon drops this client's connection, which closes every window. Without this
+        // the last window closing would quit the app before the queued hand-off below ever ran.
+        QGuiApplication::setQuitOnLastWindowClosed(false);
+        _daemonRestartThread = std::jthread { [this] {
+            auto result = _restartDaemon();
+            QMetaObject::invokeMethod(
+                &_daemonDrift,
+                [this, result = std::move(result)] {
+                    QGuiApplication::setQuitOnLastWindowClosed(true);
+                    if (!result)
+                    {
+                        _daemonDrift.noteRestartFailed(QString::fromStdString(result.error()));
+                        quitIfWindowless();
+                        return;
+                    }
+                    // Until the client reconnects by itself, the new process is what attaches to the
+                    // new daemon.
+                    auto arguments = QStringList {};
+                    for (auto const argument: std::span { _argv, static_cast<size_t>(_argc) }.subspan(1))
+                        arguments.push_back(QString::fromUtf8(argument));
+                    if (auto const started =
+                            externalLauncher().runDetached(QString::fromStdString(programPath()), arguments);
+                        !started)
+                    {
+                        _daemonDrift.noteRestartFailed(
+                            tr("the daemon restarted, but this window could not be reopened"));
+                        quitIfWindowless();
+                        return;
+                    }
+                    QCoreApplication::quit();
+                },
+                Qt::QueuedConnection);
+        } };
+    });
+}
+
+std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string const& label,
+                                                                   std::filesystem::path const& controlPath,
+                                                                   vthost::DaemonSpawnOptions const& options)
+{
+    auto const endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
+    auto start = LocalDaemonStart { processEnvironment(), fileSystem(), programPath() };
+    auto const starter = start.starter(label, endpoint, *_processPlacement, options);
+    auto const control = vthost::client::makeDaemonControl(endpoint);
+    return vthost::client::restartDaemon(*control, *starter)
+        .transform_error([](vthost::client::DaemonRestartFailure const& failure) { return failure.detail; });
+}
+
 int ContourGuiApp::clientAction()
 {
     // Installed first, so an ensureDaemon spawn failure below is captured. Read here with the
@@ -698,7 +824,6 @@ int ContourGuiApp::clientAction()
     if (!wantsTmux && connectTcp.empty())
     {
         auto const controlPath = vthost::muxSocketPath(label, socketOption);
-        auto const endpoint = vthost::AttachEndpoint { vthost::UnixEndpoint { .socketPath = controlPath } };
         // The spawned daemon inherits our logging: it is the instance nobody can configure by
         // hand and whose stderr lands in this process's terminal. It inherits our config and
         // profile for the same reason — its hosted terminals must emulate the way THIS client's
@@ -719,10 +844,22 @@ int ContourGuiApp::clientAction()
                                                                 .configPath = attachConfig,
                                                                 .profileName = attachProfile,
                                                                 .sizePolicy = *sizePolicy };
-        if (vthost::ensureDaemon(endpoint, programPath(), *_processPlacement, daemonOptions) != EXIT_SUCCESS)
+        // Spawned, if it must be, from this version's own copy where an upgrade would disturb the
+        // installed binary, and that copy held leased until the daemon serves.
+        auto start = LocalDaemonStart { processEnvironment(), fileSystem(), programPath() };
+        _restartDaemon = [this, label = std::string { label }, controlPath, daemonOptions] {
+            return restartLocalDaemon(label, controlPath, daemonOptions);
+        };
+        if (start.spawner->probe(controlPath) != vthost::DaemonPresence::Serving)
         {
-            cerr << std::format("contour client: daemon did not start within 5 seconds.\n");
-            return EXIT_FAILURE;
+            // A registered service is started before a daemon is spawned on demand.
+            auto const starter = start.starter(
+                label, vthost::UnixEndpoint { .socketPath = controlPath }, *_processPlacement, daemonOptions);
+            if (auto const started = starter->start(); !started)
+            {
+                cerr << std::format("contour client: {}\n", started.error());
+                return EXIT_FAILURE;
+            }
         }
     }
 
@@ -832,6 +969,8 @@ int ContourGuiApp::clientAction()
             return EXIT_FAILURE;
         }
         _routingFactory->setDelegate(_nativeController.get());
+        if (connectTcp.empty() && _restartDaemon)
+            offerDaemonRestartIfDrifted(*_nativeController);
         // A window spawned to host a daemon window binds itself here (from its
         // Main.qml, via consumeAttachWindow) instead of creating a fresh first tab.
         _sessionManager.setAttachWindowBinder(
@@ -1683,6 +1822,7 @@ int ContourGuiApp::terminalGuiAction()
 
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
+        context->setContextProperty("daemonDrift", &_daemonDrift);
         // A context property rather than a registered QML singleton: two separate modules read these
         // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
         // the style module import this application's own C++ URI, which a style that Qt resolves by

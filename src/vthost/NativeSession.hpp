@@ -20,6 +20,10 @@
 /// Grid rows are addressed by stable id; a generation change triggers one
 /// resync snapshot. Hyperlink URIs ship once per connection on first
 /// reference; image pixels only on FetchImage.
+///
+/// All of that is for an Attach connection, the hello's default role. A Control connection only asks the
+/// daemon about itself: it is sent its ServerHello and the answers to its daemon-control requests, and
+/// nothing else — no layout, no snapshot, no event of the host's — and it counts as no client.
 
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
@@ -43,7 +47,9 @@
 #include <unordered_set>
 #include <vector>
 
+#include <vthost/ClientCensus.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/DaemonControl.hpp>
 #include <vthost/PduPump.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/proto/Negotiation.hpp>
@@ -73,6 +79,9 @@ struct HandshakePolicy
 struct NativeSessionServices
 {
     HandshakePolicy handshake = {}; ///< What the handshake admits.
+    /// The daemon behind this endpoint: what a Control connection asks about, and what counts each Attach
+    /// connection as a client. The null object, which serves nothing, for an endpoint without a daemon.
+    std::reference_wrapper<DaemonControl> daemon = nullDaemonControl();
 };
 
 /// One connected native-protocol client.
@@ -146,8 +155,8 @@ class NativeSession final: public SessionStreamEvents
     /// peer disconnects.
     [[nodiscard]] core::async::Task<void> run();
 
-    /// Marks @p session changed and schedules a debounced delta flush (the
-    /// connection subscribes itself to the host's stream fan-out).
+    /// Marks @p session changed and schedules a debounced delta flush (an Attach
+    /// connection subscribes itself to the host's stream fan-out as its hello is accepted).
     void sessionScreenUpdated(vtworkspace::SessionId session) override;
 
     /// Drops the follow state for a session the host destroyed, so a long-lived
@@ -170,8 +179,8 @@ class NativeSession final: public SessionStreamEvents
 
     /// Adapts the host's model-change fan-out into a single "layout changed"
     /// callback: every structural change re-pushes the whole LayoutState. It is a
-    /// `vtworkspace::ModelEvents` the caller subscribes to the host (see @ref
-    /// layoutObserver), so the model stays transport-agnostic.
+    /// `vtworkspace::ModelEvents` an Attach connection subscribes to the host as its
+    /// hello is accepted, so the model stays transport-agnostic.
     struct LayoutObserver final: vtworkspace::ModelEvents
     {
         std::function<void()> onChange;
@@ -201,10 +210,6 @@ class NativeSession final: public SessionStreamEvents
         void tabTitleChanged(vtworkspace::TabId) override { onChange(); }
         void tabColorChanged(vtworkspace::TabId) override { onChange(); }
     };
-
-    /// The layout observer to subscribe to the host's model fan-out (see
-    /// serveNativeClient) so live tab/pane changes reach this connection.
-    [[nodiscard]] LayoutObserver& layoutObserver() noexcept { return _layoutObserver; }
 
     /// @param type A PDU type this connection may send.
     /// @return Whether the client answered it with Unsupported, so it is no longer sent.
@@ -339,6 +344,25 @@ class NativeSession final: public SessionStreamEvents
 
     void handlePdu(proto::DecodedFrame const& frame);
 
+    /// Whether a frame was a daemon-control request, which a connection of either role may send.
+    enum class DaemonRequest : uint8_t
+    {
+        None = 0,   ///< It was not one: the frame is dispatched on.
+        Served = 1, ///< It was, and it has been answered or carried out.
+    };
+
+    /// Serves @p frame if it is a DaemonStatusRequest or a StopDaemon, through NativeSessionServices::daemon.
+    /// What the daemon does not serve, and a stop for a reason this version does not know, is answered
+    /// Unsupported.
+    /// @param frame A frame received after the handshake.
+    /// @return Whether it was such a request.
+    [[nodiscard]] DaemonRequest serveDaemonRequest(proto::DecodedFrame const& frame);
+
+    /// Answers @p frame with an Unsupported naming its serial and tag: a PDU this connection knows but cannot
+    /// serve.
+    /// @param frame The frame refused.
+    void refuse(proto::DecodedFrame const& frame);
+
     /// Encodes @p pdu and hands it to the write queue, disconnecting on refusal. A PDU the client answered
     /// with Unsupported is not sent at all.
     /// @param serial The request serial to answer, or 0 for an unsolicited push.
@@ -368,10 +392,17 @@ class NativeSession final: public SessionStreamEvents
     /// (serial 0), once the handshake completed — on attach and on every change.
     void pushLayout();
 
-    /// Validates the peer's ClientHello, answers, and queues the attach
-    /// snapshot (spawning the first session on an empty daemon).
+    /// Validates the peer's ClientHello and answers it. An Attach connection then becomes a client
+    /// (see attachClient: the census ticket, the subscriptions, and the attach snapshot, spawning the
+    /// first session on an empty daemon); a Control connection gets the ServerHello and nothing else.
     /// @return False when the hello was missing or version-mismatched.
     [[nodiscard]] bool completeHandshake(proto::DecodedFrame const& frame);
+
+    /// What an accepted Attach hello starts: the census ticket and the host's subscriptions, the client's
+    /// settings, the first session of an empty daemon, the layout, the attach snapshot and the open
+    /// permission questions.
+    /// @param hello The accepted hello.
+    void attachClient(proto::ClientHello const& hello);
 
     /// Adopts the emulation settings the client states for the sessions it creates from now on, in
     /// its ClientHello or later in a SessionSettingsChanged.
@@ -605,7 +636,9 @@ class NativeSession final: public SessionStreamEvents
     /// enqueued: @ref snapshotPieceBytes of this connection's bound.
     std::size_t _snapshotPieceBytes;
     ConnectionId _id;                ///< Prefixes this connection's every log line.
-    NativeSessionServices _services; ///< The handshake's policy, and later phases' collaborators.
+    NativeSessionServices _services; ///< The handshake's policy, the daemon, and later phases' collaborators.
+    /// What the accepted hello said this connection is for; Attach until then.
+    proto::ConnectionRole _role = proto::ConnectionRole::Attach;
     /// What the handshake agreed on; engaged once a ClientHello was accepted, which is what "handshaken"
     /// means everywhere below.
     std::optional<proto::Negotiated> _negotiated;
@@ -641,6 +674,16 @@ class NativeSession final: public SessionStreamEvents
     /// The session this connection's input backed up in, past the high-water mark: the connection is read
     /// no further until it drains. @see awaitInputRoom
     std::optional<vtworkspace::SessionId> _inputBackedUp;
+    /// Counts this connection as a client of the daemon from its accepted Attach hello on; holds nothing for
+    /// a Control connection. Released after the subscriptions below, so a census that drops to zero sees the
+    /// connection gone from the host already.
+    ClientCensus::Ticket _clientTicket;
+    /// The host's stream and model events, taken for an accepted Attach hello only: a Control connection is
+    /// never among the host's subscribers, so it is sent no screen, resize, bell or layout, and it neither
+    /// reports a client area nor is told one. Optional because a ScopedSubscription cannot be moved, and
+    /// the last members, so they are released before anything they deliver to.
+    std::optional<ScopedStreamSubscription> _streamSubscription;
+    std::optional<ScopedModelSubscription> _layoutSubscription;
 };
 
 /// The daemon's connection-handler factory for native-protocol clients.

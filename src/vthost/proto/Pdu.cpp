@@ -216,6 +216,18 @@ namespace
     {
         return std::to_underlying(PduType::Unsupported);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(DaemonStatusRequest const&) noexcept
+    {
+        return std::to_underlying(PduType::DaemonStatusRequest);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(DaemonStatusReply const&) noexcept
+    {
+        return std::to_underlying(PduType::DaemonStatusReply);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(StopDaemon const&) noexcept
+    {
+        return std::to_underlying(PduType::StopDaemon);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -297,6 +309,7 @@ namespace
         encodeCapabilities(fields, pdu.capabilities);
         fields.string(pdu.token);
         encodeOptionalSessionSettings(fields, pdu.sessionSettings);
+        fields.u8(std::to_underlying(pdu.role));
         out.blob(fields.view());
         out.u8(0);
     }
@@ -322,6 +335,7 @@ namespace
         encodeCapabilities(fields, pdu.capabilities);
         fields.string(pdu.machineId);
         fields.string(pdu.hostname);
+        fields.string(pdu.releaseVersion);
         out.blob(fields.view());
     }
 
@@ -693,6 +707,28 @@ namespace
         out.varint(pdu.ident);
     }
 
+    void encodeBody(Writer&, DaemonStatusRequest const&)
+    {
+    }
+
+    void encodeBody(Writer& out, DaemonStatusReply const& pdu)
+    {
+        out.string(pdu.releaseVersion);
+        out.varint(pdu.processId);
+        out.varint(pdu.uptimeSeconds);
+        out.string(pdu.socketPath);
+        out.string(pdu.executablePath);
+        out.string(pdu.logFile);
+        out.varint(pdu.sessions);
+        out.varint(pdu.clients);
+        out.u8(pdu.lifecycle);
+    }
+
+    void encodeBody(Writer& out, StopDaemon const& pdu)
+    {
+        out.u8(pdu.reason);
+    }
+
     void encodeBody(Writer& out, ResizeSplit const& pdu)
     {
         out.varint(pdu.firstSession);
@@ -841,6 +877,16 @@ namespace
                 if (!settings)
                     return std::unexpected(settings.error());
                 pdu.sessionSettings = *std::move(settings);
+                if (inner.remaining() != 0)
+                {
+                    // Fails closed: a role this version does not know is never Attach, which spawns a
+                    // session.
+                    auto role = uint8_t {};
+                    if (!assign(inner.u8(), role, error))
+                        return std::unexpected(error);
+                    pdu.role = role == std::to_underlying(ConnectionRole::Attach) ? ConnectionRole::Attach
+                                                                                  : ConnectionRole::Control;
+                }
             }
         }
         auto closing = uint8_t {};
@@ -886,6 +932,8 @@ namespace
         if (inner.remaining() != 0 && !assign(inner.string(), pdu.machineId, error))
             return std::unexpected(error);
         if (inner.remaining() != 0 && !assign(inner.string(), pdu.hostname, error))
+            return std::unexpected(error);
+        if (inner.remaining() != 0 && !assign(inner.string(), pdu.releaseVersion, error))
             return std::unexpected(error);
         return pdu;
     }
@@ -1333,6 +1381,33 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeDaemonStatusRequest(Reader&)
+    {
+        return DaemonStatusRequest {};
+    }
+
+    DecodeResult decodeDaemonStatusReply(Reader& in)
+    {
+        auto pdu = DaemonStatusReply {};
+        auto error = DecodeError {};
+        if (!assign(in.string(), pdu.releaseVersion, error) || !assign(in.varint(), pdu.processId, error)
+            || !assign(in.varint(), pdu.uptimeSeconds, error) || !assign(in.string(), pdu.socketPath, error)
+            || !assign(in.string(), pdu.executablePath, error) || !assign(in.string(), pdu.logFile, error)
+            || !assign(in.varint(), pdu.sessions, error) || !assign(in.varint(), pdu.clients, error)
+            || !assign(in.u8(), pdu.lifecycle, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeStopDaemon(Reader& in)
+    {
+        auto pdu = StopDaemon {};
+        auto error = DecodeError {};
+        if (!assign(in.u8(), pdu.reason, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeResizeSplit(Reader& in)
     {
         auto pdu = ResizeSplit {};
@@ -1440,6 +1515,9 @@ namespace
         DecodeRow { PduType::PermissionRequest, decodePermissionRequest },
         DecodeRow { PduType::PermissionReply, decodePermissionReply },
         DecodeRow { PduType::Unsupported, decodeUnsupported },
+        DecodeRow { PduType::DaemonStatusRequest, decodeDaemonStatusRequest },
+        DecodeRow { PduType::DaemonStatusReply, decodeDaemonStatusReply },
+        DecodeRow { PduType::StopDaemon, decodeStopDaemon },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

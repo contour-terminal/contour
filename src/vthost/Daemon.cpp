@@ -18,6 +18,7 @@
 #include <vtpty/ProgramLookup.hpp>
 #include <vtpty/WindowsCommandLine.hpp>
 
+#include <core/Assert.hpp>
 #include <core/Environment.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
@@ -27,10 +28,10 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/Tls.hpp>
+#include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/SystemInfo.hpp>
 
-#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
@@ -50,18 +51,24 @@
 #include <vector>
 
 #include <vthost/ConnectionAcceptor.hpp>
+#include <vthost/DaemonBinary.hpp>
+#include <vthost/DaemonControl.hpp>
+#include <vthost/DaemonRuntime.hpp>
 #include <vthost/HostedShell.hpp>
+#include <vthost/IdleExitWatcher.hpp>
 #include <vthost/LastSessionWatcher.hpp>
 #include <vthost/Logging.hpp>
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/ShutdownFunnel.hpp>
+#include <vthost/ShutdownSignals.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vthost/tmux/ImsgServer.hpp>
 
 #ifndef _WIN32
-    #include <csignal>
+    #include <core/net/posix/UnixListener.hpp>
 
     #include <fcntl.h>
     #include <unistd.h>
@@ -180,13 +187,13 @@ namespace
 
     /// Composes a native connection handler that FIRST encrypts each accepted
     /// socket (server-side TLS), then serves the native protocol over it.
+    /// @param services What each native connection is served with, the TCP token among them.
     [[nodiscard]] ConnectionHandler makeTlsNativeHandler(core::net::EventLoop& loop,
                                                          SessionHost& host,
                                                          std::shared_ptr<core::net::ITlsContext> tls,
-                                                         std::string token)
+                                                         NativeSessionServices services)
     {
-        auto base = makeNativeHandler(
-            loop, host, NativeSessionServices { .handshake = { .expectedToken = std::move(token) } });
+        auto base = makeNativeHandler(loop, host, std::move(services));
         return [tls = std::move(tls), base = std::move(base), &loop](
                    ConnectionId id, std::unique_ptr<core::net::ISocket> socket) {
             return base(std::move(id), tls->wrap(std::move(socket), loop));
@@ -219,55 +226,93 @@ namespace
         return std::move(*listener);
     }
 
-    /// The one shutdown action every trigger shares: stop accepting on every endpoint, then
-    /// unwind the loop so each connection flow cancels.
-    ///
-    /// MUST run on the loop thread — @c EventLoop::requestStop is documented loop-thread-only. The
-    /// signal (POSIX) and console-control (Windows) triggers get there by posting this; the
-    /// last-session trigger is already on it and posts only to leave the observer fan-out (see
-    /// LastSessionWatcher).
-    ///
-    /// This skips the connections' graceful epilogues by design (see the "Daemon lifetime" section
-    /// of docs/internals/vthost.md); peers see a clean FIN rather than a goodbye.
-    /// @param loop The loop to unwind.
-    /// @param servers Every bound endpoint (not owned).
-    /// @param reason What asked for the shutdown, for the single log line.
-    void requestDaemonShutdown(core::net::EventLoop& loop,
-                               std::vector<ConnectionAcceptor*> const& servers,
-                               std::string_view reason)
+    /// The watcher a daemon's lifecycle calls for, if any. Holds at most one, because a lifecycle is one
+    /// rule; the watchers hold non-movable subscriptions, so they are emplaced rather than returned.
+    struct LifecycleWatchers
     {
-        daemonLog()("{}; closing {} listener(s)", reason, servers.size());
-        for (auto* each: servers)
-            each->close();
-        loop.requestStop();
-    }
+        std::optional<LastSessionWatcher> lastSession; ///< Armed for ExitWhenEmpty.
+        std::optional<IdleExitWatcher> idle;           ///< Armed for ExitWhenIdle.
+    };
 
-    /// Arms @p slot with the watcher that ends the daemon together with its last session, when
-    /// @p lifecycle asks for it. Shared by the POSIX and Windows runDaemon bodies.
+    /// Arms the watcher that ends the daemon on its own, when @p config's lifecycle asks for one. Shared
+    /// by the POSIX and Windows runDaemon bodies.
     ///
-    /// Emplaces rather than returning, because LastSessionWatcher holds a non-movable
-    /// ScopedStreamSubscription. Nothing is constructed for a persistent daemon, so it registers no
-    /// observer at all rather than one that would decline on every close for the process's life.
-    /// @param slot The watcher's storage; left empty unless @p lifecycle is ExitWhenEmpty.
-    /// @param lifecycle Whether this daemon outlives its last session.
-    /// @param host The host whose session closes are observed.
+    /// Nothing is constructed for a Persistent daemon, so it registers no observer at all rather than one
+    /// that would decline for the process's life.
+    /// @param watchers The watchers' storage; left empty for a Persistent daemon.
+    /// @param config The daemon's configuration: its lifecycle and idle grace.
+    /// @param host The host whose sessions are observed.
+    /// @param census The daemon's client count.
     /// @param loop The loop the deferred shutdown is posted onto.
-    /// @param servers Every bound endpoint, closed on shutdown (not owned; must outlive @p slot).
-    void installLastSessionWatcher(std::optional<LastSessionWatcher>& slot,
-                                   DaemonLifecycle lifecycle,
-                                   SessionHost& host,
-                                   core::net::EventLoop& loop,
-                                   std::vector<ConnectionAcceptor*> const& servers)
+    /// @param funnel The daemon's shutdown (not owned; must outlive @p watchers).
+    void installLifecycleWatchers(LifecycleWatchers& watchers,
+                                  DaemonConfig const& config,
+                                  SessionHost& host,
+                                  ClientCensus& census,
+                                  core::net::EventLoop& loop,
+                                  ShutdownFunnel& funnel)
     {
-        if (lifecycle != DaemonLifecycle::ExitWhenEmpty)
-            return;
-
         // Announced up front, because "why did my daemon vanish?" must be answerable from the
         // default log — this category is enabled without any --log.
-        daemonLog()("this daemon terminates with its last hosted session");
-        slot.emplace(host, loop, [&loop, &servers] {
-            requestDaemonShutdown(loop, servers, "the last hosted session closed");
-        });
+        switch (config.lifecycle)
+        {
+            case DaemonLifecycle::Persistent: return;
+            case DaemonLifecycle::ExitWhenEmpty:
+                daemonLog()("this daemon terminates with its last hosted session");
+                watchers.lastSession.emplace(
+                    host, loop, [&funnel] { funnel.request(ShutdownCause::LastSessionClosed); });
+                return;
+            case DaemonLifecycle::ExitWhenIdle:
+                daemonLog()("this daemon terminates after {} s with no session and no client",
+                            config.idleExitGrace.count());
+                watchers.idle.emplace(host, census, loop, config.idleExitGrace, [&funnel] {
+                    funnel.request(ShutdownCause::Idle);
+                });
+                return;
+        }
+    }
+
+    /// A shutdown request that may be made from anywhere — another thread, or a connection's PDU
+    /// handler — because it only posts @p funnel's request onto @p loop, the loop's one thread-safe entry
+    /// point. A StopDaemon is answered inside NativeSession's pump handler, which the shutdown would
+    /// unwind, and like LastSessionWatcher's this gives each write queue one pump to flush.
+    /// @param loop The loop the shutdown runs on (not owned).
+    /// @param funnel The daemon's shutdown (not owned; outlives every request, see runDaemon).
+    /// @return The request.
+    [[nodiscard]] std::function<void(ShutdownCause)> postedShutdown(core::net::EventLoop& loop,
+                                                                    ShutdownFunnel& funnel)
+    {
+        return [&loop, &funnel](ShutdownCause cause) {
+            loop.post([&funnel, cause] { funnel.request(cause); });
+        };
+    }
+
+    /// @param config The daemon's configuration.
+    /// @return What its DaemonRuntime states about it.
+    [[nodiscard]] DaemonRuntimeConfig runtimeConfigOf(DaemonConfig const& config)
+    {
+        return DaemonRuntimeConfig { .releaseVersion = config.releaseVersion,
+                                     .processId = currentProcessId(),
+                                     .socketPath = config.socketPath,
+                                     .executablePath = config.executablePath,
+                                     .logFile = config.logFile,
+                                     .lifecycle = config.lifecycle };
+    }
+
+    /// What every native endpoint of a daemon serves its connections with: @p runtime behind them, and a
+    /// handshake that offers DaemonControl, because @p runtime answers it. Only a daemon offers it; an
+    /// embedded host's default handshake keeps not claiming what its null daemon control refuses.
+    /// @param runtime The daemon (not owned; outlives every connection).
+    /// @param token The preshared token required of every client; empty for the unix endpoint.
+    /// @return The services.
+    [[nodiscard]] NativeSessionServices daemonNativeServices(DaemonRuntime& runtime, std::string token = {})
+    {
+        return NativeSessionServices {
+            .handshake = { .expectedToken = std::move(token),
+                           .capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
+                                                                      proto::Capability::DaemonControl }) },
+            .daemon = runtime,
+        };
     }
 
     /// Probes whether a daemon is accepting connections on the native socket at
@@ -290,13 +335,14 @@ namespace
     ///
     /// Takes the argv prebuilt (see daemonSpawnArgs) rather than composing it here. It gives the flag
     /// list ONE spelling for both platforms.
-    /// @param args The full argv; args[0] is the binary to exec. Mutable because CreateProcess may
-    ///        write to its command-line buffer.
+    /// @param args The full argv; args[0] is the binary to exec.
     /// @param placement Places the daemon before it runs, as a session's shell is placed. POSIX only.
-    /// @return False if the process could not be started.
-    [[nodiscard]] bool spawnDetachedDaemon(std::vector<std::string>& args,
-                                           [[maybe_unused]] vtpty::ProcessPlacement& placement)
+    /// @return Nothing, or why the process could not be started.
+    [[nodiscard]] std::expected<void, std::string> spawnDetachedDaemon(
+        std::span<std::string const> args, [[maybe_unused]] vtpty::ProcessPlacement& placement)
     {
+        if (args.empty())
+            return std::unexpected("no program to start");
 #ifndef _WIN32
         // Resolved here, not in the child, which may only call async-signal-safe functions before it
         // execs: a PATH walk is not one. argv[0] itself stays as the caller named it -- that is what
@@ -322,20 +368,22 @@ namespace
         // Placed, as a session's shell is: the daemon holds the scrollback of every session it hosts,
         // and an out-of-memory kill elsewhere in the client's unit, or in the tab it was typed into,
         // must not end it.
-        return vtpty::startDetached(vtpty::DetachedCommand { .image = std::move(image),
-                                                             .argv = args,
-                                                             .standardInput = "/dev/null",
-                                                             .output = vtpty::DetachedOutput::Discarded,
-                                                             .role = vtpty::ProcessRole::Daemon },
-                                    placement)
-            .has_value();
+        return vtpty::startDetached(
+                   vtpty::DetachedCommand { .image = std::move(image),
+                                            .argv = std::vector<std::string>(args.begin(), args.end()),
+                                            .standardInput = "/dev/null",
+                                            .output = vtpty::DetachedOutput::Discarded,
+                                            .role = vtpty::ProcessRole::Daemon },
+                   placement)
+            .transform([](int) {})
+            .transform_error([](std::error_code const& error) { return error.message(); });
 #else
         // CreateProcess parses its command line in place and may write to it, so the buffer must be
         // mutable. joinCommandLine quotes an argument, argv[0] included, where it holds a space
         // (`C:\Program Files\...`), which an unquoted command line would split.
         auto commandLine = core::toUtf16(joinCommandLine(args));
         if (!commandLine)
-            return false;
+            return std::unexpected("the command line is not valid UTF-8");
         auto startupInfo = STARTUPINFOW {};
         startupInfo.cb = sizeof(startupInfo);
         auto processInfo = PROCESS_INFORMATION {};
@@ -349,54 +397,79 @@ namespace
                               nullptr,
                               &startupInfo,
                               &processInfo))
-            return false;
+            return std::unexpected(std::system_category().message(static_cast<int>(::GetLastError())));
         ::CloseHandle(processInfo.hThread);
         ::CloseHandle(processInfo.hProcess);
-        return true;
+        return {};
 #endif
     }
 
-    /// Spawns @p args detached, then blocks until a daemon accepts on @p nativePath.
+    /// The operating system's DaemonSpawner: one reactor serves every probe it is asked.
+    class NativeDaemonSpawner final: public DaemonSpawner
+    {
+      public:
+        NativeDaemonSpawner(): _source { core::net::makeDefaultBackend() }, _loop { *_source } {}
+
+        [[nodiscard]] std::expected<void, std::string> spawn(std::span<std::string const> argv,
+                                                             vtpty::ProcessPlacement& placement) override
+        {
+            return spawnDetachedDaemon(argv, placement);
+        }
+
+        [[nodiscard]] DaemonPresence probe(std::filesystem::path const& socketPath) override
+        {
+            return daemonAccepts(_loop, core::pathToUtf8(nativeSocketPath(socketPath)))
+                       ? DaemonPresence::Serving
+                       : DaemonPresence::Absent;
+        }
+
+      private:
+        std::unique_ptr<core::net::IoBackend> _source;
+        core::net::EventLoop _loop;
+    };
+
+    /// Spawns @p args detached, then blocks until a daemon serves at @p socketPath.
     ///
     /// Shared by the client's auto-spawn (@ref ensureDaemon) and `contour daemon --background`,
     /// because "it returned" must mean "it is serving" for both: a caller that gets its prompt
     /// back and only then discovers the daemon never bound has no way to tell that from a
     /// daemon that bound and died.
-    /// @param loop The reactor driving each readiness probe (not owned).
-    /// @param args The full argv; mutable because CreateProcess wants it so.
+    /// @param spawner What starts the daemon and asks whether it serves.
+    /// @param args The full argv.
     /// @param placement Places the daemon before it runs.
-    /// @param nativePath The native endpoint probed for readiness.
+    /// @param socketPath The control socket the daemon binds.
     /// @param timeout How long to wait before giving up.
     /// @return EXIT_SUCCESS once it accepts, EXIT_FAILURE on spawn failure or timeout.
-    [[nodiscard]] int spawnAndAwaitDaemon(core::net::EventLoop& loop,
-                                          std::vector<std::string>& args,
+    [[nodiscard]] int spawnAndAwaitDaemon(DaemonSpawner& spawner,
+                                          std::span<std::string const> args,
                                           vtpty::ProcessPlacement& placement,
-                                          std::string const& nativePath,
-                                          std::chrono::seconds timeout)
+                                          std::filesystem::path const& socketPath,
+                                          std::chrono::milliseconds timeout)
     {
-        if (!spawnDetachedDaemon(args, placement))
-            return EXIT_FAILURE;
-
-        // Poll until the socket accepts connections or the timeout elapses.
-        // Back off gradually: a freshly spawned daemon needs a moment to bind,
-        // but polling at a fixed 100ms wastes ~50 connect/close cycles over the
-        // default 5s timeout. Doubling the sleep each iteration caps at 1s.
-        auto const deadline = std::chrono::steady_clock::now() + timeout;
-        auto sleepMs = std::chrono::milliseconds { 50 };
-        while (std::chrono::steady_clock::now() < deadline)
+        if (auto const spawned = spawner.spawn(args, placement); !spawned)
         {
-            if (daemonAccepts(loop, nativePath))
-                return EXIT_SUCCESS;
-            auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                deadline - std::chrono::steady_clock::now());
-            if (remaining < sleepMs)
-                sleepMs = remaining;
-            std::this_thread::sleep_for(sleepMs);
-            sleepMs = std::min(sleepMs * 2, std::chrono::milliseconds { 1000 });
+            daemonLog()("cannot start {}: {}", args.empty() ? std::string {} : args.front(), spawned.error());
+            return EXIT_FAILURE;
         }
-        return EXIT_FAILURE; // timeout
+
+        return awaitDaemon(spawner, socketPath, timeout) == DaemonPresence::Serving ? EXIT_SUCCESS
+                                                                                    : EXIT_FAILURE;
     }
 } // namespace
+
+std::expected<void, std::string> prepareSocketDirectory(
+    [[maybe_unused]] std::filesystem::path const& socketPath)
+{
+#ifndef _WIN32
+    auto const directory = socketPath.parent_path();
+    if (directory.empty())
+        return {};
+    return core::net::ensureOwnedPrivateDirectory(directory).transform_error(
+        [](core::net::NetError const& error) { return error.toString(); });
+#else
+    return {};
+#endif
+}
 
 std::string endpointToken(AttachEndpoint const& endpoint)
 {
@@ -405,7 +478,21 @@ std::string endpointToken(AttachEndpoint const& endpoint)
     return {};
 }
 
-core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string>> connectAttach(
+namespace
+{
+    /// @param error What a connect failed with.
+    /// @return Whether it says nothing listens: a refused connection, or a socket file that is gone.
+    [[nodiscard]] AttachFailure classifyConnectFailure(core::net::NetError const& error)
+    {
+        // ENOENT is ERROR_FILE_NOT_FOUND's number too, and WSAECONNREFUSED arrives as ConnRefused.
+        auto const absent = error.code == core::net::NetErrorCode::ConnRefused || error.systemCode == ENOENT;
+        return AttachFailure { .kind =
+                                   absent ? AttachFailureKind::DaemonAbsent : AttachFailureKind::Unreachable,
+                               .text = error.toString() };
+    }
+} // namespace
+
+core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, AttachFailure>> connectAttachDetailed(
     core::net::EventLoop* loop, AttachEndpoint endpoint)
 {
     if (auto const* unixEp = std::get_if<UnixEndpoint>(&endpoint))
@@ -413,23 +500,83 @@ core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string
         auto socket =
             co_await core::net::connectUnix(loop, core::pathToUtf8(nativeSocketPath(unixEp->socketPath)));
         if (!socket)
-            co_return std::unexpected(socket.error().toString());
+            co_return std::unexpected(classifyConnectFailure(socket.error()));
         co_return std::move(*socket);
     }
 
     auto const& tcp = std::get<TcpEndpoint>(endpoint);
     auto socket = co_await core::net::connect(loop, tcp.host, tcp.port);
     if (!socket)
-        co_return std::unexpected(socket.error().toString());
+        co_return std::unexpected(classifyConnectFailure(socket.error()));
     // The host we asked for is also the name the certificate must carry: a pinned CA proves who
     // signed, not who was signed for.
     auto tls = core::net::makeTlsClientContext(tcp.caPem, tcp.host);
     if (!tls)
-        co_return std::unexpected(tls.error());
+        co_return std::unexpected(AttachFailure { .text = tls.error() });
     auto encrypted = (*tls)->wrap(std::move(*socket), *loop);
     if (!encrypted)
-        co_return std::unexpected(std::string { "TLS handshake setup failed" });
+        co_return std::unexpected(AttachFailure { .text = "TLS handshake setup failed" });
     co_return std::move(encrypted);
+}
+
+core::async::Task<std::expected<std::unique_ptr<core::net::ISocket>, std::string>> connectAttach(
+    core::net::EventLoop* loop, AttachEndpoint endpoint)
+{
+    auto socket = co_await connectAttachDetailed(loop, std::move(endpoint));
+    if (!socket)
+        co_return std::unexpected(std::move(socket.error().text));
+    co_return std::move(*socket);
+}
+
+namespace
+{
+    /// @param quotedTail What follows an argument's opening quote.
+    /// @return The argument up to its closing quote, with systemd's escapes undone: `\\` and `\"`, `%%`
+    ///         and `$$`. A backslash before any other character is itself, as on a Windows command line.
+    [[nodiscard]] std::string unquoteArgument(std::string_view quotedTail)
+    {
+        auto decoded = std::string {};
+        // A `\`, `%` or `$` read but not yet written: what it means depends on the character after it.
+        auto pending = char {};
+        for (auto const ch: quotedTail)
+        {
+            if (pending != char {})
+            {
+                auto const escape = std::exchange(pending, char {});
+                auto const escapes = escape == '\\' ? (ch == '\\' || ch == '"') : ch == escape;
+                if (escapes)
+                {
+                    decoded += ch;
+                    continue;
+                }
+                decoded += escape;
+            }
+            if (ch == '"')
+                break;
+            if (ch == '\\' || ch == '%' || ch == '$')
+                pending = ch;
+            else
+                decoded += ch;
+        }
+        if (pending != char {})
+            decoded += pending;
+        return decoded;
+    }
+} // namespace
+
+std::optional<std::filesystem::path> registeredSocketPath(std::string_view commandLine)
+{
+    auto const at = commandLine.find(SocketOption);
+    if (at == std::string_view::npos)
+        return std::nullopt;
+    auto const quoted = at > 0 && commandLine[at - 1] == '"';
+    auto const value = commandLine.substr(at + SocketOption.size());
+    auto const path =
+        quoted ? unquoteArgument(value) : std::string { value.substr(0, value.find_first_of(" \t")) };
+    auto parsed = core::pathFromUtf8(path);
+    if (path.empty() || !parsed)
+        return std::nullopt;
+    return *std::move(parsed);
 }
 
 std::vector<std::string> daemonSpawnArgs(std::string_view daemonBinary,
@@ -440,16 +587,18 @@ std::vector<std::string> daemonSpawnArgs(std::string_view daemonBinary,
     auto args = std::vector<std::string> {
         std::string { daemonBinary },
         "daemon",
-        std::format("--socket={}", core::pathToUtf8(socketPath)),
+        std::format("{}{}", SocketOption, core::pathToUtf8(socketPath)),
     };
-    // A daemon we spawned belongs to the client that spawned it, so it must not outlive the
-    // sessions it was started for.
-    if (lifecycle == DaemonLifecycle::ExitWhenEmpty)
-        args.emplace_back("--exit-with-last-session");
+    // Stated even for Persistent, as --size-policy is: absence is itself a value, and the process list
+    // should not need the default to be read.
+    args.push_back(std::format("--lifecycle={}", nameOf(lifecycle)));
     if (!spawnOptions.filter.empty())
         args.push_back(std::format("--log={}", spawnOptions.filter));
-    if (!spawnOptions.logFile.empty())
-        args.push_back(std::format("--log-file={}", spawnOptions.logFile));
+    // Always logs to a file: a spawned daemon is detached from any console, and `contour daemon logs`
+    // reads this file.
+    args.push_back(std::format("--log-file={}",
+                               spawnOptions.logFile.empty() ? core::pathToUtf8(daemonLogPath(socketPath))
+                                                            : spawnOptions.logFile));
     // The client's own configuration decides how its sessions emulate, so a daemon it
     // spawns must read the same file and profile — otherwise the client renders a
     // deeper scrollback than the daemon retains, and a resync truncates it.
@@ -494,8 +643,23 @@ std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_v
 
 int runDaemon(DaemonConfig const& config)
 {
+    Require(config.shutdownSignals != nullptr);
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
+    auto const clock = core::platform::SteadyClock {};
+
+    // Filled as each endpoint is bound below; the funnel reads it when the shutdown comes.
+    auto servers = std::vector<ConnectionAcceptor*> {};
+    auto funnel = ShutdownFunnel { loop, servers, config.beforeShutdown };
+
+    // Armed before the host, for two reasons. The watch blocks SIGINT/SIGTERM on this thread, and only
+    // threads started afterwards inherit that mask: the host starts a pump thread per session of the
+    // startup layout in its constructor, and a process-directed SIGTERM reaching a thread that does not
+    // block it kills the process by its default action. And it is destroyed after ~SessionHost has
+    // joined those threads, so the SIGTERM ~SigwaitWatch sends to release its own thread after a
+    // StopDaemon finds none of them left.
+    auto const signals = config.shutdownSignals->watch(
+        [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); });
 
     auto host = SessionHost {
         loop,
@@ -508,6 +672,17 @@ int runDaemon(DaemonConfig const& config)
                             .identity = thisHostIdentity(),
                             .extensions = config.extensions ? config.extensions() : nullptr }
     };
+    // Declared before the drain, as the funnel is: the connection flows the drain unwinds hold its census
+    // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
+    // the funnel.
+    auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
+    // An auto-spawned daemon ends when it has nothing left to serve; a user-started one persists.
+    // Declared after `host`, so it unsubscribes while the host is still alive, and before the drain, so
+    // it outlives it: a sessionClosed in the loop's last turn leaves a post capturing a watcher queued,
+    // and the drain runs it. A shutdown request it makes then is harmless: the funnel has shut down
+    // already, or every listener died on its own and servers.clear() left it nothing to close.
+    auto lifecycleWatchers = LifecycleWatchers {};
+    installLifecycleWatchers(lifecycleWatchers, config, host, runtime.census(), loop, funnel);
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
@@ -515,17 +690,21 @@ int runDaemon(DaemonConfig const& config)
     auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
     if (!listener)
         return listener.error();
-    auto server = ConnectionAcceptor {
-        loop, "control", std::move(*listener), tmux::makeControlModeHandler(loop, host)
-    };
+    auto server = ConnectionAcceptor { loop,
+                                       "control",
+                                       std::move(*listener),
+                                       countedHandler(runtime, tmux::makeControlModeHandler(loop, host)) };
 
-    // The native cells+deltas protocol listens beside the control-mode socket.
+    // The native cells+deltas protocol listens beside the control-mode socket. Its connections count
+    // themselves, as only an Attach connection is a client.
     auto const nativePath = core::pathToUtf8(nativeSocketPath(config.socketPath));
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer =
-        ConnectionAcceptor { loop, "native", std::move(*nativeListener), makeNativeHandler(loop, host) };
+    auto nativeServer = ConnectionAcceptor { loop,
+                                             "native",
+                                             std::move(*nativeListener),
+                                             makeNativeHandler(loop, host, daemonNativeServices(runtime)) };
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
@@ -533,10 +712,11 @@ int runDaemon(DaemonConfig const& config)
     auto imsgListener = bindDaemonEndpoint(loop, imsgPath);
     if (!imsgListener)
         return imsgListener.error();
-    auto imsgServer =
-        ConnectionAcceptor { loop, "imsg", std::move(*imsgListener), tmux::makeTmuxImsgHandler(loop, host) };
+    auto imsgServer = ConnectionAcceptor {
+        loop, "imsg", std::move(*imsgListener), countedHandler(runtime, tmux::makeTmuxImsgHandler(loop, host))
+    };
 
-    auto servers = std::vector<ConnectionAcceptor*> { &server, &nativeServer, &imsgServer };
+    servers = { &server, &nativeServer, &imsgServer };
 
     // Opt-in: ALSO bind tmux's own discovery path, so a plain
     // `tmux -L <label> -C attach-session` finds this daemon. Opt-in only —
@@ -549,8 +729,10 @@ int runDaemon(DaemonConfig const& config)
         auto compatListener = bindDaemonEndpoint(loop, compatPath);
         if (!compatListener)
             return compatListener.error();
-        compatServer.emplace(
-            loop, "tmux-compat", std::move(*compatListener), tmux::makeTmuxImsgHandler(loop, host));
+        compatServer.emplace(loop,
+                             "tmux-compat",
+                             std::move(*compatListener),
+                             countedHandler(runtime, tmux::makeTmuxImsgHandler(loop, host)));
         servers.push_back(&*compatServer);
         daemonLog()("tmux-compat socket bound at {}", compatPath);
     }
@@ -574,55 +756,23 @@ int runDaemon(DaemonConfig const& config)
         if (!tls)
             return EXIT_FAILURE;
         auto const boundPort = (*tcpListener)->boundPort();
-        nativeTcpServer.emplace(loop,
-                                "native-tcp",
-                                std::move(*tcpListener),
-                                makeTlsNativeHandler(loop, host, std::move(tls), config.nativeTcp->token));
+        nativeTcpServer.emplace(
+            loop,
+            "native-tcp",
+            std::move(*tcpListener),
+            makeTlsNativeHandler(
+                loop, host, std::move(tls), daemonNativeServices(runtime, config.nativeTcp->token)));
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
     }
 
-    // An auto-spawned daemon ends with its last session; a user-started one persists. Declared after
-    // `servers` is complete (it is captured by reference) and after `host`, so it unsubscribes while
-    // the host is still alive.
-    auto lastSession = std::optional<LastSessionWatcher> {};
-    installLastSessionWatcher(lastSession, config.lifecycle, host, loop, servers);
-
-    // Signal handling without async-signal-safety hazards: SIGINT/SIGTERM are
-    // blocked process-wide and consumed by a dedicated sigwait thread, which
-    // marshals the shutdown onto the loop via post() (the loop's only
-    // thread-safe entry point).
-    auto signals = sigset_t {};
-    sigemptyset(&signals);
-    sigaddset(&signals, SIGINT);
-    sigaddset(&signals, SIGTERM);
-    pthread_sigmask(SIG_BLOCK, &signals, nullptr);
-
-    auto signalSeen = std::atomic<bool> { false };
-    auto watcher = std::thread { [&] {
-        auto sig = 0;
-        sigwait(&signals, &sig);
-        signalSeen = true;
-        // Everything below runs on the LOOP thread, deliberately: this lambda body is the
-        // sigwait thread, and logging from there would put a line outside the single-threaded
-        // invariant the rest of the module keeps.
-        loop.post([&, sig] { requestDaemonShutdown(loop, servers, std::format("signal {} received", sig)); });
-    } };
-
     daemonLog()(
         "serving on {} (native: {}, tmux: {})", core::pathToUtf8(config.socketPath), nativePath, imsgPath);
     loop.blockOn(serveAll(servers));
-
-    // Unblock the sigwait thread when the shutdown came from elsewhere — the last-session
-    // exit, for which no signal was ever delivered. If it already consumed a signal, this
-    // one stays blocked and dies with the process.
-    //
-    // raise(3) targets the calling thread (pthread_kill(pthread_self(), …)) — the watcher
-    // thread's sigwait dequeues from the PROCESS queue and never sees a thread-directed
-    // signal, so the join below would hang. kill(getpid(), …) is process-directed.
-    if (!signalSeen)
-        std::ignore = ::kill(::getpid(), SIGTERM);
-    watcher.join();
+    // The acceptors are destroyed before the drain below turns the loop again, and a shutdown request
+    // still queued may run in it — one that finds the funnel Serving when every listener died on its own.
+    // Emptied, the list lets such a request close nothing that is gone.
+    servers.clear();
 
     daemonLog()("shut down");
     return EXIT_SUCCESS;
@@ -630,8 +780,37 @@ int runDaemon(DaemonConfig const& config)
 
 #endif // _WIN32
 
+DaemonPresence awaitDaemon(DaemonSpawner& spawner,
+                           std::filesystem::path const& socketPath,
+                           std::chrono::milliseconds timeout)
+{
+    // Poll until the socket accepts connections or the timeout elapses. Back off gradually: a freshly
+    // started daemon needs a moment to bind, but polling at a fixed interval wastes ~50 connect/close
+    // cycles over the default 5s timeout. Doubling the sleep each iteration caps at 1s.
+    auto const deadline = std::chrono::steady_clock::now() + timeout;
+    auto sleepMs = std::chrono::milliseconds { 50 };
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (spawner.probe(socketPath) == DaemonPresence::Serving)
+            return DaemonPresence::Serving;
+        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (remaining < sleepMs)
+            sleepMs = remaining;
+        std::this_thread::sleep_for(sleepMs);
+        sleepMs = std::min(sleepMs * 2, std::chrono::milliseconds { 1000 });
+    }
+    return DaemonPresence::Absent;
+}
+
+std::unique_ptr<DaemonSpawner> makeNativeDaemonSpawner()
+{
+    return std::make_unique<NativeDaemonSpawner>();
+}
+
 int ensureDaemon(AttachEndpoint const& endpoint,
-                 std::string_view daemonBinary,
+                 DaemonBinarySource& binary,
+                 DaemonSpawner& spawner,
                  vtpty::ProcessPlacement& placement,
                  DaemonSpawnOptions const& spawnOptions,
                  std::chrono::seconds timeout)
@@ -640,22 +819,27 @@ int ensureDaemon(AttachEndpoint const& endpoint,
     if (std::holds_alternative<TcpEndpoint>(endpoint))
         return EXIT_SUCCESS;
 
-    // Unix socket: probe the native socket beside the control socket. One reactor
-    // serves the initial probe and every poll that follows.
+    // Unix socket: probe the native socket beside the control socket.
     auto const& unixEp = std::get<UnixEndpoint>(endpoint);
-    auto const nativePath = core::pathToUtf8(nativeSocketPath(unixEp.socketPath));
-
-    auto const source = core::net::makeDefaultBackend();
-    auto loop = core::net::EventLoop { *source };
-
-    if (daemonAccepts(loop, nativePath))
+    if (spawner.probe(unixEp.socketPath) == DaemonPresence::Serving)
         return EXIT_SUCCESS; // daemon is already running
 
     // Daemon not running — spawn it in the background. A daemon we spawn is ours, so it is started
-    // `--exit-with-last-session` and ends when the work it was spawned for is done.
-    auto args =
-        daemonSpawnArgs(daemonBinary, unixEp.socketPath, spawnOptions, DaemonLifecycle::ExitWhenEmpty);
-    return spawnAndAwaitDaemon(loop, args, placement, nativePath, timeout);
+    // `--lifecycle=exit-when-idle` and ends once nothing needs it any more. The image is asked for only
+    // now, and held until the daemon serves: by then the daemon has leased it itself.
+    auto const image = binary.imageForSpawn();
+    auto const args = daemonSpawnArgs(
+        core::pathToUtf8(image.executable), unixEp.socketPath, spawnOptions, DaemonLifecycle::ExitWhenIdle);
+    return spawnAndAwaitDaemon(spawner, args, placement, unixEp.socketPath, timeout);
+}
+
+int ensureDaemon(AttachEndpoint const& endpoint,
+                 DaemonBinarySource& binary,
+                 vtpty::ProcessPlacement& placement,
+                 DaemonSpawnOptions const& spawnOptions,
+                 std::chrono::seconds timeout)
+{
+    return ensureDaemon(endpoint, binary, *makeNativeDaemonSpawner(), placement, spawnOptions, timeout);
 }
 
 int runDaemonDetached(std::vector<std::string> commandLine,
@@ -663,36 +847,26 @@ int runDaemonDetached(std::vector<std::string> commandLine,
                       vtpty::ProcessPlacement& placement,
                       std::chrono::seconds timeout)
 {
-    auto const source = core::net::makeDefaultBackend();
-    auto loop = core::net::EventLoop { *source };
-    return spawnAndAwaitDaemon(
-        loop, commandLine, placement, core::pathToUtf8(nativeSocketPath(socketPath)), timeout);
+    return spawnAndAwaitDaemon(*makeNativeDaemonSpawner(), commandLine, placement, socketPath, timeout);
 }
 
 #ifdef _WIN32
 
-namespace
-{
-    /// The console-control shutdown hook: SetConsoleCtrlHandler's callback is
-    /// a plain C function invoked on an arbitrary thread with no user data
-    /// pointer, so the running daemon registers its (thread-safe) shutdown
-    /// poster in this one process-wide slot.
-    std::atomic<std::function<void()>*> consoleShutdown = nullptr;
-
-    BOOL WINAPI consoleCtrlHandler(DWORD type)
-    {
-        if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT && type != CTRL_CLOSE_EVENT)
-            return FALSE;
-        if (auto* shutdown = consoleShutdown.load())
-            (*shutdown)();
-        return TRUE;
-    }
-} // namespace
-
 int runDaemon(DaemonConfig const& config)
 {
+    Require(config.shutdownSignals != nullptr);
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
+    auto const clock = core::platform::SteadyClock {};
+
+    auto servers = std::vector<ConnectionAcceptor*> {};
+    auto funnel = ShutdownFunnel { loop, servers, config.beforeShutdown };
+
+    // The console-control handler runs on an arbitrary OS thread; the request only posts, so the
+    // shutdown and its log line land on the loop thread like everything else. Armed before the host and
+    // destroyed after it, as in the POSIX body above.
+    auto const signals = config.shutdownSignals->watch(
+        [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); });
 
     auto host = SessionHost {
         loop,
@@ -705,6 +879,11 @@ int runDaemon(DaemonConfig const& config)
                             .identity = thisHostIdentity(),
                             .extensions = config.extensions ? config.extensions() : nullptr }
     };
+    // See the POSIX body above for why the runtime is declared here, before the drain.
+    auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
+    // See the POSIX body above for why the lifecycle watchers are declared here, before the drain.
+    auto lifecycleWatchers = LifecycleWatchers {};
+    installLifecycleWatchers(lifecycleWatchers, config, host, runtime.census(), loop, funnel);
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
@@ -712,19 +891,22 @@ int runDaemon(DaemonConfig const& config)
     auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
     if (!listener)
         return listener.error();
-    auto server = ConnectionAcceptor {
-        loop, "control", std::move(*listener), tmux::makeControlModeHandler(loop, host)
-    };
+    auto server = ConnectionAcceptor { loop,
+                                       "control",
+                                       std::move(*listener),
+                                       countedHandler(runtime, tmux::makeControlModeHandler(loop, host)) };
 
     auto const nativePath = core::pathToUtf8(nativeSocketPath(config.socketPath));
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer =
-        ConnectionAcceptor { loop, "native", std::move(*nativeListener), makeNativeHandler(loop, host) };
+    auto nativeServer = ConnectionAcceptor { loop,
+                                             "native",
+                                             std::move(*nativeListener),
+                                             makeNativeHandler(loop, host, daemonNativeServices(runtime)) };
     // No imsg endpoint on Windows: SCM_RIGHTS fd passing does not exist here.
 
-    auto servers = std::vector<ConnectionAcceptor*> { &server, &nativeServer };
+    servers = { &server, &nativeServer };
 
     // Opt-in native TCP listener (loopback by default), same as the POSIX path.
     auto nativeTcpServer = std::optional<ConnectionAcceptor> {};
@@ -743,32 +925,22 @@ int runDaemon(DaemonConfig const& config)
         if (!tls)
             return EXIT_FAILURE;
         auto const boundPort = (*tcpListener)->boundPort();
-        nativeTcpServer.emplace(loop,
-                                "native-tcp",
-                                std::move(*tcpListener),
-                                makeTlsNativeHandler(loop, host, std::move(tls), config.nativeTcp->token));
+        nativeTcpServer.emplace(
+            loop,
+            "native-tcp",
+            std::move(*tcpListener),
+            makeTlsNativeHandler(
+                loop, host, std::move(tls), daemonNativeServices(runtime, config.nativeTcp->token)));
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
     }
 
-    // An auto-spawned daemon ends with its last session; a user-started one persists. See the
-    // POSIX body above for why this is declared here.
-    auto lastSession = std::optional<LastSessionWatcher> {};
-    installLastSessionWatcher(lastSession, config.lifecycle, host, loop, servers);
-
-    auto shutdown = std::function<void()> { [&] {
-        // The console-control handler runs on an arbitrary OS thread; logging happens inside
-        // the POSTED body so it lands on the loop thread like everything else.
-        loop.post([&] { requestDaemonShutdown(loop, servers, "console shutdown requested"); });
-    } };
-    consoleShutdown = &shutdown;
-    ::SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
-
     daemonLog()("serving on {} (native: {})", core::pathToUtf8(config.socketPath), nativePath);
     loop.blockOn(serveAll(servers));
-
-    ::SetConsoleCtrlHandler(consoleCtrlHandler, FALSE);
-    consoleShutdown = nullptr;
+    // The acceptors are destroyed before the drain below turns the loop again, and a shutdown request
+    // still queued may run in it — one that finds the funnel Serving when every listener died on its own.
+    // Emptied, the list lets such a request close nothing that is gone.
+    servers.clear();
 
     daemonLog()("shut down");
     return EXIT_SUCCESS;

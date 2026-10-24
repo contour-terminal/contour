@@ -129,6 +129,13 @@ class NativeController final: public QObject, public contour::session::SessionFa
     // connectAndWait() and stop() are inherited from RemoteController; this
     // controller supplies the hooks below.
 
+    /// @return The daemon's release as its ServerHello stated it; empty until the handshake is through
+    ///         (valid after connectAndWait) and for a daemon that predates the field.
+    [[nodiscard]] std::string daemonRelease() const;
+
+    /// @return What the handshake agreed on, captured as it completed; empty until then.
+    [[nodiscard]] std::optional<vthost::proto::Negotiated> negotiated() const;
+
     /// @return How many remote sessions await a local tab.
     [[nodiscard]] std::size_t pendingCount() const;
 
@@ -434,6 +441,11 @@ class NativeController final: public QObject, public contour::session::SessionFa
     std::optional<vtbackend::Settings> _attachSettings;
     /// This client's profile as it is now, restated before every session this connection creates.
     SessionSettingsSource _sessionSettings;
+    /// Filled, under _mutex, by the first callback after the daemon's ServerHello. @see negotiated()
+    std::optional<vthost::proto::Negotiated> _negotiated;
+    std::string _daemonRelease; ///< @see daemonRelease(). Guarded by _mutex.
+    /// Takes the handshake's outcome from the client once it has one. Call under _mutex.
+    void captureHandshake();
     std::deque<PendingSession> _pending; ///< Discovered remote sessions without a local tab.
     std::unordered_map<uint64_t, Binding> _bindings;
     /// The daemon's latest tab/pane tree per window id (B2/B4). Ordered so windowIds()
