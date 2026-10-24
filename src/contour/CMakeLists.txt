@@ -766,6 +766,8 @@ if(CONTOUR_FRONTEND_GUI)
             session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
             test/MainWindowControllerMock.hpp
+            test/MockMainController.hpp
+            test/QmlMocks.hpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/Notifier_test.cpp

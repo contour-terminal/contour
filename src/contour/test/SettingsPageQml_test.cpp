@@ -11,6 +11,7 @@
 #include <contour/display/GpuInventory.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/WindowController.hpp>
@@ -45,6 +46,7 @@
 #include <QtTest/QTest>
 
 using namespace contour;
+using contour::test::IncubationDriver;
 
 namespace
 {
@@ -56,26 +58,6 @@ void clickButton(QObject* object)
     REQUIRE(object != nullptr);
     QMetaObject::invokeMethod(object, "clicked");
 }
-
-/// Drives QML object incubation to completion.
-///
-/// A component built by QQmlComponent creates nested objects through the engine's incubator, and
-/// asynchronously while it is itself being created. Asynchronous incubation only progresses when something
-/// drives it, which a bare QQmlEngine has nothing to do; this supplies that.
-///
-/// The page's Repeaters do create their delegates here, with or without a window. A delegate has a parent
-/// item but no QObject parent, though, so findChild() never finds one: walk the visual tree instead
-/// (findDescendant, below). Typing into a delegate's field needs the page in an active window (TestWindow,
-/// below).
-struct IncubationDriver: QQmlIncubationController
-{
-    void settle()
-    {
-        // Bounded, so an incubation that genuinely never finishes fails the test instead of hanging it.
-        for (auto guard = 0; incubatingObjectCount() > 0 && guard < 1000; ++guard)
-            incubateFor(5);
-    }
-};
 
 /// The real SettingsPage.qml over a SettingsController, with every delegate it makes incubated.
 struct SettingsPageView
