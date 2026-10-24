@@ -43,15 +43,17 @@ namespace
 
     /// The data of one Contour-designed scheme: everything a row of that family sets.
     ///
-    /// The status-line indicators and the running-block colour are derived from the sixteen colors
-    /// (see applyContourScheme()) rather than listed, so a scheme cannot leave them unreadable.
+    /// The idle (inactive and insert) status-line pair is stated per scheme, because a light scheme wants a
+    /// light bar, not its palette black. The normal and visual indicators and the running-block colour are
+    /// derived from the sixteen colors (see applyContourScheme()), so a scheme cannot leave them unreadable.
     struct ContourScheme
     {
-        RGBColor background;        ///< The scheme's page color.
-        RGBColor foreground;        ///< The scheme's text color.
-        RGBColor cursor;            ///< The cursor color.
-        RGBColor selection;         ///< The selection's background.
-        RGBColor idleIndicatorText; ///< Text of the inactive and insert indicators, set on palette black.
+        RGBColor background;                 ///< The scheme's page color.
+        RGBColor foreground;                 ///< The scheme's text color.
+        RGBColor cursor;                     ///< The cursor color.
+        RGBColor selection;                  ///< The selection's background.
+        RGBColor idleForeground;             ///< Text of the inactive and insert indicators.
+        RGBColor idleBackground;             ///< Bar of the inactive and insert indicators.
         std::array<RGBColor, 16> ansiColors; ///< Palette entries 0..15: normal, then bright.
     };
 
@@ -60,7 +62,8 @@ namespace
         .foreground = 0xD9DCE3_rgb,
         .cursor = 0xE8C26E_rgb,
         .selection = 0x3A4A6B_rgb,
-        .idleIndicatorText = 0xC5CAD3_rgb, // the scheme's white
+        .idleForeground = 0xC5CAD3_rgb, // palette white
+        .idleBackground = 0x2A2D35_rgb, // palette black
         .ansiColors = { 0x2A2D35_rgb,
                         0xF0757A_rgb,
                         0x8FCB7A_rgb,
@@ -84,8 +87,9 @@ namespace
         .foreground = 0x2B2E35_rgb,
         .cursor = 0x1F5FBF_rgb,
         .selection = 0xC8D8F5_rgb,
-        // Not the scheme's white (#5F6670): on a light scheme that is a mid gray, 2.3:1 on its black.
-        .idleIndicatorText = 0xFAFAF8_rgb,
+        // A light bar one step off the page (about 12:1), not palette white on black (2.3:1).
+        .idleForeground = 0x2B2E35_rgb,
+        .idleBackground = 0xECEDEA_rgb,
         .ansiColors = { 0x2B2E35_rgb,
                         0xB42D35_rgb,
                         0x2A7A1F_rgb,
@@ -105,8 +109,8 @@ namespace
     };
 
     /// Applies @p scheme to @p palette, including the colors that follow from it: the status-line
-    /// indicators (inactive and insert: the scheme's idle text on black; normal: page on blue; visual: page
-    /// on magenta) and a running block in blue, because yellow means search.
+    /// indicators (inactive and insert: the scheme's idle pair; normal: page on blue; visual: page on
+    /// magenta) and a running block in blue, because yellow means search.
     void applyContourScheme(ColorPalette& palette, ContourScheme const& scheme) noexcept
     {
         std::ranges::copy(scheme.ansiColors, palette.palette.begin());
@@ -116,11 +120,10 @@ namespace
         palette.selection.background = scheme.selection;
         palette.selection.backgroundAlpha = 1.0f;
 
-        constexpr auto Black = 0;
         constexpr auto Blue = 4;
         constexpr auto Magenta = 5;
-        palette.indicatorStatusLineInactive = { .foreground = scheme.idleIndicatorText,
-                                                .background = palette.palette[Black] };
+        palette.indicatorStatusLineInactive = { .foreground = scheme.idleForeground,
+                                                .background = scheme.idleBackground };
         palette.indicatorStatusLineInsertMode = palette.indicatorStatusLineInactive;
         palette.indicatorStatusLineNormalMode = { .foreground = scheme.background,
                                                   .background = palette.palette[Blue] };

@@ -1830,7 +1830,7 @@ constexpr StringLiteral BlockStatusHeaderConfig {
     "\n"
     "{comment} Colors of the gutter's block column by how each command ended. Written back because this\n"
     "{comment} scheme sets them; remove a key to derive it again -- success from the fold column, failure\n"
-    "{comment} from normal color 1, running from normal color 3.\n"
+    "{comment} from normal color 1, running from normal color 4.\n"
     "block_status:\n"
 };
 
@@ -1844,7 +1844,7 @@ constexpr StringLiteral BlockStatusHoverConfig {
     "{comment} block_status_hover:\n"
     "{comment}     success: '#D0D0D0'\n"
     "{comment}     failure: '#CB8484'\n"
-    "{comment}     running: '#B8B868'\n"
+    "{comment}     running: '#8EA4E7'\n"
 };
 
 constexpr StringLiteral BlockStatusHoverHeaderConfig {
