@@ -48,7 +48,6 @@
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonLifecycle.hpp>
-#include <vthost/DurableFiles.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
@@ -775,10 +774,10 @@ struct RestartHarness
     core::net::EventLoop loop { *backend, clock };
     core::platform::ManualWallClock wallClock { std::chrono::system_clock::time_point {
         std::chrono::seconds { 1'761'000'000 } } };
-    core::platform::testing::InMemoryFileSystem files {};
+    vthost::testing::RecordingDurableFiles durability {};
+    core::platform::testing::InMemoryFileSystem& files { durability.files };
     vthost::testing::RecordingFilePrivacy privacy { files };
-    vthost::testing::RecordingDurableFiles durability { files };
-    vthost::SessionSnapshotStore store { files, privacy, durability, fs::path { RestartSnapshot } };
+    vthost::SessionSnapshotStore store { durability, privacy, fs::path { RestartSnapshot } };
     vthost::WorkspacePersistenceConfig config { .snapshotPath = fs::path { RestartSnapshot } };
     std::vector<std::string> lines {}; ///< What the persistence reported.
 
@@ -921,7 +920,6 @@ TEST_CASE("a daemon that keeps its workspace offers the restore and writes it as
     CHECK(signals->lastWrite().wait_for(std::chrono::seconds { 0 }) == std::future_status::ready);
     auto const store = vthost::SessionSnapshotStore { core::platform::NativeFileSystem::instance(),
                                                       vthost::NativeFilePrivacy::instance(),
-                                                      vthost::NativeDurableFiles::instance(),
                                                       config.persistence.snapshotPath };
     auto const loaded = store.load();
     CHECK(loaded.verdict == verdict);

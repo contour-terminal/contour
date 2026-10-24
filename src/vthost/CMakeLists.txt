@@ -25,9 +25,6 @@ add_library(vthost STATIC
     DaemonStarter.cpp
     DaemonStarter.hpp
     DaemonRuntime.hpp
-    DurableFiles.cpp
-    DurableFiles.hpp
-    DurableFiles_win32.cpp
     ExtensionHosting.hpp
     FilePrivacy.cpp
     FilePrivacy.hpp
@@ -243,7 +240,6 @@ if(VTHOST_TESTING)
         SessionSnapshotCodec_test.cpp
         SessionSnapshotStore_test.cpp
         FilePrivacy_test.cpp
-        DurableFiles_test.cpp
         WorkspaceCapture_test.cpp
         HistorySeed_test.cpp
         RerunPolicy_test.cpp
