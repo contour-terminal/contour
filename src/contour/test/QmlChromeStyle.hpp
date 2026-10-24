@@ -40,7 +40,8 @@ inline void installChromeStyle(
     config::UiStyle style = config::UiStyle::Native,
     config::WindowControlStyle windowControlStyle = config::WindowControlStyle::Windows)
 {
-    auto* provider = new contour::window::UiStyleProvider(style, QGuiApplication::font(), &engine);
+    auto* provider = new contour::window::UiStyleProvider(
+        config::resolveChromeStyle(style, config::HostPlatform::Other), QGuiApplication::font(), &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
 
     auto* controls = new contour::window::WindowControlStyleProvider(windowControlStyle, &engine);

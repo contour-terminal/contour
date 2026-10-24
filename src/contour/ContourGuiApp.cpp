@@ -2089,9 +2089,11 @@ int ContourGuiApp::terminalGuiAction()
     //
     // This is why `ui_style` takes effect on the next start rather than live: the style is resolved
     // once, here, before the first control exists, and Qt offers no way to re-resolve it afterwards.
+    _chromeStyle = config::resolveChromeStyle(_config.uiStyle.value(),
+                                              config::detectHostPlatform(processEnvironment()));
     QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
     QQuickStyle::setStyle(
-        QString::fromUtf8(config::uiStyleTokens(_config.uiStyle.value()).quickControlsStyle));
+        QString::fromUtf8(config::uiStyleTokens(_chromeStyle).quickControlsStyle));
 
     // Select the Qt RHI graphics API from the configured renderer backend, before the first
     // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
@@ -2165,7 +2167,7 @@ int ContourGuiApp::terminalGuiAction()
     // it is configured entirely at construction (see AGENT.md's complete-constructor rule) and its
     // configuration is this app's, not the engine's -- there is nothing for QML to build it from.
     _uiStyleProvider = make_unique<window::UiStyleProvider>(
-        _config.uiStyle.value(), window::resolveChromeFont(_config, profileName()));
+        _chromeStyle, window::resolveChromeFont(_config, _chromeStyle, profileName()));
 
     // Constructed with the resolved style rather than default-constructed and then applied: a
     // constructed object is a usable object, and the first frame must already draw the right

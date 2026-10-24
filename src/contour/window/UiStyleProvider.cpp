@@ -143,13 +143,27 @@ namespace
     }
 } // namespace
 
-UiStyleProvider::UiStyleProvider(config::UiStyle style, QFont const& chromeFont, QObject* parent):
+UiStyleProvider::UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent):
     QObject { parent },
-    _tokens { config::uiStyleTokens(style) },
+    _row { row },
+    _tokens { config::uiStyleTokens(row) },
     _fonts { chromeFontsFor(_tokens, chromeFont) },
     _metrics { chromeMetricsFor(_tokens, chromeFont) },
     _glyphs { chromeGlyphsFor(_tokens) }
 {
+}
+
+QString UiStyleProvider::chromeStyleName() const
+{
+    using enum config::ChromeStyle;
+    switch (_row)
+    {
+        case MacOS: return QStringLiteral("macos");
+        case Fluent: return QStringLiteral("fluent");
+        case ContourLinux: return QStringLiteral("linux");
+        case Terminal: break;
+    }
+    return QStringLiteral("terminal");
 }
 
 QColor UiStyleProvider::wash(QColor const& base) const
@@ -189,9 +203,9 @@ QColor UiStyleProvider::errorColor() const
     return progressColor(static_cast<int>(vtbackend::ProgressState::Error));
 }
 
-QFont resolveChromeFont(config::Config const& config, std::string const& profileName)
+QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, std::string const& profileName)
 {
-    auto const& tokens = config::uiStyleTokens(config.uiStyle.value());
+    auto const& tokens = config::uiStyleTokens(row);
     auto font = QGuiApplication::font();
 
     // A style that wants the platform's own font is done here -- and the ui_font_* keys, which exist

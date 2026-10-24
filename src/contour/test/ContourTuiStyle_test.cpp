@@ -365,10 +365,10 @@ TEST_CASE("The two chrome styles cast recognisably different shadows", "[contour
     // Not a preference check: the terminal style quotes a text-mode UI, whose drop shadow is a hard
     // offset block rather than a soft halo. A blurred one would be the single thing in that chrome not
     // aligned to the character grid.
-    auto const native =
-        contour::window::UiStyleProvider(contour::config::UiStyle::Native, QGuiApplication::font(), nullptr);
+    auto const native = contour::window::UiStyleProvider(
+        contour::config::ChromeStyle::ContourLinux, QGuiApplication::font(), nullptr);
     auto const terminal = contour::window::UiStyleProvider(
-        contour::config::UiStyle::Terminal, QGuiApplication::font(), nullptr);
+        contour::config::ChromeStyle::Terminal, QGuiApplication::font(), nullptr);
 
     CHECK(native.shadowBlur() > 0);
     CHECK(terminal.shadowBlur() == 0);

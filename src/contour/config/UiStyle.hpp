@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/ConfigEnumInfo.hpp>
+#include <contour/config/WindowControlStyle.hpp>
 
 #include <array>
 #include <cstddef>
@@ -27,6 +28,20 @@ enum class UiStyle : uint8_t
     Terminal,   //!< Cell-quantized monospace chrome that reads like a TUI.
 };
 
+/// One row of the chrome's token table: the look the chrome is painted with once the configured
+/// @c UiStyle has been resolved against the host platform (see @c resolveChromeStyle).
+///
+/// @c UiStyle is what the user asks for and stays a two-entry config value; this is what the chrome
+/// actually is, so a native look can differ per platform without a new config key.
+/// Enumerator order is the row order of the token table.
+enum class ChromeStyle : uint8_t
+{
+    MacOS = 0,    //!< Native chrome on macOS.
+    Fluent,       //!< Native chrome on Windows.
+    ContourLinux, //!< Native chrome on KDE Plasma and every other host.
+    Terminal,     //!< Cell-quantized monospace chrome that reads like a TUI.
+};
+
 /// What one unit of chrome length means, for the extents @c UiStyleTokens counts in units.
 ///
 /// This is what lets one set of numbers describe both styles: @c Pixel leaves an extent free to take
@@ -47,7 +62,7 @@ enum class ChromeFontSource : uint8_t
     TerminalProfile, //!< The default profile's regular font, so the chrome matches the grid.
 };
 
-/// The shape, metrics and glyph vocabulary one @c UiStyle paints its chrome with.
+/// The shape, metrics and glyph vocabulary one @c ChromeStyle paints its chrome with.
 ///
 /// Every corner radius, inset and decorative glyph the chrome QML used to carry as a literal lives
 /// here instead, so a style is described by a row of data that the QML interprets.
@@ -215,22 +230,21 @@ namespace detail
     // inline, so every translation unit that includes this header shares one table rather than
     // getting a private copy the returned span would then point into.
     //
-    // Rows are indexed by UiStyle, so their order is the enumerator order -- uiStyleTokens() relies
-    // on that, and the static_assert below pins it against the token table.
+    // Rows are indexed by ChromeStyle, so their order is the enumerator order -- uiStyleTokens()
+    // relies on that, and the static_assert below pins it against the enumerator count.
     //
     // NB: zoomGlyph, newTabGlyph, menuGlyph and submenuGlyph happen to be identical in both rows. They live
     // in the table anyway because they are the same KIND of thing as the two that do vary, and a
     // style wanting an ASCII "v" rather than "▾" should not have to edit QML to get it.
-    inline constexpr auto UiStyleTokenTable = std::array {
-        // Native's numbers are the literals the chrome QML carried before it was made style-driven,
-        // so selecting Native reproduces the previous appearance. That is what the geometry
-        // assertions in MainWindowQml_test guard.
-        //
-        // One deliberate exception: stripButtonUnits. The "+" and "▾" used to be as narrow as a
-        // tab's close glyph (controlUnits), which made two of the strip's three permanently visible
-        // targets the hardest in it to hit. They are padded out here rather than in TabStrip.qml so
-        // that every style states the width it wants.
-        UiStyleTokens {
+    // Native's numbers are the literals the chrome QML carried before it was made style-driven,
+    // so selecting Native reproduces the previous appearance. That is what the geometry
+    // assertions in MainWindowQml_test guard.
+    //
+    // One deliberate exception: stripButtonUnits. The "+" and "▾" used to be as narrow as a
+    // tab's close glyph (controlUnits), which made two of the strip's three permanently visible
+    // targets the hardest in it to hit. They are padded out here rather than in TabStrip.qml so
+    // that every style states the width it wants.
+    inline constexpr auto NativeTokens = UiStyleTokens {
             .unit = LengthUnit::Pixel,
             .quickControlsStyle = "Fusion",
             .fontSource = ChromeFontSource::PlatformUi,
@@ -298,12 +312,13 @@ namespace detail
             .newTabGlyph = "+",
             .menuGlyph = "▾",
             .submenuGlyph = "▸",
-        },
-        // One row tall, every extent a whole cell, square corners and a box-drawing separator: the
-        // vocabulary a status line would use. The close glyph is the lighter multiplication sign
-        // rather than Native's heavy ✕, because at one cell wide beside a label set in the same
-        // monospace font the heavy form reads as another letter of the label.
-        UiStyleTokens {
+    };
+
+    // One row tall, every extent a whole cell, square corners and a box-drawing separator: the
+    // vocabulary a status line would use. The close glyph is the lighter multiplication sign
+    // rather than Native's heavy ✕, because at one cell wide beside a label set in the same
+    // monospace font the heavy form reads as another letter of the label.
+    inline constexpr auto TerminalTokens = UiStyleTokens {
             .unit = LengthUnit::Cell,
             .quickControlsStyle = "ContourTui",
             .fontSource = ChromeFontSource::TerminalProfile,
@@ -372,16 +387,28 @@ namespace detail
             .newTabGlyph = "+",
             .menuGlyph = "▾",
             .submenuGlyph = "▸",
-        },
     };
+
+    // The three native rows start as copies of one another (Phase 0 moves no pixel); a platform's
+    // look diverges by changing its own row, never by branching in code.
+    inline constexpr auto UiStyleTokenTable = std::array {
+        NativeTokens,   // ChromeStyle::MacOS
+        NativeTokens,   // ChromeStyle::Fluent
+        NativeTokens,   // ChromeStyle::ContourLinux
+        TerminalTokens, // ChromeStyle::Terminal
+    };
+
+    /// Number of @c ChromeStyle enumerators; the token table must have exactly this many rows.
+    inline constexpr size_t ChromeStyleCount = 4;
 
     inline constexpr auto UiStyleTable = std::array {
         ConfigEnumInfo<UiStyle> { UiStyle::Native, "native", "Native (GUI)" },
         ConfigEnumInfo<UiStyle> { UiStyle::Terminal, "terminal", "Terminal (TUI)" },
     };
 
-    static_assert(UiStyleTokenTable.size() == UiStyleTable.size(),
-                  "Every UiStyle needs exactly one token row; uiStyleTokens() indexes by enumerator.");
+    static_assert(UiStyleTokenTable.size() == ChromeStyleCount
+                      && static_cast<size_t>(ChromeStyle::Terminal) + 1 == ChromeStyleCount,
+                  "Every ChromeStyle needs exactly one token row; uiStyleTokens() indexes by enumerator.");
 } // namespace detail
 
 template <>
@@ -390,13 +417,33 @@ constexpr std::span<ConfigEnumInfo<UiStyle> const> configEnumValues() noexcept
     return detail::UiStyleTable;
 }
 
-/// The shape, metrics and glyph vocabulary @p style paints with.
+/// The chrome row @p style resolves to on @p platform.
+///
+/// A native style picks the row of the host it runs on; the terminal style looks the same everywhere.
+/// @param style    The configured style.
+/// @param platform The host the application runs on.
+/// @return The token row to paint the chrome with.
+[[nodiscard]] constexpr ChromeStyle resolveChromeStyle(UiStyle style, HostPlatform platform) noexcept
+{
+    if (style == UiStyle::Terminal)
+        return ChromeStyle::Terminal;
+    switch (platform)
+    {
+        case HostPlatform::MacOS: return ChromeStyle::MacOS;
+        case HostPlatform::Windows: return ChromeStyle::Fluent;
+        case HostPlatform::KdePlasma:
+        case HostPlatform::Other: break;
+    }
+    return ChromeStyle::ContourLinux;
+}
+
+/// The shape, metrics and glyph vocabulary the chrome row @p row paints with.
 ///
 /// Indexes the table by enumerator, which the static_assert above keeps sound; no bounds check is
 /// needed and none is done, so this stays usable from a noexcept context.
-[[nodiscard]] constexpr UiStyleTokens const& uiStyleTokens(UiStyle style) noexcept
+[[nodiscard]] constexpr UiStyleTokens const& uiStyleTokens(ChromeStyle row) noexcept
 {
-    return detail::UiStyleTokenTable[static_cast<size_t>(style)];
+    return detail::UiStyleTokenTable[static_cast<size_t>(row)];
 }
 
 } // namespace contour::config

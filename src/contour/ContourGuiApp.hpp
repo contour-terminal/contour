@@ -855,6 +855,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// The chrome's design tokens, handed to QML as the `chromeStyle` context property. Declared
     /// BEFORE the engine so it outlives it: a context property is a borrowed pointer the engine keeps
     /// dereferencing, and members are destroyed in reverse declaration order.
+    /// The chrome token row, resolved once at startup from `ui_style` and the host platform.
+    config::ChromeStyle _chromeStyle = config::ChromeStyle::ContourLinux;
     std::unique_ptr<window::UiStyleProvider> _uiStyleProvider;
 
     /// What the window controls are and where they go, handed to QML as the `windowControls` context

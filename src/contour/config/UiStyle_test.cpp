@@ -6,8 +6,11 @@
 #include <array>
 
 using contour::config::ChromeFontSource;
+using contour::config::ChromeStyle;
 using contour::config::configEnumValues;
+using contour::config::HostPlatform;
 using contour::config::LengthUnit;
+using contour::config::resolveChromeStyle;
 using contour::config::UiStyle;
 using contour::config::uiStyleTokens;
 
@@ -18,7 +21,7 @@ TEST_CASE("UiStyle: every style has a token row", "[uistyle]")
     // actually filled in rather than default-constructed.
     for (auto const& info: configEnumValues<UiStyle>())
     {
-        auto const& tokens = uiStyleTokens(info.value);
+        auto const& tokens = uiStyleTokens(resolveChromeStyle(info.value, HostPlatform::Other));
         CHECK(tokens.chromeHeightUnits > 0);
         CHECK(tokens.tabHeightUnits > 0);
         CHECK(tokens.controlUnits > 0);
@@ -64,7 +67,7 @@ TEST_CASE("UiStyle: a native tab is as wide as its historical literal made it", 
     //
     // Every term naturalWidth sums appears here, including the ones Native zeroes: a token that is 0
     // today is exactly the one a later edit can give a value to without anything else noticing.
-    auto const& native = uiStyleTokens(UiStyle::Native);
+    auto const& native = uiStyleTokens(ChromeStyle::ContourLinux);
 
     CHECK(native.labelPaddingUnits + native.labelGapUnits + native.controlUnits + native.trailingPaddingUnits
               + native.tabSlackUnits
@@ -79,7 +82,7 @@ TEST_CASE("UiStyle: Native reproduces the chrome's historical metrics", "[uistyl
     // made style-driven. They are the regression gate for "an existing configuration keeps the
     // appearance it had": the QML now reads them from here, so a change to this row is a change to
     // every user's window, and MainWindowQml_test's chromeHeight == 34 assertion depends on it.
-    auto const& native = uiStyleTokens(UiStyle::Native);
+    auto const& native = uiStyleTokens(ChromeStyle::ContourLinux);
 
     CHECK(native.unit == LengthUnit::Pixel);
     CHECK(native.chromeHeightUnits == 34);
@@ -124,7 +127,7 @@ TEST_CASE("UiStyle: Native reproduces the chrome's historical metrics", "[uistyl
 
 TEST_CASE("UiStyle: Terminal counts its chrome in whole cells", "[uistyle]")
 {
-    auto const& terminal = uiStyleTokens(UiStyle::Terminal);
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
 
     // The unit is what makes the same numbers describe both styles -- Cell is what snaps the chrome
     // to the grid, and is what the QML reads to decide its quantum.
@@ -185,4 +188,29 @@ TEST_CASE("UiStyle: Terminal counts its chrome in whole cells", "[uistyle]")
     // from, so neither is a branch on the enumerator somewhere else in the tree.
     CHECK(terminal.quickControlsStyle == "ContourTui");
     CHECK(terminal.fontSource == ChromeFontSource::TerminalProfile);
+}
+
+TEST_CASE("UiStyle.resolveChromeStyle", "[config]")
+{
+    using enum contour::config::ChromeStyle;
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::MacOS) == MacOS);
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::Windows) == Fluent);
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::KdePlasma) == ContourLinux);
+    CHECK(resolveChromeStyle(UiStyle::Native, HostPlatform::Other) == ContourLinux);
+    for (auto p: { HostPlatform::MacOS, HostPlatform::Windows, HostPlatform::KdePlasma, HostPlatform::Other })
+        CHECK(resolveChromeStyle(UiStyle::Terminal, p) == Terminal);
+}
+
+TEST_CASE("UiStyle.nativeRowsKeepTodaysGeometry", "[config]")
+{
+    // Phase 0 must not move a pixel: every native row starts as a copy of the old Native row.
+    for (auto row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto const& t = uiStyleTokens(row);
+        CHECK(t.chromeHeightUnits == 34);
+        CHECK(t.tabHeightUnits == 32);
+        CHECK(t.cornerRadiusPixels == 3);
+        CHECK(t.quickControlsStyle == "Fusion");
+    }
+    CHECK(uiStyleTokens(ChromeStyle::Terminal).quickControlsStyle == "ContourTui");
 }

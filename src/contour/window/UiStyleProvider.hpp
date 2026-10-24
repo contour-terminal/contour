@@ -94,6 +94,8 @@ class UiStyleProvider: public QObject
 {
     Q_OBJECT
 
+    /// Which token row is active: "macos", "fluent", "linux" or "terminal".
+    Q_PROPERTY(QString chromeStyle READ chromeStyleName CONSTANT)
     Q_PROPERTY(QFont font READ font CONSTANT)
     Q_PROPERTY(QFont newTabFont READ newTabFont CONSTANT)
     Q_PROPERTY(QFont menuFont READ menuFont CONSTANT)
@@ -145,12 +147,15 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString submenuGlyph READ submenuGlyph CONSTANT)
 
   public:
-    /// @param style      The configured chrome style.
+    /// @param row        The chrome token row, see config::resolveChromeStyle.
     /// @param chromeFont The font the chrome is drawn with, already resolved against its fallbacks
     ///                   (see resolveChromeFont). Its metrics define the cell every terminal-style
     ///                   extent is counted in.
     /// @param parent     Qt ownership.
-    UiStyleProvider(config::UiStyle style, QFont const& chromeFont, QObject* parent = nullptr);
+    UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent = nullptr);
+
+    /// The active row's name for QML: "macos", "fluent", "linux" or "terminal".
+    [[nodiscard]] QString chromeStyleName() const;
 
     [[nodiscard]] QFont const& font() const noexcept { return _fonts.base; }
     [[nodiscard]] QFont const& newTabFont() const noexcept { return _fonts.newTab; }
@@ -259,6 +264,7 @@ class UiStyleProvider: public QObject
   private:
     // By value rather than by reference: the rows have static storage duration, but a reference member
     // would delete move-assignment for no gain -- the row is a handful of ints and string_views.
+    config::ChromeStyle _row;
     config::UiStyleTokens _tokens;
     ChromeFonts _fonts;
     ChromeMetrics _metrics;
@@ -273,11 +279,14 @@ class UiStyleProvider: public QObject
 /// the chrome match the terminal grid below it without the user configuring anything twice.
 ///
 /// @param config      The loaded configuration.
+/// @param row         The resolved chrome row, see config::resolveChromeStyle.
 /// @param profileName The profile this window is opening with, i.e. ContourGuiApp::profileName().
 ///                    The *running* profile rather than @c default_profile, because `-p/--profile`
 ///                    overrides the latter and the chrome has to match the grid actually on screen.
 ///                    A name that resolves to no profile leaves the platform font in place.
 /// @return A font ready to hand to UiStyleProvider.
-[[nodiscard]] QFont resolveChromeFont(config::Config const& config, std::string const& profileName);
+[[nodiscard]] QFont resolveChromeFont(config::Config const& config,
+                                      config::ChromeStyle row,
+                                      std::string const& profileName);
 
 } // namespace contour::window

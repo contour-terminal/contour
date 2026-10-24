@@ -30,6 +30,19 @@ using contour::window::resolveChromeFont;
 namespace
 {
 
+/// The chrome row a style resolves to on a host with no platform convention of its own, so the
+/// assertions below do not depend on the machine running them.
+[[nodiscard]] contour::config::ChromeStyle rowOf(UiStyle style)
+{
+    return contour::config::resolveChromeStyle(style, contour::config::HostPlatform::Other);
+}
+
+/// @return The row @p config's `ui_style` resolves to, per rowOf().
+[[nodiscard]] contour::config::ChromeStyle chromeRowOf(contour::config::Config const& config)
+{
+    return rowOf(config.uiStyle.value());
+}
+
 /// A config with two profiles whose fonts differ, which is what makes "which profile?" observable.
 ///
 /// @return A config carrying `main` (12pt) and `big` (20pt), with `main` as the default.
@@ -62,13 +75,13 @@ TEST_CASE("resolveChromeFont: the native chrome keeps the platform UI font", "[c
 
     // Not merely "some font": the point of the native style is that its chrome is indistinguishable
     // from any other application's, which is exactly what the platform font buys.
-    CHECK(resolveChromeFont(config, "main") == QGuiApplication::font());
+    CHECK(resolveChromeFont(config, chromeRowOf(config), "main") == QGuiApplication::font());
 
     // And the ui_font_* keys, which exist to put a cell-counting chrome on the terminal's grid, are
     // deliberately not applied to a chrome that has no grid -- setting one must not restyle it.
     config.uiFontFamily = "JetBrains Mono";
     config.uiFontSize = 18.0;
-    CHECK(resolveChromeFont(config, "main") == QGuiApplication::font());
+    CHECK(resolveChromeFont(config, chromeRowOf(config), "main") == QGuiApplication::font());
 }
 
 TEST_CASE("resolveChromeFont: the terminal chrome inherits the running profile's font", "[contour][uistyle]")
@@ -78,7 +91,7 @@ TEST_CASE("resolveChromeFont: the terminal chrome inherits the running profile's
 
     SECTION("the default profile, when that is what the window runs")
     {
-        auto const font = resolveChromeFont(config, "main");
+        auto const font = resolveChromeFont(config, chromeRowOf(config), "main");
         CHECK(font.family() == QStringLiteral("Main Mono"));
         CHECK(font.pointSizeF() == 12.0);
     }
@@ -87,7 +100,7 @@ TEST_CASE("resolveChromeFont: the terminal chrome inherits the running profile's
     {
         // `contour profile=big` puts a 20pt grid on screen. A chrome quantized to the 12pt default's
         // cell would line up with nothing below it, which is the entire premise of the style.
-        auto const font = resolveChromeFont(config, "big");
+        auto const font = resolveChromeFont(config, chromeRowOf(config), "big");
         CHECK(font.family() == QStringLiteral("Big Mono"));
         CHECK(font.pointSizeF() == 20.0);
     }
@@ -96,7 +109,7 @@ TEST_CASE("resolveChromeFont: the terminal chrome inherits the running profile's
     {
         // The style counts in character cells, so a proportional substitute would put the whole
         // chrome off the grid -- worse than a family that merely looks different.
-        CHECK(resolveChromeFont(config, "main").styleHint() == QFont::Monospace);
+        CHECK(resolveChromeFont(config, chromeRowOf(config), "main").styleHint() == QFont::Monospace);
     }
 }
 
@@ -108,13 +121,13 @@ TEST_CASE("resolveChromeFont: ui_font_* override the profile's font", "[contour]
     SECTION("family and size independently")
     {
         config.uiFontFamily = "JetBrains Mono";
-        auto const family = resolveChromeFont(config, "big");
+        auto const family = resolveChromeFont(config, chromeRowOf(config), "big");
         CHECK(family.family() == QStringLiteral("JetBrains Mono"));
         CHECK(family.pointSizeF() == 20.0); // still the profile's size
 
         config.uiFontFamily = "";
         config.uiFontSize = 9.5;
-        auto const size = resolveChromeFont(config, "big");
+        auto const size = resolveChromeFont(config, chromeRowOf(config), "big");
         CHECK(size.family() == QStringLiteral("Big Mono")); // still the profile's family
         CHECK(size.pointSizeF() == 9.5);
     }
@@ -125,7 +138,7 @@ TEST_CASE("resolveChromeFont: ui_font_* override the profile's font", "[contour]
         // family or a zero point size would leave the chrome unrenderable rather than inherited.
         config.uiFontFamily = "";
         config.uiFontSize = 0.0;
-        auto const font = resolveChromeFont(config, "main");
+        auto const font = resolveChromeFont(config, chromeRowOf(config), "main");
         CHECK(font.family() == QStringLiteral("Main Mono"));
         CHECK(font.pointSizeF() == 12.0);
     }
@@ -139,13 +152,14 @@ TEST_CASE("resolveChromeFont: an unknown profile still resolves to a usable font
     auto config = twoProfileConfig();
     config.uiStyle = UiStyle::Terminal;
 
-    auto const font = resolveChromeFont(config, "no-such-profile");
+    auto const font = resolveChromeFont(config, chromeRowOf(config), "no-such-profile");
     CHECK(font.family() == QGuiApplication::font().family());
     CHECK(font.styleHint() == QFont::Monospace);
 
     // The explicit override still applies: it does not depend on a profile having been found.
     config.uiFontFamily = "JetBrains Mono";
-    CHECK(resolveChromeFont(config, "no-such-profile").family() == QStringLiteral("JetBrains Mono"));
+    CHECK(resolveChromeFont(config, chromeRowOf(config), "no-such-profile").family()
+          == QStringLiteral("JetBrains Mono"));
 }
 
 TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell", "[contour][uistyle]")
@@ -156,15 +170,15 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     auto const font = QGuiApplication::font();
     auto const metrics = QFontMetricsF(font);
 
-    auto const native = contour::window::UiStyleProvider(UiStyle::Native, font);
-    auto const& nativeTokens = contour::config::uiStyleTokens(UiStyle::Native);
+    auto const native = contour::window::UiStyleProvider(rowOf(UiStyle::Native), font);
+    auto const& nativeTokens = contour::config::uiStyleTokens(rowOf(UiStyle::Native));
     CHECK(native.widthQuantum() == 1.0); // pixels: every token passes through unscaled
     CHECK(native.labelPadding() == nativeTokens.labelPaddingUnits);
     CHECK(native.trailingPadding() == nativeTokens.trailingPaddingUnits);
     CHECK(native.tabSlack() == nativeTokens.tabSlackUnits);
 
-    auto const terminal = contour::window::UiStyleProvider(UiStyle::Terminal, font);
-    auto const& terminalTokens = contour::config::uiStyleTokens(UiStyle::Terminal);
+    auto const terminal = contour::window::UiStyleProvider(rowOf(UiStyle::Terminal), font);
+    auto const& terminalTokens = contour::config::uiStyleTokens(rowOf(UiStyle::Terminal));
     CHECK(terminal.widthQuantum() == terminal.cellWidth());
     CHECK(terminal.cellWidth() == metrics.horizontalAdvance(QStringLiteral("M")));
     CHECK(terminal.labelPadding() == terminalTokens.labelPaddingUnits * terminal.cellWidth());
@@ -202,8 +216,8 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     auto const shadow = QColor(0x20, 0x30, 0x40);
     for (auto const style: { UiStyle::Native, UiStyle::Terminal })
     {
-        auto const provider = contour::window::UiStyleProvider(style, font);
-        auto const& tokens = contour::config::uiStyleTokens(style);
+        auto const provider = contour::window::UiStyleProvider(rowOf(style), font);
+        auto const& tokens = contour::config::uiStyleTokens(rowOf(style));
         INFO("style: " << static_cast<int>(style));
 
         // One 8-bit step of margin: QColor stores alpha as a byte, so a percentage never survives
@@ -225,7 +239,7 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     // `chromeStyle.modalScrim(control.palette.shadow)` -- so being Q_INVOKABLE is part of the
     // contract, not an implementation detail. A plain member function leaves the binding resolving to
     // undefined, i.e. a fully transparent scrim, behind a runtime warning nobody reads.
-    auto styleProvider = contour::window::UiStyleProvider(UiStyle::Terminal, font);
+    auto styleProvider = contour::window::UiStyleProvider(rowOf(UiStyle::Terminal), font);
     for (auto const* name: { "wash", "modalScrim", "modelessScrim" })
     {
         INFO("method: " << name);
@@ -240,7 +254,7 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
     // draws it silently disappears. The separator is the documented exception.
     for (auto const style: { UiStyle::Native, UiStyle::Terminal })
     {
-        auto const provider = contour::window::UiStyleProvider(style, font);
+        auto const provider = contour::window::UiStyleProvider(rowOf(style), font);
         INFO("style: " << static_cast<int>(style));
         CHECK(!provider.closeGlyph().isEmpty());
         CHECK(!provider.zoomGlyph().isEmpty());
