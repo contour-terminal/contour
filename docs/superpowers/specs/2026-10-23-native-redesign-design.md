@@ -134,7 +134,7 @@ foreground against background must also reach 4.5:1. Bright black on dark is all
 1. **macOS window**: expanded client area and safe area, tab well, menus.
 2. **Panes**: cards and headers, the two densities.
 3. **Overlays**: palette, find bar, toasts, dialogs.
-   - 3b. **Command blocks**.
+   - Command blocks (Step 3f in the implementation design).
 4. **Settings window.**
 5. **Windows and Linux rows.**
 6. **Moments**: first run, restore, quick terminal, and similar.
