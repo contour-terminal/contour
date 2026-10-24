@@ -10,17 +10,21 @@
 
 #include <contour/config/Config.hpp>
 #include <contour/config/UiStyle.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
 #include <text_shaper/Font.hpp>
 
+#include <QtCore/QMetaEnum>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
+#include <QtQml/QQmlEngine>
+#include <QtQml/QQmlExpression>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -355,4 +359,36 @@ TEST_CASE("UiStyleProvider.onStatusColor picks the more legible of black and whi
         CHECK(ratio(provider.onStatusColor(danger), provider.statusColor(danger)) >= 4.5);
     });
     CHECK(provider.paneDimTextColor() == QColor(Qt::white));
+}
+
+TEST_CASE("chromeStyle names the status roles as properties in QML", "[contour][uistyle][qml]")
+{
+    using contour::window::UiStyleProvider;
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+
+    auto const evaluate = [&engine](char const* expression) {
+        auto qmlExpression = QQmlExpression(engine.rootContext(), nullptr, QString::fromLatin1(expression));
+        auto ok = false;
+        auto const value = qmlExpression.evaluate(&ok);
+        REQUIRE(!qmlExpression.hasError());
+        return value;
+    };
+
+    // Not undefined (which toInt() would also report as 0):
+    CHECK(evaluate("typeof chromeStyle.statusDanger").toString() == QStringLiteral("number"));
+    // Not undefined: statusColor(undefined) would quietly be transparent and nothing else would notice.
+    CHECK(evaluate("chromeStyle.statusDanger").toInt() == 0);
+    CHECK(evaluate("chromeStyle.statusWarning").toInt() == 1);
+    CHECK(evaluate("chromeStyle.statusSuccess").toInt() == 2);
+    CHECK(evaluate("chromeStyle.statusRunning").toInt() == 3);
+
+    withWindowColor(QColor(0xF6, 0xF6, 0xF6), [&] {
+        auto const color = evaluate("chromeStyle.statusColor(chromeStyle.statusDanger)").value<QColor>();
+        CHECK(color == QColor(0xD7, 0x00, 0x15));
+    });
+
+    // A new config::StatusColorRole must get a QML name too.
+    CHECK(static_cast<size_t>(QMetaEnum::fromType<UiStyleProvider::StatusRole>().keyCount())
+          == contour::config::StatusColorRoleCount);
 }

@@ -246,6 +246,9 @@ namespace
                          == static_cast<int>(config::StatusColorRole::Success)
                   && static_cast<int>(UiStyleProvider::StatusRole::Running)
                          == static_cast<int>(config::StatusColorRole::Running));
+    static_assert(static_cast<size_t>(UiStyleProvider::StatusRole::Running) + 1
+                      == config::StatusColorRoleCount,
+                  "UiStyleProvider::StatusRole must mirror every config::StatusColorRole.");
 
     [[nodiscard]] vtbackend::RGBColor toRgb(QColor const& color) noexcept
     {

@@ -255,6 +255,10 @@ struct StatusColor
 /// Number of @c StatusColorRole enumerators.
 inline constexpr size_t StatusColorRoleCount = 4;
 
+static_assert(
+    static_cast<size_t>(StatusColorRole::Running) + 1 == StatusColorRoleCount,
+    "StatusColorRoleCount must name every StatusColorRole; add the new role's row to StatusColors.");
+
 /// The status colours, indexed by @c StatusColorRole.
 inline constexpr std::array<StatusColor, StatusColorRoleCount> StatusColors = {
     StatusColor { StatusColorSource::Fixed, 0xD70015, 0xFF6961 }, // Danger

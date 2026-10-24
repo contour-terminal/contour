@@ -76,7 +76,7 @@ Dialog {
                 }
                 contentItem: Label {
                     text: root.confirmText
-                    color: chromeStyle.onStatusColor(chromeStyle.Danger)
+                    color: chromeStyle.onStatusColor(chromeStyle.statusDanger)
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
@@ -84,7 +84,7 @@ Dialog {
                     radius: 4
                     implicitWidth: 84
                     implicitHeight: 30
-                    readonly property color danger: chromeStyle.statusColor(chromeStyle.Danger)
+                    readonly property color danger: chromeStyle.statusColor(chromeStyle.statusDanger)
                     color: parent.down ? Qt.darker(danger, 1.3)
                                        : (parent.hovered ? Qt.lighter(danger, 1.15) : danger)
                 }

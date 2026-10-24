@@ -97,7 +97,7 @@ class UiStyleProvider: public QObject
     Q_OBJECT
 
   public:
-    /// The status roles, for QML to name (`chromeStyle.Danger`). Mirrors
+    /// The status roles, for QML to name (`chromeStyle.statusDanger`). Mirrors
     /// config::StatusColorRole value for value; a static_assert in UiStyleProvider.cpp keeps them equal.
     enum class StatusRole : uint8_t
     {
@@ -120,6 +120,10 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QFont captionFont READ captionFont CONSTANT)
     Q_PROPERTY(QFont headlineFont READ headlineFont CONSTANT)
 
+    Q_PROPERTY(int statusDanger READ statusDanger CONSTANT)
+    Q_PROPERTY(int statusWarning READ statusWarning CONSTANT)
+    Q_PROPERTY(int statusSuccess READ statusSuccess CONSTANT)
+    Q_PROPERTY(int statusRunning READ statusRunning CONSTANT)
     Q_PROPERTY(QColor paneDimColor READ paneDimColor CONSTANT)
     Q_PROPERTY(QColor paneDimTextColor READ paneDimTextColor CONSTANT)
     Q_PROPERTY(QColor dotGlyphColor READ dotGlyphColor CONSTANT)
@@ -191,6 +195,26 @@ class UiStyleProvider: public QObject
 
     /// The scrim laid over a pane to dim it (an unfocused or reconnecting one).
     [[nodiscard]] QColor paneDimColor() const;
+
+    /// The QML names of the status roles, for statusColor() and onStatusColor(). Properties rather than
+    /// an exported enum: a Q_ENUM is not reachable through a context-property instance, so
+    /// `chromeStyle.Danger` was silently undefined.
+    [[nodiscard]] static constexpr int statusDanger() noexcept
+    {
+        return static_cast<int>(StatusRole::Danger);
+    }
+    [[nodiscard]] static constexpr int statusWarning() noexcept
+    {
+        return static_cast<int>(StatusRole::Warning);
+    }
+    [[nodiscard]] static constexpr int statusSuccess() noexcept
+    {
+        return static_cast<int>(StatusRole::Success);
+    }
+    [[nodiscard]] static constexpr int statusRunning() noexcept
+    {
+        return static_cast<int>(StatusRole::Running);
+    }
 
     /// The colour of text drawn on the pane-dim scrim: whichever of black and white contrasts more
     /// with the scrim's black, so it is legible in every theme (a palette's bright-text role is not).
