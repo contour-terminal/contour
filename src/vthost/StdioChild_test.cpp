@@ -74,8 +74,8 @@ core::async::Task<std::vector<std::byte>> exchange(core::net::ISocket* socket, s
 
 [[nodiscard]] std::string textOf(std::vector<std::byte> const& bytes)
 {
-    return bytes | std::views::transform([](std::byte b) { return static_cast<char>(b); })
-           | std::ranges::to<std::string>();
+    return std::ranges::to<std::string>(
+        bytes | std::views::transform([](std::byte b) { return static_cast<char>(b); }));
 }
 
 /// Every byte value, twice.

@@ -14,10 +14,54 @@
 #include <string_view>
 #include <utility>
 
-#include <glaze/json.hpp>
+#include <glaze/util/dump.hpp>
 #include <vtcontrol/Api.hpp>
 #include <vtcontrol/ControlError.hpp>
 #include <vtcontrol/EnumTable.hpp>
+
+namespace vtcontrol
+{
+
+/// @param text Arbitrary bytes.
+/// @return `text` with every invalid UTF-8 sequence replaced by U+FFFD, so that it can sit in a JSON string.
+[[nodiscard]] std::string toValidUtf8(std::string_view text);
+
+/// @param text Arbitrary bytes, e.g. a pane's text with ESC and NUL in it.
+/// @return A JSON string literal, quotes included: invalid UTF-8 becomes U+FFFD and every control
+///         character is escaped, so the document stays valid whatever the pane printed.
+[[nodiscard]] std::string quoteJsonString(std::string_view text);
+
+} // namespace vtcontrol
+
+/// Strings are written through `vtcontrol::quoteJsonString`. Glaze's own writer does not escape most
+/// control characters (it emits NUL bytes to flag them), which would let one pane's output break a
+/// whole reply. This is a full specialization, so it wins over every glaze rule, and it lives here so
+/// that every translation unit that writes JSON sees it.
+///
+/// It must also come before glaze's JSON headers: they name `glz::to<glz::JSON, std::string>` outside any
+/// template (glaze/json/wrappers.hpp), which instantiates glaze's own writer on the spot and makes a later
+/// specialization ill-formed. Hence glaze/util/dump.hpp alone above it -- the declarations it uses, and none
+/// of the writers -- and glaze's JSON headers, the schema writer among them, below it: a translation unit
+/// reaches them through this header only, since one included beside it sorts ahead of it.
+///
+/// It names glaze internals (`glz::to<glz::JSON, T>`, `glz::ensure_space`, `glz::dump_maybe_empty`), which
+/// glaze does not promise to keep: on a glaze bump (`GLAZE_VERSION` in cmake/ContourThirdParties.cmake),
+/// re-run `vtcontrol_test "[json]"`, whose control-character cases fail if this stops being chosen.
+template <>
+struct glz::to<glz::JSON, std::string>
+{
+    template <auto Opts, class B>
+    static void op(std::string const& value, is_context auto&& ctx, B& buffer, auto& index)
+    {
+        auto const quoted = vtcontrol::quoteJsonString(value);
+        if (!glz::ensure_space(ctx, buffer, index + quoted.size() + glz::write_padding_bytes))
+            return;
+        glz::dump_maybe_empty<false>(quoted, buffer, index);
+    }
+};
+
+#include <glaze/json.hpp>
+#include <glaze/json/schema.hpp>
 
 namespace vtcontrol
 {
@@ -54,35 +98,7 @@ template <typename T>
     return value;
 }
 
-/// @param text Arbitrary bytes.
-/// @return `text` with every invalid UTF-8 sequence replaced by U+FFFD, so that it can sit in a JSON string.
-[[nodiscard]] std::string toValidUtf8(std::string_view text);
-
-/// @param text Arbitrary bytes, e.g. a pane's text with ESC and NUL in it.
-/// @return A JSON string literal, quotes included: invalid UTF-8 becomes U+FFFD and every control
-///         character is escaped, so the document stays valid whatever the pane printed.
-[[nodiscard]] std::string quoteJsonString(std::string_view text);
-
 } // namespace vtcontrol
-
-/// Strings are written through `vtcontrol::quoteJsonString`. Glaze's own writer does not escape most
-/// control characters (it emits NUL bytes to flag them), which would let one pane's output break a
-/// whole reply. This is a full specialization, so it wins over every glaze rule, and it lives here so
-/// that every translation unit that writes JSON sees it.
-///
-/// It names glaze internals (`glz::detail::to_json`, `glz::detail::dump_maybe_empty`, `is_context`), which
-/// glaze does not promise to keep: on a glaze bump (`GLAZE_VERSION` in cmake/ContourThirdParties.cmake),
-/// re-run `vtcontrol_test "[json]"`, whose control-character cases fail if this stops being chosen.
-template <>
-struct glz::detail::to_json<std::string>
-{
-    template <auto Opts, class B>
-    static void op(std::string const& value, is_context auto&& /*ctx*/, B& buffer, auto& index) noexcept
-    {
-        auto const quoted = vtcontrol::quoteJsonString(value);
-        glz::detail::dump_maybe_empty(quoted, buffer, index);
-    }
-};
 
 /// Teaches glaze the spelling of every enum that has an `EnumTable`.
 template <vtcontrol::HasEnumTable E>
@@ -106,26 +122,25 @@ struct glz::meta<E> // NOLINT(readability-identifier-naming)
 /// `vtcontrol::RawJson` is written as the text it holds and read as the exact text of one value, as glaze's
 /// own `raw_json` is.
 template <>
-struct glz::detail::to_json<vtcontrol::RawJson>
+struct glz::to<glz::JSON, vtcontrol::RawJson>
 {
     template <auto Opts, class B>
-    static void op(vtcontrol::RawJson const& value,
-                   is_context auto&& /*ctx*/,
-                   B& buffer,
-                   auto& index) noexcept
+    static void op(vtcontrol::RawJson const& value, is_context auto&& ctx, B& buffer, auto& index)
     {
-        glz::detail::dump_maybe_empty(value.text, buffer, index);
+        if (!glz::ensure_space(ctx, buffer, index + value.text.size() + glz::write_padding_bytes))
+            return;
+        glz::dump_maybe_empty<false>(value.text, buffer, index);
     }
 };
 
 template <>
-struct glz::detail::from_json<vtcontrol::RawJson>
+struct glz::from<glz::JSON, vtcontrol::RawJson>
 {
     template <auto Opts>
-    static void op(vtcontrol::RawJson& value, is_context auto&& ctx, auto&& it, auto&& end) noexcept
+    static void op(vtcontrol::RawJson& value, is_context auto&& ctx, auto&& it, auto&& end)
     {
         auto const start = it;
-        glz::detail::skip_value<Opts>(ctx, it, end);
+        glz::skip_value<glz::JSON>::op<Opts>(ctx, it, end);
         if (bool(ctx.error))
             return;
         value.text.assign(start, static_cast<std::size_t>(it - start));

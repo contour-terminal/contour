@@ -463,7 +463,7 @@ TEST_CASE("Runner.frameClamp", "[vtextension][runner][guest]")
 
     constexpr auto Elapsed = std::chrono::milliseconds { 1s };
     harness.scheduler.advance(Elapsed);
-    auto const renders = generationOf(*runner);
+    auto const renders = static_cast<int64_t>(generationOf(*runner));
     INFO("renders over " << Elapsed.count() << " ms: " << renders);
     CHECK(renders <= 1 + (Elapsed / limits.minFrameInterval));
     // The requested frames did arrive: the guest kept rendering, at the clamped rate.

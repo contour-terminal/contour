@@ -15,9 +15,11 @@ namespace vtcontrol
 {
 
 /// How a handler reports the outcome of a call; it may be invoked synchronously or later, once.
+/// std::function (not move_only_function, which Apple's libc++ lacks): no handler captures move-only
+/// state, and none copies a completion, so the call-once rule holds as it did.
 /// @tparam Reply The reply type of the method.
 template <typename Reply>
-using Completion = std::move_only_function<void(std::expected<Reply, ControlError>)>;
+using Completion = std::function<void(std::expected<Reply, ControlError>)>;
 
 /// Where a subscription's events are delivered. One sink is one connection (or one extension).
 class EventSink

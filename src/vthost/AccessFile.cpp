@@ -2,6 +2,7 @@
 #include <vthost/AccessFile.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <format>
@@ -17,7 +18,7 @@ std::expected<std::vector<AcceptedToken>, std::string> parseAccessFile(std::stri
 {
     auto entries = std::vector<AcceptedToken> {};
     auto lineNumbers = std::vector<std::size_t> {};
-    for (auto const [index, rawLine]: std::views::split(text, '\n') | std::views::enumerate)
+    for (auto const [index, rawLine]: core::views::enumerate(std::views::split(text, '\n')))
     {
         auto const lineNumber = static_cast<std::size_t>(index) + 1;
         // Indentation is not part of the grant list: `  # note` is a comment, `  read tok` an entry.

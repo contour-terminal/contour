@@ -265,8 +265,13 @@ Task<void> recordedDaemon(core::net::ISocket* socket, std::span<std::byte const>
     // Sixteen bytes to a literal, each escaped, so that no escape runs into the character after it.
     auto text = std::format("constexpr auto {} = recorded(", name);
     auto separator = std::string_view {};
-    for (auto const line: frame | std::views::chunk(16))
+    // Row indices rather than std::views::chunk, which the libc++ that macOS ships lacks.
+    constexpr auto BytesPerLine = std::size_t { 16 };
+    for (auto const row:
+         std::views::iota(std::size_t { 0 }, (frame.size() + BytesPerLine - 1) / BytesPerLine))
     {
+        auto const line =
+            frame.subspan(row * BytesPerLine, std::min(BytesPerLine, frame.size() - (row * BytesPerLine)));
         text += std::exchange(separator, "\n                                    ");
         text += '"';
         for (auto const byte: line)

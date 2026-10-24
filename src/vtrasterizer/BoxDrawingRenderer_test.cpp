@@ -123,7 +123,7 @@ TEST_CASE("Powerline basic separators fit their tiles and preserve diagonal alia
         REQUIRE(lowerLeft);
         CHECK(lowerLeft->front() == 255);
         CHECK(lowerLeft->back() == 0);
-        for (auto const pair: { std::pair { U'\uE0B9', U'\uE0BF' }, std::pair { U'\uE0BB', U'\uE0BD' } })
+        for (auto const& pair: { std::pair { U'\uE0B9', U'\uE0BF' }, std::pair { U'\uE0BB', U'\uE0BD' } })
             CHECK(BoxDrawingRendererTest::buildElements(pair.first, size, 1)
                   == BoxDrawingRendererTest::buildElements(pair.second, size, 1));
         for (auto const codepoint: { U'\uE0B1', U'\uE0B3' })
@@ -843,9 +843,9 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
         {
             for (auto const thickness: { 1, 2 })
             {
-                for (auto const [open, body, end]: { std::tuple { 0x10F000, 0x10F006, 0x10F007 },
-                                                     std::tuple { 0x10F008, 0x10F00A, 0x10F00B },
-                                                     std::tuple { 0x10F00C, 0x10F00E, 0x10F00F } })
+                for (auto const& [open, body, end]: { std::tuple { 0x10F000, 0x10F006, 0x10F007 },
+                                                      std::tuple { 0x10F008, 0x10F00A, 0x10F00B },
+                                                      std::tuple { 0x10F00C, 0x10F00E, 0x10F00F } })
                 {
                     CAPTURE(unbox<int>(size.width), thickness, open);
                     auto const headBuffer =
@@ -889,9 +889,9 @@ TEST_CASE("BoxDrawingRenderer.foldHeadGlyphs", "[boxdrawing]")
         auto constexpr Wide = ImageSize { Width(18), Height(20) };
         for (auto const size: { Cell, Wide })
         {
-            for (auto const [closed, open]: { std::pair { 0x10F001, 0x10F000 },
-                                              std::pair { 0x10F009, 0x10F008 },
-                                              std::pair { 0x10F00D, 0x10F00C } })
+            for (auto const& [closed, open]: { std::pair { 0x10F001, 0x10F000 },
+                                               std::pair { 0x10F009, 0x10F008 },
+                                               std::pair { 0x10F00D, 0x10F00C } })
             {
                 CAPTURE(unbox<int>(size.width), closed);
                 auto const w = unbox<int>(size.width);

@@ -3,9 +3,10 @@
 
 #include <format>
 #include <optional>
+#include <string_view>
 #include <tuple>
+#include <vector>
 
-#include <glaze/json/schema.hpp>
 #include <vtcontrol/Catalog.hpp>
 #include <vtcontrol/Events.hpp>
 #include <vtcontrol/Json.hpp>
@@ -17,7 +18,8 @@ struct glz::detail::to_json_schema<vtcontrol::RawJson>
     template <auto Opts>
     static void op(auto& schema, auto& /*defs*/) noexcept
     {
-        schema.type = { "number", "string", "boolean", "object", "array", "null" };
+        schema.type =
+            std::vector<std::string_view> { "number", "string", "boolean", "object", "array", "null" };
     }
 };
 

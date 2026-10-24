@@ -4,6 +4,7 @@
 #include <contour/config/Config.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
@@ -71,10 +72,10 @@ namespace
             auto answer = std::string {};
             if (!std::getline(_in, answer))
                 return Confirmation::Declined;
-            auto const lower = answer | std::views::transform([](char c) {
-                                   return static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
-                               })
-                               | std::ranges::to<std::string>();
+            auto const lower = std::ranges::to<std::string>(answer | std::views::transform([](char c) {
+                                                                return static_cast<char>(
+                                                                    c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+                                                            }));
             return lower == "y" || lower == "yes" ? Confirmation::Confirmed : Confirmation::Declined;
         }
 
@@ -123,7 +124,7 @@ std::string formatUptime(std::chrono::seconds uptime)
                                 : std::format("{}{}", count, unit.suffix));
         started = true;
     }
-    return parts | std::views::join_with(' ') | std::ranges::to<std::string>();
+    return core::joinHumanReadable(parts, " ");
 }
 
 std::string formatDaemonStatus(DaemonStatus const& status)

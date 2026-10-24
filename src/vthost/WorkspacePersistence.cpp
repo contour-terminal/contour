@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vthost/WorkspacePersistence.hpp>
 
+#include <vtbackend/screen/LocalTime.hpp>
+
 #include <core/Utf8Path.hpp>
 
 #include <algorithm>
 #include <format>
-#include <stdexcept>
 #include <utility>
 
 #include <vthost/HistorySeed.hpp>
@@ -367,15 +368,8 @@ void WorkspacePersistence::tabColorChanged(vtworkspace::TabId)
 
 std::chrono::local_seconds localTimeOf(std::chrono::sys_seconds takenAt)
 {
-    try
-    {
-        return std::chrono::current_zone()->to_local(takenAt);
-    }
-    catch (std::runtime_error const&)
-    {
-        // A minimal container may ship no time zone database.
-        return std::chrono::local_seconds { takenAt.time_since_epoch() };
-    }
+    // Not std::chrono::current_zone(): Apple's libc++ has no time zone database.
+    return vtbackend::systemLocalTime(takenAt);
 }
 
 // ---------------------------------------------------------------------------

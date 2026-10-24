@@ -20,8 +20,8 @@ enum class Caller : uint8_t
     Extension,  ///< A WebAssembly extension inside the host.
 };
 
-/// How a raw (JSON) call reports its outcome.
-using RawCompletion = std::move_only_function<void(std::expected<std::string, ControlError>)>;
+/// How a raw (JSON) call reports its outcome, once; a std::function for the reason `Completion` is one.
+using RawCompletion = std::function<void(std::expected<std::string, ControlError>)>;
 
 /// Serves one call: finds the catalog row, decodes `params`, calls the typed handler and encodes the reply.
 ///

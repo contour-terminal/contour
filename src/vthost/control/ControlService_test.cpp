@@ -202,7 +202,7 @@ TEST_CASE("captured text is always valid JSON", "[vthost][control]")
         callSync<vtcontrol::CaptureReply>(h.service, h.context, vtcontrol::CaptureRequest {});
     REQUIRE(capture.has_value());
     auto const json = vtcontrol::encodeJson(*capture);
-    auto parsed = glz::json_t {};
+    auto parsed = glz::generic {};
     CHECK_FALSE(glz::read_json(parsed, json));
     auto const decoded = vtcontrol::decodeJson<vtcontrol::CaptureReply>(json);
     REQUIRE(decoded.has_value());

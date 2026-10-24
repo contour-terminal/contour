@@ -3,6 +3,8 @@
 
 #include <vtbackend/shell/CommandBlock.hpp>
 
+#include <core/Utils.hpp>
+
 #include <algorithm>
 #include <format>
 #include <memory>
@@ -51,7 +53,7 @@ namespace
         // The first rows fill the page from its top; once it is full, each further row scrolls the oldest up
         // into the history and takes the bottom row. Scrolling the first rows instead would push the page's
         // blank rows into the history ahead of them.
-        for (auto const [index, source]: history.lines | std::views::enumerate)
+        for (auto const [index, source]: core::views::enumerate(history.lines))
         {
             auto wire = source;
             // Stamped by the session the row came from, which is not this terminal's: counted from another

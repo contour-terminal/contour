@@ -47,14 +47,17 @@ void ControlApi::handle(CallContext& /*context*/,
                         ApiListRequest const& /*request*/,
                         Completion<ApiListReply> done)
 {
-    done(listApi());
+    // Taken, not borrowed: the completion is the call's own, and it is called once.
+    auto const reply = std::move(done);
+    reply(listApi());
 }
 
 void ControlApi::handle(CallContext& /*context*/,
                         ApiDescribeRequest const& request,
                         Completion<ApiDescription> done)
 {
-    done(describeApi(request.name));
+    auto const reply = std::move(done);
+    reply(describeApi(request.name));
 }
 
 void ControlApi::clientAttached(std::string_view /*client*/)

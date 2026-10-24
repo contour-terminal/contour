@@ -2,6 +2,7 @@
 #include <vthost/ServiceControl_launchd.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <array>
@@ -243,8 +244,7 @@ std::expected<ServiceStatus, ServiceError> LaunchdBackend::status() const
 
     auto status = ServiceStatus { .state = parseLaunchctlPrint(printed->exitCode, printed->standardOutput) };
     if (auto const plist = _fileSystem.readFile(_config.plistPath))
-        status.commandLine =
-            std::ranges::to<std::string>(parseLaunchAgentArguments(*plist) | std::views::join_with(' '));
+        status.commandLine = core::joinHumanReadable(parseLaunchAgentArguments(*plist), " ");
     return status;
 }
 

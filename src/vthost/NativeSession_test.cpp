@@ -3955,11 +3955,11 @@ namespace
 /// @return Harness options whose session admits @p versions and requires @p token.
 [[nodiscard]] HarnessOptions admitting(proto::VersionRange versions, std::string token = {})
 {
+    auto acceptedTokens = std::vector<vthost::AcceptedToken> {};
+    if (!token.empty())
+        acceptedTokens.push_back(vthost::AcceptedToken { .token = std::move(token) });
     return HarnessOptions { .services = vthost::NativeSessionServices {
-                                .handshake = { .acceptedTokens = token.empty()
-                                                                     ? std::vector<vthost::AcceptedToken> {}
-                                                                     : std::vector { vthost::AcceptedToken {
-                                                                           .token = std::move(token) } },
+                                .handshake = { .acceptedTokens = std::move(acceptedTokens),
                                                .versions = versions } } };
 }
 

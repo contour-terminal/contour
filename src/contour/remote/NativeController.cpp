@@ -281,10 +281,10 @@ void NativeController::adoptReconnect()
         // A daemon that predates attach intents names no windows, and every window is followed.
         if (client->negotiated()
             && client->negotiated()->shared.contains(vthost::proto::Capability::AttachIntent))
-            _lostWindows = mapped | std::views::filter([&](uint64_t window) {
-                               return !std::ranges::contains(client->followedWindows(), window);
-                           })
-                           | std::ranges::to<std::vector>();
+            _lostWindows = std::ranges::to<std::vector>(mapped | std::views::filter([&](uint64_t window) {
+                                                            return !std::ranges::contains(
+                                                                client->followedWindows(), window);
+                                                        }));
         // The same sessions, re-snapshotted: each mirror takes the new connection's first snapshot as a
         // first.
         for (auto& binding: _bindings | std::views::values)

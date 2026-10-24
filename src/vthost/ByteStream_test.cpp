@@ -44,8 +44,8 @@ void writeText(IByteStream& stream, std::string_view text)
 [[nodiscard]] std::string readTextToEnd(IByteStream& stream)
 {
     auto const bytes = readToEnd(stream);
-    return bytes | std::views::transform([](std::byte b) { return static_cast<char>(b); })
-           | std::ranges::to<std::string>();
+    return std::ranges::to<std::string>(
+        bytes | std::views::transform([](std::byte b) { return static_cast<char>(b); }));
 }
 
 } // namespace

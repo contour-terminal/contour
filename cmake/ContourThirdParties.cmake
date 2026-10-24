@@ -98,9 +98,13 @@ set(YAML_CPP_VERSION "0.8.0")
 set(HARFBUZZ_VERSION "8.4.0")
 set(GSL_VERSION "3.1.0")
 set(REFLECTION_CPP_VERSION "0.4.0")
-# Bumping glaze: src/vtcontrol/Json.hpp specializes glz::detail::to_json<std::string>; re-run
-# `vtcontrol_test "[json]"` to check it is still the writer glaze picks.
+# Bumping glaze: src/vtcontrol/Json.hpp specializes glz::to<glz::JSON, std::string> ahead of glaze's JSON
+# headers, and src/vtcontrol/Reflect.hpp names glz::to_tie and glz::detail::count_members; re-run
+# `vtcontrol_test "[json]"` to check the string writer is still the one glaze picks. Update GLAZE_SHA256 (of
+# the release tarball), compare glaze_glaze below with the target glaze's own CMakeLists defines, and bump
+# the version in scripts/install-deps.sh and scripts/install-deps.ps1 too.
 set(GLAZE_VERSION "9.0.0")
+set(GLAZE_SHA256 "dd7b033c5bf6e4308615bb7834c541291d5b20f64121d9a68222a39414635517")
 set(FREETYPE_VERSION "2.10.0")
 set(WAMR_MINIMAL_VERSION "2.4.5")
 
@@ -316,6 +320,64 @@ else()
     set(THIRDPARTY_BUILTIN_wamr "(extensions disabled)")
 endif()
 
+# glaze, the JSON (de)serializer behind vtcontrol: structs in, structs out, schemas from the same structs.
+#
+# It must come before termbench-pro, whose CMakeLists declares its own, older glaze to FetchContent
+# under the same name. FetchContent keeps the first declaration of a name and ignores every later one,
+# so declaring ours first makes termbench-pro's FetchContent_MakeAvailable(glaze) find it populated and
+# do nothing: one glaze in the build, and ours.
+#
+# glaze is header-only, and its own CMakeLists is never run: glaze 9 requires CMake 3.31, newer than this
+# project does. SOURCE_SUBDIR names a directory with no CMakeLists.txt, so FetchContent_MakeAvailable only
+# populates the sources, and glaze_glaze below is ours. install-deps.sh only unpacks the archive. A system
+# package is declared too, with FIND_PACKAGE_ARGS, so that termbench-pro's MakeAvailable finds that
+# package instead of fetching. The download is FetchContent's, not CPM's: from CMake 3.30.3 on, CPM's
+# DOWNLOAD_ONLY populates without declaring, and termbench-pro's declaration would then win.
+include(FetchContent)
+set(_glaze_embedded_dir "${ContourThirdParties_SRCDIR}/glaze-${GLAZE_VERSION}")
+set(_glaze_header_only SOURCE_SUBDIR "contour-header-only")
+if(EXISTS "${_glaze_embedded_dir}/include/glaze/glaze.hpp")
+    FetchContent_Declare(glaze SOURCE_DIR "${_glaze_embedded_dir}" ${_glaze_header_only})
+    set(THIRDPARTY_BUILTIN_glaze "embedded")
+else()
+    find_package(glaze ${GLAZE_VERSION} QUIET)
+    if(glaze_FOUND)
+        FetchContent_Declare(glaze FIND_PACKAGE_ARGS ${GLAZE_VERSION})
+        set(THIRDPARTY_BUILTIN_glaze "system package")
+    elseif(CONTOUR_USE_CPM)
+        message(STATUS "Fetching glaze ${GLAZE_VERSION}")
+        FetchContent_Declare(glaze
+            URL "https://github.com/stephenberry/glaze/archive/refs/tags/v${GLAZE_VERSION}.tar.gz"
+            URL_HASH SHA256=${GLAZE_SHA256}
+            DOWNLOAD_EXTRACT_TIMESTAMP ON
+            ${_glaze_header_only}
+        )
+        set(THIRDPARTY_BUILTIN_glaze "embedded (fetched)")
+    else()
+        message(FATAL_ERROR "Could not find glaze ${GLAZE_VERSION}. "
+            "Run install-deps.sh, install system packages, or set CONTOUR_USE_CPM=ON.")
+    endif()
+endif()
+if(NOT glaze_FOUND)
+    FetchContent_MakeAvailable(glaze)
+    # What glaze's own CMakeLists defines, less its opt-in options (all off by default). The includes are
+    # SYSTEM, as glaze makes them for a consumer, so its headers never warn.
+    add_library(glaze_glaze INTERFACE)
+    add_library(glaze::glaze ALIAS glaze_glaze)
+    set_target_properties(glaze_glaze PROPERTIES EXPORT_NAME glaze)
+    target_compile_features(glaze_glaze INTERFACE cxx_std_23)
+    target_include_directories(glaze_glaze SYSTEM INTERFACE "$<BUILD_INTERFACE:${glaze_SOURCE_DIR}/include>")
+    if(MSVC)
+        target_compile_options(glaze_glaze INTERFACE
+            $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:preprocessor>
+            $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/permissive->
+            $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/Zc:lambda>)
+    else()
+        target_compile_options(glaze_glaze INTERFACE
+            $<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:CXX>>:-Wno-missing-braces>)
+    endif()
+endif()
+
 if(LIBTERMINAL_BUILD_BENCH_HEADLESS)
     if(COMMAND ContourThirdParties_Embed_termbench_pro)
         ContourThirdParties_Embed_termbench_pro()
@@ -352,6 +414,13 @@ if(TARGET termbench)
     set_target_properties(termbench PROPERTIES CXX_CLANG_TIDY "")
 endif()
 
+# termbench-pro links glaze publicly and exports itself, and CMake refuses an install(EXPORT) whose
+# dependency is in no export set. Our glaze_glaze joins termbench-pro's; it is an interface library, so
+# this installs nothing, and EXCLUDE_FROM_ALL keeps even the rule out of a plain install.
+if(TARGET termbench AND TARGET glaze_glaze)
+    install(TARGETS glaze_glaze EXPORT termbench-targets COMPONENT termbench EXCLUDE_FROM_ALL)
+endif()
+
 if(COMMAND ContourThirdParties_Embed_boxed_cpp)
     ContourThirdParties_Embed_boxed_cpp()
     subproject_version(boxed-cpp boxed_cpp_version)
@@ -368,15 +437,6 @@ if(COMMAND ContourThirdParties_Embed_reflection_cpp)
     set(THIRDPARTY_BUILTIN_reflection-cpp "embedded")
 else()
     HandleThirdparty(reflection-cpp "gh:contour-terminal/reflection-cpp#v${REFLECTION_CPP_VERSION}")
-endif()
-
-# glaze, the JSON (de)serializer behind vtcontrol: structs in, structs out, schemas from the same structs.
-# Its includes are SYSTEM by its own default (glaze_INCLUDES_WITH_SYSTEM), so its headers never warn.
-if(COMMAND ContourThirdParties_Embed_glaze)
-    ContourThirdParties_Embed_glaze()
-    set(THIRDPARTY_BUILTIN_glaze "embedded")
-else()
-    HandleThirdparty(glaze "gh:stephenberry/glaze@v${GLAZE_VERSION}" VERSION ${GLAZE_VERSION})
 endif()
 
 # core-cpp, the shared foundation of the Contour Terminal projects (coroutines, the event loop and

@@ -87,8 +87,8 @@ namespace
     /// @return Them as owned strings.
     [[nodiscard]] std::vector<std::string> toStrings(std::span<std::string_view const> words)
     {
-        return words | std::views::transform([](auto word) { return std::string { word }; })
-               | std::ranges::to<std::vector>();
+        return std::ranges::to<std::vector>(
+            words | std::views::transform([](auto word) { return std::string { word }; }));
     }
 
     /// @param words Trailing command-line words.

@@ -12,18 +12,19 @@ namespace
     /// @return The ids of the windows holding at least one tab.
     [[nodiscard]] std::vector<uint64_t> windowsWithTabs(AttachContext const& context)
     {
-        return context.windows
-               | std::views::filter([](WindowSummary const& window) { return window.tabCount > 0; })
-               | std::views::transform(&WindowSummary::id) | std::ranges::to<std::vector>();
+        return std::ranges::to<std::vector>(
+            context.windows
+            | std::views::filter([](WindowSummary const& window) { return window.tabCount > 0; })
+            | std::views::transform(&WindowSummary::id));
     }
 
     /// @return The ids in @p wanted that name an existing window, ascending.
     [[nodiscard]] std::vector<uint64_t> existing(std::vector<uint64_t> const& wanted,
                                                  AttachContext const& context)
     {
-        return context.windows | std::views::transform(&WindowSummary::id)
-               | std::views::filter([&](uint64_t id) { return std::ranges::contains(wanted, id); })
-               | std::ranges::to<std::vector>();
+        return std::ranges::to<std::vector>(
+            context.windows | std::views::transform(&WindowSummary::id)
+            | std::views::filter([&](uint64_t id) { return std::ranges::contains(wanted, id); }));
     }
 
     /// Every window with tabs; with none, the primary window gets its first tab.
@@ -65,9 +66,9 @@ AttachPlan planAttach(proto::AttachIntent const& intent, AttachContext const& co
             // holding no tab is no survivor: it is a restarted daemon's own empty primary window, whose id is
             // the lost one's only because every run counts from 1.
             auto follow =
-                windowsWithTabs(context)
-                | std::views::filter([&](uint64_t id) { return std::ranges::contains(intent.windows, id); })
-                | std::ranges::to<std::vector>();
+                std::ranges::to<std::vector>(windowsWithTabs(context) | std::views::filter([&](uint64_t id) {
+                                                 return std::ranges::contains(intent.windows, id);
+                                             }));
             if (follow.empty())
                 return launch(context);
             return { .scope = FollowScope::Listed,

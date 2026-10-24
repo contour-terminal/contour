@@ -140,9 +140,9 @@ proto::Delta capturePaneHistory(vtbackend::Terminal const& terminal, std::size_t
         return line.empty() && line.blockId().value == 0;
     };
     // Newest first: the blank rows under the last printed one are dropped, then the newest maxRows are kept.
-    auto newestFirst = std::views::iota(top, end) | std::views::reverse
-                       | std::views::drop_while(isTrailingBlank) | std::views::take(maxRows)
-                       | std::ranges::to<std::vector<int>>();
+    auto newestFirst = std::ranges::to<std::vector<int>>(std::views::iota(top, end) | std::views::reverse
+                                                         | std::views::drop_while(isTrailingBlank)
+                                                         | std::views::take(maxRows));
     std::ranges::reverse(newestFirst);
 
     auto history = proto::Delta {};

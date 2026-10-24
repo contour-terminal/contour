@@ -24,7 +24,7 @@ std::string toString(Uuid const& uuid)
 {
     auto text = std::string {};
     text.reserve(36);
-    for (auto const [index, byte]: uuid.bytes | std::views::enumerate)
+    for (auto const [index, byte]: core::views::enumerate(uuid.bytes))
     {
         if (std::ranges::contains(DashAfterByte, static_cast<std::size_t>(index)))
             text.push_back('-');
@@ -42,7 +42,7 @@ std::optional<Uuid> parseUuid(std::string_view text)
     auto uuid = Uuid {};
     auto nibbles = std::array<unsigned, 32> {};
     auto count = std::size_t { 0 };
-    for (auto const [position, ch]: text | std::views::enumerate)
+    for (auto const [position, ch]: core::views::enumerate(text))
     {
         auto const isDashPosition = position == 8 || position == 13 || position == 18 || position == 23;
         if (isDashPosition)

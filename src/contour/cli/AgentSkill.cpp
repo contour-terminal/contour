@@ -3,6 +3,7 @@
 #include <contour/cli/ControlVerbs.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 
 #include <algorithm>
 #include <format>
@@ -146,11 +147,11 @@ std::string renderAgentSkill(std::string_view version)
 
 std::vector<std::string> parseAgentList(std::string_view commaList)
 {
-    return std::views::split(commaList, ',')
-           | std::views::transform([](auto part) { return std::string_view { part }; })
-           | std::views::filter([](auto part) { return !part.empty(); })
-           | std::views::transform([](auto part) { return std::string { part }; })
-           | std::ranges::to<std::vector>();
+    return std::ranges::to<std::vector>(
+        std::views::split(commaList, ',')
+        | std::views::transform([](auto part) { return std::string_view { part }; })
+        | std::views::filter([](auto part) { return !part.empty(); })
+        | std::views::transform([](auto part) { return std::string { part }; }));
 }
 
 std::expected<std::vector<SkillOutcome>, std::string> setupAgentSkills(core::platform::FileSystem& fileSystem,
@@ -213,7 +214,7 @@ std::string formatSkillOutcomes(std::span<SkillOutcome const> outcomes, SetupMod
                                           vtcontrol::quoteJsonString(outcome.agent),
                                           vtcontrol::quoteJsonString(core::pathToUtf8(outcome.path)),
                                           vtcontrol::quoteJsonString(jsonNameOf(outcome.state))));
-        return std::format("[{}]\n", rows | std::views::join_with(',') | std::ranges::to<std::string>());
+        return std::format("[{}]\n", core::joinHumanReadable(rows, ","));
     }
 
     auto labelOf = [](std::string_view agent) {

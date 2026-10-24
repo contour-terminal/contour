@@ -761,7 +761,7 @@ std::expected<HostEntry, std::string> resolveHost(std::string const& configPath,
             auto const& hosts = loaded.hosts.value();
             if (auto const found = hosts.find(std::string { nameOrUrl }); found != hosts.end())
                 return found->second;
-            auto const names = std::views::keys(hosts) | std::ranges::to<std::vector<std::string>>();
+            auto const names = std::ranges::to<std::vector<std::string>>(std::views::keys(hosts));
             return std::unexpected { std::format("no host named '{}' in {} (saved hosts: {})",
                                                  nameOrUrl,
                                                  core::pathToUtf8(loaded.configFile),

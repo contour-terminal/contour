@@ -6,9 +6,9 @@
 /// to each. Like Json.hpp it names glaze, so include it only from `.cpp` files and from headers private to a
 /// module that links glaze itself -- never from a header that the GUI or a public interface sees.
 ///
-/// Glaze reflects an aggregate through `glz::detail::to_tuple`, which its `detail` namespace documents as
-/// unstable; this header is the one place outside Json.hpp that depends on it, so a glaze bump re-checks
-/// here.
+/// Glaze reflects an aggregate through `glz::to_tie` and counts its fields with `glz::detail::count_members`,
+/// which its `detail` namespace documents as unstable; this header is the one place outside Json.hpp that
+/// depends on them, so a glaze bump re-checks here.
 
 #include <cstddef>
 #include <optional>
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#include <glaze/core/refl.hpp>
+#include <glaze/core/reflect.hpp>
 
 namespace vtcontrol::reflect
 {
@@ -28,7 +28,7 @@ inline constexpr std::size_t FieldCount = glz::detail::count_members<T>;
 
 /// The type of field @p I of the aggregate `T`, without reference or cv-qualifiers.
 template <typename T, std::size_t I>
-using FieldType = std::remove_cvref_t<decltype(glz::get<I>(glz::detail::to_tuple(std::declval<T&>())))>;
+using FieldType = std::remove_cvref_t<decltype(glz::get<I>(glz::to_tie(std::declval<T&>())))>;
 
 /// The name of field @p I of the aggregate `T`, spelled as in the source.
 template <typename T, std::size_t I>
@@ -39,7 +39,7 @@ inline constexpr std::string_view FieldName = glz::member_names<T>[I];
 template <std::size_t I, typename T>
 [[nodiscard]] constexpr FieldType<T, I>& field(T& value) noexcept
 {
-    auto tied = glz::detail::to_tuple(value);
+    auto tied = glz::to_tie(value);
     return glz::get<I>(tied);
 }
 
@@ -48,7 +48,7 @@ template <std::size_t I, typename T>
 template <std::size_t I, typename T>
 [[nodiscard]] constexpr FieldType<T, I> const& field(T const& value) noexcept
 {
-    auto tied = glz::detail::to_tuple(value);
+    auto tied = glz::to_tie(value);
     return glz::get<I>(tied);
 }
 

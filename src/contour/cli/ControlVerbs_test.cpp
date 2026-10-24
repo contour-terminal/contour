@@ -8,6 +8,7 @@
 #include <contour/config/HostUrl.hpp>
 
 #include <core/Environment.hpp>
+#include <core/Utils.hpp>
 #include <core/async/StopToken.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
@@ -265,7 +266,7 @@ TEST_CASE("every ControlErrorCode and ControlFailure has an exit status", "[cont
         FailureRow { .failure = ControlFailure::Misconfigured, .status = ExitStatus::BadUsage },
     };
     // In value order, so the last row is the last enumerator and none is skipped.
-    for (auto const [index, row]: std::views::enumerate(FailureRows))
+    for (auto const [index, row]: core::views::enumerate(FailureRows))
     {
         CHECK(std::cmp_equal(std::to_underlying(row.failure), index));
         CHECK(contour::cli::exitStatusFor(row.failure) == row.status);

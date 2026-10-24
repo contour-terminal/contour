@@ -155,8 +155,8 @@ std::string imageDirectoryName(std::string_view releaseVersion,
         return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.'
                || ch == '_' || ch == '-';
     };
-    auto name = releaseVersion | std::views::transform([&](char ch) { return isSafe(ch) ? ch : '_'; })
-                | std::ranges::to<std::string>();
+    auto name = std::ranges::to<std::string>(
+        releaseVersion | std::views::transform([&](char ch) { return isSafe(ch) ? ch : '_'; }));
 
     auto const fnv = core::FNV<char, std::uint32_t> {};
     auto const ticks = static_cast<std::int64_t>(executableTime.time_since_epoch().count());

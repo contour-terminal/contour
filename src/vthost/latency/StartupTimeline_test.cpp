@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <core/Utils.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
@@ -37,7 +39,7 @@ TEST_CASE("every StartupMark has exactly one named table row", "[vthost][latency
 {
     CHECK(StartupMarkTable.size() == static_cast<size_t>(StartupMark::FirstPromptSwapped) + 1);
     auto names = std::set<std::string_view> {};
-    for (auto const [index, row]: StartupMarkTable | std::views::enumerate)
+    for (auto const [index, row]: core::views::enumerate(StartupMarkTable))
     {
         CHECK(static_cast<size_t>(row.mark) == static_cast<size_t>(index));
         CHECK_FALSE(row.name.empty());
