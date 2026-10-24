@@ -9,6 +9,7 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/ChromeSnapshotScene.hpp>
+#include <contour/test/ChromeSnapshotWriter.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/SettingsController.hpp>
 
@@ -19,6 +20,7 @@
 
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
 #include <QtGui/QPalette>
 #include <QtQuick/QQuickItem>
 
@@ -120,4 +122,47 @@ TEST_CASE("The bundled chrome fonts register with Qt, and a missing directory sa
     auto const unloaded = registerBundledChromeFonts(noFont, "/fonts");
     REQUIRE_FALSE(unloaded.has_value());
     CHECK(unloaded.error() == SnapshotFontError::NoFontLoaded);
+}
+
+TEST_CASE("The snapshot writer writes a PNG and its manifest line", "[contour][gui][snapshot]")
+{
+    using namespace contour::test::snapshot;
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto const variant = SnapshotVariant { SnapshotScript::Palette,
+                                           contour::config::ChromeStyle::Terminal,
+                                           contour::config::DefaultsEdition::Native2026,
+                                           vtbackend::ColorPreference::Dark };
+    auto const facts = SnapshotFacts { "offscreen", 1.0, "JetBrains Mono", "Fusion", "6.11.1" };
+    auto image = QImage(QSize(4, 4), QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    auto const expectedManifest = std::string(ManifestHeader) + manifestLine(variant, facts);
+
+    auto writer = ChromeSnapshotWriter::open(files, "/out");
+    REQUIRE(writer.has_value());
+    auto const written = writer->write(variant, image, facts);
+    REQUIRE(written.has_value());
+    CHECK(*written == std::filesystem::path("/out/palette.terminal.native2026.dark.png"));
+    CHECK(files.readFile(*written).value().starts_with("\x89PNG"));
+    CHECK(files.readFile("/out/manifest.tsv").value() == expectedManifest);
+
+    // Review focus 4: the second pass opens the same directory and keeps the first pass's lines.
+    auto again = ChromeSnapshotWriter::open(files, "/out");
+    REQUIRE(again.has_value());
+    CHECK(files.readFile("/out/manifest.tsv").value() == expectedManifest);
+
+    CHECK(writer->write(variant, QImage {}, facts).error() == SnapshotWriteError::EncodeFailed);
+    CHECK(files.readFile("/out/manifest.tsv").value() == expectedManifest);
+}
+
+TEST_CASE("The snapshot writer refuses a directory it cannot use", "[contour][gui][snapshot]")
+{
+    using namespace contour::test::snapshot;
+    auto files = core::platform::testing::InMemoryFileSystem { core::platform::testing::FileEntry {
+        .path = "/out",
+        .content = "not a directory",
+        .perms = std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        .isExecutable = false,
+        .isDirectory = false,
+        .isSymlink = false } };
+    CHECK(ChromeSnapshotWriter::open(files, "/out").error() == SnapshotWriteError::DirectoryUnavailable);
 }
