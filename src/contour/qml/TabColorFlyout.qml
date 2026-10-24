@@ -194,7 +194,7 @@ Popup {
                     radius: 5
                     color: cell.modelData
                     border.width: 1
-                    border.color: Qt.rgba(0, 0, 0, 0.4)
+                    border.color: palette.mid
 
                     HoverHandler { id: swatchHover }
                     scale: swatchHover.hovered ? 1.15 : 1.0
@@ -238,7 +238,7 @@ Popup {
                 Layout.preferredHeight: 30
                 radius: 5
                 border.width: 1
-                border.color: Qt.rgba(0, 0, 0, 0.4)
+                border.color: palette.mid
                 color: hexField.acceptableInput ? ("#" + hexField.text) : "transparent"
                 TapHandler {
                     enabled: hexField.acceptableInput

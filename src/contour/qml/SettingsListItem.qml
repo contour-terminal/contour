@@ -145,13 +145,13 @@ Item {
                 text: "🗑"
                 Accessible.name: qsTr("Delete")
                 font.pointSize: 11
-                color: trashButton.hovered ? "#e53935" : "#c62828"
+                color: trashButton.hovered ? Qt.lighter(chromeStyle.statusColor(0), 1.15) : chromeStyle.statusColor(0)
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
             background: Rectangle {
                 radius: 4
-                color: trashButton.hovered ? Qt.rgba(0.9, 0.2, 0.2, 0.16) : "transparent"
+                color: trashButton.hovered ? Qt.rgba(chromeStyle.statusColor(0).r, chromeStyle.statusColor(0).g, chromeStyle.statusColor(0).b, 0.16) : "transparent"
             }
         }
     }

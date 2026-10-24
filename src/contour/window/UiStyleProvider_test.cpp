@@ -18,6 +18,7 @@
 #include <QtGui/QFont>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QPalette>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -262,4 +263,72 @@ TEST_CASE("UiStyleProvider resolves the token row against the chrome font's cell
         CHECK(!provider.menuGlyph().isEmpty());
         CHECK(!provider.submenuGlyph().isEmpty());
     }
+}
+
+namespace
+{
+
+/// Runs @p body with the application palette's Window colour set to @p window, restoring it after.
+template <typename Body>
+void withWindowColor(QColor const& window, Body&& body)
+{
+    auto const saved = QGuiApplication::palette();
+    auto palette = saved;
+    palette.setColor(QPalette::Window, window);
+    palette.setColor(QPalette::Highlight, QColor(0x12, 0x34, 0x56));
+    QGuiApplication::setPalette(palette);
+    std::forward<Body>(body)();
+    QGuiApplication::setPalette(saved);
+}
+
+} // namespace
+
+TEST_CASE("UiStyleProvider.statusColor picks the light or dark pair by the palette's window",
+          "[contour][uistyle]")
+{
+    using contour::config::StatusColorRole;
+    auto const provider = contour::window::UiStyleProvider(rowOf(UiStyle::Native), QGuiApplication::font());
+    auto const role = [](StatusColorRole value) {
+        return static_cast<int>(value);
+    };
+
+    withWindowColor(QColor(0xF6, 0xF6, 0xF6), [&] {
+        CHECK(provider.statusColor(0) == QColor(0xD7, 0x00, 0x15));
+        CHECK(provider.statusColor(role(StatusColorRole::Warning)) == QColor(0xC9, 0x34, 0x00));
+        CHECK(provider.statusColor(role(StatusColorRole::Success)) == QColor(0x24, 0x8A, 0x3D));
+    });
+
+    withWindowColor(QColor(0x1E, 0x1E, 0x1E), [&] {
+        CHECK(provider.statusColor(0) == QColor(0xFF, 0x69, 0x61));
+        CHECK(provider.statusColor(role(StatusColorRole::Warning)) == QColor(0xFF, 0x9F, 0x0A));
+        CHECK(provider.statusColor(role(StatusColorRole::Success)) == QColor(0x32, 0xD7, 0x4B));
+    });
+}
+
+TEST_CASE("UiStyleProvider.statusColor: Running is the palette accent and bad roles are transparent",
+          "[contour][uistyle]")
+{
+    auto const provider = contour::window::UiStyleProvider(rowOf(UiStyle::Native), QGuiApplication::font());
+    auto const running = static_cast<int>(contour::config::StatusColorRole::Running);
+
+    for (auto const window: { QColor(0xF6, 0xF6, 0xF6), QColor(0x1E, 0x1E, 0x1E) })
+        withWindowColor(window, [&] {
+            CHECK(provider.statusColor(running) == QColor(0x12, 0x34, 0x56));
+            CHECK(provider.statusColor(-1).alpha() == 0);
+            CHECK(provider.statusColor(99).alpha() == 0);
+        });
+}
+
+TEST_CASE("UiStyleProvider publishes the pane-dim, notice and font-scale tokens", "[contour][uistyle]")
+{
+    auto const font = QGuiApplication::font();
+    auto const provider = contour::window::UiStyleProvider(rowOf(UiStyle::Native), font);
+
+    CHECK(provider.paneDimColor().rgb() == QColor(Qt::black).rgb());
+    CHECK(provider.paneDimColor().alpha() == 153);
+    CHECK(provider.dotGlyphColor().alpha() == 153);
+    CHECK(provider.hostingNoticeFillAlpha() == Catch::Approx(0.92));
+    CHECK(provider.hostingNoticeBorderAlpha() == Catch::Approx(0.25));
+    CHECK(provider.captionFont().pointSizeF() < font.pointSizeF());
+    CHECK(provider.headlineFont().pointSizeF() > font.pointSizeF());
 }

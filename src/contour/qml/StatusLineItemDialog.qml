@@ -233,7 +233,7 @@ Popup {
                 // because a template cannot escape them.
                 text: qsTr("A comma or a brace cannot be stored with styling — remove it, or the styling "
                            + "on this text will be dropped.")
-                color: "#e0a030"
+                color: chromeStyle.statusColor(1)
             }
         }
 

@@ -272,6 +272,12 @@ if(CONTOUR_TESTING)
         contour_add_lint_gate(check_wasm_runtime_containment check-wasm-runtime-containment.py)
         contour_add_lint_gate(check_wasm_runtime_containment_selftest check-wasm-runtime-containment.py --self-test)
 
+        # The chrome QML takes every colour from the palette or from chromeStyle. This gate fails on a hex
+        # literal or an all-numeric Qt.rgba( in src/contour/qml and src/contour/styles, so a hardcoded
+        # colour cannot return; the self-test keeps the scanner itself honest.
+        contour_add_lint_gate(check_qml_colors check-qml-colors.py)
+        contour_add_lint_gate(check_qml_colors_selftest check-qml-colors.py --self-test)
+
         # 300s, not the 120s these had as shell scripts: a cold cache now downloads the tool on
         # Windows too, and a CI runner's first run pays for both.
         set_tests_properties(${CONTOUR_LINT_GATES} PROPERTIES LABELS "lint" TIMEOUT 300)
@@ -279,7 +285,7 @@ if(CONTOUR_TESTING)
         # A warning, not a status line: losing both lint gates is exactly the silent gap this
         # change set out to close, and it must not scroll past in a wall of configure output.
         message(WARNING "Python 3 not found: the lint gates (check_spelling, check_workflows, "
-                        "check_wasm_runtime_containment) "
+                        "check_wasm_runtime_containment, check_qml_colors) "
                         "are not registered.")
     endif()
 endif()

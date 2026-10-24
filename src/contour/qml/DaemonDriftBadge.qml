@@ -37,7 +37,7 @@ Rectangle {
         objectName: "daemonDriftLabel"
         anchors.centerIn: parent
         text: root.model !== null ? root.model.text : ""
-        font.pointSize: 9
+        font: chromeStyle.captionFont
         color: Qt.rgba(sys.windowText.r, sys.windowText.g, sys.windowText.b, 0.7)
     }
 

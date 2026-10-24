@@ -225,6 +225,56 @@ struct UiStyleTokens
     std::string_view submenuGlyph; ///< Marks a menu row that opens a sub-menu.
 };
 
+/// The meanings the chrome colours with a status hue rather than with the OS palette.
+///
+/// Enumerator order is the row order of @c StatusColors. A status hue is a statement about meaning
+/// ("this failed"), so a theme-picked colour could render a failure green; the table pins it.
+enum class StatusColorRole : uint8_t
+{
+    Danger = 0, //!< A destructive action or a failure.
+    Warning,    //!< Something the user should read before going on.
+    Success,    //!< A completed or healthy state.
+    Running,    //!< Work in progress. Not a fixed hue: it is the palette's accent.
+};
+
+/// Where a status hue comes from.
+enum class StatusColorSource : uint8_t
+{
+    Fixed = 0,     //!< The row's @c light / @c dark pair.
+    PaletteAccent, //!< The application palette's highlight colour; the pair is unused.
+};
+
+/// One status role's colour in each theme, as @c 0xRRGGBB.
+struct StatusColor
+{
+    StatusColorSource source = StatusColorSource::Fixed; ///< Where the colour comes from.
+    uint32_t light = 0;                                  ///< Used on a light chrome.
+    uint32_t dark = 0;                                   ///< Used on a dark chrome.
+};
+
+/// Number of @c StatusColorRole enumerators.
+inline constexpr size_t StatusColorRoleCount = 4;
+
+/// The status colours, indexed by @c StatusColorRole.
+inline constexpr std::array<StatusColor, StatusColorRoleCount> StatusColors = {
+    StatusColor { StatusColorSource::Fixed, 0xD70015, 0xFF6961 }, // Danger
+    StatusColor { StatusColorSource::Fixed, 0xC93400, 0xFF9F0A }, // Warning
+    StatusColor { StatusColorSource::Fixed, 0x248A3D, 0x32D74B }, // Success
+    StatusColor { StatusColorSource::PaletteAccent, 0, 0 },       // Running
+};
+
+/// Chrome tokens no style row varies, kept together so a restyle changes a number here and not a
+/// literal in a QML file.
+namespace ChromeTokens
+{
+    inline constexpr int PaneDimPercent = 60;  ///< Opacity of the black scrim over a dimmed pane.
+    inline constexpr int DotGlyphPercent = 60; ///< Opacity of the glyph drawn on a traffic-light dot.
+    inline constexpr int HostingNoticeFillPercent = 92;   ///< Opacity of the hosting-notice bar's fill.
+    inline constexpr int HostingNoticeBorderPercent = 25; ///< Opacity of the hosting-notice bar's border.
+    inline constexpr int CaptionFontPercent = 85;         ///< Caption text size relative to the chrome font.
+    inline constexpr int HeadlineFontPercent = 150; ///< Overlay headline size relative to the chrome font.
+} // namespace ChromeTokens
+
 namespace detail
 {
     // inline, so every translation unit that includes this header shares one table rather than

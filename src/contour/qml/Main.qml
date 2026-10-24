@@ -41,7 +41,7 @@ ApplicationWindow
     // Application window's background must be transparent in order to support transparent/semi-transparent
     // background in the terminal widgets.
     // color: "transparent"
-    color: Qt.rgba(0, 0, 0, 0.0)
+    color: "#00000000"
 
     // Force the window's Qt Quick Controls palette to follow the application palette (which
     // ContourGuiApp::applyGuiTheme drives for the theme: dark|light|system setting).
@@ -241,8 +241,8 @@ ApplicationWindow
             anchors.right: parent.right
             implicitHeight: Math.max(hostingNoticeLabel.implicitHeight, hostingNoticeDismiss.implicitHeight) + 8
             height: visible ? implicitHeight : 0
-            color: Qt.rgba(noticePalette.window.r, noticePalette.window.g, noticePalette.window.b, 0.92)
-            border.color: Qt.rgba(noticePalette.windowText.r, noticePalette.windowText.g, noticePalette.windowText.b, 0.25)
+            color: Qt.rgba(noticePalette.window.r, noticePalette.window.g, noticePalette.window.b, chromeStyle.hostingNoticeFillAlpha)
+            border.color: Qt.rgba(noticePalette.windowText.r, noticePalette.windowText.g, noticePalette.windowText.b, chromeStyle.hostingNoticeBorderAlpha)
             border.width: 1
 
             SystemPalette {

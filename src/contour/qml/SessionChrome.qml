@@ -180,9 +180,9 @@ Item {
         // reads on any theme without plumbing a foreground color to QML: light handle over dark
         // backgrounds, dark handle over light ones. Null-guarded during split-teardown rebinds.
         readonly property color handleColor: {
-            let bg = chrome.session ? chrome.session.backgroundColor : Qt.rgba(0, 0, 0, 1);
+            let bg = chrome.session ? chrome.session.backgroundColor : Qt.color("black");
             let luminance = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b;
-            return luminance < 0.5 ? Qt.rgba(1, 1, 1, 1) : Qt.rgba(0, 0, 0, 1);
+            return luminance < 0.5 ? Qt.color("white") : Qt.color("black");
         }
 
         // True only while there is scrollback to move through. Because we supply our own contentItem, the

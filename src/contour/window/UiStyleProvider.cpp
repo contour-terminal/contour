@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/Config.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
+#include <contour/platform/GuiTheme.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/vt/ProgressState.hpp>
@@ -9,9 +10,12 @@
 
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QPalette>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
+#include <utility>
 
 namespace contour::window
 {
@@ -104,6 +108,17 @@ namespace
             badge.setPixelSize(tokens.badgePixelSize);
         badge.setBold(true);
 
+        // Scaled by a percentage of the chrome font rather than pinned to a size, so the caption and
+        // the headline follow the user's font size. A pixel-sized font scales its pixel size instead.
+        auto const scaled = [&font](int percent) {
+            auto result = font;
+            if (font.pointSizeF() > 0.0)
+                result.setPointSizeF(font.pointSizeF() * percent / 100.0);
+            else if (font.pixelSize() > 0)
+                result.setPixelSize(std::max(1, font.pixelSize() * percent / 100));
+            return result;
+        };
+
         return ChromeFonts {
             .base = font,
             .close = sized(tokens.closePointSize),
@@ -111,6 +126,8 @@ namespace
             .menu = sized(tokens.menuPointSize),
             .windowControl = sized(tokens.windowControlPointSize),
             .badge = badge,
+            .caption = scaled(config::ChromeTokens::CaptionFontPercent),
+            .headline = scaled(config::ChromeTokens::HeadlineFontPercent),
         };
     }
 
@@ -196,6 +213,47 @@ QColor UiStyleProvider::progressColor(int state) const
     if (state < 0 || std::cmp_greater_equal(state, colors.size()))
         return { Qt::transparent };
     return QColor::fromRgb(colors[static_cast<size_t>(state)]);
+}
+
+QColor UiStyleProvider::statusColor(int role) const
+{
+    if (role < 0 || std::cmp_greater_equal(role, config::StatusColors.size()))
+        return { Qt::transparent };
+
+    auto const& row = config::StatusColors[static_cast<size_t>(role)];
+    auto const palette = QGuiApplication::palette();
+    switch (row.source)
+    {
+        case config::StatusColorSource::PaletteAccent: return palette.color(QPalette::Highlight);
+        case config::StatusColorSource::Fixed: break;
+    }
+
+    auto const window = palette.color(QPalette::Window);
+    auto const background = vtbackend::RGBColor(static_cast<uint8_t>(window.red()),
+                                                static_cast<uint8_t>(window.green()),
+                                                static_cast<uint8_t>(window.blue()));
+    auto const dark = platform::colorSchemeOfBackground(background) == Qt::ColorScheme::Dark;
+    return QColor::fromRgb(dark ? row.dark : row.light);
+}
+
+QColor UiStyleProvider::paneDimColor() const
+{
+    return atOpacity(QColor(Qt::black), config::ChromeTokens::PaneDimPercent);
+}
+
+QColor UiStyleProvider::dotGlyphColor() const
+{
+    return atOpacity(QColor(Qt::black), config::ChromeTokens::DotGlyphPercent);
+}
+
+qreal UiStyleProvider::hostingNoticeFillAlpha() const noexcept
+{
+    return config::ChromeTokens::HostingNoticeFillPercent / 100.0;
+}
+
+qreal UiStyleProvider::hostingNoticeBorderAlpha() const noexcept
+{
+    return config::ChromeTokens::HostingNoticeBorderPercent / 100.0;
 }
 
 QColor UiStyleProvider::errorColor() const

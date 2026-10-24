@@ -276,7 +276,7 @@ RowLayout {
                             text: control.text
                             font: control.font
                             color: control.hovered && slot.modelData.hoverFill !== ""
-                                 ? "white" : systemPalette.windowText
+                                 ? systemPalette.highlightedText : systemPalette.windowText
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
@@ -314,9 +314,8 @@ RowLayout {
                                 text: root.glyphFor(slot.modelData)
                                 // Dark rather than palette-driven: the dot colors are fixed, light and
                                 // saturated in every theme, so the glyph's contrast is against the dot
-                                // and not against the window behind it. Qt reads an 8-digit hex color
-                                // as #AARRGGBB, NOT as CSS's #RRGGBBAA -- so the alpha leads.
-                                color: "#99000000"
+                                // and not against the window behind it.
+                                color: chromeStyle.dotGlyphColor
                                 font.pixelSize: Math.max(1, Math.round(dot.width * 0.7))
                             }
                         }

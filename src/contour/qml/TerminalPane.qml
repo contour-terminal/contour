@@ -198,7 +198,7 @@ ContourTerminal {
         color: pane.dimOverlayColor(pane.session ? pane.session.dimUnfocused : 0.0,
                                     pane.paneActive,
                                     Window.active,
-                                    pane.session ? pane.session.backgroundColor : "#000000")
+                                    pane.session ? pane.session.backgroundColor : "black")
         visible: color.a > 0
     }
 
@@ -210,15 +210,15 @@ ContourTerminal {
         anchors.fill: parent
         z: 6
         visible: pane.session ? pane.session.isReconnecting === true : false
-        color: Qt.rgba(0, 0, 0, 0.6)
+        color: chromeStyle.paneDimColor
         property alias text: reconnectingLabel.text
 
         Text {
             id: reconnectingLabel
             anchors.centerIn: parent
             text: qsTr("Reconnecting\u2026")
-            color: "white"
-            font.pixelSize: 18
+            color: pane.palette.brightText
+            font: chromeStyle.headlineFont
         }
     }
 
