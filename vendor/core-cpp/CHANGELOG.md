@@ -7,6 +7,68 @@ release may break the API; every break is listed under **Breaking** with a migra
 release tag `vX.Y.Z` equals the version in `project(core-cpp VERSION X.Y.Z)`, and the release
 workflow refuses one without a section here.
 
+## [0.9.0] - 2026-10-24
+
+### Breaking
+
+- **`core::log::Sink::console()` writes to standard error, not standard output.** Standard output is the program's
+  own and may carry data -- a program that speaks a binary protocol over its standard I/O had its frames corrupted
+  by a log line -- and every other destination core-cpp installs already wrote to standard error (`ScopedOutput`'s default,
+  `Sink::errorConsole()`). `core::cli::App`'s console formatter now colourises when standard error is a terminal,
+  and the test binaries' `LOG` output goes to standard error, beside Catch2's report on standard output.
+  - *Migration*: a program or script that read log lines from standard output reads them from standard error
+    (`2>&1` keeps them in one stream). A program that wants them on standard output installs a sink of its own:
+    `core::log::setSink(sink)` with `Sink { true, std::cout }`.
+
+### Added
+
+- **`core::log::installedSink()` and `installedFormatter()`**: the sink and formatter a category constructed now
+  starts out with, which `setSink()` and `setFormatter()` set. And **`Sink::isEnabled()`**.
+- **Durable file replacement on `core::platform::FileSystem`**: `createNewFile(path)`, `syncFile(path)`,
+  `replaceFile(from, to)` and `syncDirectory(directory)`, each `std::expected<void, std::string>`, are what replacing
+  a file so that it survives a crash or a power loss takes. `NativeFileSystem` creates with `O_CREAT | O_EXCL |
+  O_NOFOLLOW` and mode 0600 (`CREATE_NEW` with `FILE_FLAG_OPEN_REPARSE_POINT` on Windows), so a symbolic link planted where the file goes is refused
+  rather than followed; syncs with `fsync()` (`F_FULLFSYNC` on macOS, `FlushFileBuffers()` on Windows); replaces in
+  one step with `rename()` (`MoveFileExW()` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH` on Windows),
+  never through `rename()`'s two-hop lettercase retry; and syncs a directory with `fsync()` on it, which Windows has
+  no need of. The four are virtual with defaults, so an existing implementation still compiles: the defaults have
+  nothing to flush, replace through `rename()` and create after a check, which is what `InMemoryFileSystem` uses. A
+  `FileSystem` that forwards to another must override all four, or it answers from the defaults rather than from the
+  backend it forwards to.
+- **`core::platform::readMachineId()`** (`<core/platform/MachineId.hpp>`): the machine id from `/etc/machine-id`,
+  read through an injected `FileSystem`. It is returned lowercased, and only if it is exactly 32 hexadecimal
+  digits; a missing file, `uninitialized` or any other content gives `std::nullopt`. Not part of the
+  WebAssembly subset.
+- **Row marks: zero-width raw sequences anchored to canvas cells.** `Canvas::mark(row, column, sequence)` stores
+  a `RowMark` in the `Buffer` (`addMark()`, `marks()`, `clearMarks()`, cleared with the frame like images). The
+  inline screen writes a mark through `writeRaw` at its own column before repainting any cell of its segment --
+  from its column up to the next mark's on that row -- so a terminal that tags each written cell with the zone in
+  force (OSC 133 in Ghostty and WezTerm) stays correct across partial repaints. Marks are diffed like
+  hyperlinks: a row whose marks changed repaints whole; an otherwise unchanged row emits nothing. The fullscreen
+  and fixed viewports ignore marks.
+- **`TerminalOutput::deleteLines(n)`** writes DL (`CSI n M`). `MockTerminalOutput` records it (`deletedLines()`)
+  and every `writeRaw` with the cursor position it was made at (`rawWrites()`).
+
+### Changed
+
+- **The compiler cache follows fastcached's rename to Pace** (v0.6.0): a top-level build now looks for `pace-cc`
+  and a `pace-kv` daemon, and the compiler-cache options are `PACE_ADDR`, `PACE_AUTO_INSTALL` and
+  `PACE_AUTO_START` (formerly `FASTCACHE_*`); `FetchTransferBound.cmake`'s bounds are `PACE_FETCH_*`. Both
+  verbatim modules are re-synced from Pace (`CompileCache.cmake` at `46b563b0`, `FetchTransferBound.cmake` at
+  `892df2b1`). As a subproject, core-cpp's CPM bootstrap still honours a parent's
+  `FASTCACHED_FETCH_SILENCE_SECONDS`. Since Pace 0.6.0 publishes no `fastcached-*` archives, auto-install with
+  the old module fetched nothing.
+
+### Fixed
+
+- **A log category constructed after logging was installed wrote to the console, not to the installed sink.**
+  `core::log::setSink()` and `setFormatter()`, and so `ScopedOutput` and `core::cli::App`'s console setup, reached
+  only the categories that existed when they ran; a category constructed later -- created lazily, or in a
+  translation unit initialised late -- started out with `Sink::console()` and no formatter. Both are now the
+  store's: a later category starts out with what was installed last. `ScopedOutput` restores the store's previous
+  sink and formatter as well, and gives them to a category constructed while it was installed, so none is left
+  holding its destroyed sink; it also no longer writes through a category destroyed while it was installed.
+
 ## [0.8.0] - 2026-10-15
 
 ### Breaking
@@ -3306,7 +3368,8 @@ that names an upstream falls under exactly one row below; that table has the per
 
 | From | Commit | What |
 |---|---|---|
-| [fastcached](https://github.com/LASTRADA-Software/fastcached) | `f6ec49f3446b8bc121eba82c64cde2de759e774a` | `cmake/portable/CompileCache.cmake` and `cmake/FetchTransferBound.cmake`, verbatim |
+| [Pace](https://github.com/LASTRADA-Software/pace) (formerly fastcached) | `46b563b064fcdc1650f547b52f083bdb5089f871` | `cmake/portable/CompileCache.cmake`, verbatim |
+| [Pace](https://github.com/LASTRADA-Software/pace) (formerly fastcached) | `892df2b1b79134a02bf3925cb7a2cc251eb35822` | `cmake/FetchTransferBound.cmake`, verbatim |
 | [fastcached](https://github.com/LASTRADA-Software/fastcached) | `eb9c9c68da8fadfd43b0b36366919cb462689f48` | the bounded bootstrap download in `cmake/CPM.cmake`; the Windows error-popup suppression, merged into `SuppressWindowsDialogs`; the hook-name `IgnoredRegexp` of `.clang-tidy` |
 | [contour](https://github.com/contour-terminal/contour) | `6777ff05014f8ff163b071e8b0e942830119db80` | `.clang-format` and `.clang-tidy`, adapted; two copies of `SuppressWindowsDialogs`, merged; `LICENSE` |
 | [endo](https://github.com/contour-terminal/endo) | `f774a210ce989e5947b8f61d715068b1dc96088c` | `SuppressWindowsDialogsAtStartup.cpp`, `WindowsDialogCanary.cpp`, the CPM 0.40.8 pin; a copy of `SuppressWindowsDialogs`, merged; `.github/clang-tidy-matcher.json` |

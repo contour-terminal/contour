@@ -13,6 +13,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -81,24 +82,26 @@ struct OutputConfig
 
 /// @return Whether this process's standard output is a terminal.
 ///
-/// The colourisation gate for anything written there -- core::log::Sink::console(), and a help
-/// text. It is asked here, in one place, rather than spelled out at each call site: the Windows
-/// half of the branch that used to do the asking answered `true` unconditionally, so a redirected
-/// stream received SGR escapes.
+/// The colourisation gate for anything written there, such as a help text. It is asked here, in one place,
+/// rather than spelled out at each call site: the Windows half of the branch that used to do the asking
+/// answered `true` unconditionally, so a redirected stream received SGR escapes.
 [[nodiscard]] bool isStdOutTerminal() noexcept;
 
 /// @return Whether this process's standard error is a terminal.
 ///
-/// The gate for a destination that writes there, which can be redirected independently of
-/// standard output.
+/// The gate for a destination that writes there -- core::log::Sink::console() and ScopedOutput's
+/// default -- which can be redirected independently of standard output.
 [[nodiscard]] bool isStdErrTerminal() noexcept;
 
-/// Installs a process-wide log destination for its own lifetime, restoring the console
-/// defaults on destruction.
+/// Installs a process-wide log destination for its own lifetime, restoring what was installed
+/// before on destruction.
+///
+/// The destination is the store's (core::log::setSink()), so a category constructed while this is
+/// installed writes here too, not to the console.
 ///
 /// The restore is load-bearing, not tidiness: core::log::Category holds its sink as a
-/// std::reference_wrapper with NO lifetime management, so every category must be pointed back
-/// at a static sink before this object's sink dies.
+/// std::reference_wrapper with NO lifetime management, and so does the store, so every category
+/// and the store must be pointed back at the previous sink before this object's sink dies.
 ///
 /// Thread safety: the writer serialises the whole write-and-flush under a mutex. Sink does
 /// NOT do this — Sink::write() calls its writer unguarded, and the `<< text` / flush() pair
@@ -113,7 +116,8 @@ class ScopedOutput
 {
   public:
     /// Opens the configured destination (creating parent directories, appending to an existing
-    /// file), applies the filter, and points every registered category at the new sink.
+    /// file), applies the filter, and installs the new sink and formatters for every category,
+    /// registered now or later.
     /// @param config Where and what to log.
     /// @return The installed output, or a human-readable reason the file could not be opened.
     [[nodiscard]] static std::expected<std::unique_ptr<ScopedOutput>, std::string> create(
@@ -144,6 +148,10 @@ class ScopedOutput
     std::mutex _mutex;
     std::ofstream _file;
     Sink _sink;
+    /// The store's sink and formatter before this was installed, for the categories that have no
+    /// restore point and for the store itself.
+    std::reference_wrapper<Sink> _previousSink;
+    Category::Formatter _previousFormatter;
     std::vector<RestorePoint> _restorePoints;
 };
 

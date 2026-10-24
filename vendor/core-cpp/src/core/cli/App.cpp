@@ -333,9 +333,9 @@ void App::customizeLogStoreOutput()
 {
     core::log::Sink::console().setEnabled(true);
 
-    // console() writes to std::cout, so STDOUT is the right stream to ask about here.
+    // console() writes to std::cerr, so STDERR is the right stream to ask about here.
     // (A destination that writes elsewhere must gate on ITS stream — see core::log::ScopedOutput.)
-    static bool const colorized = core::log::isStdOutTerminal();
+    static bool const colorized = core::log::isStdErrTerminal();
 
     // The historical console shape: timestamped standard lines, and a bare `[error]` tag with
     // no timestamp for errors. Destinations that want the process id (or a timestamp on error

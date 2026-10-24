@@ -22,6 +22,11 @@
 /// A category is a process-wide object that registers itself by name, so a filter string
 /// (configure()) can enable a set of them by name, as `LOG=net.*` does for core-cpp's test
 /// binaries. Where the output goes and how a line looks is `<core/log/LogSink.hpp>`.
+///
+/// The sink and formatter last installed with setSink() and setFormatter() are the store's, not
+/// only those of the categories that existed then: a category constructed afterwards starts out
+/// with them too, so a category a library creates lazily -- or one in a translation unit whose
+/// static initialisation ran late -- writes where the program said logging goes.
 
 namespace core::log
 {
@@ -162,7 +167,14 @@ class Sink
 
     void setEnabled(bool enabled) { _enabled = enabled; }
 
-    /// The standard debug-logging sink: standard output, disabled until setEnabled(true).
+    /// @return Whether this sink writes what it is given.
+    [[nodiscard]] bool isEnabled() const noexcept { return _enabled; }
+
+    /// The standard debug-logging sink: standard error, disabled until setEnabled(true).
+    ///
+    /// Standard error rather than standard output, which is the program's own output: a program
+    /// whose standard output carries data -- a protocol, a pipeline's payload -- must not find log
+    /// lines in it. This is the sink installedSink() answers until a program installs another.
     static Sink& console();
     /// A sink to standard error, enabled.
     static Sink& errorConsole();
@@ -179,11 +191,24 @@ std::vector<std::reference_wrapper<Category>>& get();
 /// @return The category of that name, or nullptr if none exists.
 Category* get(std::string_view categoryName);
 
-/// Points every category that exists now at @p sink, which must outlive them or be replaced first.
+/// Points every category at @p sink: every one that exists now, and every one constructed from now on.
+///
+/// @p sink must outlive every category that uses it, or be replaced first.
+/// @param sink The sink to install.
 void setSink(Sink& sink);
 
-/// Gives every category that exists now the formatter @p f.
+/// Gives every category the formatter @p f: every one that exists now, and every one constructed
+/// from now on.
+/// @param f The formatter to install; an empty one writes the bare text.
 void setFormatter(Category::Formatter const& f);
+
+/// @return The sink a category constructed now starts out with: the one last given to setSink(),
+///         or Sink::console() before any was.
+[[nodiscard]] Sink& installedSink();
+
+/// @return The formatter a category constructed now starts out with: the one last given to
+///         setFormatter(), or an empty one before any was.
+[[nodiscard]] Category::Formatter const& installedFormatter();
 
 /// Enables (or disables) the category named @p categoryName, if it exists.
 void enable(std::string_view categoryName, bool enabled = true);
@@ -219,18 +244,6 @@ inline Category* get(std::string_view categoryName)
         if (cat.get().name() == categoryName)
             return &cat.get();
     return nullptr;
-}
-
-inline void setSink(Sink& s)
-{
-    for (auto const& cat: get())
-        cat.get().setSink(s);
-}
-
-inline void setFormatter(Category::Formatter const& f)
-{
-    for (auto const& cat: get())
-        cat.get().setFormatter(f);
 }
 
 inline void enable(std::string_view categoryName, bool enabled)
@@ -319,7 +332,10 @@ inline Category::Category(std::string_view name,
     _description { desc },
     _state { state },
     _visibility { visibility },
-    _sink { Sink::console() }
+    // What the program installed, not the console: a category constructed after the program set up
+    // its logging would otherwise still write to the console sink.
+    _formatter { installedFormatter() },
+    _sink { installedSink() }
 {
     assert(std::none_of(get().begin(), get().end(), [&](Category const& x) { return x.name() == _name; }));
     get().emplace_back(*this);

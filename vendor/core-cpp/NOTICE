@@ -69,8 +69,11 @@ fastcached
   - src/core/tui/runtime/TuiRuntime.hpp and TuiRuntime_test.cpp (from
     vendor/endo/tui/runtime/, adapted): endo f774a210 plus fastcached 6483abd8,
     which makes DelayAwaiter::await_ready() a constant
-  Imported at f6ec49f3446b8bc121eba82c64cde2de759e774a
+  Imported at 46b563b064fcdc1650f547b52f083bdb5089f871 (after the project's
+  rename to Pace, https://github.com/LASTRADA-Software/pace)
   - cmake/portable/CompileCache.cmake (verbatim)
+  Imported at 892df2b1b79134a02bf3925cb7a2cc251eb35822 (after the project's
+  rename to Pace)
   - cmake/FetchTransferBound.cmake (verbatim)
   Imported at 0708dd54dc7ee72622c8c0783c2bd4a06f0e9b21 (origin/master)
   - src/core/async/{ParkedWork,IExecutor,ResumeOn,ThreadPoolExecutor,AsyncQueue}.hpp

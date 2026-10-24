@@ -242,6 +242,85 @@ class ScopedRedirect
     int _fd;
     int _saved = -1;
 };
+
+/// Collects what is written to one of the standard streams for this object's lifetime.
+///
+/// Through the stream's buffer, not its descriptor, which is what a Sink built over the stream
+/// writes through. Keep the scope to the logging under test: Catch2 reports to std::cout as well.
+class ScopedStreamCapture
+{
+  public:
+    explicit ScopedStreamCapture(std::ostream& stream):
+        _stream { stream }, _saved { stream.rdbuf(_buffer.rdbuf()) }
+    {
+    }
+
+    ~ScopedStreamCapture() { _stream.rdbuf(_saved); }
+
+    ScopedStreamCapture(ScopedStreamCapture const&) = delete;
+    ScopedStreamCapture& operator=(ScopedStreamCapture const&) = delete;
+    ScopedStreamCapture(ScopedStreamCapture&&) = delete;
+    ScopedStreamCapture& operator=(ScopedStreamCapture&&) = delete;
+
+    /// @return Everything written to the stream so far.
+    [[nodiscard]] std::string text() const { return _buffer.str(); }
+
+  private:
+    std::ostream& _stream;
+    std::ostringstream _buffer;
+    std::streambuf* _saved;
+};
+
+/// Enables the console sink for this object's lifetime, so a line that reaches it is seen.
+///
+/// The console is disabled unless the test binary's LOG enabled it, and a disabled sink swallows a
+/// misrouted line as silently as a correct route writes nothing.
+class ScopedConsoleEnabled
+{
+  public:
+    ScopedConsoleEnabled(): _wasEnabled { core::log::Sink::console().isEnabled() }
+    {
+        core::log::Sink::console().setEnabled(true);
+    }
+
+    ~ScopedConsoleEnabled() { core::log::Sink::console().setEnabled(_wasEnabled); }
+
+    ScopedConsoleEnabled(ScopedConsoleEnabled const&) = delete;
+    ScopedConsoleEnabled& operator=(ScopedConsoleEnabled const&) = delete;
+    ScopedConsoleEnabled(ScopedConsoleEnabled&&) = delete;
+    ScopedConsoleEnabled& operator=(ScopedConsoleEnabled&&) = delete;
+
+  private:
+    bool _wasEnabled;
+};
+
+/// Installs a sink and a formatter with core::log::setSink() and setFormatter() for this object's
+/// lifetime, and puts back what was installed before however the test leaves.
+class ScopedInstall
+{
+  public:
+    ScopedInstall(core::log::Sink& sink, core::log::Category::Formatter const& formatter):
+        _previousSink { core::log::installedSink() }, _previousFormatter { core::log::installedFormatter() }
+    {
+        core::log::setSink(sink);
+        core::log::setFormatter(formatter);
+    }
+
+    ~ScopedInstall()
+    {
+        core::log::setSink(_previousSink);
+        core::log::setFormatter(_previousFormatter);
+    }
+
+    ScopedInstall(ScopedInstall const&) = delete;
+    ScopedInstall& operator=(ScopedInstall const&) = delete;
+    ScopedInstall(ScopedInstall&&) = delete;
+    ScopedInstall& operator=(ScopedInstall&&) = delete;
+
+  private:
+    core::log::Sink& _previousSink;
+    core::log::Category::Formatter _previousFormatter;
+};
 } // namespace
 
 TEST_CASE("parseLogFileSpec maps the standard-error spellings onto nullopt", "[log][logsink]")
@@ -681,4 +760,85 @@ TEST_CASE("a redirected standard stream is not a terminal", "[log][logsink]")
             SKIP("standard error could not be redirected");
         CHECK(!core::log::isStdErrTerminal());
     }
+}
+
+TEST_CASE("a category constructed after logging is installed writes to the installed sink", "[log][logsink]")
+{
+    // A program installed its logging and then created a category, which still wrote to the console
+    // sink: setSink() reached only the categories that existed when it was called. When standard
+    // output carries a binary protocol, one stray log line corrupts it.
+    auto installedText = std::string {};
+    auto installed = core::log::Sink { true, [&](std::string_view text) { installedText += text; } };
+    auto const console = ScopedConsoleEnabled {};
+    auto const install = ScopedInstall { installed, [](core::log::MessageBuilder const& message) {
+                                            return std::format("<installed> {}\n", message.text());
+                                        } };
+
+    auto late = TestCategory { "test.late" };
+    CHECK(&late.value.sink() == &installed);
+    {
+        auto const out = ScopedStreamCapture { std::cout };
+        auto const err = ScopedStreamCapture { std::cerr };
+        late.value()("after installation");
+        CHECK(out.text().empty());
+        CHECK(err.text().empty());
+    }
+    CHECK(installedText == "<installed> after installation\n");
+}
+
+TEST_CASE("a category constructed while a ScopedOutput is installed writes to its file", "[log][logsink]")
+{
+    auto const log = ScratchLog { "late" };
+    auto const* const before = &core::log::installedSink();
+    auto const console = ScopedConsoleEnabled {};
+    {
+        auto output = core::log::ScopedOutput::create({ .file = log.path() });
+        REQUIRE(output.has_value());
+
+        auto late = TestCategory { "test.lateoutput" };
+        {
+            auto const out = ScopedStreamCapture { std::cout };
+            auto const err = ScopedStreamCapture { std::cerr };
+            late.value()("into the file");
+            CHECK(out.text().empty());
+            CHECK(err.text().empty());
+        }
+    }
+    CHECK(&core::log::installedSink() == before);
+
+    auto stream = std::ifstream { log.path() };
+    REQUIRE(stream.is_open());
+    auto const contents = contentsOf(stream);
+    CHECK(contents.contains("into the file"));
+    CHECK(contents.contains("[test.lateoutput]"));
+}
+
+TEST_CASE("a ScopedOutput gives a category constructed under it the previous sink back", "[log][logsink]")
+{
+    // The category outlives the output, and must not be left holding a reference into the output's
+    // destroyed sink.
+    auto const* const before = &core::log::installedSink();
+    auto const log = ScratchLog { "laterestore" };
+    auto output = core::log::ScopedOutput::create({ .file = log.path() });
+    REQUIRE(output.has_value());
+    auto late = TestCategory { "test.laterestore" };
+    CHECK(&late.value.sink() != before);
+
+    output->reset();
+    CHECK(&late.value.sink() == before);
+    CHECK(&core::log::installedSink() == before);
+}
+
+TEST_CASE("the console sink writes to standard error, never to standard output", "[log][logsink]")
+{
+    // Standard output is the program's own, and may carry data; a log line belongs on stderr.
+    auto category = TestCategory { "test.console" };
+    category.value.setSink(core::log::Sink::console());
+    auto const console = ScopedConsoleEnabled {};
+
+    auto const out = ScopedStreamCapture { std::cout };
+    auto const err = ScopedStreamCapture { std::cerr };
+    category.value()("to the console");
+    CHECK(out.text().empty());
+    CHECK(err.text().contains("to the console"));
 }

@@ -208,6 +208,116 @@ class FileSystem
     // Temp files
     [[nodiscard]] virtual std::expected<std::filesystem::path, std::string> createTempFile(
         std::string_view prefix) const = 0;
+
+    // Durability
+    //
+    // What replacing a file so that it survives a crash or a power loss takes: create the new
+    // content under a temporary name with createNewFile(), write it, syncFile() it, replaceFile() it
+    // over the old name, and syncDirectory() the directory both live in. A rename alone can reach
+    // the disk before the data it names, and the next start then finds an empty or partial file
+    // where the last good one was.
+    //
+    // These four are virtual with defaults rather than pure, so an implementation written before
+    // they existed still compiles. The defaults are what a backend with no stable storage of its
+    // own needs -- the in-memory model, a test double: nothing to flush, a rename that already
+    // replaces, and an exclusive create checked rather than atomic. A backend over real storage
+    // overrides all four, as NativeFileSystem does, and so does one that forwards to another
+    // FileSystem, or it answers from these defaults rather than from the backend it forwards to.
+
+    /// @brief Creates @p path as an empty file, failing when anything is there already.
+    ///
+    /// A symbolic link at @p path counts as something there, dangling or not, and is never
+    /// followed, so a link planted where a temporary file is about to go cannot redirect the write.
+    /// The file is readable and writable by its owner only (mode 0600 on POSIX).
+    ///
+    /// The default checks and then writes, which is exclusive only where no other writer races it.
+    ///
+    /// @param path The file to create.
+    /// @return Nothing, or why it could not be created.
+    [[nodiscard]] virtual std::expected<void, std::string> createNewFile(
+        std::filesystem::path const& path) const
+    {
+        auto const refuse = [&](std::errc reason) -> std::expected<void, std::string> {
+            return std::unexpected(std::format(
+                "Cannot create '{}': {}", core::pathToUtf8(path), std::make_error_code(reason).message()));
+        };
+        if (exists(path) || isSymlink(path))
+            return refuse(std::errc::file_exists);
+        // As open(O_CREAT) does, and unlike writeFile() in the in-memory model, which creates
+        // missing parents.
+        if (auto const parent = path.parent_path(); !parent.empty() && !isDirectory(parent))
+            return refuse(std::errc::no_such_file_or_directory);
+        if (auto written = writeFile(path, {}); !written)
+            return written;
+        return setPermissions(path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    }
+
+    /// @brief Flushes what was written to @p path to stable storage.
+    ///
+    /// fsync() on POSIX and, on macOS, fcntl(F_FULLFSYNC), since its fsync() reaches the drive
+    /// but not past the drive's cache; FlushFileBuffers() on Windows. Whichever stream or handle
+    /// wrote the content, it must be closed or flushed first: this flushes the operating system's
+    /// buffers, not a stream's.
+    ///
+    /// The default has nothing to flush, and answers whether @p path is a file.
+    ///
+    /// @param path The existing file.
+    /// @return Nothing, or why it could not be synced.
+    [[nodiscard]] virtual std::expected<void, std::string> syncFile(std::filesystem::path const& path) const
+    {
+        if (!isRegularFile(path))
+            return std::unexpected(
+                std::format("Cannot sync '{}': {}",
+                            core::pathToUtf8(path),
+                            std::make_error_code(isDirectory(path) ? std::errc::is_a_directory
+                                                                   : std::errc::no_such_file_or_directory)
+                                .message()));
+        return {};
+    }
+
+    /// @brief Renames @p from over @p to atomically, replacing whatever @p to was.
+    ///
+    /// A reader sees either the old file or the new one at @p to, never neither and never a mix.
+    /// rename() on POSIX; MoveFileExW() with MOVEFILE_REPLACE_EXISTING and MOVEFILE_WRITE_THROUGH
+    /// on Windows, which returns only once the move is on the disk. On POSIX the move reaches
+    /// the disk with syncDirectory() on the directory that holds @p to.
+    ///
+    /// NativeFileSystem's never takes two steps, as its rename() does for a lettercase-only
+    /// rename on a volume that refuses one: a reader could find neither name in between.
+    ///
+    /// The default is rename().
+    ///
+    /// @param from The file to move, synced first with syncFile() when it must survive a power loss.
+    /// @param to The file it replaces, if there is one.
+    /// @return Nothing, or why it could not be replaced.
+    [[nodiscard]] virtual std::expected<void, std::string> replaceFile(std::filesystem::path const& from,
+                                                                       std::filesystem::path const& to) const
+    {
+        return rename(from, to);
+    }
+
+    /// @brief Flushes the entries of @p directory to stable storage, so that a file created,
+    ///        renamed or removed in it survives a power loss.
+    ///
+    /// fsync() on the directory on POSIX. On Windows, where replaceFile() wrote through already,
+    /// nothing is flushed, and only whether @p directory is a directory is answered.
+    ///
+    /// The default has nothing to flush, and answers whether @p directory is a directory.
+    ///
+    /// @param directory The existing directory.
+    /// @return Nothing, or why it could not be synced.
+    [[nodiscard]] virtual std::expected<void, std::string> syncDirectory(
+        std::filesystem::path const& directory) const
+    {
+        if (!isDirectory(directory))
+            return std::unexpected(
+                std::format("Cannot sync directory '{}': {}",
+                            core::pathToUtf8(directory),
+                            std::make_error_code(exists(directory) ? std::errc::not_a_directory
+                                                                   : std::errc::no_such_file_or_directory)
+                                .message()));
+        return {};
+    }
 };
 
 } // namespace core::platform

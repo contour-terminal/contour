@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25...3.31)
 
 # The version literal is the source of truth; a release tag must equal it.
 project(core-cpp
-    VERSION 0.8.0
+    VERSION 0.9.0
     DESCRIPTION "Shared C++23 foundation libraries of the Contour Terminal projects"
     HOMEPAGE_URL "https://github.com/contour-terminal/core-cpp"
     LANGUAGES CXX)

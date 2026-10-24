@@ -31,7 +31,7 @@ class TotalsListener final: public Catch::EventListenerBase
 
 /// Applies the filter in @p environment's LOG to core::log, as endo's test mains do: `LOG=net`
 /// enables the `net` category, disables every other one but `error`, and writes them to standard
-/// output. An unset or empty LOG leaves the categories as they are.
+/// error. An unset or empty LOG leaves the categories as they are.
 void applyLogFilter(core::Environment const& environment)
 {
     auto const filter = environment.get("LOG");

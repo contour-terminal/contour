@@ -4,6 +4,7 @@
 #include <core/Escape.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/platform/PathUtils.hpp>
+#include <core/platform/detail/DurableFiles.hpp>
 
 #include <cerrno>
 #include <cstdlib>
@@ -530,6 +531,38 @@ std::expected<fs::path, std::string> NativeFileSystem::createTempFile(std::strin
     ::close(fd);
     return fs::path(templateStr);
 #endif
+}
+
+// The four durability calls are the operating system's own, in detail/DurableFiles.hpp's posix/ and
+// windows/ implementations; what is phrased here is only the message.
+
+std::expected<void, std::string> NativeFileSystem::createNewFile(fs::path const& path) const
+{
+    return detail::createNewFile(path).transform_error([&](std::error_code const& ec) {
+        return std::format("Cannot create '{}': {}", core::pathToUtf8(path), ec.message());
+    });
+}
+
+std::expected<void, std::string> NativeFileSystem::syncFile(fs::path const& path) const
+{
+    return detail::syncFile(path).transform_error([&](std::error_code const& ec) {
+        return std::format("Cannot sync '{}': {}", core::pathToUtf8(path), ec.message());
+    });
+}
+
+std::expected<void, std::string> NativeFileSystem::replaceFile(fs::path const& from, fs::path const& to) const
+{
+    return detail::replaceFile(from, to).transform_error([&](std::error_code const& ec) {
+        return std::format(
+            "Cannot rename '{}' to '{}': {}", core::pathToUtf8(from), core::pathToUtf8(to), ec.message());
+    });
+}
+
+std::expected<void, std::string> NativeFileSystem::syncDirectory(fs::path const& directory) const
+{
+    return detail::syncDirectory(directory).transform_error([&](std::error_code const& ec) {
+        return std::format("Cannot sync directory '{}': {}", core::pathToUtf8(directory), ec.message());
+    });
 }
 
 } // namespace core::platform
