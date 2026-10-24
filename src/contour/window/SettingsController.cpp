@@ -1593,14 +1593,14 @@ namespace
                               "Word delimiters",
                               "Characters that separate words when selecting by double-click.",
                               [](config::Config const& c) { return c.wordDelimiters.value(); }),
-            // Reuse the std::formatter<GuiTheme> (the "system"/"dark"/"light" source of truth) rather than
-            // re-switching the enum here, matching the std::format idiom used for modifiers/keys.
+            // Reuse the std::formatter<GuiTheme> (the "terminal"/"system"/"dark"/"light" source of truth)
+            // rather than re-switching the enum here, matching the std::format idiom used for modifiers/keys.
             globalEnumField("theme",
                             "GUI theme",
-                            "Light/dark appearance of the GUI chrome (menus, tabs, dialogs). The terminal "
-                            "keeps following the OS.",
+                            "Light/dark appearance of the GUI chrome (menus, tabs, dialogs). 'terminal' "
+                            "matches the terminal's background; 'system' follows the OS.",
                             [](config::Config const& c) { return std::format("{}", c.theme.value()); },
-                            { "system", "dark", "light" }),
+                            { "terminal", "system", "dark", "light" }),
             // Both tab bar rows read their options, their rendered value and their accepted set from
             // contour/TabBarMode.h, so the page cannot offer a token the configuration reader would
             // then reject -- and a new mode shows up here with this file untouched.

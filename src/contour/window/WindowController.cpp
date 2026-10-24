@@ -71,7 +71,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     // which is the answer Win32 needs for the border DWM draws around the rounded corners, and the
     // reason this is injected rather than read from a global at the point of use.
     _nativeFrame = platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme {
-        if (auto const configured = platform::qtColorSchemeFor(_manager.app().config().theme.value()))
+        if (auto const configured = platform::qtColorSchemeFor(_manager.app().config().theme.value(),
+                                                               _manager.app().defaultProfileColors()))
             return *configured;
         return QGuiApplication::styleHints()->colorScheme();
     });
@@ -87,7 +88,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
                 errorLog()("Failed to reload configuration. {}", reloaded.error());
             // Re-apply the GUI chrome theme live: a settings-page change to `theme` is already in the
             // reloaded Config, so the chrome recolors without a restart.
-            _manager.app().applyGuiTheme(_manager.app().config().theme.value());
+            _manager.app().applyGuiTheme(_manager.app().config().theme.value(),
+                                         _manager.app().defaultProfileColors());
             // Likewise for `window_control_style`: which corner the min/max/close buttons sit in,
             // and what shape they take, are QML bindings on the provider, so they re-evaluate the
             // moment it says so. Application-wide, so every open window follows.

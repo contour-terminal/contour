@@ -686,7 +686,7 @@ TEST_CASE("SettingsController: the global theme enum field round-trips with its 
             options = row.toMap().value("options").toStringList();
         }
     CHECK(type == "enum");
-    CHECK(options == QStringList { "system", "dark", "light" });
+    CHECK(options == QStringList { "terminal", "system", "dark", "light" });
 
     // Selecting a value persists it as the corresponding enum on the live config.
     REQUIRE(fx.controller->setGlobalField("theme", "dark"));
@@ -694,6 +694,9 @@ TEST_CASE("SettingsController: the global theme enum field round-trips with its 
 
     REQUIRE(fx.controller->setGlobalField("theme", "system"));
     CHECK(fx.cfg.theme.value() == config::GuiTheme::System);
+
+    REQUIRE(fx.controller->setGlobalField("theme", "terminal"));
+    CHECK(fx.cfg.theme.value() == config::GuiTheme::Terminal);
 }
 
 TEST_CASE("SettingsController: the tab bar fields are global and offer their table's tokens", "[settings]")

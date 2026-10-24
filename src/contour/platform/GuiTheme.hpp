@@ -3,15 +3,30 @@
 
 #include <contour/config/Config.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <QtCore/Qt>
 #include <QtGui/QColor>
 #include <QtGui/QPalette>
 
 #include <array>
 #include <optional>
+#include <variant>
 
 namespace contour::platform
 {
+
+/// The luminance below which a terminal background reads as dark (WCAG relative luminance, 0 to 1).
+inline constexpr double DarkBackgroundLuminance = 0.18;
+
+/// Whether a terminal background of the given color calls for a dark or a light chrome.
+/// @param background The terminal's default background color.
+/// @return @c Dark when its relative luminance is below @c DarkBackgroundLuminance, else @c Light.
+[[nodiscard]] inline Qt::ColorScheme colorSchemeOfBackground(vtbackend::RGBColor background) noexcept
+{
+    return vtbackend::relativeLuminance(background) < DarkBackgroundLuminance ? Qt::ColorScheme::Dark
+                                                                              : Qt::ColorScheme::Light;
+}
 
 /// Maps the configured GUI theme to the Qt color-scheme override that should be applied to the
 /// application's chrome (title bar, tab strip, command palette, settings pages, dialogs).
@@ -21,15 +36,22 @@ namespace contour::platform
 /// @c QStyleHints::setColorScheme / @c unsetColorScheme.
 ///
 /// @param theme The configured GUI theme.
-/// @return The Qt color scheme to force, or @c std::nullopt for @c GuiTheme::System (defer to the
-///         operating system's color scheme, i.e. @c unsetColorScheme).
-[[nodiscard]] constexpr std::optional<Qt::ColorScheme> qtColorSchemeFor(config::GuiTheme theme) noexcept
+/// @param colors The default profile's color configuration, consulted for @c GuiTheme::Terminal.
+/// @return The Qt color scheme to force, or @c std::nullopt to defer to the operating system's color
+///         scheme (i.e. @c unsetColorScheme): for @c GuiTheme::System, and for @c GuiTheme::Terminal
+///         over a dual (dark/light) color configuration, which already follows the OS.
+[[nodiscard]] inline std::optional<Qt::ColorScheme> qtColorSchemeFor(
+    config::GuiTheme theme, config::ColorConfig const& colors) noexcept
 {
     switch (theme)
     {
         case config::GuiTheme::System: return std::nullopt;
         case config::GuiTheme::Dark: return Qt::ColorScheme::Dark;
         case config::GuiTheme::Light: return Qt::ColorScheme::Light;
+        case config::GuiTheme::Terminal:
+            if (auto const* simple = std::get_if<config::SimpleColorConfig>(&colors))
+                return colorSchemeOfBackground(simple->colors.defaultBackground);
+            return std::nullopt;
     }
     return std::nullopt;
 }

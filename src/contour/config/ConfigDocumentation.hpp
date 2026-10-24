@@ -1093,9 +1093,11 @@ constexpr StringLiteral ThemeConfig {
     "\n"
     "{comment} Light/dark appearance of the GUI chrome (title bar, tab strip, command palette,\n"
     "{comment} settings pages, dialogs), independent of the terminal grid (ignore-case):\n"
-    "{comment}   system = follow the operating system's color scheme (default).\n"
-    "{comment}   dark   = force a dark GUI appearance regardless of the OS.\n"
-    "{comment}   light  = force a light GUI appearance regardless of the OS.\n"
+    "{comment}   terminal = follow the terminal's background: dark chrome over a dark background,\n"
+    "{comment}              light over a light one (default).\n"
+    "{comment}   system   = follow the operating system's color scheme.\n"
+    "{comment}   dark     = force a dark GUI appearance regardless of the OS.\n"
+    "{comment}   light    = force a light GUI appearance regardless of the OS.\n"
     "{comment} The terminal grid keeps following the OS light/dark preference via its color scheme.\n"
     "theme: {}\n"
 };
@@ -2085,9 +2087,10 @@ constexpr StringLiteral GuiConfigLockedWeb {
 
 constexpr StringLiteral ThemeWeb {
     "option selects the light/dark appearance of the GUI chrome (title bar, tab strip, command palette, "
-    "settings pages, dialogs) independently of the operating system. Possible values are `system` "
-    "(follow the OS color scheme), `dark`, and `light`. The terminal grid keeps following the OS "
-    "light/dark preference through its own color scheme. The default value is `system`."
+    "settings pages, dialogs) independently of the operating system. Possible values are `terminal` "
+    "(follow the terminal's background), `system` (follow the OS color scheme), `dark`, and `light`. "
+    "The terminal grid keeps following the OS light/dark preference through its own color scheme. "
+    "The default value is `terminal`."
 };
 
 constexpr StringLiteral BypassMouseProtocolModifiersWeb {

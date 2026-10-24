@@ -750,6 +750,7 @@ if(CONTOUR_FRONTEND_GUI)
             test/test_main.cpp
             remote/RemoteController_test.cpp
             platform/AudioNote_test.cpp
+            platform/GuiTheme_test.cpp
             platform/MultimediaEnvironment_test.cpp
             test/BenignQtMessages_test.cpp
             config/GpuSelector_test.cpp

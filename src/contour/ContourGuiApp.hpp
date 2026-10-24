@@ -459,10 +459,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// color scheme, so while pinned the grid reflects the OS scheme captured at startup; a live OS
     /// switch is tracked only in @c System mode (see the @c colorSchemeChanged handler in @c run()).
     /// Safe to call at startup and live (e.g. from the settings page).
+    /// @c GuiTheme::Terminal forces the scheme the terminal background's luminance calls for.
     /// @param theme The GUI theme to apply.
+    /// @param colors The default profile's color configuration, which @c GuiTheme::Terminal reads.
     /// @note On Qt older than 6.8 (no @c QStyleHints::setColorScheme) this is a no-op and the GUI
     ///       follows the OS unconditionally.
-    void applyGuiTheme(config::GuiTheme theme);
+    void applyGuiTheme(config::GuiTheme theme, config::ColorConfig const& colors);
+
+    /// The color configuration of the default profile, which @c GuiTheme::Terminal follows.
+    [[nodiscard]] config::ColorConfig const& defaultProfileColors() const noexcept
+    {
+        return _config.profile().colors.value();
+    }
 
     /// Re-points the window controls at @p style, resolving @c Auto against this host.
     ///

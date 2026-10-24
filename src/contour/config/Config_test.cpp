@@ -3301,7 +3301,7 @@ TEST_CASE("Config: theme parses each value (ignore-case)", "[config]")
 {
     using contour::config::GuiTheme;
 
-    SECTION("default is System (follow the OS color scheme)")
+    SECTION("default is Terminal (follow the terminal background)")
     {
         QTemporaryDir dir;
         auto const config = loadFromYaml(dir, R"(
@@ -3310,7 +3310,20 @@ profiles:
     main:
         shell: /bin/sh
 )"sv);
-        CHECK(config.theme.value() == GuiTheme::System);
+        CHECK(config.theme.value() == GuiTheme::Terminal);
+    }
+
+    SECTION("terminal")
+    {
+        QTemporaryDir dir;
+        auto const config = loadFromYaml(dir, R"(
+default_profile: main
+theme: Terminal
+profiles:
+    main:
+        shell: /bin/sh
+)"sv);
+        CHECK(config.theme.value() == GuiTheme::Terminal);
     }
 
     SECTION("dark")
@@ -3359,7 +3372,7 @@ TEST_CASE("Config: an invalid theme value falls back to the default", "[config]"
 
     QTemporaryDir dir;
     // A typo in a visible appearance setting must not silently pass; the reader errorLog()s and keeps
-    // the compiled-in default (System) rather than aborting the whole config load.
+    // the compiled-in default (Terminal) rather than aborting the whole config load.
     auto const config = loadFromYaml(dir, R"(
 default_profile: main
 theme: midnight
@@ -3367,18 +3380,7 @@ profiles:
     main:
         shell: /bin/sh
 )"sv);
-    CHECK(config.theme.value() == GuiTheme::System);
-}
-
-TEST_CASE("GuiTheme: qtColorSchemeFor maps each theme to a Qt color-scheme override", "[config]")
-{
-    using contour::config::GuiTheme;
-    using contour::platform::qtColorSchemeFor;
-
-    // System defers to the OS (unsetColorScheme), so no override is produced.
-    CHECK_FALSE(qtColorSchemeFor(GuiTheme::System).has_value());
-    CHECK(qtColorSchemeFor(GuiTheme::Dark) == Qt::ColorScheme::Dark);
-    CHECK(qtColorSchemeFor(GuiTheme::Light) == Qt::ColorScheme::Light);
+    CHECK(config.theme.value() == GuiTheme::Terminal);
 }
 
 TEST_CASE("GuiTheme: buildThemePalette forces a legible dark/light chrome palette", "[config]")
@@ -6094,7 +6096,7 @@ std::optional<vtbackend::RGBColor>& blockStatusHoverOf(vtbackend::ColorPalette& 
 TEST_CASE("Config: each gutter color a scheme sets is written back on its own", "[config]")
 {
     // One key at a time, so a key the writer skips, or spells as another, shows up as exactly that key.
-    using Slot = std::optional<vtbackend::RGBColor>& (*) (vtbackend::ColorPalette&);
+    using Slot = std::optional<vtbackend::RGBColor>& (*)(vtbackend::ColorPalette&);
     auto constexpr Slots = std::array {
         std::pair { "block_status.success"sv,
                     Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Success> } },

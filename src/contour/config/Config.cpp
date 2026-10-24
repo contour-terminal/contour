@@ -3460,6 +3460,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
             return GuiTheme::Dark;
         if (literal == "light")
             return GuiTheme::Light;
+        if (literal == "terminal")
+            return GuiTheme::Terminal;
         return std::nullopt;
     };
 

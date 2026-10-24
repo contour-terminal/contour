@@ -124,14 +124,16 @@ enum class PixelReporting : uint8_t
 ///
 /// This affects the GUI elements only; the terminal grid keeps following the OS light/dark
 /// preference through its per-profile color scheme. @c System defers to the operating
-/// system's color scheme (the historical behavior).
+/// system's color scheme (the historical behavior); @c Terminal follows the terminal's own
+/// background (the default).
 /// @note Exposed to QML/Settings as the lower-case strings produced by
 ///       @c std::formatter<GuiTheme>; the reader parses them case-insensitively.
 enum class GuiTheme : uint8_t
 {
-    System, //!< Follow the operating system's light/dark color scheme (default).
-    Dark,   //!< Force a dark GUI appearance regardless of the OS.
-    Light,  //!< Force a light GUI appearance regardless of the OS.
+    System,   //!< Follow the operating system's light/dark color scheme.
+    Dark,     //!< Force a dark GUI appearance regardless of the OS.
+    Light,    //!< Force a light GUI appearance regardless of the OS.
+    Terminal, //!< Follow the luminance of the terminal's background (default).
 };
 
 enum class Permission : uint8_t
@@ -1629,7 +1631,9 @@ struct Config
         TabBarVisibility::Always
     };
     ConfigEntry<bool, documentation::GuiConfigLocked> guiConfigLocked { false };
-    ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme { contour::config::GuiTheme::System };
+    ConfigEntry<contour::config::GuiTheme, documentation::Theme> theme {
+        contour::config::GuiTheme::Terminal
+    };
     // Like the tab bar above, the chrome style belongs to the APPLICATION rather than to a profile: a
     // window paints one tab strip and one set of menus while its panes may each run a different
     // profile, so asking a profile which style the chrome wears has no answer when they disagree.
@@ -3385,6 +3389,7 @@ struct std::formatter<contour::config::GuiTheme>: formatter<std::string_view>
             case contour::config::GuiTheme::System: name = "system"; break;
             case contour::config::GuiTheme::Dark: name = "dark"; break;
             case contour::config::GuiTheme::Light: name = "light"; break;
+            case contour::config::GuiTheme::Terminal: name = "terminal"; break;
         }
         return formatter<std::string_view>::format(name, ctx);
     }

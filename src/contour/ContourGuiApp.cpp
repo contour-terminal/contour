@@ -1646,11 +1646,11 @@ void ContourGuiApp::onExit(session::TerminalSession& session)
 #endif
 }
 
-void ContourGuiApp::applyGuiTheme(config::GuiTheme theme)
+void ContourGuiApp::applyGuiTheme(config::GuiTheme theme, config::ColorConfig const& colors)
 {
     // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
     // std::nullopt for system.
-    auto const scheme = platform::qtColorSchemeFor(theme);
+    auto const scheme = platform::qtColorSchemeFor(theme, colors);
 
     // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
     // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the
@@ -2054,9 +2054,10 @@ int ContourGuiApp::terminalGuiAction()
     connect(
         QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [this](Qt::ColorScheme newScheme) {
             // Only the terminal grid tracks the OS here, and only while the GUI theme defers to the
-            // system (theme: system). When the GUI theme is force-pinned (dark/light), colorScheme()
-            // reflects our own override, which must not move the terminal palette.
-            if (_config.theme.value() != config::GuiTheme::System)
+            // system (theme: system, or terminal over a dual color config). When the GUI theme is
+            // force-pinned, colorScheme() reflects our own override, which must not move the terminal
+            // palette.
+            if (_guiPaletteOverridden)
                 return;
 
             auto const newValue = newScheme == Qt::ColorScheme::Dark ? vtbackend::ColorPreference::Dark
@@ -2072,7 +2073,7 @@ int ContourGuiApp::terminalGuiAction()
 
     // Apply the configured GUI chrome theme (dark/light/system). Must run after the OS scheme has
     // been captured above and before the first QQuickWindow is created, so the chrome opens themed.
-    applyGuiTheme(_config.theme.value());
+    applyGuiTheme(_config.theme.value(), defaultProfileColors());
 
     // Pin the Fusion Qt Quick Controls style app-wide so the hand-drawn tab strip, its controls, and the
     // tab context menu render, blend, and stay readable on every OS. Qt otherwise picks the native style
@@ -2089,11 +2090,10 @@ int ContourGuiApp::terminalGuiAction()
     //
     // This is why `ui_style` takes effect on the next start rather than live: the style is resolved
     // once, here, before the first control exists, and Qt offers no way to re-resolve it afterwards.
-    _chromeStyle = config::resolveChromeStyle(_config.uiStyle.value(),
-                                              config::detectHostPlatform(processEnvironment()));
+    _chromeStyle =
+        config::resolveChromeStyle(_config.uiStyle.value(), config::detectHostPlatform(processEnvironment()));
     QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
-    QQuickStyle::setStyle(
-        QString::fromUtf8(config::uiStyleTokens(_chromeStyle).quickControlsStyle));
+    QQuickStyle::setStyle(QString::fromUtf8(config::uiStyleTokens(_chromeStyle).quickControlsStyle));
 
     // Select the Qt RHI graphics API from the configured renderer backend, before the first
     // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
