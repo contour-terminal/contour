@@ -164,6 +164,8 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
     auto const cases = std::array {
         Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml"),
                QVariantMap { { "text", QStringLiteral("Contour has new defaults") } } },
+        Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
+               QVariantMap { { "text", QStringLiteral("Copied 3 lines") } } },
     };
 
     for (auto const& testCase: cases)

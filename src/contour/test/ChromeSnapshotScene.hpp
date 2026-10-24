@@ -27,13 +27,17 @@
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
+#include <QtCore/QUrl>
+#include <QtCore/QVariantMap>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 #include <QtGui/QPalette>
 #include <QtGui/QStyleHints>
+#include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
+#include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -198,6 +202,7 @@ class ChromeSnapshotScene
                 REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, 2000));
                 break;
             }
+            case ScriptAction::ShowToast: showToast(); break;
         }
         _incubation.settle();
         QCoreApplication::processEvents();
@@ -229,6 +234,12 @@ class ChromeSnapshotScene
   private:
     /// How many recent commands the palette remembers, as MockPaletteController remembers them.
     static constexpr std::size_t PaletteHistoryCapacity = 5;
+
+    /// The toast's message.
+    static inline auto const ToastText = QStringLiteral("Copied 3 lines");
+
+    /// What halves a length to centre an item.
+    static constexpr qreal HalfDivisor = 2;
 
     /// The leaf that holds focus in every pane shape.
     static constexpr std::size_t ActiveLeaf = 0;
@@ -322,6 +333,23 @@ class ChromeSnapshotScene
         return nullptr;
     }
 
+    /// Creates the toast over the content, centred horizontally at its top, and shows it.
+    void showToast()
+    {
+        auto component = QQmlComponent(&_engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml")));
+        INFO("Toast.qml errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        auto overlay = std::unique_ptr<QObject>(component.createWithInitialProperties(
+            QVariantMap { { QStringLiteral("text"), ToastText }, { QStringLiteral("shown"), true } }));
+        auto* item = qobject_cast<QQuickItem*>(overlay.get());
+        REQUIRE(item != nullptr);
+        auto* content = window().contentItem();
+        item->setParentItem(content);
+        item->setX((content->width() - item->implicitWidth()) / HalfDivisor);
+        item->setWidth(item->implicitWidth());
+        _overlay = std::move(overlay);
+    }
+
     /// Loads Main.qml against the controller under the variant's chrome row.
     [[nodiscard]] std::unique_ptr<QObject> load()
     {
@@ -331,6 +359,10 @@ class ChromeSnapshotScene
             .font = _chromeFont,
             .windowControls = config::resolveWindowControlStyle(config::WindowControlStyle::Auto,
                                                                 rowHost(_variant.row).host),
+            .accessibility = {},
+            .appearance = {},
+            .scheme = config::chromeSchemeColorsOf(
+                *config::preferredColorPalette(config::defaultColors(_variant.edition), _variant.appearance)),
         };
         auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
         REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
@@ -354,7 +386,8 @@ class ChromeSnapshotScene
     MockMainController _controller;
     QQmlEngine _engine;
     IncubationDriver _incubation;
-    std::unique_ptr<QObject> _root; ///< Last: the QML tree dies before everything it borrows.
+    std::unique_ptr<QObject> _root;    ///< The QML tree dies before everything it borrows.
+    std::unique_ptr<QObject> _overlay; ///< Last: the toast, parented into _root's tree, dies first.
 };
 
 } // namespace contour::test::snapshot

@@ -32,6 +32,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 
@@ -85,6 +86,18 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                     scene.root().findChild<QQuickItem*>(QStringLiteral("reconnectingOverlay"));
                 REQUIRE(overlay != nullptr);
                 CHECK(overlay->isVisible());
+                break;
+            }
+            case SnapshotScript::Toast: {
+                // The toast is a visual child of the content item, not a QObject child of the root.
+                auto const items = scene.window().contentItem()->childItems();
+                auto const toast = std::ranges::find_if(items, [](QQuickItem const* item) {
+                    return item->objectName() == QStringLiteral("toast");
+                });
+                REQUIRE(toast != items.end());
+                auto const* text = (*toast)->findChild<QObject*>(QStringLiteral("toastText"));
+                REQUIRE(text != nullptr);
+                CHECK(text->property("text").toString() == QStringLiteral("Copied 3 lines"));
                 break;
             }
             case SnapshotScript::SingleTab: break;

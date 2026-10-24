@@ -5932,6 +5932,93 @@ TEST_CASE("Banner: the Terminal row is the content's height in the scheme's pale
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+namespace
+{
+/// Creates the Toast under @p engine with @p initialProperties.
+[[nodiscard]] std::unique_ptr<QObject> createToast(QQmlEngine& engine, QVariantMap const& initialProperties)
+{
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml")));
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto toast = std::unique_ptr<QObject>(component.createWithInitialProperties(initialProperties));
+    REQUIRE(toast != nullptr);
+    QCoreApplication::processEvents();
+    return toast;
+}
+} // namespace
+
+TEST_CASE("Toast: a pill of the toast tokens (offscreen)", "[contour][gui][qml][kit][toast]")
+{
+    QQmlEngine engine;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto toast = createToast(engine, QVariantMap { { "text", QStringLiteral("Copied 3 lines") } });
+    auto* item = qobject_cast<QQuickItem*>(toast.get());
+    REQUIRE(item != nullptr);
+    auto* background = item->property("background").value<QQuickItem*>();
+    auto* text = item->findChild<QObject*>(QStringLiteral("toastText"));
+    REQUIRE(background != nullptr);
+    REQUIRE(text != nullptr);
+
+    CHECK(item->height() == chromeToken(engine, "size", "toast"));
+    CHECK(background->property("radius").toReal() == chromeToken(engine, "radii", "toast"));
+    CHECK(text->property("text").toString() == QStringLiteral("Copied 3 lines"));
+    CHECK(item->implicitWidth()
+          == item->property("implicitContentWidth").toReal() + item->property("leftPadding").toReal()
+                 + item->property("rightPadding").toReal());
+    CHECK(item->property("opacity").toReal() == 0.0);
+
+    item->setProperty("shown", true);
+    CHECK(QTest::qWaitFor([&] { return item->property("opacity").toReal() == 1.0; }, 2000));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Toast: the Terminal row is a one-row inverse strip (offscreen)", "[contour][gui][qml][kit][toast]")
+{
+    QQmlEngine engine;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Foreground)] =
+        vtbackend::RGBColor { 0xD9DCE3u };
+    setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Background)] =
+        vtbackend::RGBColor { 0x1C1E24u };
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto toast = createToast(engine, QVariantMap { { "text", QStringLiteral("Copied 3 lines") } });
+    auto* item = qobject_cast<QQuickItem*>(toast.get());
+    REQUIRE(item != nullptr);
+    auto* background = item->property("background").value<QQuickItem*>();
+    auto* text = item->findChild<QObject*>(QStringLiteral("toastText"));
+    REQUIRE(background != nullptr);
+    REQUIRE(text != nullptr);
+
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    CHECK(item->height() == style->property("cellHeight").toReal());
+    CHECK(background->property("radius").toReal() == 0.0);
+    CHECK(background->property("color").value<QColor>() == QColor(0xD9, 0xDC, 0xE3));
+    CHECK(text->property("color").value<QColor>() == QColor(0x1C, 0x1E, 0x24));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Toast: Reduce Motion fades without travel (offscreen)", "[contour][gui][qml][kit][toast]")
+{
+    QQmlEngine engine;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    setup.accessibility.motion = contour::config::MotionPreference::Reduced;
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto toast = createToast(engine, QVariantMap { { "text", QStringLiteral("Copied 3 lines") } });
+    CHECK(toast->property("enterOffset").toReal() == 0.0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 #include <QmlComponents_test.moc>
 
 namespace

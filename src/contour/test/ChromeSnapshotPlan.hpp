@@ -40,6 +40,7 @@ enum class SnapshotScript : uint8_t
     Palette,
     Settings,
     RemoteReconnecting,
+    Toast,
 };
 
 /// How a script's active tab is divided into panes.
@@ -61,6 +62,7 @@ enum class ScriptAction : uint8_t
 {
     None = 0,
     OpenPalette,
+    ShowToast,
 };
 
 /// Whether the window is attached to a host, and in which state.
@@ -133,6 +135,14 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Reconnecting,
                         .hostLabel = "build-01" },
+    SnapshotScriptRow { .script = SnapshotScript::Toast,
+                        .name = "toast",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .page = ContentPage::Terminal,
+                        .action = ScriptAction::ShowToast,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "" },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
@@ -140,7 +150,7 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotSc
                                       return static_cast<std::size_t>(SnapshotScripts[i].script) == i;
                                   }),
               "SnapshotScripts must list one row per SnapshotScript, in enumerator order");
-static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::RemoteReconnecting) + 1,
+static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::Toast) + 1,
               "every SnapshotScript needs a row");
 
 /// The row describing @p script.
