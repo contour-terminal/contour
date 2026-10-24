@@ -643,6 +643,43 @@ TEST_CASE("Main.qml tooltips: every attached tooltip shows its text as written (
     CHECK(textFormat.toInt() == Qt::PlainText);
 }
 
+TEST_CASE("Main.qml remote chrome: a window attached to a host names it (offscreen)",
+          "[contour][gui][qml][mainwindow][window][hosts]")
+{
+    SECTION("a remote window")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.attachedHost = QStringLiteral("home");
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        // No session has a title yet, so the title is the host alone.
+        CHECK(root->property("title").toString() == QStringLiteral("home"));
+        auto const* badge = root->findChild<QQuickItem*>(QStringLiteral("hostBadge"));
+        REQUIRE(badge != nullptr);
+        CHECK(badge->isVisible());
+        auto const* text = root->findChild<QObject*>(QStringLiteral("hostBadgeText"));
+        REQUIRE(text != nullptr);
+        CHECK(text->property("text").toString() == QStringLiteral("home"));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("a local window")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        CHECK(root->property("title").toString().isEmpty());
+        auto const* badge = root->findChild<QQuickItem*>(QStringLiteral("hostBadge"));
+        REQUIRE(badge != nullptr);
+        CHECK_FALSE(badge->isVisible());
+        CHECK(badge->width() == 0);
+    }
+}
+
 TEST_CASE("Main.qml hosting notice: shown while the window runs its shells itself (offscreen)",
           "[contour][gui][qml][mainwindow][hosting]")
 {

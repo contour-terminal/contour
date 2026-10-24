@@ -52,6 +52,35 @@ Row {
         return item ? item.x : 0
     }
 
+    // The remote host this window's sessions run on (`contour client --host`), at the strip's leading edge,
+    // so a remote window is never mistaken for a local one. Not interactive, and in the inactive tab text's
+    // font and colour: it names where the tabs are, it is not one of them. Absent for a local window.
+    Item {
+        id: hostBadge
+        objectName: "hostBadge"
+        // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
+        readonly property string hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
+        visible: hostLabel !== ""
+        width: visible ? hostBadgeText.implicitWidth + (2 * chromeStyle.labelPadding) : 0
+        height: root.height
+        Accessible.role: Accessible.StaticText
+        Accessible.name: qsTr("Attached to %1").arg(hostLabel)
+
+        SystemPalette {
+            id: hostBadgePalette
+            colorGroup: SystemPalette.Active
+        }
+
+        Text {
+            id: hostBadgeText
+            objectName: "hostBadgeText"
+            anchors.centerIn: parent
+            font: chromeStyle.font
+            text: hostBadge.hostLabel
+            color: hostBadgePalette.windowText
+        }
+    }
+
     // The tab list plus a DropArea that accepts tabs dragged from this or any other window's strip.
     Item {
         width: list.contentWidth

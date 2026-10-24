@@ -649,6 +649,89 @@ frontend can render — and `contour client` is the GUI frontend on top of it.
 Sessions survive detach; a reattach replays history. The daemon serves the native
 protocol on `<control-socket>-native`.
 
+### The stdio relay
+
+`contour daemon --stdio` is the remote end of an ssh attach (`ssh <target> contour daemon --stdio`):
+it reaches this user's daemon on `<control-socket>-native`, starting it through phase 2's
+`DaemonStarter` when none serves (a registered user service first, so a stopped service is started
+rather than an on-demand daemon beside it), and then copies bytes both ways between its standard
+input/output and that socket (`vthost/StdioAttach.hpp`, `vthost/ByteStream.hpp`).
+
+Before the protocol it writes exactly one line, the preamble (`vthost/StdioPreamble.hpp`):
+
+| Line | Meaning |
+| --- | --- |
+| `contour-stdio 1 ready\n` | The daemon is reached; the native protocol follows. |
+| `contour-stdio 1 error: <message>\n` | It could not be; the message says why, on one line. The relay then exits. |
+
+A client scans for that line, skipping up to 64 KiB of whatever came before it — a remote login shell
+that prints a banner or a motd on non-interactive logins is the classic reason binary protocols over
+ssh break. **Nothing may follow the ready line** before the client speaks: the native server reads a
+`ClientHello` before it writes anything, and the client has not sent one yet, so a byte after the
+ready line is not the protocol and the scanner reports it as such.
+
+The relay never parses a PDU. It is a pipe with a preamble, so a relay of one release serves any
+protocol version its daemon and the client negotiate (see [Version negotiation](#version-negotiation));
+an old relay in front of a new daemon costs nothing.
+
+**Logging must never reach stdout**, which is the invariant the whole transport rests on: every byte
+on stdout belongs to the protocol. The log's default sink is stderr and `--log-file` names a file or
+stderr, but that is not left to convention: `makeProcessStdioStream()` takes a private copy of stdout
+for the relay and points stdout itself at stderr, so a stray `std::cout` — a log category constructed
+after logging was installed, which defaults to the console, or a library's diagnostic — goes to ssh's
+stderr channel instead of into a frame. `contour daemon --stdio` takes stdout over that way **first**,
+before it loads its configuration: the configuration names the socket, so it loads before logging is
+installed, and a warning it logs then goes to the default console sink. Only a refused option
+combination is reported earlier, while stdout is still untouched; any later failure (a configuration
+that does not load, an unknown `--size-policy`) goes to stderr and, as an error preamble, to the
+client (`contour_e2e_stdio_relay` pins both). Stdout is read and written raw (fds 0/1, or the
+`GetStdHandle` handles on Windows), never through the CRT's text-mode streams, which would turn every
+`0x0A` into `0x0D 0x0A`.
+
+The client→daemon direction runs on a detached thread: a blocking read of process stdin cannot be
+interrupted portably, and the process exits as soon as the daemon→client direction ends, which is the
+relay's end.
+
+#### The ssh side
+
+`SshTransportFactory` (`vthost/SshTransport.hpp`) is the client end: an `ITransportFactory` whose
+`connect()` spawns, through the injected `IStdioSpawner`, exactly
+
+```
+ssh -T -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    [-p PORT] -- [USER@]HOST contour daemon --stdio
+```
+
+| Argument | Why |
+| --- | --- |
+| `-T` | No remote pty: a pty would translate bytes (`\n` → `\r\n`) and echo them. |
+| `-o BatchMode=yes` | Key and agent authentication only. Nothing may prompt: a GUI has no terminal to prompt on, and a prompt nobody answers is a hang. |
+| `-o ConnectTimeout=10` | A host that does not answer fails within ssh itself, before the transport's own bound. |
+| `-o ServerAliveInterval=15`, `-o ServerAliveCountMax=3` | A dead peer (sleep, Wi-Fi) is noticed in about 45 s, so ssh exits and the reconnect loop takes over. |
+| `--` | Ends ssh's options. `parseHostUrl` already refuses a user or host that begins with `-`, but the argv does not rely on it: a destination like `-oProxyCommand=…` can never be read as an option. |
+| `REMOTE_COMMAND` | `contour daemon --stdio`, or the host's `remote_command:`, verbatim. |
+
+From the spawn to the preamble the attempt is bounded by `SshConnectTimeout` (30 s). Bytes before the
+ready line are skipped and logged (`vthost.client`); the ready line hands out the child's socket as the
+`Connection`, with the ssh child as its `lifetime`, so the child is reaped only after the socket is
+closed. The token is empty: ssh authenticated the user, and the relay connects to the user's own
+AF_UNIX socket.
+
+When ssh ends before the preamble, what it wrote to stderr is classified by `SshFailureRules`, a table
+of needles matched in order (first match wins), with exit code 127 meaning "the remote shell found no
+`contour`". **A new message ssh or a remote shell prints is a new row there**, and its words a row of
+the message table in `SshTransport.cpp`. Each failure maps onto a `TransportErrorKind`, and that decides
+whether `ClientSupervisor` retries: only an unreachable host and an ssh that ended for no recognized
+reason are `Unreachable` (Transient). A refused login, an unknown or changed host key, a missing or too
+old remote Contour, a login shell that prints more than 64 KiB, and the relay's own error preamble are
+all Permanent: retrying cannot fix them, so the window ends with the message instead of looping. ssh
+never yields `DaemonAbsent`: the remote relay starts its daemon itself and reports a failed start as an
+error preamble (`Refused`).
+
+Every failure path ends the child before `connect()` returns, and every `connect()` spawns a fresh
+ssh: a dropped connection's child is reaped when its `Connection` goes, and the next attempt starts
+anew.
+
 ## The GUI seams (`contour client`, `contour client --tmux`)
 
 The display stack consumes a session exclusively through

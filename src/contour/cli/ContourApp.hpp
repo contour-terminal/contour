@@ -6,13 +6,19 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vthost
 {
 enum class DaemonLaunchStyle : std::uint8_t;
-}
+enum class ClientSizePolicy : std::uint8_t;
+class IByteStream;
+} // namespace vthost
 
 namespace contour::cli
 {
@@ -30,6 +36,20 @@ enum class DaemonServiceAction : std::uint8_t
     Status,
 };
 
+/// How an option says it was given.
+enum class GivenAs : std::uint8_t
+{
+    Text = 0, ///< A string option, given when it is not empty.
+    Flag,     ///< A boolean option, given when it is true.
+};
+
+/// An option of a verb, named for a check on whether it was given.
+struct OptionPresence
+{
+    std::string_view name; ///< The option, without its leading dashes.
+    GivenAs givenAs;       ///< How it says it was given.
+};
+
 /// Contour CLI application base.
 ///
 /// TODO: provide special installable targets in debian packages (cmake and PPA)
@@ -40,6 +60,14 @@ class ContourApp: public core::cli::App
     explicit ContourApp(core::Environment const& env);
 
     [[nodiscard]] core::cli::Command parameterDefinition() const override;
+
+  protected:
+    /// Finds the first of @p options that the command line gave.
+    /// @param verbPrefix The verb's dotted parameter prefix, e.g. "contour.daemon".
+    /// @param options The options to look for.
+    /// @return The name of the first one given, if any.
+    [[nodiscard]] std::optional<std::string_view> firstGivenOption(std::string_view verbPrefix,
+                                                                   std::span<OptionPresence const> options);
 
   private:
     int captureAction();
@@ -63,6 +91,19 @@ class ContourApp: public core::cli::App
     /// @param prefix That sub-verb's dotted flag prefix, e.g. "contour.daemon.status".
     /// @return The process exit code.
     int daemonVerbAction(DaemonVerb verb, std::string const& prefix);
+    /// Checks that `contour daemon --stdio` names no option only a daemon this process becomes can honour.
+    /// @return The refusal, naming the option, when one is given.
+    [[nodiscard]] std::expected<void, std::string> checkStdioCombinations();
+    /// Runs `contour daemon --stdio`: relays the native protocol between this process's standard
+    /// input/output and the daemon serving @p socketPath, starting that daemon when none serves.
+    /// @param client This process's stdio, taken (makeProcessStdioStream()) before the configuration loaded.
+    /// @param socketPath The daemon's control socket.
+    /// @param sizePolicy The policy a daemon this relay starts runs with.
+    /// @return EXIT_SUCCESS once the daemon side ended; EXIT_FAILURE for a daemon that could not be
+    ///         reached (as an error preamble on stdout).
+    int stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
+                         std::filesystem::path const& socketPath,
+                         vthost::ClientSizePolicy sizePolicy);
     /// Relaunches this process detached (`--background`) and waits until it is serving.
     /// @param socketPath The control socket the daemon binds; also derives its default log file.
     /// @return EXIT_SUCCESS once the background daemon accepts connections.

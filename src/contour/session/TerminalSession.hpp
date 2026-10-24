@@ -1186,6 +1186,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ResizePane const& action);
     bool operator()(actions::LaunchLayout const& event);
     bool operator()(actions::SaveLayout const& event);
+    bool operator()(actions::AttachToHost const& event);
     bool operator()(actions::OpenContextMenu);
     bool operator()(actions::SelectAll);
     bool operator()(actions::SoftReset);

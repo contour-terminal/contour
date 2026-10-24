@@ -8,6 +8,7 @@
 #include <contour/config/ConfigEnumReader.hpp>
 #include <contour/config/FinishNotificationConfig.hpp>
 #include <contour/config/GpuSelector.hpp>
+#include <contour/config/HostUrl.hpp>
 #include <contour/config/SingleQuoted.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
@@ -1674,6 +1675,9 @@ struct Config
     };
     ConfigEntry<std::unordered_map<std::string, Layout>, documentation::Layouts> layouts {};
     ConfigEntry<std::string, documentation::DefaultLayout> defaultLayoutName { "" };
+    /// The saved remote hosts, by name. Ordered, so every listing is sorted by name without a sort at
+    /// each consumer.
+    ConfigEntry<std::map<std::string, HostEntry>, documentation::Hosts> hosts {};
     ConfigEntry<std::unordered_map<std::string, vtbackend::ColorPalette>, documentation::ColorSchemes>
         colorschemes { { { "default", vtbackend::ColorPalette {} } } };
 
@@ -1955,6 +1959,22 @@ struct YAMLConfigReader
                        std::unordered_map<std::string, Layout>& where);
 
     void loadFromEntry(YAML::Node const& node, std::string const& entry, Layout& where);
+
+    /// Reads `hosts:` -- a map from a host's name to its `url`, `token_file`, `tls_ca`, `remote_command`
+    /// and `profile`. A malformed entry costs that entry alone, reported, never the map.
+    /// @param node The mapping that holds @p entry.
+    /// @param entry The key to read (`hosts`).
+    /// @param where Receives the entries; a later duplicate replaces an earlier one.
+    void loadFromEntry(YAML::Node const& node,
+                       std::string const& entry,
+                       std::map<std::string, HostEntry>& where) const;
+
+    /// Parses one entry of `hosts:`. Never throws: an entry that cannot be used is reported and skipped.
+    /// @param hostNode The entry's value.
+    /// @param name The entry's key, for the report.
+    /// @return The host, or no value when it is skipped.
+    [[nodiscard]] std::optional<HostEntry> parseHostNode(YAML::Node const& hostNode,
+                                                         std::string const& name) const;
 
     /// Parses one layout's node (its `tabs:` sequence) into @p where. Never throws: malformed
     /// scalars are logged and skipped, so one broken layout cannot unwind the whole config load
@@ -2985,6 +3005,17 @@ void compareEntries(Config& config, auto const& output);
 ///         refused rather than replaced by the default.
 [[nodiscard]] std::expected<vtbackend::Settings, std::string> emulationSettingsFor(
     Config const& config, std::string const& profileName);
+
+/// Resolves the host `contour client --host` names: a saved one of `hosts:`, or an ad-hoc URL.
+///
+/// @param configPath Configuration file to read; empty selects the default location. Not read for a URL.
+/// @param nameOrUrl A name under `hosts:`, or a URL (anything containing `://`). An ad-hoc `ssh://` URL
+///        needs no configuration; an ad-hoc `tls://` URL is refused, as a TLS daemon needs a token
+///        and only a saved host can name its `token_file`.
+/// @return The host, or a human-readable reason it could not be resolved: a malformed URL, or an
+///         unknown name with the saved ones listed.
+[[nodiscard]] std::expected<HostEntry, std::string> resolveHost(std::string const& configPath,
+                                                                std::string_view nameOrUrl);
 
 /// Picks the color palette @p colorConfig yields for @p preference: the matching half of a dual
 /// (dark/light) config, or the single palette of a simple one.

@@ -131,6 +131,17 @@ TEST_CASE("Actions: LaunchLayout maps by name", "[actions][layout]")
     CHECK(std::holds_alternative<contour::actions::LaunchLayout>(*action));
 }
 
+TEST_CASE("Actions: AttachToHost maps by name, and needs a host to run", "[actions][hosts]")
+{
+    auto const action = contour::actions::fromString("AttachToHost");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::AttachToHost>(*action));
+    // Bare it names no host, so the palette offers it only per saved host; and a held key opens one window.
+    CHECK(contour::actions::isParameterized(*action));
+    CHECK(contour::actions::isNonRepeatable(
+        contour::actions::Action { contour::actions::AttachToHost { .name = "home" } }));
+}
+
 TEST_CASE("Actions: SaveLayout maps by name", "[actions][layout]")
 {
     auto const action = contour::actions::fromString("SaveLayout");

@@ -46,6 +46,7 @@ add_library(contour_cli STATIC
     DaemonVerbs.cpp DaemonVerbs.hpp
     ExitStatus.hpp
     Hosting.hpp
+    HostTransport.cpp HostTransport.hpp
     ShellIntegration.cpp ShellIntegration.hpp
     "${_shell_integration_data}"
 )

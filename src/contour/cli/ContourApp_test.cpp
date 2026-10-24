@@ -18,7 +18,9 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iostream>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -170,4 +172,48 @@ TEST_CASE("ContourApp: `daemon --socket X status` keeps X in the daemon scope", 
     CHECK(app.parameters().get<bool>("contour.daemon.status"));
     CHECK(app.parameters().get<std::string>("contour.daemon.socket") == "/tmp/x.sock");
     CHECK(app.parameters().get<std::string>("contour.daemon.status.socket").empty());
+}
+
+namespace
+{
+
+/// Points @p stream at a buffer of its own while it lives, so a test can read what was written there.
+class StreamCapture
+{
+  public:
+    explicit StreamCapture(std::ostream& stream): _stream { stream }, _saved { stream.rdbuf(_buffer.rdbuf()) }
+    {
+    }
+    ~StreamCapture() { _stream.rdbuf(_saved); }
+    StreamCapture(StreamCapture const&) = delete;
+    StreamCapture& operator=(StreamCapture const&) = delete;
+    StreamCapture(StreamCapture&&) = delete;
+    StreamCapture& operator=(StreamCapture&&) = delete;
+
+    /// @return Everything written so far.
+    [[nodiscard]] std::string text() const { return _buffer.str(); }
+
+  private:
+    std::ostringstream _buffer;
+    std::ostream& _stream;
+    std::streambuf* _saved;
+};
+
+} // namespace
+
+TEST_CASE("ContourApp: daemon --stdio refuses --listen-tcp", "[contour][cli][daemon]")
+{
+    // Refused before stdout is taken over: the relay would become a daemon of its own otherwise.
+    auto const temp = core::testing::ScopedTempDir { "contour-stdio" };
+    auto const socket = core::pathToUtf8(temp.path() / "s" / "control");
+    auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+    auto argv = std::array<char const*, 7> { "contour", "daemon",       "--socket",   socket.c_str(),
+                                             "--stdio", "--listen-tcp", "127.0.0.1:1" };
+
+    auto const out = StreamCapture { std::cout };
+    auto const err = StreamCapture { std::cerr };
+    CHECK(app.run(static_cast<int>(argv.size()), argv.data()) == EXIT_FAILURE);
+    CHECK(err.text().contains(
+        "contour daemon: --stdio relays to a daemon; it cannot be combined with --listen-tcp"));
+    CHECK(out.text().empty());
 }

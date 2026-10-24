@@ -3,6 +3,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/FileOpenerTemplate.hpp>
 #include <contour/config/GlobalOverrides.hpp>
+#include <contour/config/HostUrl.hpp>
 #include <contour/config/ModifierNames.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -739,6 +740,36 @@ std::expected<vtbackend::Settings, std::string> emulationSettingsFor(Config cons
     });
 }
 
+std::expected<HostEntry, std::string> resolveHost(std::string const& configPath, std::string_view nameOrUrl)
+{
+    if (nameOrUrl.contains("://"))
+        return parseHostUrl(nameOrUrl)
+            .transform_error(
+                [&](HostUrlError error) { return std::format("{}: {}", nameOrUrl, describe(error)); })
+            .and_then([](HostUrl url) -> std::expected<HostEntry, std::string> {
+                // A TCP daemon always requires a token, and only a saved host can name its file.
+                if (url.scheme == HostScheme::Tls)
+                    return std::unexpected { std::string {
+                        "a tls:// host needs a token; save it under hosts: with token_file" } };
+                return HostEntry {
+                    .url = std::move(url), .tokenFile = {}, .tlsCa = {}, .remoteCommand = {}, .profile = {}
+                };
+            });
+
+    return tryLoadConfigFromFile(configFileNamed(configPath))
+        .and_then([&](Config const& loaded) -> std::expected<HostEntry, std::string> {
+            auto const& hosts = loaded.hosts.value();
+            if (auto const found = hosts.find(std::string { nameOrUrl }); found != hosts.end())
+                return found->second;
+            auto const names = std::views::keys(hosts) | std::ranges::to<std::vector<std::string>>();
+            return std::unexpected { std::format("no host named '{}' in {} (saved hosts: {})",
+                                                 nameOrUrl,
+                                                 core::pathToUtf8(loaded.configFile),
+                                                 names.empty() ? std::string { "(none)" }
+                                                               : core::joinHumanReadable(names, ", ")) };
+        });
+}
+
 vtbackend::ColorPalette const* preferredColorPalette(ColorConfig const& colorConfig,
                                                      vtbackend::ColorPreference preference)
 {
@@ -1441,6 +1472,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("mouse_block_selection_modifier", c.mouseBlockSelectionModifiers);
         loadFromEntry("profiles", c.profiles, c.defaultProfileName.value());
         loadFromEntry("layouts", c.layouts);
+        loadFromEntry("hosts", c.hosts);
         loadFromEntry("git_drawings", c.gitDrawings);
         vtrasterizer::BoxDrawingRenderer::setGitDrawingsStyle(c.gitDrawings.value());
         loadFromEntry("box_arc_style", c.boxArcStyle);
@@ -1780,6 +1812,68 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
             parseLayoutNode(layoutEntry.second, layout);
         }
     }
+}
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     std::map<std::string, HostEntry>& where) const
+{
+    auto const child = node[entry];
+    if (!child || !child.IsMap())
+        return;
+    for (auto hostEntry: child)
+    {
+        if (!hostEntry.first.IsScalar())
+        {
+            errorLog()("Ignoring a host with a non-scalar name.");
+            continue;
+        }
+        auto const name = hostEntry.first.as<std::string>();
+        if (auto host = parseHostNode(hostEntry.second, name))
+            where.insert_or_assign(name, std::move(*host));
+    }
+}
+
+std::optional<HostEntry> YAMLConfigReader::parseHostNode(YAML::Node const& hostNode,
+                                                         std::string const& name) const
+{
+    auto const skip = [&](std::string_view reason) -> std::optional<HostEntry> {
+        errorLog()("Ignoring host '{}': {}", name, reason);
+        return std::nullopt;
+    };
+    auto const scalar = [&](char const* key) -> std::optional<std::string> {
+        if (auto const value = hostNode[key]; value && value.IsScalar())
+            return value.as<std::string>();
+        return std::nullopt;
+    };
+    auto const path = [&](char const* key) {
+        return scalar(key)
+            .transform([&](std::string const& text) { return resolvedPath(text); })
+            .value_or(std::filesystem::path {});
+    };
+
+    if (!hostNode.IsMap())
+        return skip("expected a map of url, token_file, tls_ca, remote_command and profile");
+    auto const urlText = scalar("url");
+    if (!urlText)
+        return skip("it has no url");
+    auto url = parseHostUrl(*urlText);
+    if (!url)
+        return skip(describe(url.error()));
+
+    auto host = HostEntry {
+        .url = std::move(*url),
+        .tokenFile = path("token_file"),
+        .tlsCa = path("tls_ca"),
+        .remoteCommand = scalar("remote_command").value_or(std::string {}),
+        .profile = scalar("profile").value_or(std::string {}),
+    };
+    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
+    if (host.url.scheme == HostScheme::Tls && host.tokenFile.empty())
+        return skip("a tls:// host needs a token_file");
+    if (host.url.scheme == HostScheme::Tls && host.tlsCa.empty())
+        errorLog()("Host '{}' has no tls_ca: the daemon's certificate is not verified", name);
+    return host;
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
@@ -4444,6 +4538,14 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
             return std::nullopt;
         }
 
+        if (holds_alternative<actions::AttachToHost>(action))
+        {
+            // Like LaunchLayout: a nameless "attach to which host?" has no default, so it is dropped.
+            if (auto name = node["name"]; name && name.IsScalar())
+                return actions::AttachToHost { name.as<std::string>() };
+            return std::nullopt;
+        }
+
         if (holds_alternative<actions::SaveLayout>(action))
         {
             // The name is OPTIONAL, unlike LaunchLayout above: with one, SaveLayout saves straight to it;
@@ -4753,6 +4855,8 @@ static std::string createForGlobal(Config const& c)
         [&]([[maybe_unused]] auto const& name,
             [[maybe_unused]] ConfigEntry<std::unordered_map<std::string, config::Layout>,
                                          documentation::Layouts> const& v) {},
+        [&]([[maybe_unused]] auto const& name,
+            [[maybe_unused]] ConfigEntry<std::map<std::string, HostEntry>, documentation::Hosts> const& v) {},
         [&]([[maybe_unused]] auto const& name, [[maybe_unused]] auto const& v) {},
     };
 

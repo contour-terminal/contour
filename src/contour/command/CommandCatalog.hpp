@@ -66,6 +66,19 @@ class ProfileCommandSource final: public CommandSource
     config::Config const& _config;
 };
 
+/// One AttachToHost command per saved host.
+class HostCommandSource final: public CommandSource
+{
+  public:
+    /// @param config The loaded configuration. Must outlive this source.
+    explicit HostCommandSource(config::Config const& config) noexcept: _config { config } {}
+
+    [[nodiscard]] std::vector<Command> commands() const override;
+
+  private:
+    config::Config const& _config;
+};
+
 /// One LaunchLayout command per saved layout.
 class LayoutCommandSource final: public CommandSource
 {

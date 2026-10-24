@@ -106,6 +106,8 @@ class WindowController:
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(bool settingsActive READ settingsActive NOTIFY settingsActiveChanged)
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
+    // CONSTANT: a process attaches to one host for its life, and has done so before its first window.
+    Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
     Q_PROPERTY(contour::window::SettingsController* settingsController READ settingsController CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -647,6 +649,19 @@ class WindowController:
     Q_INVOKABLE void dismissHostingNotice() { showHostingNotice({}); }
     // }}}
 
+    // {{{ Remote chrome
+    /// The remote host this window's sessions run on (`contour client --host`), which its title and tab
+    /// strip name, so it is never mistaken for a local window.
+    /// @return The host's label; empty for a local window.
+    [[nodiscard]] QString hostLabel() const;
+
+    /// The OS window title for the active session's @p sessionTitle: prefixed with the host for a remote
+    /// window. @see remoteWindowTitle
+    /// @param sessionTitle The active session's title.
+    /// @return The window title.
+    Q_INVOKABLE [[nodiscard]] QString windowTitle(QString const& sessionTitle) const;
+    // }}}
+
   signals:
     void countChanged();
     void activeTabIndexChanged();
@@ -802,6 +817,7 @@ class WindowController:
     command::TabCommandSource _tabCommands;
     command::ProfileCommandSource _profileCommands;
     command::LayoutCommandSource _layoutCommands;
+    command::HostCommandSource _hostCommands;
     command::BoundCommandSource _boundCommands;
     command::ActionCommandSource _actionCommands;
     std::unique_ptr<CommandPaletteModel> _commandPalette;

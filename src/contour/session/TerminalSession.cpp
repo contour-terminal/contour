@@ -3998,6 +3998,8 @@ command::ContextMenuState TerminalSession::contextMenuState()
             .lastCommandLine = lastCommandLine,
             .activeProfile = profileName(),
             .profileNames = std::move(profileNames),
+            // `hosts` is ordered by name already.
+            .hostNames = std::ranges::to<std::vector>(_config.hosts.value() | std::views::keys),
         };
     });
 }
@@ -5520,6 +5522,23 @@ bool TerminalSession::operator()(actions::ResizePane const& action)
 bool TerminalSession::operator()(actions::LaunchLayout const& event)
 {
     _manager->launchLayout(event.name, this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::AttachToHost const& event)
+{
+    // A process of its own: a GUI process is attached to exactly one daemon for its life.
+    // An unknown name is still handled: the new process would only report the same.
+    if (!_config.hosts.value().contains(event.name))
+    {
+        errorLog()("Could not attach to host \"{}\": {}.", event.name, "no such host under hosts:");
+        return true;
+    }
+    auto const command = buildAttachHostCommand(
+        _app.programPath(), core::platform::normalizePath(_config.configFile), event.name);
+    if (auto const started = _app.externalLauncher().runDetached(command.program, command.arguments);
+        !started)
+        errorLog()("Could not attach to host \"{}\": {}.", event.name, platform::describe(started.error()));
     return true;
 }
 

@@ -251,6 +251,7 @@ namespace
             Table::separator(),
 
             Table::submenu("Change Profile", profileRows).shownWhen(hasProfiles),
+            Table::attachToHostSubmenu(),
             Table::submenu("Advanced", advancedRows),
         };
 

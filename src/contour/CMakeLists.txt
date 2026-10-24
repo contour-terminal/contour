@@ -1050,6 +1050,10 @@ if(CONTOUR_FRONTEND_GUI)
             # lacks. The default `in_process` is what every other app run here already covers.
             add_test(NAME contour_e2e_hosting
                 COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/hosting.sh $<TARGET_FILE:contour>)
+            # `contour daemon --stdio`, the remote end of an ssh attach: stdout carries its preamble and
+            # nothing else, not even a warning the configuration logs before logging is installed.
+            add_test(NAME contour_e2e_stdio_relay
+                COMMAND setsid -w sh ${CMAKE_CURRENT_SOURCE_DIR}/test/e2e/stdio-relay.sh $<TARGET_FILE:contour>)
 
             # LeakSanitizer is disabled for the e2e app runs (LSAN_OPTIONS=detect_leaks=0). Booting the
             # real binary probes the audio/GPU driver stack (QMediaDevices::audioOutputs() ->
@@ -1062,7 +1066,7 @@ if(CONTOUR_FRONTEND_GUI)
             set_tests_properties(
                 contour_e2e_lifecycle contour_e2e_vt_stream
                 contour_e2e_custom_config contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
-                contour_e2e_hosting
+                contour_e2e_hosting contour_e2e_stdio_relay
                 PROPERTIES
                     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LIBGL_ALWAYS_SOFTWARE=1;LSAN_OPTIONS=detect_leaks=0"
                     TIMEOUT 120
@@ -1071,6 +1075,7 @@ if(CONTOUR_FRONTEND_GUI)
             # Also selectable with the daemon suites: `ctest -L daemon` must cover the feature
             # end to end, not just its unit layers.
             set_property(TEST contour_e2e_daemon contour_e2e_client_unreachable contour_e2e_hosting
+                              contour_e2e_stdio_relay
                          APPEND PROPERTY LABELS daemon)
 
             # Under ThreadSanitizer, the same ignore_noninstrumented_modules=1 as contour_gui_test, and
@@ -1083,7 +1088,7 @@ if(CONTOUR_FRONTEND_GUI)
             if(CONTOUR_SANITIZE STREQUAL "thread")
                 set_property(TEST contour_e2e_lifecycle contour_e2e_vt_stream contour_e2e_custom_config
                                   contour_e2e_cli contour_e2e_daemon contour_e2e_client_unreachable
-                                  contour_e2e_hosting
+                                  contour_e2e_hosting contour_e2e_stdio_relay
                              APPEND PROPERTY ENVIRONMENT_MODIFICATION "${CONTOUR_QML_TEST_TSAN_OPTIONS}")
             endif()
         endif()
@@ -1108,6 +1113,7 @@ if(CONTOUR_TESTING)
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp
         config/GlobalOverrides_test.cpp
+        config/HostUrl_test.cpp
         config/LayoutBuilder_test.cpp
         config/PtyReadBufferSize_test.cpp
         config/UiStyle_test.cpp
@@ -1122,6 +1128,7 @@ if(CONTOUR_TESTING)
         cli/ContourApp_test.cpp
         cli/DaemonVerbs_test.cpp
         cli/Hosting_test.cpp
+        cli/HostTransport_test.cpp
         cli/CatImageArgs_test.cpp
         cli/ConfigProfileCatalog_test.cpp
         cli/ConfigReloadPoller_test.cpp
@@ -1136,6 +1143,7 @@ if(CONTOUR_TESTING)
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
         platform/SessionVisibility_test.cpp
+        window/RemoteChrome_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
     # ScreenshotFile one over its Screen, and FinishNotification one over its CommandBlockSummary; testing

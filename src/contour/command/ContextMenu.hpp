@@ -99,6 +99,7 @@ struct ContextMenuState
 
     std::string activeProfile;             ///< The profile this session runs under.
     std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.
+    std::vector<std::string> hostNames {}; ///< Saved hosts (`hosts:`), sorted.
 };
 
 /// What a menu row IS: something to run, a divider, or a submenu that holds more rows.

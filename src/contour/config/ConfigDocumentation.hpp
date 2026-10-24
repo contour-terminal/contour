@@ -1136,6 +1136,31 @@ constexpr StringLiteral LayoutsConfig {
     "\n"
 };
 constexpr StringLiteral LayoutsWeb { "Named sets of tabs opened together." };
+constexpr StringLiteral HostsConfig {
+    "\n"
+    "{comment} Hosts\n"
+    "{comment} -----\n"
+    "{comment}\n"
+    "{comment} Saved remote hosts that \"Attach to Host\" lists, by name. Each host has:\n"
+    "{comment}   url             ssh://[user@]host[:port] or tls://host:port (required)\n"
+    "{comment}   token_file      the daemon's token file (required for tls://)\n"
+    "{comment}   tls_ca          a CA to verify the daemon's certificate against (tls://)\n"
+    "{comment}   remote_command  replaces the whole remote command (ssh://)\n"
+    "{comment}   profile         the profile the remote sessions are created with\n"
+    "{comment}\n"
+    "{comment} hosts:\n"
+    "{comment}     home:\n"
+    "{comment}         url: \"ssh://me@homepc\"\n"
+    "{comment}         remote_command: \"/opt/contour/bin/contour daemon --stdio\"\n"
+    "{comment}         profile: \"remote\"\n"
+    "{comment}     studio:\n"
+    "{comment}         url: \"tls://studio.tailnet.ts.net:7297\"\n"
+    "{comment}         token_file: \"~/.config/contour/studio.token\"\n"
+    "{comment}         tls_ca: \"~/.config/contour/studio-ca.pem\"\n"
+    "hosts:\n"
+    "\n"
+};
+constexpr StringLiteral HostsWeb { "Saved remote hosts that \"Attach to Host\" lists." };
 constexpr StringLiteral DefaultLayoutWeb {
     "Name of the layout to open at startup, instead of a single default tab."
 };
@@ -3494,6 +3519,7 @@ using ColorSchemes = DocumentationEntry<ColorSchemesConfig, Dummy>;
 using Profiles = DocumentationEntry<ProfilesConfig, ProfilesWeb>;
 using DefaultProfiles = DocumentationEntry<StringLiteral { "default_profile: {}\n" }, DefaultProfilesWeb>;
 using Layouts = DocumentationEntry<LayoutsConfig, LayoutsWeb>;
+using Hosts = DocumentationEntry<HostsConfig, HostsWeb>;
 using DefaultLayout = DocumentationEntry<StringLiteral { "default_layout: {}\n" }, DefaultLayoutWeb>;
 using WordDelimiters = DocumentationEntry<WordDelimitersConfig, WordDelimitersWeb>;
 using ExtendedWordDelimiters = DocumentationEntry<ExtendedWordDelimitersConfig, ExtendedWordDelimitersWeb>;

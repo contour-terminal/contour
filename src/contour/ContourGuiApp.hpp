@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/cli/ContourApp.hpp>
+#include <contour/cli/HostTransport.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/LayoutStore.hpp>
@@ -38,6 +39,7 @@
 #include <QtGui/QScreen>
 #include <QtQml/QQmlApplicationEngine>
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -431,6 +433,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The filesystem handed in at construction; this machine's by default.
     [[nodiscard]] core::platform::FileSystem const& fileSystem() const noexcept { return _fileSystem; }
 
+    /// The remote host this process is attached to, as `contour client --host` named it: the host's name
+    /// under `hosts:`, or the URL of an ad-hoc host.
+    /// @return Empty unless `contour client --host` attached; fixed once its connect succeeded, as a
+    ///         process attaches to one daemon for its life.
+    [[nodiscard]] std::string const& attachedHostLabel() const noexcept { return _attachedHostLabel; }
+
     [[nodiscard]] vtbackend::ColorPreference colorPreference() const noexcept { return _colorPreference; }
 
     /// Applies the configured GUI chrome theme (dark/light/system) to the application's color
@@ -505,7 +513,17 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         std::string logFilter;          ///< `--log`, forwarded to a daemon it starts.
         std::string logFile;            ///< `--log-file`, likewise.
         std::optional<uint64_t> window; ///< `--window`: the one daemon window to show.
+        std::optional<cli::HostTransport>
+            host; ///< `--host`, resolved: a remote daemon instead of the local one.
     };
+
+    /// Resolves `contour client --host`: refuses an option that names another way to a daemon, takes the
+    /// host's profile when `--profile` names none, and maps the host onto its transport.
+    /// @param nameOrUrl The `--host` option.
+    /// @param request What the client asked for; its profile is filled in from the host's entry.
+    /// @return The host's transport, or the line to print after `contour client: `.
+    [[nodiscard]] std::expected<cli::HostTransport, std::string> resolveClientHost(
+        std::string const& nameOrUrl, ClientRequest& request);
 
     /// Decides where this launch hosts its sessions (`daemon.mode`, forced to `required` by `contour
     /// client`, else `--daemon-mode`, else the configuration) and, for a mode that attaches, starts the
@@ -548,8 +566,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// Waits for the native attach started before the GUI booted, with what remains of its budget, then
     /// routes session creation to the controller and offers a restart to a drifted local daemon.
+    /// @param budget How long the attach may take since it started; never less than MinimumConnectAwait.
+    /// @param hostLabel The remote host it attaches to (`--host`), which attachedHostLabel() reports once
+    ///        attached; empty for the local daemon or `--connect-tcp`.
     /// @return Nothing once attached; why not, the controller given up, otherwise.
-    [[nodiscard]] std::expected<void, std::string> awaitNativeAttach();
+    [[nodiscard]] std::expected<void, std::string> awaitNativeAttach(std::chrono::milliseconds budget,
+                                                                     std::string hostLabel);
 
     /// After a reconnect: closes the OS windows of the daemon windows the daemon no longer has for this
     /// client, once the windows that came instead are shown, so that closing them never closes the last one.
@@ -633,6 +655,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// What the first window tells the user when the daemon this launch wanted could not be had and its
     /// sessions run in-process instead (cli::hostingNotice); empty otherwise.
     std::string _hostingNotice;
+    /// @see attachedHostLabel
+    std::string _attachedHostLabel;
+    /// The PATH `contour client --host` looks ssh up on. A member fixed at construction, as every spawner's
+    /// vtpty::ProgramSearch holds a view of it for as long as its attach reconnects.
+    std::string _sshSearchPath;
 
     config::Config _config;
     // Sessions are heap-allocated with C++ ownership and never destroyed in production, so their command

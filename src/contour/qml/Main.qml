@@ -106,8 +106,9 @@ ApplicationWindow
     // The window title follows the ACTIVE PANE's session: focusing another pane changes
     // terminalSessions.activeSession (which emits activeSessionChanged on a pane-focus change as well as on
     // a tab switch), and this binding also re-evaluates when that session's own title changes. Empty string
-    // covers the brief startup window before the first session resolves.
-    title: (win && win.activeSession) ? win.activeSession.title : ""
+    // covers the brief startup window before the first session resolves. A window attached to a remote host
+    // (`contour client --host`) names it first, so it is never mistaken for a local one.
+    title: win ? win.windowTitle(win.activeSession ? win.activeSession.title : "") : ""
 
     // Create the first session/tab on startup. This used to be done by vtui's one-shot
     // `session: terminalSessions.createSession()`; with the pane tree as the sole renderer, Main.qml mints

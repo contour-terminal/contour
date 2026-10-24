@@ -129,6 +129,7 @@ struct TogglePaneZoom{};    // give the active pane the whole tab area (hiding i
 struct ResizePane{ Direction direction; int percent = 5; }; // grow/shrink the active pane
 struct LaunchLayout{ std::string name; }; // open the named layout's tabs in the current window
 struct SaveLayout{ std::string name; };   // save the current window's tabs/panes as the named layout
+struct AttachToHost{ std::string name; }; // open a new window attached to the saved host (hosts:)
 struct OpenContextMenu{};        // open the terminal pane's context menu (bound to the right button)
 struct SelectAll{};              // select the whole scrollback and screen
 struct SoftReset{};              // DECSTR: reset modes/rendition/cursor, keeping content and history
@@ -247,6 +248,7 @@ using Action = std::variant<CancelSelection,
                             ResizePane,
                             LaunchLayout,
                             SaveLayout,
+                            AttachToHost,
                             OpenContextMenu,
                             SelectAll,
                             SoftReset,
@@ -296,6 +298,7 @@ concept CommandBlockActionConcept =
 /// fire walks the blocks and builds text, sets the clipboard or drops rows, and a repeat adds nothing
 /// the first press did not do. OpenCommandOutput has the splits' reason too: each fire forks a pager
 /// pane.
+/// AttachToHost joins them too: each fire starts a client process that opens a window of its own.
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
 /// KeyboardEventType::Repeat events.
 template <typename T>
@@ -322,6 +325,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     TogglePaneZoom,
                                                     LaunchLayout,
                                                     SaveLayout,
+                                                    AttachToHost,
                                                     ClearToPrompt,
                                                     CopyLastCommandPrompt,
                                                     CopyLastCommandOutput,
@@ -370,7 +374,7 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
 /// a bare SetTabColor opens the color picker and a bare SaveLayout opens the save-as name prompt, so
 /// the bare form is a meaningful gesture the palette SHOULD offer from the catalog. LaunchLayout
 /// stays in the list — a nameless "launch which layout?" has no default; its per-name rows already
-/// reach the palette through the saved-layout source.
+/// reach the palette through the saved-layout source. AttachToHost likewise, through the saved-host source.
 template <typename T>
 concept ParameterizedActionConcept = core::oneOf<T,
                                                  ChangeProfile,
@@ -382,6 +386,7 @@ concept ParameterizedActionConcept = core::oneOf<T,
                                                  SwitchToTab,
                                                  ResizePane,
                                                  LaunchLayout,
+                                                 AttachToHost,
                                                  ToggleFoldAt>;
 
 /// @returns true if @p action requires an argument that a bare catalog entry cannot supply (a
@@ -618,6 +623,9 @@ namespace documentation
     constexpr inline std::string_view LaunchLayout {
         "Opens a named layout, appending its tabs to the current window."
     };
+    constexpr inline std::string_view AttachToHost {
+        "Opens a new window attached to the saved host `name` (see `hosts:`)."
+    };
     constexpr inline std::string_view SaveLayout {
         "Saves the current window's tabs as a named layout in layouts.yml. Without a name it opens a "
         "prompt to type one in (which is how the command palette offers it)."
@@ -836,6 +844,7 @@ struct ActionCatalogEntry
             "ResizePane", Action { ResizePane { Direction::Right } }, documentation::ResizePane },
         ActionCatalogEntry { "LaunchLayout", Action { LaunchLayout {} }, documentation::LaunchLayout },
         ActionCatalogEntry { "SaveLayout", Action { SaveLayout {} }, documentation::SaveLayout },
+        ActionCatalogEntry { "AttachToHost", Action { AttachToHost {} }, documentation::AttachToHost },
         ActionCatalogEntry {
             "OpenContextMenu", Action { OpenContextMenu {} }, documentation::OpenContextMenu },
         ActionCatalogEntry { "SelectAll", Action { SelectAll {} }, documentation::SelectAll },
@@ -999,6 +1008,7 @@ template <contour::actions::CommandBlockActionConcept BlockAction>
             [](WriteScreen const& a) { return std::format(", chars: '{}'", a.chars); },
             [](CreateSelection const& a) { return std::format(", delimiters: '{}'", a.delimiters); },
             [](LaunchLayout const& a) { return std::format(", name: '{}'", a.name); },
+            [](AttachToHost const& a) { return std::format(", name: '{}'", a.name); },
             [](SaveLayout const& a) {
                 // A nameless SaveLayout opens the save-as prompt, so — like a colorless SetTabColor below
                 // — it has no argument to write; a named one round-trips its name.

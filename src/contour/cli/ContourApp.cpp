@@ -29,10 +29,12 @@
 #include <core/platform/NativeFileSystem.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <expected>
 #include <filesystem>
@@ -41,7 +43,11 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <ranges>
+#include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -69,10 +75,12 @@
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/DurableFiles.hpp>
 #include <vthost/FilePrivacy.hpp>
+#include <vthost/PlatformStreams.hpp>
 #include <vthost/ServiceControl.hpp>
 #include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/StatePath.hpp>
+#include <vthost/StdioAttach.hpp>
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
@@ -953,6 +961,32 @@ int ContourApp::daemonAction()
             return daemonVerbAction(row.verb, prefix);
     }
 
+    // On --stdio every byte of stdout belongs to the protocol, and from before the configuration
+    // loads: a warning it emits goes to the default log sink, std::cout, as logging is installed only
+    // after the configuration names the socket. A refused combination is reported first, with stdout
+    // still untouched.
+    auto stdioClient = std::shared_ptr<vthost::IByteStream> {};
+    if (parameters().get<bool>("contour.daemon.stdio"))
+    {
+        if (auto const combined = checkStdioCombinations(); !combined)
+        {
+            cerr << std::format("contour daemon: {}\n", combined.error());
+            return EXIT_FAILURE;
+        }
+        stdioClient = vthost::makeProcessStdioStream();
+    }
+    // Reports a failure on stderr, and on --stdio to the attaching client as well, as an error preamble.
+    auto const refuse = [&stdioClient](std::string const& reason) {
+        cerr << std::format("contour daemon: {}\n", reason);
+        if (!stdioClient)
+            return EXIT_FAILURE;
+        return vthost::runStdioAttach(
+            std::move(stdioClient),
+            [&reason]() -> std::expected<std::shared_ptr<vthost::IByteStream>, std::string> {
+                return std::unexpected { reason };
+            });
+    };
+
     // The hosted terminals' full session configuration: emulation settings, presentation/color
     // fields, the shell to run and its sandbox policy. The profile's `history.limit` is
     // load-bearing here rather than cosmetic -- @see vthost::DefaultSessionHistoryLineCount. This
@@ -965,10 +999,7 @@ int ContourApp::daemonAction()
     // every profile a client names later.
     auto hostConfig = config::tryLoadConfigNamed(parameters().get<string>("contour.daemon.config"));
     if (!hostConfig)
-    {
-        cerr << std::format("contour daemon: {}\n", hostConfig.error());
-        return EXIT_FAILURE;
-    }
+        return refuse(hostConfig.error());
     auto const daemonSettings = hostConfig->daemon.value();
 
     auto config = vthost::DaemonConfig {};
@@ -981,25 +1012,31 @@ int ContourApp::daemonAction()
     // Before logging, whose default file lies beside the socket: a log sink creating the socket's
     // directory would give it the umask's 0755, which the listener refuses as world-accessible.
     if (auto const prepared = vthost::prepareSocketDirectory(config.socketPath); !prepared)
-    {
-        cerr << std::format("contour daemon: {}\n", prepared.error());
-        return EXIT_FAILURE;
-    }
+        return refuse(prepared.error());
 
     // Logging is installed next, so every diagnostic below — socket binds, TLS setup — is
     // captured. The app owns it, so it outlives runDaemon (categories hold a reference into its
     // sink) and every thread runDaemon spawns has been joined by the time it returns.
     if (auto const installed = installLogging("contour.daemon", /*showProcessId=*/true); !installed)
-    {
-        cerr << std::format("contour daemon: {}\n", installed.error());
-        return EXIT_FAILURE;
-    }
+        return refuse(installed.error());
     // Loaded again, now that there is a log: what the load has to say -- a key it does not know, a value it
     // corrects -- was said to the default sink the first time, which for a --background daemon is nowhere a
     // user looks. The socket stays the one derived above; a file that no longer loads keeps the first load.
     if (auto reloaded = config::tryLoadConfigNamed(parameters().get<string>("contour.daemon.config"));
         reloaded)
         hostConfig = std::move(reloaded);
+
+    // Logging's default sink is stderr, never stdout, and --log-file names a file or stderr; stdout
+    // has pointed at stderr since makeProcessStdioStream() above besides.
+    if (stdioClient)
+    {
+        // The option, else the configuration's `daemon.size_policy`, as for a daemon this process becomes.
+        auto const sizePolicy = resolveSizePolicy(parameters().get<string>("contour.daemon.size-policy"),
+                                                  daemonSettings.sizePolicy);
+        if (!sizePolicy)
+            return refuse(sizePolicy.error());
+        return stdioRelayAction(std::move(stdioClient), config.socketPath, *sizePolicy);
+    }
 
     auto const daemonProfile = parameters().get<string>("contour.daemon.profile");
     auto const resolved = config::resolvedSessionConfigFor(*hostConfig, daemonProfile);
@@ -1203,6 +1240,81 @@ int ContourApp::daemonAction()
     }
 
     return vthost::runDaemon(config);
+}
+
+namespace
+{
+    /// Each names something only a daemon this process would become can do; the relay becomes none.
+    constexpr auto StdioRefusals = std::array {
+        OptionPresence { .name = "listen-tcp", .givenAs = GivenAs::Text },
+        OptionPresence { .name = "background", .givenAs = GivenAs::Flag },
+        OptionPresence { .name = "tmux-compat-socket", .givenAs = GivenAs::Text },
+    };
+} // namespace
+
+std::optional<std::string_view> ContourApp::firstGivenOption(std::string_view verbPrefix,
+                                                             std::span<OptionPresence const> options)
+{
+    for (auto const& option: options)
+    {
+        auto const key = std::format("{}.{}", verbPrefix, option.name);
+        if (option.givenAs == GivenAs::Flag ? parameters().get<bool>(key)
+                                            : !parameters().get<string>(key).empty())
+            return option.name;
+    }
+    return std::nullopt;
+}
+
+std::expected<void, std::string> ContourApp::checkStdioCombinations()
+{
+    if (auto const given = firstGivenOption("contour.daemon", StdioRefusals))
+        return std::unexpected { std::format("--stdio relays to a daemon; it cannot be combined with --{}",
+                                             *given) };
+    return {};
+}
+
+int ContourApp::stdioRelayAction(std::shared_ptr<vthost::IByteStream> client,
+                                 std::filesystem::path const& socketPath,
+                                 vthost::ClientSizePolicy sizePolicy)
+{
+#ifndef _WIN32
+    // A client that went away is a write error that ends the relay with RelayEnd::Failed, not a SIGPIPE
+    // that ends it as signal 13 in the ssh session's exit status.
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
+    // An auto-started daemon is told what `contour client` would tell it.
+    auto const options = vthost::DaemonSpawnOptions {
+        .filter = parameters().get<string>("contour.daemon.log"),
+        .logFile = parameters().get<string>("contour.daemon.log-file"),
+        .configPath = parameters().get<string>("contour.daemon.config"),
+        .profileName = parameters().get<string>("contour.daemon.profile"),
+        .sizePolicy = sizePolicy,
+    };
+    auto const binary = vthost::makeOwnDaemonBinary(
+        processEnvironment(),
+        core::platform::NativeFileSystem::instance(),
+        CONTOUR_VERSION_STRING,
+        core::pathFromUtf8(commandLine().front()).value_or(std::filesystem::path {}));
+    auto const spawner = vthost::makeNativeDaemonSpawner();
+    auto const commands = vthost::makeNativeCommandRunner();
+    auto const services =
+        vthost::ServiceBackendServices { .fileSystem = core::platform::NativeFileSystem::instance(),
+                                         .commands = *commands,
+                                         .environment = processEnvironment() };
+    auto const placement = vtpty::makeDefaultProcessPlacement();
+    // The registered user service when there is one, so a stopped service is started rather than an
+    // on-demand daemon beside it.
+    auto starter = vthost::chooseDaemonStarter(
+        vthost::findRegisteredService(parameters().get<string>("contour.daemon.label"),
+                                      vthost::nativeServiceBackendFactory(services)),
+        vthost::OnDemandSpawn { .endpoint = vthost::UnixEndpoint { .socketPath = socketPath },
+                                .spawner = *spawner,
+                                .binary = *binary,
+                                .placement = *placement,
+                                .options = options,
+                                .timeout = std::chrono::seconds(5) });
+    return vthost::runStdioAttach(std::move(client),
+                                  vthost::makeLocalDaemonConnector(socketPath, *spawner, std::move(starter)));
 }
 
 int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
@@ -1722,6 +1834,11 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "its diagnostics to. On Linux the daemon runs in a systemd scope of "
                                   "its own where systemd answers before this command returns; "
                                   "otherwise it stays where it was started." },
+                    CLI::Option { "stdio",
+                                  CLI::Value { false },
+                                  "Relays the native protocol between standard input/output and this "
+                                  "user's daemon, starting it if needed. What `contour client --host` "
+                                  "runs over ssh." },
                     CLI::Option { "in-place",
                                   CLI::Value { false },
                                   "Runs from the installed binary instead of a per-version copy; a "

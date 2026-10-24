@@ -139,6 +139,33 @@ struct MenuTable
                      .children = children };
     }
 
+    /// One AttachToHost row per saved host, in `State::hostNames` order.
+    ///
+    /// Shared by every menu that offers the hosts, so the pane's and the title bar's "Attach to Host"
+    /// cannot drift apart.
+    /// @param state The world the menu was opened over; reads its `hostNames`.
+    /// @return The rows, none without saved hosts.
+    [[nodiscard]] static std::vector<ContextMenuEntry> hostRows(State const& state)
+    {
+        auto entries = std::vector<ContextMenuEntry> {};
+        entries.reserve(state.hostNames.size());
+
+        for (auto const& name: state.hostNames)
+            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
+                                                    .title = name,
+                                                    .action = actions::AttachToHost { .name = name },
+                                                    .enabled = true,
+                                                    .checkable = false,
+                                                    .checked = false,
+                                                    .children = {} });
+
+        return entries;
+    }
+
+    /// The "Attach to Host" submenu, listing hostRows(); absent without saved hosts, as an empty submenu
+    /// is dropped.
+    [[nodiscard]] static Row attachToHostSubmenu() { return submenu("Attach to Host", hostRows); }
+
     /// Resolves @p rows against @p state: drops the rows whose precondition fails, grays out the ones
     /// merely unsatisfied, and expands the submenus.
     ///

@@ -15,6 +15,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/RemoteChrome.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
@@ -53,11 +54,16 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _tabCommands { *this },
     _profileCommands { manager.app().config() },
     _layoutCommands { manager.app().config() },
+    _hostCommands { manager.app().config() },
     _boundCommands { manager.app().config().inputMappings.value() },
     _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) }
 {
-    _commandPalette->setSources(
-        { &_tabCommands, &_profileCommands, &_layoutCommands, &_boundCommands, &_actionCommands });
+    _commandPalette->setSources({ &_tabCommands,
+                                  &_profileCommands,
+                                  &_layoutCommands,
+                                  &_hostCommands,
+                                  &_boundCommands,
+                                  &_actionCommands });
 
     // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
     // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
@@ -181,6 +187,17 @@ void WindowController::triggerContextMenuAction(int actionId)
     session->executeAction(*action);
 }
 
+QString WindowController::hostLabel() const
+{
+    return QString::fromStdString(_manager.app().attachedHostLabel());
+}
+
+QString WindowController::windowTitle(QString const& sessionTitle) const
+{
+    return QString::fromStdString(
+        remoteWindowTitle(_manager.app().attachedHostLabel(), sessionTitle.toStdString()));
+}
+
 void WindowController::openTitleBarContextMenu()
 {
     auto state = command::TitleBarContextMenuState {
@@ -191,6 +208,8 @@ void WindowController::openTitleBarContextMenu()
         .tabBarPosition = _tabBarPosition,
         .activeProfile = {},
         .profileNames = {},
+        // `hosts` is ordered by name already.
+        .hostNames = std::ranges::to<std::vector>(_manager.app().config().hosts.value() | std::views::keys),
     };
 
     if (auto* session = activeSession())

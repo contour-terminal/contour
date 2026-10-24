@@ -8,6 +8,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <iterator>
+#include <ranges>
 #include <string>
 #include <variant>
 #include <vector>
@@ -571,4 +573,36 @@ TEST_CASE("ContextMenu.blockRows.hiddenWithoutShellIntegration", "[contextmenu][
         INFO(title);
         CHECK(find(menu, title) == nullptr);
     }
+}
+
+TEST_CASE("the Attach to Host submenu lists saved hosts", "[contextmenu][hosts]")
+{
+    auto state = fullyEnabledState();
+    state.hostNames = { "home", "studio" };
+
+    auto const menu = buildContextMenu(state);
+    auto const* hosts = find(menu, "Attach to Host");
+    REQUIRE(hosts != nullptr);
+    REQUIRE(hosts->kind == ContextMenuEntryKind::Submenu);
+    REQUIRE(hosts->children.size() == 2);
+    for (auto const& [child, name]: std::views::zip(hosts->children, state.hostNames))
+    {
+        CHECK(child.title == name);
+        CHECK_FALSE(child.checkable);
+        auto const* attach = std::get_if<actions::AttachToHost>(&child.action);
+        REQUIRE(attach != nullptr);
+        CHECK(attach->name == name);
+    }
+
+    // Directly after "Change Profile".
+    auto const profiles = std::ranges::find(menu, std::string { "Change Profile" }, &ContextMenuEntry::title);
+    REQUIRE(profiles != menu.end());
+    REQUIRE(std::next(profiles) != menu.end());
+    CHECK(std::next(profiles)->title == "Attach to Host");
+}
+
+TEST_CASE("no hosts, no Attach to Host submenu", "[contextmenu][hosts]")
+{
+    auto const menu = buildContextMenu(fullyEnabledState());
+    CHECK(find(menu, "Attach to Host") == nullptr);
 }

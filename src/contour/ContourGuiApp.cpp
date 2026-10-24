@@ -36,6 +36,7 @@
 #include <vtbackend/vt/DesktopNotification.hpp>
 
 #include <vtpty/Process.hpp>
+#include <vtpty/ProgramLookup.hpp>
 #include <vtpty/SandboxInfo.hpp>
 
 #ifdef CONTOUR_EXTENSIONS
@@ -74,6 +75,7 @@
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonStarter.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/StdioChild.hpp>
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
@@ -405,6 +407,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              core::platform::SteadyTimePoint processStart):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
+    _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeBackgroundExecutor(StatusLineCommandThreads)),
     _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
@@ -858,15 +861,15 @@ void ContourGuiApp::applyOpenGlGpuSelection()
 #endif
 }
 
-std::expected<void, std::string> ContourGuiApp::awaitNativeAttach()
+std::expected<void, std::string> ContourGuiApp::awaitNativeAttach(std::chrono::milliseconds budget,
+                                                                  std::string hostLabel)
 {
-    // Ten seconds: the first connect starts the daemon too, when none serves, and that waits up to five
-    // seconds for it to accept before the connect's own share of the budget begins.
-    if (auto connected = _nativeController->awaitConnected(std::chrono::seconds(10)); !connected)
+    if (auto connected = _nativeController->awaitConnected(budget); !connected)
     {
         _nativeController.reset();
         return std::unexpected(connected.error());
     }
+    _attachedHostLabel = std::move(hostLabel);
     _routingFactory->setDelegate(_nativeController.get());
     // After the connect: the drift offer reads what the handshake negotiated. Only a daemon this client
     // can restart -- a local one, which is what _restartDaemon is set for -- is offered a restart.
@@ -943,6 +946,42 @@ std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string c
         .transform_error([](vthost::client::DaemonRestartFailure const& failure) { return failure.detail; });
 }
 
+namespace
+{
+    /// Each would be silently ignored beside `--host`: the host's entry says where and how to connect.
+    constexpr auto HostExclusions = std::array {
+        cli::OptionPresence { .name = "connect-tcp", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "socket", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "tmux", .givenAs = cli::GivenAs::Flag },
+        cli::OptionPresence { .name = "token", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "token-file", .givenAs = cli::GivenAs::Text },
+        cli::OptionPresence { .name = "tls-ca", .givenAs = cli::GivenAs::Text },
+        // A host attach mirrors all of the remote daemon's windows; one window would need its own intent.
+        cli::OptionPresence { .name = "window", .givenAs = cli::GivenAs::Text },
+    };
+} // namespace
+
+std::expected<cli::HostTransport, std::string> ContourGuiApp::resolveClientHost(std::string const& nameOrUrl,
+                                                                                ClientRequest& request)
+{
+    if (auto const given = firstGivenOption("contour.client", HostExclusions))
+        return std::unexpected { std::format("pass either --host or --{}, not both", *given) };
+    auto host = config::resolveHost(request.config, nameOrUrl);
+    if (!host)
+        return std::unexpected { host.error() };
+    // The host's profile, unless --profile names one: the GUI renders with it and the daemon creates with it.
+    if (request.profile.empty())
+        request.profile = host->profile;
+    // A saved host by its name, an ad-hoc one by its URL, canonically spelled.
+    auto label = nameOrUrl.contains("://") ? config::toString(host->url) : nameOrUrl;
+    return cli::makeHostTransport(
+        std::move(label),
+        *host,
+        fileSystem(),
+        vthost::makeSystemStdioSpawner(vtpty::ProgramSearch {
+            .path = _sshSearchPath, .workingDirectory = {}, .fileSystem = fileSystem() }));
+}
+
 int ContourGuiApp::clientAction()
 {
     // Installed first, so an ensureDaemon spawn failure is captured. Read here with the other client-verb
@@ -988,6 +1027,16 @@ int ContourGuiApp::clientAction()
         return EXIT_FAILURE;
     }
     request.token = *std::move(token);
+    if (auto const host = parameters().get<string>("contour.client.host"); !host.empty())
+    {
+        auto resolved = resolveClientHost(host, request);
+        if (!resolved)
+        {
+            cerr << std::format("contour client: {}\n", resolved.error());
+            return EXIT_FAILURE;
+        }
+        request.host = *std::move(resolved);
+    }
 
     // Boot the GUI under the terminal verb's parameter surface: re-parse a synthetic argv so every
     // contour.terminal.* key resolves, carrying the attach-specific profile/config choices over.
@@ -1085,7 +1134,10 @@ namespace
     /// @param tlsCaPath `--tls-ca`: the PEM pinning its certificate; empty to trust on first use.
     /// @return The TLS transport to a daemon over TCP, which a client follows every window of.
     [[nodiscard]] std::expected<NativeAttachTarget, std::string> tcpAttachTarget(
-        std::string const& connectTcp, std::string const& token, std::string const& tlsCaPath)
+        std::string const& connectTcp,
+        std::string const& token,
+        std::string const& tlsCaPath,
+        core::platform::FileSystem const& fileSystem)
     {
         auto const hostPort = vthost::parseHostPort(connectTcp);
         if (!hostPort)
@@ -1096,16 +1148,11 @@ namespace
         };
         if (!tlsCaPath.empty())
         {
-            auto const path = core::pathFromUtf8(tlsCaPath).value_or(fs::path {});
-            // An empty CA read must hard-fail exactly like the thin client: makeTlsClientContext treats "" as
-            // the TOFU/no-verify posture, so accepting it would silently strip the pinning the user asked
-            // for.
-            auto caPem = std::string {};
-            if (std::filesystem::is_regular_file(path))
-                caPem = core::readFileAsString(path);
-            if (caPem.empty())
-                return std::unexpected(std::format("cannot read --tls-ca file '{}'", tlsCaPath));
-            tcp.caPem = std::move(caPem);
+            auto caPem = cli::readPinnedCa(
+                fileSystem, core::pathFromUtf8(tlsCaPath).value_or(fs::path {}), "--tls-ca");
+            if (!caPem)
+                return std::unexpected(caPem.error());
+            tcp.caPem = *std::move(caPem);
         }
         return NativeAttachTarget {
             .transport = std::make_shared<vthost::TlsTransportFactory>(std::move(tcp)),
@@ -1119,9 +1166,25 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
 {
     auto const& settings = _config.daemon.value();
     auto target = std::expected<NativeAttachTarget, std::string> {};
-    if (_clientRequest && !_clientRequest->connectTcp.empty())
-        target =
-            tcpAttachTarget(_clientRequest->connectTcp, _clientRequest->token, _clientRequest->tlsCaPath);
+    // Ten seconds for the local daemon: the first connect starts it too, when none serves, and that waits up
+    // to five seconds for it to accept before the connect's own share of the budget begins.
+    auto budget = std::chrono::milliseconds { std::chrono::seconds(10) };
+    auto hostLabel = std::string {};
+    if (_clientRequest && _clientRequest->host)
+    {
+        // A remote daemon is started by the remote relay, never from here; a client follows every window.
+        auto& host = *_clientRequest->host;
+        budget = std::max(host.connectTimeout, std::chrono::milliseconds { remote::MinimumConnectAwait });
+        hostLabel = host.label;
+        target = NativeAttachTarget {
+            .transport = host.factory,
+            .intent = vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows,
+                                                    .windows = {} },
+        };
+    }
+    else if (_clientRequest && !_clientRequest->connectTcp.empty())
+        target = tcpAttachTarget(
+            _clientRequest->connectTcp, _clientRequest->token, _clientRequest->tlsCaPath, fileSystem());
     else
     {
         // The local daemon: its socket and size policy are the client's options, else the `daemon:` section.
@@ -1255,8 +1318,8 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     // connect, in the transport's ensureDaemon, on a worker thread of the transport's own while the GUI
     // boots.
     _nativeController->startConnecting();
-    _awaitAttach = [this] {
-        return awaitNativeAttach();
+    _awaitAttach = [this, budget, hostLabel = std::move(hostLabel)] {
+        return awaitNativeAttach(budget, hostLabel);
     };
     return {};
 }
@@ -1328,6 +1391,12 @@ core::cli::Command ContourGuiApp::parameterDefinition() const
                               "NAME" },
                 CLI::Option {
                     "config", CLI::Value { ""s }, "Path to configuration file the GUI loads.", "FILE" },
+                CLI::Option { "host",
+                              CLI::Value { ""s },
+                              "Attaches to a remote host: a name under the configuration's `hosts:`, or a "
+                              "URL, `ssh://[USER@]HOST[:PORT]` (key or agent authentication only). The "
+                              "remote host's daemon is started there when none runs.",
+                              "NAME|URL" },
                 CLI::Option { "connect-tcp",
                               CLI::Value { ""s },
                               "Connect to a TCP daemon at HOST:PORT (TLS-encrypted, "

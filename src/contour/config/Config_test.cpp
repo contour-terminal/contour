@@ -614,6 +614,159 @@ layouts:
     CHECK(*layouts.at("extra").tabs.at(0).root.command == "zsh");
 }
 
+// {{{ hosts
+TEST_CASE("Config: saved hosts parse", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    home:
+        url: "ssh://me@homepc"
+        remote_command: "/opt/contour/bin/contour daemon --stdio"
+        profile: "remote"
+    studio:
+        url: "tls://studio.tailnet.ts.net:7297"
+        token_file: "~/.config/contour/studio.token"
+        tls_ca: "~/.config/contour/studio-ca.pem"
+)"sv);
+
+    auto const& hosts = config.hosts.value();
+    REQUIRE(hosts.size() == 2);
+    auto const& home = hosts.at("home");
+    CHECK(home.url.scheme == contour::config::HostScheme::Ssh);
+    CHECK(home.url.user == "me");
+    CHECK(home.url.host == "homepc");
+    CHECK(home.remoteCommand == "/opt/contour/bin/contour daemon --stdio");
+    CHECK(home.profile == "remote");
+    CHECK(home.tokenFile.empty());
+
+    auto const& studio = hosts.at("studio");
+    CHECK(studio.url.scheme == contour::config::HostScheme::Tls);
+    CHECK(studio.url.port == 7297);
+    CHECK(studio.tokenFile == vtpty::Process::homeDirectory() / ".config/contour/studio.token");
+    CHECK(studio.tlsCa == vtpty::Process::homeDirectory() / ".config/contour/studio-ca.pem");
+}
+
+TEST_CASE("Config: a host with a malformed url is skipped, the others load", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    bad:
+        url: "homepc"
+    home:
+        url: "ssh://homepc"
+)"sv);
+
+    auto const& hosts = config.hosts.value();
+    CHECK(hosts.size() == 1);
+    CHECK(hosts.contains("home"));
+}
+
+TEST_CASE("Config: a host without url is skipped", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    nowhere:
+        profile: "remote"
+    home:
+        url: "ssh://homepc"
+)"sv);
+
+    auto const& hosts = config.hosts.value();
+    CHECK(hosts.size() == 1);
+    CHECK(hosts.contains("home"));
+}
+
+TEST_CASE("Config: tls host without token_file is skipped", "[config][hosts]")
+{
+    // A TCP daemon always requires a token, so a saved TLS host without one could never attach.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    studio:
+        url: "tls://studio:7297"
+)"sv);
+
+    CHECK(config.hosts.value().empty());
+}
+
+TEST_CASE("Config: tls host without tls_ca loads, unverified", "[config][hosts]")
+{
+    // Warned about at load rather than skipped: the guide explains when an unpinned daemon is acceptable.
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+hosts:
+    studio:
+        url: "tls://studio:7297"
+        token_file: "/tmp/studio.token"
+)"sv);
+
+    REQUIRE(config.hosts.value().contains("studio"));
+    CHECK(config.hosts.value().at("studio").tlsCa.empty());
+}
+
+TEST_CASE("Config: resolveHost finds saved hosts and parses ad-hoc URLs", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, R"(
+hosts:
+    home:
+        url: "ssh://me@homepc"
+    studio:
+        url: "tls://studio:7297"
+        token_file: "/tmp/studio.token"
+)"sv);
+
+    SECTION("a saved name")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "home");
+        REQUIRE(host.has_value());
+        CHECK(host->url.user == "me");
+    }
+
+    SECTION("an unknown name lists the saved ones")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "office");
+        REQUIRE_FALSE(host.has_value());
+        CHECK(host.error().contains("no host named 'office'"));
+        CHECK(host.error().contains("home"));
+        CHECK(host.error().contains("studio"));
+    }
+
+    SECTION("an ad-hoc ssh URL needs no configuration")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "ssh://other");
+        REQUIRE(host.has_value());
+        CHECK(host->url.host == "other");
+    }
+
+    SECTION("an ad-hoc tls URL is refused")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "tls://studio:7297");
+        REQUIRE_FALSE(host.has_value());
+        CHECK(host.error() == "a tls:// host needs a token; save it under hosts: with token_file");
+    }
+
+    SECTION("a malformed ad-hoc URL says why")
+    {
+        auto const host = contour::config::resolveHost(path.string(), "ssh://-oProxyCommand=x");
+        REQUIRE_FALSE(host.has_value());
+        CHECK(host.error().contains("a host may not begin with '-'"));
+    }
+}
+
+TEST_CASE("Config: resolveHost says (none) when nothing is saved", "[config][hosts]")
+{
+    QTemporaryDir dir;
+    auto const path = writeConfig(dir, "default_profile: main\n");
+    auto const host = contour::config::resolveHost(path.string(), "home");
+    REQUIRE_FALSE(host.has_value());
+    CHECK(host.error().contains("(saved hosts: (none))"));
+}
+// }}}
+
 TEST_CASE("Config: a malformed layout field is skipped, not fatal to the rest of the config",
           "[config][layout]")
 {
@@ -2167,6 +2320,36 @@ input_mapping:
     });
     CHECK(nameless);
     CHECK(named);
+}
+
+TEST_CASE("Config: an AttachToHost binding carries its host's name, and one without is refused",
+          "[config][hosts]")
+{
+    // Like LaunchLayout: "attach to which host?" has no default, so a nameless binding is dropped on parse.
+    using namespace contour::actions;
+
+    CHECK(std::format("{}", Action { AttachToHost { .name = "home" } }) == "AttachToHost, name: 'home'");
+
+    QTemporaryDir dir;
+    auto const config = loadFromYaml(dir, R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Control, Shift], key: F6, action: AttachToHost, name: home }
+    - { mods: [Control, Shift], key: F7, action: AttachToHost }
+)"sv);
+
+    auto const& mappings = config.inputMappings.value().keyMappings;
+    auto const attaches = std::ranges::count_if(
+        mappings, [](auto const& m) { return std::holds_alternative<AttachToHost>(m.binding.at(0)); });
+    CHECK(attaches == 1);
+    auto const home = std::ranges::any_of(mappings, [](auto const& m) {
+        auto const* attach = std::get_if<AttachToHost>(&m.binding.at(0));
+        return attach != nullptr && attach->name == "home";
+    });
+    CHECK(home);
 }
 
 TEST_CASE("Config: font features, text shaping engine, frozen DEC modes and hint patterns load", "[config]")

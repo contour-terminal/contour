@@ -234,7 +234,8 @@ void NativeController::onConnectionState(vthost::client::ConnectionState state, 
                 else
                 {
                     _state = State::Failed;
-                    _failure = std::format("{} ({})", reason, where);
+                    // Named once: an ssh transport's message already says which host it failed on.
+                    _failure = reason.contains(where) ? reason : std::format("{} ({})", reason, where);
                     errorLog()("attach: {}", _failure);
                 }
                 closed = true;

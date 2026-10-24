@@ -3,6 +3,8 @@ add_library(vthost STATIC
     AccessFile.hpp
     AttachPlan.cpp
     AttachPlan.hpp
+    ByteStream.cpp
+    ByteStream.hpp
     ClientCensus.hpp
     ClientSizePolicy.hpp
     ConfigReload.hpp
@@ -31,6 +33,9 @@ add_library(vthost STATIC
     FilePrivacy.hpp
     FilePrivacy_win32.cpp
     PermissionWire.hpp
+    PlatformStreams.hpp
+    PlatformStreams_posix.cpp
+    PlatformStreams_win32.cpp
     ProfileCatalog.hpp
     ImageWire.hpp
     TimeWire.hpp
@@ -85,7 +90,17 @@ add_library(vthost STATIC
     ShutdownSignals.cpp
     ShutdownSignals.hpp
     SocketPath.hpp
+    SshTransport.cpp
+    SshTransport.hpp
     StatePath.hpp
+    StderrTail.hpp
+    StdioAttach.cpp
+    StdioAttach.hpp
+    StdioChild.hpp
+    StdioChild_posix.cpp
+    StdioChild_win32.cpp
+    StdioPreamble.cpp
+    StdioPreamble.hpp
     TabEdits.cpp
     TabEdits.hpp
     TappingPty.hpp
@@ -214,6 +229,7 @@ if(VTHOST_TESTING)
         test_main.cpp
         AccessFile_test.cpp
         AttachPlan_test.cpp
+        ByteStream_test.cpp
         TabEdits_test.cpp
         GracefulClose_test.cpp
         HostIdentity_test.cpp
@@ -255,7 +271,11 @@ if(VTHOST_TESTING)
         ServiceControl_systemd_test.cpp
         ServiceControl_test.cpp
         SocketPath_test.cpp
+        SshTransport_test.cpp
         StatePath_test.cpp
+        StdioAttach_test.cpp
+        StdioChild_test.cpp
+        StdioPreamble_test.cpp
         Token_test.cpp
         Transport_test.cpp
         testing/GridParity.cpp
@@ -276,6 +296,7 @@ if(VTHOST_TESTING)
         testing/FakeProfileCatalog.hpp
         testing/ForwardingFileSystem.hpp
         testing/GatedFileSystem.hpp
+        testing/MemoryByteStream.hpp
         testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
         client/ClientSupervisor_test.cpp

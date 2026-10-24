@@ -134,6 +134,7 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 | `--exit-with-last-session` | Alias for `--lifecycle=exit-with-last-session`. |
 | `--size-policy POLICY` | Which attached client's size the shared grid takes when clients of different sizes are attached: `latest`, `smallest` or `largest`. Mirrors tmux's `window-size`. Defaults to the configuration's `daemon.size_policy` (`latest` unless set). |
 | `--background` | Relaunches the command detached and returns once the daemon accepts connections. Without `--log-file` the daemon logs beside its socket (`SOCKET.log`), since a detached process has no console. |
+| `--stdio` | Relays the native protocol between standard input/output and this user's daemon, starting it if needed: what `contour client --host` runs over ssh. Honours `--label`, `--socket`, `--config`, `--profile`, `--log`, `--log-file` and `--size-policy` (forwarded to a daemon it starts); cannot be combined with `--listen-tcp`, `--background` or `--tmux-compat-socket`. |
 | `--in-place` | Runs from the installed binary instead of a per-version copy. See [After upgrading Contour](#after-upgrading-contour). |
 | `--tmux-compat-socket LABEL` | Additionally binds tmux's own discovery path `/tmp/tmux-<uid>/<LABEL>`, so a plain `tmux -L LABEL -C attach-session` finds this daemon. |
 | `--listen-tcp HOST:PORT` | Also serve the native protocol over TCP. Opt-in; always TLS-encrypted and token-authenticated. See [Remote access](#remote-access-over-tcp). |
@@ -172,6 +173,7 @@ under `auto`; under `required` it ends before any window, since a daemon session
 | `--tmux-socket PATH` | The tmux server socket (tmux's `-S`) for `--tmux`. |
 | `--profile NAME` | Config profile the window renders remote sessions with. |
 | `--config FILE` | Configuration file to load. |
+| `--host NAME\|URL` | Attach to a remote host: a name saved under [`hosts:`](configuration/hosts.md), or an ad-hoc `ssh://[USER@]HOST[:PORT]` (a `tls://` host needs its token, so it must be saved). The remote daemon is started there when none runs; every one of its windows is shown, and the window title and the tab strip name the host. A host's `profile:` is used unless `--profile` names one. Cannot be combined with `--socket`, `--connect-tcp`, `--token`, `--token-file`, `--tls-ca` or `--tmux`. See [Remote hosts](remote-hosts.md). |
 | `--connect-tcp HOST:PORT` | Connect to a remote daemon over TLS instead of a local socket. |
 | `--token TOKEN`, `--token-file FILE` | The preshared token to present, inline or read from a file. |
 | `--tls-ca FILE` | PEM trust anchor pinning the daemon's certificate. Omitted means encrypt-but-do-not-verify. |
@@ -288,6 +290,9 @@ kinds the token may not see is answered `forbidden`.
 A call outside a token's grants is answered `forbidden` and the connection stays open. Viewing the
 sessions needs every grant, so a `contour client` with a narrower token is refused exactly as with a
 wrong one.
+
+To attach over ssh instead, with no port to open, to save hosts by name, or to reach a home PC from
+the office over Tailscale, see [Remote hosts](remote-hosts.md).
 
 ## Starting the daemon at login
 
@@ -547,6 +552,9 @@ since it exits 10 seconds after its last session and client are gone.
   own; the shell's scrollback appears when the program exits.
 - Shells end with the daemon (see [Stopping a daemon](#stopping-a-daemon)); the workspace comes back
   without them (see [Surviving reboots](#surviving-reboots)).
+- **ssh attach needs key or agent authentication.** Contour never answers an ssh prompt — a
+  password, a key passphrase, a second factor or an unknown host key — so run `ssh USER@HOST` once
+  in a terminal first (see [Remote hosts](remote-hosts.md#over-ssh)).
 - Images are not recoverable through tmux-mode replay (see the note under
   [tmux interoperability](#tmux-interoperability)).
 

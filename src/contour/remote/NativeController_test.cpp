@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/cli/HostTransport.hpp>
 #include <contour/remote/NativeController.hpp>
 #include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -45,6 +46,7 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/Tls.hpp>
+#include <core/net/testing/InMemoryTransport.hpp>
 #include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <core/platform/NativeFileSystem.hpp>
@@ -58,6 +60,8 @@
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/SshTransport.hpp>
+#include <vthost/StdioChild.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/LayoutReconstruction.hpp>
@@ -2320,6 +2324,148 @@ TEST_CASE("attach controller reports an unreachable daemon", "[attach][controlle
     auto const connected = controller.connectAndWait(2s);
     REQUIRE(!connected.has_value());
     CHECK(!connected.error().empty());
+}
+
+namespace
+{
+/// A transport whose every attempt fails with one message.
+class FailingTransportFactory final: public vthost::ITransportFactory
+{
+  public:
+    FailingTransportFactory(std::string where, std::string message):
+        _where { std::move(where) }, _message { std::move(message) }
+    {
+    }
+
+    [[nodiscard]] core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    connect(core::net::EventLoop& /*loop*/) override
+    {
+        return fail(_message);
+    }
+
+    [[nodiscard]] std::string describe() const override { return _where; }
+
+    [[nodiscard]] vthost::PeerTrust peerTrust() const noexcept override
+    {
+        return vthost::PeerTrust::Verified;
+    }
+
+  private:
+    [[nodiscard]] static core::async::Task<
+        std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>>
+    fail(std::string message)
+    {
+        co_return std::unexpected { vthost::TransportError { .kind = vthost::TransportErrorKind::Refused,
+                                                             .message = std::move(message) } };
+    }
+
+    std::string _where;
+    std::string _message;
+};
+} // namespace
+
+TEST_CASE("NativeController names the transport of a failure once", "[attach][controller][hosts]")
+{
+    struct Row
+    {
+        std::string_view name;
+        std::string message;
+        std::string expected;
+    };
+    auto const rows = std::array {
+        Row { .name = "a message that names no host gets it appended",
+              .message = "connection refused",
+              .expected = "connection refused (ssh://me@homepc)" },
+        Row { .name = "an ssh message names its host already",
+              .message = "ssh could not reach ssh://me@homepc: Connection refused",
+              .expected = "ssh could not reach ssh://me@homepc: Connection refused" },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
+        auto timeline = TestTimeline {};
+        auto controller = contour::remote::NativeController {
+            std::make_shared<FailingTransportFactory>("ssh://me@homepc", row.message),
+            vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows,
+                                          .windows = {} },
+            std::string {},
+            std::nullopt,
+            {},
+            core::platform::defaultSteadyClock(),
+            timeline.timeline
+        };
+        auto const connected = controller.connectAndWait(10s);
+        REQUIRE_FALSE(connected.has_value());
+        CHECK(connected.error() == row.expected);
+        controller.stop();
+    }
+}
+
+namespace
+{
+/// An ssh child that never answers: its stdout stays open and silent, like a remote stuck in its login.
+class SilentStdioChild final: public vthost::IStdioChild
+{
+  public:
+    explicit SilentStdioChild(std::unique_ptr<core::net::ISocket> remoteEnd):
+        _remoteEnd { std::move(remoteEnd) }
+    {
+    }
+
+    [[nodiscard]] std::string stderrTail() const override { return {}; }
+    [[nodiscard]] std::optional<int> exitCode(std::chrono::milliseconds /*wait*/) override
+    {
+        return std::nullopt;
+    }
+    void terminate() noexcept override { _remoteEnd.reset(); }
+
+  private:
+    std::unique_ptr<core::net::ISocket> _remoteEnd; ///< Held open, written never.
+};
+
+/// Spawns SilentStdioChild, on an in-process socket pair.
+class SilentStdioSpawner final: public vthost::IStdioSpawner
+{
+  public:
+    [[nodiscard]] std::expected<vthost::SpawnedStdioChild, vthost::StdioSpawnError> spawn(
+        core::net::EventLoop& loop, std::span<std::string const> /*argv*/) override
+    {
+        auto pair = core::net::testing::makeSocketPair(loop);
+        if (!pair)
+            return std::unexpected { vthost::StdioSpawnError { .kind = vthost::SpawnFailure::SystemError,
+                                                               .message = "no socket pair" } };
+        return vthost::SpawnedStdioChild { .transport = std::move(pair->first),
+                                           .process =
+                                               std::make_unique<SilentStdioChild>(std::move(pair->second)) };
+    }
+};
+} // namespace
+
+TEST_CASE("a silent ssh remote is reported by the ssh transport rather than as an attach timeout",
+          "[attach][controller][hosts]")
+{
+    // The attach's clock starts before the transport's: with the same bound for both, the attach would
+    // time out first and say nothing about the host. Above MinimumConnectAwait, so the floor decides nothing.
+    auto constexpr TransportBound = std::chrono::milliseconds { 2500 };
+    static_assert(TransportBound > contour::remote::MinimumConnectAwait);
+    auto timeline = TestTimeline {};
+    auto controller = contour::remote::NativeController {
+        std::make_shared<vthost::SshTransportFactory>(
+            vthost::SshTarget { .user = "me", .host = "homepc", .port = std::nullopt },
+            std::make_shared<SilentStdioSpawner>(),
+            TransportBound),
+        vthost::proto::AttachIntent { .kind = vthost::proto::AttachIntentKind::AllWindows, .windows = {} },
+        std::string {},
+        std::nullopt,
+        {},
+        core::platform::defaultSteadyClock(),
+        timeline.timeline
+    };
+    auto const connected = controller.connectAndWait(contour::cli::sshAttachBudget(TransportBound));
+    REQUIRE_FALSE(connected.has_value());
+    CHECK(connected.error() == "ssh://me@homepc did not answer within 3 seconds");
+    controller.stop();
 }
 
 // B4: the manager's attach-window seam (consumeAttachWindow) routes a freshly-spawned
