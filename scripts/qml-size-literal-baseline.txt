@@ -1,0 +1,35 @@
+# Numeric size literals per chrome QML file (scripts/check-qml-sizes.py). This file only shrinks:
+# a new literal fails the gate, and so does a file below its count. After removing literals, regenerate
+# the lines with `python3 scripts/check-qml-sizes.py --print-baseline` and keep this header.
+src/contour/qml/ColorSchemeEditor.qml 20
+src/contour/qml/ColorSlotField.qml 9
+src/contour/qml/CommandPalette.qml 19
+src/contour/qml/ConfirmDialog.qml 13
+src/contour/qml/DaemonDriftBadge.qml 4
+src/contour/qml/LinkPatternList.qml 8
+src/contour/qml/Main.qml 6
+src/contour/qml/PopupSurface.qml 1
+src/contour/qml/SaveLayoutDialog.qml 5
+src/contour/qml/SearchBar.qml 2
+src/contour/qml/SessionChrome.qml 11
+src/contour/qml/SettingRow.qml 23
+src/contour/qml/SettingsListItem.qml 19
+src/contour/qml/SettingsNavItem.qml 16
+src/contour/qml/SettingsPage.qml 90
+src/contour/qml/SettingsSection.qml 22
+src/contour/qml/StatusLineChip.qml 11
+src/contour/qml/StatusLineIndicatorEditor.qml 8
+src/contour/qml/StatusLineItemDialog.qml 21
+src/contour/qml/StatusLinePreviewItem.qml 1
+src/contour/qml/StatusLineSegmentRow.qml 23
+src/contour/qml/TabColorFlyout.qml 12
+src/contour/qml/TabItem.qml 5
+src/contour/qml/TabStrip.qml 3
+src/contour/qml/TerminalPane.qml 3
+src/contour/qml/TitleBar.qml 1
+src/contour/qml/WindowControls.qml 5
+src/contour/styles/ContourTui/Button.qml 1
+src/contour/styles/ContourTui/ComboBox.qml 2
+src/contour/styles/ContourTui/Menu.qml 1
+src/contour/styles/ContourTui/MenuItem.qml 1
+src/contour/styles/ContourTui/TextField.qml 1
