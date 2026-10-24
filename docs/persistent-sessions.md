@@ -315,10 +315,78 @@ runs, or end its process.
 For a service-managed daemon, prefer `contour daemon-service stop`, which lets the service manager
 know it was stopped on purpose rather than restarting it.
 
-!!! warning "Sessions do not survive the daemon"
+!!! warning "Shells do not survive the daemon"
     Persistence is against the *client*, not against the daemon process. Stopping the daemon ends
     every shell it hosts. Shutdown is abrupt by design — attached clients see the connection close
-    with no goodbye, exactly as a real `tmux kill-server` looks to them.
+    with no goodbye, exactly as a real `tmux kill-server` looks to them. What comes back after a
+    reboot, a crash or an upgrade is the *workspace* — see [Surviving reboots](#surviving-reboots).
+
+## Surviving reboots
+
+A daemon keeps a snapshot of its workspace, so that after a reboot, a crash or an upgrade the next
+daemon brings it back. The shells themselves cannot survive their daemon; what returns is:
+
+- every window, tab and split, with its ratios, the active tab and pane, and a zoomed pane;
+- tab titles and the tab colours you set;
+- each pane's working directory and profile;
+- the newest lines of each pane's scrollback, under a dim marker row such as
+  `── restored · snapshot of 2026-10-24 09:15 ──`, followed by a fresh shell.
+
+The snapshot is written every `interval` seconds while the workspace changes, at once when you close
+a pane or a tab, and once more as the daemon ends. It is **restored** when a daemon starts and finds
+one: after a reboot, a crash, a `SIGTERM`, an idle exit, or the restart the drift chip offers after
+an upgrade (see [After upgrading Contour](#after-upgrading-contour)). It is **not restored** after a
+plain `contour daemon stop`, which empties it, and panes and tabs you closed are not brought back.
+
+```sh
+contour daemon stop                   # ends the shells and discards the workspace
+contour daemon stop --keep-snapshot   # ends the shells; the next daemon restores the workspace
+```
+
+With no daemon running, `contour daemon stop` still offers to empty the saved workspace, so a daemon
+started later does not bring back what you meant to end. Since a crash may have left that workspace as
+all you have, it asks first, unless `--yes` is given, and without a terminal to ask on it clears
+nothing and tells you to pass `--yes`. It exits with status 4 as before, whether it cleared the
+workspace or you kept it; with nothing saved it says so and creates no file. A
+daemon from a release before this feature keeps no workspace: `--keep-snapshot` then says so and
+stops it plainly.
+
+A program is never started again by itself. Only one you list in `rerun_programs` is run once more
+when its pane was running it, and only when its command line holds nothing a shell would expand.
+When the saved directory no longer exists, the pane opens in the shell's default directory and the
+daemon logs it.
+
+```yaml
+daemon:
+  restore:
+    scrollback: true          # bring the scrollback back
+    scrollback_lines: 1000    # the most lines kept per pane, 0 to 100000
+    rerun_programs: []        # e.g. [vim, htop]; nothing is re-run unless listed
+    interval: 30              # seconds between writes of a changed workspace, at least 5
+```
+
+`scrollback_lines` bounds the snapshot only; how much scrollback a session holds while it runs stays
+`daemon.history_limit`.
+
+The snapshot is `<state-dir>/sessions/<label>.snapshot` (the state directory is listed under
+[Platform notes](#platform-notes)); a daemon started with `--label work` keeps `work.snapshot`. A
+daemon given a socket of its own, by `--socket` or `$CONTOUR_MUX`, keeps `<label>@<hash>.snapshot`
+instead, the hash naming its socket, so it never restores or overwrites the workspace of the daemon
+its label runs; `contour daemon stop --socket` finds the same file. The
+file is your user's alone: mode `0600` in a `0700` directory on Linux, macOS and BSD, and a protected
+ACL granting only your account on Windows. It is replaced atomically and durably: each write is
+flushed to the disk before it replaces the previous snapshot, and the replacement is flushed in turn,
+so a daemon crash, a power loss or a kernel crash in the middle of a write leaves either the previous
+snapshot or the new one, whole.
+
+!!! warning "The snapshot may hold secrets"
+    Restored scrollback is whatever was on screen: a password echoed by mistake, a token printed by a
+    tool. It is written to disk in the clear. Set `scrollback: false` to keep only the layout and the
+    directories, or `scrollback_lines: 0` for the same.
+
+A snapshot that cannot be read is renamed `<label>.snapshot.corrupt` and the daemon starts with its
+startup layout, logging why; one written by a newer release is left in place. A restore that brought
+nothing back is tried once more at the next start, then set aside as `<label>.snapshot.failed`.
 
 ## Diagnostics
 
@@ -402,8 +470,10 @@ side does not know are simply not used on that connection.
 When the daemon's release differs from the client's, the window shows a quiet chip at the bottom
 right, for instance `daemon 0.8.1 is older than this client`. Clicking it offers **Restart daemon on
 the new version**. The confirmation says what that costs: it **ends every shell the daemon hosts**,
-and a fresh one opens on the new daemon, because the layout is not kept across a restart yet. After
-the restart a new Contour window attaches to the new daemon, and this one closes. The chip is shown
+and a fresh one opens on the new daemon. A daemon that keeps its workspace brings your windows, tabs,
+directories and scrollback back, and the confirmation says so (see
+[Surviving reboots](#surviving-reboots)). After the restart a new Contour window attaches to the new
+daemon, and this one closes. The chip is shown
 only for the local daemon: a remote one (`--connect-tcp`) is not yours to restart.
 
 The restart stops the daemon for an upgrade, then starts one the same way a client would: through the
@@ -439,7 +509,8 @@ since it exits 10 seconds after its last session and client are gone.
 - **A session sitting on the alternate screen has no scrollback to show.** Attach while `vim`,
   `less` or `htop` is running and you get that program's screen, which never has history of its
   own; the shell's scrollback appears when the program exits.
-- Sessions end with the daemon (see [Stopping a daemon](#stopping-a-daemon)).
+- Shells end with the daemon (see [Stopping a daemon](#stopping-a-daemon)); the workspace comes back
+  without them (see [Surviving reboots](#surviving-reboots)).
 - Images are not recoverable through tmux-mode replay (see the note under
   [tmux interoperability](#tmux-interoperability)).
 

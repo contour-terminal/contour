@@ -616,7 +616,7 @@ ControlSession::HandlerResult ControlSession::commandKillPane(std::vector<std::s
     auto pane = resolvePane(arguments);
     if (!pane)
         return std::unexpected(pane.error());
-    _host.handleSessionExit((*pane)->session());
+    _host.closeSession((*pane)->session());
     return std::vector<std::string> {};
 }
 

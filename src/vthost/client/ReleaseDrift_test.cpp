@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch_test_macros.hpp>
 
+#include <utility>
+
 #include <vthost/client/ReleaseDrift.hpp>
 
 TEST_CASE("releases compare by their numeric prefix", "[vthost][drift]")
@@ -47,6 +49,24 @@ TEST_CASE("the drift notice uses the spec's wording", "[vthost][drift]")
 TEST_CASE("before phase 6 a restart does not keep the layout", "[vthost][drift]")
 {
     CHECK(vthost::client::layoutSurvivesRestart(vthost::proto::Negotiated {})
+          == vthost::client::LayoutAfterRestart::Lost);
+}
+
+TEST_CASE("layoutSurvivesRestart follows the restore capability", "[vthost][client]")
+{
+    using vthost::proto::Capability;
+    using vthost::proto::CapabilitySet;
+    auto const offered = [](CapabilitySet daemon, CapabilitySet shared = {}) {
+        return vthost::client::layoutSurvivesRestart(vthost::proto::Negotiated {
+            .version = 4, .peerCapabilities = std::move(daemon), .shared = std::move(shared) });
+    };
+    CHECK(offered(CapabilitySet::of({ Capability::DaemonControl, Capability::WorkspaceRestore }))
+          == vthost::client::LayoutAfterRestart::Restored);
+    CHECK(offered(CapabilitySet::of({ Capability::DaemonControl }))
+          == vthost::client::LayoutAfterRestart::Lost);
+    // What the daemon offers decides, whatever the client offered.
+    CHECK(offered(CapabilitySet::of({ Capability::DaemonControl }),
+                  CapabilitySet::of({ Capability::WorkspaceRestore }))
           == vthost::client::LayoutAfterRestart::Lost);
 }
 

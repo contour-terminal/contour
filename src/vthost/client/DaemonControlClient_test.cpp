@@ -179,6 +179,18 @@ TEST_CASE("status() over a Control connection returns the daemon's report", "[vt
     CHECK(h.host.sessionCount() == 0);
 }
 
+TEST_CASE("a status says what the daemon offered", "[vthost][client][control]")
+{
+    auto const offered =
+        proto::CapabilitySet::of({ proto::Capability::DaemonControl, proto::Capability::WorkspaceRestore });
+    auto h = ControlHarness { StoppableDaemon::OnStop::GoAway, offered };
+    auto port = client::SocketDaemonControl { h.loop, h.connector(), 2s };
+    auto const status = port.status();
+    REQUIRE(status.has_value());
+    CHECK(status->capabilities.contains(proto::Capability::WorkspaceRestore));
+    CHECK(client::DefaultStopTimeout > client::DefaultControlTimeout);
+}
+
 TEST_CASE("a daemon without DaemonControl is Unsupported, not unreachable", "[vthost][client][control]")
 {
     auto h = ControlHarness { StoppableDaemon::OnStop::GoAway, proto::CapabilitySet {} };

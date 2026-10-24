@@ -923,9 +923,11 @@ std::expected<void, std::string> ContourGuiApp::restartLocalDaemon(std::string c
     auto const endpoint = vthost::UnixEndpoint { .socketPath = controlPath };
     auto start = LocalDaemonStart { processEnvironment(), fileSystem(), programPath() };
     auto const starter = start.starter(label, endpoint, *_processPlacement, options);
-    // Never starts a daemon itself: the restart below starts the new one through the starter.
+    // Never starts a daemon itself: the restart below starts the new one through the starter. The stop waits
+    // for the old daemon to write the workspace the new one restores.
     auto const control = vthost::client::makeDaemonControl(
-        std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr));
+        std::make_shared<vthost::UnixTransportFactory>(controlPath, nullptr),
+        vthost::client::DefaultStopTimeout);
     return vthost::client::restartDaemon(*control, *starter)
         .transform_error([](vthost::client::DaemonRestartFailure const& failure) { return failure.detail; });
 }

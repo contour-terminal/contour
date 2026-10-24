@@ -5,6 +5,7 @@
 
 #include <core/Assert.hpp>
 #include <core/Overloaded.hpp>
+#include <core/Utf8Path.hpp>
 
 #include <algorithm>
 #include <array>
@@ -16,7 +17,9 @@
 #include <utility>
 #include <variant>
 
+#include <vthost/HistorySeed.hpp>
 #include <vthost/Logging.hpp>
+#include <vthost/RerunPolicy.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -93,16 +96,20 @@ HostedSession::HostedSession(SessionId id,
         _extensions->start();
 }
 
+vtpty::Process const* HostedSession::process() const noexcept
+{
+    auto const* const tapped = dynamic_cast<TappingPty const*>(&_terminal.device());
+    return dynamic_cast<vtpty::Process const*>(tapped != nullptr ? &tapped->inner() : &_terminal.device());
+}
+
 void HostedSession::pollForegroundProcess()
 {
     if (!followsForegroundProcess())
         return;
-    auto const* const tapped = dynamic_cast<TappingPty const*>(&_terminal.device());
-    auto const* const process =
-        dynamic_cast<vtpty::Process const*>(tapped != nullptr ? &tapped->inner() : &_terminal.device());
-    if (process == nullptr)
+    auto const* const child = process();
+    if (child == nullptr)
         return;
-    auto name = process->foregroundProcessName();
+    auto name = child->foregroundProcessName();
     if (!name || *name == _foregroundProcessName)
         return;
     _foregroundProcessName = std::move(*name);
@@ -137,6 +144,7 @@ void HostedSession::start()
 
 void HostedSession::terminate()
 {
+    _terminateRequested = true;
     if (!_terminal.device().isClosed())
         _terminal.device().close();
     // Unconditionally, even when someone else closed the device first: close() wakes a blocked
@@ -167,8 +175,29 @@ void HostedSession::pumpLoop()
         deliverPending();
         _terminal.flushInput();
     }
+    _endCause = observeEnd();
     if (_onClosed)
         _onClosed();
+}
+
+SessionEnd HostedSession::observeEnd() const
+{
+    // The host closing the PTY says nothing of how the program ended; and without a process there is nothing
+    // to ask.
+    auto const* const child = process();
+    if (child == nullptr || _terminateRequested)
+        return SessionEnd::Exited;
+    // The PTY reports its hangup before the child is necessarily reaped: give the status a moment to land.
+    constexpr auto Patience = std::chrono::milliseconds { 200 };
+    constexpr auto Interval = std::chrono::milliseconds { 10 };
+    auto const deadline = std::chrono::steady_clock::now() + Patience;
+    auto status = child->checkStatus();
+    while (!status && !_terminateRequested && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::sleep_for(Interval);
+        status = child->checkStatus();
+    }
+    return sessionEndOf(status);
 }
 
 void HostedSession::deliverOnPump(Delivery deliver, std::string_view bytes)
@@ -270,8 +299,12 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
 {
     // Realized here, in the BODY: _window is the last member to construct, so this is the
     // earliest point a tab can legally be created on it. Runs before runDaemon() binds any
-    // listener, so the layout is in place before a client could possibly attach.
-    realizeStartupLayout(_window, config.startupLayout);
+    // listener, so the layout is in place before a client could possibly attach. A restored workspace
+    // replaces the startup layout, unless it brought nothing back.
+    if (config.restore && realizeRestoredWorkspace(*config.restore) > 0)
+        _restoreOutcome = RestoreOutcome::Realized;
+    else
+        realizeStartupLayout(_window, config.startupLayout);
 }
 
 SessionHost::~SessionHost()
@@ -393,6 +426,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
                 // batches arrived meanwhile.
                 if (hosted->second->hasExtensions() && hasScreenMirrors())
                     hosted->second->requestStatusLineRepaint();
+                typeInitialInputAtPrompt(id);
                 for (auto* observer: _streamSubscribers)
                     observer->sessionScreenUpdated(id);
             });
@@ -425,10 +459,19 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
             });
         },
         /*onClosed=*/
-        [this, id] { _loop.post([this, id] { handleSessionExit(id); }); },
+        [this, id] {
+            _loop.post([this, id] {
+                // The pump has ended by the time this runs, so what it saw is final.
+                if (auto const it = _sessions.find(id.value); it != _sessions.end())
+                    endSession(id, it->second->endCause());
+            });
+        },
         makeSessionExtensions(id),
         std::move(profileName));
 
+    // Before the pump starts: the seed assumes nothing else writes to the terminal.
+    if (request.restoredHistory)
+        seedRestoredHistory(session->terminal(), *request.restoredHistory, request.restoredMarker);
     if (_pumping == SessionPumping::Threaded)
         session->start();
     if (session->hasExtensions())
@@ -440,6 +483,8 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& req
 
     _sessions.emplace(id.value, std::move(session));
     _pendingSessionId = id;
+    if (!request.initialInput.empty())
+        holdInitialInput(id, request.initialInput);
     sessionLog()("session {} spawned at {}x{} ({} live)",
                  id.value,
                  unbox(_pageSize.columns),
@@ -499,6 +544,185 @@ void SessionHost::realizeStartupLayout(vtworkspace::WindowId window, vtworkspace
         std::ignore = vtworkspace::realizeLayoutTab(_model, window, tabSpec, seeder);
         _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
     }
+}
+
+namespace
+{
+    /// A tab of a snapshot as the layout realizer takes it, plus each of its leaves' captured data.
+    struct RestoredTab
+    {
+        vtworkspace::LayoutTab layout;
+        std::unordered_map<vtworkspace::LayoutPane const*, PaneSnapshot const*> panes {};
+    };
+
+    [[nodiscard]] vtworkspace::LayoutPane layoutPaneOf(PaneNode const& node)
+    {
+        auto pane = vtworkspace::LayoutPane {};
+        if (node.children.empty())
+        {
+            pane.profile = node.pane.profile;
+            return pane;
+        }
+        pane.orientation = node.split;
+        for (auto const& child: node.children)
+            pane.children.push_back(layoutPaneOf(child));
+        // The realizer reads a child's share of the whole split: the first gets the ratio, the second the
+        // rest.
+        pane.children.front().ratio = node.ratio;
+        pane.children.back().ratio = 1.0 - node.ratio;
+        return pane;
+    }
+
+    /// Pairs each leaf of @p pane with the leaf of @p node it was converted from.
+    void indexLeaves(vtworkspace::LayoutPane const& pane,
+                     PaneNode const& node,
+                     std::unordered_map<vtworkspace::LayoutPane const*, PaneSnapshot const*>& panes)
+    {
+        if (pane.isLeaf())
+        {
+            panes.emplace(&pane, &node.pane);
+            return;
+        }
+        for (auto const index: std::views::iota(std::size_t { 0 }, pane.children.size()))
+            indexLeaves(pane.children[index], node.children[index], panes);
+    }
+
+    [[nodiscard]] std::unique_ptr<RestoredTab> restoredTabOf(TabSnapshot const& tab)
+    {
+        // Held by pointer: the leaf index names addresses inside the layout, which must not move.
+        auto restored = std::make_unique<RestoredTab>();
+        restored->layout.title = tab.title;
+        restored->layout.color = tab.color;
+        restored->layout.root = layoutPaneOf(tab.root);
+        indexLeaves(restored->layout.root, tab.root, restored->panes);
+        return restored;
+    }
+
+    /// @return The @p index-th leaf of @p pane, depth first, first child first; null past the last.
+    [[nodiscard]] vtworkspace::Pane const* leafAt(vtworkspace::Pane const& pane, std::uint32_t& index)
+    {
+        if (pane.isLeaf())
+            return index-- == 0 ? &pane : nullptr;
+        if (auto const* const found = leafAt(*pane.first(), index))
+            return found;
+        return leafAt(*pane.second(), index);
+    }
+} // namespace
+
+std::size_t SessionHost::realizeRestoredWorkspace(WorkspaceRestore const& restore)
+{
+    auto realized = std::size_t { 0 };
+    for (auto const& window: restore.snapshot.windows)
+    {
+        // The first window that brings anything back is the host's own, which never stays empty while a
+        // later one fills.
+        auto const id = realized == 0 ? _window : _model.createWindow()->id();
+        auto const panes = realizeRestoredWindow(id, window, restore);
+        // A window none of whose panes came back is not left behind empty.
+        if (panes == 0 && id != _window)
+            _model.removeWindow(id);
+        realized += panes;
+    }
+    sessionLog()("restore: {} pane(s) of a snapshot of {} window(s) came back",
+                 realized,
+                 restore.snapshot.windows.size());
+    return realized;
+}
+
+std::size_t SessionHost::realizeRestoredWindow(WindowId window,
+                                               WindowSnapshot const& snapshot,
+                                               WorkspaceRestore const& restore)
+{
+    auto realized = std::size_t { 0 };
+    auto tabs = std::vector<Tab*> {};
+    for (auto const& tabSnapshot: snapshot.tabs)
+    {
+        auto const restored = restoredTabOf(tabSnapshot);
+        auto const seeder = [&](vtworkspace::LayoutPane const& leaf) -> bool {
+            auto const& pane = *restored->panes.at(&leaf);
+            auto request = SessionSpawnRequest { .profileName = pane.profile.value_or(std::string {}) };
+            if (pane.workingDirectory)
+            {
+                // A directory deleted or unmounted since is no reason to lose the pane.
+                if (_fileSystem.isDirectory(*pane.workingDirectory))
+                {
+                    request.commandOverride = vtpty::Process::ExecInfo {};
+                    request.commandOverride->workingDirectory = *pane.workingDirectory;
+                }
+                else
+                    sessionLog()(
+                        "restore: {} no longer exists; the pane starts in the shell's default directory",
+                        core::pathToUtf8(*pane.workingDirectory));
+            }
+            if (pane.history)
+            {
+                request.restoredHistory = std::make_shared<proto::Delta const>(*pane.history);
+                request.restoredMarker = restore.marker;
+            }
+            request.initialInput = rerunInputFor(pane, restore.rerunPrograms).value_or(std::string {});
+            auto const seeded = seedSession(request).has_value();
+            realized += seeded ? 1 : 0;
+            return seeded;
+        };
+        auto* const tab = vtworkspace::realizeLayoutTab(_model, window, restored->layout, seeder);
+        _pendingSessionId.reset(); // consumed by the allocator; clear any leftover
+        if (tab == nullptr)
+            continue;
+        tabs.push_back(tab);
+        auto leaf = tabSnapshot.activeLeaf;
+        if (auto const* const active = leafAt(*tab->rootPane(), leaf))
+            _model.setActivePane(tab->id(), active->id());
+        if (tabSnapshot.zoom == TabZoom::Zoomed && tab->paneCount() > 1)
+            _model.toggleActivePaneZoom(tab->id());
+    }
+    if (snapshot.activeTab < tabs.size())
+        _model.activateTab(window, tabs[snapshot.activeTab]->id());
+    return realized;
+}
+
+void SessionHost::holdInitialInput(SessionId session, std::string input)
+{
+    auto pending = std::make_unique<PendingInitialInput>(this, session, std::move(input));
+    pending->fallback.emplace(
+        _loop, _loop.clock().now() + InitialInputFallback, &initialInputFallbackExpired, pending.get());
+    _initialInputs.insert_or_assign(session.value, std::move(pending));
+}
+
+void SessionHost::typeInitialInputAtPrompt(SessionId session)
+{
+    auto const held = _initialInputs.find(session.value);
+    if (held == _initialInputs.end())
+        return;
+    auto* const backing = terminal(session);
+    if (backing == nullptr)
+        return;
+    auto const prompting = [&] {
+        auto const guard = std::lock_guard { *backing };
+        return backing->commandBlocks().current() != nullptr;
+    }();
+    if (prompting)
+        typeInitialInput(session);
+}
+
+void SessionHost::typeInitialInput(SessionId session)
+{
+    auto const held = _initialInputs.find(session.value);
+    if (held == _initialInputs.end())
+        return;
+    // Out of the map first: erasing it destroys the fallback, which may be what is running this.
+    auto const pending = std::move(held->second);
+    _initialInputs.erase(held);
+    if (auto const hosted = _sessions.find(session.value); hosted != _sessions.end())
+    {
+        sessionLog()("session {}: re-running its restored program", session.value);
+        hosted->second->writeInput(pending->input);
+    }
+}
+
+void SessionHost::initialInputFallbackExpired(void* pending)
+{
+    auto const& held = *static_cast<PendingInitialInput const*>(pending);
+    held.host->typeInitialInput(held.session);
 }
 
 Tab* SessionHost::createTab(SessionSpawnRequest const& request, std::optional<SessionId> beside)
@@ -762,6 +986,7 @@ std::optional<core::platform::SteadyTimePoint> SessionHost::lastInputAt(SessionI
 
 void SessionHost::eraseSession(uint64_t session)
 {
+    _initialInputs.erase(session);
     _lastInput.erase(session);
     _sessions.erase(session);
 }
@@ -921,6 +1146,43 @@ void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
 
 void SessionHost::handleSessionExit(SessionId session)
 {
+    endSession(session, SessionEnd::Exited);
+}
+
+void SessionHost::closeSession(SessionId session)
+{
+    endSession(session, SessionEnd::Requested);
+}
+
+PaneRuntime SessionHost::paneRuntime(SessionId session) const
+{
+    auto const it = _sessions.find(session.value);
+    if (it == _sessions.end())
+        return {};
+    auto& hosted = *it->second;
+    auto runtime = PaneRuntime {};
+    {
+        auto const guard = std::lock_guard { hosted.terminal() };
+        if (auto const resolved = hosted.terminal().resolveWorkingDirectory(vtbackend::CwdPurpose::Spawn))
+            if (auto path = core::pathFromUtf8(resolved->path))
+                runtime.workingDirectory = *std::move(path);
+    }
+    if (auto const* const child = hosted.process())
+    {
+        // "." is the lookup's failure value.
+        if (auto const directory = child->workingDirectory();
+            !runtime.workingDirectory && !directory.empty() && directory != ".")
+            if (auto path = core::pathFromUtf8(directory))
+                runtime.workingDirectory = *std::move(path);
+        runtime.foregroundProcess = child->foregroundProcessName();
+    }
+    if (!hosted.profileName().empty())
+        runtime.profile = hosted.profileName();
+    return runtime;
+}
+
+void SessionHost::endSession(SessionId session, SessionEnd cause)
+{
     auto const it = _sessions.find(session.value);
     if (it == _sessions.end())
         return;
@@ -936,7 +1198,7 @@ void SessionHost::handleSessionExit(SessionId session)
     eraseSession(session.value);
     // Reached from the pump thread's posted completion, so this runs on the loop thread like
     // every other line in this file.
-    sessionLog()("session {} exited ({} live)", session.value, _sessions.size());
+    sessionLog()("session {} {} ({} live)", session.value, describe(cause), _sessions.size());
     auto rehomed = std::vector<proto::PermissionRequest> {};
     if (hadExtensions)
     {
@@ -946,6 +1208,8 @@ void SessionHost::handleSessionExit(SessionId session)
 
     // The session is gone: tell stream observers so they drop any per-session
     // state (delta cursors, sent-hyperlink sets) instead of accumulating it.
+    for (auto* observer: _streamSubscribers)
+        observer->sessionEnded(session, cause);
     for (auto* observer: _streamSubscribers)
         observer->sessionClosed(session);
 

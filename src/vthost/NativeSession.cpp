@@ -1556,7 +1556,7 @@ void NativeSession::handlePdu(proto::DecodedFrame const& frame)
     }
     if (auto const* close = std::get_if<proto::ClosePane>(&frame.pdu))
     {
-        _host.handleSessionExit(vtworkspace::SessionId { close->session });
+        _host.closeSession(vtworkspace::SessionId { close->session });
         return;
     }
     if (auto const* reply = std::get_if<proto::PermissionReply>(&frame.pdu))

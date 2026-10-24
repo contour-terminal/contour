@@ -22,7 +22,18 @@
 #include <string>
 #include <string_view>
 
+#include <vthost/WorkspacePersistenceConfig.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+
+namespace contour::config
+{
+struct DaemonRestoreConfig;
+} // namespace contour::config
+
+namespace vthost
+{
+class SessionSnapshotStore;
+} // namespace vthost
 
 namespace contour::cli
 {
@@ -51,9 +62,11 @@ inline constexpr auto DaemonSubVerbs = std::array {
                     DaemonVerb::Status },
     DaemonVerbRow {
         "logs", "Prints the daemon's log; --follow keeps printing as it grows.", DaemonVerb::Logs },
-    DaemonVerbRow { "stop",
-                    "Stops the daemon, ending every session it hosts; asks first when sessions exist.",
-                    DaemonVerb::Stop },
+    DaemonVerbRow {
+        "stop",
+        "Stops the daemon, ending every session it hosts; asks first when sessions exist. The next "
+        "daemon starts afresh, unless --keep-snapshot keeps the workspace for it.",
+        DaemonVerb::Stop },
 };
 
 /// Whether `daemon stop` may end sessions without asking (`--yes`).
@@ -61,6 +74,23 @@ enum class StopConsent : uint8_t
 {
     Ask = 0, ///< Ask first when sessions exist.
     Given,   ///< Already given on the command line.
+};
+
+/// What `daemon stop` does with the daemon's saved workspace (`--keep-snapshot`).
+enum class StopDisposition : uint8_t
+{
+    Discard = 0,  ///< The next daemon starts afresh.
+    KeepSnapshot, ///< The next daemon restores the workspace.
+};
+
+/// How `daemon stop` stops.
+struct StopOptions
+{
+    StopConsent consent = StopConsent::Ask;                 ///< Whether to ask before ending sessions.
+    StopDisposition disposition = StopDisposition::Discard; ///< What becomes of the saved workspace.
+    /// The daemon's snapshot file, emptied when no daemon runs and the workspace is discarded; null when no
+    /// file can be named for the daemon's label.
+    vthost::SessionSnapshotStore const* savedWorkspace = nullptr;
 };
 
 /// Whether `daemon logs` ends after printing (`--follow`).
@@ -155,19 +185,33 @@ class LogFollower
                                                                         std::string const& unset);
 
 /// `contour daemon stop`.
+///
+/// A KeepSnapshot stop asks the daemon to keep its workspace only when it offers
+/// Capability::WorkspaceRestore (an older daemon refuses the request); otherwise it says the daemon keeps
+/// none, and stops it plainly. With no daemon running, a Discard stop empties a saved workspace that would
+/// come back, so the next daemon does not bring back what the user meant to end — after asking, unless
+/// consent is given, since a crash may have left it as all the user has.
 /// @param control The daemon's control port.
 /// @param socket The socket asked, named when no daemon answers.
-/// @param consent Whether sessions may be ended without asking.
-/// @param prompt Asked when sessions exist and consent is not given.
+/// @param options Whether to ask first, and what becomes of the saved workspace.
+/// @param prompt Asked when sessions exist, or a workspace would be cleared, and consent is not given.
 /// @param out Where the confirmation goes.
 /// @param err Where a failure or refusal goes.
-/// @return Ok once stopped; Unreachable when no daemon runs; Failed otherwise.
+/// @return Ok once stopped; Unreachable when no daemon runs; Failed otherwise, also when a saved workspace
+///         was neither cleared nor kept by the user's answer.
 [[nodiscard]] ExitStatus daemonStopVerb(vthost::client::DaemonControlPort& control,
                                         std::filesystem::path const& socket,
-                                        StopConsent consent,
+                                        StopOptions const& options,
                                         ConfirmPrompt& prompt,
                                         std::ostream& out,
                                         std::ostream& err);
+
+/// @param restore The `daemon.restore` section.
+/// @param snapshotPath The daemon's snapshot file; empty keeps no workspace.
+/// @return How the daemon keeps its workspace: its scrollback Off when `scrollback` is false or
+///         `scrollback_lines` is 0, else the Tail of that many rows.
+[[nodiscard]] vthost::WorkspacePersistenceConfig workspacePersistenceOf(
+    config::DaemonRestoreConfig const& restore, std::filesystem::path snapshotPath);
 
 /// What `contour daemon logs` prints.
 struct LogsOptions

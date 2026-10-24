@@ -66,8 +66,12 @@
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonImage.hpp>
 #include <vthost/DaemonStarter.hpp>
+#include <vthost/DurableFiles.hpp>
+#include <vthost/FilePrivacy.hpp>
 #include <vthost/ServiceControl.hpp>
+#include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/StatePath.hpp>
 #include <vthost/Token.hpp>
 #include <vthost/Transport.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
@@ -289,6 +293,10 @@ namespace
             case DaemonVerb::Stop:
                 options.emplace_back(CLI::Option {
                     "yes", CLI::Value { false }, "Ends the daemon's sessions without asking first." });
+                options.emplace_back(CLI::Option { "keep-snapshot",
+                                                   CLI::Value { false },
+                                                   "Keeps the daemon's workspace, so that the next daemon "
+                                                   "restores its windows, tabs and panes." });
                 break;
             case DaemonVerb::Logs:
                 options.emplace_back(CLI::Option {
@@ -904,6 +912,22 @@ namespace
         return nullptr;
     }
 
+    /// @param env The environment the state directory and the label's own socket are derived from.
+    /// @param label The daemon's label.
+    /// @param socket The socket the daemon listens on.
+    /// @return The file the daemon labelled @p label at @p socket keeps its workspace in; nullopt for a label
+    ///         no file can be named for.
+    [[nodiscard]] std::optional<std::filesystem::path> snapshotPathOf(core::Environment const& env,
+                                                                      std::string_view label,
+                                                                      std::filesystem::path const& socket)
+    {
+        auto const& fileSystem = core::platform::NativeFileSystem::instance();
+        return vthost::daemonSnapshotPath(vthost::daemonStateDirectory(env),
+                                          label,
+                                          fileSystem.weaklyCanonical(socket),
+                                          fileSystem.weaklyCanonical(vthost::labelSocketPath(label, env)));
+    }
+
     /// @return Whether `--in-place` refuses a move onto a staged image.
     [[nodiscard]] vthost::RelocationRequest relocationRequestOf(bool inPlace) noexcept
     {
@@ -977,6 +1001,14 @@ int ContourApp::daemonAction()
         cerr << std::format("contour daemon: {}\n", resolved.error());
         return EXIT_FAILURE;
     }
+    // Read before the configuration moves into the catalog. Not reloaded: a running daemon keeps the file
+    // and the schedule it started with.
+    auto const daemonLabel = parameters().get<string>("contour.daemon.label");
+    if (auto snapshotPath = snapshotPathOf(processEnvironment(), daemonLabel, config.socketPath))
+        config.persistence =
+            workspacePersistenceOf(hostConfig->daemon.value().restore, *std::move(snapshotPath));
+    else
+        errorLog()("the label '{}' names no snapshot file; this daemon keeps no workspace", daemonLabel);
     auto profiles = std::make_shared<ConfigProfileCatalog const>(
         *std::move(hostConfig), daemonProfile, vtbackend::ColorPreference::Light);
     // Edits of the configuration reach the sessions spawned afterwards, and the scrollback of those
@@ -1154,18 +1186,33 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
         return exitCode(ExitStatus::BadUsage);
     }
     auto const socket = vthost::muxSocketPath(*label, *socketOption);
-    // Never starts a daemon: asking about one, or stopping it, must not bring one up.
+    // Never starts a daemon: asking about one, or stopping it, must not bring one up. A stop waits for the
+    // daemon's last snapshot.
     auto control =
-        vthost::client::makeDaemonControl(std::make_shared<vthost::UnixTransportFactory>(socket, nullptr));
+        vthost::client::makeDaemonControl(std::make_shared<vthost::UnixTransportFactory>(socket, nullptr),
+                                          verb == DaemonVerb::Stop ? vthost::client::DefaultStopTimeout
+                                                                   : vthost::client::DefaultControlTimeout);
 
     switch (verb)
     {
         case DaemonVerb::Status: return exitCode(daemonStatusVerb(*control, socket, cout, cerr));
         case DaemonVerb::Stop: {
             auto prompt = makeTerminalPrompt(std::cin, cout);
-            auto const consent =
-                parameters().get<bool>(prefix + ".yes") ? StopConsent::Given : StopConsent::Ask;
-            return exitCode(daemonStopVerb(*control, socket, consent, *prompt, cout, cerr));
+            auto const snapshotPath = snapshotPathOf(processEnvironment(), *label, socket);
+            auto const savedWorkspace = snapshotPath.transform([](std::filesystem::path const& path) {
+                return vthost::SessionSnapshotStore { core::platform::NativeFileSystem::instance(),
+                                                      vthost::NativeFilePrivacy::instance(),
+                                                      vthost::NativeDurableFiles::instance(),
+                                                      path };
+            });
+            auto const options = StopOptions {
+                .consent = parameters().get<bool>(prefix + ".yes") ? StopConsent::Given : StopConsent::Ask,
+                .disposition = parameters().get<bool>(prefix + ".keep-snapshot")
+                                   ? StopDisposition::KeepSnapshot
+                                   : StopDisposition::Discard,
+                .savedWorkspace = savedWorkspace ? &*savedWorkspace : nullptr,
+            };
+            return exitCode(daemonStopVerb(*control, socket, options, *prompt, cout, cerr));
         }
         case DaemonVerb::Logs: {
             auto const lines = parameters().get<unsigned>(prefix + ".lines");
@@ -1308,7 +1355,8 @@ int ContourApp::daemonServiceAction(DaemonServiceAction action, std::string cons
         if (!status)
             return std::unexpected(status.error());
         auto const control = vthost::client::makeDaemonControl(
-            std::make_shared<vthost::UnixTransportFactory>(socketOf(*status), nullptr));
+            std::make_shared<vthost::UnixTransportFactory>(socketOf(*status), nullptr),
+            vthost::client::DefaultStopTimeout);
         if (auto const stopped = control->stop(vthost::proto::StopReason::User);
             !stopped && stopped.error().code != vthost::client::ControlErrorCode::NotRunning)
             return std::unexpected(vthost::ServiceError { .code = vthost::ServiceErrorCode::Backend,

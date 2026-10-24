@@ -2590,6 +2590,8 @@ void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& 
         loadFromEntry(child, "history_limit", value);
         where.historyLimit = value;
     }
+
+    loadFromEntry(child, "restore", where.restore);
 }
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where)
@@ -3397,6 +3399,80 @@ namespace
         return negative ? chrono::seconds::zero() : chrono::seconds { *count };
     }
 } // namespace
+
+void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
+                                     std::string const& entry,
+                                     DaemonRestoreConfig& where)
+{
+    // Only the children present are written, and each is read without as<>(), which would throw on a value
+    // of the wrong kind and leave the keys after it unread.
+    auto const child = node[entry];
+    if (!child)
+        return;
+
+    loadGuarded(child, "scrollback", where.scrollback);
+
+    if (auto const lines = child["scrollback_lines"])
+    {
+        auto const count = lines.IsScalar() ? core::toInteger<10, size_t>(lines.Scalar()) : nullopt;
+        if (!count)
+            errorLog()("{} must be a whole number of lines, not '{}'; keeping {}.",
+                       keyPathTo(child, "scrollback_lines"),
+                       YAML::Dump(lines),
+                       where.scrollbackLines);
+        else
+        {
+            if (*count > MaxRestoreScrollbackLines)
+                errorLog()("{} is at most {}, not {}; using {}.",
+                           keyPathTo(child, "scrollback_lines"),
+                           MaxRestoreScrollbackLines,
+                           *count,
+                           MaxRestoreScrollbackLines);
+            where.scrollbackLines = std::min(*count, MaxRestoreScrollbackLines);
+        }
+    }
+
+    if (auto const programs = child["rerun_programs"])
+    {
+        if (!programs.IsSequence())
+            errorLog()(
+                "{} ({}) takes a list of program names, such as [vim, htop]; keeping the previous one.",
+                keyPathTo(child, "rerun_programs"),
+                detail::placeOf(programs));
+        else
+        {
+            where.rerunPrograms.clear();
+            for (auto const& program: programs)
+            {
+                if (program.IsScalar() && !program.Scalar().empty())
+                    where.rerunPrograms.push_back(program.Scalar());
+                else
+                    errorLog()("{} ({}) lists something other than a program name; ignored.",
+                               keyPathTo(child, "rerun_programs"),
+                               detail::placeOf(program));
+            }
+        }
+    }
+
+    if (auto const interval = child["interval"])
+    {
+        if (auto const parsed = wholeSecondsFloor(interval); !parsed)
+            errorLog()("{} must be a whole number of seconds, not '{}'; keeping {}.",
+                       keyPathTo(child, "interval"),
+                       YAML::Dump(interval),
+                       where.interval.count());
+        else
+        {
+            if (*parsed < MinRestoreInterval)
+                errorLog()("{} is at least {} s, not {} s; using {} s.",
+                           keyPathTo(child, "interval"),
+                           MinRestoreInterval.count(),
+                           parsed->count(),
+                           MinRestoreInterval.count());
+            where.interval = std::max(*parsed, MinRestoreInterval);
+        }
+    }
+}
 
 void YAMLConfigReader::loadFromEntry(YAML::Node const& node,
                                      std::string const& entry,

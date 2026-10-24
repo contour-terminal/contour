@@ -6,7 +6,9 @@
 /// on Windows. Behind an interface because those are process-wide: a daemon run inside a test process must
 /// not take that process's signals, nor raise one into it.
 
+#include <chrono>
 #include <functional>
+#include <future>
 #include <memory>
 
 namespace vthost
@@ -39,9 +41,18 @@ class ShutdownSignals
     /// Starts watching.
     /// @param onSignal Called at most once, on a thread of the source's own, when the process is asked to
     ///        end. It must only post: it runs outside the daemon's loop.
+    /// @param lastWrite Ready once the daemon has written what it keeps as it ends (its beforeShutdown
+    ///        work). A source whose process ends as soon as it has been told (a Windows console being
+    ///        closed, a logoff, a system shutdown) holds the process on it for at most LastWriteGrace;
+    ///        every other source ignores it.
     /// @return The watch, which watches until destroyed.
-    [[nodiscard]] virtual std::unique_ptr<Watch> watch(std::function<void()> onSignal) = 0;
+    [[nodiscard]] virtual std::unique_ptr<Watch> watch(std::function<void()> onSignal,
+                                                       std::shared_future<void> lastWrite) = 0;
 };
+
+/// How long a console-control handler holds the process for the daemon's last write. Windows ends the
+/// process when the handler returns, and allows a close or logoff handler 5 s, a shutdown one 20 s at most.
+inline constexpr auto LastWriteGrace = std::chrono::seconds { 4 };
 
 /// The process's own: SIGINT/SIGTERM taken by a sigwait thread (POSIX), or the console-control handler
 /// (Windows). One daemon per process may watch them at a time.
@@ -52,7 +63,8 @@ class ShutdownSignals
 class NoShutdownSignals final: public ShutdownSignals
 {
   public:
-    [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal) override;
+    [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal,
+                                               std::shared_future<void> lastWrite) override;
 };
 
 } // namespace vthost

@@ -8,6 +8,9 @@
 
 #include <vtpty/MockPty.hpp>
 #ifndef _WIN32
+    #include <vtpty/Process.hpp>
+    #include <vtpty/ProcessPlacement.hpp>
+    #include <vtpty/Pty.hpp>
     #include <vtpty/UnixPty.hpp>
     #include <vtpty/test/PtyReading.hpp>
 #endif
@@ -2231,4 +2234,158 @@ TEST_CASE("a session takes escape_sandbox from its own profile", "[vthost][profi
           == std::vector { vthost::SandboxEscape::Contained,
                            vthost::SandboxEscape::Escapes,
                            vthost::SandboxEscape::Escapes });
+}
+
+namespace
+{
+
+/// Remembers the order in which a host announced the end of its sessions.
+struct EndRecorder final: vthost::SessionStreamEvents
+{
+    std::vector<std::pair<vtworkspace::SessionId, vthost::SessionEnd>> ended {};
+    std::vector<std::string> order {};
+
+    void sessionEnded(vtworkspace::SessionId session, vthost::SessionEnd cause) override
+    {
+        ended.emplace_back(session, cause);
+        order.push_back(std::format("ended({})", session.value));
+    }
+    void sessionClosed(vtworkspace::SessionId session) override
+    {
+        order.push_back(std::format("closed({})", session.value));
+    }
+};
+
+} // namespace
+
+TEST_CASE("SessionHost reports why each session ended", "[vthost][snapshot]")
+{
+    auto h = HostHarness {};
+    auto recorder = EndRecorder {};
+    h.host.subscribeStream(&recorder);
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
+    h.host.splitActivePane(tab->id(), SplitState::Horizontal, 0.5);
+    REQUIRE(h.host.sessionCount() == 3);
+    auto const a = tab->rootPane()->first()->session();
+    auto const b = tab->rootPane()->second()->first()->session();
+    auto const c = tab->rootPane()->second()->second()->session();
+
+    h.host.closeSession(a);
+    h.host.handleSessionExit(b);
+    using Entry = std::pair<vtworkspace::SessionId, vthost::SessionEnd>;
+    CHECK(recorder.ended
+          == std::vector<Entry> { { a, vthost::SessionEnd::Requested }, { b, vthost::SessionEnd::Exited } });
+    CHECK(recorder.order
+          == std::vector<std::string> { std::format("ended({})", a.value),
+                                        std::format("closed({})", a.value),
+                                        std::format("ended({})", b.value),
+                                        std::format("closed({})", b.value) });
+
+    h.host.endSession(c, vthost::SessionEnd::Killed);
+    CHECK(recorder.ended.back() == Entry { c, vthost::SessionEnd::Killed });
+    h.host.unsubscribeStream(&recorder);
+}
+
+#ifndef _WIN32
+TEST_CASE("a hosted shell killed by a signal ends Killed, one that exits ends Exited",
+          "[vthost][snapshot][threading]")
+{
+    // The PTY reports its hangup before the child is necessarily reaped; the pump's short poll of the exit
+    // status is what tells a kill from an exit, and the kill-grace rule of the snapshot rests on it.
+    struct Row
+    {
+        std::string script;
+        vthost::SessionEnd expected;
+    };
+    for (auto const& row: {
+             Row { "kill -9 $$", vthost::SessionEnd::Killed },
+             // Closing its terminal while it lives on makes the pump see the hangup first, and the host's
+             // close then hangs the shell up: there is no status yet when the pump asks, only a moment later.
+             Row { "exec 0<&- 1>&- 2>&-; sleep 5", vthost::SessionEnd::Killed },
+             Row { "exit 3", vthost::SessionEnd::Exited },
+         })
+    {
+        INFO(row.script);
+        auto const backend = core::net::makeDefaultBackend();
+        auto loop = core::net::EventLoop { *backend };
+        auto host =
+            SessionHost { loop,
+                          [&row](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                              auto shell = vtpty::Process::ExecInfo {};
+                              shell.program = "/bin/sh";
+                              shell.arguments = { "-c", row.script };
+                              return std::make_unique<vtpty::Process>(shell,
+                                                                      vtpty::createPty(size, std::nullopt),
+                                                                      false,
+                                                                      std::make_shared<vtpty::NoPlacement>());
+                          },
+                          vtbackend::Settings {},
+                          core::defaultEnvironment(),
+                          vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Threaded } };
+        auto recorder = EndRecorder {};
+        host.subscribeStream(&recorder);
+        REQUIRE(host.createTab() != nullptr);
+
+        auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds { 10 };
+        while (recorder.ended.empty() && std::chrono::steady_clock::now() < deadline)
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 10 });
+        REQUIRE(recorder.ended.size() == 1);
+        CHECK(recorder.ended.front().second == row.expected);
+        host.unsubscribeStream(&recorder);
+    }
+}
+#endif
+
+TEST_CASE("ending a session twice reports it once", "[vthost][snapshot]")
+{
+    auto h = HostHarness {};
+    auto recorder = EndRecorder {};
+    h.host.subscribeStream(&recorder);
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    h.host.closeSession(session);
+    h.host.handleSessionExit(session);
+    CHECK(recorder.ended.size() == 1);
+    h.host.unsubscribeStream(&recorder);
+}
+
+TEST_CASE("paneRuntime reports the reported directory and the spawn profile", "[vthost][snapshot]")
+{
+    SECTION("a directory the shell reported, on a MockPty")
+    {
+        auto h = HostHarness { vthost::ClientSizePolicy::Latest,
+                               vtbackend::HostIdentity { .machineId = {}, .hostname = "zeta" } };
+        auto* tab = h.host.createTab();
+        REQUIRE(tab != nullptr);
+        auto const session = tab->rootPane()->session();
+        auto const before = h.host.paneRuntime(session);
+        CHECK_FALSE(before.workingDirectory);
+        CHECK_FALSE(before.foregroundProcess);
+        CHECK_FALSE(before.profile);
+
+        h.host.terminal(session)->writeToScreen("\033]7;file://zeta/tmp/work\033\\");
+        auto const after = h.host.paneRuntime(session);
+        CHECK(after.workingDirectory == std::filesystem::path { "/tmp/work" });
+        CHECK_FALSE(after.foregroundProcess);
+    }
+    SECTION("the profile a session was spawned under")
+    {
+        auto h = ProfileHost {};
+        auto const* const named = h.host.createTab({ .profileName = "build" });
+        auto const* const unnamed = h.host.createTab();
+        REQUIRE(named != nullptr);
+        REQUIRE(unnamed != nullptr);
+        CHECK(h.host.paneRuntime(h.sessionOf(*named)).profile == "build");
+        CHECK_FALSE(h.host.paneRuntime(h.sessionOf(*unnamed)).profile);
+    }
+    SECTION("an unknown session")
+    {
+        auto h = HostHarness {};
+        auto const runtime = h.host.paneRuntime(vtworkspace::SessionId { 4711 });
+        CHECK_FALSE(runtime.workingDirectory);
+        CHECK_FALSE(runtime.profile);
+    }
 }

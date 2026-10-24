@@ -28,9 +28,12 @@
 #include <core/platform/FileSystem.hpp>
 #include <core/platform/NativeFileSystem.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -47,7 +50,10 @@
 #include <vthost/ExtensionHosting.hpp>
 #include <vthost/PermissionWire.hpp>
 #include <vthost/ProfileCatalog.hpp>
+#include <vthost/SessionEnd.hpp>
 #include <vthost/SessionSettings.hpp>
+#include <vthost/SessionSnapshot.hpp>
+#include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 #include <vtworkspace/ModelEvents.hpp>
@@ -131,6 +137,10 @@ class SessionStreamEvents
     /// it. Observers holding per-session state must drop it here, or it leaks for
     /// the connection's whole lifetime.
     virtual void sessionClosed(vtworkspace::SessionId /*session*/) {}
+
+    /// @p session is about to be reported closed, for @p cause. Fires once, on the loop thread, right before
+    /// sessionClosed().
+    virtual void sessionEnded(vtworkspace::SessionId /*session*/, SessionEnd /*cause*/) {}
 
     /// @p session's grid changed size, and the resize has already been applied.
     ///
@@ -276,6 +286,14 @@ class HostedSession
     ///         when the name asked for was unknown — or empty when it was spawned under none.
     [[nodiscard]] std::string const& profileName() const noexcept { return _profileName; }
 
+    /// @return The child process behind the session's PTY; nullptr for a PTY that is no process (a test's
+    ///         MockPty).
+    [[nodiscard]] vtpty::Process const* process() const noexcept;
+
+    /// @return Why the session ended, as the pump saw it once its PTY closed: valid from the moment the
+    ///         onClosed callback runs, Exited before.
+    [[nodiscard]] SessionEnd endCause() const noexcept { return _endCause.load(); }
+
     /// @return Whether the session runs status-line extensions.
     [[nodiscard]] bool hasExtensions() const noexcept { return _extensions != nullptr; }
 
@@ -388,6 +406,9 @@ class HostedSession
 
     void pumpLoop();
 
+    /// Asks the child, once the PTY closed, how it ended. Pump thread.
+    [[nodiscard]] SessionEnd observeEnd() const;
+
     /// What a client handed over, waiting for the pump. @see deliverOnPump()
     struct PendingDelivery
     {
@@ -414,6 +435,10 @@ class HostedSession
     /// load or subscribe later hear it from the terminal, which remembers it. Loop thread only.
     std::string _foregroundProcessName;
     std::function<void()> _onClosed;
+    /// Set by terminate(): the host closing the PTY is not the program ending, so the pump does not wait for
+    /// an exit status.
+    std::atomic<bool> _terminateRequested { false };
+    std::atomic<SessionEnd> _endCause { SessionEnd::Exited }; ///< @see endCause
     std::unique_ptr<std::thread> _pumpThread;
     /// Guards _pending and _pendingBytes: the loop thread queues, the pump thread delivers.
     mutable std::mutex _pendingMutex;
@@ -421,6 +446,15 @@ class HostedSession
     /// alike share an entry.
     std::vector<PendingDelivery> _pending;
     std::size_t _pendingBytes = 0; ///< What _pending holds, and what the pump took off it and is delivering.
+};
+
+/// What a pane is doing now, for a snapshot to restore it by.
+struct PaneRuntime
+{
+    /// OSC 3008 / OSC 7 when the directory is this machine's, else the process's.
+    std::optional<std::filesystem::path> workingDirectory {};
+    std::optional<std::string> foregroundProcess {}; ///< As the OS names the foreground program.
+    std::optional<std::string> profile {};           ///< The profile the session was spawned under, if named.
 };
 
 /// What ONE session-creating request overrides about the session it spawns.
@@ -451,6 +485,30 @@ struct SessionSpawnRequest
     /// that shell. Empty names the catalog's default profile, whose shell it runs — @ref settings, when
     /// set, still shaping its emulation; without a catalog the paths above stay as they are.
     std::string profileName {};
+
+    /// What the pane this session replaces had printed, seeded into the fresh terminal before its pump starts
+    /// (@see seedRestoredHistory); null for a session that restores nothing.
+    std::shared_ptr<proto::Delta const> restoredHistory {};
+
+    /// Written under @ref restoredHistory, as the parser reads it (@see restoredMarker); only with history.
+    std::string restoredMarker {};
+
+    /// Typed at the session's first OSC 133 `A` (prompt start), or after InitialInputFallback: a restored
+    /// pane's re-run program (@see rerunInputFor). Empty for nothing.
+    std::string initialInput {};
+};
+
+/// How long a restored session waits for its shell's first OSC 133 `A` before typing initialInput anyway
+/// (a shell without prompt marks). Measured on the loop's injected clock.
+inline constexpr auto InitialInputFallback = std::chrono::seconds { 2 };
+
+/// A workspace snapshot for a host to bring back as it starts, and what it re-runs in it.
+struct WorkspaceRestore
+{
+    WorkspaceSnapshot snapshot;                ///< The windows, tabs and panes to bring back.
+    std::vector<std::string> rerunPrograms {}; ///< The programs a restored pane may re-run (rerunInputFor).
+    std::string marker {}; ///< restoredMarker(snapshot.takenAt) in the daemon's local time.
+    RestoreSource source = RestoreSource::Snapshot; ///< Which file it came from, for endRestore().
 };
 
 /// Who feeds a hosted session's terminal from its PTY.
@@ -515,6 +573,9 @@ struct SessionHostConfig
     /// (proto::ServerHello::daemonInstance): the daemon draws it at random as it starts. 0 states none, as an
     /// embedded host or a test does.
     uint64_t instance = 0;
+    /// A snapshot to bring back. Wins over @ref startupLayout when it realizes at least one pane; the
+    /// startup layout is realized only when it realizes none (or none is given).
+    std::optional<WorkspaceRestore> restore {};
 };
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
@@ -744,6 +805,10 @@ class SessionHost final: public vtworkspace::ModelEvents
         return _pendingPermissions;
     }
 
+    /// @return Whether SessionHostConfig::restore realized at least one pane; NothingRealized when no restore
+    ///         was given.
+    [[nodiscard]] RestoreOutcome restoreOutcome() const noexcept { return _restoreOutcome; }
+
     /// @return The number of live hosted sessions.
     [[nodiscard]] std::size_t sessionCount() const noexcept { return _sessions.size(); }
 
@@ -770,6 +835,21 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// the loop thread — by the pump's posted completion in production, or
     /// directly by tests.
     void handleSessionExit(vtworkspace::SessionId session);
+
+    /// handleSessionExit()'s body, told why the session ended: prunes the pane, destroys the session, then
+    /// fires sessionEnded() and sessionClosed() to the stream observers. Public so the pump's posted
+    /// completion, and tests, name the cause.
+    /// @param session The session that ended.
+    /// @param cause Why.
+    void endSession(vtworkspace::SessionId session, SessionEnd cause);
+
+    /// A client closed @p session's pane: endSession() with SessionEnd::Requested.
+    /// @param session The session to end.
+    void closeSession(vtworkspace::SessionId session);
+
+    /// @param session A hosted session.
+    /// @return What the pane is doing now; every field empty for an unknown session.
+    [[nodiscard]] PaneRuntime paneRuntime(vtworkspace::SessionId session) const;
 
     // vtworkspace::ModelEvents — every completed change fans out to subscribers.
     void tabAdded(vtworkspace::WindowId window, vtworkspace::TabId tab, int index) override;
@@ -837,6 +917,42 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// @param window The window to realize every tab into (the host's own, freshly created).
     /// @param layout The resolved startup layout; a no-op when its `tabs` is empty.
     void realizeStartupLayout(vtworkspace::WindowId window, vtworkspace::Layout const& layout);
+
+    /// Realizes @p restore's windows: the first into the host's own window, each further one into a new
+    /// window, every tab via vtworkspace::realizeLayoutTab, then each tab's active pane and zoom and each
+    /// window's active tab. A pane's saved directory is used only while it still exists. Called once, from
+    /// the constructor body.
+    /// @param restore The snapshot, and what its panes re-run.
+    /// @return How many panes were realized.
+    std::size_t realizeRestoredWorkspace(WorkspaceRestore const& restore);
+
+    /// Realizes one window of a restore into @p window.
+    /// @return How many panes were realized.
+    std::size_t realizeRestoredWindow(vtworkspace::WindowId window,
+                                      WindowSnapshot const& snapshot,
+                                      WorkspaceRestore const& restore);
+
+    /// A restored session's initialInput, held until its shell shows its first prompt or the fallback fires.
+    struct PendingInitialInput
+    {
+        SessionHost* host;                                   ///< The host, for the fallback's callback.
+        vtworkspace::SessionId session;                      ///< The session it is typed into.
+        std::string input;                                   ///< What is typed.
+        std::optional<core::net::DeadlineTimer> fallback {}; ///< Types it anyway after InitialInputFallback.
+    };
+
+    /// Holds @p input for @p session until its first prompt, arming the fallback. Loop thread.
+    void holdInitialInput(vtworkspace::SessionId session, std::string input);
+
+    /// Types @p session's held input if its terminal shows a prompt (an unfinished command block): the seeded
+    /// records are all finished, so one is the shell's own. Loop thread, after a screen update.
+    void typeInitialInputAtPrompt(vtworkspace::SessionId session);
+
+    /// Types @p session's held input now and forgets it, disarming the fallback.
+    void typeInitialInput(vtworkspace::SessionId session);
+
+    /// What the fallback timer does. @param pending The PendingInitialInput.
+    static void initialInputFallbackExpired(void* pending);
 
     /// Resizes every leaf's terminal to its cell-space projection under the
     /// current client area — run after every layout-shape change so PTY sizes
@@ -1005,6 +1121,10 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Every window created for a client, by window id: that client while it is attached, null once it
     /// left. A window absent here is unclaimed. @see windowClaim
     std::unordered_map<uint64_t, SessionStreamEvents const*> _windowCreators;
+    /// Every restored session's input not typed yet, by session id. Erased with the session, by
+    /// eraseSession(). Owned by pointer: its fallback timer is handed the entry's address.
+    std::unordered_map<uint64_t, std::unique_ptr<PendingInitialInput>> _initialInputs;
+    RestoreOutcome _restoreOutcome = RestoreOutcome::NothingRealized; ///< @see restoreOutcome
 
     vtworkspace::SessionModel _model; ///< Last member: its callbacks reach into the host.
     vtworkspace::WindowId _window;

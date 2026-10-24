@@ -4,6 +4,7 @@
 // system.
 
 #include <contour/cli/DaemonVerbs.hpp>
+#include <contour/config/Config.hpp>
 
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
@@ -11,6 +12,7 @@
 
 #include <chrono>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <sstream>
 #include <string>
@@ -19,7 +21,11 @@
 #include <utility>
 #include <vector>
 
+#include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/client/DaemonControlClient.hpp>
+#include <vthost/proto/Negotiation.hpp>
+#include <vthost/testing/RecordingDurableFiles.hpp>
+#include <vthost/testing/RecordingFilePrivacy.hpp>
 
 namespace
 {
@@ -145,7 +151,7 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { sampleStatus() };
         auto prompt = FakePrompt { contour::cli::Confirmation::Declined };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Ask, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Ask }, prompt, out, err)
               == contour::cli::ExitStatus::Failed);
         CHECK(port.stops.empty());
         CHECK(prompt.asked.contains("3 session"));
@@ -156,7 +162,7 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { sampleStatus() };
         auto prompt = FakePrompt { contour::cli::Confirmation::Unavailable };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Ask, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Ask }, prompt, out, err)
               == contour::cli::ExitStatus::Failed);
         CHECK(port.stops.empty());
         CHECK(err.str().contains("--yes"));
@@ -166,7 +172,7 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { sampleStatus() };
         auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Ask, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Ask }, prompt, out, err)
               == contour::cli::ExitStatus::Ok);
         CHECK(port.stops.size() == 1);
     }
@@ -175,7 +181,7 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { sampleStatus() };
         auto prompt = FakePrompt { contour::cli::Confirmation::Declined };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Given, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Given }, prompt, out, err)
               == contour::cli::ExitStatus::Ok);
         CHECK(port.stops == std::vector { vthost::proto::StopReason::User });
         CHECK(prompt.asked.empty());
@@ -187,7 +193,7 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { status };
         auto prompt = FakePrompt { contour::cli::Confirmation::Declined };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Ask, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Ask }, prompt, out, err)
               == contour::cli::ExitStatus::Ok);
         CHECK(prompt.asked.empty());
     }
@@ -196,7 +202,7 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { ControlErrorCode::NotRunning };
         auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Given, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Given }, prompt, out, err)
               == contour::cli::ExitStatus::Unreachable);
         CHECK(err.str() == "no daemon is running on /run/c/default\n");
         CHECK(out.str().empty());
@@ -206,7 +212,7 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { ControlErrorCode::Unsupported, "release 0.7.0" };
         auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Given, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Given }, prompt, out, err)
               == contour::cli::ExitStatus::Failed);
         CHECK(err.str().contains("the daemon (release 0.7.0) does not support `contour daemon stop`"));
         CHECK(err.str().contains("Ctrl+C"));
@@ -216,11 +222,188 @@ TEST_CASE("stop asks before ending sessions, and refuses without a terminal", "[
         auto port = FakeControlPort { ControlErrorCode::Unsupported, "an earlier release" };
         auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
         CHECK(contour::cli::daemonStopVerb(
-                  port, "/run/c/default", contour::cli::StopConsent::Given, prompt, out, err)
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Given }, prompt, out, err)
               == contour::cli::ExitStatus::Failed);
         CHECK(
             err.str().starts_with("the daemon (an earlier release) does not support `contour daemon stop`"));
     }
+}
+
+namespace
+{
+
+/// A saved workspace of one tab in an in-memory file, as the daemon labelled `default` keeps it.
+struct SavedWorkspace
+{
+    core::platform::testing::InMemoryFileSystem files {};
+    vthost::testing::RecordingFilePrivacy privacy { files };
+    vthost::testing::RecordingDurableFiles durability { files };
+    vthost::SessionSnapshotStore store {
+        files, privacy, durability, std::filesystem::path { "/state/contour/sessions/default.snapshot" }
+    };
+
+    SavedWorkspace()
+    {
+        auto workspace = vthost::WorkspaceSnapshot {};
+        workspace.windows.emplace_back().tabs.emplace_back();
+        REQUIRE(store.write(workspace));
+    }
+};
+
+} // namespace
+
+TEST_CASE("daemon stop with no daemon running clears the saved workspace on consent",
+          "[contour][cli][daemon]")
+{
+    auto saved = SavedWorkspace {};
+    auto port = FakeControlPort { ControlErrorCode::NotRunning };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const stop = [&](contour::cli::StopConsent consent, contour::cli::Confirmation answer) {
+        auto prompt = FakePrompt { answer };
+        auto const status = contour::cli::daemonStopVerb(
+            port, "/run/c/default", { .consent = consent, .savedWorkspace = &saved.store }, prompt, out, err);
+        return std::pair { status, prompt.asked };
+    };
+
+    SECTION("confirmed")
+    {
+        auto const [status, asked] =
+            stop(contour::cli::StopConsent::Ask, contour::cli::Confirmation::Confirmed);
+        CHECK(status == contour::cli::ExitStatus::Unreachable);
+        CHECK(asked.contains("clear its saved workspace"));
+        CHECK(saved.store.load().verdict == vthost::LoadVerdict::Empty);
+        CHECK(err.str() == "no daemon is running; its saved workspace was cleared\n");
+    }
+    SECTION("declined")
+    {
+        auto const [status, asked] =
+            stop(contour::cli::StopConsent::Ask, contour::cli::Confirmation::Declined);
+        CHECK(status == contour::cli::ExitStatus::Unreachable);
+        CHECK(saved.store.load().verdict == vthost::LoadVerdict::Restorable);
+        CHECK(err.str() == "no daemon is running; its saved workspace is kept\n");
+    }
+    SECTION("no terminal to ask on")
+    {
+        auto const [status, asked] =
+            stop(contour::cli::StopConsent::Ask, contour::cli::Confirmation::Unavailable);
+        CHECK(status == contour::cli::ExitStatus::Failed);
+        CHECK(saved.store.load().verdict == vthost::LoadVerdict::Restorable);
+        CHECK(err.str().contains("--yes"));
+    }
+    SECTION("--yes")
+    {
+        auto const [status, asked] =
+            stop(contour::cli::StopConsent::Given, contour::cli::Confirmation::Declined);
+        CHECK(status == contour::cli::ExitStatus::Unreachable);
+        CHECK(asked.empty());
+        CHECK(saved.store.load().verdict == vthost::LoadVerdict::Empty);
+    }
+    CHECK(port.stops.empty());
+}
+
+TEST_CASE("daemon stop with no daemon running and nothing saved creates no file", "[contour][cli][daemon]")
+{
+    auto saved = SavedWorkspace {};
+    auto const store =
+        vthost::SessionSnapshotStore { saved.files,
+                                       saved.privacy,
+                                       saved.durability,
+                                       std::filesystem::path { "/state/contour/sessions/other.snapshot" } };
+    auto port = FakeControlPort { ControlErrorCode::NotRunning };
+    auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    CHECK(contour::cli::daemonStopVerb(
+              port,
+              "/run/c/default",
+              { .consent = contour::cli::StopConsent::Given, .savedWorkspace = &store },
+              prompt,
+              out,
+              err)
+          == contour::cli::ExitStatus::Unreachable);
+    CHECK_FALSE(saved.files.exists(store.path()));
+    CHECK(prompt.asked.empty());
+    CHECK(err.str() == "no daemon is running; it left no workspace to clear\n");
+}
+
+TEST_CASE("daemon stop --keep-snapshot with no daemon running keeps it", "[contour][cli][daemon]")
+{
+    auto saved = SavedWorkspace {};
+    auto const before = saved.files.readFile("/state/contour/sessions/default.snapshot");
+    auto port = FakeControlPort { ControlErrorCode::NotRunning };
+    auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    CHECK(contour::cli::daemonStopVerb(
+              port,
+              "/run/c/default",
+              { .disposition = contour::cli::StopDisposition::KeepSnapshot, .savedWorkspace = &saved.store },
+              prompt,
+              out,
+              err)
+          == contour::cli::ExitStatus::Unreachable);
+    CHECK(saved.files.readFile("/state/contour/sessions/default.snapshot") == before);
+    CHECK(saved.store.load().verdict == vthost::LoadVerdict::Restorable);
+    CHECK(err.str() == "no daemon is running on /run/c/default\n");
+}
+
+TEST_CASE("daemon stop --keep-snapshot asks the daemon to keep the workspace", "[contour][cli][daemon]")
+{
+    auto status = sampleStatus();
+    status.capabilities = vthost::proto::CapabilitySet::of(
+        { vthost::proto::Capability::DaemonControl, vthost::proto::Capability::WorkspaceRestore });
+    auto port = FakeControlPort { status };
+    auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
+    auto out = std::ostringstream {};
+    auto err = std::ostringstream {};
+    auto const keep =
+        contour::cli::StopOptions { .consent = contour::cli::StopConsent::Given,
+                                    .disposition = contour::cli::StopDisposition::KeepSnapshot };
+
+    SECTION("--keep-snapshot")
+    {
+        CHECK(contour::cli::daemonStopVerb(port, "/run/c/default", keep, prompt, out, err)
+              == contour::cli::ExitStatus::Ok);
+        CHECK(port.stops == std::vector { vthost::proto::StopReason::UserKeepingWorkspace });
+        CHECK(out.str() == "daemon stopped; its workspace is kept\n");
+    }
+    SECTION("a plain stop")
+    {
+        CHECK(contour::cli::daemonStopVerb(
+                  port, "/run/c/default", { .consent = contour::cli::StopConsent::Given }, prompt, out, err)
+              == contour::cli::ExitStatus::Ok);
+        CHECK(port.stops == std::vector { vthost::proto::StopReason::User });
+    }
+    SECTION("a daemon that keeps no workspace is stopped plainly")
+    {
+        auto older = FakeControlPort { sampleStatus() };
+        CHECK(contour::cli::daemonStopVerb(older, "/run/c/default", keep, prompt, out, err)
+              == contour::cli::ExitStatus::Ok);
+        CHECK(older.stops == std::vector { vthost::proto::StopReason::User });
+        CHECK(err.str() == "contour daemon: this daemon keeps no workspace\n");
+        CHECK(out.str() == "daemon stopped\n");
+    }
+}
+
+TEST_CASE("daemon.restore becomes the daemon's persistence", "[contour][cli][daemon]")
+{
+    using vthost::ScrollbackPersistence;
+    auto restore = contour::config::DaemonRestoreConfig {};
+    restore.rerunPrograms = { "vim" };
+    restore.interval = std::chrono::seconds { 60 };
+    auto const kept = contour::cli::workspacePersistenceOf(restore, "/s/default.snapshot");
+    CHECK(kept.snapshotPath == std::filesystem::path { "/s/default.snapshot" });
+    CHECK(kept.scrollback == ScrollbackPersistence::Tail);
+    CHECK(kept.scrollbackRows == 1000);
+    CHECK(kept.rerunPrograms == std::vector<std::string> { "vim" });
+    CHECK(kept.interval == std::chrono::seconds { 60 });
+
+    restore.scrollback = false;
+    CHECK(contour::cli::workspacePersistenceOf(restore, {}).scrollback == ScrollbackPersistence::Off);
+    restore.scrollback = true;
+    restore.scrollbackLines = 0;
+    CHECK(contour::cli::workspacePersistenceOf(restore, {}).scrollback == ScrollbackPersistence::Off);
 }
 
 TEST_CASE("a log follower prints what was appended and survives truncation", "[contour][cli][daemon]")

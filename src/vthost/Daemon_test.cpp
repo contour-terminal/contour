@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <vtpty/MockPty.hpp>
 #include <vtpty/Process.hpp>
 #include <vtpty/ProcessPlacement.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 #include <vtpty/test/ProcessTesting.hpp>
 #include <vtpty/test/WindowsCommandLineSplit.hpp>
 
+#include <core/Environment.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
 #include <core/async/Task.hpp>
@@ -13,6 +15,9 @@
 #include <core/net/IoBackend.hpp>
 #include <core/net/IoResult.hpp>
 #include <core/net/Sockets.hpp>
+#include <core/platform/Clock.hpp>
+#include <core/platform/NativeFileSystem.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -20,6 +25,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -27,6 +33,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <ranges>
 #include <string>
@@ -41,10 +48,18 @@
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonLifecycle.hpp>
+#include <vthost/DurableFiles.hpp>
+#include <vthost/FilePrivacy.hpp>
+#include <vthost/SessionHost.hpp>
+#include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/ShutdownSignals.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/WorkspaceCapture.hpp>
+#include <vthost/WorkspacePersistence.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vthost/proto/Wire.hpp>
+#include <vthost/testing/RecordingDurableFiles.hpp>
+#include <vthost/testing/RecordingFilePrivacy.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 
 #ifndef _WIN32
@@ -213,10 +228,12 @@ core::async::Task<void> converseAsControl(core::net::EventLoop* loop,
 class ManualShutdownSignals final: public vthost::ShutdownSignals
 {
   public:
-    [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal) override
+    [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal,
+                                               std::shared_future<void> lastWrite) override
     {
         auto const lock = std::scoped_lock { _mutex };
         _onSignal = std::move(onSignal);
+        _lastWrite = std::move(lastWrite);
         if (_fired)
             _onSignal();
         return std::make_unique<ManualWatch>(*this);
@@ -229,6 +246,13 @@ class ManualShutdownSignals final: public vthost::ShutdownSignals
         _fired = true;
         if (_onSignal)
             _onSignal();
+    }
+
+    /// @return What the watching daemon fulfils once its last write is done.
+    [[nodiscard]] std::shared_future<void> lastWrite()
+    {
+        auto const lock = std::scoped_lock { _mutex };
+        return _lastWrite;
     }
 
   private:
@@ -248,6 +272,7 @@ class ManualShutdownSignals final: public vthost::ShutdownSignals
 
     std::mutex _mutex;
     std::function<void()> _onSignal;
+    std::shared_future<void> _lastWrite;
     bool _fired = false; ///< Whether fire() was called, so a watch started later fires at once.
 };
 
@@ -714,3 +739,224 @@ TEST_CASE("joinCommandLine reads back through CommandLineToArgvW as the argv it 
     CHECK(readBack == args);
 }
 #endif
+
+TEST_CASE("workspaceFor discards only on a plain stop", "[vthost][daemon][snapshot]")
+{
+    using vthost::ShutdownCause;
+    using vthost::ShutdownWorkspace;
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::Signal) == ShutdownWorkspace::Keep);
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::LastSessionClosed) == ShutdownWorkspace::Keep);
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::Idle) == ShutdownWorkspace::Keep);
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequested) == ShutdownWorkspace::Discard);
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::UpgradeRestart) == ShutdownWorkspace::Keep);
+    STATIC_CHECK(vthost::workspaceFor(ShutdownCause::StopRequestedKeepingWorkspace)
+                 == ShutdownWorkspace::Keep);
+}
+
+TEST_CASE("DaemonConfig persists nothing unless a snapshot path is set", "[vthost][daemon]")
+{
+    CHECK(vthost::DaemonConfig {}.persistence.snapshotPath.empty());
+    CHECK(vthost::DaemonConfig {}.persistence.rerunPrograms.empty());
+    CHECK(vthost::DaemonConfig {}.persistence.interval == std::chrono::seconds { 30 });
+}
+
+namespace
+{
+
+constexpr auto RestartSnapshot = std::string_view { "/state/contour/sessions/default.snapshot" };
+
+/// Two daemons' lives over one in-memory snapshot file, without their sockets: what runDaemon() wires
+/// around its host, with the writer inline and every session a MockPty.
+struct RestartHarness
+{
+    core::platform::ManualClock clock {};
+    std::unique_ptr<core::net::IoBackend> backend = core::net::makeDefaultBackend();
+    core::net::EventLoop loop { *backend, clock };
+    core::platform::ManualWallClock wallClock { std::chrono::system_clock::time_point {
+        std::chrono::seconds { 1'761'000'000 } } };
+    core::platform::testing::InMemoryFileSystem files {};
+    vthost::testing::RecordingFilePrivacy privacy { files };
+    vthost::testing::RecordingDurableFiles durability { files };
+    vthost::SessionSnapshotStore store { files, privacy, durability, fs::path { RestartSnapshot } };
+    vthost::WorkspacePersistenceConfig config { .snapshotPath = fs::path { RestartSnapshot } };
+    std::vector<std::string> lines {}; ///< What the persistence reported.
+
+    /// The daemon's startup layout: one plain tab.
+    vtworkspace::Layout startup { .tabs = { vtworkspace::LayoutTab {} } };
+
+    [[nodiscard]] vthost::DiagnosticSink sink()
+    {
+        return [this](std::string_view line) {
+            lines.emplace_back(line);
+        };
+    }
+
+    /// @return A host as runDaemon() builds it: the restore read from the file, else the startup layout.
+    [[nodiscard]] std::unique_ptr<vthost::SessionHost> startHost(
+        std::optional<vthost::WorkspaceRestore> restore)
+    {
+        return std::make_unique<vthost::SessionHost>(
+            loop,
+            [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                return std::make_unique<vtpty::MockPty>(size);
+            },
+            vtbackend::Settings {},
+            core::defaultEnvironment(),
+            vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                        .startupLayout = startup,
+                                        .restore = std::move(restore) });
+    }
+
+    /// The first daemon: a split tab and a plain one, ended by @p cause.
+    void runFirstDaemon(vthost::ShutdownCause cause)
+    {
+        auto host = startHost(std::nullopt);
+        auto* const tab = host->createTab();
+        REQUIRE(tab != nullptr);
+        host->splitActivePane(tab->id(), vtworkspace::SplitState::Vertical);
+        REQUIRE(tab->paneCount() == 2);
+        auto persistence = vthost::DaemonPersistence {
+            loop, *host, store, std::nullopt, config, wallClock, vthost::WriterThreading::Inline, sink()
+        };
+        persistence.finalize(cause);
+    }
+
+    /// @return What the second daemon's host holds once it has started.
+    [[nodiscard]] vthost::WorkspaceSnapshot runSecondDaemon()
+    {
+        auto restore = vthost::prepareRestore(store, config, sink());
+        auto const restoredFrom =
+            restore.transform([](vthost::WorkspaceRestore const& restored) { return restored.source; });
+        auto host = startHost(std::move(restore));
+        auto const persistence = vthost::DaemonPersistence {
+            loop, *host, store, restoredFrom, config, wallClock, vthost::WriterThreading::Inline, sink()
+        };
+        return vthost::captureWorkspace(*host, {}, std::chrono::sys_seconds {});
+    }
+};
+
+[[nodiscard]] std::size_t paneCount(vthost::PaneNode const& node)
+{
+    if (node.children.empty())
+        return 1;
+    return paneCount(node.children[0]) + paneCount(node.children[1]);
+}
+
+} // namespace
+
+TEST_CASE("what one host keeps at shutdown, the next one restores", "[vthost][daemon][snapshot]")
+{
+    auto h = RestartHarness {};
+    h.runFirstDaemon(vthost::ShutdownCause::UpgradeRestart);
+
+    auto const restored = h.runSecondDaemon();
+    REQUIRE(restored.windows.size() == 1);
+    // The startup tab, then the split one: what the first daemon held, not a startup layout beside it.
+    REQUIRE(restored.windows[0].tabs.size() == 2);
+    CHECK(paneCount(restored.windows[0].tabs[0].root) == 1);
+    CHECK(paneCount(restored.windows[0].tabs[1].root) == 2);
+    CHECK(std::ranges::any_of(h.lines, [](std::string const& line) {
+        return line.contains("restoring 1 window(s) from") && line.contains(RestartSnapshot);
+    }));
+}
+
+TEST_CASE("what one host discards at shutdown, the next one does not restore", "[vthost][daemon][snapshot]")
+{
+    auto h = RestartHarness {};
+    h.runFirstDaemon(vthost::ShutdownCause::StopRequested);
+
+    REQUIRE_FALSE(vthost::prepareRestore(h.store, h.config, h.sink()).has_value());
+    auto const started = h.runSecondDaemon();
+    REQUIRE(started.windows.size() == 1);
+    REQUIRE(started.windows[0].tabs.size() == 1); // the startup layout
+    CHECK(paneCount(started.windows[0].tabs[0].root) == 1);
+}
+
+#ifndef _WIN32
+TEST_CASE("a daemon that keeps its workspace offers the restore and writes it as it stops",
+          "[vthost][daemon][snapshot][afunix]")
+{
+    auto const tmp = TempDir {};
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = tmp.path / "control";
+    config.shell.program = "/bin/sh";
+    config.escapeSandbox = false;
+    config.startupLayout = vtworkspace::Layout { .tabs = { vtworkspace::LayoutTab {} } };
+    config.persistence.snapshotPath = tmp.path / "state" / "sessions" / "default.snapshot";
+    auto const signals = std::make_shared<ManualShutdownSignals>();
+    config.shutdownSignals = signals;
+
+    // UpgradeRestart keeps the workspace, a plain stop empties the file.
+    auto const [reason, verdict] = GENERATE(table<std::uint8_t, vthost::LoadVerdict>({
+        { std::uint8_t { 1 }, vthost::LoadVerdict::Restorable },
+        { std::uint8_t { 0 }, vthost::LoadVerdict::Empty },
+    }));
+
+    auto daemon = std::async(std::launch::async, [&config] { return vthost::runDaemon(config); });
+    auto const stopOnExit = StopOnExit { *signals };
+
+    auto const nativePath = core::pathToUtf8(vthost::nativeSocketPath(config.socketPath));
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, nativePath));
+
+    auto request = vthost::proto::Writer {};
+    vthost::proto::encodePdu(
+        request, 1, vthost::proto::ClientHello { .role = vthost::proto::ConnectionRole::Control });
+    vthost::proto::encodePdu(request, 2, vthost::proto::StopDaemon { .reason = reason });
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(
+        converseAsControl(&loop, nativePath, { request.view().begin(), request.view().end() }, &received));
+
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+
+    REQUIRE_FALSE(received.empty());
+    auto const* const hello = std::get_if<vthost::proto::ServerHello>(&received.front().pdu);
+    REQUIRE(hello != nullptr);
+    CHECK(hello->capabilities.contains(vthost::proto::Capability::WorkspaceRestore));
+
+    // The last write was done before the daemon let a console-control handler return.
+    CHECK(signals->lastWrite().wait_for(std::chrono::seconds { 0 }) == std::future_status::ready);
+    auto const store = vthost::SessionSnapshotStore { core::platform::NativeFileSystem::instance(),
+                                                      vthost::NativeFilePrivacy::instance(),
+                                                      vthost::NativeDurableFiles::instance(),
+                                                      config.persistence.snapshotPath };
+    auto const loaded = store.load();
+    CHECK(loaded.verdict == verdict);
+    CHECK((fs::status(config.persistence.snapshotPath).permissions() & fs::perms::all)
+          == (fs::perms::owner_read | fs::perms::owner_write));
+}
+#endif
+
+TEST_CASE("a daemon without persistence offers no restore", "[vthost][daemon][afunix]")
+{
+    auto const tmp = TempDir {};
+    auto config = vthost::DaemonConfig {};
+    config.socketPath = tmp.path / "control";
+    auto const signals = std::make_shared<ManualShutdownSignals>();
+    config.shutdownSignals = signals;
+
+    auto daemon = std::async(std::launch::async, [&config] { return vthost::runDaemon(config); });
+    auto const stopOnExit = StopOnExit { *signals };
+
+    auto const nativePath = core::pathToUtf8(vthost::nativeSocketPath(config.socketPath));
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    REQUIRE(awaitAccepting(loop, nativePath));
+
+    auto request = vthost::proto::Writer {};
+    vthost::proto::encodePdu(
+        request, 1, vthost::proto::ClientHello { .role = vthost::proto::ConnectionRole::Control });
+    vthost::proto::encodePdu(request, 2, vthost::proto::StopDaemon { .reason = 0 });
+    auto received = std::vector<vthost::proto::DecodedFrame> {};
+    loop.blockOn(
+        converseAsControl(&loop, nativePath, { request.view().begin(), request.view().end() }, &received));
+
+    REQUIRE(daemon.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+    CHECK(daemon.get() == EXIT_SUCCESS);
+    REQUIRE_FALSE(received.empty());
+    auto const* const hello = std::get_if<vthost::proto::ServerHello>(&received.front().pdu);
+    REQUIRE(hello != nullptr);
+    CHECK_FALSE(hello->capabilities.contains(vthost::proto::Capability::WorkspaceRestore));
+}

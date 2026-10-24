@@ -13,9 +13,15 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <tuple>
 #include <utility>
+
+#ifdef _WIN32
+    #include <algorithm>
+    #include <array>
+#endif
 
 #ifndef _WIN32
     #include <csignal>
@@ -106,7 +112,9 @@ namespace
     class ProcessSignals final: public ShutdownSignals
     {
       public:
-        [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal) override
+        /// A SIGTERM ends nothing by itself here, so the daemon's last write needs no waiting for.
+        [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal,
+                                                   std::shared_future<void> /*lastWrite*/) override
         {
             return std::make_unique<SigwaitWatch>(std::move(onSignal));
         }
@@ -114,27 +122,66 @@ namespace
 
 #else
 
+    /// What a console-control event asks of the handler once the daemon has been told.
+    enum class ConsoleEventEnd : std::uint8_t
+    {
+        Returns = 0,     ///< Ctrl+C, Ctrl+Break: the process lives on until the daemon has ended.
+        AwaitsLastWrite, ///< Windows ends the process as soon as the handler returns.
+    };
+
+    /// One console-control event a daemon ends on.
+    struct ConsoleEventRow
+    {
+        DWORD type;
+        ConsoleEventEnd end;
+    };
+
+    /// Every console-control event a daemon ends on; each arrives as ShutdownCause::Signal.
+    constexpr auto ConsoleEvents = std::to_array<ConsoleEventRow>({
+        { .type = CTRL_C_EVENT, .end = ConsoleEventEnd::Returns },
+        { .type = CTRL_BREAK_EVENT, .end = ConsoleEventEnd::Returns },
+        { .type = CTRL_CLOSE_EVENT, .end = ConsoleEventEnd::AwaitsLastWrite },
+        { .type = CTRL_LOGOFF_EVENT, .end = ConsoleEventEnd::AwaitsLastWrite },
+        { .type = CTRL_SHUTDOWN_EVENT, .end = ConsoleEventEnd::AwaitsLastWrite },
+    });
+
+    /// What the watching daemon is told through, and what it fulfils once its last write is done.
+    struct ConsoleShutdown
+    {
+        std::function<void()> onSignal;
+        std::shared_future<void> lastWrite;
+    };
+
     /// The console-control shutdown hook: SetConsoleCtrlHandler's callback is a plain C function invoked on
     /// an arbitrary thread with no user data pointer, so the watching daemon registers its (thread-safe)
     /// shutdown poster in this one process-wide slot.
-    std::atomic<std::function<void()>*> consoleShutdown = nullptr;
+    std::atomic<ConsoleShutdown const*> consoleShutdown = nullptr;
 
     BOOL WINAPI consoleCtrlHandler(DWORD type)
     {
-        if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT && type != CTRL_CLOSE_EVENT)
+        auto const row = std::ranges::find(ConsoleEvents, type, &ConsoleEventRow::type);
+        if (row == ConsoleEvents.end())
             return FALSE;
-        if (auto* shutdown = consoleShutdown.load())
-            (*shutdown)();
+        auto const* const shutdown = consoleShutdown.load();
+        if (shutdown == nullptr)
+            return TRUE;
+        // Copied before the post: the watch, and the slot's target with it, may be destroyed once the
+        // daemon has shut down, while this thread still waits.
+        auto const lastWrite = shutdown->lastWrite;
+        shutdown->onSignal();
+        if (row->end == ConsoleEventEnd::AwaitsLastWrite && lastWrite.valid())
+            std::ignore = lastWrite.wait_for(LastWriteGrace);
         return TRUE;
     }
 
-    /// Ctrl+C, Ctrl+Break and closing the console window.
+    /// Ctrl+C, Ctrl+Break, closing the console window, logging off and shutting the system down.
     class ConsoleControlWatch final: public ShutdownSignals::Watch
     {
       public:
-        explicit ConsoleControlWatch(std::function<void()> onSignal): _onSignal { std::move(onSignal) }
+        ConsoleControlWatch(std::function<void()> onSignal, std::shared_future<void> lastWrite):
+            _shutdown { .onSignal = std::move(onSignal), .lastWrite = std::move(lastWrite) }
         {
-            consoleShutdown = &_onSignal;
+            consoleShutdown = &_shutdown;
             ::SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
         }
 
@@ -146,23 +193,24 @@ namespace
         ~ConsoleControlWatch() override
         {
             // The slot first: a handler the console thread starts from here on finds nothing to call. One
-            // that loaded the pointer just before may still call _onSignal as it is destroyed — a window
+            // that loaded the pointer just before may still call onSignal as it is destroyed — a window
             // SetConsoleCtrlHandler offers no way to close, since it does not wait for running handlers.
             consoleShutdown = nullptr;
             ::SetConsoleCtrlHandler(consoleCtrlHandler, FALSE);
         }
 
       private:
-        std::function<void()> _onSignal;
+        ConsoleShutdown _shutdown;
     };
 
     /// The process's console-control events.
     class ProcessSignals final: public ShutdownSignals
     {
       public:
-        [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal) override
+        [[nodiscard]] std::unique_ptr<Watch> watch(std::function<void()> onSignal,
+                                                   std::shared_future<void> lastWrite) override
         {
-            return std::make_unique<ConsoleControlWatch>(std::move(onSignal));
+            return std::make_unique<ConsoleControlWatch>(std::move(onSignal), std::move(lastWrite));
         }
     };
 
@@ -174,7 +222,8 @@ std::shared_ptr<ShutdownSignals> processShutdownSignals()
     return std::make_shared<ProcessSignals>();
 }
 
-std::unique_ptr<ShutdownSignals::Watch> NoShutdownSignals::watch(std::function<void()> /*onSignal*/)
+std::unique_ptr<ShutdownSignals::Watch> NoShutdownSignals::watch(std::function<void()> /*onSignal*/,
+                                                                 std::shared_future<void> /*lastWrite*/)
 {
     return std::make_unique<InertWatch>();
 }

@@ -21,7 +21,13 @@ add_library(vthost STATIC
     DaemonStarter.cpp
     DaemonStarter.hpp
     DaemonRuntime.hpp
+    DurableFiles.cpp
+    DurableFiles.hpp
+    DurableFiles_win32.cpp
     ExtensionHosting.hpp
+    FilePrivacy.cpp
+    FilePrivacy.hpp
+    FilePrivacy_win32.cpp
     PermissionWire.hpp
     ProfileCatalog.hpp
     ImageWire.hpp
@@ -32,10 +38,13 @@ add_library(vthost STATIC
     Daemon.cpp
     Daemon.hpp
     GracefulClose.hpp
+    HistorySeed.cpp
+    HistorySeed.hpp
     HostIdentity.cpp
     HostIdentity.hpp
     LoopDrain.hpp
     ProcessImage_native.cpp
+    RerunPolicy.hpp
     ConnectionAcceptor.cpp
     ConnectionAcceptor.hpp
     NativeSession.cpp
@@ -54,7 +63,19 @@ add_library(vthost STATIC
     ServiceControl_systemd.hpp
     ServiceControl_win32.cpp
     SessionSettings.cpp
+    SessionEnd.hpp
     SessionSettings.hpp
+    SessionSnapshot.hpp
+    SessionSnapshotCodec.cpp
+    SessionSnapshotCodec.hpp
+    SessionSnapshotStore.cpp
+    SessionSnapshotStore.hpp
+    SnapshotSchedule.hpp
+    WorkspaceCapture.cpp
+    WorkspaceCapture.hpp
+    WorkspacePersistence.cpp
+    WorkspacePersistence.hpp
+    WorkspacePersistenceConfig.hpp
     ShutdownFunnel.cpp
     ShutdownFunnel.hpp
     ShutdownSignals.cpp
@@ -148,7 +169,7 @@ target_link_libraries(vthost PRIVATE core::net_tls)
 if(WIN32)
     # The Task Scheduler 2.0 backend of ServiceControl is COM (taskschd), hence ole32/oleaut32
     # for the apartment and the BSTR/VARIANT allocators.
-    target_link_libraries(vthost PRIVATE taskschd ole32 oleaut32)
+    target_link_libraries(vthost PRIVATE taskschd ole32 oleaut32 advapi32)
 endif()
 target_include_directories(vthost PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -179,6 +200,17 @@ if(VTHOST_TESTING)
         SessionHost_test.cpp
         FlushPolicy_test.cpp
         SessionSettings_test.cpp
+        SessionEnd_test.cpp
+        SessionSnapshotCodec_test.cpp
+        SessionSnapshotStore_test.cpp
+        FilePrivacy_test.cpp
+        DurableFiles_test.cpp
+        WorkspaceCapture_test.cpp
+        HistorySeed_test.cpp
+        RerunPolicy_test.cpp
+        WorkspaceRestore_test.cpp
+        SnapshotSchedule_test.cpp
+        WorkspacePersistence_test.cpp
         ConnectionAcceptor_test.cpp
         CommandBlockWire_test.cpp
         CommandRunner_test.cpp
@@ -209,6 +241,10 @@ if(VTHOST_TESTING)
         testing/ShippedCodec.hpp
         testing/PduExamples.hpp
         testing/PreNegotiationCodec.hpp
+        testing/RecordedSnapshots.hpp
+        testing/RecordingFilePrivacy.hpp
+        testing/RecordingDurableFiles.hpp
+        testing/FaultyFileSystem.hpp
         testing/RecordedTranscripts.hpp
         testing/FakeCommandRunner.hpp
         testing/FakeDaemonControl.hpp

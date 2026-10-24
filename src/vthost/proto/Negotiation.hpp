@@ -47,6 +47,10 @@ enum class Capability : uint8_t
     ProfileByName = 5, ///< The peer resolves the profile name a hello or spawning verb carries.
     TabEdits = 6,      ///< The peer serves EditTab.
     Heartbeat = 7,     ///< The peer echoes Heartbeat.
+    /// The peer keeps its workspace across a restart: it snapshots its windows, tabs and panes, restores
+    /// them at its next start, and honours StopReason::UserKeepingWorkspace. A daemon offers it while its
+    /// persistence is on.
+    WorkspaceRestore = 8,
 };
 
 /// One row of the table naming a Capability.
@@ -65,6 +69,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::ProfileByName, .name = "profile-by-name" },
     CapabilityRow { .capability = Capability::TabEdits, .name = "tab-edits" },
     CapabilityRow { .capability = Capability::Heartbeat, .name = "heartbeat" },
+    CapabilityRow { .capability = Capability::WorkspaceRestore, .name = "workspace-restore" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

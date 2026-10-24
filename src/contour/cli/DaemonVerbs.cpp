@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <contour/cli/DaemonVerbs.hpp>
+#include <contour/config/Config.hpp>
 
 #include <core/Utf8Path.hpp>
 
@@ -15,6 +16,8 @@
 #include <vector>
 
 #include <vthost/DaemonLifecycle.hpp>
+#include <vthost/SessionSnapshotStore.hpp>
+#include <vthost/proto/Negotiation.hpp>
 
 #ifdef _WIN32
     #include <io.h>
@@ -239,9 +242,61 @@ std::expected<std::string, std::string> mergeSharedOption(std::string_view name,
         std::format("--{} is given twice with different values ('{}' and '{}')", name, parent, child));
 }
 
+namespace
+{
+    /// What `daemon stop` does with the saved workspace when no daemon runs: a crash may have left it as the
+    /// one thing the user still has, so it is cleared only on consent, and a file that holds nothing to come
+    /// back is left alone rather than created.
+    /// @param store The daemon's snapshot file.
+    /// @param consent Whether `--yes` was given.
+    /// @param prompt Asks the user.
+    /// @param err Where the outcome is reported.
+    /// @return Unreachable, or Failed when consent could not be asked for or the file could not be cleared.
+    [[nodiscard]] ExitStatus clearSavedWorkspace(vthost::SessionSnapshotStore const& store,
+                                                 StopConsent consent,
+                                                 ConfirmPrompt& prompt,
+                                                 std::ostream& err)
+    {
+        switch (store.load().verdict)
+        {
+            case vthost::LoadVerdict::Absent:
+            case vthost::LoadVerdict::Empty:
+            case vthost::LoadVerdict::SetAside:
+                err << "no daemon is running; it left no workspace to clear\n";
+                return ExitStatus::Unreachable;
+            case vthost::LoadVerdict::Restorable:
+            case vthost::LoadVerdict::Unsupported:
+            case vthost::LoadVerdict::Unreadable: break;
+        }
+        if (consent == StopConsent::Ask)
+        {
+            switch (prompt.ask("No daemon is running; clear its saved workspace? [y/N] "))
+            {
+                case Confirmation::Confirmed: break;
+                case Confirmation::Declined:
+                    err << "no daemon is running; its saved workspace is kept\n";
+                    return ExitStatus::Unreachable;
+                case Confirmation::Unavailable:
+                    err << "no daemon is running; pass --yes to clear its saved workspace\n";
+                    return ExitStatus::Failed;
+            }
+        }
+        if (auto const discarded = store.discard(); !discarded)
+        {
+            err << std::format("contour daemon: no daemon is running, and its saved workspace {} cannot be "
+                               "cleared: {}\n",
+                               core::pathToUtf8(store.path()),
+                               discarded.error().detail);
+            return ExitStatus::Failed;
+        }
+        err << "no daemon is running; its saved workspace was cleared\n";
+        return ExitStatus::Unreachable;
+    }
+} // namespace
+
 ExitStatus daemonStopVerb(DaemonControlPort& control,
                           std::filesystem::path const& socket,
-                          StopConsent consent,
+                          StopOptions const& options,
                           ConfirmPrompt& prompt,
                           std::ostream& out,
                           std::ostream& err)
@@ -265,9 +320,15 @@ ExitStatus daemonStopVerb(DaemonControlPort& control,
 
     auto const status = control.status();
     if (!status)
+    {
+        // The daemon is gone, but what it saved would come back at the next start.
+        if (status.error().code == ControlErrorCode::NotRunning
+            && options.disposition == StopDisposition::Discard && options.savedWorkspace != nullptr)
+            return clearSavedWorkspace(*options.savedWorkspace, options.consent, prompt, err);
         return fail(status.error());
+    }
 
-    if (status->sessions != 0 && consent == StopConsent::Ask)
+    if (status->sessions != 0 && options.consent == StopConsent::Ask)
     {
         switch (
             prompt.ask(std::format("Stop the daemon and end its {} session(s)? [y/N] ", status->sessions)))
@@ -280,10 +341,36 @@ ExitStatus daemonStopVerb(DaemonControlPort& control,
         }
     }
 
-    if (auto const stopped = control.stop(vthost::proto::StopReason::User); !stopped)
+    // A daemon that keeps no workspace refuses a reason it does not know: it is stopped plainly instead.
+    auto reason = vthost::proto::StopReason::User;
+    if (options.disposition == StopDisposition::KeepSnapshot)
+    {
+        if (status->capabilities.contains(vthost::proto::Capability::WorkspaceRestore))
+            reason = vthost::proto::StopReason::UserKeepingWorkspace;
+        else
+            err << "contour daemon: this daemon keeps no workspace\n";
+    }
+
+    if (auto const stopped = control.stop(reason); !stopped)
         return fail(stopped.error());
-    out << "daemon stopped\n";
+    out << (reason == vthost::proto::StopReason::UserKeepingWorkspace
+                ? "daemon stopped; its workspace is kept\n"
+                : "daemon stopped\n");
     return ExitStatus::Ok;
+}
+
+vthost::WorkspacePersistenceConfig workspacePersistenceOf(config::DaemonRestoreConfig const& restore,
+                                                          std::filesystem::path snapshotPath)
+{
+    auto const keepsScrollback = restore.scrollback && restore.scrollbackLines > 0;
+    return vthost::WorkspacePersistenceConfig {
+        .snapshotPath = std::move(snapshotPath),
+        .scrollback =
+            keepsScrollback ? vthost::ScrollbackPersistence::Tail : vthost::ScrollbackPersistence::Off,
+        .scrollbackRows = restore.scrollbackLines,
+        .rerunPrograms = restore.rerunPrograms,
+        .interval = restore.interval,
+    };
 }
 
 ExitStatus daemonLogsVerb(DaemonControlPort& control,

@@ -1169,6 +1169,9 @@ enum class StopReason : uint8_t
 {
     User = 0,           ///< The user asked.
     UpgradeRestart = 1, ///< It is replaced by a newer release.
+    /// The user asked, and the daemon keeps its workspace for its next start. Sent only to a daemon that
+    /// offers Capability::WorkspaceRestore: an older one refuses the byte.
+    UserKeepingWorkspace = 2,
 };
 
 /// Client→server: asks the daemon to shut down. Served on a connection of either role, as a

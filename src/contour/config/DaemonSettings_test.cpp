@@ -4,6 +4,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <format>
+#include <string>
+#include <vector>
+
 #include <vthost/SessionSettings.hpp>
 
 using contour::config::DaemonMode;
@@ -55,4 +60,48 @@ TEST_CASE("the daemon's default scrollback is the in-process default", "[config]
 {
     CHECK(contour::config::HistoryConfig {}.maxHistoryLineCount
           == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(vthost::DefaultSessionHistoryLineCount) });
+}
+
+TEST_CASE("Config: daemon.restore defaults", "[config][daemon]")
+{
+    auto const config = contour::config::Config {};
+    auto const& c = config.daemon.value().restore;
+    CHECK(c.scrollback);
+    CHECK(c.scrollbackLines == 1000);
+    CHECK(c.rerunPrograms.empty());
+    CHECK(c.interval == std::chrono::seconds { 30 });
+}
+
+TEST_CASE("Config: daemon.restore reads every key", "[config][daemon]")
+{
+    auto const config =
+        loadConfigFromYaml("daemon:\n  restore:\n    scrollback: false\n    scrollback_lines: 200\n"
+                           "    rerun_programs: [vim, htop]\n    interval: 60\n");
+    auto const& c = config.daemon.value().restore;
+    CHECK_FALSE(c.scrollback);
+    CHECK(c.scrollbackLines == 200);
+    CHECK(c.rerunPrograms == std::vector<std::string> { "vim", "htop" });
+    CHECK(c.interval == std::chrono::seconds { 60 });
+}
+
+TEST_CASE("Config: daemon.restore clamps out-of-range values", "[config][daemon]")
+{
+    auto const config =
+        loadConfigFromYaml("daemon:\n  restore:\n    interval: 1\n    scrollback_lines: 999999\n");
+    auto const& c = config.daemon.value().restore;
+    CHECK(c.interval == contour::config::MinRestoreInterval);
+    CHECK(c.scrollbackLines == contour::config::MaxRestoreScrollbackLines);
+}
+
+TEST_CASE("Config: a malformed daemon.restore value keeps its default and the keys after it",
+          "[config][daemon]")
+{
+    auto const config =
+        loadConfigFromYaml("daemon:\n  restore:\n    scrollback_lines: lots\n"
+                           "    rerun_programs: vim\n    interval: soon\n  size_policy: smallest\n");
+    auto const& c = config.daemon.value().restore;
+    CHECK(c.scrollbackLines == 1000);
+    CHECK(c.rerunPrograms.empty());
+    CHECK(c.interval == std::chrono::seconds { 30 });
+    CHECK(config.daemon.value().sizePolicy == vthost::ClientSizePolicy::Smallest);
 }

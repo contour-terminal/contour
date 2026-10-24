@@ -67,6 +67,9 @@ enum class ShutdownCause : std::uint8_t
     Idle,              ///< An ExitWhenIdle daemon's grace period passed with nothing to serve.
     StopRequested,     ///< A Control connection asked it to stop.
     UpgradeRestart,    ///< A Control connection asked it to stop, to be replaced by a newer release.
+    /// A Control connection asked it to stop and to keep its workspace for the next start
+    /// (`contour daemon stop --keep-snapshot`).
+    StopRequestedKeepingWorkspace,
 };
 
 /// The causes' log text, single-sourced.
@@ -76,6 +79,7 @@ inline constexpr auto ShutdownCauseNames = std::to_array<std::pair<std::string_v
     { "idle", ShutdownCause::Idle },
     { "stop requested", ShutdownCause::StopRequested },
     { "restart for upgrade", ShutdownCause::UpgradeRestart },
+    { "stop requested, keeping the workspace", ShutdownCause::StopRequestedKeepingWorkspace },
 });
 
 /// @param cause The cause to name.

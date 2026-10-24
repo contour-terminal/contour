@@ -140,6 +140,16 @@ TEST_CASE("ContourApp: `daemon logs` dispatches the logs verb, not the --log opt
         CHECK(app.parameters().get<unsigned>("contour.daemon.logs.lines") == 7);
     }
 
+    SECTION("stop keeps the snapshot only when asked")
+    {
+        auto app = contour::cli::ContourApp { core::defaultEnvironment() };
+        auto argv = std::array<char const*, 4> { "contour", "daemon", "stop", "--keep-snapshot" };
+        REQUIRE(app.parseParametersForTesting(static_cast<int>(argv.size()), argv.data()));
+        CHECK(app.parameters().get<bool>("contour.daemon.stop"));
+        CHECK(app.parameters().get<bool>("contour.daemon.stop.keep-snapshot"));
+        CHECK_FALSE(app.parameters().get<bool>("contour.daemon.stop.yes"));
+    }
+
     SECTION("bare `daemon` stays the daemon")
     {
         auto app = contour::cli::ContourApp { core::defaultEnvironment() };

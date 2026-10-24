@@ -98,9 +98,13 @@ DriftKind compareReleases(std::string_view client, std::string_view daemon)
     return DriftKind::Differs;
 }
 
-LayoutAfterRestart layoutSurvivesRestart(proto::Negotiated const& /*negotiated*/) noexcept
+LayoutAfterRestart layoutSurvivesRestart(proto::Negotiated const& negotiated) noexcept
 {
-    return LayoutAfterRestart::Lost;
+    // What the daemon offered, not what both share: the restore is the daemon's alone, and a client needs
+    // no capability of its own to get its windows back.
+    return negotiated.peerCapabilities.contains(proto::Capability::WorkspaceRestore)
+               ? LayoutAfterRestart::Restored
+               : LayoutAfterRestart::Lost;
 }
 
 DriftNotice assessDrift(std::string_view clientRelease,

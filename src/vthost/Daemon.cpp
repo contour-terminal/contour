@@ -39,6 +39,7 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <future>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -56,6 +57,8 @@
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonControl.hpp>
 #include <vthost/DaemonRuntime.hpp>
+#include <vthost/DurableFiles.hpp>
+#include <vthost/FilePrivacy.hpp>
 #include <vthost/HostedShell.hpp>
 #include <vthost/IdleExitWatcher.hpp>
 #include <vthost/LastSessionWatcher.hpp>
@@ -63,9 +66,11 @@
 #include <vthost/LoopDrain.hpp>
 #include <vthost/NativeSession.hpp>
 #include <vthost/SessionHost.hpp>
+#include <vthost/SessionSnapshotStore.hpp>
 #include <vthost/ShutdownFunnel.hpp>
 #include <vthost/ShutdownSignals.hpp>
 #include <vthost/SocketPath.hpp>
+#include <vthost/WorkspacePersistence.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vthost/tmux/ImsgServer.hpp>
 
@@ -309,6 +314,116 @@ namespace
         };
     }
 
+    /// The workspace persistence's one-line diagnostics, into the daemon's log. The writer thread calls it
+    /// too, which the log allows: its sinks serialize their writes.
+    /// @param line The diagnostic.
+    void logPersistence(std::string_view line)
+    {
+        daemonLog()("{}", line);
+    }
+
+    /// @param config How the daemon keeps its workspace.
+    /// @return The snapshot file on the native file system; nullopt while persistence is off.
+    [[nodiscard]] std::optional<SessionSnapshotStore> snapshotStoreOf(
+        WorkspacePersistenceConfig const& config)
+    {
+        if (config.snapshotPath.empty())
+            return std::nullopt;
+        daemonLog()("the workspace is kept in {}", core::pathToUtf8(config.snapshotPath));
+        return SessionSnapshotStore { core::platform::NativeFileSystem::instance(),
+                                      NativeFilePrivacy::instance(),
+                                      NativeDurableFiles::instance(),
+                                      config.snapshotPath };
+    }
+
+    /// @param store The snapshot file, while persistence is on.
+    /// @param config How the daemon keeps its workspace.
+    /// @return What the host restores at its start; nullopt for nothing.
+    [[nodiscard]] std::optional<WorkspaceRestore> restoreOf(std::optional<SessionSnapshotStore> const& store,
+                                                            WorkspacePersistenceConfig const& config)
+    {
+        if (!store)
+            return std::nullopt;
+        return prepareRestore(*store, config, logPersistence);
+    }
+
+    class BoundPersistence;
+
+    /// What a daemon does before its listeners close, in order: the workspace's last snapshot, the caller's
+    /// beforeShutdown, then the word that lets a console-control handler holding the process's end return
+    /// (ShutdownSignals::watch's lastWrite). Built before the funnel that runs it and the signal watch that
+    /// waits on it; the persistence it finalizes exists only once the host does, so a BoundPersistence binds
+    /// itself in for its own lifetime.
+    class ShutdownSequence
+    {
+      public:
+        /// @param callerHook DaemonConfig::beforeShutdown (not owned; outlives this); may be empty.
+        explicit ShutdownSequence(std::function<void(ShutdownCause)> const& callerHook):
+            _callerHook { callerHook }, _lastWrite { _lastWritten.get_future().share() }
+        {
+        }
+
+        /// Runs the sequence. Loop thread; once, as the funnel runs its hook.
+        /// @param cause What ends the daemon.
+        void run(ShutdownCause cause)
+        {
+            if (_persistence != nullptr)
+                _persistence->finalize(cause);
+            if (_callerHook)
+                _callerHook(cause);
+            _lastWritten.set_value();
+        }
+
+        /// @return Ready once run() is done.
+        [[nodiscard]] std::shared_future<void> lastWrite() const { return _lastWrite; }
+
+      private:
+        friend class BoundPersistence;
+
+        std::function<void(ShutdownCause)> const& _callerHook;
+        DaemonPersistence* _persistence = nullptr; ///< Set by the BoundPersistence alive, if any.
+        std::promise<void> _lastWritten;
+        std::shared_future<void> _lastWrite;
+    };
+
+    /// A daemon's DaemonPersistence, bound into its ShutdownSequence for as long as it lives.
+    class BoundPersistence
+    {
+      public:
+        /// Starts keeping @p host's workspace; see DaemonPersistence for the parameters.
+        /// @param sequence The shutdown sequence that finalizes it (not owned; outlives this).
+        BoundPersistence(ShutdownSequence& sequence,
+                         core::net::EventLoop& loop,
+                         SessionHost& host,
+                         SessionSnapshotStore const& store,
+                         std::optional<RestoreSource> restoredFrom,
+                         WorkspacePersistenceConfig const& config,
+                         core::platform::IWallClock const& wallClock):
+            _persistence(loop,
+                         host,
+                         store,
+                         restoredFrom,
+                         config,
+                         wallClock,
+                         WriterThreading::Background,
+                         logPersistence),
+            _sequence { sequence }
+        {
+            _sequence._persistence = &_persistence;
+        }
+
+        BoundPersistence(BoundPersistence const&) = delete;
+        BoundPersistence& operator=(BoundPersistence const&) = delete;
+        BoundPersistence(BoundPersistence&&) = delete;
+        BoundPersistence& operator=(BoundPersistence&&) = delete;
+
+        ~BoundPersistence() { _sequence._persistence = nullptr; }
+
+      private:
+        DaemonPersistence _persistence;
+        ShutdownSequence& _sequence;
+    };
+
     /// @param config The daemon's configuration.
     /// @return What its DaemonRuntime states about it.
     [[nodiscard]] DaemonRuntimeConfig runtimeConfigOf(DaemonConfig const& config)
@@ -341,6 +456,9 @@ namespace
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)
             capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));
+        // Only a daemon that keeps its workspace brings it back after a restart.
+        if (!config.persistence.snapshotPath.empty())
+            capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceRestore));
         return NativeSessionServices {
             .handshake = { .expectedToken = std::move(token), .capabilities = std::move(capabilities) },
             .daemon = runtime,
@@ -630,19 +748,33 @@ int runDaemon(DaemonConfig const& config)
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
     auto const clock = core::platform::SteadyClock {};
+    auto const wallClock = core::platform::SystemWallClock {};
 
     // Filled as each endpoint is bound below; the funnel reads it when the shutdown comes.
     auto servers = std::vector<ConnectionAcceptor*> {};
-    auto funnel = ShutdownFunnel { loop, servers, config.beforeShutdown };
+    auto sequence = ShutdownSequence { config.beforeShutdown };
+    auto funnel = ShutdownFunnel { loop, servers, [&sequence](ShutdownCause cause) { sequence.run(cause); } };
 
     // Armed before the host, for two reasons. The watch blocks SIGINT/SIGTERM on this thread, and only
     // threads started afterwards inherit that mask: the host starts a pump thread per session of the
-    // startup layout in its constructor, and a process-directed SIGTERM reaching a thread that does not
-    // block it kills the process by its default action. And it is destroyed after ~SessionHost has
-    // joined those threads, so the SIGTERM ~SigwaitWatch sends to release its own thread after a
-    // StopDaemon finds none of them left.
+    // startup layout in its constructor (and the persistence its writer thread), and a process-directed
+    // SIGTERM reaching a thread that does not block it kills the process by its default action. And it is
+    // destroyed after ~SessionHost has joined those threads, so the SIGTERM ~SigwaitWatch sends to release
+    // its own thread after a StopDaemon finds none of them left.
     auto const signals = config.shutdownSignals->watch(
-        [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); });
+        [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); }, sequence.lastWrite());
+
+    // The control socket is bound before the snapshot is touched: a second daemon on the same label fails
+    // here, rather than after moving aside the file the serving one keeps writing.
+    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
+    if (!listener)
+        return listener.error();
+
+    // Read before the host, which realizes it in its constructor; the store outlives the persistence below.
+    auto const store = snapshotStoreOf(config.persistence);
+    auto restore = restoreOf(store, config.persistence);
+    auto const restoredFrom =
+        restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
 
     auto host = SessionHost {
         loop,
@@ -659,7 +791,8 @@ int runDaemon(DaemonConfig const& config)
                                 config.profiles
                                     ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
                                     : ProfilePtyFactory {},
-                            .instance = config.instance }
+                            .instance = config.instance,
+                            .restore = std::move(restore) }
     };
     // Declared before the drain, as the funnel is: the connection flows the drain unwinds hold its census
     // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
@@ -676,13 +809,15 @@ int runDaemon(DaemonConfig const& config)
     auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
     if (config.configReload)
         reloadWatcher.emplace(loop, host, *config.configReload);
+    // After the host, which it watches and must go first, and before the drain, which may still run the
+    // shutdown it finalizes in; before any listener serves, so no client changes what it has not seen.
+    auto persistence = std::optional<BoundPersistence> {};
+    if (store)
+        persistence.emplace(sequence, loop, host, *store, restoredFrom, config.persistence, wallClock);
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
 
-    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
-    if (!listener)
-        return listener.error();
     auto server = ConnectionAcceptor { loop,
                                        "control",
                                        std::move(*listener),
@@ -849,15 +984,29 @@ int runDaemon(DaemonConfig const& config)
     auto const source = core::net::makeDefaultBackend();
     auto loop = core::net::EventLoop { *source };
     auto const clock = core::platform::SteadyClock {};
+    auto const wallClock = core::platform::SystemWallClock {};
 
     auto servers = std::vector<ConnectionAcceptor*> {};
-    auto funnel = ShutdownFunnel { loop, servers, config.beforeShutdown };
+    auto sequence = ShutdownSequence { config.beforeShutdown };
+    auto funnel = ShutdownFunnel { loop, servers, [&sequence](ShutdownCause cause) { sequence.run(cause); } };
 
     // The console-control handler runs on an arbitrary OS thread; the request only posts, so the
     // shutdown and its log line land on the loop thread like everything else. Armed before the host and
-    // destroyed after it, as in the POSIX body above.
+    // destroyed after it, as in the POSIX body above. For a close, a logoff or a system shutdown it holds
+    // the process until the sequence has written the workspace: Windows ends it as the handler returns.
     auto const signals = config.shutdownSignals->watch(
-        [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); });
+        [request = postedShutdown(loop, funnel)] { request(ShutdownCause::Signal); }, sequence.lastWrite());
+
+    // Bound before the snapshot is touched, as in the POSIX body above.
+    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
+    if (!listener)
+        return listener.error();
+
+    // See the POSIX body above.
+    auto const store = snapshotStoreOf(config.persistence);
+    auto restore = restoreOf(store, config.persistence);
+    auto const restoredFrom =
+        restore.transform([](WorkspaceRestore const& restored) { return restored.source; });
 
     auto host = SessionHost {
         loop,
@@ -874,7 +1023,8 @@ int runDaemon(DaemonConfig const& config)
                                 config.profiles
                                     ? makeProfilePtyFactory(config.shell, config.socketPath, config.placement)
                                     : ProfilePtyFactory {},
-                            .instance = config.instance }
+                            .instance = config.instance,
+                            .restore = std::move(restore) }
     };
     // See the POSIX body above for why the runtime is declared here, before the drain.
     auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
@@ -885,13 +1035,14 @@ int runDaemon(DaemonConfig const& config)
     auto reloadWatcher = std::optional<ConfigReloadWatcher> {};
     if (config.configReload)
         reloadWatcher.emplace(loop, host, *config.configReload);
+    // See the POSIX body above for why the persistence is declared here.
+    auto persistence = std::optional<BoundPersistence> {};
+    if (store)
+        persistence.emplace(sequence, loop, host, *store, restoredFrom, config.persistence, wallClock);
     // Declared after the host: every connection flow the servers below spawn subscribes to it, so
     // those flows must end before it is destroyed, not in ~EventLoop after it.
     auto const drain = LoopDrain { loop };
 
-    auto listener = bindDaemonEndpoint(loop, core::pathToUtf8(config.socketPath));
-    if (!listener)
-        return listener.error();
     auto server = ConnectionAcceptor { loop,
                                        "control",
                                        std::move(*listener),

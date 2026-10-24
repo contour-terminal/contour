@@ -23,6 +23,7 @@
 
 #include <vthost/DaemonLifecycle.hpp>
 #include <vthost/Transport.hpp>
+#include <vthost/proto/Negotiation.hpp>
 #include <vthost/proto/Pdu.hpp>
 
 namespace vthost::client
@@ -60,6 +61,8 @@ struct DaemonStatus
     std::size_t sessions = 0;                                ///< How many sessions it hosts.
     std::size_t clients = 0;                                 ///< How many clients are attached.
     DaemonLifecycle lifecycle = DaemonLifecycle::Persistent; ///< When it ends on its own.
+    /// What its ServerHello offered: which requests it serves, Capability::WorkspaceRestore among them.
+    proto::CapabilitySet capabilities {};
 };
 
 /// @param reply A DaemonStatusReply as the wire spells it.
@@ -109,10 +112,14 @@ class SocketDaemonControl final: public DaemonControlPort
 /// The control timeout when a caller states none.
 ///
 /// It bounds a whole call: for stop(), the connect, the StopDaemon, the daemon's hang-up and the
-/// reconnects until nothing accepts any more. Enough while the shutdown only closes listeners; once
-/// phase 6's beforeShutdown writes a session snapshot inside the funnel, a stop may legitimately take
-/// longer — revisit it then.
+/// reconnects until nothing accepts any more. Enough for a status; a port that stops takes
+/// DefaultStopTimeout instead.
 inline constexpr auto DefaultControlTimeout = std::chrono::milliseconds { 2000 };
+
+/// The control timeout of a port that stops the daemon. A daemon that keeps its workspace writes its last
+/// snapshot inside the shutdown, before it hangs up: up to MaxSnapshotFileBytes, on whatever disk the state
+/// directory is on.
+inline constexpr auto DefaultStopTimeout = std::chrono::milliseconds { 15'000 };
 
 /// Daemon control over a real transport, owning the loop it runs on.
 /// @param transport How to reach the daemon. A probe passes one that never starts a daemon (a

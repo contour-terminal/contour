@@ -105,6 +105,19 @@ TEST_CASE("a stop request maps its reason onto a shutdown cause", "[vthost][runt
           == std::vector { vthost::ShutdownCause::StopRequested, vthost::ShutdownCause::UpgradeRestart });
 }
 
+TEST_CASE("a stop that keeps the workspace maps to its own cause", "[vthost][daemon]")
+{
+    auto clock = core::platform::ManualClock {};
+    auto h = RuntimeHarness {};
+    auto causes = std::vector<vthost::ShutdownCause> {};
+    auto runtime =
+        vthost::DaemonRuntime { {}, h.host, clock, [&](vthost::ShutdownCause c) { causes.push_back(c); } };
+    CHECK(runtime.requestStop(vthost::proto::StopReason::UserKeepingWorkspace).has_value());
+    CHECK(causes == std::vector { vthost::ShutdownCause::StopRequestedKeepingWorkspace });
+    CHECK(vthost::nameOf(vthost::ShutdownCause::StopRequestedKeepingWorkspace)
+          == "stop requested, keeping the workspace");
+}
+
 TEST_CASE("every lifecycle round-trips through its CLI spelling", "[vthost][runtime]")
 {
     for (auto const& [text, value]: vthost::DaemonLifecycleNames)

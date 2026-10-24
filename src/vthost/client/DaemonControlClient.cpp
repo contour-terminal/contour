@@ -70,6 +70,14 @@ namespace
         Phase phase = Phase::AwaitHello;
         std::optional<ControlError> failure;
         std::optional<proto::DaemonStatusReply> reply;
+        proto::CapabilitySet offered; ///< What the daemon's ServerHello offered.
+    };
+
+    /// What a Control conversation came to.
+    struct Answer
+    {
+        std::optional<proto::DaemonStatusReply> reply; ///< The status, for Purpose::Status.
+        proto::CapabilitySet offered;                  ///< What the daemon's ServerHello offered.
     };
 
     [[nodiscard]] ControlError fail(ControlErrorCode code, std::string detail)
@@ -89,8 +97,9 @@ namespace
 
     /// Runs one Control conversation over @p socket: hello, one request, then its answer (status) or the
     /// daemon's EOF (stop).
-    /// @return The status for Purpose::Status, nothing for Purpose::Stop, or the failure.
-    core::async::Task<std::expected<std::optional<proto::DaemonStatusReply>, ControlError>> converse(
+    /// @return The status for Purpose::Status, nothing for Purpose::Stop, with what the daemon offered; or
+    ///         the failure.
+    core::async::Task<std::expected<Answer, ControlError>> converse(
         core::net::EventLoop* loop,
         std::unique_ptr<core::net::ISocket> socket,
         Purpose purpose,
@@ -127,6 +136,7 @@ namespace
                                                 proto::describe(judged.error(), proto::PeerRole::Daemon));
                     return false;
                 }
+                conversation.offered = hello->capabilities;
                 if (!hello->capabilities.contains(proto::Capability::DaemonControl))
                 {
                     conversation.failure = fail(ControlErrorCode::Unsupported,
@@ -169,11 +179,11 @@ namespace
         if (conversation.failure)
             co_return std::unexpected { *conversation.failure };
         if (conversation.reply)
-            co_return conversation.reply;
+            co_return Answer { .reply = conversation.reply, .offered = std::move(conversation.offered) };
         // The stop is done once the daemon hangs up after having been asked.
         if (purpose == Purpose::Stop && conversation.phase == Phase::AwaitAnswer
             && outcome.stop == PumpStop::PeerClosed)
-            co_return std::optional<proto::DaemonStatusReply> {};
+            co_return Answer { .reply = std::nullopt, .offered = std::move(conversation.offered) };
         co_return std::unexpected { fail(
             ControlErrorCode::Transport,
             describe(outcome).value_or(std::string { "the daemon closed the connection" })) };
@@ -198,12 +208,13 @@ namespace
         auto answer = co_await converse(loop, std::move(*socket), Purpose::Status, proto::StopReason::User);
         if (!answer)
             co_return std::unexpected { answer.error() };
-        auto const status = fromWire(**answer);
+        auto status = fromWire(*answer->reply);
         if (!status)
             co_return std::unexpected { fail(
                 ControlErrorCode::Transport,
                 "the daemon's status names a lifecycle this client does not know") };
-        co_return *status;
+        status->capabilities = std::move(answer->offered);
+        co_return *std::move(status);
     }
 
     core::async::Task<std::expected<void, ControlError>> requestStop(

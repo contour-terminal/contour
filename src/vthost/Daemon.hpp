@@ -37,6 +37,7 @@
 #include <vthost/ProfileCatalog.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/ShutdownSignals.hpp>
+#include <vthost/WorkspacePersistenceConfig.hpp>
 
 namespace vthost
 {
@@ -131,6 +132,11 @@ struct DaemonConfig
     /// watch neither takes the test process's signals nor sends one into it.
     /// Never null.
     std::shared_ptr<ShutdownSignals> shutdownSignals = processShutdownSignals();
+    /// How the daemon keeps its workspace across a restart: restored at start from the snapshot file,
+    /// written while it serves and as it ends (workspaceFor). An empty `snapshotPath` (the default, a test's
+    /// bare `DaemonConfig{}`) keeps nothing and offers no Capability::WorkspaceRestore; `contour daemon`
+    /// sets it from `daemon.restore`.
+    WorkspacePersistenceConfig persistence {};
 };
 
 /// Creates the directory @p socketPath lives in owner-only, or checks that it is safe, as the

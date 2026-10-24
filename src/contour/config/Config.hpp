@@ -852,6 +852,27 @@ constexpr auto DaemonModeNames = std::to_array<std::pair<std::string_view, Daemo
     return std::nullopt;
 }
 
+/// The most rows `daemon.restore.scrollback_lines` keeps per pane.
+inline constexpr std::size_t MaxRestoreScrollbackLines = 100'000;
+
+/// The shortest `daemon.restore.interval`.
+inline constexpr auto MinRestoreInterval = std::chrono::seconds { 5 };
+
+/// `daemon.restore`: what a daemon keeps of its workspace across a restart.
+struct DaemonRestoreConfig
+{
+    /// `scrollback`: whether a restored pane gets its history back. A Config boundary bool (AGENT.md
+    /// exception); `contour daemon` converts it to vthost::ScrollbackPersistence.
+    bool scrollback = true;
+    /// `scrollback_lines`: the most rows kept per pane, clamped to [0, MaxRestoreScrollbackLines]. It bounds
+    /// the snapshot only; the live scrollback stays `daemon.history_limit`.
+    std::size_t scrollbackLines = 1000;
+    std::vector<std::string> rerunPrograms {}; ///< `rerun_programs`: what a restored pane may re-run.
+    std::chrono::seconds interval {
+        30
+    }; ///< `interval`: how often it is written, at least MinRestoreInterval.
+};
+
 /// The `daemon:` section: whether and how the terminal talks to a session-hosting daemon.
 ///
 /// GLOBAL rather than per-profile: it decides where sessions live, not how one of them looks.
@@ -868,6 +889,9 @@ struct DaemonSettings
 
     /// The scrollback the daemon keeps per session; unset means the hosting profile's `history.limit`.
     std::optional<vtbackend::MaxHistoryLineCount> historyLimit {};
+
+    /// What the daemon keeps of its workspace across a restart (`daemon.restore`).
+    DaemonRestoreConfig restore {};
 };
 
 struct HorizontalMarginTag
@@ -2094,6 +2118,7 @@ struct YAMLConfigReader
     void loadFromEntry(YAML::Node const& node, std::string const& entry, RendererConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, ImagesConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonSettings& where);
+    void loadFromEntry(YAML::Node const& node, std::string const& entry, DaemonRestoreConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, HistoryConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, FoldingConfig& where);
     void loadFromEntry(YAML::Node const& node, std::string const& entry, GutterConfig& where);
@@ -2527,8 +2552,20 @@ struct Writer
                 return "-1";
             return std::format("{}", unbox(std::get<vtbackend::LineCount>(*v.historyLimit)));
         }();
-        return format(
-            doc, nameOf(v.mode), SingleQuoted { v.socket }, vthost::nameOf(v.sizePolicy), historyLimit);
+        auto rerunPrograms = std::string { "[" };
+        for (auto const& program: v.restore.rerunPrograms)
+            rerunPrograms +=
+                std::format("{}{}", rerunPrograms.size() > 1 ? ", " : "", SingleQuoted { program });
+        rerunPrograms += "]";
+        return format(doc,
+                      nameOf(v.mode),
+                      SingleQuoted { v.socket },
+                      vthost::nameOf(v.sizePolicy),
+                      historyLimit,
+                      v.restore.scrollback,
+                      v.restore.scrollbackLines,
+                      rerunPrograms,
+                      v.restore.interval.count());
     }
 
     [[nodiscard]] std::string format(std::string_view doc, WindowMargins const& v)

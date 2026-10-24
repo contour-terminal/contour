@@ -41,9 +41,9 @@ enum class LayoutAfterRestart : uint8_t
     Restored, ///< The daemon snapshots its layout and restores it.
 };
 
-/// The phase-6 seam: becomes Restored once the daemon advertises its snapshot capability.
 /// @param negotiated What the handshake with the daemon agreed.
-/// @return What a restart keeps of the daemon's layout.
+/// @return What a restart keeps of the daemon's layout: Restored when the daemon offered
+///         Capability::WorkspaceRestore, else Lost.
 [[nodiscard]] LayoutAfterRestart layoutSurvivesRestart(proto::Negotiated const& negotiated) noexcept;
 
 /// What to tell the user about a drift.

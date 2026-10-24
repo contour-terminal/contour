@@ -894,6 +894,7 @@ single shutdown log line names it:
 | `Idle`              | an `ExitWhenIdle` daemon with nothing to serve for its grace period           | `idle`                           |
 | `StopRequested`     | a Control connection's `StopDaemon` with reason `User`                        | `stop requested`                 |
 | `UpgradeRestart`    | a Control connection's `StopDaemon` with reason `UpgradeRestart`              | `restart for upgrade`            |
+| `StopRequestedKeepingWorkspace` | a Control connection's `StopDaemon` with reason `UserKeepingWorkspace` | `stop requested, keeping the workspace` |
 
 All of them funnel into one `ShutdownFunnel`, which runs on the loop thread and runs once: a second
 request — a `SIGTERM` racing a `StopDaemon` — logs nothing and does nothing. The shutdown first calls
@@ -958,10 +959,9 @@ at the decoder's default, and a PDU tag it does not know is answered with `Unsup
 (`ControlErrorCode::NotRunning` for a missing or refused socket) rather than a string the caller
 parses.
 
-`DaemonConfig::beforeShutdown` is the seam for persistent workspaces (phase 6): the funnel calls it
-with the `ShutdownCause` before any listener closes, so a snapshot of the layout is written there, and
-`workspaceFor(ShutdownCause)` will decide whether the cause keeps or discards it. Until then a restart
-ends the sessions, which is what `layoutSurvivesRestart` reports and the GUI's confirmation says.
+`DaemonConfig::beforeShutdown` is the seam for persistent workspaces: the funnel calls it with the
+`ShutdownCause` before any listener closes, after the daemon's own last snapshot (see
+[Workspace snapshots](#workspace-snapshots)).
 
 Sessions leave through exactly one funnel, `SessionHost::handleSessionExit`: a shell exiting (the
 pump thread's posted completion), the native `ClosePane` PDU, or control mode's `kill-pane`. The
@@ -991,6 +991,91 @@ path.
 One consequence worth knowing when shutting a daemon down by signal: a session whose shell is still
 running blocks teardown, because `~HostedSession` joins a pump thread parked in a blocking PTY read.
 The last-session path is unaffected (its sessions are already gone by then).
+
+### Workspace snapshots
+
+A daemon whose `DaemonConfig::persistence` names a file keeps its workspace there
+(`SessionSnapshotStore`), and offers `Capability::WorkspaceRestore` (8) while it does; that
+capability is what turns `client::layoutSurvivesRestart` to `Restored`, and with it the drift
+confirmation's text. `runDaemon` wires it in this order:
+
+1. the control socket is bound first, so a second daemon on the same label fails before it touches
+   the file the serving one keeps writing;
+2. `prepareRestore` loads the file and moves it aside to `<file>.restored`, and the result becomes
+   `SessionHostConfig::restore`, which the host realizes in its constructor instead of the startup
+   layout (unless nothing of it came back);
+3. after the host, a `DaemonPersistence` closes the restore (`endRestore`), then owns the
+   `SnapshotWriter` (its own thread, started after the signal watch so it inherits the blocked
+   `SIGINT`/`SIGTERM`) and the `WorkspacePersistence` observer that decides when to write;
+4. the funnel's hook runs `finalize(workspaceFor(cause))` and only then the caller's
+   `beforeShutdown`. `workspaceFor` discards for `StopRequested` alone: a signal is how a reboot ends
+   the daemon, a last session may have been killed by it, and `--keep-snapshot` is
+   `StopReason::UserKeepingWorkspace` (2), which a daemon that predates it refuses rather than reads
+   as a plain stop. The CLI therefore sends it only to a daemon whose hello offered
+   `WorkspaceRestore`.
+
+On Windows the console-control handler returns only once that hook has run, for at most 4 s, for a
+close, a logoff or a system shutdown: Windows ends the process as soon as the handler returns. The
+watch is handed the hook's future (`ShutdownSignals::watch`'s `lastWrite`) for that.
+
+The file, little-endian, every `blob{…}` decoded from a sub-reader of its own (bytes a reader does
+not know are skipped; absent trailing fields keep their defaults — phase 1's PDU body rule):
+
+```
+File     := Magic Version:varint BodyLength:varint ChecksumLo:u32 ChecksumHi:u32 Body
+Magic    := the 8 bytes "CTRSNAP\n"
+Body     := TakenAt:svarint(unix seconds) WindowCount:varint Window{WindowCount}
+Window   := blob{ Identity? ActiveTab:varint TabCount:varint Tab{TabCount} }
+Tab      := blob{ Identity? Title:string? Color:u32(0xRRGGBB)? ActiveLeaf:varint Zoom:u8 Node }
+Node     := blob{ Split:u8 ( Ratio:varint(millionths) Node Node | Leaf ) }
+Leaf     := Identity? Cwd:string(UTF-8)? Profile:string? Foreground:string? CommandLine:string?
+            History:blob(encodePdu(Delta))?
+Identity := 16 raw bytes, Label:string?
+X?       := u8 0 (absent) | u8 1 then X
+```
+
+The checksum is FNV-1a 64 over `Body`. **Cross-version readability is a requirement**: the drift
+restart writes the file with the old daemon and reads it with the new one. A daemon reads every
+`SnapshotFormatVersion` an earlier release wrote, records grow only by appending inside their
+`blob{…}`, and the version steps only for a change an old reader would misread; an older daemon
+leaves a newer format in place instead of setting it aside. A history blob that does not decode
+drops only that pane's scrollback. The file is bounded (`MaxSnapshotFileBytes`, 64 MiB, and
+`daemon.restore.scrollback_lines` per pane), written to a private temporary sibling and renamed over
+the old one, and user-only (0600 in a 0700 directory; a protected DACL on Windows).
+
+A restore never loses the last good workspace: `<file>.restored` is deleted only by the first
+successful write after a restore that realized a pane. One that realized nothing keeps it for the next
+start, which tries it once more and then renames it `<file>.failed`.
+
+When to write is a pure table, `decideSnapshotWrite` (`SnapshotSchedule.hpp`), with the kill grace
+(5 s) and the layout debounce (1 s) of `SchedulePolicy`; `now` is T and `lastKill` the newest
+`SessionEnd::Killed`:
+
+| Trigger                  | Workspace | Last kill  | Action            |
+|--------------------------|-----------|------------|-------------------|
+| `Periodic`               | clean     | any        | skip              |
+| `Periodic`               | changed   | none, ≥ 5 s ago | write now    |
+| `Periodic`               | changed   | T−2 s      | defer to T+3 s    |
+| `LayoutChanged`          | any       | none       | defer to T+1 s    |
+| `LayoutChanged`          | any       | T−2 s      | defer to T+3 s    |
+| `SessionExited`          | any       | none       | write now         |
+| `SessionClosedByRequest` | any       | none       | write now         |
+| `SessionExited`, `SessionClosedByRequest` | any | T−1 s | defer to T+4 s |
+| `SessionKilled`          | any       | any        | defer to T+5 s    |
+| `Shutdown`               | any       | none, ≥ 5 s ago | write now    |
+| `Shutdown`               | any       | T−2 s      | skip: the file is kept as it was |
+
+**The kill grace** is what makes a reboot restore anything. A system shutdown stops every shell
+before the daemon (systemd stops each shell's scope; a Windows logoff ends the ConPTY children), so
+the daemon sees its panes die moments before it is asked to end. A pane whose process was killed is
+therefore dropped from the file only after the grace, and a shutdown inside the grace keeps the file
+as it was. The kill is recorded in `sessionEnded` itself, not in a posted job: an `ExitWhenEmpty`
+daemon's `LastSessionClosed` shutdown is posted right after the last `sessionClosed`, and must already
+see it. A pane closed on request (`ClosePane`, `kill-pane`, through `SessionHost::closeSession`) or
+whose shell exited leaves the file at once.
+
+A periodic write that fails (a full or read-only state directory) leaves the previous file and no
+temporary behind, is logged once until a write succeeds again, and makes the next interval retry.
 
 ### Where a daemon runs from
 
