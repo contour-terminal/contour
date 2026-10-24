@@ -24,6 +24,8 @@
 
 #include <QtCore/QPointer>
 #include <QtCore/QTemporaryDir>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QPalette>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -1060,3 +1062,24 @@ TEST_CASE("TerminalSessionManager: the tab tooltip shortens a directory against 
 }
 
 // }}}
+
+TEST_CASE("TerminalSessionManager: a configuration reload re-applies the GUI chrome theme",
+          "[manager][theme]")
+{
+    // With `theme: terminal` the chrome follows the terminal background, so a colour change made by hand
+    // in contour.yml must recolor the chrome on reload, not only after a restart.
+    contour::test::ConfiguredTestApp testApp;
+    auto const windowLightness = [] {
+        return QGuiApplication::palette().color(QPalette::Window).lightness();
+    };
+
+    testApp.app().applyGuiTheme(contour::config::GuiTheme::Light, testApp.app().defaultProfileColors());
+    auto const lightChrome = windowLightness();
+
+    contour::test::writeConfigFile(
+        testApp.configFile(), contour::test::profileConfigYaml(testApp.app().profileName(), "theme: dark\n"));
+    REQUIRE(testApp.manager().reloadAllSessions());
+
+    CHECK(testApp.app().config().theme.value() == contour::config::GuiTheme::Dark);
+    CHECK(windowLightness() < lightChrome);
+}

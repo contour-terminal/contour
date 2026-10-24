@@ -1685,7 +1685,8 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme, config::ColorConfig co
     // Controls internals and the platforms that DO regenerate their own palette (Windows/macOS) honor
     // it. On the palette-owning Linux platform themes this is inert on its own — hence the explicit
     // setPalette above. Setting the scheme emits no colorSchemeChanged to the terminal grid unless the
-    // reported scheme actually changes, and the grid handler is gated to System mode regardless.
+    // reported scheme actually changes, and the grid handler tracks the OS whenever the chrome is not pinned
+    // (_guiPaletteOverridden false).
     if (scheme)
         QGuiApplication::styleHints()->setColorScheme(*scheme);
     else

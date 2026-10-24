@@ -457,8 +457,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// light/dark preference is derived from the OS independently of this setting, so a forced GUI
     /// theme never drags the grid with it. Note that forcing a theme pins the shared @c QStyleHints
     /// color scheme, so while pinned the grid reflects the OS scheme captured at startup; a live OS
-    /// switch is tracked only in @c System mode (see the @c colorSchemeChanged handler in @c run()).
-    /// Safe to call at startup and live (e.g. from the settings page).
+    /// switch is tracked whenever the chrome is not pinned (see the @c colorSchemeChanged handler in @c
+    /// run()). Safe to call at startup and live (e.g. from the settings page).
     /// @c GuiTheme::Terminal forces the scheme the terminal background's luminance calls for.
     /// @param theme The GUI theme to apply.
     /// @param colors The default profile's color configuration, which @c GuiTheme::Terminal reads.

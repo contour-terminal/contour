@@ -86,10 +86,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
         [this]() {
             if (auto const reloaded = _manager.reloadAllSessions(); !reloaded)
                 errorLog()("Failed to reload configuration. {}", reloaded.error());
-            // Re-apply the GUI chrome theme live: a settings-page change to `theme` is already in the
-            // reloaded Config, so the chrome recolors without a restart.
-            _manager.app().applyGuiTheme(_manager.app().config().theme.value(),
-                                         _manager.app().defaultProfileColors());
+            // The GUI chrome theme is re-applied by reloadAllSessions() itself, so a settings-page
+            // change to `theme` recolors the chrome without a restart.
             // Likewise for `window_control_style`: which corner the min/max/close buttons sit in,
             // and what shape they take, are QML bindings on the provider, so they re-evaluate the
             // moment it says so. Application-wide, so every open window follows.
