@@ -214,3 +214,11 @@ TEST_CASE("UiStyle.nativeRowsKeepTodaysGeometry", "[config]")
     }
     CHECK(uiStyleTokens(ChromeStyle::Terminal).quickControlsStyle == "ContourTui");
 }
+
+TEST_CASE("UiStyle.chromeStyleName", "[config]")
+{
+    CHECK(contour::config::chromeStyleName(ChromeStyle::MacOS) == "macos");
+    CHECK(contour::config::chromeStyleName(ChromeStyle::Fluent) == "fluent");
+    CHECK(contour::config::chromeStyleName(ChromeStyle::ContourLinux) == "linux");
+    CHECK(contour::config::chromeStyleName(ChromeStyle::Terminal) == "terminal");
+}

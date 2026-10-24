@@ -187,15 +187,7 @@ bool UiStyleProvider::eventFilter(QObject* watched, QEvent* event)
 
 QString UiStyleProvider::chromeStyleName() const
 {
-    using enum config::ChromeStyle;
-    switch (_row)
-    {
-        case MacOS: return QStringLiteral("macos");
-        case Fluent: return QStringLiteral("fluent");
-        case ContourLinux: return QStringLiteral("linux");
-        case Terminal: break;
-    }
-    return QStringLiteral("terminal");
+    return QString::fromLatin1(config::chromeStyleName(_row));
 }
 
 QColor UiStyleProvider::wash(QColor const& base) const

@@ -496,4 +496,19 @@ constexpr std::span<ConfigEnumInfo<UiStyle> const> configEnumValues() noexcept
     return detail::UiStyleTokenTable[static_cast<size_t>(row)];
 }
 
+/// The name QML and the snapshot files know @p row by.
+/// @param row The chrome row.
+/// @return "macos", "fluent", "linux" or "terminal".
+[[nodiscard]] constexpr std::string_view chromeStyleName(ChromeStyle row) noexcept
+{
+    switch (row)
+    {
+        case ChromeStyle::MacOS: return "macos";
+        case ChromeStyle::Fluent: return "fluent";
+        case ChromeStyle::ContourLinux: return "linux";
+        case ChromeStyle::Terminal: break;
+    }
+    return "terminal";
+}
+
 } // namespace contour::config

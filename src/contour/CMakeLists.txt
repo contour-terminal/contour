@@ -1120,8 +1120,10 @@ if(CONTOUR_TESTING)
         config/HostUrl_test.cpp
         config/LayoutBuilder_test.cpp
         config/PtyReadBufferSize_test.cpp
+        config/TabBarMode_test.cpp
         config/UiStyle_test.cpp
         config/WindowControlStyle_test.cpp
+        test/ChromeSnapshotPlan_test.cpp
         command/CommandCatalog_test.cpp
         command/CommandHistory_test.cpp
         command/ContextMenu_test.cpp

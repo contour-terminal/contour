@@ -46,6 +46,21 @@ namespace detail
     };
 } // namespace detail
 
+/// Whether the tab strip is shown under @p visibility.
+/// @param visibility The configured mode.
+/// @param tabCount How many tabs the window holds.
+/// @return True when the strip is shown.
+[[nodiscard]] constexpr bool isTabBarShown(TabBarVisibility visibility, int tabCount) noexcept
+{
+    switch (visibility)
+    {
+        case TabBarVisibility::Always: return true;
+        case TabBarVisibility::Never: return false;
+        case TabBarVisibility::Multiple: return tabCount > 1;
+    }
+    return true;
+}
+
 template <>
 constexpr std::span<ConfigEnumInfo<TabBarPosition> const> configEnumValues() noexcept
 {

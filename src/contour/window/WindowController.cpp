@@ -896,13 +896,7 @@ int WindowController::tabBarVisibility() const noexcept
 
 bool WindowController::tabBarShouldShow() const noexcept
 {
-    switch (_tabBarVisibility)
-    {
-        case config::TabBarVisibility::Always: return true;
-        case config::TabBarVisibility::Never: return false;
-        case config::TabBarVisibility::Multiple: return count() > 1;
-    }
-    return true;
+    return config::isTabBarShown(_tabBarVisibility, count());
 }
 
 void WindowController::setTabBarVisibility(config::TabBarVisibility visibility)
