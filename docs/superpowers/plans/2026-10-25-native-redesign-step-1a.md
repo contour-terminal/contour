@@ -1,5 +1,7 @@
 # Native Redesign — Step 1a (Kit Primitives, Tokens, Accessibility, New-Defaults Banner) Implementation Plan
 
+Amended after its pre-flight scan (findings F1–F27).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the chrome its kit — the 1a token groups, the `Banner`, `Toast` and `KitDialog`
@@ -56,7 +58,8 @@ This run is tracked on a private status board, a page published from an untracke
   - **Dependency injection.** Accessibility preferences and platform appearance are reached only
     through `IAccessibilityPreferenceSource` and `IPlatformAppearance`, each with a null implementation
     for tests and for every platform without a backend. Files go through the injected stores
-    (`GuiConfigStore`, the new `GuiStateStore`). No test reads the developer's real OS settings.
+    (`GuiConfigStore`, the new `GuiStateStore`). No test's outcome depends on the developer's real OS
+    settings; only the `[cocoa]` backend cases read them, and they compare against what they read.
   - **Configuration at construction.** `UiStyleProvider`, `ChromeStyleHost`, `NewDefaultsNotice`, the
     backends and every mock take their shape in the constructor. An input change rebuilds the provider.
   - **`enum class` over `bool`,** with the default enumerator at zero. The only new `bool`s are the
@@ -71,10 +74,13 @@ This run is tracked on a private status board, a page published from an untracke
   reconfigure with it if needed. Never run two builds at once.
 - **Tests:** each task runs only its own filter. The full suite runs in CI on Linux, macOS and Windows.
 - **Format** every touched `.cpp`/`.hpp`/`.mm` with `/opt/homebrew/opt/llvm@22/bin/clang-format -i`
-  before each commit; it is CI's version.
-- **CI's clang 22 enforces `-Wmissing-designated-field-initializers`:** a designated initializer names
-  every field, defaulted or not. **clang-tidy enforces `cppcoreguidelines-pro-type-member-init`:** every
-  new struct member has a default member initializer.
+  before each commit; it is CI's version. Check every new or touched non-C++ file (`.qml`, `.py`,
+  `.txt`) with `editorconfig-checker <files>` before its commit; CI runs it as the `editorconfig` job
+  (`.github/workflows/build.yml:390-396`).
+- **CI's clang 22 enforces `-Wmissing-designated-field-initializers`:** a designated initializer may
+  omit only a field that has a default member initializer. So every new struct member gets `{}` or a
+  value (which clang-tidy's `cppcoreguidelines-pro-type-member-init` requires anyway), and existing
+  designated initializers need no edit when such a field is added. AppleClang may not warn locally; CI does.
 - **Header-only functions are `inline`** (or `constexpr`). `std::views::iota` takes two bounds of the
   same type (`std::size_t { 0 }` against a `size_t` count).
 - **Never edit `vendor/core-cpp`.**
@@ -143,7 +149,9 @@ These settle where the spec is silent or the code disagrees with it. Implementer
   now; the Linux button layout field is added with the Linux backend that fills it.
 - **R-f. TUI colour roles.** The Terminal row's banner and toast colours come from the default
   profile's palette at the current light/dark preference (`config::preferredColorPalette`). The
-  provider is rebuilt when that palette changes (reload, OS light/dark flip).
+  provider is rebuilt when that palette changes (reload, OS light/dark flip). It is the *configured*
+  scheme: a background set live by OSC 11 (Task 10) moves only the chrome's light/dark, not the
+  Terminal row's colour roles.
 - **R-g. The banner pushes the content.** Today's comment at `Main.qml:228-231` overlays the notice "so
   the terminal is not resized". §3.1 and the canvas say a Banner is a band that pushes the content down
   once, so the terminal loses a row while a banner shows. No height animation.
@@ -151,6 +159,13 @@ These settle where the spec is silent or the code disagrees with it. Implementer
   (`GuiTheme.hpp:43-58`) forces a scheme for `theme: terminal` only over a simple colour config; over a
   dual config the chrome follows the OS, and the OS handler at `ContourGuiApp.cpp:2101` relies on the
   palette not being overridden. The live background therefore decides only in the simple case.
+
+**Ratified departures from the spec's text** (owner, after the pre-flight scan; each is justified by the
+code and changes no behaviour the spec asks for): R-a publishes `radii.*` where §2.1 says `radius.*`;
+the token rows live in a new `config/ChromeTokenGroups.hpp` though §2.1 is headed `config/UiStyle.hpp`;
+R-b applies Reduce Motion in `sessionSettings` rather than at the display's construction; R-c keeps the
+Standard status colours under Increased Contrast, since they are already their AA-large variant; and
+`NewDefaultsOffer.hpp` is a pure decision in `config/`, which §1.3's list does not name.
 
 ---
 
@@ -175,7 +190,7 @@ These settle where the spec is silent or the code disagrees with it. Implementer
   - `enum class ChromeColorRole : uint8_t { BannerFill = 0, BannerText, BannerGlyph, ToastFill, ToastText };`
   - `enum class ColorSourceKind : uint8_t { Fixed = 0, PaletteWindow, PaletteWindowText, Status, Scheme };`
   - `enum class SchemeSlot : uint8_t { Background = 0, Foreground, Bar, Secondary, Selection, Accent, Danger, Success, Warning };`
-  - `struct ChromeColorSource { ColorSourceKind kind = ColorSourceKind::Fixed; uint32_t rgb = 0; StatusColorRole status = StatusColorRole::Danger; SchemeSlot slot = SchemeSlot::Background; int alphaPercent = 100; };`
+  - `struct ChromeColorSource { ColorSourceKind kind = ColorSourceKind::Fixed; uint32_t rgb = 0; StatusColorRole status = StatusColorRole::Danger; SchemeSlot slot = SchemeSlot::Background; int alphaPercent = 100; [[nodiscard]] bool operator==(ChromeColorSource const&) const = default; };`
   - `struct ChromeSchemeColors { std::array<vtbackend::RGBColor, SchemeSlotCount> slots {}; [[nodiscard]] bool operator==(ChromeSchemeColors const&) const = default; };`
   - Group structs, every member defaulted to 0 / the zero enumerator:
     `SizeTokens { int titleBar, tabWell, tab, control, paneHeader, toast, dialogWidth; }`,
@@ -189,6 +204,8 @@ These settle where the spec is silent or the code disagrees with it. Implementer
     `ContrastTokens { int separatorPercent; double activeCardRing; std::optional<int> paneDimPercent; }`,
     `TuiTokens { double inactivePaneOpacity; ToastStyle toastStyle; }`,
     `LayoutTokens { DialogPlacement dialog; }`.
+    Each of these structs, `ElevationLevel` included, declares
+    `[[nodiscard]] bool operator==(<Struct> const&) const = default;`, so a test can compare whole groups.
   - `struct ChromeTokenRow { SizeTokens size; SpaceTokens space; RadiusTokens radii; TypeTokens type; MotionTokens motion; ElevationTokens elevation; MaterialTokens material; ContrastTokens contrast; TuiTokens tui; LayoutTokens layout; std::array<ChromeColorSource, ChromeColorRoleCount> colors; };`
   - `inline constexpr size_t SchemeSlotCount`, `ChromeColorRoleCount` (derived from the last enumerator,
     as `StatusColorRoleCount` is at `UiStyle.hpp:256`).
@@ -198,8 +215,9 @@ These settle where the spec is silent or the code disagrees with it. Implementer
   - `[[nodiscard]] constexpr ChromeTokenRow resolveChromeTokens(ChromeStyle row, AccessibilityPreferences preferences) noexcept;`
   - `[[nodiscard]] inline ChromeSchemeColors chromeSchemeColorsOf(vtbackend::ColorPalette const& palette);`
     Slots: Background = `defaultBackground`, Foreground = `defaultForeground`, Bar = `normalColor(0)`,
-    Secondary = `brightColor(0)`, Selection = `selection.background` (or its resolved RGB),
-    Accent = `normalColor(4)`, Danger = `normalColor(1)`, Success = `normalColor(2)`,
+    Secondary = `brightColor(0)`, Selection from `selection.background` (a `CellRGBColor` variant,
+    `Color.hpp:482`): an `RGBColor` is taken as-is, `CellForegroundColor` gives `defaultForeground`, and
+    `CellBackgroundColor` gives `defaultBackground`; Accent = `normalColor(4)`, Danger = `normalColor(1)`, Success = `normalColor(2)`,
     Warning = `normalColor(3)`.
 
 **The rows** (native rows in logical pixels, the Terminal row in cells; values from the canvas *Design
@@ -259,15 +277,17 @@ TEST_CASE("chromeTokens.componentTokens", "[chrometokens]")
   Plus these cases, each a loop over every `ChromeStyle` (`std::views::iota(std::size_t { 0 }, detail::ChromeStyleCount)`):
   - `chromeTokens.reducedMotion`: under `{ .motion = MotionPreference::Reduced, .transparency = TransparencyPreference::Allowed, .contrast = ContrastPreference::Standard }`,
     all three durations equal `ReducedMotionCrossFadeMs` and `travel == 0`; every other group equals the
-    unadjusted row's.
+    unadjusted row's (compared with the groups' defaulted `operator==`).
   - `chromeTokens.reducedTransparency`: no resolved material is `Glass` or `Mica`; the Terminal row stays `None`.
   - `chromeTokens.increasedContrast`: `separatorPercent == 2 * row.separatorPercent`,
     `activeCardRing == 1.5`, `paneDimPercent == 5`.
   - `chromeTokens.statusColoursAreLargeTextSafe`: for every `StatusColors` row with source `Fixed`,
-    `contrastRatio(light, 0xFFFFFF) >= 3.0` and `contrastRatio(dark, 0x1C1C1E) >= 3.0` (R-c). Bring
-    `vtbackend::operator""_rgb` into scope at file level, as `GuiTheme_test.cpp:21` does.
+    `contrastRatio(RGBColor { row.light }, 0xFFFFFF_rgb) >= 3.0` and
+    `contrastRatio(RGBColor { row.dark }, 0x1C1C1E_rgb) >= 3.0` (R-c; `RGBColor(uint32_t)` is `explicit`,
+    `Color.hpp:55`). Bring `vtbackend::operator""_rgb` into scope at file level, as `GuiTheme_test.cpp:21` does.
   - `chromeTokens.schemeColours`: `chromeSchemeColorsOf(palette)` of a palette with distinct colours maps
-    each slot as listed above (Bar = `normalColor(0)`, Warning = `normalColor(3)`, …).
+    each slot as listed above (Bar = `normalColor(0)`, Warning = `normalColor(3)`, …); a second row whose
+    `selection.background` is `CellForegroundColor {}` gives Selection = `defaultForeground`.
 
 - [ ] **Step 2: Run them and see them fail.**
 
@@ -297,10 +317,14 @@ git commit -m "config: describe the 1a chrome token groups and the accessibility
 ### Task 2: Accessibility and appearance sources (null, macOS, test doubles)
 
 **Files:**
-- Create: `src/contour/platform/AccessibilityPreferenceSource.hpp` and `.cpp` (the non-Apple factory,
-  wholly inside `#if !defined(__APPLE__)`, as `TaskbarProgressSink.cpp:24` does).
-- Create: `src/contour/platform/PlatformAppearance.hpp` and `.cpp` (same shape).
-- Create: `src/contour/platform/AppearanceServices.hpp`.
+- Create: `src/contour/platform/AccessibilityPreferenceSource.hpp` (the interface, and
+  `NullAccessibilityPreferenceSource` defined inline) and `.cpp` (only the non-Apple
+  `makeAccessibilityPreferenceSource`, wholly inside `#if !defined(__APPLE__)`, as
+  `TaskbarProgressSink.cpp:24` does).
+- Create: `src/contour/platform/PlatformAppearance.hpp` and `.cpp` (same shape: `NullPlatformAppearance`
+  inline in the header, only `makePlatformAppearance` in the guarded `.cpp`).
+- Create: `src/contour/platform/AppearanceServices.hpp` (`nullAppearanceServices()` is `inline` here, so
+  the null side exists on every platform, Apple included).
 - Create: `src/contour/platform/CocoaAccessibilityPreferenceSource.mm` and
   `src/contour/platform/CocoaPlatformAppearance.mm` (ARC; Apple factories).
 - Create: `src/contour/test/AppearanceFixtures.hpp` (test doubles).
@@ -309,7 +333,7 @@ git commit -m "config: describe the 1a chrome token groups and the accessibility
 - Modify: `src/contour/platform/CMakeLists.txt` — the `.hpp`/`.cpp` pairs in `contour_platform`'s list
   (`:15-66`); the two `.mm` in the `if(APPLE)` `target_sources` at `:82`, with `-fobjc-arc` as `:83` sets it.
 - Modify: `src/contour/CMakeLists.txt` — `platform/AppearanceSources_test.cpp` in `contour_gui_test`
-  (`:749-805`); `platform/CocoaAppearanceSources_test.mm` in the `if(APPLE)` block at `:809-815`, with
+  (`:749-807`); `platform/CocoaAppearanceSources_test.mm` in the `if(APPLE)` block at `:809-815`, with
   `-fobjc-arc`.
 
 **Interfaces:**
@@ -319,18 +343,21 @@ git commit -m "config: describe the 1a chrome token groups and the accessibility
   - `using AccessibilityPreferencesChanged = std::function<void(config::AccessibilityPreferences)>;`
     Called on the GUI thread.
   - `class NullAccessibilityPreferenceSource final: public IAccessibilityPreferenceSource` —
-    `current()` returns `{}`.
+    `current()` returns `{}`; defined wholly in the header.
   - `[[nodiscard]] std::unique_ptr<IAccessibilityPreferenceSource> makeAccessibilityPreferenceSource(AccessibilityPreferencesChanged onChange);`
   - `struct PlatformAppearance { std::optional<vtbackend::RGBColor> accent {}; std::optional<int> windowCornerRadius {}; [[nodiscard]] bool operator==(PlatformAppearance const&) const = default; };`
   - `class IPlatformAppearance { … [[nodiscard]] virtual PlatformAppearance current() const = 0; };`,
     `using PlatformAppearanceChanged = std::function<void(PlatformAppearance)>;`,
-    `class NullPlatformAppearance final`, and
+    `class NullPlatformAppearance final` (defined wholly in the header), and
     `[[nodiscard]] std::unique_ptr<IPlatformAppearance> makePlatformAppearance(PlatformAppearanceChanged onChange);`
+  - The two `make*` factories are the only out-of-line definitions: the guarded `.cpp` off Apple, the
+    `.mm` on Apple.
   - `struct AppearanceServices { std::function<std::unique_ptr<IAccessibilityPreferenceSource>(AccessibilityPreferencesChanged)> accessibility = makeAccessibilityPreferenceSource; std::function<std::unique_ptr<IPlatformAppearance>(PlatformAppearanceChanged)> appearance = makePlatformAppearance; };`
-  - `[[nodiscard]] AppearanceServices nullAppearanceServices();` — factories that return the null backends.
+  - `[[nodiscard]] inline AppearanceServices nullAppearanceServices();` — defined in
+    `AppearanceServices.hpp`; factories that return the null backends.
 - Produces (namespace `contour::test`, `AppearanceFixtures.hpp`):
   - `struct AccessibilitySwitch { config::AccessibilityPreferences preferences {}; platform::AccessibilityPreferencesChanged notify {}; void set(config::AccessibilityPreferences next); };` —
-    `set` stores and calls `notify` when it is set.
+    `set`, defined in-class, stores and calls `notify` when it is set.
   - `struct AppearanceSwitch` — the same over `platform::PlatformAppearance`.
   - `[[nodiscard]] inline platform::AppearanceServices appearanceServicesWith(AccessibilitySwitch& accessibility, AppearanceSwitch& appearance);` —
     each factory stores the callback into the switch and returns a source that reads the switch.
@@ -368,8 +395,9 @@ Run: `cmake --build out/appleclang-debug -j 3 --target contour_gui_test`
 
 Expected: compile failure — the headers do not exist.
 
-- [ ] **Step 3: Implement** the headers, the two `.cpp` factories (`#if !defined(__APPLE__)`, returning the
-  null backends), the two `.mm`, and the fixtures.
+- [ ] **Step 3: Implement** the headers (the null backends and `nullAppearanceServices()` inline in
+  them), the two `.cpp` factories (`#if !defined(__APPLE__)`, returning the null backends), the two `.mm`
+  (Apple factories only), and the fixtures.
 
 - [ ] **Step 4: Run them and see them pass.**
 
@@ -394,16 +422,19 @@ git commit -m "platform: ask the OS for accessibility preferences and appearance
 - Create: `src/contour/window/ChromeStyleHost.hpp` and `.cpp`.
 - Modify: `src/contour/window/UiStyleProvider.hpp`/`.cpp` — `ChromeInputs`, the new constructor, the group
   properties, `accentColor`, and Running from the platform accent.
-- Modify: `src/contour/test/QmlChromeStyle.hpp:18-53` — `ChromeSetup` gains `accessibility`, `appearance`
-  and `scheme`, and `installChromeStyle` builds `ChromeInputs` from it; `defaultChromeSetup` fills them
-  with defaults (naming every field).
+- Modify: `src/contour/test/QmlChromeStyle.hpp:18-53` — `ChromeSetup` gains
+  `config::AccessibilityPreferences accessibility {}`, `platform::PlatformAppearance appearance {}` and
+  `config::ChromeSchemeColors scheme {}`, each with a `{}` default member initializer, so the existing
+  designated initializers (`defaultChromeSetup`, `MainWindowQml_test.cpp:427`,
+  `ChromeSnapshotScene.hpp:329`) need no edit; `installChromeStyle` builds `ChromeInputs` from it.
 - Modify: `src/contour/ContourGuiApp.hpp:230-245` (constructor), `:856` (`_uiStyleProvider` becomes
-  `_chromeStyleHost`), and add the two source members; `ContourGuiApp.cpp:396-410` (initialisers),
-  `:2210-2211` and `:2252` (host instead of provider), `:2111` (refresh on a light/dark flip).
+  `_chromeStyleHost`), and add the two source members; `ContourGuiApp.cpp:396-410` (the signature gains
+  the parameter) and the initialiser list from `:411`, `:2210-2211` and `:2252` (host instead of
+  provider), `:2111` (refresh on a light/dark flip).
 - Modify: `src/contour/session/TerminalSessionManager.cpp:741` — call `_app.refreshChromeStyle()` after
   `applyGuiTheme`.
 - Modify: `src/contour/main.cpp:220-234` — pass `contour::platform::AppearanceServices {}` before `processStart`.
-- Modify: `src/contour/test/GuiTestFixtures.hpp` — every `TestApp` constructor (`:480-503`, `:518-533`,
+- Modify: `src/contour/test/GuiTestFixtures.hpp` — every `TestApp` constructor (`:480-503`, `:516-533`,
   `:563-579`) passes `appearance`; the first gains a trailing parameter
   `contour::platform::AppearanceServices appearance = contour::platform::nullAppearanceServices()`.
 - Modify: `src/contour/CMakeLists.txt:278`, `:323` — list the new `window/` files in `contour_core`.
@@ -430,10 +461,12 @@ git commit -m "platform: ask the OS for accessibility preferences and appearance
     `UiStyleProvider.cpp:51-93`):
     - `ChromeSizeTokens`: `qreal titleBar, tabWell, tab, control, paneHeader, toast, dialogWidth`
       (`dialogWidth` and `control` horizontal, the rest vertical).
-    - `ChromeSpaceTokens`: `qreal paneGap, splitHit, paneInset, s1 … s10` (horizontal).
+    - `ChromeSpaceTokens`: `qreal paneGap, splitHit, paneInset, s1 … s10` (horizontal). A vertical use
+      of a space token (Banner's `s3` padding, Task 5) is exact only while the Terminal row's value is 0,
+      as `s3` is; a vertically quantised space group is a later step's concern.
     - `ChromeRadiusTokens`: `qreal control, popover, menu, paneCard, toast`.
     - `ChromeTypeTokens`: `QFont caption, footnote, body, tab, title` — the chrome font with
-      `setPixelSize(std::lround(value))`, or the chrome font itself where the value is 0.
+      `setPixelSize(static_cast<int>(std::lround(value)))`, or the chrome font itself where the value is 0.
     - `ChromeMotionTokens`: `int fast, standard, emphasized`; `qreal travel`.
     - `ChromeElevationLevel`: `qreal offsetX, offsetY, blur; qreal opacity` (0–1); `ChromeElevationTokens`:
       `QObject* e0, e1, e2, e3`.
@@ -477,10 +510,12 @@ git commit -m "platform: ask the OS for accessibility preferences and appearance
       `chromeInputsFor(MacOS, font)` has `size.toast == 36.0`, `radii.toast == 18.0`,
       `motion.standard == 160`; one over `Terminal` has `size.toast == provider.cellHeight()` and
       `radii.toast == 0.0` (read the groups through `property("size").value<QObject*>()->property("toast")`).
-    - "UiStyleProvider applies Reduce Motion": inputs with `.accessibility.motion = Reduced` give
-      `motion.fast == motion.standard == motion.emphasized == 100` and `motion.travel == 0`.
+    - "UiStyleProvider applies Reduce Motion": `auto inputs = chromeInputsFor(MacOS, font);
+      inputs.accessibility.motion = MotionPreference::Reduced;` (C++ has no nested designators;
+      `ChromeInputs` is a value type, so assigning before use is not post-construction configuration)
+      gives `motion.fast == motion.standard == motion.emphasized == 100` and `motion.travel == 0`.
     - "UiStyleProvider takes Running from the platform accent": with
-      `.appearance.accent = 0xFF00AA_rgb`, `statusColor(statusRunning())` and `accentColor()` are
+      `inputs.appearance.accent = 0xFF00AA_rgb`, `statusColor(statusRunning())` and `accentColor()` are
       `#FF00AA`; with none, they equal `QGuiApplication::palette().color(QPalette::Highlight)`.
     - "UiStyleProvider resolves the colour roles": under `Terminal` with a scheme whose Bar slot is
       `0x123456`, `colors.bannerFill == #123456`; under `MacOS`, `colors.toastFill` is `#28282C` at alpha 0.92.
@@ -534,13 +569,17 @@ git commit -m "contour: publish the token groups on chromeStyle, and rebuild it 
   directory at the front of `sys.path`); its self-test still passes unchanged.
 - Create: `scripts/check-qml-sizes.py`, the sibling gate, importing the same scanner.
 - Create: `scripts/qml-size-literal-baseline.txt`.
-- Modify: `CMakeLists.txt:274-279` — register `check_qml_sizes` and `check_qml_sizes_selftest` with
-  `contour_add_lint_gate`, and add `check_qml_sizes` to the warning text at `:287-289`.
+- Modify: `CMakeLists.txt` — register `check_qml_sizes` and `check_qml_sizes_selftest` with
+  `contour_add_lint_gate` beside the colour gates (`:275-279`, registered at `:278-279`), and add
+  `check_qml_sizes` to the warning text at `:287-289`.
 
 **The rule.**
-- Scans `src/contour/qml/**/*.qml` and `src/contour/styles/**/*.qml`, outside comments.
-- A line is an offence when it assigns one of the **size properties** and its value contains a numeric
-  literal other than `0`. The properties are a table at the top of the script: `width`, `height`,
+- Scans `src/contour/qml/**/*.qml` and `src/contour/styles/**/*.qml`, outside comments. `code_lines()`
+  keeps string contents, so the property is matched as an assignment target, never anywhere in the line.
+- An assignment is an offence when it assigns one of the **size properties** and its value contains a
+  numeric literal other than `0` — an arithmetic multiplier (`2 * chromeStyle.space.s3`) included. A
+  property is matched as `(^|[{;])\s*(<prop>)\s*:`, so `foo { width: 120; height: 4 }` on one line is
+  two assignments. The properties are a table at the top of the script: `width`, `height`,
   `implicitWidth`, `implicitHeight`, `radius`, `spacing`, `padding`, `leftPadding`, `rightPadding`,
   `topPadding`, `bottomPadding`, `horizontalPadding`, `verticalPadding`, `leftInset`, `rightInset`,
   `topInset`, `bottomInset`, `anchors.margins`, `anchors.leftMargin`, `anchors.rightMargin`,
@@ -548,9 +587,16 @@ git commit -m "contour: publish the token groups on chromeStyle, and rebuild it 
   `Layout.minimumWidth`, `Layout.minimumHeight`, `Layout.maximumWidth`, `Layout.maximumHeight`,
   `Layout.margins`, `Layout.leftMargin`, `Layout.rightMargin`, `Layout.topMargin`, `Layout.bottomMargin`,
   `font.pixelSize`, `font.pointSize`, `border.width`, `duration`.
+- The grouped forms are in the table too, scoped to their group: inside `anchors { … }` the names
+  `margins`, `leftMargin`, `rightMargin`, `topMargin`, `bottomMargin`; inside `Layout { … }` the
+  `Layout.*` names above without the prefix; inside `font { … }` `pixelSize` and `pointSize`; inside
+  `border { … }` `width`.
+- `property <type> <name>: N` declarations are left out of 1a; the gate does not look at them.
 - A numeric literal is a token `(?<![\w.])\d+(?:\.\d+)?(?![\w.])`, so `chromeStyle.space.s6` and
-  `elevation.e2` are not literals.
-- **Ratchet baseline.** `qml-size-literal-baseline.txt` holds `path count` lines. A file must have
+  `elevation.e2` are not literals. The gate counts **literals, not lines**: `Math.max(a, 8) + 8` is two.
+- **Ratchet baseline.** `qml-size-literal-baseline.txt` holds `path count` lines, each path
+  repository-relative with `/` separators (`Path.relative_to(REPO_ROOT).as_posix()`, as the colour gate
+  writes its allowlist paths), so the gate gives the same answer on Windows. A file must have
   exactly its baseline count: more fails ("N new size literal(s)"), fewer also fails ("lower the
   baseline of <path> to N"), so the baseline only shrinks. A file not listed has baseline 0, which is
   what keeps every new component literal-free.
@@ -558,12 +604,17 @@ git commit -m "contour: publish the token groups on chromeStyle, and rebuild it 
 
 - [ ] **Step 1: Write the self-test cases first,** in the script's `self_test()`:
   - offences: `width: 120`, `anchors.leftMargin: 8`, `implicitHeight: Math.max(a, b) + 8`,
-    `font.pointSize: 14`, `duration: 160`, `radius: 4.5`, `Layout.maximumWidth: 360`;
+    `implicitHeight: label.implicitHeight + 2 * chromeStyle.space.s3`, `font.pointSize: 14`,
+    `duration: 160`, `radius: 4.5`, `Layout.maximumWidth: 360`;
+  - counted per literal: `foo { width: 120; height: 4 }` is two; `implicitWidth: Math.max(a, 8) + 8` is two;
+  - grouped forms: `anchors { margins: 8 }` and `font { pixelSize: 12 }` are offences; `margins: 8`
+    outside any of the four groups is not;
   - not offences: `height: visible ? implicitHeight : 0`, `width: chromeStyle.size.toast`,
     `anchors.margins: chromeStyle.space.s6`, `opacity: 0.5`, `z: 11`, `// width: 120`,
-    `text: "width: 120"`;
+    `text: "width: 120"`, `property real gap: 8` (out of 1a's scope);
   - baseline: a file at its count passes; one above fails; one below fails with the lower-it message; an
-    unlisted file with one literal fails.
+    unlisted file with one literal fails; `--print-baseline` writes `src/contour/qml/a.qml`-style paths
+    with `/` separators.
 
 - [ ] **Step 2: Run the self-test and see it fail** (the scanner body is a stub returning no offences).
 
@@ -583,9 +634,10 @@ Run: `cmake out/appleclang-debug >/dev/null && ctest --test-dir out/appleclang-d
 
 Expected: PASS for `check_qml_sizes`, `check_qml_sizes_selftest` and both colour gates.
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 5: Check and commit.**
 
 ```bash
+editorconfig-checker scripts/qml_lint.py scripts/check-qml-colors.py scripts/check-qml-sizes.py scripts/qml-size-literal-baseline.txt CMakeLists.txt
 git add scripts/qml_lint.py scripts/check-qml-colors.py scripts/check-qml-sizes.py scripts/qml-size-literal-baseline.txt CMakeLists.txt
 git commit -m "lint: hold numeric size literals in the chrome QML to a baseline that only shrinks"
 ```
@@ -603,19 +655,23 @@ git commit -m "lint: hold numeric size literals in the chrome QML to a baseline 
 **Interfaces:**
 - Consumes: `chromeStyle.colors.bannerFill/bannerText/bannerGlyph`, `chromeStyle.space.s3/s5/s6`,
   `chromeStyle.type.footnote`, `chromeStyle.borderWidth`, `chromeStyle.contrast.separatorAlpha` (Task 3).
-- Produces — `Banner` (a full-width band; its user places it):
+- Produces — `Banner` (a full-width band; its user places it), built on a Qt Quick Controls `Control`:
   - `property string text`, `property string glyph: "!"`, `property string actionText` (empty: no action
     button), `property string dismissText: qsTr("Dismiss")`;
   - `signal actionTriggered()`, `signal dismissed()`;
-  - `visible: text.length > 0`; `implicitHeight` = the taller of its label and buttons plus
-    `2 * chromeStyle.space.s3`; `height: visible ? implicitHeight : 0`;
+  - `visible: text.length > 0`; `topPadding`/`bottomPadding: chromeStyle.space.s3`,
+    `leftPadding`/`rightPadding: chromeStyle.space.s6`; the `RowLayout` below is its `contentItem`, so
+    its height is the content's plus the padding, with no multiplier written
+    (`implicitHeight: implicitContentHeight + topPadding + bottomPadding`, bound explicitly so it does
+    not hang on the active style's `Control`); `height: visible ? implicitHeight : 0`;
   - children by `objectName`: `bannerGlyph`, `bannerText`, `bannerAction`, `bannerDismiss`;
   - a bottom separator `chromeStyle.borderWidth` high in `bannerText`'s colour at
     `contrast.separatorAlpha`;
   - `Accessible.role: Accessible.AlertMessage`, `Accessible.name: text`; each button names itself.
-- Layout: glyph, text (word-wrapped, fills), action, dismiss in a `RowLayout` with spacing `space.s5`
-  and side insets `space.s6`. Fill `colors.bannerFill`, text `colors.bannerText`, glyph
-  `colors.bannerGlyph`. No literal number anywhere (Task 4's gate).
+- Layout: glyph, text (word-wrapped, fills), action, dismiss in a `RowLayout` with spacing `space.s5`;
+  the side insets are the `space.s6` padding. Fill (the `Control`'s `background`) `colors.bannerFill`,
+  text `colors.bannerText`, glyph `colors.bannerGlyph`. No literal number anywhere, and no arithmetic
+  literal either (Task 4's gate).
 - **TUI row:** under the Terminal tokens `space.s3` is 0 and the scheme slots apply, so the band is the
   content's height in the scheme's palette[0] — one row under ContourTui controls.
 
@@ -628,8 +684,9 @@ git commit -m "lint: hold numeric size literals in the chrome QML to a baseline 
       is invisible; with `text = ""` the banner is invisible and `height == 0`.
     - "Banner: the Terminal row is the content's height in the scheme's palette[0] (offscreen)" — install
       `ChromeSetup` for `ChromeStyle::Terminal` with a scheme whose Bar is `0x2A2D35`; the banner's
-      `color == #2A2D35` and `height == implicitHeight` equals the content row's `implicitHeight`
-      (`space.s3 == 0`); under `MacOS` its height exceeds the content row by `2 * space.s3`.
+      `background`'s `color == #2A2D35` and `height == implicitHeight` equals the content row's `implicitHeight`
+      (`space.s3 == 0`); under `MacOS` its height exceeds the content row by `topPadding + bottomPadding`,
+      each equal to `space.s3`.
     - No QML diagnostics in either.
   - `Accessibility_qml_test.cpp`, `[contour][gui][qml][a11y]`: "accessibility: every kit primitive declares
     a role and a name" — a table of `{ url, initialProperties }` rows; this task adds the `Banner.qml` row.
@@ -649,9 +706,11 @@ Run: `out/appleclang-debug/src/contour/contour_gui_test "[banner],[a11y]" && cte
 
 Expected: PASS. The Terminal row case is this task's TUI rendering.
 
-- [ ] **Step 5: Commit.**
+- [ ] **Step 5: Format and commit.**
 
 ```bash
+/opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/test/QmlComponents_test.cpp src/contour/test/Accessibility_qml_test.cpp
+editorconfig-checker src/contour/qml/Banner.qml src/contour/CMakeLists.txt
 git add src/contour/qml/Banner.qml src/contour/CMakeLists.txt src/contour/test/QmlComponents_test.cpp src/contour/test/Accessibility_qml_test.cpp
 git commit -m "contour: add the kit's Banner"
 ```
@@ -662,20 +721,28 @@ git commit -m "contour: add the kit's Banner"
 
 **Files:**
 - Create: `src/contour/qml/Toast.qml`; list it in `src/contour/CMakeLists.txt:370-405`.
-- Modify: `src/contour/test/ChromeSnapshotPlan.hpp:60-64` (`ScriptAction` gains `ShowToast`), `:87-136`
-  (a `toast` row), `:143` (the count `static_assert` names the new last enumerator).
-- Modify: `src/contour/test/ChromeSnapshotScene.hpp:187-205` — `show()` handles `ShowToast`.
+- Modify: `src/contour/test/ChromeSnapshotPlan.hpp:35-43` (`SnapshotScript` gains `Toast`), `:60-64`
+  (`ScriptAction` gains `ShowToast`), `:87-136` (a `toast` row), `:143` (the count `static_assert` names
+  the new last enumerator).
+- Modify: `src/contour/test/ChromeSnapshotScene.hpp:187-205` — `show()` handles `ShowToast`; and
+  `load()` (`:326-339`) sets the `ChromeSetup`'s `.scheme` from the variant, so every Terminal-row
+  snapshot paints the toast and banners in the variant's scheme rather than `ColorPalette {}`'s.
 - Test: `QmlComponents_test.cpp`, `Accessibility_qml_test.cpp` (one row), `ChromeSnapshotPlan_test.cpp:19`,
-  `:60`, `:63` (counts), `ChromeSnapshot_test.cpp:60-91` (a `case`).
+  `:60`, `:63` (counts) and `:62` (the last file name, rewritten to derive from the table),
+  `ChromeSnapshot_test.cpp:60-91` (a `case`).
 
 **Interfaces:**
 - Consumes: `chromeStyle.size.toast`, `radii.toast`, `space.s5/s7`, `type.footnote`, `motion.standard`,
   `motion.travel`, `elevation.e2`, `tui.toastStyle`/`tui.inverse`, `colors.toastFill/toastText`.
-- Produces — `Toast` (presentational; its host positions it and decides when it shows):
+- Produces — `Toast` (presentational; its host positions it and decides when it shows), built on a Qt
+  Quick Controls `Control`:
   - `property string text`, `property string glyph` (optional, leading);
   - `property bool shown` — QML-facing, the carve-out for a QML property; drives `opacity` (0/1) through
     a `Behavior` of `motion.standard` ms and a `y` offset of `motion.travel` that settles to 0;
-  - `height: chromeStyle.size.toast`, `radius: chromeStyle.radii.toast`, width = text + `2 * space.s7`;
+  - `height: chromeStyle.size.toast`; its `background` has `radius: chromeStyle.radii.toast`;
+    `leftPadding`/`rightPadding: chromeStyle.space.s7`, and the width is the content's plus that padding
+    (`implicitWidth: implicitContentWidth + leftPadding + rightPadding`) — no multiplier written, and no
+    arithmetic literal either (Task 4's gate);
   - its shadow is a `PopupSurface`-style stack driven by `elevation.e2` (no shadow when `blur` and both
     offsets are 0);
   - children `toastText`, `toastGlyph`; `Accessible.role: Accessible.AlertMessage`, `Accessible.name: text`.
@@ -684,22 +751,29 @@ git commit -m "contour: add the kit's Banner"
   parented to `window().contentItem()`, centred horizontally at the content's top; it owns it in a new
   `std::unique_ptr<QObject> _overlay` declared before `_root` dies (after `_root` in the member list, so
   it is destroyed first).
+- The scene's `ChromeSetup` gains
+  `.scheme = config::chromeSchemeColorsOf(*config::preferredColorPalette(config::defaultColors(variant.edition), variant.appearance))`
+  (§2.1 TUI row: "every colour role comes from the active terminal scheme").
 - **TUI row:** `size.toast` is one row, `radii.toast` 0, `elevation.e2` the hard one-cell offset, and the
   colours are the scheme's foreground on its background — the one-row inverse cell strip.
 
 - [ ] **Step 1: Write the failing tests.**
   - `QmlComponents_test.cpp`, `[contour][gui][qml][kit][toast]`:
-    - "Toast: a pill of the toast tokens (offscreen)": under `MacOS`, `height == 36`, `radius == 18`,
-      `toastText.text == "Copied 3 lines"`; after `shown = true` and the `standard` duration
-      (`QTest::qWait(provider motion.standard + 50)`), `opacity == 1`.
+    - "Toast: a pill of the toast tokens (offscreen)": under `MacOS`, `height == 36`, the background's
+      `radius == 18`, `toastText.text == "Copied 3 lines"`; after `shown = true`,
+      `QTest::qWaitFor([&] { return toast->property("opacity").toReal() == 1.0; }, 2000)` succeeds (as
+      `QmlComponents_test.cpp:2312` waits, not a fixed `qWait`).
     - "Toast: the Terminal row is a one-row inverse strip (offscreen)": under `Terminal` with scheme
-      Foreground `0xD9DCE3`, Background `0x1C1E24`: `height == cellHeight`, `radius == 0`,
-      `color == #D9DCE3`, `toastText.color == #1C1E24`.
-    - "Toast: Reduce Motion fades without travel (offscreen)": with `.accessibility.motion = Reduced`,
-      the `y` animation's distance is 0 (read `motion.travel` through the toast's bound property
+      Foreground `0xD9DCE3`, Background `0x1C1E24`: `height == cellHeight`, the background's `radius == 0`
+      and `color == #D9DCE3`, `toastText.color == #1C1E24`.
+    - "Toast: Reduce Motion fades without travel (offscreen)": with a setup built as
+      `auto setup = ChromeSetup { … }; setup.accessibility.motion = MotionPreference::Reduced;` (no nested
+      designators), the `y` animation's distance is 0 (read `motion.travel` through the toast's bound property
       `enterOffset`, which it exposes as `readonly property real enterOffset: chromeStyle.motion.travel`).
   - `Accessibility_qml_test.cpp`: add the `Toast.qml` row.
-  - `ChromeSnapshotPlan_test.cpp`: `SnapshotScripts.size() == 7`, matrix `112`, ContourTui `28`.
+  - `ChromeSnapshotPlan_test.cpp`: `SnapshotScripts.size() == 7`, matrix `112`, ContourTui `28`; `:62`
+    becomes `CHECK(snapshotFileName(matrix.back()) == std::format("{}.terminal.native2026.light.png", SnapshotScripts.back().name));`,
+    so later rows need no edit there.
   - `ChromeSnapshot_test.cpp`: `case SnapshotScript::Toast:` finds `toastText` under the window's content
     item and checks its text.
 
@@ -721,6 +795,7 @@ Expected: PASS; the offscreen snapshot case builds the `toast` script on the mac
 
 ```bash
 /opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/test/ChromeSnapshotPlan.hpp src/contour/test/ChromeSnapshotScene.hpp src/contour/test/ChromeSnapshotPlan_test.cpp src/contour/test/ChromeSnapshot_test.cpp src/contour/test/QmlComponents_test.cpp src/contour/test/Accessibility_qml_test.cpp
+editorconfig-checker src/contour/qml/Toast.qml src/contour/CMakeLists.txt
 git add src/contour/qml/Toast.qml src/contour/CMakeLists.txt src/contour/test
 git commit -m "contour: add the kit's Toast, with a snapshot script"
 ```
@@ -731,8 +806,9 @@ git commit -m "contour: add the kit's Toast, with a snapshot script"
 
 **Files:**
 - Create: `src/contour/qml/KitDialog.qml`; list it in `src/contour/CMakeLists.txt:370-405`.
-- Modify: `ChromeSnapshotPlan.hpp` (`ScriptAction::OpenKitDialog`, a `kit-dialog` row, the count assert),
-  `ChromeSnapshotScene.hpp` (`show()` handles it).
+- Modify: `ChromeSnapshotPlan.hpp` (`SnapshotScript::KitDialog`, `ScriptAction::OpenKitDialog`, a
+  `kit-dialog` row, the count assert), `ChromeSnapshotScene.hpp` (`show()` handles it). The last-name
+  check at `ChromeSnapshotPlan_test.cpp:62` derives from the table since Task 6 and needs no edit.
 - Test: `QmlComponents_test.cpp`, `Accessibility_qml_test.cpp` (one row), `ChromeSnapshotPlan_test.cpp`
   (8 scripts, 128, 32), `ChromeSnapshot_test.cpp` (a `case`).
 
@@ -745,8 +821,11 @@ git commit -m "contour: add the kit's Toast, with a snapshot script"
     `property string rejectText: qsTr("Cancel")`, `property int acceptRole: chromeStyle.statusRunning`
     (a `StatusColorRole` value; `statusDanger` makes the accept button destructive);
   - `modal: true`, `closePolicy: Popup.CloseOnEscape`, `background: PopupSurface {}`,
-    `width: chromeStyle.size.dialogWidth`;
-  - placement: `x` centred in `Overlay.overlay`; `y` is 0 (top-attached, a sheet under the title band)
+    `width: chromeStyle.size.dialogWidth`. `PopupSurface` draws its corner and its shadow's corner from
+    the legacy `chromeStyle.radius` (`PopupSurface.qml:49`, `:75`), not `radii.popover`; accepted for 1a,
+    since the legacy radius is a token, and `PopupSurface` is the first reader to migrate when `radius`
+    is retired (R-a);
+  - placement: `x` centred in `Overlay.overlay`; `y` is 0 (a sheet attached to the window's top edge)
     when `layout.dialog === layout.sheet`, else centred;
   - children `kitDialogHeading`, `kitDialogMessage`, `kitDialogAccept`, `kitDialogReject`; the accept
     button's fill is `statusColor(acceptRole)` and its text `onStatusColor(acceptRole)`, read through
@@ -789,6 +868,7 @@ Expected: PASS. The `Terminal` placement case and the `kit-dialog` Terminal scen
 
 ```bash
 /opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/test/ChromeSnapshot*.hpp src/contour/test/ChromeSnapshot*_test.cpp src/contour/test/QmlComponents_test.cpp src/contour/test/Accessibility_qml_test.cpp
+editorconfig-checker src/contour/qml/KitDialog.qml src/contour/CMakeLists.txt
 git add src/contour/qml/KitDialog.qml src/contour/CMakeLists.txt src/contour/test
 git commit -m "contour: add the kit's sheet-styled dialog, with a snapshot script"
 ```
@@ -799,23 +879,27 @@ git commit -m "contour: add the kit's sheet-styled dialog, with a snapshot scrip
 
 **Files:**
 - Modify: `src/contour/qml/Main.qml`:
-  - add a `Column { id: bannerStack; objectName: "bannerStack" }` after the `TitleBar` (`:143-169`),
+  - add a `Column { id: bannerStack; objectName: "bannerStack" }` after the `TitleBar` (`:143-175`),
     anchored left/right, `y: appWindow.tabBarPosition === 0 ? titleBar.height : 0`, `z: 1`;
-  - the content `Item` (`:182-190`) anchors its top to `bannerStack.bottom` in both positions; its bottom
+  - the content `Item` (`:182-192`) anchors its top to `bannerStack.bottom` in both positions; its bottom
     stays `appWindow.tabBarPosition === 1 ? titleBar.top : parent.bottom`;
-  - the hosting `Rectangle` (`:228-270`, its comment included) is replaced by a `Banner` inside
+  - the hosting `Rectangle` (`:228-275`, its comment included) is replaced by a `Banner` inside
     `bannerStack`, `objectName: "hostingNoticeBar"`, `text: (appWindow.win && appWindow.win.hostingNotice) || ""`,
     `onDismissed: appWindow.win.dismissHostingNotice()`. Same `WindowController.hostingNotice` /
     `dismissHostingNotice` contract; no Retry (owner decision 2).
 - Modify: `src/contour/config/UiStyle.hpp:272-273` — delete `HostingNoticeFillPercent` and
   `HostingNoticeBorderPercent`.
-- Modify: `src/contour/window/UiStyleProvider.hpp:117-118`, `:224-228` and `UiStyleProvider.cpp:272-280` —
-  delete the two `hostingNotice*Alpha` properties and accessors.
-- Modify: `src/contour/test/MockMainController.hpp:31-44` — `MainWindowScene` gains
-  `QString hostingNotice;`, and the constructor (`:100-105`) seeds `_hostingNotice` from it.
-- Modify: `ChromeSnapshotPlan.hpp` — `enum class SnapshotBanner : uint8_t { None = 0, Hosting };` and a
-  `banner` column on `SnapshotScriptRow` (every existing row gets `.banner = SnapshotBanner::None`), plus a
-  `hosting-banner` row; `ChromeSnapshotScene.hpp:168-175` sets `.hostingNotice` from it.
+- Modify: `src/contour/window/UiStyleProvider.hpp`/`.cpp` — delete the two `hostingNotice*Alpha`
+  properties (`hostingNoticeFillAlpha`, `hostingNoticeBorderAlpha`), their accessors and their
+  definitions. Find them by name: Task 3 has moved the lines (`:117-118`, `:224-228`, `.cpp:272-280` at
+  the plan's base).
+- Modify: `src/contour/test/MockMainController.hpp:29-44` — `MainWindowScene` gains
+  `QString hostingNotice {};` (a default member initializer, so the designated initializers that omit it
+  stay clean under clang 22), and the constructor (`:103-109`) seeds `_hostingNotice` from it.
+- Modify: `ChromeSnapshotPlan.hpp` — `SnapshotScript::HostingBanner`;
+  `enum class SnapshotBanner : uint8_t { None = 0, Hosting };` and a `banner` column on
+  `SnapshotScriptRow` (every existing row gets `.banner = SnapshotBanner::None`), plus a `hosting-banner`
+  row; `ChromeSnapshotScene.hpp:168-175` names `.hostingNotice = …` from it.
 - Modify: `scripts/qml-size-literal-baseline.txt` — lower `Main.qml`'s count (the removed bar held five).
 - Test: `src/contour/test/MainWindowQml_test.cpp:381-414` (rewritten), `UiStyleProvider_test.cpp:334-346`
   (drop the two notice checks), snapshot tests (9 scripts, 144, 36).
@@ -838,14 +922,14 @@ git commit -m "contour: add the kit's sheet-styled dialog, with a snapshot scrip
     `setTabBarPosition(1)` before loading; with the notice up, `bannerStack.y == 0`,
     `content.y == bar.height`, and `titleBar.y + titleBar.height == window height`.
   - "Main.qml hosting notice: the Terminal row's banner is the scheme's palette[0] (offscreen)": load
-    with a Terminal `ChromeSetup`; the bar's `color` equals the setup's scheme Bar colour.
+    with a Terminal `ChromeSetup`; the bar's `background`'s `color` equals the setup's scheme Bar colour.
   - Snapshot: `case SnapshotScript::HostingBanner:` asserts `hostingNoticeBar` is visible.
 
 - [ ] **Step 2: Run them and see them fail.**
 
 Run: `cmake --build out/appleclang-debug -j 3 --target contour_gui_test contour_test && out/appleclang-debug/src/contour/contour_gui_test "[hosting]"`
 
-Expected: FAIL — `bannerText`/`bannerStack` are not found; `content.y` is unchanged with the notice up.
+Expected: compile failure on `SnapshotScript::HostingBanner` (Step 1 adds its `case`).
 
 - [ ] **Step 3: Implement** the Main.qml change, the deletions and the snapshot row; update the baseline.
 
@@ -859,6 +943,7 @@ Expected: PASS, with every pre-existing `[mainwindow]` geometry assertion unchan
 
 ```bash
 /opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/config/UiStyle.hpp src/contour/window/UiStyleProvider.* src/contour/test/MockMainController.hpp src/contour/test/ChromeSnapshot*.hpp src/contour/test/*_test.cpp src/contour/window/UiStyleProvider_test.cpp
+editorconfig-checker src/contour/qml/Main.qml scripts/qml-size-literal-baseline.txt
 git add src/contour scripts/qml-size-literal-baseline.txt
 git commit -m "contour: show the hosting notice as a Banner that pushes the content down"
 ```
@@ -875,6 +960,8 @@ git commit -m "contour: show the hosting notice as a Banner that pushes the cont
   `updateColorPreference` (`.cpp:1137-1141`).
 - Modify: `src/contour/ContourGuiApp.cpp` — `onAccessibilityPreferencesChanged` (Task 3) also calls
   `sessionsManager().updateMotionPreference(preferences.motion)`.
+- Modify: `src/contour/test/GuiTestFixtures.hpp` — `ConfiguredTestApp` forwards an `AppearanceServices`
+  to `TestApp` (below).
 - Test: `src/contour/config/Config_test.cpp`, `src/contour/session/TerminalSession_test.cpp`.
 
 **Interfaces:**
@@ -902,7 +989,11 @@ git commit -m "contour: show the hosting notice as a Banner that pushes the cont
       `appearanceServicesWith(sw, aw)`, `sw.preferences.motion = Reduced`;
       `makeDisplaylessSession(testApp.app())`; `terminal().settings().screenTransitionDuration == 0ms` and
       `cursorMotionAnimationDuration == 0ms`.
-    - "Turning Reduce Motion on and off follows live": born under `Full` (Classic profile values,
+    - "Turning Reduce Motion on and off follows live": the session is created through the manager, so
+      `updateMotionPreference` reaches it — `contour::test::ScopedController const win { testApp.manager() };
+      auto* session = testApp.manager().createSession(win.id);` as `TerminalSessionManager_test.cpp:516`
+      does (`makeDisplaylessSession` builds a session the manager never registers: `_sessionsById` is
+      filled only at `TerminalSessionManager.cpp:324`). Born under `Full` (Classic profile values,
       250 ms / 80 ms per `Config.hpp:1086` and `:1227`); `sw.set(Reduced)` → both 0 ms; `sw.set(Full)` →
       250 ms and 80 ms again.
     - "A configuration reload keeps Reduce Motion": born under `Reduced` in a `ConfiguredTestApp`-style
@@ -941,8 +1032,14 @@ git commit -m "contour: honour Reduce Motion in the cursor glide and the screen 
 - Modify: `src/vtbackend/screen/Terminal.hpp:706-714` (a new `Events` hook) and `:785-786` (the null
   events), plus a `Terminal` forwarder beside `:1672-1674`.
 - Modify: `src/vtbackend/screen/Screen.cpp:3423-3474` — `resetDynamicColor` and `setDynamicColor` call the
-  forwarder in their `DefaultBackgroundColor` case (DECAC item 1 goes through them, `:8097-8106`).
-- Modify: `src/vtbackend/screen/Terminal.cpp:7421` — the hard reset calls it after `resetColorPalette()`.
+  forwarder in their `DefaultBackgroundColor` case when the colour actually changes (DECAC item 1 goes
+  through them, `:8097-8106`).
+- Modify: `src/vtbackend/screen/Terminal.cpp` — the two palette funnels notify, each comparing
+  `defaultBackground` before and after rather than each caller notifying:
+  - `Terminal::setColorPalette` (`:8779`), which `resetColorPalette()` (`Terminal.hpp:2303`) and so DECSTR
+    (`:7235`) and RIS (`:7422`) reach, and which XTPOPCOLORS (`popColorPalette`, `:8846`) calls;
+  - `Terminal::resetColorPalette(ColorPalette const&)` (`:8784`), the GUI re-seed
+    (`TerminalSession.cpp:1291`, `:5979`).
 - Modify: `src/vtbackend/testing/MockTerm.hpp:290-332` — record it.
 - Modify: `src/contour/platform/GuiTheme.hpp:43-58` — `qtColorSchemeFor` gains a live background.
 - Modify: `src/contour/ContourGuiApp.hpp:459` / `.cpp:1660` — `applyGuiTheme` passes it through.
@@ -957,7 +1054,9 @@ git commit -m "contour: honour Reduce Motion in the cursor glide and the screen 
 - Produces:
   - `virtual void Terminal::Events::defaultBackgroundColorChanged(RGBColor /*color*/) {}` and
     `void Terminal::notifyDefaultBackgroundColorChanged()` — reads `colorPalette().defaultBackground` and
-    forwards it. Called on the parser thread under the state lock.
+    forwards it. Called by whichever thread holds the terminal lock (the parser thread, or the GUI thread
+    for the re-seed), and only when the default background changed; `TerminalSession`'s override posts
+    to the manager either way.
   - `MockTerm`: `std::optional<RGBColor> defaultBackground;` and `int defaultBackgroundChangeCount = 0;`.
   - `[[nodiscard]] inline std::optional<Qt::ColorScheme> qtColorSchemeFor(config::GuiTheme theme, config::ColorConfig const& colors, std::optional<vtbackend::RGBColor> liveBackground) noexcept;`
     — `Terminal` over a simple config uses `liveBackground` when set, else the config's background; every
@@ -972,10 +1071,12 @@ git commit -m "contour: honour Reduce Motion in the cursor glide and the screen 
     `liveBackground()`s differ, re-apply with the next one's; focusing nothing changes nothing.
 
 - [ ] **Step 1: Write the failing tests.**
-  - `Screen_osc_test.cpp`, `[screen][osc][background-event]`: "OSC 11, OSC 111, DECAC 1 and RIS announce the
-    default background": `\033]11;rgb:1010/1010/1010\033\\` → count 1, colour `#101010`; `\033]111\033\\` →
-    count 2, colour = the default palette's; `\033[1;7;4,|` → count 3; `\033c` → count 4; an OSC 10
-    (foreground) does not change the count.
+  - `Screen_osc_test.cpp`, `[screen][osc][background-event]`: "OSC 11, OSC 111, DECAC 1, DECSTR and RIS
+    announce the default background", a table of `{ input, count, colour }` rows applied in order:
+    `\033]11;rgb:1010/1010/1010\033\\` → count 1, colour `#101010`; `\033]111\033\\` → count 2, colour =
+    the default palette's; `\033[1;7;4,|` → count 3; `\033[!p` (DECSTR) → count 4, the default palette's;
+    `\033]11;rgb:2020/2020/2020\033\\` → count 5; `\033c` → count 6. An OSC 10 (foreground) does not
+    change the count, and neither does a reset whose background is already the default.
   - `GuiTheme_test.cpp`, `[guitheme][chromefollow]`: `qtColorSchemeFor(Terminal, simpleBlack, 0xFAFAF8_rgb) == Light`;
     `qtColorSchemeFor(Terminal, dual, 0xFAFAF8_rgb) == std::nullopt`;
     `qtColorSchemeFor(Dark, simpleBlack, 0xFAFAF8_rgb) == Dark`.
@@ -987,6 +1088,9 @@ git commit -m "contour: honour Reduce Motion in the cursor glide and the screen 
       palette's `Window` lightness rose.
     - "OSC 11 in an unfocused session leaves the chrome alone": two sessions, the second focused; the
       first receives the OSC 11; lightness unchanged. Focusing the first afterwards makes it light.
+    - Both cases create their sessions through `manager().createSession(win.id)` under a
+      `ScopedController`, as `TerminalSessionManager_test.cpp:516` does: an unregistered session has
+      `modelSessionId() == {}`, which would make "unfocused" indistinguishable from focused.
 
 - [ ] **Step 2: Run them and see them fail.**
 
@@ -1000,8 +1104,8 @@ Expected: compile failure — `defaultBackgroundChangeCount` and the three-argum
 
 Run: `out/appleclang-debug/src/vtbackend/vtbackend_test "[background-event],Terminal.DECAC" && out/appleclang-debug/src/contour/contour_gui_test "[chromefollow],[manager][theme]"`
 
-Expected: PASS. The chrome's light/dark is the only visual change; the Terminal row follows it the same
-way, through the rebuilt provider (Task 3) and the palette.
+Expected: PASS. The chrome's light/dark is the only visual change. The Terminal row's colour roles stay
+the configured scheme's (R-f); only the chrome's light/dark follows.
 
 - [ ] **Step 5: Format and commit.**
 
@@ -1025,17 +1129,25 @@ git commit -m "contour: let a terminal-themed chrome follow the focused session'
 - Create: `src/contour/window/NewDefaultsNotice.hpp` and `.cpp`.
 - Modify: `src/contour/ContourGuiApp.hpp`/`.cpp` — build the notice after the QML engine (beside `:2252`),
   publish it as the `newDefaults` context property, and add `void onConfigurationReloaded();` (calls
-  `refreshChromeStyle()` and `_newDefaultsNotice->refresh()`), which replaces Task 3's
-  `refreshChromeStyle()` call at `TerminalSessionManager.cpp:741`.
+  `refreshChromeStyle()` and, guarded as `refreshChromeStyle()` and `applyWindowControlStyle`
+  (`ContourGuiApp.cpp:1729`) are, `if (_newDefaultsNotice) _newDefaultsNotice->refresh();` — engine-less
+  `TestApp`s reload too, e.g. `[manager][theme]` at `TerminalSessionManager_test.cpp:1066`). The member
+  `std::unique_ptr<window::NewDefaultsNotice> _newDefaultsNotice` is declared **before** `_qmlEngine`,
+  beside `_chromeStyleHost` (Task 3's rename of `_uiStyleProvider`, `ContourGuiApp.hpp:853-856` at the
+  plan's base), because the engine borrows it as a context property.
+- Modify: `src/contour/session/TerminalSessionManager.cpp:741` — `onConfigurationReloaded()` replaces
+  Task 3's `refreshChromeStyle()` call there.
 - Modify: `src/contour/qml/Main.qml` — a second `Banner` in `bannerStack`, `objectName: "newDefaultsBanner"`,
   reading `typeof newDefaults !== "undefined" ? newDefaults : null` as `DaemonDriftBadge.qml:18` does.
 - Modify: `src/contour/test/QmlMocks.hpp` — `MockNewDefaultsNotice`.
 - Modify: `ChromeSnapshotPlan.hpp` (`SnapshotBanner::NewDefaults`, a `new-defaults-banner` row),
   `ChromeSnapshotScene.hpp` (owns a `MockNewDefaultsNotice` and sets `newDefaults` in `load()`,
   `:326-339`, before `loadMainWindow`).
-- Modify: `src/contour/CMakeLists.txt` — the new `config/` files in `contour_config`, `window/` files in
-  `contour_core`, `config/NewDefaultsOffer_test.cpp` and `config/GuiStateStore_test.cpp` in
-  `contour_test`, `window/NewDefaultsNotice_test.cpp` in `contour_gui_test`.
+- Modify: `src/contour/config/CMakeLists.txt` — `GuiStateStore.cpp GuiStateStore.hpp` and
+  `NewDefaultsOffer.hpp` in `contour_config` (defined there, as in Task 1).
+- Modify: `src/contour/CMakeLists.txt` — `config/NewDefaultsOffer_test.cpp` and
+  `config/GuiStateStore_test.cpp` in `contour_test` (`:1115-1127`), `window/NewDefaultsNotice.cpp`/`.hpp`
+  in `contour_core` (`:278`, `:323`), and `window/NewDefaultsNotice_test.cpp` in `contour_gui_test`.
 
 **Interfaces:**
 - Produces (namespace `contour::config`):
@@ -1071,8 +1183,12 @@ git commit -m "contour: let a terminal-themed chrome follow the focused session'
     - `void refresh();` — re-decides from `config().defaultsEditionSources` and the stored state; emits
       `offeredChanged` only on change.
 - Produces (namespace `contour::test`): `MockNewDefaultsNotice` — `Q_PROPERTY(bool offered READ offered WRITE setOffered NOTIFY offeredChanged)`,
-  `explicit MockNewDefaultsNotice(bool offered = false)` (the "parameter is the property" carve-out, as
-  the moved mocks' setters are), `Q_INVOKABLE useNew()` / `keepMine()` appending to `QStringList calls`.
+  `explicit MockNewDefaultsNotice(config::NewDefaultsOffer offer)` with
+  `offered = offer != config::NewDefaultsOffer::None` (no `bool` constructor parameter; `setOffered` is the
+  "parameter is the property" setter carve-out, as the moved mocks' setters are),
+  `Q_INVOKABLE useNew()` / `keepMine()` appending to `QStringList calls`. The snapshot scene passes
+  `NewDefaultsOffer::ExistingConfig` for a `SnapshotBanner::NewDefaults` row and `NewDefaultsOffer::None`
+  otherwise.
 
 **The decision table** (`newDefaultsOffer`):
 
@@ -1108,10 +1224,12 @@ Copy, both offers: text "Contour has new defaults", action "Use New", dismiss "K
       again; `keepMine()` there hides that too, and a third notice is not offered.
     - A `reload` that returns `std::unexpected("broken")`: `switchToNewDefaults()` returns that error and
       `offered()` stays true.
-  - `MainWindowQml_test.cpp`, `[mainwindow][newdefaults]`: with `newDefaults` = `MockNewDefaultsNotice { true }`
+  - `MainWindowQml_test.cpp`, `[mainwindow][newdefaults]`: with `newDefaults` =
+    `MockNewDefaultsNotice { config::NewDefaultsOffer::ExistingConfig }`
     set on the engine before `loadMainWindow`, `newDefaultsBanner` is visible with the copy above;
     clicking its action and dismiss records `useNew` and `keepMine`; with no `newDefaults` property the
-    load has no diagnostics and the banner is invisible; under the Terminal setup its colour is the scheme Bar.
+    load has no diagnostics and the banner is invisible; under the Terminal setup its `background`'s colour
+    is the scheme Bar.
   - Snapshot counts: 10 scripts, 160, 40; `case SnapshotScript::NewDefaultsBanner:` asserts the banner is visible.
 
 - [ ] **Step 2: Run them and see them fail.**
@@ -1134,6 +1252,7 @@ Expected: PASS. The Terminal-setup banner case and the Terminal `new-defaults-ba
 
 ```bash
 /opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/config/DefaultsEdition.hpp src/contour/config/NewDefaultsOffer.hpp src/contour/config/GuiStateStore.* src/contour/config/Config.* src/contour/window/NewDefaultsNotice.* src/contour/ContourGuiApp.* src/contour/session/TerminalSessionManager.cpp src/contour/test/*.hpp src/contour/config/*_test.cpp src/contour/window/NewDefaultsNotice_test.cpp src/contour/test/*_test.cpp
+editorconfig-checker src/contour/qml/Main.qml src/contour/CMakeLists.txt src/contour/config/CMakeLists.txt
 git add src/contour
 git commit -m "contour: offer the new defaults once to Classic users, including after Reset Config"
 ```
@@ -1142,7 +1261,7 @@ git commit -m "contour: offer the new defaults once to Classic users, including 
 
 ### Task 12: Finish
 
-- [ ] **Step 1:** Run `/simplify` on the step's diff (`git diff d210ae10..HEAD`) and apply its findings;
+- [ ] **Step 1:** Run `/simplify` on the step's diff (`git diff 6da3e0a0..HEAD -- src scripts CMakeLists.txt`, so the plan's own commits are left out) and apply its findings;
   re-run the filters of every task it touches.
 - [ ] **Step 2:** Run every task's filter once more:
 
@@ -1165,7 +1284,8 @@ ls "$CONTOUR_SNAPSHOT_DIR"/*.png | wc -l
 
   Expected: `160`. Open `toast.terminal.*`, `kit-dialog.macos.*`, `hosting-banner.terminal.*` and
   `new-defaults-banner.macos.*` to look at the four new surfaces.
-- [ ] **Step 4: Release notes** with `/add-release-note` in `metainfo.xml` (the `x.y.z` release at `:97`):
+- [ ] **Step 4: Release notes** with `/add-release-note` in `metainfo.xml`, under the open `0.9.0` release at `:107` (the `x.y.z` block at `:95-105` is a
+  commented-out template):
   Reduce Motion stops the cursor glide and the screen transition (macOS); the chrome follows a
   background set by OSC 11; the hosting notice is a banner; Classic users are offered the new defaults once.
 - [ ] **Step 5:** Mark Step 1a done in the plans index and on the board, and update the PR body with
