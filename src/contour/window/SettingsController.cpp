@@ -2003,7 +2003,8 @@ void SettingsController::refresh()
     auto const& cfg = _config();
     _gpus = _gpuInventory ? _gpuInventory->list() : std::vector<display::GpuCandidate> {};
     _locked = cfg.guiConfigLocked.value();
-    _linkGesture = QString::fromStdString(command::describeLinkGesture(cfg));
+    _linkGesture =
+        QString::fromStdString(command::describeLinkGesture(cfg, command::platformShortcutStyle()));
     _defaultProfile = QString::fromStdString(cfg.defaultProfileName.value());
 
     // Profiles, name-sorted for a stable list.

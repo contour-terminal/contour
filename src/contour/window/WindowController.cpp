@@ -103,7 +103,8 @@ void WindowController::openCommandPalette()
 {
     // Re-read the bindings on every open, not once at construction: a ReloadConfig can have rebound a
     // key since, and a shortcut column that advertises the OLD chord is worse than none at all.
-    _commandPalette->setShortcuts(command::shortcutIndex(_manager.app().config()));
+    _commandPalette->setShortcuts(
+        command::shortcutIndex(_manager.app().config(), command::platformShortcutStyle()));
 
     // Re-queries the sources (so the tab rows track the tabs that exist now) and clears any filter the
     // last open left behind.

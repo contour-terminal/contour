@@ -324,7 +324,7 @@ TEST_CASE("The shortcut column advertises the chord that runs the command", "[co
 
     auto model = CommandPaletteModel { history };
     model.setSources({ &actionCommands });
-    model.setShortcuts(command::shortcutIndex(config::defaultInputMappings()));
+    model.setShortcuts(command::shortcutIndex(config::defaultInputMappings(), command::ShortcutStyle::Text));
     model.refresh();
 
     model.setFilter(QStringLiteral("SplitVertical"));

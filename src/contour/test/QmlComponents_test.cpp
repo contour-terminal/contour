@@ -3782,7 +3782,7 @@ class MockPaletteController: public QObject
     {
         _history.record("TogglePaneZoom");
         _model->setSources({ &_actionCommands });
-        _model->setShortcuts(contour::command::shortcutIndex(contour::config::defaultInputMappings()));
+        _model->setShortcuts(contour::command::shortcutIndex(contour::config::defaultInputMappings(), contour::command::ShortcutStyle::Text));
         _model->refresh();
     }
 

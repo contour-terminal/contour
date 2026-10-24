@@ -7,7 +7,9 @@
 
 #include <vtbackend/input/InputGenerator.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -23,6 +25,24 @@ namespace contour::command
 /// its own binding first.
 using ShortcutInput = std::variant<vtbackend::Key, char32_t>;
 
+/// How a chord is spelled for the user.
+enum class ShortcutStyle : uint8_t
+{
+    Text = 0,  ///< Spelled-out names joined by plus signs: "Ctrl+Shift+P".
+    MacGlyphs, ///< Apple's modifier and key glyphs, unseparated: "⇧⌘P".
+};
+
+/// The style the host platform's users expect: glyphs on macOS, spelled-out text elsewhere.
+/// @return The platform's shortcut style.
+[[nodiscard]] constexpr ShortcutStyle platformShortcutStyle() noexcept
+{
+#if defined(__APPLE__)
+    return ShortcutStyle::MacGlyphs;
+#else
+    return ShortcutStyle::Text;
+#endif
+}
+
 /// One chord modifier and the name a UI shows it under.
 ///
 /// Separate from vtbackend::ChordModifierTable on purpose: that table is the wire vocabulary and the
@@ -37,18 +57,19 @@ struct ShortcutModifierRow
 {
     vtbackend::Modifier modifier; ///< The modifier bit.
     std::string_view name;        ///< Its display name.
+    std::string_view glyph;       ///< Its ShortcutStyle::MacGlyphs symbol; empty when it has none.
 };
 
 /// The chord modifiers in display order, each with its display name.
 ///
 /// Adding a modifier to a shortcut's rendering is adding a row here.
 constexpr inline auto ShortcutModifierTable = std::array {
-    ShortcutModifierRow { vtbackend::Modifier::Control, "Ctrl" },
-    ShortcutModifierRow { vtbackend::Modifier::Alt, "Alt" },
-    ShortcutModifierRow { vtbackend::Modifier::Shift, "Shift" },
-    ShortcutModifierRow { vtbackend::Modifier::Super, "Super" },
-    ShortcutModifierRow { vtbackend::Modifier::Hyper, "Hyper" },
-    ShortcutModifierRow { vtbackend::Modifier::Meta, "Meta" },
+    ShortcutModifierRow { vtbackend::Modifier::Control, "Ctrl", "⌃" },
+    ShortcutModifierRow { vtbackend::Modifier::Alt, "Alt", "⌥" },
+    ShortcutModifierRow { vtbackend::Modifier::Shift, "Shift", "⇧" },
+    ShortcutModifierRow { vtbackend::Modifier::Super, "Super", "⌘" },
+    ShortcutModifierRow { vtbackend::Modifier::Hyper, "Hyper", "" },
+    ShortcutModifierRow { vtbackend::Modifier::Meta, "Meta", "" },
 };
 
 static_assert(ShortcutModifierTable.size() == vtbackend::ChordModifierTable.size(),
@@ -65,17 +86,46 @@ static_assert(std::ranges::all_of(ShortcutModifierTable,
               "parser refuses sends them to a binding that silently never fires -- which is exactly "
               "what issue #1987 was. Add the spelling to contour::config::ConfigModifierTable as an alias.");
 
-/// Renders a chord's modifiers the way a UI shows them, each followed by a plus: "Ctrl+Shift+".
+/// One named key and the symbol ShortcutStyle::MacGlyphs shows it as.
+struct ShortcutKeyGlyphRow
+{
+    vtbackend::Key key;     ///< The key.
+    std::string_view glyph; ///< Its symbol.
+};
+
+/// The keys that have a ShortcutStyle::MacGlyphs symbol; every other key keeps its name.
+constexpr inline auto ShortcutKeyGlyphTable = std::array {
+    ShortcutKeyGlyphRow { vtbackend::Key::Enter, "↩" },
+    ShortcutKeyGlyphRow { vtbackend::Key::Escape, "⎋" },
+    ShortcutKeyGlyphRow { vtbackend::Key::Tab, "⇥" },
+    ShortcutKeyGlyphRow { vtbackend::Key::Backspace, "⌫" },
+    ShortcutKeyGlyphRow { vtbackend::Key::Delete, "⌦" },
+    ShortcutKeyGlyphRow { vtbackend::Key::LeftArrow, "←" },
+    ShortcutKeyGlyphRow { vtbackend::Key::UpArrow, "↑" },
+    ShortcutKeyGlyphRow { vtbackend::Key::RightArrow, "→" },
+    ShortcutKeyGlyphRow { vtbackend::Key::DownArrow, "↓" },
+    ShortcutKeyGlyphRow { vtbackend::Key::PageUp, "⇞" },
+    ShortcutKeyGlyphRow { vtbackend::Key::PageDown, "⇟" },
+    ShortcutKeyGlyphRow { vtbackend::Key::Home, "↖" },
+    ShortcutKeyGlyphRow { vtbackend::Key::End, "↘" },
+};
+
+/// Renders a chord's modifiers the way a UI shows them: "Ctrl+Shift+" as text, "⌃⇧" as glyphs.
+/// A modifier without a glyph keeps its "Name+" spelling in either style.
 /// @param modifiers The chord modifiers (locks are not part of a binding and must not be passed).
+/// @param style     How to spell them.
 /// @return The rendered modifiers; empty when @p modifiers is.
-[[nodiscard]] std::string modifiersText(vtbackend::Modifiers modifiers);
+[[nodiscard]] std::string modifiersText(vtbackend::Modifiers modifiers, ShortcutStyle style);
 
 /// Renders a key chord the way a UI shows it, e.g. "Ctrl+Shift+P" or "Alt+Enter".
 ///
 /// @param modifiers The chord modifiers (locks are not part of a binding and must not be passed).
 /// @param input     The key or character the chord ends on.
+/// @param style     How to spell it.
 /// @return The rendered shortcut; just the key's own name when @p modifiers is empty ("F3").
-[[nodiscard]] std::string shortcutText(vtbackend::Modifiers modifiers, ShortcutInput input);
+[[nodiscard]] std::string shortcutText(vtbackend::Modifiers modifiers,
+                                       ShortcutInput input,
+                                       ShortcutStyle style);
 
 /// Indexes every key/char binding in @p mappings by the id of the command it runs, so a view can ask
 /// "what is the shortcut for this command?" in one lookup rather than re-scanning the bindings.
@@ -88,9 +138,10 @@ static_assert(std::ranges::all_of(ShortcutModifierTable,
 /// command, the first wins (config order), so the rendering is stable.
 ///
 /// @param mappings The configured input mappings.
+/// @param style    How to spell the chords.
 /// @return Command id (see commandId()) -> rendered shortcut.
 [[nodiscard]] std::unordered_map<std::string, std::string> shortcutIndex(
-    config::InputMappings const& mappings);
+    config::InputMappings const& mappings, ShortcutStyle style);
 
 /// @copydoc shortcutIndex(config::InputMappings const&)
 ///
@@ -98,12 +149,15 @@ static_assert(std::ranges::all_of(ShortcutModifierTable,
 /// chord such as Ctrl+Shift+G is advertised too. A fallback row whose chord the user's table binds is
 /// left out: the user's binding is found first, so that chord never reaches the fallback.
 /// @param config The configuration: its input mappings and the options that enable fallback rows.
-[[nodiscard]] std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config);
+/// @param style  How to spell the chords.
+[[nodiscard]] std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config,
+                                                                         ShortcutStyle style);
 
 /// How links are opened, for the settings page: "Ctrl+Click (Shift+Ctrl+Click inside applications that use
 /// the mouse)". Spelled as the shortcut column spells a chord.
 /// @param config The loaded configuration: its FollowHyperlink mouse binding and bypass modifiers.
+/// @param style  How to spell the modifiers.
 /// @return The gesture, spelled for a user.
-[[nodiscard]] std::string describeLinkGesture(config::Config const& config);
+[[nodiscard]] std::string describeLinkGesture(config::Config const& config, ShortcutStyle style);
 
 } // namespace contour::command
