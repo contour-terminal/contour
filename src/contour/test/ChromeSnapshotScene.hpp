@@ -163,17 +163,14 @@ class ChromeSnapshotScene
         _rootPane { makePaneTree(scriptRow(variant.script).panes, _sessions) },
         _history { PaletteHistoryCapacity },
         _paletteModel { makePaletteModel(
-            _history, _actionCommands, _config, rowHost(variant.row).shortcuts) },
+            _history, _actionCommands, _config, command::shortcutStyleFor(rowHost(variant.row).host)) },
         _settings { makeSettings(scriptRow(variant.script).page) },
         _controller { MainWindowScene {
             .tabCount = scriptRow(variant.script).tabCount,
             .rootPane = _rootPane.get(),
             .commandPalette = _paletteModel.get(),
             .settingsController = _settings.get(),
-            .page = scriptRow(variant.script).page,
-            .hostLabel =
-                QString::fromUtf8(scriptRow(variant.script).hostLabel.data(),
-                                  static_cast<qsizetype>(scriptRow(variant.script).hostLabel.size())),
+            .hostLabel = QString::fromUtf8(scriptRow(variant.script).hostLabel),
             .tabBarVisibility = _look.tabBarVisibility,
         } },
         _root { load() }

@@ -2,7 +2,6 @@
 #pragma once
 
 #include <contour/config/TabBarMode.hpp>
-#include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -33,11 +32,12 @@ namespace contour::test
 /// always shown, and no pane tree, palette model or settings controller.
 struct MainWindowScene
 {
-    int tabCount = 2;                      ///< How many tabs the strip lists.
-    QObject* rootPane = nullptr;           ///< The active tab's pane tree; borrowed, may be null.
-    QObject* commandPalette = nullptr;     ///< The command palette's model; borrowed, may be null.
-    QObject* settingsController = nullptr; ///< The settings page's controller; borrowed, may be null.
-    snapshot::ContentPage page = snapshot::ContentPage::Terminal; ///< What the content area shows.
+    int tabCount = 2;                  ///< How many tabs the strip lists.
+    QObject* rootPane = nullptr;       ///< The active tab's pane tree; borrowed, may be null.
+    QObject* commandPalette = nullptr; ///< The command palette's model; borrowed, may be null.
+    /// The settings page's controller; borrowed, may be null. The content area shows the settings
+    /// page exactly when it is set.
+    QObject* settingsController = nullptr;
     QString hostLabel; ///< The attached host; empty for a local window.
     /// When the tab strip is shown, resolved against @c tabCount into the initial tabBarShouldShow.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
@@ -166,10 +166,7 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] QObject* activeSession() const noexcept { return nullptr; }
     [[nodiscard]] QObject* commandPalette() const noexcept { return _scene.commandPalette; }
     /// Mirrors WindowController::settingsActive(): whether the content area shows the settings page.
-    [[nodiscard]] bool settingsActive() const noexcept
-    {
-        return _scene.page == snapshot::ContentPage::Settings;
-    }
+    [[nodiscard]] bool settingsActive() const noexcept { return _scene.settingsController != nullptr; }
     [[nodiscard]] QObject* settingsController() const noexcept { return _scene.settingsController; }
     /// Mirrors WindowController::closeSettings(): what the settings page's close button calls. The
     /// page is part of the scene, so it stays.

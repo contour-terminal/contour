@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/command/Shortcut.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
+#include <contour/test/TestEnvironment.hpp>
 
 #include <core/testing/Environment.hpp>
 
@@ -25,10 +27,16 @@ TEST_CASE("snapshot.rowHosts", "[snapshot]")
     using contour::config::ChromeStyle;
     using contour::config::HostPlatform;
     using namespace contour::test::snapshot;
+    using contour::command::ShortcutStyle;
+    using contour::command::shortcutStyleFor;
     CHECK(rowHost(ChromeStyle::MacOS).host == HostPlatform::MacOS);
     CHECK(rowHost(ChromeStyle::Fluent).host == HostPlatform::Windows);
+    CHECK(rowHost(ChromeStyle::ContourLinux).host == HostPlatform::Other);
     CHECK(rowHost(ChromeStyle::Terminal).host == HostPlatform::Other);
-    CHECK(rowHost(ChromeStyle::MacOS).shortcuts == contour::command::ShortcutStyle::MacGlyphs);
+    CHECK(shortcutStyleFor(rowHost(ChromeStyle::MacOS).host) == ShortcutStyle::MacGlyphs);
+    CHECK(shortcutStyleFor(rowHost(ChromeStyle::Fluent).host) == ShortcutStyle::Text);
+    CHECK(shortcutStyleFor(rowHost(ChromeStyle::ContourLinux).host) == ShortcutStyle::Text);
+    CHECK(shortcutStyleFor(rowHost(ChromeStyle::Terminal).host) == ShortcutStyle::Text);
 }
 
 TEST_CASE("snapshot.rowsRenderableUnder", "[snapshot]")
@@ -77,6 +85,7 @@ TEST_CASE("snapshot.lookPerEdition", "[snapshot]")
 
 TEST_CASE("snapshot.environment", "[snapshot]")
 {
+    using contour::test::controlsStyleFor;
     using namespace contour::test::snapshot;
     auto const none = core::testing::FakeEnvironment {};
     CHECK(controlsStyleFor(none) == "Fusion");

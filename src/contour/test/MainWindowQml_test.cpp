@@ -17,6 +17,7 @@
 
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -414,33 +415,29 @@ TEST_CASE("Main.qml hosting notice: shown while the window runs its shells itsel
 
 TEST_CASE("Main.qml loads under every chrome row (offscreen)", "[contour][gui][qml][mainwindow][chromerow]")
 {
-    using contour::config::ChromeStyle;
-    using contour::config::HostPlatform;
-    struct Row
+    for (auto const& [row, host]: contour::test::snapshot::SnapshotRowHosts)
     {
-        ChromeStyle row;
-        HostPlatform host;
-        char const* name;
-    };
-    for (auto const& [row, host, name]:
-         std::array { Row { .row = ChromeStyle::MacOS, .host = HostPlatform::MacOS, .name = "macos" },
-                      Row { .row = ChromeStyle::Fluent, .host = HostPlatform::Windows, .name = "fluent" },
-                      Row { .row = ChromeStyle::ContourLinux, .host = HostPlatform::Other, .name = "linux" },
-                      Row { .row = ChromeStyle::Terminal, .host = HostPlatform::Other, .name = "terminal" } })
-    {
+        auto const name = contour::config::chromeStyleName(row);
         INFO("row: " << name);
         QQmlEngine engine;
         MockMainController controller;
         contour::test::QmlMessageCapture warnings;
-        auto const chrome =
-            contour::test::ChromeSetup { .row = row,
-                                         .font = QGuiApplication::font(),
-                                         .windowControls = contour::config::resolveWindowControlStyle(
-                                             contour::config::WindowControlStyle::Auto, host) };
+        auto const windowControls =
+            contour::config::resolveWindowControlStyle(contour::config::WindowControlStyle::Auto, host);
+        auto const chrome = contour::test::ChromeSetup { .row = row,
+                                                         .font = QGuiApplication::font(),
+                                                         .windowControls = windowControls };
         auto root = loadMainWindow(engine, controller, warnings, chrome);
         auto const* style = engine.rootContext()->contextProperty("chromeStyle").value<QObject*>();
         REQUIRE(style != nullptr);
         CHECK(style->property("chromeStyle").toString() == QString::fromLatin1(name));
+        // The row's host decides its window controls: traffic lights on the leading edge on macOS,
+        // buttons on the trailing edge everywhere else.
+        auto const* controls = engine.rootContext()->contextProperty("windowControls").value<QObject*>();
+        REQUIRE(controls != nullptr);
+        auto const isMac = host == contour::config::HostPlatform::MacOS;
+        CHECK(controls->property("presentation").toString() == (isMac ? "trafficLight" : "button"));
+        CHECK(controls->property("side").toString() == (isMac ? "leading" : "trailing"));
         CHECK(root->findChild<QQuickItem*>(QStringLiteral("titleBar")) != nullptr);
     }
 }

@@ -4,9 +4,9 @@
 // engine and scene graph run without a display server (CI-safe), then constructs the
 // QGuiApplication that the QML components need before running the Catch2 session.
 
-#include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/TestEnvironment.hpp>
 
 #include <core/Environment.hpp>
 #include <core/testing/SuppressWindowsDialogs.hpp>
@@ -94,7 +94,7 @@ int main(int argc, char* argv[])
     ///     may withhold frame callbacks from unexposed/occluded test windows, stalling
     ///     QQuickWindow::grabWindow() indefinitely, while X11/XWayland keeps delivering frames.
     ///   - Otherwise leave the platform untouched and let Qt pick.
-    if (qgetenv("CONTOUR_TEST_DISPLAY") != "1")
+    if (!contour::test::displayTestsEnabled(core::LiveEnvironment {}))
     {
 #ifdef _WIN32
         _putenv_s("QT_QPA_PLATFORM", "offscreen");
@@ -120,8 +120,7 @@ int main(int argc, char* argv[])
     // ContourTui, notably -- can only be rendered by a second run under it; the chrome snapshot case
     // (ChromeSnapshot_test.cpp, tag [snapshot]) draws the rows of whichever style this run has.
     QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
-    QQuickStyle::setStyle(
-        QString::fromStdString(contour::test::snapshot::controlsStyleFor(core::LiveEnvironment {})));
+    QQuickStyle::setStyle(QString::fromStdString(contour::test::controlsStyleFor(core::LiveEnvironment {})));
 
     // Run-wide gate: capture every warning/critical for the whole session. Per-test QmlMessageCapture guards
     // chain to this one (see QmlMessageCapture.h), so a per-test guard never blinds the gate.

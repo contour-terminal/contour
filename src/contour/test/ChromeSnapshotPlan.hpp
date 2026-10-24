@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/TabBarMode.hpp>
@@ -74,14 +73,14 @@ enum class HostConnection : uint8_t
 /// One row of the script table.
 struct SnapshotScriptRow
 {
-    SnapshotScript script;      ///< The script this row describes.
-    std::string_view name;      ///< Its name in file names and the manifest.
-    int tabCount;               ///< How many tabs the window holds.
-    PaneShape panes;            ///< The active tab's pane layout.
-    ContentPage page;           ///< What the content area shows.
-    ScriptAction action;        ///< What is done after showing the window.
-    HostConnection connection;  ///< The attached host's state.
-    std::string_view hostLabel; ///< The attached host's label; empty when local.
+    SnapshotScript script = SnapshotScript::SingleTab; ///< The script this row describes.
+    std::string_view name {};                          ///< Its name in file names and the manifest.
+    int tabCount = 1;                                  ///< How many tabs the window holds.
+    PaneShape panes = PaneShape::SingleLeaf;           ///< The active tab's pane layout.
+    ContentPage page = ContentPage::Terminal;          ///< What the content area shows.
+    ScriptAction action = ScriptAction::None;          ///< What is done after showing the window.
+    HostConnection connection = HostConnection::Local; ///< The attached host's state.
+    std::string_view hostLabel {};                     ///< The attached host's label; empty when local.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -155,25 +154,17 @@ static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript:
 /// The host a chrome row is rendered as, so its window controls and shortcut glyphs match.
 struct SnapshotRowHost
 {
-    config::ChromeStyle row;          ///< The chrome row.
-    config::HostPlatform host;        ///< The platform whose window controls the row shows.
-    command::ShortcutStyle shortcuts; ///< How shortcuts are spelled on that platform.
+    config::ChromeStyle row = config::ChromeStyle::Terminal; ///< The chrome row.
+    config::HostPlatform host = config::HostPlatform::Other; ///< The platform whose window controls and
+                                                             ///< shortcut spelling the row shows.
 };
 
 /// The rows of the row-host table, in @c config::ChromeStyle order.
 inline constexpr auto SnapshotRowHosts = std::array {
-    SnapshotRowHost { .row = config::ChromeStyle::MacOS,
-                      .host = config::HostPlatform::MacOS,
-                      .shortcuts = command::ShortcutStyle::MacGlyphs },
-    SnapshotRowHost { .row = config::ChromeStyle::Fluent,
-                      .host = config::HostPlatform::Windows,
-                      .shortcuts = command::ShortcutStyle::Text },
-    SnapshotRowHost { .row = config::ChromeStyle::ContourLinux,
-                      .host = config::HostPlatform::Other,
-                      .shortcuts = command::ShortcutStyle::Text },
-    SnapshotRowHost { .row = config::ChromeStyle::Terminal,
-                      .host = config::HostPlatform::Other,
-                      .shortcuts = command::ShortcutStyle::Text },
+    SnapshotRowHost { .row = config::ChromeStyle::MacOS, .host = config::HostPlatform::MacOS },
+    SnapshotRowHost { .row = config::ChromeStyle::Fluent, .host = config::HostPlatform::Windows },
+    SnapshotRowHost { .row = config::ChromeStyle::ContourLinux, .host = config::HostPlatform::Other },
+    SnapshotRowHost { .row = config::ChromeStyle::Terminal, .host = config::HostPlatform::Other },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotRowHosts.size()),
@@ -186,7 +177,8 @@ static_assert(SnapshotRowHosts.size() == config::detail::ChromeStyleCount, "ever
 /// The host @p row is rendered as.
 /// @param row The chrome row.
 /// @return Its row of the row-host table. The window controls are
-///         `resolveWindowControlStyle(WindowControlStyle::Auto, rowHost(row).host)`.
+///         `resolveWindowControlStyle(WindowControlStyle::Auto, rowHost(row).host)`, and the shortcuts
+///         are spelled `command::shortcutStyleFor(rowHost(row).host)`.
 [[nodiscard]] constexpr SnapshotRowHost const& rowHost(config::ChromeStyle row) noexcept
 {
     return SnapshotRowHosts[static_cast<std::size_t>(row)];
@@ -216,10 +208,10 @@ inline constexpr auto SnapshotAppearances =
 /// One picture in the matrix.
 struct SnapshotVariant
 {
-    SnapshotScript script;                 ///< The window state.
-    config::ChromeStyle row;               ///< The chrome row.
-    config::DefaultsEdition edition;       ///< The defaults edition.
-    vtbackend::ColorPreference appearance; ///< Dark or light.
+    SnapshotScript script = SnapshotScript::SingleTab;                        ///< The window state.
+    config::ChromeStyle row = config::ChromeStyle::Terminal;                  ///< The chrome row.
+    config::DefaultsEdition edition = config::DefaultsEdition::Classic;       ///< The defaults edition.
+    vtbackend::ColorPreference appearance = vtbackend::ColorPreference::Dark; ///< Dark or light.
 
     [[nodiscard]] bool operator==(SnapshotVariant const&) const = default;
 };
@@ -229,14 +221,11 @@ struct SnapshotVariant
 /// @return The matching rows, in enumerator order; empty when the name matches none.
 [[nodiscard]] inline std::vector<config::ChromeStyle> rowsRenderableUnder(std::string_view controlsStyle)
 {
-    auto const matches = [&](std::size_t i) {
-        return config::uiStyleTokens(static_cast<config::ChromeStyle>(i)).quickControlsStyle == controlsStyle;
+    auto const matches = [&](config::ChromeStyle row) {
+        return config::uiStyleTokens(row).quickControlsStyle == controlsStyle;
     };
-    auto rows = std::vector<config::ChromeStyle> {};
-    for (auto const i:
-         std::views::iota(std::size_t { 0 }, config::detail::ChromeStyleCount) | std::views::filter(matches))
-        rows.push_back(static_cast<config::ChromeStyle>(i));
-    return rows;
+    return std::ranges::to<std::vector>(SnapshotRowHosts | std::views::transform(&SnapshotRowHost::row)
+                                        | std::views::filter(matches));
 }
 
 /// Every variant to render for @p rows.
@@ -273,7 +262,7 @@ struct SnapshotVariant
 /// The edition- and appearance-dependent look a window is configured with.
 struct SnapshotLook
 {
-    vtbackend::RGBColor terminalBackground; ///< The terminal's default background.
+    vtbackend::RGBColor terminalBackground {}; ///< The terminal's default background.
     double dimUnfocused = 0.0; ///< How far unfocused panes are dimmed; Classic's value by default.
     /// When the tab strip is shown; Classic's value by default.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
@@ -295,22 +284,8 @@ struct SnapshotLook
     };
 }
 
-/// The Quick Controls style the snapshots render under unless the environment says otherwise.
-inline constexpr std::string_view DefaultControlsStyle = "Fusion";
-/// The variable that selects the Quick Controls style.
-inline constexpr std::string_view ControlsStyleVariable = "CONTOUR_TEST_CONTROLS_STYLE";
 /// The variable that names the directory snapshots are written to.
 inline constexpr std::string_view SnapshotDirectoryVariable = "CONTOUR_SNAPSHOT_DIR";
-
-/// The Quick Controls style to render under.
-/// @param env The environment to read.
-/// @return The variable's value, or @c DefaultControlsStyle when it is unset or empty.
-[[nodiscard]] inline std::string controlsStyleFor(core::Environment const& env)
-{
-    if (auto value = env.get(ControlsStyleVariable); value && !value->empty())
-        return *std::move(value);
-    return std::string { DefaultControlsStyle };
-}
 
 /// The directory snapshots are written to.
 /// @param env The environment to read.

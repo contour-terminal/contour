@@ -74,9 +74,6 @@ class ChromeSnapshotWriter
         return path;
     }
 
-    /// @return The directory the snapshots are written into.
-    [[nodiscard]] std::filesystem::path const& directory() const noexcept { return _directory; }
-
   private:
     ChromeSnapshotWriter(core::platform::FileSystem const& files, std::filesystem::path directory):
         _files { &files }, _directory { std::move(directory) }

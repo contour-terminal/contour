@@ -13,6 +13,7 @@
 #include <contour/test/ChromeSnapshotWriter.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/test/TestEnvironment.hpp>
 #include <contour/window/SettingsController.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
@@ -187,8 +188,8 @@ TEST_CASE("Chrome snapshots: every script on every row this process draws", "[di
 
     // The style test_main.cpp was asked for must be the one in effect, or a pass renders the wrong rows.
     auto const controls = QQuickStyle::name().toStdString();
-    INFO("Quick Controls style: " << controls << " (set " << ControlsStyleVariable << ")");
-    REQUIRE(controls == controlsStyleFor(environment));
+    INFO("Quick Controls style: " << controls << " (set " << contour::test::ControlsStyleVariable << ")");
+    REQUIRE(controls == contour::test::controlsStyleFor(environment));
     auto const rows = rowsRenderableUnder(controls);
     REQUIRE_FALSE(rows.empty());
 

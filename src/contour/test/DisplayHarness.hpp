@@ -5,6 +5,7 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/TestEnvironment.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
@@ -35,17 +36,6 @@
 
 namespace contour::test
 {
-
-/// The variable that opts a run into the display-gated cases.
-inline constexpr std::string_view DisplayTestsVariable = "CONTOUR_TEST_DISPLAY";
-
-/// Whether this run renders through a real windowing system (see test_main.cpp).
-/// @param env The environment to read.
-/// @return True when CONTOUR_TEST_DISPLAY is `1`.
-[[nodiscard]] inline bool displayTestsEnabled(core::Environment const& env)
-{
-    return env.get(DisplayTestsVariable) == "1";
-}
 
 /// Whether a DisplayHarness stands its display up inside a shown QQuickWindow, and whether pump() forces
 /// frames through that window.

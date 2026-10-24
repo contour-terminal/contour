@@ -4,6 +4,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/ModifierNames.hpp>
+#include <contour/config/WindowControlStyle.hpp>
 
 #include <vtbackend/input/InputGenerator.hpp>
 
@@ -32,14 +33,29 @@ enum class ShortcutStyle : uint8_t
     MacGlyphs, ///< Apple's modifier and key glyphs, unseparated: "⇧⌘P".
 };
 
-/// The style the host platform's users expect: glyphs on macOS, spelled-out text elsewhere.
+/// The style @p host's users expect: glyphs on macOS, spelled-out text elsewhere.
+/// @param host The host to spell shortcuts for.
+/// @return That host's shortcut style.
+[[nodiscard]] constexpr ShortcutStyle shortcutStyleFor(config::HostPlatform host) noexcept
+{
+    switch (host)
+    {
+        case config::HostPlatform::MacOS: return ShortcutStyle::MacGlyphs;
+        case config::HostPlatform::Windows:
+        case config::HostPlatform::KdePlasma:
+        case config::HostPlatform::Other: break;
+    }
+    return ShortcutStyle::Text;
+}
+
+/// The style the platform this was built for expects. @see shortcutStyleFor.
 /// @return The platform's shortcut style.
 [[nodiscard]] constexpr ShortcutStyle platformShortcutStyle() noexcept
 {
-#if defined(__APPLE__)
-    return ShortcutStyle::MacGlyphs;
+#ifdef __APPLE__
+    return shortcutStyleFor(config::HostPlatform::MacOS);
 #else
-    return ShortcutStyle::Text;
+    return shortcutStyleFor(config::HostPlatform::Other);
 #endif
 }
 
