@@ -133,7 +133,7 @@ ContourTerminal {
     Rectangle {
         id: sizeWidget
         anchors.centerIn: parent
-        border.width: pane.paneActive ? 1 : 0
+        border.width: 1
         border.color: "black"
         property int margin: 10
         color: "white"
