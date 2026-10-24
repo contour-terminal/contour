@@ -54,6 +54,8 @@ enum class ShortcutStyle : uint8_t
 {
 #ifdef __APPLE__
     return shortcutStyleFor(config::HostPlatform::MacOS);
+#elif defined(_WIN32)
+    return shortcutStyleFor(config::HostPlatform::Windows);
 #else
     return shortcutStyleFor(config::HostPlatform::Other);
 #endif

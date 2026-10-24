@@ -31,8 +31,14 @@ export CONTOUR_SNAPSHOT_DIR
 
 # --run keeps run-display-tests.sh from appending its own "[display]" argument, which Catch2 would OR
 # with this selection and so run every display case under ContourTui.
-"$HERE/run-display-tests.sh" --run "$TEST_BINARY" "[display][snapshot]"
-CONTOUR_TEST_CONTROLS_STYLE=ContourTui "$HERE/run-display-tests.sh" --run "$TEST_BINARY" "[display][snapshot]"
+# A failing pass does not stop the other, so the reviewer still gets every image that rendered; the
+# script exits with the first failure's status after the count check.
+status=0
+"$HERE/run-display-tests.sh" --run "$TEST_BINARY" "[display][snapshot]" || status=$?
+tui_status=0
+CONTOUR_TEST_CONTROLS_STYLE=ContourTui "$HERE/run-display-tests.sh" --run "$TEST_BINARY" "[display][snapshot]" \
+    || tui_status=$?
+[ "$status" -ne 0 ] || status=$tui_status
 
 PNG_COUNT=$(find "$CONTOUR_SNAPSHOT_DIR" -maxdepth 1 -name '*.png' | wc -l)
 MANIFEST="$CONTOUR_SNAPSHOT_DIR/manifest.tsv"
@@ -44,3 +50,4 @@ if [ "$PNG_COUNT" -eq 0 ] || [ "$PNG_COUNT" -ne "$MANIFEST_LINES" ]; then
     exit 1
 fi
 echo "$PNG_COUNT chrome snapshots in $CONTOUR_SNAPSHOT_DIR"
+exit "$status"
