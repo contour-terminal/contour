@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <vtextension/CanonicalAbi.hpp>
+#include <vtextension/ControlImports.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/StatuslineWorld.hpp>
 
@@ -26,9 +27,6 @@ namespace
     /// The bytes of one WebAssembly page.
     constexpr auto WasmPageBytes = uint64_t { 64 } * 1024;
 
-    /// The Canonical ABI's limit on flat parameters; a call with more passes them through memory.
-    constexpr auto MaxFlatParameters = std::size_t { 16 };
-
     static_assert(abi::Codec<Event>::FlatCount <= MaxFlatParameters, "update takes its event flat");
     static_assert(abi::Codec<ConfigMap>::FlatCount <= MaxFlatParameters, "load takes its config flat");
 
@@ -38,22 +36,44 @@ namespace
         return static_cast<uint32_t>(std::max(extent, 0));
     }
 
-    /// The world's host functions, as every runtime is created with them: the index of each row is
-    /// what the runtime calls it by, and the row of Instance's handler table that runs it.
-    constexpr auto HostFunctions = std::array {
+    /// The statusline world's host functions: the first rows of the table every runtime is created with.
+    constexpr auto StatuslineHostFunctions = std::array {
         wasm::HostFunction {
             .module = detail::HostImportModule, .name = "request-frame", .parameterCount = 1 },
         wasm::HostFunction { .module = detail::HostImportModule, .name = "log", .parameterCount = 3 },
         wasm::HostFunction { .module = detail::HostImportModule, .name = "state", .parameterCount = 1 },
         wasm::HostFunction { .module = detail::HostImportModule, .name = "run-command", .parameterCount = 5 },
     };
+
+    /// How many host functions there are: the statusline world's, then the control interface's.
+    constexpr auto HostFunctionCount = StatuslineHostFunctions.size() + ControlImportCount;
+
+    /// The table every runtime is created with: the index of each row is what the runtime calls it by, and
+    /// the row of Instance's handler table that runs it.
+    [[nodiscard]] std::array<wasm::HostFunction, HostFunctionCount> const& hostFunctionTable() noexcept
+    {
+        static auto const table = [] {
+            auto rows = std::array<wasm::HostFunction, HostFunctionCount> {};
+            auto const next = std::ranges::copy(StatuslineHostFunctions, rows.begin()).out;
+            std::ranges::copy(controlHostFunctions(), next);
+            return rows;
+        }();
+        return table;
+    }
+
+    /// @return The control permissions @p compiled's manifest declares; none without a manifest.
+    [[nodiscard]] vtcontrol::ControlGrants declaredControlOf(CompiledExtension const& compiled) noexcept
+    {
+        return compiled.manifest() ? controlGrantsOf(compiled.manifest()->control)
+                                   : vtcontrol::ControlGrants::none();
+    }
 } // namespace
 
 namespace detail
 {
-    std::span<wasm::HostFunction const> statuslineHostFunctions() noexcept
+    std::span<wasm::HostFunction const> hostFunctions() noexcept
     {
-        return HostFunctions;
+        return hostFunctionTable();
     }
 } // namespace detail
 
@@ -186,9 +206,30 @@ struct Instance::HostCalls
             .transform_error([](ExtensionError error) { return abi::commandErrorFor(error); });
     }
 
-    /// What runs each host function, by its index in HostFunctions.
-    static constexpr auto Handlers = std::array<Handler, 4> { &requestFrame, &log, &state, &runCommand };
-    static_assert(Handlers.size() == HostFunctions.size(), "a handler for every host function");
+    /// A control verb, the control interface's import @p Import: served by callControlImport() with the
+    /// rest of the call's deadline, which keeps running meanwhile -- unlike a command's, the host bounds the
+    /// verb by the guest's own time.
+    template <std::size_t Import>
+    static abi::Result<void> control(Instance& instance, std::span<uint32_t const> arguments)
+    {
+        auto const remaining =
+            std::chrono::floor<std::chrono::milliseconds>(instance._deadline - instance._clock.now());
+        return callControlImport(
+            Import,
+            *instance._memory,
+            arguments,
+            instance._services,
+            instance._declaredControl,
+            ControlCallBudget { .remaining = remaining, .deadline = instance._deadlineState });
+    }
+
+    /// What runs each host function, by its index in the host function table.
+    static constexpr auto Handlers = []<std::size_t... Import>(std::index_sequence<Import...>) {
+        return std::array<Handler, HostFunctionCount> {
+            &requestFrame, &log, &state, &runCommand, &control<Import>...
+        };
+    }(std::make_index_sequence<ControlImportCount> {});
+    static_assert(StatuslineHostFunctions.size() == 4, "a handler for every statusline host function");
 };
 
 Instance::Instance(PrivateTag /*unused*/,
@@ -201,6 +242,7 @@ Instance::Instance(PrivateTag /*unused*/,
     _services { services },
     _clock { clock },
     _limits { limits },
+    _declaredControl { declaredControlOf(*_compiled) },
     _memory { std::make_unique<GuestMemory>(*this) }
 {
 }
@@ -342,7 +384,7 @@ std::expected<void, ExtensionError> Instance::callHost(std::size_t functionIndex
     // The runtime calls only what it was created with, each with its arity; anything else is a guest
     // the host cannot serve.
     if (functionIndex >= HostCalls::Handlers.size()
-        || arguments.size() != HostFunctions[functionIndex].parameterCount)
+        || arguments.size() != hostFunctionTable().at(functionIndex).parameterCount)
         return failHostCall(ExtensionError::Trapped);
     // Host calls do not nest. The only way into one from inside another is the guest's `cabi_realloc`,
     // which the host calls while it stores a result; a guest that makes a host call from there would

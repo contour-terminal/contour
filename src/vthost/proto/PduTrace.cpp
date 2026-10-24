@@ -332,10 +332,11 @@ namespace
                    +[](DecodedPdu const& pdu) {
                        // The manifest is counted, never transcribed: its text is the guest's own.
                        auto const& value = std::get<PermissionRequest>(pdu);
-                       return std::format("session={} digest={} commands={}",
+                       return std::format("session={} digest={} commands={} control={}",
                                           value.session,
                                           value.digest,
-                                          value.commands.size());
+                                          value.commands.size(),
+                                          value.control.size());
                    } },
         TraceRow { PduType::PermissionReply,
                    "PermissionReply",

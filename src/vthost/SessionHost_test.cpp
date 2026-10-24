@@ -55,9 +55,11 @@
 #include <vtcontrol/testing/SequentialUuidSource.hpp>
 
 #ifdef CONTOUR_EXTENSIONS
+    #include <vtextension/testing/TestModules.hpp>
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
+    #include <vthost/control/ControlService.hpp>
     #include <vthost/testing/GatedFileSystem.hpp>
 #endif
 #include <vthost/ConfigReload.hpp>
@@ -1809,9 +1811,12 @@ struct DaemonExtensionsHarness
     /// @param module The extension's module bytes.
     /// @param permission What the user allows its commands.
     /// @param config The extension's settings.
+    /// @param extensionLimits What the extension may use.
     DaemonExtensionsHarness(std::string const& module,
                             vtextension::CommandPermission permission,
-                            vtextension::ConfigMap config = {})
+                            vtextension::ConfigMap config = {},
+                            vtextension::ExtensionLimits extensionLimits = {}):
+        limits { extensionLimits }
     {
         REQUIRE(fileSystem.files.writeFile(modulePath, module).has_value());
         auto made = std::make_shared<vthost::DaemonExtensions>(
@@ -1908,6 +1913,83 @@ TEST_CASE("SessionHost.extension.buildInFlightAtTeardown", "[vthost][host][exten
     // What a daemon's loop does after its host: it turns once more, then goes.
     std::ignore = h.loop.runOnce(std::chrono::milliseconds { 0 });
     SUCCEED("the build's result was released while the runtime lived");
+}
+
+TEST_CASE("SessionHost.extension.controlVerb", "[vthost][host][extensions][control][threading]")
+{
+    // A daemon-hosted extension calls a control verb on its worker; the daemon's loop serves it through the
+    // control API, as the extension's pane, once the user granted the manifest's `control read`. The guest
+    // shows what it was answered: the refusal first, then the daemon's version.
+    auto const module = vtextension::testing::withManifest(
+        vtextension::testing::toModule(vtextension::testing::ControlReportingModule),
+        "name = reporter\nversion = 1\ncontrol read\n");
+    auto h =
+        DaemonExtensionsHarness { std::string(reinterpret_cast<char const*>(module.data()), module.size()),
+                                  vtextension::CommandPermission::Ask };
+    auto wall = core::platform::ManualWallClock {};
+    auto const service = vthost::control::ControlService {
+        *h.host,
+        vthost::control::ControlServiceConfig { .version = "e2e-1.2.3", .socketPath = "", .clock = wall }
+    };
+    h.fileSystem.open();
+    REQUIRE(h.host->createTab() != nullptr);
+    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto client = vthost::SessionStreamEvents {};
+    h.host->subscribeStream(&client);
+
+    h.turnUntil([&] { return h.indicatorText(session).contains("not granted yet"); });
+    INFO(h.indicatorText(session));
+    CHECK(h.indicatorText(session).contains("needs grant 'read': not granted yet"));
+    REQUIRE(h.host->pendingPermissionRequests().size() == 1);
+    auto const request = h.host->pendingPermissionRequests().front();
+    CHECK(request.control == std::vector<std::string> { "read" });
+
+    h.host->answerPermission(request.hostId, request.digest, vthost::GrantState::Granted);
+    h.turnUntil([&] { return h.indicatorText(session).contains("e2e-1.2.3"); });
+    CHECK(h.indicatorText(session).contains("e2e-1.2.3"));
+    h.host->unsubscribeStream(&client);
+}
+
+TEST_CASE("SessionHost.extension.controlClosesItsOwnPane", "[vthost][host][extensions][control][threading]")
+{
+    // A daemon-hosted extension closes its own pane. The loop serves the close, which destroys the pane's
+    // extensions -- the caller among them -- before it answers. Destroying them must not wait for the call
+    // in flight: that would hold the loop, every session's, until the guest's deadline passed.
+    auto const module = vtextension::testing::withManifest(
+        vtextension::testing::toModule(vtextension::testing::PaneClosingModule),
+        "name = closer\nversion = 1\ncontrol write\n");
+    // A deadline far beyond the test's run: a loop that waits for it is told apart from one that does not.
+    auto limits = vtextension::ExtensionLimits {};
+    limits.callDeadline = std::chrono::seconds { 60 };
+    auto h =
+        DaemonExtensionsHarness { std::string(reinterpret_cast<char const*>(module.data()), module.size()),
+                                  vtextension::CommandPermission::Ask,
+                                  {},
+                                  limits };
+    auto wall = core::platform::ManualWallClock {};
+    auto const service = vthost::control::ControlService {
+        *h.host,
+        vthost::control::ControlServiceConfig { .version = "e2e-1.2.3", .socketPath = "", .clock = wall }
+    };
+    h.fileSystem.open();
+    REQUIRE(h.host->createTab() != nullptr);
+    auto const session = h.host->model().window(h.host->windowId())->activeTab()->rootPane()->session();
+    auto client = vthost::SessionStreamEvents {};
+    h.host->subscribeStream(&client);
+
+    h.turnUntil([&] { return h.indicatorText(session).contains("not granted yet"); });
+    INFO(h.indicatorText(session));
+    CHECK(h.indicatorText(session).contains("needs grant 'write': not granted yet"));
+    REQUIRE(h.host->pendingPermissionRequests().size() == 1);
+    auto const request = h.host->pendingPermissionRequests().front();
+
+    auto const granted = std::chrono::steady_clock::now();
+    h.host->answerPermission(request.hostId, request.digest, vthost::GrantState::Granted);
+    h.turnUntil([&] { return h.host->terminal(session) == nullptr; });
+    CHECK(h.host->terminal(session) == nullptr);
+    // Far below the deadline the loop would otherwise have been held for.
+    CHECK(std::chrono::steady_clock::now() - granted < std::chrono::seconds { 30 });
+    h.host->unsubscribeStream(&client);
 }
 
     #ifdef VTHOST_TEST_ECHO_WASM

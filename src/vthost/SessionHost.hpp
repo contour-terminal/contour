@@ -46,6 +46,7 @@
 #include <variant>
 #include <vector>
 
+#include <vtcontrol/ControlApi.hpp>
 #include <vtcontrol/Uuid.hpp>
 // Part of this header's contract, not an implementation detail: the settings a host is constructed
 // with — and any a SessionSpawnRequest carries — are normalized through hostedSessionSettings.
@@ -930,6 +931,19 @@ class SessionHost final: public vtworkspace::ModelEvents
     /// Removes @p observer from the stream fan-out. Idempotent.
     void unsubscribeStream(SessionStreamEvents* observer);
 
+    /// Serves the control calls of the sessions' extensions with @p api, as each extension's pane, from now
+    /// on; until then, and after detachExtensionControl(), they are `unsupported`. Loop thread only.
+    ///
+    /// The one attach-style call of a cyclic wiring: the control API (control::ControlService) is built over
+    /// this host, and the host's extensions call it. The service attaches itself for its lifetime (through
+    /// ScopedExtensionControl), so no call reaches a service that is gone: a call is resolved on the loop
+    /// thread, which is where the service is destroyed.
+    /// @param api The control API. Not owned.
+    void attachExtensionControl(vtcontrol::ControlApi* api);
+
+    /// Stops serving extensions' control calls with @p api. Idempotent; does nothing for another API.
+    void detachExtensionControl(vtcontrol::ControlApi* api);
+
     /// Handles a session whose PTY closed (shell exited): prunes its pane from
     /// the model (prune-then-terminate) and destroys the session. Invoked on
     /// the loop thread — by the pump's posted completion in production, or
@@ -1260,6 +1274,8 @@ class SessionHost final: public vtworkspace::ModelEvents
     std::vector<SessionStreamEvents const*> _attachedClients;
     /// The client whose launch took every window; null while none is attached. @see claimPrimaryViewer
     SessionStreamEvents const* _primaryViewer = nullptr;
+    /// What serves the extensions' control calls. @see attachExtensionControl
+    std::reference_wrapper<vtcontrol::ControlApi> _extensionControl { vtcontrol::nullControlApi() };
     /// Every window created for a client, by window id: that client while it is attached, null once it
     /// left. A window absent here is unclaimed. @see windowClaim
     std::unordered_map<uint64_t, SessionStreamEvents const*> _windowCreators;
@@ -1321,6 +1337,18 @@ inline ScopedStreamSubscription makeScopedStreamSubscription(SessionHost& host, 
 {
     return ScopedStreamSubscription {
         host, observer, &SessionHost::subscribeStream, &SessionHost::unsubscribeStream
+    };
+}
+
+/// Scoped extension-control attachment: a control API keeps one for its lifetime, serving the host's
+/// extensions while it lives. @see SessionHost::attachExtensionControl
+using ScopedExtensionControl = ScopedSubscription<SessionHost, vtcontrol::ControlApi>;
+
+/// Factory for the extension-control attachment.
+inline ScopedExtensionControl makeScopedExtensionControl(SessionHost& host, vtcontrol::ControlApi& api)
+{
+    return ScopedExtensionControl {
+        host, api, &SessionHost::attachExtensionControl, &SessionHost::detachExtensionControl
     };
 }
 

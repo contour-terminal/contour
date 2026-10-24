@@ -11,7 +11,9 @@
 #include <vtbackend/testing/FakeStatusLineExtensions.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
+#include <chrono>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <map>
 #include <memory>
@@ -73,6 +75,17 @@ class FakeSessionExtensions final: public ISessionExtensions
     void askPermission(proto::PermissionRequest request) const
     {
         _events.onPermissionNeeded(std::move(request));
+    }
+
+    /// Calls a control verb, as a runner whose extension called its import does: from the extension's lane,
+    /// which is to say from any thread but the host's loop.
+    [[nodiscard]] std::expected<std::string, vtcontrol::ControlError> callControl(
+        std::string_view method,
+        std::string_view params,
+        vtcontrol::ControlGrants granted,
+        std::chrono::milliseconds timeout) const
+    {
+        return _events.callControl(method, params, granted, timeout);
     }
 
     /// The terminal's view of the extensions: what a test sets the take-over and the frames on.

@@ -730,6 +730,9 @@ namespace
             for (auto const& element: command.argv)
                 out.string(element);
         }
+        out.varint(pdu.control.size());
+        for (auto const& permission: pdu.control)
+            out.string(permission);
     }
 
     void encodeBody(Writer& out, PermissionReply const& pdu)
@@ -1510,6 +1513,12 @@ namespace
             return std::unexpected(error);
         if (auto const decoded = decodeVector(in, pdu.commands, decodeDeclaredCommand); !decoded)
             return std::unexpected(decoded.error());
+        // Appended by a later version; an older sender's body ends before it.
+        if (in.remaining() != 0)
+            if (auto const decoded =
+                    decodeVector(in, pdu.control, [](Reader& reader) { return reader.string(); });
+                !decoded)
+                return std::unexpected(decoded.error());
         return pdu;
     }
 

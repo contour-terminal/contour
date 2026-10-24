@@ -104,6 +104,8 @@ add_library(vthost STATIC
     control/ControlService.hpp
     control/EventHub.cpp
     control/EventHub.hpp
+    control/LoopControlBridge.cpp
+    control/LoopControlBridge.hpp
     control/PaneText.cpp
     control/PaneText.hpp
     client/DaemonRestart.cpp
@@ -266,6 +268,7 @@ if(VTHOST_TESTING)
         testing/RecordingDurableFiles.hpp
         testing/FaultyFileSystem.hpp
         testing/RecordedTranscripts.hpp
+        testing/ControlHarness.hpp
         testing/FakeCommandRunner.hpp
         testing/FakeDaemonControl.hpp
         testing/FakeExtensionHosting.hpp
@@ -279,6 +282,7 @@ if(VTHOST_TESTING)
         client/ControlClient_test.cpp
         client/DaemonControlClient_test.cpp
         control/ControlService_test.cpp
+        control/LoopControlBridge_test.cpp
         control/EventHub_test.cpp
         control/PaneText_test.cpp
         client/DaemonRestart_test.cpp

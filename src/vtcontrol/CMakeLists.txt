@@ -16,10 +16,13 @@ add_library(vtcontrol STATIC
     Json.hpp
     ObjectRef.cpp
     ObjectRef.hpp
+    Reflect.hpp
     Target.cpp
     Target.hpp
     Uuid.cpp
     Uuid.hpp
+    Wit.cpp
+    Wit.hpp
     testing/FakeControlApi.hpp
     testing/JsonProbe.hpp
     testing/SequentialUuidSource.hpp
@@ -54,8 +57,12 @@ if(VTCONTROL_TESTING)
         ObjectRef_test.cpp
         Target_test.cpp
         Uuid_test.cpp
+        Wit_test.cpp
     )
     target_link_libraries(vtcontrol_test vtcontrol glaze::glaze core::platform core::testing Catch2::Catch2)
+    # The control WIT package is generated from the catalog; the golden test reads it from the source tree,
+    # and rewrites it when UPDATE_WIT=1 is set.
+    target_compile_definitions(vtcontrol_test PRIVATE VTCONTROL_WIT_DIR="${PROJECT_SOURCE_DIR}/wit/control")
     add_test(NAME vtcontrol_test COMMAND $<TARGET_FILE:vtcontrol_test>)
     set_tests_properties(vtcontrol_test PROPERTIES LABELS daemon)
 

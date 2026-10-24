@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 
+#include <vtextension/ControlImports.hpp>
 #include <vtextension/HostBindings.hpp>
 #include <vtextension/wasm/WasiAllowList.hpp>
 
@@ -68,10 +69,10 @@ namespace
     }
 
     /// Whether @p module (an import's module name) and @p function name a function the host provides:
-    /// one of the world's host functions, or an allowed WASI function.
+    /// one of the world's host functions, a control verb, or an allowed WASI function.
     [[nodiscard]] bool isProvided(std::string_view module, std::string_view function)
     {
-        if (module == detail::HostImportModule)
+        if (module == detail::HostImportModule || module == ControlImportModule)
             return true; // only what the host registered is satisfied, which the caller checks
         return module == wasm::WasiModule
                && std::ranges::find(wasm::AllowedWasiFunctions, function) != wasm::AllowedWasiFunctions.end();

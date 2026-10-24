@@ -1116,6 +1116,10 @@ struct PermissionRequest
     uint32_t version = 0;    ///< The manifest's format revision.
     std::string digest = {}; ///< The manifest's digest, which the answer is bound to.
     std::vector<WireDeclaredCommand> commands = {}; ///< What it may run, if allowed.
+    /// The control-API permissions it asks for (`read`, `screen`, `input`, `write`), granted with the
+    /// commands. Appended by a later version: an older sender's body ends before it. Sent only to a client
+    /// that shares Capability::ControlPermissions, which shows them in its prompt.
+    std::vector<std::string> control = {};
     bool operator==(PermissionRequest const&) const = default;
 };
 

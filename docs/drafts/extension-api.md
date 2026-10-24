@@ -291,10 +291,15 @@ The host cannot tell the two apart, and that is the design:
   hop per host call. Acceptable, because extension work is event-driven: the git status line makes
   one host call a second, not a million.
 
-The IDL generating both tiers' bindings also leaves the door open to an **out-of-process** tier —
-the same verbs over the existing `vthost` socket, so a Python or Go extension needs no WASM at all.
-That is deliberately **not** in scope here (§4.4 non-goals); the note matters only because it
-constrains the IDL to stay serializable, which it must be anyway.
+The **out-of-process** tier exists now, as the daemon's control API (phase 7a): the same verbs over
+the `vthost` socket, as JSON, so a Python or Go script needs no WASM at all (`contour api …`). Its
+method catalog (`vtcontrol::Methods`) is the one definition both tiers read. The in-process side of
+it is the WIT package `terminal-extensions:control@0.1.0` (`wit/control/`), generated from that
+catalog by `vtcontrol::renderControlWit()`: one import per verb an extension may call — the catalog
+rows marked `Exposure::Everywhere`, which leaves out the verbs that wait or stream (`block.wait`,
+`events.*`). A daemon-hosted extension that declares `control <read|screen|input|write>` in its
+manifest and is granted it calls them from its worker; the daemon serves each on its loop, as the
+extension's pane, within the rest of the guest call's deadline.
 
 ### 3.3 Threading, cancellation, and deadlines
 
@@ -350,6 +355,10 @@ costs when nobody uses it, and which existing type it is built on. Signatures ar
 
 #### `contour:terminal/workspace`
 
+> **Shipped in part** as `terminal-extensions:control/control@0.1.0` (`wit/control/`): listing,
+> opening, splitting, closing and labelling windows, tabs and panes, under the `control read` and
+> `control write` manifest lines. Focus, move, resize, zoom, swap and layouts are not in it yet.
+
 **Permissions:** `workspace:read`, `workspace:write` · **Placement:** session · **Cost unused:** nil
 (pull API plus a coalesced change event)
 
@@ -396,6 +405,11 @@ extension, a pane jump-list.
 Use cases: error triage, redaction, the recorder's replay verification, the agent bridge's context.
 
 #### `contour:terminal/shell`
+
+> **Shipped in part** as `terminal-extensions:control/control@0.1.0` (`wit/control/`): the block
+> queries (`block-list`, `block-read`) and a pane's text (`pane-capture`) under `control screen`, and
+> typing into a pane (`pane-send`, never waiting) under `control input`. The `command-finished` event
+> is the socket API's (`events.subscribe`) only: an extension cannot subscribe yet.
 
 **Permission:** `shell:observe` · **Placement:** session · **Cost unused:** nil — the existing
 `NullShellIntegration` stays installed until someone subscribes

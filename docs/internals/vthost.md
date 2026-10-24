@@ -156,6 +156,7 @@ A peer of any of them gets only the readable refusal; no old codec is kept for t
 | `Capability` | Ident | Name | Gates |
 |--------------|-------|------|-------|
 | `ExtensionPermissions` | 1 | `extension-permissions` | `PermissionRequest` / `PermissionReply`: the daemon asks an extension's permission question only of a client with which it shares it; one that did not offer it is never asked, and the question waits for another client, as it does while none is attached |
+| `ControlPermissions` | 11 | `control-permissions` | A `PermissionRequest`'s appended `control` list (the control-API permissions an extension's manifest declares, granted with its commands): a question that asks for any is sent only to a client sharing it, whose prompt shows them; one that would prompt with the commands alone is not asked, and the question waits for another. So an older client is never asked about such an extension at all -- its commands stay ungranted there too, and the extension shows only its own "not granted yet" text until a client sharing the capability answers |
 
 A capability's ident travels as a varint and unknown idents survive decoding, so a newer peer's offer
 costs an older one nothing. A protocol version step is reserved for a change to an existing PDU's
@@ -883,9 +884,9 @@ holds all four too, ssh having authenticated it. The TCP endpoint lists `--token
 (everything) and the entries of `--access-file` (`AccessFile.hpp`), and a hello holds the grants of
 the first token it equals. `vtcontrol::dispatch` answers a row outside the grants `forbidden`
 (`needs grant 'input'`) without calling the handler, a typed `ControlReply` and not a closed
-connection. A row may also name a `requestGrant` rule, which decides from the decoded request what it
-needs beyond the row's permission: `tab.create` and `pane.split` need `input` beside `write` when they
-name a `command` (`commandNeedsInput`), since running a program is typing it. Each `EventRow` names a permission as
+connection. A row may also name a `requestGrant` rule, a permission and the reason for it with a predicate on the
+decoded request, for what a request needs beyond the row's permission: `tab.create` and `pane.split` need `input` beside `write` when they
+name a `command` (`CommandNeedsInput`), since running a program is typing it. Each `EventRow` names a permission as
 well (`block.finished` needs `screen`, every other kind `read`): `events.subscribe` narrows the kinds
 it is given, or every kind, to those the grants allow, and refuses one that names only forbidden kinds. The role's own verbs are gated alike: `DaemonStatusRequest` needs `read`, `StopDaemon`
 `write`, and without it they are answered `Unsupported`, the daemon logging why. A narrow token is

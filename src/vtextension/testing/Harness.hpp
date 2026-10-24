@@ -59,7 +59,19 @@ struct CommandCall
     [[nodiscard]] bool operator==(CommandCall const&) const = default;
 };
 
-/// Records every host call; answers `state` with `snapshot` and `run-command` with `commandAnswer`.
+/// One control verb a guest called.
+struct ControlCall
+{
+    std::string method;
+    std::string params;
+    vtcontrol::ControlGrants granted;
+    std::chrono::milliseconds timeout;
+
+    [[nodiscard]] bool operator==(ControlCall const&) const = default;
+};
+
+/// Records every host call; answers `state` with `snapshot`, `run-command` with `commandAnswer`, and the
+/// control verbs with `consent` and `controlAnswer`.
 class FakeHostServices final: public IHostServices
 {
   public:
@@ -81,12 +93,39 @@ class FakeHostServices final: public IHostServices
         return commandAnswer;
     }
 
+    [[nodiscard]] GrantState controlConsent() override
+    {
+        ++consentQuestions;
+        return consent;
+    }
+
+    [[nodiscard]] std::expected<std::string, vtcontrol::ControlError> callControl(
+        std::string_view method,
+        std::string_view paramsJson,
+        vtcontrol::ControlGrants granted,
+        std::chrono::milliseconds timeout) override
+    {
+        controlCalls.push_back(ControlCall { .method = std::string(method),
+                                             .params = std::string(paramsJson),
+                                             .granted = granted,
+                                             .timeout = timeout });
+        if (beforeControlAnswer)
+            beforeControlAnswer();
+        return controlAnswer;
+    }
+
     std::vector<std::chrono::milliseconds> frameRequests;
     std::vector<LoggedMessage> logged;
     std::vector<CommandCall> commands;
     StateSnapshot snapshot;
     std::expected<std::string, ExtensionError> commandAnswer;
     std::function<void()> beforeCommandAnswer; ///< Runs inside runCommand, before it answers.
+
+    GrantState consent = GrantState::Granted; ///< What controlConsent() answers.
+    int consentQuestions = 0;                 ///< How often controlConsent() was asked.
+    std::vector<ControlCall> controlCalls;    ///< Every callControl(), in order.
+    std::expected<std::string, vtcontrol::ControlError> controlAnswer; ///< What callControl() answers.
+    std::function<void()> beforeControlAnswer; ///< Runs inside callControl, before it answers.
 };
 
 /// @return A surface of @p columns by @p lines cells.

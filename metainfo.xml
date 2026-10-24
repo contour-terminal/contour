@@ -114,6 +114,7 @@
           <li>Daemon: a window attached to a daemon survives a lost connection: its panes show "Reconnecting…" while it reconnects with backoff, a connection gone half-open is noticed by a heartbeat, input typed meanwhile is dropped rather than replayed, and a pane closed meanwhile is closed on the daemon once it answers.</li>
           <li>Daemon: <code>contour client --window N</code> shows one daemon window; a tab's profile is resolved in the daemon's configuration, and its active pane, zoom, title and color reach every other attached client; a client smaller than the shared grid follows the cursor.</li>
           <li>Daemon: picks up edits of its configuration file without a restart: new sessions use the edited profiles, and running ones take the new scrollback limits.</li>
+          <li>Extensions: a status-line extension that contour daemon hosts can call the control API: list, open, split, close and label windows, tabs and panes, type into panes, and read panes and command blocks. Its manifest declares what it needs (control read, screen, input or write), the permission prompt lists each, and the answer covers the extension's commands too; the WIT package terminal-extensions:control@0.1.0 in wit/control describes the calls. An older Contour attached to the daemon is not asked about such an extension, whose commands then stay ungranted until a current one answers</li>
         </ul>
       </description>
     </release>

@@ -277,3 +277,25 @@ TEST_CASE("CommandPolicy.argumentRejected", "[vtextension]")
         CHECK(result.error() == ExtensionError::ArgumentRejected);
     }
 }
+
+TEST_CASE("CommandPolicy.controlConsent", "[vtextension][control]")
+{
+    // The control permissions share the commands' answer, but `allow` pre-approves commands only.
+    auto store = FakeGrantStore();
+    auto const policyFor = [&](CommandPermission configured) {
+        return CommandPolicy(gitManifest(), std::string(HostId), store, configured);
+    };
+    CHECK(policyFor(CommandPermission::Ask).controlConsent() == GrantState::Pending);
+    CHECK(policyFor(CommandPermission::Allow).controlConsent() == GrantState::Pending);
+    CHECK(policyFor(CommandPermission::Deny).controlConsent() == GrantState::Denied);
+
+    store.record(HostId, "digest-a", GrantState::Granted);
+    CHECK(policyFor(CommandPermission::Ask).controlConsent() == GrantState::Granted);
+    CHECK(policyFor(CommandPermission::Deny).controlConsent() == GrantState::Denied);
+    CHECK(CommandPolicy(gitManifest("digest-b"), std::string(HostId), store, CommandPermission::Ask)
+              .controlConsent()
+          == GrantState::Pending);
+
+    store.record(HostId, "digest-a", GrantState::Denied);
+    CHECK(policyFor(CommandPermission::Ask).controlConsent() == GrantState::Denied);
+}

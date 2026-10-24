@@ -277,6 +277,8 @@ class ControlService final:
     /// Last, so that they end first: no event reaches a service being destroyed.
     ScopedStreamSubscription _streamSubscription;
     ScopedModelSubscription _modelSubscription;
+    /// Serves the host's extensions while the service lives. Last: it is what reaches the rest.
+    ScopedExtensionControl _extensionControl;
 };
 
 } // namespace vthost::control

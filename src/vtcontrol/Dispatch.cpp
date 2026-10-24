@@ -52,7 +52,7 @@ namespace
             return true;
         }
 
-        if (auto const extra = row.requestGrant(*request);
+        if (auto const extra = requestGrantOf(row.requestGrant, *request);
             extra && !context.grants().contains(extra->permission))
         {
             done(failure(

@@ -3994,6 +3994,50 @@ TEST_CASE("permission questions wait for a client that can answer them", "[vthos
     }
 }
 
+TEST_CASE("a question for control permissions is asked only of a client that shows them",
+          "[vthost][negotiation][control]")
+{
+    // A client without ControlPermissions would prompt with the commands alone, and its user would grant
+    // what they were never shown: it is not asked, and the question waits for another.
+    struct Row
+    {
+        std::string_view name;
+        proto::CapabilitySet client;
+        bool asked;
+    };
+    auto const rows = std::array {
+        Row { .name = "a client that shows them",
+              .client = proto::CapabilitySet::of(
+                  { proto::Capability::ExtensionPermissions, proto::Capability::ControlPermissions }),
+              .asked = true },
+        Row { .name = "a client that would not", .client = answeringPermissions(), .asked = false },
+    };
+    for (auto const& row: rows)
+    {
+        INFO(row.name);
+        auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+        auto h = NativeHarness { HarnessOptions { .extensions = hosting } };
+        std::ignore = newSession(h.host);
+        auto question = gitQuestion();
+        question.control = { "input" };
+        hosting->sessions.front()->askPermission(question);
+        awaitOpenQuestion(h);
+        REQUIRE(h.host.pendingPermissionRequests().size() == 1);
+
+        auto const received =
+            h.exchangeUntil({ proto::ClientHello { .capabilities = row.client } },
+                            [](auto const& got) { return std::ranges::any_of(got, endsSnapshotRun); });
+
+        REQUIRE(std::ranges::any_of(received, endsSnapshotRun));
+        auto const request = std::ranges::find_if(received, isPermissionRequest);
+        CHECK((request != received.end()) == row.asked);
+        if (request != received.end())
+            CHECK(std::get<proto::PermissionRequest>(request->pdu).control
+                  == std::vector<std::string> { "input" });
+        CHECK(h.host.pendingPermissionRequests().size() == 1); // asked, but not answered yet
+    }
+}
+
 TEST_CASE("a permission question one client could not answer is asked of the next that can",
           "[vthost][negotiation]")
 {

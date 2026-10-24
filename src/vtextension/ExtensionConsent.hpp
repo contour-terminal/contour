@@ -44,14 +44,20 @@ struct ExtensionConsentRequest
     Manifest manifest;  ///< What it declares, and the digest the answer is bound to.
 };
 
-/// The first line of every consent prompt: fixed, and free of anything a guest chose.
+/// The first line of a consent prompt for commands only: fixed, and free of anything a guest chose.
 inline constexpr auto ConsentHeadline = std::string_view { "A status-line extension asks to run commands." };
 
+/// The first line of a consent prompt that asks for control permissions too: fixed, likewise.
+inline constexpr auto ControlConsentHeadline =
+    std::string_view { "A status-line extension asks to run commands and to control the terminal." };
+
 /// @param request A request.
-/// @return What the prompt asking it says: who asks, from which module, and every command it may run, each
-///         verbatim. Plain text whatever the guest declares: its first line is ConsentHeadline, so that a
-///         dialog that guesses the format (Qt::mightBeRichText reads up to the first line break) finds no
-///         markup there.
+/// @return What the prompt asking it says: who asks, from which module, every command it may run, each
+///         verbatim, then one line `May <phrase>.` per control permission it declares (vtcontrol's
+///         consentPhraseOf). Plain text whatever the guest declares: its first line is ConsentHeadline,
+///         or ControlConsentHeadline when it declares a control permission, so that a dialog that guesses
+///         the format (Qt::mightBeRichText reads up to the first line break) finds no markup there. A
+///         manifest without `control` lines is asked exactly as before they existed.
 [[nodiscard]] std::string consentText(ExtensionConsentRequest const& request);
 
 /// What the user answered.

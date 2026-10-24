@@ -64,7 +64,8 @@ namespace
                                       onNeeded(permissionRequestOf(hostId, manifest));
                                   },
                               .onLog = &logExtensionMessage,
-                              .onReplaced = std::move(events.onReplaced) },
+                              .onReplaced = std::move(events.onReplaced),
+                              .callControl = std::move(events.callControl) },
                           std::make_shared<PostingOwner>(std::move(post)) }
         {
         }
@@ -104,6 +105,9 @@ proto::PermissionRequest permissionRequestOf(std::string_view hostId, vtextensio
     for (auto const& command: manifest.commands)
         request.commands.push_back(
             proto::WireDeclaredCommand { .name = command.name, .argv = command.argvTemplate });
+    request.control.reserve(manifest.control.size());
+    for (auto const permission: manifest.control)
+        request.control.emplace_back(vtcontrol::nameOf(permission));
     return request;
 }
 

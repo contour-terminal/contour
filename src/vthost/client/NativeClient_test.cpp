@@ -52,6 +52,7 @@
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
 #ifdef CONTOUR_EXTENSIONS
+    #include <vthost/DaemonExtensions.hpp>
     #include <vthost/client/DaemonGrantReplies.hpp>
 #endif
 #include <vthost/testing/FakeExtensionHosting.hpp>
@@ -1581,6 +1582,25 @@ TEST_CASE("DaemonGrantReplies sends each answer, and remembers it", "[vthost][at
     replies.record("git@/x.wasm", "d2", vtextension::GrantState::Denied);
     CHECK(sent.back().answer == vthost::GrantState::Denied);
     CHECK(replies.lookup("git@/x.wasm", "d2") == vtextension::GrantState::Denied);
+}
+
+TEST_CASE("a daemon's question keeps the control permissions it asks for",
+          "[vthost][attach][extensions][control]")
+{
+    auto manifest = vtextension::Manifest { .name = "agent", .version = 1, .commands = {}, .digest = "d1" };
+    manifest.control = { vtcontrol::Permission::Read, vtcontrol::Permission::Input };
+    auto const request = vthost::permissionRequestOf("agent@/x.wasm", manifest);
+    CHECK(request.control == std::vector<std::string> { "read", "input" });
+
+    auto const consent = vthost::client::consentRequestOf(request);
+    REQUIRE(consent.has_value());
+    CHECK(consent->manifest.control == manifest.control);
+    CHECK(vtextension::consentText(*consent).contains("May type into panes."));
+
+    // A permission this build cannot name cannot be shown, so the question is not asked.
+    auto unknown = request;
+    unknown.control.emplace_back("fly");
+    CHECK_FALSE(vthost::client::consentRequestOf(unknown).has_value());
 }
 #endif
 

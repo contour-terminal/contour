@@ -317,6 +317,38 @@ struct Codec<I>
     }
 };
 
+/// A WIT `bool`: one byte, which lifts any non-zero value as `true`, as the Canonical ABI does.
+template <>
+struct Codec<bool>
+{
+    static constexpr uint32_t Size = 1;
+    static constexpr uint32_t Alignment = 1;
+    static constexpr std::size_t FlatCount = 1;
+
+    [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, bool value)
+    {
+        return detail::storeInteger<uint8_t>(memory, address, value ? 1 : 0);
+    }
+
+    [[nodiscard]] static Result<bool> load(IGuestMemory& memory, Address address)
+    {
+        return detail::loadInteger<uint8_t>(memory, address).transform([](uint8_t byte) {
+            return byte != 0;
+        });
+    }
+
+    [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& /*memory*/, bool value, FlatValues& out)
+    {
+        out.push_back(value ? 1 : 0);
+        return {};
+    }
+
+    [[nodiscard]] static Result<bool> liftFlat(IGuestMemory& /*memory*/, FlatReader& reader)
+    {
+        return reader.next().transform([](uint32_t value) { return value != 0; });
+    }
+};
+
 /// Enums, and the two-case enums that stand for a WIT `bool`: a discriminant of the smallest width.
 template <typename E>
     requires(std::is_enum_v<E> && EnumCaseCount<E> > 0)
@@ -655,100 +687,138 @@ struct Codec<std::vector<T>>
     }
 };
 
+namespace detail
+{
+    /// How a record codec reaches the fields RecordFields names: through member pointers.
+    template <typename T>
+    struct MemberPointerAccess
+    {
+        static constexpr auto Members = RecordFields<T>::Members;
+        static constexpr std::size_t FieldCount = std::tuple_size_v<decltype(Members)>;
+
+        // Named through the member pointer's type rather than a decltype of `value.*member`: GCC 15 crashes
+        // (internal compiler error in tsubst) on the latter inside the generic lambdas of RecordCodec.
+        template <std::size_t I>
+        using Field = std::remove_cvref_t<typename MemberType<std::remove_cvref_t<
+            std::tuple_element_t<I, std::remove_cvref_t<decltype(RecordFields<T>::Members)>>>>::Type>;
+
+        template <std::size_t I>
+        [[nodiscard]] static constexpr Field<I> const& get(T const& value) noexcept
+        {
+            return value.*std::get<I>(Members);
+        }
+
+        template <std::size_t I>
+        [[nodiscard]] static constexpr Field<I>& get(T& value) noexcept
+        {
+            return value.*std::get<I>(Members);
+        }
+    };
+
+    /// The codec of a record, whatever describes its fields: each field at its natural alignment, in order.
+    ///
+    /// @tparam T The record.
+    /// @tparam Access How its fields are reached: `FieldCount`, `Field<I>`, and `get<I>(value)` for a
+    ///         const and a mutable record. RecordFields rows go through MemberPointerAccess; a world may
+    ///         describe its records another way (by reflection, say) and share this codec.
+    template <typename T, typename Access>
+    struct RecordCodec
+    {
+        static constexpr std::size_t FieldCount = Access::FieldCount;
+
+        template <std::size_t I>
+        using Field = Access::template Field<I>;
+
+        /// Each field's offset from the record's start.
+        static constexpr auto Offsets = []<std::size_t... I>(std::index_sequence<I...>) {
+            auto result = std::array<uint32_t, FieldCount> {};
+            auto offset = uint32_t { 0 };
+            ((offset = alignTo(offset, Codec<Field<I>>::Alignment),
+              result[I] = offset,
+              offset += Codec<Field<I>>::Size),
+             ...);
+            return result;
+        }(std::make_index_sequence<FieldCount> {});
+
+        static constexpr uint32_t Alignment = []<std::size_t... I>(std::index_sequence<I...>) {
+            return std::max({ uint32_t { 1 }, Codec<Field<I>>::Alignment... });
+        }(std::make_index_sequence<FieldCount> {});
+
+        // The end of the last field, rounded up to the record's alignment. Folded over every field rather
+        // than naming the last one: MSVC instantiates Field<FieldCount - 1> even in a discarded branch, which
+        // a record without fields cannot satisfy.
+        static constexpr uint32_t Size = []<std::size_t... I>(std::index_sequence<I...>) {
+            auto end = uint32_t { 0 };
+            ((end = Offsets[I] + Codec<Field<I>>::Size), ...);
+            return alignTo(end, Alignment);
+        }(std::make_index_sequence<FieldCount> {});
+
+        static constexpr std::size_t FlatCount = []<std::size_t... I>(std::index_sequence<I...>) {
+            return (std::size_t { 0 } + ... + Codec<Field<I>>::FlatCount);
+        }(std::make_index_sequence<FieldCount> {});
+
+        [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, T const& value)
+        {
+            auto result = checkRange(memory, address, Size);
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((result = result.and_then([&] {
+                     return Codec<Field<I>>::store(
+                         memory, address + Offsets[I], Access::template get<I>(value));
+                 })),
+                 ...);
+            }(std::make_index_sequence<FieldCount> {});
+            return result;
+        }
+
+        [[nodiscard]] static Result<T> load(IGuestMemory& memory, Address address)
+        {
+            auto value = T {};
+            auto result = checkRange(memory, address, Size);
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((result = result.and_then([&] {
+                     return Codec<Field<I>>::load(memory, address + Offsets[I])
+                         .transform(
+                             [&](Field<I> field) { Access::template get<I>(value) = std::move(field); });
+                 })),
+                 ...);
+            }(std::make_index_sequence<FieldCount> {});
+            return result.transform([&] { return std::move(value); });
+        }
+
+        [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& memory, T const& value, FlatValues& out)
+        {
+            auto result = Result<void> {};
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((result = result.and_then([&] {
+                     return Codec<Field<I>>::lowerFlat(memory, Access::template get<I>(value), out);
+                 })),
+                 ...);
+            }(std::make_index_sequence<FieldCount> {});
+            return result;
+        }
+
+        [[nodiscard]] static Result<T> liftFlat(IGuestMemory& memory, FlatReader& reader)
+        {
+            auto value = T {};
+            auto result = Result<void> {};
+            [&]<std::size_t... I>(std::index_sequence<I...>) {
+                ((result = result.and_then([&] {
+                     return Codec<Field<I>>::liftFlat(memory, reader).transform([&](Field<I> field) {
+                         Access::template get<I>(value) = std::move(field);
+                     });
+                 })),
+                 ...);
+            }(std::make_index_sequence<FieldCount> {});
+            return result.transform([&] { return std::move(value); });
+        }
+    };
+} // namespace detail
+
 /// Records and tuples: the fields RecordFields names, each at its natural alignment, in order.
 template <typename T>
     requires requires { RecordFields<T>::Members; }
-struct Codec<T>
+struct Codec<T>: detail::RecordCodec<T, detail::MemberPointerAccess<T>>
 {
-    static constexpr auto Members = RecordFields<T>::Members;
-    static constexpr std::size_t FieldCount = std::tuple_size_v<decltype(Members)>;
-
-    // Named through the member pointer's type rather than a decltype of `value.*member`: GCC 15 crashes
-    // (internal compiler error in tsubst) on the latter inside the generic lambdas below.
-    template <std::size_t I>
-    using Field = std::remove_cvref_t<typename detail::MemberType<std::remove_cvref_t<
-        std::tuple_element_t<I, std::remove_cvref_t<decltype(RecordFields<T>::Members)>>>>::Type>;
-
-    /// Each field's offset from the record's start.
-    static constexpr auto Offsets = []<std::size_t... I>(std::index_sequence<I...>) {
-        auto result = std::array<uint32_t, FieldCount> {};
-        auto offset = uint32_t { 0 };
-        ((offset = alignTo(offset, Codec<Field<I>>::Alignment),
-          result[I] = offset,
-          offset += Codec<Field<I>>::Size),
-         ...);
-        return result;
-    }(std::make_index_sequence<FieldCount> {});
-
-    static constexpr uint32_t Alignment = []<std::size_t... I>(std::index_sequence<I...>) {
-        return std::max({ uint32_t { 1 }, Codec<Field<I>>::Alignment... });
-    }(std::make_index_sequence<FieldCount> {});
-
-    // The end of the last field, rounded up to the record's alignment. Folded over every field rather
-    // than naming the last one: MSVC instantiates Field<FieldCount - 1> even in a discarded branch, which
-    // a record without fields cannot satisfy.
-    static constexpr uint32_t Size = []<std::size_t... I>(std::index_sequence<I...>) {
-        auto end = uint32_t { 0 };
-        ((end = Offsets[I] + Codec<Field<I>>::Size), ...);
-        return alignTo(end, Alignment);
-    }(std::make_index_sequence<FieldCount> {});
-
-    static constexpr std::size_t FlatCount = []<std::size_t... I>(std::index_sequence<I...>) {
-        return (std::size_t { 0 } + ... + Codec<Field<I>>::FlatCount);
-    }(std::make_index_sequence<FieldCount> {});
-
-    [[nodiscard]] static Result<void> store(IGuestMemory& memory, Address address, T const& value)
-    {
-        auto result = detail::checkRange(memory, address, Size);
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((result = result.and_then([&] {
-                 return Codec<Field<I>>::store(memory, address + Offsets[I], value.*std::get<I>(Members));
-             })),
-             ...);
-        }(std::make_index_sequence<FieldCount> {});
-        return result;
-    }
-
-    [[nodiscard]] static Result<T> load(IGuestMemory& memory, Address address)
-    {
-        auto value = T {};
-        auto result = detail::checkRange(memory, address, Size);
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((result = result.and_then([&] {
-                 return Codec<Field<I>>::load(memory, address + Offsets[I]).transform([&](Field<I> field) {
-                     value.*std::get<I>(Members) = std::move(field);
-                 });
-             })),
-             ...);
-        }(std::make_index_sequence<FieldCount> {});
-        return result.transform([&] { return std::move(value); });
-    }
-
-    [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& memory, T const& value, FlatValues& out)
-    {
-        auto result = Result<void> {};
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((result = result.and_then(
-                  [&] { return Codec<Field<I>>::lowerFlat(memory, value.*std::get<I>(Members), out); })),
-             ...);
-        }(std::make_index_sequence<FieldCount> {});
-        return result;
-    }
-
-    [[nodiscard]] static Result<T> liftFlat(IGuestMemory& memory, FlatReader& reader)
-    {
-        auto value = T {};
-        auto result = Result<void> {};
-        [&]<std::size_t... I>(std::index_sequence<I...>) {
-            ((result = result.and_then([&] {
-                 return Codec<Field<I>>::liftFlat(memory, reader).transform([&](Field<I> field) {
-                     value.*std::get<I>(Members) = std::move(field);
-                 });
-             })),
-             ...);
-        }(std::make_index_sequence<FieldCount> {});
-        return result.transform([&] { return std::move(value); });
-    }
 };
 
 /// Variants: a discriminant of the smallest width, then the case's payload at the alignment of the
@@ -890,6 +960,62 @@ struct Codec<std::expected<T, E>>
     }
 
     [[nodiscard]] static Result<std::expected<T, E>> liftFlat(IGuestMemory& memory, FlatReader& reader)
+    {
+        return VariantCodec::liftFlat(memory, reader).transform(&fromVariant);
+    }
+};
+
+/// The `none` case of an `option`: a case without a payload.
+template <>
+struct RecordFields<std::monostate>
+{
+    static constexpr auto Members = std::tuple {};
+};
+
+/// Options: a variant whose case 0 is `none` and case 1 `some`.
+template <typename T>
+struct Codec<std::optional<T>>
+{
+    using Variant = std::variant<std::monostate, T>;
+    using VariantCodec = Codec<Variant>;
+    static constexpr uint32_t Size = VariantCodec::Size;
+    static constexpr uint32_t Alignment = VariantCodec::Alignment;
+    static constexpr std::size_t FlatCount = VariantCodec::FlatCount;
+
+    [[nodiscard]] static Variant toVariant(std::optional<T> const& value)
+    {
+        if (value)
+            return Variant { std::in_place_index<1>, *value };
+        return Variant { std::in_place_index<0> };
+    }
+
+    [[nodiscard]] static std::optional<T> fromVariant(Variant value)
+    {
+        if (value.index() == 1)
+            return std::move(std::get<1>(value));
+        return std::nullopt;
+    }
+
+    [[nodiscard]] static Result<void> store(IGuestMemory& memory,
+                                            Address address,
+                                            std::optional<T> const& value)
+    {
+        return VariantCodec::store(memory, address, toVariant(value));
+    }
+
+    [[nodiscard]] static Result<std::optional<T>> load(IGuestMemory& memory, Address address)
+    {
+        return VariantCodec::load(memory, address).transform(&fromVariant);
+    }
+
+    [[nodiscard]] static Result<void> lowerFlat(IGuestMemory& memory,
+                                                std::optional<T> const& value,
+                                                FlatValues& out)
+    {
+        return VariantCodec::lowerFlat(memory, toVariant(value), out);
+    }
+
+    [[nodiscard]] static Result<std::optional<T>> liftFlat(IGuestMemory& memory, FlatReader& reader)
     {
         return VariantCodec::liftFlat(memory, reader).transform(&fromVariant);
     }

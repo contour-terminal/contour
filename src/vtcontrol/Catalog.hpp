@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <initializer_list>
@@ -37,6 +38,41 @@ struct EnumTable<Permission>
         EnumName { Permission::Write, "write" },
     };
 };
+
+/// What granting a permission lets an extension do, as its consent prompt says it: "May <phrase>.".
+struct PermissionPhrase
+{
+    Permission permission;   ///< The permission.
+    std::string_view phrase; ///< What it allows, lower-case, without the final full stop.
+};
+
+/// One row per `Permission`, in enumerator order, as `EnumTable<Permission>` has.
+inline constexpr std::array PermissionPhrases {
+    PermissionPhrase { .permission = Permission::Read, .phrase = "see the windows, tabs and panes" },
+    PermissionPhrase { .permission = Permission::Screen,
+                       .phrase = "read what panes show, and their command history" },
+    PermissionPhrase { .permission = Permission::Input, .phrase = "type into panes" },
+    PermissionPhrase { .permission = Permission::Write,
+                       .phrase = "open, split, close and label tabs and panes" },
+};
+
+static_assert(
+    [] {
+        auto index = std::size_t { 0 };
+        for (auto const& row: PermissionPhrases)
+            if (static_cast<std::size_t>(row.permission) != index++)
+                return false;
+        return index == EnumTable<Permission>::Rows.size();
+    }(),
+    "PermissionPhrases holds one row per Permission, in enumerator order");
+
+/// @param permission A permission.
+/// @return What it allows, for a consent prompt ("type into panes").
+[[nodiscard]] constexpr std::string_view consentPhraseOf(Permission permission) noexcept
+{
+    auto const index = static_cast<std::size_t>(permission);
+    return index < PermissionPhrases.size() ? PermissionPhrases[index].phrase : std::string_view {};
+}
 
 /// The permissions a connection holds. Permissions genuinely combine -- a script's token may read the
 /// screen yet never type -- so the set is a bitmask over `Permission`, not a pile of enums.
@@ -107,36 +143,44 @@ enum class Exposure : uint8_t
     SocketOnly,     ///< Sockets only; an extension gets `Unsupported`.
 };
 
-/// A permission one request needs beyond its method's, for what it asks the method to do.
-struct RequestGrant
-{
-    Permission permission;   ///< What must be granted as well.
-    std::string_view reason; ///< What the request does that needs it, e.g. `running a command`.
-};
-
-/// Decides what a request needs beyond its method's permission.
+/// A permission a request needs beyond its method's, for something it may ask the method to do.
 /// @tparam Req The request type.
 template <typename Req>
-using RequestGrantRule = std::optional<RequestGrant> (*)(Req const& request) noexcept;
-
-/// The rule of a method whose requests never need more than the method does.
-/// @return Nothing.
-template <typename Req>
-[[nodiscard]] constexpr std::optional<RequestGrant> noRequestGrant(Req const& /*request*/) noexcept
+struct RequestGrantRule
 {
-    return std::nullopt;
+    Permission permission = Permission::Read; ///< What must be granted as well.
+    std::string_view reason {}; ///< What the request does that needs it, e.g. `running a command`.
+    /// @return Whether @p request does what needs @ref permission.
+    bool (*appliesTo)(Req const& request) noexcept = nullptr;
+};
+
+/// @return Whether @p request names a command to run.
+/// @tparam Req A request with a `command` member.
+template <typename Req>
+[[nodiscard]] constexpr bool namesCommand(Req const& request) noexcept
+{
+    return !request.command.empty();
 }
 
 /// Running a program is typing it, so a request that names a command needs `input` beside the method's
 /// `write`: a token that may rearrange the workspace may not run what it likes in it.
 /// @tparam Req A request with a `command` member.
-/// @return `input` when @p request names a command.
 template <typename Req>
-[[nodiscard]] constexpr std::optional<RequestGrant> commandNeedsInput(Req const& request) noexcept
+inline constexpr auto CommandNeedsInput = RequestGrantRule<Req> {
+    .permission = Permission::Input,
+    .reason = "running a command",
+    .appliesTo = &namesCommand<Req>,
+};
+
+/// @return @p rule when @p request does what it guards, so needs its permission as well; otherwise nothing.
+template <typename Req>
+[[nodiscard]] constexpr std::optional<RequestGrantRule<Req>> requestGrantOf(
+    std::optional<RequestGrantRule<Req>> const& rule, Req const& request) noexcept
 {
-    if (request.command.empty())
-        return std::nullopt;
-    return RequestGrant { .permission = Permission::Input, .reason = "running a command" };
+    // A rule without a predicate never applies, rather than being called.
+    if (rule && rule->appliesTo != nullptr && rule->appliesTo(request))
+        return rule;
+    return std::nullopt;
 }
 
 /// One row of the method catalog.
@@ -148,14 +192,16 @@ struct Method
     using Request = Req;
     using Reply = Rep;
 
-    std::string_view name;            ///< The wire name, `noun.verb`.
-    std::string_view summary;         ///< A one-line summary.
-    Permission permission;            ///< What a connection must be granted.
-    Exposure exposure;                ///< Who may call it.
-    std::string_view requestExample;  ///< An example request; decodes as `Request`.
-    std::string_view responseExample; ///< An example reply; decodes as `Reply`.
-    /// What a request needs granted beyond @ref permission, decided by what it asks for.
-    RequestGrantRule<Req> requestGrant = &noRequestGrant<Req>;
+    std::string_view name;    ///< The wire name, `noun.verb`.
+    std::string_view summary; ///< A one-line summary.
+    // The defaults are the restrictive cases, so that a row forgetting either is closed rather than open.
+    Permission permission = Permission::Write; ///< What a connection must be granted.
+    Exposure exposure = Exposure::SocketOnly;  ///< Who may call it.
+    std::string_view requestExample;           ///< An example request; decodes as `Request`.
+    std::string_view responseExample;          ///< An example reply; decodes as `Reply`.
+    /// What a request may need granted beyond @ref permission, decided by what it asks for; nothing for a
+    /// method whose requests never need more than it does.
+    std::optional<RequestGrantRule<Req>> requestGrant = std::nullopt;
 };
 
 /// Every method of the control API, once.
@@ -183,7 +229,7 @@ inline constexpr auto Methods = std::tuple {
         Exposure::Everywhere,
         R"({"window":"","placement":"existing","cwd":"/tmp","command":["make","-j8"],"label":"build","focus":"keep"})",
         R"({"window":"window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab","tab":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ad"})",
-        &commandNeedsInput<CreateTabRequest>,
+        CommandNeedsInput<CreateTabRequest>,
     },
     Method<SplitRequest, SplitReply> {
         "pane.split",
@@ -192,7 +238,7 @@ inline constexpr auto Methods = std::tuple {
         Exposure::Everywhere,
         R"({"pane":"logs","direction":"below","ratioPercent":30,"cwd":"","command":[],"label":"tail","focus":"keep"})",
         R"({"tab":"tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ac","pane":"pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ae"})",
-        &commandNeedsInput<SplitRequest>,
+        CommandNeedsInput<SplitRequest>,
     },
     Method<SendRequest, SendReply> {
         "pane.send",

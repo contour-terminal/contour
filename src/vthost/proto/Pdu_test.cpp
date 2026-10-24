@@ -594,6 +594,32 @@ TEST_CASE("Proto.permissionPdu.roundtrip", "[vthost][proto][extensions]")
         CHECK(roundTrip(request) == request);
     }
 
+    SECTION("a request carries the control permissions it asks for")
+    {
+        auto const request = DecodedPdu { PermissionRequest { .session = 7,
+                                                              .hostId = "agent@/x.wasm",
+                                                              .name = "agent",
+                                                              .version = 1,
+                                                              .digest = "d1",
+                                                              .commands = {},
+                                                              .control = { "read", "input" } } };
+        CHECK(roundTrip(request) == request);
+    }
+
+    SECTION("an older sender's request, which ends before the control permissions, asks for none")
+    {
+        auto const request =
+            PermissionRequest { .session = 7,
+                                .hostId = "git@/x.wasm",
+                                .name = "git",
+                                .version = 1,
+                                .digest = "d1",
+                                .commands = { WireDeclaredCommand { .name = "status", .argv = { "git" } } },
+                                .control = {} };
+        // The empty list is one byte, its count.
+        CHECK(decodeAs<PermissionRequest>(encodeWithoutTrailingField(request, 1)) == request);
+    }
+
     SECTION("a reply carries each answer")
     {
         for (auto const state:

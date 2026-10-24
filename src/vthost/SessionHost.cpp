@@ -23,6 +23,7 @@
 #include <vthost/RerunPolicy.hpp>
 #include <vthost/SessionSettings.hpp>
 #include <vthost/TappingPty.hpp>
+#include <vthost/control/LoopControlBridge.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/PaneLayout.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -1260,6 +1261,17 @@ bool SessionHost::hasScreenMirrors() const noexcept
         _streamSubscribers, [](SessionStreamEvents const* observer) { return observer->mirrorsScreens(); });
 }
 
+void SessionHost::attachExtensionControl(vtcontrol::ControlApi* api)
+{
+    _extensionControl = *api;
+}
+
+void SessionHost::detachExtensionControl(vtcontrol::ControlApi* api)
+{
+    if (&_extensionControl.get() == api)
+        _extensionControl = vtcontrol::nullControlApi();
+}
+
 void SessionHost::unsubscribeStream(SessionStreamEvents* observer)
 {
     std::erase(_streamSubscribers, observer);
@@ -1416,6 +1428,30 @@ HostedSessionExtensions SessionHost::makeSessionExtensions(SessionId session)
             },
         // Runs from a job `post` hands to the loop, so only while the session is hosted.
         .onReplaced = [this, session] { extensionsReplaced(session); },
+        // Called on the extension's worker; served on the loop, as the session's pane, by whatever control
+        // API is attached when the call gets there.
+        .callControl =
+            [bridge =
+                 control::LoopControlBridge {
+                     _loop,
+                     [gate = _gate, hosted, session]() -> std::optional<control::ExtensionCaller> {
+                         if (!hosted())
+                             return std::nullopt;
+                         auto& host = *gate->host;
+                         auto const uuid = host._objects.uuidOf(session);
+                         if (!uuid)
+                             return std::nullopt;
+                         return control::ExtensionCaller {
+                             .api = host._extensionControl.get(),
+                             .pane = vtcontrol::toString(
+                                 vtcontrol::ObjectRef { .kind = vtcontrol::ObjectKind::Pane, .uuid = *uuid }),
+                         };
+                     } }](std::string_view method,
+                          std::string_view params,
+                          vtcontrol::ControlGrants granted,
+                          std::chrono::milliseconds timeout) {
+                return bridge.call(method, params, granted, timeout);
+            },
     };
     // A burst of frames costs the loop one repaint, not one per frame: the worker posts only while none is
     // pending, and the loop takes the flag down before it repaints, so a frame published meanwhile posts

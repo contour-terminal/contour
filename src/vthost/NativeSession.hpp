@@ -85,7 +85,8 @@ struct HandshakePolicy
                                                                    proto::Capability::InitialClientArea,
                                                                    proto::Capability::AttachIntent,
                                                                    proto::Capability::TabEdits,
-                                                                   proto::Capability::Heartbeat });
+                                                                   proto::Capability::Heartbeat,
+                                                                   proto::Capability::ControlPermissions });
 };
 
 /// The collaborators and policy a native connection is constructed with.
@@ -778,6 +779,17 @@ class NativeSession final: public SessionStreamEvents
     {
         return _negotiated.has_value()
                && _negotiated->shared.contains(proto::Capability::ExtensionPermissions);
+    }
+
+    /// Tells whether this client is asked @p request: it is asked permission questions, and, for one that
+    /// asks for control permissions, both ends offered proto::Capability::ControlPermissions -- a client
+    /// that would prompt without them is not asked, and the question waits for another.
+    /// @return true if @p request is to be sent.
+    [[nodiscard]] bool asks(proto::PermissionRequest const& request) const noexcept
+    {
+        return asksPermissions()
+               && (request.control.empty()
+                   || _negotiated->shared.contains(proto::Capability::ControlPermissions));
     }
 
     /// Flushes every pending increment at @p deadline, unless an earlier deadline superseded it by then.

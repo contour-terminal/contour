@@ -526,8 +526,19 @@ void ContourGuiApp::askHostedExtensions()
                          } };
     }
     for (auto& [pty, request]: _nativeController->takePermissionRequests())
-        if (auto* session = _sessionManager.sessionForPty(pty))
-            session->askForHostedExtension(vthost::client::consentRequestOf(request), *_daemonGrants);
+    {
+        auto* session = _sessionManager.sessionForPty(pty);
+        if (!session)
+            continue;
+        if (auto consent = vthost::client::consentRequestOf(request))
+            session->askForHostedExtension(std::move(*consent), *_daemonGrants);
+        else
+            // A newer daemon's permission this client cannot phrase: asking without it would have the
+            // user grant what they were not shown. Asked again on the next attach.
+            errorLog()("Extension {} asks for a control permission this version of Contour cannot show; "
+                       "not asking.",
+                       request.hostId);
+    }
 }
 #endif
 

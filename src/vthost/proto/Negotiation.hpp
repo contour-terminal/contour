@@ -52,6 +52,11 @@ enum class Capability : uint8_t
     /// persistence is on.
     WorkspaceRestore = 8,
     ControlApi = 9, ///< The peer serves ControlRequest, ControlReply and ControlEvent.
+    // 10 is ProgramStatus, which phase 7b allocates.
+    /// The peer shows a PermissionRequest's control permissions in its prompt. A daemon sends a question
+    /// that asks for any only to a client sharing it: one that would prompt without them would have its user
+    /// grant what they were never shown.
+    ControlPermissions = 11,
 };
 
 /// One row of the table naming a Capability.
@@ -72,6 +77,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::Heartbeat, .name = "heartbeat" },
     CapabilityRow { .capability = Capability::WorkspaceRestore, .name = "workspace-restore" },
     CapabilityRow { .capability = Capability::ControlApi, .name = "control-api" },
+    CapabilityRow { .capability = Capability::ControlPermissions, .name = "control-permissions" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

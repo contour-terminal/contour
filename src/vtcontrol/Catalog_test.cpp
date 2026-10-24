@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cctype>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -60,4 +61,23 @@ TEST_CASE("permissions and exposures are spelled by their tables", "[vtcontrol][
     CHECK(vtcontrol::nameOf(vtcontrol::Permission::Screen) == "screen");
     CHECK(vtcontrol::enumFromName<vtcontrol::Permission>("write") == vtcontrol::Permission::Write);
     CHECK_FALSE(vtcontrol::enumFromName<vtcontrol::Permission>("admin"));
+}
+
+TEST_CASE("a catalog row's defaults are closed", "[vtcontrol][catalog]")
+{
+    // A row forgetting its permission or exposure is the strictest, not callable by every extension.
+    constexpr auto DefaultRow =
+        vtcontrol::Method<vtcontrol::DaemonInfoRequest, vtcontrol::DaemonInfoReply> {};
+    STATIC_REQUIRE(DefaultRow.permission == vtcontrol::Permission::Write);
+    STATIC_REQUIRE(DefaultRow.exposure == vtcontrol::Exposure::SocketOnly);
+}
+
+TEST_CASE("a request-grant rule without a predicate never applies", "[vtcontrol][catalog]")
+{
+    auto const rule = std::optional { vtcontrol::RequestGrantRule<vtcontrol::CreateTabRequest> {
+        .permission = vtcontrol::Permission::Input, .reason = "nothing", .appliesTo = nullptr } };
+    CHECK_FALSE(vtcontrol::requestGrantOf(rule, vtcontrol::CreateTabRequest {}));
+    CHECK(
+        vtcontrol::requestGrantOf(std::optional { vtcontrol::CommandNeedsInput<vtcontrol::CreateTabRequest> },
+                                  vtcontrol::CreateTabRequest { .command = { "make" } }));
 }

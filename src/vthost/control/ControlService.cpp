@@ -152,7 +152,8 @@ ControlService::ControlService(SessionHost& host, ControlServiceConfig config):
     _hub(_config.maxSubscriptionsPerConnection),
     _waiters(_config.maxWaitsPerConnection),
     _streamSubscription(makeScopedStreamSubscription(host, *this)),
-    _modelSubscription(makeScopedModelSubscription(host, *this))
+    _modelSubscription(makeScopedModelSubscription(host, *this)),
+    _extensionControl(makeScopedExtensionControl(host, *this))
 {
 }
 

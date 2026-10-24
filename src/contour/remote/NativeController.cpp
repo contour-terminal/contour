@@ -87,13 +87,16 @@ std::unique_ptr<NativeClient> NativeController::makeClient(core::net::EventLoop&
             .sessionSettings =
                 _attachSettings.transform([](auto const& s) { return vthost::toWireSessionSettings(s); }),
             // ExtensionPermissions is offered because this client passes a PermissionHandler below: its
-            // panes ask the user. InitialClientArea because the hello states the area below. AttachIntent so
-            // that the daemon names the windows a reconnect resumes, Heartbeat so that a connection gone
-            // half-open is noticed and replaced. ProfileByName because the hello and every spawning verb
-            // name a profile for the daemon to resolve in its own configuration. TabEdits because the user's
-            // changes to a tab's presentation are reported (reportTabPresentation).
+            // panes ask the user, ControlPermissions because their prompt lists the control permissions a
+            // question asks for (vthost::client::consentRequestOf). InitialClientArea because the hello
+            // states the area below. AttachIntent so that the daemon names the windows a reconnect resumes,
+            // Heartbeat so that a connection gone half-open is noticed and replaced. ProfileByName because
+            // the hello and every spawning verb name a profile for the daemon to resolve in its own
+            // configuration. TabEdits because the user's changes to a tab's presentation are reported
+            // (reportTabPresentation).
             .capabilities =
                 vthost::proto::CapabilitySet::of({ vthost::proto::Capability::ExtensionPermissions,
+                                                   vthost::proto::Capability::ControlPermissions,
                                                    vthost::proto::Capability::InitialClientArea,
                                                    vthost::proto::Capability::AttachIntent,
                                                    vthost::proto::Capability::Heartbeat,

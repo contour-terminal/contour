@@ -430,7 +430,7 @@ void NativeSession::sessionPermissionRequested(SessionId session, proto::Permiss
 {
     // A question is asked in its pane: one in a window this client does not show waits for a client that
     // does.
-    if (!asksPermissions() || _closed || !followsSession(session))
+    if (!asks(request) || _closed || !followsSession(session))
         return;
     send(0, proto::DecodedPdu { request });
 }
@@ -1918,10 +1918,9 @@ void NativeSession::attachClient(uint64_t serial,
     // a dismissed prompt sends nothing. A status-line extension waits for an answer, its command calls
     // failing as pending meanwhile. A client is sent each once, as it opens or as the client attaches --
     // one that cannot answer is sent none, and they wait for another, as with no client attached.
-    if (asksPermissions())
-        for (auto const& request: _host.pendingPermissionRequests())
-            if (followsSession(SessionId { request.session }))
-                send(0, proto::DecodedPdu { request });
+    for (auto const& request: _host.pendingPermissionRequests())
+        if (asks(request) && followsSession(SessionId { request.session }))
+            send(0, proto::DecodedPdu { request });
 }
 
 void NativeSession::executeAttachPlan(proto::AttachIntent const& intent)

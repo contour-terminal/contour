@@ -142,6 +142,42 @@ TEST_CASE("Manifest.noCommands", "[vtextension]")
     CHECK(result->commands.empty());
 }
 
+TEST_CASE("manifest control lines", "[vtextension][manifest][control]")
+{
+    using vtcontrol::Permission;
+    auto const result =
+        parseManifest(moduleWith("name = agent\nversion = 1\ncontrol read\ncontrol  input \n"sv));
+    REQUIRE(result.has_value());
+    CHECK(result->control == std::vector { Permission::Read, Permission::Input });
+    CHECK(result->commands.empty());
+
+    auto const none = parseManifest(moduleWith(Example));
+    REQUIRE(none.has_value());
+    CHECK(none->control.empty());
+
+    auto const text = GENERATE(as<std::string_view> {},
+                               "name = a\nversion = 1\ncontrol fly\n",
+                               "name = a\nversion = 1\ncontrol read\ncontrol read\n",
+                               "name = a\nversion = 1\ncontrol\n",
+                               "name = a\nversion = 1\ncontrol read write\n",
+                               "name = a\nversion = 1\ncontrol = read\n",
+                               "name = a\nversion = 1\ncontrol Read\n");
+    CAPTURE(text);
+    auto const invalid = parseManifest(moduleWith(text));
+    REQUIRE_FALSE(invalid.has_value());
+    CHECK(invalid.error() == ExtensionError::ManifestInvalid);
+}
+
+TEST_CASE("manifest control lines change the digest", "[vtextension][manifest][control]")
+{
+    // A grant is bound to the digest, so declaring a new permission asks again.
+    auto const before = parseManifest(moduleWith(Example));
+    auto const after = parseManifest(moduleWith(std::string(Example) + "control write\n"));
+    REQUIRE(before.has_value());
+    REQUIRE(after.has_value());
+    CHECK(before->digest != after->digest);
+}
+
 TEST_CASE("Manifest.missing", "[vtextension]")
 {
     SECTION("no sections at all")

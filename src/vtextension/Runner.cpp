@@ -335,6 +335,39 @@ class Runner::Core final: public IHostServices, public std::enable_shared_from_t
                 .transform_error(commandError);
         });
     }
+
+    [[nodiscard]] GrantState controlConsent() override
+    {
+        // No manifest declares nothing, which the import refuses before it asks.
+        if (!_policy)
+            return GrantState::Denied;
+        // Where no control API is served there is nothing to consent to: every verb answers `unsupported`,
+        // and the user is not asked to grant what nothing here can do.
+        if (!_services.callControl)
+            return GrantState::Granted;
+        auto const consent = _policy->controlConsent();
+        if (consent == GrantState::Pending)
+            askPermissionOnce();
+        return consent;
+    }
+
+    [[nodiscard]] std::expected<std::string, vtcontrol::ControlError> callControl(
+        std::string_view method,
+        std::string_view paramsJson,
+        vtcontrol::ControlGrants granted,
+        std::chrono::milliseconds timeout) override
+    {
+        // Copied through the gate, called outside it: the call blocks until the host answers, and the host
+        // may destroy this Runner before it does -- an extension closing its own pane -- whose destructor
+        // must not wait for the answer it is itself delaying. The copy needs nothing of the Runner to run.
+        auto call = decltype(_services.callControl) {};
+        throughGate([&] { call = _services.callControl; });
+        if (!call)
+            return std::unexpected(vtcontrol::ControlError { .code = vtcontrol::ControlErrorCode::Unsupported,
+                                                             .message = "the control API is not served here",
+                                                             .candidates = {} });
+        return call(method, paramsJson, granted, timeout);
+    }
     // }}}
 
   private:
@@ -381,7 +414,9 @@ class Runner::Core final: public IHostServices, public std::enable_shared_from_t
 
     void setState(RunnerState state) noexcept { _state.store(state, std::memory_order_release); }
 
-    /// Calls @p callback unless the Runner is gone; the Runner's destructor waits for it.
+    /// Calls @p callback unless the Runner is gone; the Runner's destructor waits for it. @p callback must
+    /// therefore never wait on the Runner's owner, which may be in that destructor: callControl() is the
+    /// one callback that waits, and is called outside the gate.
     template <typename Callback>
     void throughGate(Callback const& callback)
     {

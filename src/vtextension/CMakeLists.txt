@@ -9,6 +9,7 @@ set(vtextension_SOURCES
     CommandLine.cpp
     CommandPolicy.cpp
     CompiledExtension.cpp
+    ControlImports.cpp
     Engine.cpp
     EventQueue.cpp
     ExtensionComposition.cpp
@@ -32,6 +33,8 @@ set(vtextension_HEADERS
     CommandLine.hpp
     CommandPolicy.hpp
     CompiledExtension.hpp
+    ControlCodec.hpp
+    ControlImports.hpp
     DeadlineGuard.hpp
     Engine.hpp
     Event.hpp
@@ -69,7 +72,10 @@ target_include_directories(vtextension PUBLIC
 )
 # vtpty for PageSize, the render call's surface size, and the CommandCapture extensions run commands through;
 # vtbackend for the Surface's private terminal; core::async for the thread a session's modules are loaded on.
-target_link_libraries(vtextension PUBLIC vtbackend vtpty core::async core::base core::log core::platform)
+target_link_libraries(vtextension PUBLIC vtbackend vtcontrol vtpty core::async core::base core::log core::platform)
+# Private, as in vtcontrol: ControlCodec.hpp reflects the control vocabulary through glaze, and it is included
+# from vtextension's .cpp files only. vtextension_public_headers_test below pins that no public header leaks it.
+target_link_libraries(vtextension PRIVATE glaze::glaze)
 
 option(VTEXTENSION_TESTING "Enables building of unittests for vtextension [default: ON]" ${CONTOUR_TESTING})
 if(VTEXTENSION_TESTING)
@@ -82,6 +88,8 @@ if(VTEXTENSION_TESTING)
         CanonicalAbi_test.cpp
         CommandLine_test.cpp
         CommandPolicy_test.cpp
+        ControlCodec_test.cpp
+        ControlImports_test.cpp
         DeadlineGuard_test.cpp
         Engine_test.cpp
         EventQueue_test.cpp
@@ -99,6 +107,7 @@ if(VTEXTENSION_TESTING)
         StatusLineAdapter_test.cpp
         Surface_test.cpp
         Wit_test.cpp
+        testing/FakeGuestMemory.hpp
         testing/FakeWasmBackend.hpp
         testing/Harness.hpp
         testing/LaneReport.hpp
@@ -139,7 +148,14 @@ if(VTEXTENSION_TESTING)
         message(STATUS "[vtextension] CONTOUR_EXTENSIONS_BUNDLED is OFF: the Rust-guest test cases are compiled out, and SKIP.")
     endif()
     # The tests run real guests, so they link the selected backend; its own tests are added by its directory.
-    target_link_libraries(vtextension_test PRIVATE vtextension_runtime core::testing Catch2::Catch2)
+    target_link_libraries(vtextension_test PRIVATE vtextension_runtime glaze::glaze core::testing Catch2::Catch2)
+
+    # Compiles the headers other modules include (the GUI, vthost) without glaze on the include path: a public
+    # header that pulled in ControlCodec.hpp, or anything else naming glaze, fails to build here, as it would in
+    # the GUI. Built with vtextension_test, so that its suite cannot pass with such a leak.
+    add_library(vtextension_public_headers_test OBJECT testing/PublicHeaders.cpp)
+    target_link_libraries(vtextension_public_headers_test PRIVATE vtextension)
+    add_dependencies(vtextension_test vtextension_public_headers_test)
     add_test(NAME vtextension_test COMMAND $<TARGET_FILE:vtextension_test>)
 
     if(NOT WIN32)

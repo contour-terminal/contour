@@ -259,6 +259,7 @@ namespace
         std::optional<std::string> name;
         std::optional<uint32_t> version;
         std::vector<DeclaredCommand> commands;
+        std::vector<vtcontrol::Permission> control;
     };
 
     /// What a line does to the parse: nothing, or the reason the manifest is invalid.
@@ -325,6 +326,27 @@ namespace
         return {};
     }
 
+    /// The keyword of the line `control <permission>`, the one kind of line without a value.
+    constexpr auto ControlKeyword = std::string_view("control");
+
+    [[nodiscard]] LineResult addControl(ParseState& state, std::string_view name)
+    {
+        auto const permission = vtcontrol::enumFromName<vtcontrol::Permission>(name);
+        if (!permission || std::ranges::contains(state.control, *permission))
+            return invalid();
+        state.control.push_back(*permission);
+        return {};
+    }
+
+    /// Applies a line without `=`: only `control <permission>` is one.
+    [[nodiscard]] LineResult applyBareLine(ParseState& state, std::string_view line)
+    {
+        auto const parts = words(line);
+        if (parts.size() == 2 && parts.front() == ControlKeyword)
+            return addControl(state, parts.back());
+        return invalid();
+    }
+
     [[nodiscard]] LineResult applyLine(ParseState& state, Line const& line)
     {
         if (line.key.size() == 1)
@@ -352,9 +374,8 @@ namespace
             if (line.empty() || line.starts_with('#'))
                 continue;
             auto const parsed = splitLine(line);
-            if (!parsed)
-                return std::unexpected(ExtensionError::ManifestInvalid);
-            if (auto const applied = applyLine(state, *parsed); !applied)
+            if (auto const applied = parsed ? applyLine(state, *parsed) : applyBareLine(state, line);
+                !applied)
                 return std::unexpected(applied.error());
         }
         if (!state.name || !state.version)
@@ -362,6 +383,7 @@ namespace
         return Manifest { .name = *std::move(state.name),
                           .version = *state.version,
                           .commands = std::move(state.commands),
+                          .control = std::move(state.control),
                           .digest = {} };
     }
 

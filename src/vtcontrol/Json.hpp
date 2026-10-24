@@ -90,14 +90,15 @@ struct glz::meta<E> // NOLINT(readability-identifier-naming)
 {
     static_assert(vtcontrol::enumTableIsOrdered<E>(), "EnumTable rows must be in enumerator order from 0");
 
-    // Glaze's `enumerate` takes alternating name and value arguments.
+    // Glaze's `enumerate` takes alternating name and value arguments; glaze finds the member by its spelling.
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr auto value = []<std::size_t... Index>(std::index_sequence<Index...>) {
-        constexpr auto const& rows = vtcontrol::EnumTable<E>::Rows;
+        constexpr auto const& Rows = vtcontrol::EnumTable<E>::Rows;
         return glz::enumerate([&]() constexpr {
             if constexpr (Index % 2 == 0)
-                return rows[Index / 2].name;
+                return Rows[Index / 2].name;
             else
-                return rows[Index / 2].value;
+                return Rows[Index / 2].value;
         }()...);
     }(std::make_index_sequence<vtcontrol::EnumTable<E>::Rows.size() * 2> {});
 };

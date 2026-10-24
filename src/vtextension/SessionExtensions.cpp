@@ -186,7 +186,8 @@ void SessionExtensions::adopt(uint64_t generation,
                                                      .retirement = services.retirement,
                                                      .onSnapshotPublished = publisherFor(_published),
                                                      .onPermissionNeeded = _callbacks.onPermissionNeeded,
-                                                     .onLog = _callbacks.onLog } }));
+                                                     .onLog = _callbacks.onLog,
+                                                     .callControl = _callbacks.callControl } }));
 }
 
 void SessionExtensions::install(std::shared_ptr<HostedExtensions> next)

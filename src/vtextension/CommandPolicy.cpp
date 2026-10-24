@@ -105,4 +105,11 @@ std::expected<std::vector<std::string>, ExtensionError> CommandPolicy::resolve(
     return fillAll(declared->argvTemplate, args);
 }
 
+GrantState CommandPolicy::controlConsent() const
+{
+    if (_configured == CommandPermission::Deny)
+        return GrantState::Denied;
+    return _store.lookup(_hostId, _manifest.digest);
+}
+
 } // namespace vtextension

@@ -43,13 +43,13 @@ concept HasEnumTable = std::is_enum_v<E> && requires { EnumTable<E>::Rows; };
 template <HasEnumTable E>
 [[nodiscard]] constexpr bool enumTableIsOrdered() noexcept
 {
-    constexpr auto const& rows = EnumTable<E>::Rows;
-    for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
+    constexpr auto const& Rows = EnumTable<E>::Rows;
+    for (auto const index: std::views::iota(std::size_t { 0 }, Rows.size()))
     {
-        if (static_cast<std::size_t>(rows[index].value) != index)
+        if (static_cast<std::size_t>(Rows[index].value) != index)
             return false;
-        for (auto const other: std::views::iota(index + 1, rows.size()))
-            if (rows[index].name == rows[other].name)
+        for (auto const other: std::views::iota(index + 1, Rows.size()))
+            if (Rows[index].name == Rows[other].name)
                 return false;
     }
     return true;
@@ -61,9 +61,9 @@ template <HasEnumTable E>
 [[nodiscard]] constexpr std::string_view nameOf(E value) noexcept
 {
     static_assert(enumTableIsOrdered<E>(), "EnumTable rows must be in enumerator order from 0");
-    constexpr auto const& rows = EnumTable<E>::Rows;
+    constexpr auto const& Rows = EnumTable<E>::Rows;
     auto const index = static_cast<std::size_t>(value);
-    return index < rows.size() ? rows[index].name : std::string_view {};
+    return index < Rows.size() ? Rows[index].name : std::string_view {};
 }
 
 /// @param name A wire spelling.

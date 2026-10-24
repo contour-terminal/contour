@@ -90,6 +90,12 @@ class CommandPolicy
     [[nodiscard]] std::expected<std::vector<std::string>, ExtensionError> resolve(
         std::string_view name, std::span<std::pair<std::string, std::string> const> args) const;
 
+    /// Tells whether the extension may use the control permissions its manifest declares. The same answer
+    /// as its commands', bound to the same digest, with one difference: `Allow` pre-approves commands only.
+    /// Control reaches past the extension's own pane, so it is never granted without the user's answer.
+    /// @return `Denied` when the configuration says `Deny`; otherwise the store's answer.
+    [[nodiscard]] GrantState controlConsent() const;
+
   private:
     Manifest _manifest;
     std::string _hostId;
