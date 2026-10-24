@@ -37,17 +37,16 @@ sections it cites: §2.6 (testing strategy) and §2.1 (rows). Visual design reco
 
 ## Status board and handoff (every step)
 
-This run is tracked on a private status board, a page published from the untracked `STATUS.md` at
-the root of the working tree.
+This run is tracked on a private status board, a page published from an untracked file at the root of the working tree.
 - **Find it** with `/status-board` in this worktree. The skill reads the remembered URL from the
   git dir (`status_page.py --url`). The URL is not written here: the board is private and this
   file is public.
 - **Every agent that continues this work updates the board, using `/status-board update`.** Do it
   in the same turn as each state change: a step or task started, in review, committed, landed,
   blocked or unblocked, a plan written, or a ruling.
-- A different worktree has a board of its own. Never write to another worktree's `STATUS.md`.
+- A different worktree has a board of its own. Never write to another worktree's board.
   Report to the session that owns the board instead.
-- If this worktree has no `STATUS.md`, ask the owner rather than creating a second board.
+- If this worktree has no board, ask the owner rather than creating a second board.
 
 ## Global Constraints
 
