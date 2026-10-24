@@ -82,6 +82,23 @@ fi
 grep -q "token" "$OUT/no-token.txt" \
     || fail "the --listen-tcp rejection does not mention the missing token"
 
+# An access file is checked before anything binds: a bad grant names its line, and the option alone
+# narrows nothing.
+printf 'read,fly t0ken\n' > "$OUT/bad-access"
+if timeout 10 "$CONTOUR" daemon --socket "$SOCKET" --listen-tcp 127.0.0.1:9099 \
+        --access-file "$OUT/bad-access" > "$OUT/bad-access.txt" 2>&1; then
+    fail "a malformed --access-file unexpectedly started a daemon"
+fi
+grep -q "line 1" "$OUT/bad-access.txt" \
+    || fail "the --access-file rejection does not name the offending line"
+printf 'read,screen t0ken\n' > "$OUT/access"
+if timeout 10 "$CONTOUR" daemon --socket "$SOCKET" --access-file "$OUT/access" \
+        > "$OUT/access-alone.txt" 2>&1; then
+    fail "--access-file without --listen-tcp unexpectedly started a daemon"
+fi
+grep -q "listen-tcp" "$OUT/access-alone.txt" \
+    || fail "the --access-file rejection does not name --listen-tcp"
+
 [ -e "$SOCKET" ] && fail "a refused daemon left a socket behind at $SOCKET"
 
 # --- A daemon binds its socket ---------------------------------------------------------------

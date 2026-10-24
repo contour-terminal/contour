@@ -77,11 +77,14 @@ using namespace std::chrono_literals;
 namespace
 {
 
-/// @param token The preshared token each connection must present.
+/// @param token The preshared token each connection must present; empty for none.
 /// @return The services of a native endpoint guarded by @p token.
 vthost::NativeSessionServices tokenGuarded(std::string token)
 {
-    return vthost::NativeSessionServices { .handshake = { .expectedToken = std::move(token) } };
+    if (token.empty())
+        return vthost::NativeSessionServices {};
+    return vthost::NativeSessionServices { .handshake = {
+                                               .acceptedTokens = { { .token = std::move(token) } } } };
 }
 
 /// The full server<->client pair over one in-memory socket: the REAL

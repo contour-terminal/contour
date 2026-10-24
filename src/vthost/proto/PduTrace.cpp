@@ -389,6 +389,33 @@ namespace
             PduType::Heartbeat,
             "Heartbeat",
             +[](DecodedPdu const& pdu) { return std::format("nonce={}", std::get<Heartbeat>(pdu).nonce); } },
+        // The call's text is sized, never transcribed: params, bodies and events can hold pane text.
+        TraceRow { PduType::ControlRequest,
+                   "ControlRequest",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<ControlRequest>(pdu);
+                       return std::format("id={} method={} params={}B context={}B",
+                                          value.requestId,
+                                          value.method,
+                                          value.params.size(),
+                                          value.context.size());
+                   } },
+        TraceRow { PduType::ControlReply,
+                   "ControlReply",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<ControlReply>(pdu);
+                       return std::format("id={} {} body={}B",
+                                          value.requestId,
+                                          value.outcome == ControlOutcome::Ok ? "ok" : "error",
+                                          value.body.size());
+                   } },
+        TraceRow { PduType::ControlEvent,
+                   "ControlEvent",
+                   +[](DecodedPdu const& pdu) {
+                       auto const& value = std::get<ControlEvent>(pdu);
+                       return std::format(
+                           "subscription={} event={}B", value.subscription, value.event.size());
+                   } },
     };
 
     static_assert(TraceTable.size() == std::variant_size_v<DecodedPdu>,

@@ -89,6 +89,14 @@ namespace detail
     return TransportRetry::Permanent;
 }
 
+/// Whether a transport proves who is at the other end, before a client sends it a token.
+enum class PeerTrust : uint8_t
+{
+    Unverified = 0, ///< Encrypted, but the peer is not authenticated: TLS without a trust anchor.
+    Verified,       ///< The peer proved its identity: TLS against a pinned CA, or ssh's host key.
+    Local,          ///< This machine's socket, gated by its owner and permissions.
+};
+
 /// One open connection to a daemon.
 struct Connection
 {
@@ -113,6 +121,10 @@ class ITransportFactory
 
     /// @return Where this factory connects to, for log lines and failure messages.
     [[nodiscard]] virtual std::string describe() const = 0;
+
+    /// @return Whether the peer is authenticated, known before connecting: a control client refuses an
+    ///         Unverified transport, as an active man-in-the-middle would take its token.
+    [[nodiscard]] virtual PeerTrust peerTrust() const noexcept = 0;
 };
 
 /// The local daemon over its AF_UNIX socket.
@@ -132,6 +144,9 @@ class UnixTransportFactory final: public ITransportFactory
 
     /// @return `unix:<socketPath>`.
     [[nodiscard]] std::string describe() const override;
+
+    /// @return Local: the socket's owner check is the gate.
+    [[nodiscard]] PeerTrust peerTrust() const noexcept override { return PeerTrust::Local; }
 
   private:
     /// The connect itself: a coroutine takes the loop by pointer, as its reference would outlive the call.
@@ -155,6 +170,12 @@ class TlsTransportFactory final: public ITransportFactory
 
     /// @return `tls://host:port`.
     [[nodiscard]] std::string describe() const override;
+
+    /// @return Verified when the endpoint pins a CA, else Unverified (trust on first use encrypts only).
+    [[nodiscard]] PeerTrust peerTrust() const noexcept override
+    {
+        return _endpoint.caPem.empty() ? PeerTrust::Unverified : PeerTrust::Verified;
+    }
 
   private:
     /// The connect itself: a coroutine takes the loop by pointer, as its reference would outlive the call.

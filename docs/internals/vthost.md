@@ -824,6 +824,81 @@ next, restarts each pane's mirror for the new connection's snapshots, and report
 (`windowsLost`) with the first window that came instead, so it can close them without closing the last
 one.
 
+### Control channel
+
+The daemon's control API (`src/vtcontrol`: windows, tabs, panes and command blocks, named by UUID,
+spoken in strict JSON) travels on the native connection, not on a listener of its own, so it inherits
+that endpoint's whole access rule and phase 5's `--stdio` relay. A caller connects with the
+**Control** role, which never views: no first session is spawned for it, it is sent no layout, no
+snapshot and no screen, it reports no client area and counts as no client. A connection's
+`NativeSession::ConnectionPhase` (`AwaitingHello`, `Viewing`, `Controlling`) is the one state the
+accepted hello decides; what was negotiated with it stays in `negotiated()`.
+
+Three PDUs carry it, gated on `Capability::ControlApi` (`control-api`, 9):
+
+| PDU | Tag | Direction | Carries |
+| --- | --- | --- | --- |
+| `ControlRequest` | 30 | client → daemon | `requestId`, the method, the params JSON, the caller's `$CONTOUR_PANE` |
+| `ControlReply` | 31 | daemon → client | the same serial and `requestId`, `Ok` with the reply JSON or `Error` with a `ControlError` |
+| `ControlEvent` | 32 | daemon → client | a subscription id and one event's JSON |
+
+A `ControlRequest` on a connection that does not share the capability, or on a `Viewing` one, is
+answered `Unsupported` for its serial and the connection stays open. Otherwise
+`vtcontrol::dispatch` serves it through `NativeSessionServices::control` — the daemon's
+`control::ControlService`, an embedded host's null object that answers every call `unsupported` —
+and the reply goes out once the call completes, at once or, for a wait, later. A Control connection
+keeps the status and stop verbs of the role (`DaemonStatusRequest`, `StopDaemon`), whether or not it
+shares the API, and is answered `Unsupported` for everything else.
+
+`ControlService` runs on the loop thread. What a session's parser raises — a finished or changed
+command block, a title, a working directory — the host posts to the loop as a `SessionSignal`
+before any observer hears of it, so subscriptions (`EventHub`) and waits (`BlockWaiters`) are never
+touched off the loop, and a terminal is only read under its lock.
+
+**The reply bound.** Pane text — a capture, a block's prompt and output — is cut to
+`ControlServiceConfig::maxReplyBytes`, a quarter of a connection's send-queue bound in the daemon,
+keeping its tail (`"truncated":"head"`), so one reply always fits beside a backlog and a pane with a
+huge scrollback never costs the connection. Every byte a pane printed is made valid UTF-8 and every
+control character escaped, so the JSON stays valid whatever the pane holds.
+
+**Event backpressure.** An event is not queued while the connection's backlog is past half its
+send-queue bound: a per-subscription counter grows instead, and the next event that fits is preceded
+by `events.dropped { count }`. A subscriber that stops reading therefore costs the daemon bounded
+memory and loses events, never the connection, and no viewer is affected. What a connection may hold is bounded
+too: `ControlServiceConfig::maxSubscriptionsPerConnection` (64) subscriptions and
+`maxWaitsPerConnection` (256) pending `block.wait`s and `pane.send` waits; one more is answered
+`limitReached` and the connection stays open, a `pane.send` refused so typing nothing. Ending a
+subscription frees its place and its dropped-event counter (`EventSink::subscriptionEnded`); a
+connection's close frees its whole share. When a connection ends, its
+subscriptions and waits are dropped (`ControlApi::sinkClosed`) before it lets go of itself; an
+`Attach` connection's coming and going is published as `client.attached`/`client.detached`, beside
+`SessionHost::noteClientAttached`/`noteClientDetached`, so the events and `connectedClients()` agree.
+
+**Grants.** Every catalog row names a `vtcontrol::Permission` — `read`, `screen`, `input` or
+`write` — and a connection holds a `vtcontrol::ControlGrants` set, decided in the handshake with its
+token: `HandshakePolicy::acceptedTokens` lists the tokens an endpoint takes, each an `AcceptedToken`
+with its grants. The unix endpoint lists none, so any hello is taken with all four, the socket's
+owner check being the gate; a connection phase 5's `--stdio` relay carries arrives on that socket and
+holds all four too, ssh having authenticated it. The TCP endpoint lists `--token`/`--token-file`
+(everything) and the entries of `--access-file` (`AccessFile.hpp`), and a hello holds the grants of
+the first token it equals. `vtcontrol::dispatch` answers a row outside the grants `forbidden`
+(`needs grant 'input'`) without calling the handler, a typed `ControlReply` and not a closed
+connection. A row may also name a `requestGrant` rule, which decides from the decoded request what it
+needs beyond the row's permission: `tab.create` and `pane.split` need `input` beside `write` when they
+name a `command` (`commandNeedsInput`), since running a program is typing it. Each `EventRow` names a permission as
+well (`block.finished` needs `screen`, every other kind `read`): `events.subscribe` narrows the kinds
+it is given, or every kind, to those the grants allow, and refuses one that names only forbidden kinds. The role's own verbs are gated alike: `DaemonStatusRequest` needs `read`, `StopDaemon`
+`write`, and without it they are answered `Unsupported`, the daemon logging why. A narrow token is
+for Control connections only: an `Attach` hello whose token lacks any grant is answered with the very
+bytes of a wrong token (`token lacks the grants an attach connection needs (has read,screen)` in the
+daemon's log), before it is counted or spawns a session.
+
+**Verified transports.** `ITransportFactory::peerTrust()` says before connecting whether the peer is
+authenticated: `Local` for the unix socket, `Verified` for TLS against a pinned CA (`--tls-ca`) and
+for ssh, which checks the host key, and `Unverified` for TLS without a trust anchor, which encrypts
+but would hand the token to an active machine-in-the-middle. A control client refuses an `Unverified`
+transport before it connects; the interactive `contour client` keeps attaching over it.
+
 ### Who configures a daemon session
 
 The host's configuration owns what runs; the client's owns how it looks. A client names a

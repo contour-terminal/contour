@@ -1,4 +1,6 @@
 add_library(vthost STATIC
+    AccessFile.cpp
+    AccessFile.hpp
     AttachPlan.cpp
     AttachPlan.hpp
     ClientCensus.hpp
@@ -49,6 +51,8 @@ add_library(vthost STATIC
     ConnectionAcceptor.hpp
     NativeSession.cpp
     NativeSession.hpp
+    ObjectRegistry.cpp
+    ObjectRegistry.hpp
     PduPump.hpp
     SessionHost.cpp
     SessionHost.hpp
@@ -90,8 +94,18 @@ add_library(vthost STATIC
     client/ClientSupervisor.cpp
     client/ClientSupervisor.hpp
     client/ConnectionState.hpp
+    client/ControlClient.cpp
+    client/ControlClient.hpp
     client/DaemonControlClient.cpp
     client/DaemonControlClient.hpp
+    control/BlockWaiters.cpp
+    control/BlockWaiters.hpp
+    control/ControlService.cpp
+    control/ControlService.hpp
+    control/EventHub.cpp
+    control/EventHub.hpp
+    control/PaneText.cpp
+    control/PaneText.hpp
     client/DaemonRestart.cpp
     client/DaemonRestart.hpp
     client/ReleaseDrift.cpp
@@ -154,6 +168,7 @@ add_library(vthost STATIC
     tmux/TmuxGateway.hpp
 )
 target_link_libraries(vthost PUBLIC
+    vtcontrol
     core::async
     core::base
     core::log
@@ -166,6 +181,9 @@ target_link_libraries(vthost PUBLIC
 )
 # The daemon serves, and the client dials, TLS; no header of vthost's names it.
 target_link_libraries(vthost PRIVATE core::net_tls)
+# The control API's JSON (vtcontrol/Json.hpp), read and written in .cpp files only: no header of vthost's
+# names glaze either.
+target_link_libraries(vthost PRIVATE glaze::glaze)
 if(WIN32)
     # The Task Scheduler 2.0 backend of ServiceControl is COM (taskschd), hence ole32/oleaut32
     # for the apartment and the BSTR/VARIANT allocators.
@@ -192,11 +210,13 @@ if(VTHOST_TESTING)
     enable_testing()
     add_executable(vthost_test
         test_main.cpp
+        AccessFile_test.cpp
         AttachPlan_test.cpp
         TabEdits_test.cpp
         GracefulClose_test.cpp
         HostIdentity_test.cpp
         LoopDrain_test.cpp
+        ObjectRegistry_test.cpp
         SessionHost_test.cpp
         FlushPolicy_test.cpp
         SessionSettings_test.cpp
@@ -256,7 +276,11 @@ if(VTHOST_TESTING)
         testing/StagingFileSystem.hpp
         testing/TestHelpers.hpp
         client/ClientSupervisor_test.cpp
+        client/ControlClient_test.cpp
         client/DaemonControlClient_test.cpp
+        control/ControlService_test.cpp
+        control/EventHub_test.cpp
+        control/PaneText_test.cpp
         client/DaemonRestart_test.cpp
         client/ReleaseDrift_test.cpp
         client/Liveness_test.cpp
@@ -286,7 +310,7 @@ if(VTHOST_TESTING)
         tmux/TmuxClientModel_test.cpp
         tmux/TmuxGateway_test.cpp
     )
-    target_link_libraries(vthost_test vthost core::net_tls core::testing Catch2::Catch2)
+    target_link_libraries(vthost_test vthost core::net_tls glaze::glaze core::testing Catch2::Catch2)
     # vthost links no WebAssembly runtime; its tests compose one, as `contour daemon` does.
     if(CONTOUR_EXTENSIONS)
         target_link_libraries(vthost_test vtextension_runtime)

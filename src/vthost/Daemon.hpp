@@ -26,6 +26,7 @@
 #include <variant>
 #include <vector>
 
+#include <vthost/AccessFile.hpp>
 #include <vtworkspace/LayoutTree.hpp>
 // Supplies DaemonConfig::settings' default, plus DefaultSessionHistoryLineCount and
 // defaultSessionSettings(), which used to be DECLARED here. They moved down because SessionHost.h
@@ -51,13 +52,22 @@ struct NativeTcpListenerConfig
 {
     std::string host = "127.0.0.1"; ///< Bind address; loopback by default.
     std::uint16_t port = 0;         ///< TCP port (0 = OS-assigned ephemeral).
-    std::string token;              ///< Preshared token required of every client.
+    std::string token;              ///< Preshared token required of every client; empty for none.
+    /// Further preshared tokens, from `--access-file`, each with the control API grants it carries; a
+    /// client presents @ref token or one of these. @see acceptedTokensOf
+    std::vector<AcceptedToken> accessTokens {};
     /// PEM certificate + private key files for TLS. When both are empty the
     /// daemon generates an ephemeral self-signed certificate (the TOFU default);
     /// the TCP transport is ALWAYS encrypted.
     std::string tlsCertPath;
     std::string tlsKeyPath;
 };
+
+/// @param listener The TCP listener's configuration.
+/// @return The tokens it accepts: its single token first, granting everything, when there is one, then the
+///         access file's in file order. A token in both would grant everything, as the first match wins,
+///         which is why parseAccessFile() refuses a line repeating the single token.
+[[nodiscard]] std::vector<AcceptedToken> acceptedTokensOf(NativeTcpListenerConfig const& listener);
 
 /// Everything `contour daemon` needs to serve.
 struct DaemonConfig

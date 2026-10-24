@@ -71,6 +71,7 @@
 #include <vthost/ShutdownSignals.hpp>
 #include <vthost/SocketPath.hpp>
 #include <vthost/WorkspacePersistence.hpp>
+#include <vthost/control/ControlService.hpp>
 #include <vthost/tmux/ControlSession.hpp>
 #include <vthost/tmux/ImsgServer.hpp>
 
@@ -440,19 +441,23 @@ namespace
     /// handshake that offers DaemonControl, because @p runtime answers it. Only a daemon offers it; an
     /// embedded host's default handshake keeps not claiming what its null daemon control refuses.
     /// @param runtime The daemon (not owned; outlives every connection).
+    /// @param control The daemon's control API (not owned; outlives every connection).
     /// @param config The daemon's configuration: with profiles, the handshake offers ProfileByName too.
-    /// @param token The preshared token required of every client; empty for the unix endpoint.
+    /// @param acceptedTokens The tokens a client may present, with their grants; empty for the unix endpoint,
+    ///        whose socket permissions are the gate.
     /// @return The services.
     [[nodiscard]] NativeSessionServices daemonNativeServices(DaemonRuntime& runtime,
+                                                             vtcontrol::ControlApi& control,
                                                              DaemonConfig const& config,
-                                                             std::string token = {})
+                                                             std::vector<AcceptedToken> acceptedTokens = {})
     {
         auto capabilities = proto::CapabilitySet::of({ proto::Capability::ExtensionPermissions,
                                                        proto::Capability::DaemonControl,
                                                        proto::Capability::InitialClientArea,
                                                        proto::Capability::AttachIntent,
                                                        proto::Capability::TabEdits,
-                                                       proto::Capability::Heartbeat });
+                                                       proto::Capability::Heartbeat,
+                                                       proto::Capability::ControlApi });
         // Only a daemon with profiles resolves a name; one without keeps honouring a client's settings.
         if (config.profiles)
             capabilities.idents.push_back(std::to_underlying(proto::Capability::ProfileByName));
@@ -460,9 +465,24 @@ namespace
         if (!config.persistence.snapshotPath.empty())
             capabilities.idents.push_back(std::to_underlying(proto::Capability::WorkspaceRestore));
         return NativeSessionServices {
-            .handshake = { .expectedToken = std::move(token), .capabilities = std::move(capabilities) },
+            .handshake = { .acceptedTokens = std::move(acceptedTokens),
+                           .capabilities = std::move(capabilities) },
             .daemon = runtime,
+            .control = control,
         };
+    }
+
+    /// @param config The daemon's configuration.
+    /// @param clock What the service reads uptimes from (not owned; outlives the service).
+    /// @return How the daemon's control service is set up: a reply carries at most a quarter of a native
+    ///         connection's send-queue bound of pane text, so that it always fits beside a backlog.
+    [[nodiscard]] control::ControlServiceConfig controlServiceConfig(DaemonConfig const& config,
+                                                                     core::platform::IWallClock const& clock)
+    {
+        return control::ControlServiceConfig { .version = config.releaseVersion,
+                                               .socketPath = config.socketPath,
+                                               .clock = clock,
+                                               .maxReplyBytes = NativeSession::DefaultWriteQueueBytes / 4 };
     }
 
     /// Probes whether a daemon is accepting connections on the native socket at
@@ -718,6 +738,16 @@ std::string joinCommandLine(std::span<std::string const> args)
     return vtpty::buildWindowsCommandLine(args.front(), args.subspan(1));
 }
 
+std::vector<AcceptedToken> acceptedTokensOf(NativeTcpListenerConfig const& listener)
+{
+    auto tokens = std::vector<AcceptedToken> {};
+    if (!listener.token.empty())
+        tokens.push_back(
+            AcceptedToken { .token = listener.token, .grants = vtcontrol::ControlGrants::all() });
+    tokens.insert(tokens.end(), listener.accessTokens.begin(), listener.accessTokens.end());
+    return tokens;
+}
+
 std::optional<std::pair<std::string, std::uint16_t>> parseHostPort(std::string_view spec)
 {
     // Split on the LAST colon so bare IPv6 works when bracketed as [addr]:port.
@@ -798,6 +828,10 @@ int runDaemon(DaemonConfig const& config)
     // tickets, and a shutdown request still queued may run during it — a no-op by then, but one that reads
     // the funnel.
     auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
+    // Declared after the host it serves and before the drain, as the runtime is: the connection flows the
+    // drain unwinds drop their subscriptions and waits in it, and its own subscriptions to the host end
+    // before the host goes.
+    auto controlService = control::ControlService { host, controlServiceConfig(config, wallClock) };
     // An auto-spawned daemon ends when it has nothing left to serve; a user-started one persists.
     // Declared after `host`, so it unsubscribes while the host is still alive, and before the drain, so
     // it outlives it: a sessionClosed in the loop's last turn leaves a post capturing a watcher queued,
@@ -829,11 +863,12 @@ int runDaemon(DaemonConfig const& config)
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer =
-        ConnectionAcceptor { loop,
-                             "native",
-                             std::move(*nativeListener),
-                             makeNativeHandler(loop, host, daemonNativeServices(runtime, config)) };
+    auto nativeServer = ConnectionAcceptor {
+        loop,
+        "native",
+        std::move(*nativeListener),
+        makeNativeHandler(loop, host, daemonNativeServices(runtime, controlService, config))
+    };
 
     // The imsg endpoint serves the REAL tmux client binary
     // (`tmux -S <socket>-tmux -C attach-session`).
@@ -890,7 +925,10 @@ int runDaemon(DaemonConfig const& config)
             "native-tcp",
             std::move(*tcpListener),
             makeTlsNativeHandler(
-                loop, host, std::move(tls), daemonNativeServices(runtime, config, config.nativeTcp->token)));
+                loop,
+                host,
+                std::move(tls),
+                daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp))));
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
     }
@@ -1026,8 +1064,10 @@ int runDaemon(DaemonConfig const& config)
                             .instance = config.instance,
                             .restore = std::move(restore) }
     };
-    // See the POSIX body above for why the runtime is declared here, before the drain.
+    // See the POSIX body above for why the runtime and the control service are declared here, before the
+    // drain.
     auto runtime = DaemonRuntime { runtimeConfigOf(config), host, clock, postedShutdown(loop, funnel) };
+    auto controlService = control::ControlService { host, controlServiceConfig(config, wallClock) };
     // See the POSIX body above for why the lifecycle watchers are declared here, before the drain.
     auto lifecycleWatchers = LifecycleWatchers {};
     installLifecycleWatchers(lifecycleWatchers, config, host, runtime.census(), loop, funnel);
@@ -1052,11 +1092,12 @@ int runDaemon(DaemonConfig const& config)
     auto nativeListener = bindDaemonEndpoint(loop, nativePath);
     if (!nativeListener)
         return nativeListener.error();
-    auto nativeServer =
-        ConnectionAcceptor { loop,
-                             "native",
-                             std::move(*nativeListener),
-                             makeNativeHandler(loop, host, daemonNativeServices(runtime, config)) };
+    auto nativeServer = ConnectionAcceptor {
+        loop,
+        "native",
+        std::move(*nativeListener),
+        makeNativeHandler(loop, host, daemonNativeServices(runtime, controlService, config))
+    };
     // No imsg endpoint on Windows: SCM_RIGHTS fd passing does not exist here.
 
     servers = { &server, &nativeServer };
@@ -1083,7 +1124,10 @@ int runDaemon(DaemonConfig const& config)
             "native-tcp",
             std::move(*tcpListener),
             makeTlsNativeHandler(
-                loop, host, std::move(tls), daemonNativeServices(runtime, config, config.nativeTcp->token)));
+                loop,
+                host,
+                std::move(tls),
+                daemonNativeServices(runtime, controlService, config, acceptedTokensOf(*config.nativeTcp))));
         servers.push_back(&*nativeTcpServer);
         daemonLog()("native TCP listener on {}:{}", config.nativeTcp->host, boundPort);
     }

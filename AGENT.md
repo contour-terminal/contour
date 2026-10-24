@@ -251,6 +251,8 @@ First-party modules under `src/`, roughly bottom-up (later depends on earlier):
 - `src/vtbackend` — terminal engine (grid, screen, VT semantics)
 - `src/vtrasterizer` — turns terminal cells into renderable geometry/atlases
 - `src/vtworkspace` — Qt-free tab/split-pane tree model
+- `src/vtcontrol` — the control API vocabulary: UUIDs, object references, strict JSON, the method catalog.
+  Depends on nothing but core-cpp and glaze
 - `src/vthost` — the Qt-free serving path: the daemon, session hosting, the native protocol and
   the tmux control-mode gateway
 - `src/contour` — the application: the headless CLI, and the Qt/QML GUI frontend

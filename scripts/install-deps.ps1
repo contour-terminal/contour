@@ -26,6 +26,7 @@ if (-not $libunicode_match) {
 }
 $libunicode_version = $libunicode_match.Matches[0].Groups[1].Value
 $reflection_cpp_version="0.4.0"
+$glaze_version="9.0.0"
 
 # Take care, order matters, at least as much as dependencies are of concern.
 $ThirdParties =
@@ -35,6 +36,12 @@ $ThirdParties =
         Archive = "reflection-cpp-${reflection_cpp_version}.zip";
         URI     = "https://github.com/contour-terminal/reflection-cpp/archive/refs/tags/v${reflection_cpp_version}.zip";
         Macro   = "reflection_cpp"
+    };
+    [ThirdParty]@{
+        Folder  = "glaze-${glaze_version}";
+        Archive = "glaze-${glaze_version}.zip";
+        URI     = "https://github.com/stephenberry/glaze/archive/refs/tags/v${glaze_version}.zip";
+        Macro   = "glaze"
     };
     [ThirdParty]@{
         Folder  = "libunicode-${libunicode_version}";

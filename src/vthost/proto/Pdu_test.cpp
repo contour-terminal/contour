@@ -1855,3 +1855,73 @@ TEST_CASE("spawning verbs carry a profile; one without it decodes to empty", "[v
     splitPane.u16(5000);
     CHECK(decodeAs<SplitPane>(frameOf(PduType::SplitPane, splitPane.view())).profileName.empty());
 }
+
+TEST_CASE("control PDUs round-trip", "[vthost][proto][control]")
+{
+    auto const request = ControlRequest {
+        .requestId = 7, .method = "pane.split", .params = R"({"pane":"x"})", .context = "pane:p"
+    };
+    CHECK(roundTrip(DecodedPdu { request }) == DecodedPdu { request });
+    auto const reply = ControlReply { .requestId = 7, .outcome = ControlOutcome::Error, .body = "{}" };
+    CHECK(roundTrip(DecodedPdu { reply }) == DecodedPdu { reply });
+    auto const event = ControlEvent { .subscription = 3, .event = R"({"type":"pane.bell"})" };
+    CHECK(roundTrip(DecodedPdu { event }) == DecodedPdu { event });
+
+    // A request that carries nothing optional still round-trips.
+    CHECK(roundTrip(DecodedPdu { ControlRequest { .method = "daemon.info" } })
+          == DecodedPdu { ControlRequest { .method = "daemon.info" } });
+
+    // Cut short, a PDU is a decode error, not a crash.
+    CHECK_FALSE(decodePdu(encodeWithoutTrailingField(DecodedPdu { reply }, 1)).has_value());
+    CHECK_FALSE(decodePdu(encodeWithoutTrailingField(DecodedPdu { request }, 1)).has_value());
+    CHECK_FALSE(decodePdu(encodeWithoutTrailingField(DecodedPdu { event }, 1)).has_value());
+}
+
+TEST_CASE("an unknown ControlOutcome reads as Error, never as Ok", "[vthost][proto][control]")
+{
+    auto const future = encodeWithFieldsEdited(
+        DecodedPdu { ControlReply { .requestId = 1, .outcome = ControlOutcome::Ok, .body = "{}" } },
+        [](std::span<std::byte const> fields) {
+            auto edited = std::vector<std::byte>(fields.begin(), fields.end());
+            edited[1] = std::byte { 9 }; // the outcome, right after the one-byte request id
+            return edited;
+        });
+    CHECK(decodeAs<ControlReply>(future).outcome == ControlOutcome::Error);
+}
+
+TEST_CASE("the control tags and capability are pinned", "[vthost][proto][control]")
+{
+    STATIC_CHECK(std::to_underlying(PduType::ControlRequest) == 30);
+    STATIC_CHECK(std::to_underlying(PduType::ControlReply) == 31);
+    STATIC_CHECK(std::to_underlying(PduType::ControlEvent) == 32);
+    STATIC_CHECK(std::to_underlying(Capability::ControlApi) == 9);
+    CHECK(std::ranges::any_of(CapabilityTable, [](CapabilityRow const& row) {
+        return row.capability == Capability::ControlApi && row.name == "control-api";
+    }));
+}
+
+TEST_CASE("the connection role byte: absent is Attach, 1 is Control, unknown is Control",
+          "[vthost][proto][control]")
+{
+    // The unknown-role rule is phase 2's; it is pinned here under the ControlApi capability, whose
+    // connections are the ones an unknown role must never be mistaken for a viewer on.
+    auto const hello = ClientHello { .capabilities = CapabilitySet::of({ Capability::ControlApi }),
+                                     .role = ConnectionRole::Control };
+    CHECK(decodeAs<ClientHello>(encodeWithFieldsEdited(DecodedPdu { hello },
+                                                       [](std::span<std::byte const> fields) {
+                                                           return std::vector<std::byte>(fields.begin(),
+                                                                                         fields.end());
+                                                       }))
+              .role
+          == ConnectionRole::Control);
+    auto const unknown = encodeWithFieldsEdited(DecodedPdu { hello }, [](std::span<std::byte const> fields) {
+        auto edited = std::vector<std::byte>(fields.begin(), fields.end());
+        edited.rbegin()[4] = std::byte { 9 };
+        return edited;
+    });
+    CHECK(decodeAs<ClientHello>(unknown).role == ConnectionRole::Control);
+    CHECK(decodeAs<ClientHello>(
+              encodeWithoutTrailingField(DecodedPdu { ClientHello { .role = ConnectionRole::Control } }, 5))
+              .role
+          == ConnectionRole::Attach);
+}

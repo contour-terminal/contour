@@ -192,9 +192,32 @@ TEST_CASE("a daemon-hosted shell is told where its own daemon is", "[vthost][soc
 
     REQUIRE(environment.contains("CONTOUR_MUX"));
     CHECK(environment.at("CONTOUR_MUX") == "/run/user/1000/contour/default");
+    // The same path under the name the control API's clients read.
+    REQUIRE(environment.contains("CONTOUR_DAEMON"));
+    CHECK(environment.at("CONTOUR_DAEMON") == "/run/user/1000/contour/default");
 
     // In UTF-8, as the spawn reads an environment value.
     auto const awkward =
         vthost::hostedShellEnvironment(std::filesystem::path { u8"/tmp/" } / vtpty::testing::NonAsciiName);
     CHECK(awkward.at("CONTOUR_MUX") == std::format("/tmp/{}", vtpty::testing::NonAsciiNameUtf8));
+    CHECK(awkward.at("CONTOUR_DAEMON") == awkward.at("CONTOUR_MUX"));
+}
+
+TEST_CASE("a hosted shell's pane variables are full references", "[vthost][socketpath]")
+{
+    auto const uuid = *vtcontrol::parseUuid("018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    auto const environment = vthost::paneEnvironment(uuid, uuid, uuid);
+    CHECK(environment.at("CONTOUR_PANE") == "pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    CHECK(environment.at("CONTOUR_TAB") == "tab:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    CHECK(environment.at("CONTOUR_WINDOW") == "window:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    CHECK(environment.size() == 3);
+
+    // The daemon's own variables win over a profile's, the pane's ids among a profile's variables.
+    auto base = vtpty::Process::ExecInfo {};
+    base.program = "/bin/zsh";
+    auto profile = vtpty::Process::ExecInfo {};
+    profile.env = { { "CONTOUR_PANE", "bogus" }, { "A", "1" } };
+    auto const shell = vthost::hostedShellFor(base, profile, vthost::ShellOverride::Replaces, environment);
+    CHECK(shell.env.at("CONTOUR_PANE") == "pane:018f3c4e-9a1b-7c2d-8e3f-0123456789ab");
+    CHECK(shell.env.at("A") == "1");
 }

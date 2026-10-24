@@ -16,6 +16,9 @@
 #include <filesystem>
 #include <optional>
 
+#include <vtcontrol/ObjectRef.hpp>
+#include <vtcontrol/Uuid.hpp>
+
 namespace vthost
 {
 
@@ -31,6 +34,9 @@ namespace vthost
 /// and with escape_sandbox (the default) that shell runs on the host while the daemon that spawned
 /// it does not. @see muxSocketPath.
 ///
+/// `$CONTOUR_DAEMON` is the same path under the name the control API's clients look for: `contour` reads it
+/// to find the daemon its pane belongs to. `$CONTOUR_MUX` stays as it is.
+///
 /// Note what is NOT here and arguably should be: `TERM`, `COLORTERM` and `TERM_PROGRAM`, which the
 /// GUI path sets from YAMLConfigReader::defaultSettings() and which a daemon-hosted shell has
 /// therefore never received at all. That is a pre-existing gap, named here rather than fixed,
@@ -41,7 +47,26 @@ namespace vthost
 [[nodiscard]] inline vtpty::Process::Environment hostedShellEnvironment(
     std::filesystem::path const& socketPath)
 {
-    return vtpty::Process::Environment { { "CONTOUR_MUX", core::pathToUtf8(socketPath) } };
+    auto const path = core::pathToUtf8(socketPath);
+    return vtpty::Process::Environment { { "CONTOUR_MUX", path }, { "CONTOUR_DAEMON", path } };
+}
+
+/// The environment that tells a pane's shell which pane, tab and window it lives in, so that
+/// `$CONTOUR_PANE` is the default target of every control call the shell makes.
+/// @param window The window's UUID.
+/// @param tab The tab's UUID.
+/// @param pane The pane's UUID.
+/// @return `CONTOUR_PANE`, `CONTOUR_TAB` and `CONTOUR_WINDOW`, each the full reference (`pane:<uuid>`).
+[[nodiscard]] inline vtpty::Process::Environment paneEnvironment(vtcontrol::Uuid const& window,
+                                                                 vtcontrol::Uuid const& tab,
+                                                                 vtcontrol::Uuid const& pane)
+{
+    return vtpty::Process::Environment {
+        { "CONTOUR_PANE", vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }) },
+        { "CONTOUR_TAB", vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, tab }) },
+        { "CONTOUR_WINDOW",
+          vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Window, window }) },
+    };
 }
 
 /// What a spawn's command override is, against the daemon's configured shell.

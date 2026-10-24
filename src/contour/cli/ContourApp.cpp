@@ -61,6 +61,7 @@
     #include <vtextension/wasm/WasmRuntime.hpp>
     #include <vthost/DaemonExtensions.hpp>
 #endif
+#include <vthost/AccessFile.hpp>
 #include <vthost/CommandRunner.hpp>
 #include <vthost/Daemon.hpp>
 #include <vthost/DaemonBinary.hpp>
@@ -1115,15 +1116,36 @@ int ContourApp::daemonAction()
             cerr << std::format("contour daemon: {}\n", token.error());
             return EXIT_FAILURE;
         }
+        // Narrower tokens for the control API, beside the one that grants everything, never repeating it.
+        auto accessTokens = std::vector<vthost::AcceptedToken> {};
+        if (auto const accessFile = parameters().get<string>("contour.daemon.access-file");
+            !accessFile.empty())
+        {
+            auto const path = core::pathFromUtf8(accessFile);
+            if (!path)
+            {
+                cerr << std::format("contour daemon: --access-file '{}' is not a valid path: {}\n",
+                                    accessFile,
+                                    path.error().message());
+                return EXIT_FAILURE;
+            }
+            auto read = vthost::readAccessFile(core::platform::NativeFileSystem::instance(), *path, *token);
+            if (!read)
+            {
+                cerr << std::format("contour daemon: {}\n", read.error());
+                return EXIT_FAILURE;
+            }
+            accessTokens = *std::move(read);
+        }
         // A token is REQUIRED here, not merely supported. On the unix socket the filesystem
         // permissions are the gate; TCP has no such gate, so serving it without a token would
         // hand a full shell to anyone who can reach the port. Refusing to start is the only safe
         // reading of `--listen-tcp` with no credential — a warning would be dismissed once and
         // then run that way forever.
-        if (token->empty())
+        if (token->empty() && accessTokens.empty())
         {
-            cerr << "contour daemon: --listen-tcp requires --token or --token-file; the TCP "
-                    "transport has no filesystem permissions to fall back on.\n";
+            cerr << "contour daemon: --listen-tcp requires --token, --token-file or a non-empty "
+                    "--access-file; the TCP transport has no filesystem permissions to fall back on.\n";
             return EXIT_FAILURE;
         }
 
@@ -1131,9 +1153,17 @@ int ContourApp::daemonAction()
             .host = hostPort->first,
             .port = hostPort->second,
             .token = *std::move(token),
+            .accessTokens = std::move(accessTokens),
             .tlsCertPath = parameters().get<string>("contour.daemon.tls-cert"),
             .tlsKeyPath = parameters().get<string>("contour.daemon.tls-key"),
         };
+    }
+    else if (!parameters().get<string>("contour.daemon.access-file").empty())
+    {
+        // Its tokens are only ever asked for over TCP: accepting the option alone would read as
+        // narrowing a listener that does not exist.
+        cerr << "contour daemon: --access-file needs --listen-tcp\n";
+        return EXIT_FAILURE;
     }
 
     // Everything above has validated the configuration, so a typo is reported by THIS process
@@ -1737,6 +1767,15 @@ core::cli::Command ContourApp::parameterDefinition() const
                                   "line, so the secret is protected by that file's permissions "
                                   "rather than exposed in the process list. Trailing newlines "
                                   "are ignored.",
+                                  "FILE" },
+                    CLI::Option { "access-file",
+                                  CLI::Value { ""s },
+                                  "Reads further TCP tokens from FILE, one per line: a grant list "
+                                  "(`all`, or a comma list of read, screen, input and write), one "
+                                  "space, then the token. A token that does not grant everything "
+                                  "serves control API calls only; viewing needs all four. Blank "
+                                  "lines and lines starting with `#` are ignored. The tokens are "
+                                  "accepted beside --token, never instead of it, and may not repeat it.",
                                   "FILE" },
                     CLI::Option { "tls-cert",
                                   CLI::Value { ""s },

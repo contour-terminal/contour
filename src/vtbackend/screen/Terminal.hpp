@@ -592,6 +592,13 @@ class Terminal: public IStatusLinePublishTarget
         /// @param activeContext The context now in effect; a zero id means the ancestry is empty.
         virtual void contextChanged(ContextId /*activeContext*/) {}
 
+        /// The application reported a working directory (`OSC 7`) that differs from the one before.
+        ///
+        /// Raised on the parser thread with Terminal::_stateMutex ALREADY HELD, with the consequence
+        /// progressChanged() documents: do not read terminal state here; defer instead. A shell that
+        /// re-reports the same URL at every prompt raises nothing.
+        virtual void workingDirectoryChanged() {}
+
         /// A shell command block finished with a REPORTED end (OSC 133;D, or an OSC 3008 `end=` while OSC
         /// 3008 owns the marks) -- never for a block a newer prompt closed implicitly, such as the `ssh`
         /// the user is still inside.
@@ -744,6 +751,7 @@ class Terminal: public IStatusLinePublishTarget
         void discardDesktopNotification(std::string_view /*identifier*/) override {}
         void progressChanged(Progress /*progress*/) override {}
         void contextChanged(ContextId /*activeContext*/) override {}
+        void workingDirectoryChanged() override {}
         void commandBlockFinished(CommandBlockSummary const& /*summary*/) override {}
         void commandBlockChanged(CommandBlockChange const& /*change*/) override {}
         [[nodiscard]] LocalIdentity localIdentity() const noexcept override { return {}; }

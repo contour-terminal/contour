@@ -51,6 +51,7 @@ enum class Capability : uint8_t
     /// them at its next start, and honours StopReason::UserKeepingWorkspace. A daemon offers it while its
     /// persistence is on.
     WorkspaceRestore = 8,
+    ControlApi = 9, ///< The peer serves ControlRequest, ControlReply and ControlEvent.
 };
 
 /// One row of the table naming a Capability.
@@ -70,6 +71,7 @@ constexpr std::array CapabilityTable {
     CapabilityRow { .capability = Capability::TabEdits, .name = "tab-edits" },
     CapabilityRow { .capability = Capability::Heartbeat, .name = "heartbeat" },
     CapabilityRow { .capability = Capability::WorkspaceRestore, .name = "workspace-restore" },
+    CapabilityRow { .capability = Capability::ControlApi, .name = "control-api" },
 };
 
 /// A set of capability idents. Raw idents, so a newer peer's unknown ones survive decoding and tracing.

@@ -397,6 +397,12 @@ class MockTerm: public Terminal::NullEvents
 
     void contextChanged(ContextId activeContext) override { contextChanges.push_back(activeContext); }
 
+    /// How many distinct working directories the terminal announced. @see
+    /// Terminal::Events::workingDirectoryChanged
+    int workingDirectoryChanges = 0;
+
+    void workingDirectoryChanged() override { ++workingDirectoryChanges; }
+
     /// The screen type of every page the terminal announced as coming on display, in order.
     /// @see Terminal::Events::bufferChanged
     std::vector<ScreenType> bufferChanges;

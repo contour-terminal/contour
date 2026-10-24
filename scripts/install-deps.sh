@@ -142,6 +142,15 @@ fetch_and_unpack_reflection_cpp() {
         reflection_cpp
 }
 
+fetch_and_unpack_glaze() {
+    local glaze_version="9.0.0"
+    fetch_and_unpack \
+        glaze-$glaze_version \
+        glaze-$glaze_version.tar.gz \
+        https://github.com/stephenberry/glaze/archive/refs/tags/v${glaze_version}.tar.gz \
+        glaze
+}
+
 fetch_and_unpack_yaml_cpp() {
     fetch_and_unpack \
         yaml-cpp-0.8.0 \
@@ -682,6 +691,7 @@ main() {
     fetch_and_unpack_boxed
     fetch_and_unpack_termbenchpro
     fetch_and_unpack_reflection_cpp
+    fetch_and_unpack_glaze
 }
 
 main $*

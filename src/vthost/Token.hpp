@@ -11,6 +11,7 @@
 
 #include <core/Utf8Path.hpp>
 
+#include <algorithm>
 #include <expected>
 #include <filesystem>
 #include <fstream>
@@ -20,6 +21,17 @@
 
 namespace vthost
 {
+
+/// Strips the carriage returns and the trailing whitespace a token picks up in a file.
+/// @param token The token as read.
+/// @return The token as the client will present it; interior whitespace is preserved.
+[[nodiscard]] inline std::string cleanedToken(std::string token)
+{
+    std::erase(token, '\r');
+    while (!token.empty() && (token.back() == '\n' || token.back() == ' ' || token.back() == '\t'))
+        token.pop_back();
+    return token;
+}
 
 /// Reads a preshared token from a file.
 ///
@@ -38,10 +50,7 @@ namespace vthost
     if (!file.is_open())
         return std::unexpected(std::string { "cannot open token file '" } + core::pathToUtf8(path) + "'");
 
-    auto token = std::string { std::istreambuf_iterator<char> { file }, {} };
-    std::erase(token, '\r');
-    while (!token.empty() && (token.back() == '\n' || token.back() == ' ' || token.back() == '\t'))
-        token.pop_back();
+    auto token = cleanedToken(std::string { std::istreambuf_iterator<char> { file }, {} });
 
     if (token.empty())
         return std::unexpected(std::string { "token file '" } + core::pathToUtf8(path) + "' is empty");

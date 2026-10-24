@@ -98,6 +98,9 @@ set(YAML_CPP_VERSION "0.8.0")
 set(HARFBUZZ_VERSION "8.4.0")
 set(GSL_VERSION "3.1.0")
 set(REFLECTION_CPP_VERSION "0.4.0")
+# Bumping glaze: src/vtcontrol/Json.hpp specializes glz::detail::to_json<std::string>; re-run
+# `vtcontrol_test "[json]"` to check it is still the writer glaze picks.
+set(GLAZE_VERSION "9.0.0")
 set(FREETYPE_VERSION "2.10.0")
 set(WAMR_MINIMAL_VERSION "2.4.5")
 
@@ -367,6 +370,15 @@ else()
     HandleThirdparty(reflection-cpp "gh:contour-terminal/reflection-cpp#v${REFLECTION_CPP_VERSION}")
 endif()
 
+# glaze, the JSON (de)serializer behind vtcontrol: structs in, structs out, schemas from the same structs.
+# Its includes are SYSTEM by its own default (glaze_INCLUDES_WITH_SYSTEM), so its headers never warn.
+if(COMMAND ContourThirdParties_Embed_glaze)
+    ContourThirdParties_Embed_glaze()
+    set(THIRDPARTY_BUILTIN_glaze "embedded")
+else()
+    HandleThirdparty(glaze "gh:stephenberry/glaze@v${GLAZE_VERSION}" VERSION ${GLAZE_VERSION})
+endif()
+
 # core-cpp, the shared foundation of the Contour Terminal projects (coroutines, the event loop and
 # sockets, logging, the CLI parser and the generic utilities), is carried as a verbatim copy of a
 # tagged release in vendor/core-cpp, so that a distribution build fetches nothing for it. Never edit
@@ -430,6 +442,7 @@ macro(ContourThirdPartiesSummary2)
     message(STATUS "yaml-cpp            ${THIRDPARTY_BUILTIN_yaml-cpp}")
     message(STATUS "termbench-pro       ${THIRDPARTY_BUILTIN_termbench}")
     message(STATUS "reflection-cpp      ${THIRDPARTY_BUILTIN_reflection-cpp}")
+    message(STATUS "glaze               ${THIRDPARTY_BUILTIN_glaze}")
     if(DEFINED THIRDPARTY_BUILTIN_libunicode)
         message(STATUS "libunicode          ${THIRDPARTY_BUILTIN_libunicode}")
     else()

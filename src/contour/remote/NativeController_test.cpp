@@ -2095,7 +2095,7 @@ TEST_CASE("NativeController shows the refusal text", "[contour][remote]")
               .daemonVersions = { .min = 6, .max = 8 } },
         // The ranges overlap: the daemon refused for the token, and the text says so.
         Row { .name = "a daemon wanting another token",
-              .policy = { .expectedToken = "right" },
+              .policy = { .acceptedTokens = { { .token = "right" } } },
               .daemonVersions = vthost::proto::SupportedVersions },
     };
     for (auto const& row: rows)

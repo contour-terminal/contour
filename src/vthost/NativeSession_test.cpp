@@ -39,6 +39,9 @@
 #include <variant>
 #include <vector>
 
+#include <vtcontrol/Api.hpp>
+#include <vtcontrol/Events.hpp>
+#include <vtcontrol/Json.hpp>
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/FlushPolicy.hpp>
 #include <vthost/HostIdentity.hpp>
@@ -46,6 +49,7 @@
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/client/NativeClient.hpp>
+#include <vthost/control/ControlService.hpp>
 #include <vthost/proto/PduTrace.hpp>
 #include <vthost/testing/FakeDaemonControl.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
@@ -286,6 +290,13 @@ vtbackend::Settings hostSettings(vtbackend::LineCount history,
 
 /// What a NativeHarness is built with. One struct rather than positional defaults, so a
 /// test needing only the second knob does not have to name the first.
+/// Which control API a harness's connection calls.
+enum class ControlServing : uint8_t
+{
+    Null = 0, ///< NativeSessionServices' default, which serves nothing.
+    Served,   ///< A ControlService over the harness's host.
+};
+
 struct HarnessOptions
 {
     std::size_t writeQueueBytes = NativeSession::DefaultWriteQueueBytes;
@@ -315,6 +326,10 @@ struct HarnessOptions
     core::platform::IClock* clock = nullptr;
     /// The host's profiles; none by default.
     std::shared_ptr<vthost::ProfileCatalog const> profiles {};
+    /// Whether the connection's control API is a ControlService over the harness's host, or the null one.
+    ControlServing control = ControlServing::Null;
+    /// The ControlService's reply cap, when it serves one.
+    std::size_t maxReplyBytes = std::size_t { 1 } * 1024 * 1024;
 };
 
 /// @param options What the harness is built with.
@@ -383,13 +398,35 @@ struct NativeHarness
                                                    .extensions = options.extensions,
                                                    .profiles = options.profiles } };
     core::net::testing::SocketPair pair = makeConnection(loop, options.pipeBytes);
+    core::platform::ManualWallClock wall {};
+    /// The control API the connection calls, under ControlServing::Served; before the connection, which
+    /// drops its subscriptions in it as it goes.
+    std::unique_ptr<vthost::control::ControlService> control =
+        options.control == ControlServing::Served
+            ? std::make_unique<vthost::control::ControlService>(
+                  host,
+                  vthost::control::ControlServiceConfig { .version = "test",
+                                                          .socketPath = {},
+                                                          .clock = wall,
+                                                          .maxReplyBytes = options.maxReplyBytes })
+            : nullptr;
     std::unique_ptr<NativeSession> session =
-        std::make_unique<NativeSession>(loop,
-                                        host,
-                                        vthost::ConnectionId { .endpoint = "test", .index = 1 },
-                                        std::move(pair.first),
-                                        options.writeQueueBytes,
-                                        options.services);
+        makeSession(pair, vthost::ConnectionId { .endpoint = "test", .index = 1 });
+
+    /// @return A connection of this harness's host over @p connection, with its services and its control API.
+    [[nodiscard]] std::unique_ptr<NativeSession> makeSession(core::net::testing::SocketPair& connection,
+                                                             vthost::ConnectionId id)
+    {
+        auto services = options.services;
+        if (control)
+            services.control = *control;
+        return std::make_unique<NativeSession>(loop,
+                                               host,
+                                               std::move(id),
+                                               std::move(connection.first),
+                                               options.writeQueueBytes,
+                                               std::move(services));
+    }
 
     /// What the client has decoded in the current exchange, as it arrives: what a step run beside
     /// the exchange waits on.
@@ -2494,7 +2531,8 @@ TEST_CASE("a token mismatch is reported without either token", "[vthost][native]
         vthost::ConnectionId { .endpoint = "native-tcp", .index = 3, .peer = "10.0.0.7" },
         std::move(pair.first),
         NativeSession::DefaultWriteQueueBytes,
-        vthost::NativeSessionServices { .handshake = { .expectedToken = "the-right-token" } });
+        vthost::NativeSessionServices {
+            .handshake = { .acceptedTokens = { { .token = "the-right-token" } } } });
 
     auto const bytes =
         encodeRequest({ proto::DecodedPdu { proto::ClientHello { .token = "the-wrong-token" } } });
@@ -3766,7 +3804,11 @@ namespace
 [[nodiscard]] HarnessOptions admitting(proto::VersionRange versions, std::string token = {})
 {
     return HarnessOptions { .services = vthost::NativeSessionServices {
-                                .handshake = { .expectedToken = std::move(token), .versions = versions } } };
+                                .handshake = { .acceptedTokens = token.empty()
+                                                                     ? std::vector<vthost::AcceptedToken> {}
+                                                                     : std::vector { vthost::AcceptedToken {
+                                                                           .token = std::move(token) } },
+                                               .versions = versions } } };
 }
 
 /// @param hello The ClientHello to encode.
@@ -5044,4 +5086,488 @@ TEST_CASE("a heartbeat without the capability is answered Unsupported", "[vthost
     auto const refusal = std::ranges::find_if(received, isRefusal);
     REQUIRE(refusal != received.end());
     CHECK(std::get<proto::Unsupported>(refusal->pdu).ident == std::to_underlying(proto::PduType::Heartbeat));
+}
+
+namespace
+{
+
+/// @return A harness whose connection calls a ControlService over its host, and whose handshake offers it.
+HarnessOptions controlApiOptions(HarnessOptions options = {})
+{
+    options.control = ControlServing::Served;
+    options.services.handshake.capabilities = proto::CapabilitySet::of({ proto::Capability::ControlApi });
+    return options;
+}
+
+/// @return A Control hello that offers the control API.
+proto::ClientHello controlApiHello()
+{
+    return proto::ClientHello { .capabilities = proto::CapabilitySet::of({ proto::Capability::ControlApi }),
+                                .role = proto::ConnectionRole::Control };
+}
+
+/// @return One control call.
+proto::ControlRequest controlCall(uint64_t requestId, std::string method, std::string params = {})
+{
+    return proto::ControlRequest {
+        .requestId = requestId, .method = std::move(method), .params = std::move(params), .context = {}
+    };
+}
+
+[[nodiscard]] bool isControlReply(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::ControlReply>(frame.pdu);
+}
+
+[[nodiscard]] bool viewsAnything(proto::DecodedFrame const& frame)
+{
+    return std::holds_alternative<proto::LayoutState>(frame.pdu)
+           || std::holds_alternative<proto::SessionState>(frame.pdu)
+           || std::holds_alternative<proto::Delta>(frame.pdu);
+}
+
+/// @return The control events among @p frames, decoded, in order.
+[[nodiscard]] std::vector<vtcontrol::Event> controlEvents(std::vector<proto::DecodedFrame> const& frames)
+{
+    auto events = std::vector<vtcontrol::Event> {};
+    for (auto const& frame: frames)
+        if (auto const* event = std::get_if<proto::ControlEvent>(&frame.pdu))
+            if (auto decoded = vtcontrol::decodeEvent(event->event))
+                events.push_back(std::move(*decoded));
+    return events;
+}
+
+template <typename Payload>
+[[nodiscard]] std::size_t countEvents(std::vector<proto::DecodedFrame> const& frames)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(controlEvents(frames), [](auto const& event) {
+        return std::holds_alternative<Payload>(event.payload);
+    }));
+}
+
+/// Decodes server PDUs into @p out until @p done holds of them, keeping what it read past a frame in
+/// @p buffer, so that it can be called again where it stopped.
+Task<void> readFramesUntil(core::net::ISocket* client,
+                           std::vector<std::byte>* buffer,
+                           std::vector<proto::DecodedFrame>* out,
+                           CollectDone done)
+{
+    auto scratch = std::vector<std::byte>(4096);
+    while (!done(*out))
+    {
+        if (auto decoded = proto::decodePdu(*buffer))
+        {
+            buffer->erase(buffer->begin(), buffer->begin() + static_cast<long>(decoded->consumed));
+            out->push_back(std::move(*decoded));
+            continue;
+        }
+        auto const n = co_await client->read(scratch);
+        if (!n.has_value() || *n == 0)
+            co_return;
+        buffer->insert(buffer->end(), scratch.begin(), scratch.begin() + static_cast<long>(*n));
+    }
+}
+
+/// Runs @p session to its end, then destroys it, as the daemon's flow does.
+Task<void> runAndRelease(std::unique_ptr<NativeSession>* session)
+{
+    co_await (*session)->run();
+    session->reset();
+}
+
+/// A control client that subscribes to bells, stops reading while @p bells of them ring, then reads again,
+/// ringing one more bell per frame it reads, until a bell arrived after an events.dropped.
+Task<void> floodedSubscriber(NativeHarness* h,
+                             vtworkspace::SessionId session,
+                             std::size_t bells,
+                             std::vector<proto::DecodedFrame>* out)
+{
+    auto* client = h->pair.second.get();
+    auto buffer = std::vector<std::byte> {};
+    co_await readFramesUntil(
+        client, &buffer, out, [](auto const& got) { return std::ranges::any_of(got, isControlReply); });
+
+    // Rung while nothing is read: the connection's backlog fills, and the rest is counted, not queued.
+    h->host.terminal(session)->writeToScreen(std::string(bells, '\a'));
+    co_await h->loop.delay(100ms);
+
+    auto const recovered = [](std::vector<proto::DecodedFrame> const& got) {
+        auto const events = controlEvents(got);
+        auto const dropped = std::ranges::find_if(events, [](auto const& e) {
+            return std::holds_alternative<vtcontrol::EventsDroppedEvent>(e.payload);
+        });
+        return dropped != events.end() && std::any_of(std::next(dropped), events.end(), [](auto const& e) {
+                   return std::holds_alternative<vtcontrol::BellEvent>(e.payload);
+               });
+    };
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 5000))
+    {
+        if (recovered(*out))
+            break;
+        h->host.terminal(session)->writeToScreen("\a");
+        auto const before = out->size();
+        co_await readFramesUntil(
+            client, &buffer, out, [before](auto const& got) { return got.size() > before; });
+    }
+    client->close();
+}
+
+} // namespace
+
+TEST_CASE("a control connection never views", "[vthost][native][control]")
+{
+    auto h = NativeHarness { controlApiOptions() };
+    auto const got = h.exchange({ controlApiHello(), controlCall(1, "workspace.list") }, 2);
+    REQUIRE(got.size() == 2);
+    REQUIRE(std::holds_alternative<proto::ServerHello>(got[0].pdu));
+    CHECK(isControlReply(got[1]));
+    CHECK_FALSE(std::ranges::any_of(got, viewsAnything));
+    CHECK(h.host.sessionCount() == 0);
+    CHECK(h.host.connectedClients() == 0);
+    CHECK(h.session->phase() == NativeSession::ConnectionPhase::Controlling);
+}
+
+TEST_CASE("a ControlRequest is answered with its reply", "[vthost][native][control]")
+{
+    auto h = NativeHarness { controlApiOptions() };
+    std::ignore = newSession(h.host);
+    auto const got = h.exchange(
+        { controlApiHello(), controlCall(41, "workspace.list"), controlCall(42, "pane.teleport") }, 3);
+    REQUIRE(got.size() == 3);
+
+    REQUIRE(isControlReply(got[1]));
+    auto const& list = std::get<proto::ControlReply>(got[1].pdu);
+    CHECK(got[1].serial == 2);
+    CHECK(list.requestId == 41);
+    CHECK(list.outcome == proto::ControlOutcome::Ok);
+    auto const decoded = vtcontrol::decodeJson<vtcontrol::ListReply>(list.body);
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->windows.size() == 1);
+    CHECK(decoded->windows[0].tabs.size() == 1);
+
+    REQUIRE(isControlReply(got[2]));
+    auto const& unknown = std::get<proto::ControlReply>(got[2].pdu);
+    CHECK(unknown.requestId == 42);
+    CHECK(unknown.outcome == proto::ControlOutcome::Error);
+    auto const error = vtcontrol::decodeJson<vtcontrol::ControlError>(unknown.body);
+    REQUIRE(error.has_value());
+    CHECK(error->code == vtcontrol::ControlErrorCode::MethodNotFound);
+}
+
+TEST_CASE("without the ControlApi capability a ControlRequest is Unsupported", "[vthost][native][control]")
+{
+    auto options = controlApiOptions();
+    options.services.handshake.capabilities = proto::CapabilitySet::of({ proto::Capability::Heartbeat });
+    auto h = NativeHarness { options };
+    auto const got =
+        h.exchange({ controlApiHello(), controlCall(1, "daemon.info"), controlCall(2, "daemon.info") }, 3);
+    REQUIRE(got.size() == 3);
+    for (auto const index: { 1U, 2U })
+    {
+        REQUIRE(std::holds_alternative<proto::Unsupported>(got[index].pdu));
+        auto const& refusal = std::get<proto::Unsupported>(got[index].pdu);
+        CHECK(refusal.ident == std::to_underlying(proto::PduType::ControlRequest));
+        CHECK(got[index].serial == index + 1);
+    }
+
+    SECTION("nor is it served to an Attach connection")
+    {
+        auto viewer = NativeHarness { controlApiOptions() };
+        auto const answered = viewer.exchangeUntil(
+            { proto::ClientHello { .capabilities =
+                                       proto::CapabilitySet::of({ proto::Capability::ControlApi }) },
+              controlCall(1, "daemon.info") },
+            [](auto const& frames) {
+                return std::ranges::any_of(
+                    frames, [](auto const& f) { return std::holds_alternative<proto::Unsupported>(f.pdu); });
+            });
+        CHECK_FALSE(std::ranges::any_of(answered, isControlReply));
+    }
+}
+
+TEST_CASE("the default services serve no control API", "[vthost][native][control]")
+{
+    // ControlApi advertised, but NativeSessionServices' null control API behind it.
+    auto options = HarnessOptions {};
+    options.services.handshake.capabilities = proto::CapabilitySet::of({ proto::Capability::ControlApi });
+    auto h = NativeHarness { options };
+    auto const got = h.exchange({ controlApiHello(), controlCall(7, "workspace.list") }, 2);
+    REQUIRE(got.size() == 2);
+    REQUIRE(isControlReply(got[1]));
+    auto const& reply = std::get<proto::ControlReply>(got[1].pdu);
+    CHECK(reply.outcome == proto::ControlOutcome::Error);
+    auto const error = vtcontrol::decodeJson<vtcontrol::ControlError>(reply.body);
+    REQUIRE(error.has_value());
+    CHECK(error->code == vtcontrol::ControlErrorCode::Unsupported);
+}
+
+TEST_CASE("phase 2's status verb still works on a control connection", "[vthost][native][control]")
+{
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    auto options = controlApiOptions();
+    options.services.daemon = daemon;
+    auto h = NativeHarness { options };
+    auto const got =
+        h.exchange({ controlApiHello(), proto::DaemonStatusRequest {}, controlCall(1, "daemon.info") }, 3);
+    REQUIRE(got.size() == 3);
+    CHECK(std::holds_alternative<proto::DaemonStatusReply>(got[1].pdu));
+    REQUIRE(isControlReply(got[2]));
+    CHECK(std::get<proto::ControlReply>(got[2].pdu).outcome == proto::ControlOutcome::Ok);
+}
+
+TEST_CASE("viewers attaching and detaching are events for control subscribers", "[vthost][native][control]")
+{
+    auto h = NativeHarness { controlApiOptions() };
+    auto attachPair = makeConnection(h.loop, std::nullopt);
+    auto attach = h.makeSession(attachPair, vthost::ConnectionId { .endpoint = "attach", .index = 2 });
+
+    auto const controlBytes = encodeRequest(
+        { controlApiHello(),
+          controlCall(1, "events.subscribe", R"({"kinds":["client.attached","client.detached"]})") });
+    auto const attachBytes = encodeRequest({ proto::ClientHello {} });
+    auto controlReceived = std::vector<proto::DecodedFrame> {};
+    auto attachReceived = std::vector<proto::DecodedFrame> {};
+
+    h.loop.blockOn(core::net::testing::allOf(
+        h.session->run(),
+        feedBytes(h.pair.second.get(), &controlBytes),
+        runAndRelease(&attach),
+        feedOnce(&h.loop,
+                 attachPair.second.get(),
+                 &attachBytes,
+                 &controlReceived,
+                 [](auto const& got) { return std::ranges::any_of(got, isControlReply); }),
+        collectUntil(
+            &h.loop,
+            attachPair.second.get(),
+            [](auto const& got) { return std::ranges::any_of(got, endsSnapshotRun); },
+            &attachReceived),
+        collectUntil(
+            &h.loop,
+            h.pair.second.get(),
+            [](auto const& got) { return countEvents<vtcontrol::ClientDetachedEvent>(got) >= 1; },
+            &controlReceived)));
+
+    auto const events = controlEvents(controlReceived);
+    REQUIRE(events.size() == 2);
+    REQUIRE(std::holds_alternative<vtcontrol::ClientAttachedEvent>(events[0].payload));
+    REQUIRE(std::holds_alternative<vtcontrol::ClientDetachedEvent>(events[1].payload));
+    CHECK(std::get<vtcontrol::ClientAttachedEvent>(events[0].payload).client == "attach#2");
+    CHECK(std::get<vtcontrol::ClientDetachedEvent>(events[1].payload).client == "attach#2");
+    CHECK(h.host.connectedClients() == 0);
+}
+
+TEST_CASE("an event flood drops events instead of the connection", "[vthost][native][control]")
+{
+    // Review focus 3: a loop ringing the bell while the subscriber does not read.
+    auto options = controlApiOptions();
+    options.writeQueueBytes = SmallQueueBytes;
+    options.pipeBytes = std::size_t { 4096 };
+    auto h = NativeHarness { options };
+    auto const session = newSession(h.host);
+    auto const bytes = encodeRequest(
+        { controlApiHello(), controlCall(1, "events.subscribe", R"({"kinds":["pane.bell"]})") });
+    auto received = std::vector<proto::DecodedFrame> {};
+
+    h.loop.blockOn(core::net::testing::allOf(h.session->run(),
+                                             feedBytes(h.pair.second.get(), &bytes),
+                                             floodedSubscriber(&h, session, 10'000, &received)));
+
+    auto const events = controlEvents(received);
+    auto const dropped = std::ranges::find_if(events, [](auto const& e) {
+        return std::holds_alternative<vtcontrol::EventsDroppedEvent>(e.payload);
+    });
+    REQUIRE(dropped != events.end());
+    CHECK(std::get<vtcontrol::EventsDroppedEvent>(dropped->payload).count > 0);
+    CHECK(std::any_of(std::next(dropped), events.end(), [](auto const& e) {
+        return std::holds_alternative<vtcontrol::BellEvent>(e.payload);
+    }));
+    // Far fewer than were rung reached the wire: the backlog stayed bounded.
+    CHECK(countEvents<vtcontrol::BellEvent>(received) < 5'000);
+    CHECK(h.host.sessionCount() == 1);
+}
+
+TEST_CASE("a capture bigger than the reply bound arrives truncated over the wire",
+          "[vthost][native][control]")
+{
+    // Review focus 2.
+    auto options = controlApiOptions();
+    options.maxReplyBytes = 1024;
+    options.history = vtbackend::LineCount(200);
+    auto h = NativeHarness { options };
+    auto const session = newSession(h.host);
+    auto text = std::string {};
+    while (text.size() < 5000)
+        text += std::string(70, 'x') + "\r\n";
+    h.host.terminal(session)->writeToScreen(text + "LAST");
+
+    auto const got =
+        h.exchange({ controlApiHello(), controlCall(1, "pane.capture", R"({"scrollback":-1})") }, 2);
+    REQUIRE(got.size() == 2);
+    REQUIRE(isControlReply(got[1]));
+    auto const& reply = std::get<proto::ControlReply>(got[1].pdu);
+    REQUIRE(reply.outcome == proto::ControlOutcome::Ok);
+    auto const capture = vtcontrol::decodeJson<vtcontrol::CaptureReply>(reply.body);
+    REQUIRE(capture.has_value());
+    CHECK(capture->truncated == vtcontrol::Truncation::Head);
+    CHECK(capture->text.size() <= 1024);
+    CHECK(capture->text.ends_with("LAST"));
+}
+
+namespace
+{
+
+/// @return A control harness whose handshake accepts "ro" for reading and the screen, "arranger" for that and
+///         changing the workspace, and "admin" for all.
+HarnessOptions narrowTokenOptions()
+{
+    auto options = controlApiOptions();
+    options.services.handshake.acceptedTokens = {
+        { .token = "ro",
+          .grants =
+              vtcontrol::ControlGrants::of({ vtcontrol::Permission::Read, vtcontrol::Permission::Screen }) },
+        { .token = "arranger",
+          .grants = vtcontrol::ControlGrants::of(
+              { vtcontrol::Permission::Read, vtcontrol::Permission::Screen, vtcontrol::Permission::Write }) },
+        { .token = "admin", .grants = vtcontrol::ControlGrants::all() },
+    };
+    return options;
+}
+
+/// @return The control error of a ControlReply frame.
+[[nodiscard]] vtcontrol::ControlError controlErrorOf(proto::DecodedFrame const& frame)
+{
+    auto const& reply = std::get<proto::ControlReply>(frame.pdu);
+    REQUIRE(reply.outcome == proto::ControlOutcome::Error);
+    auto error = vtcontrol::decodeJson<vtcontrol::ControlError>(reply.body);
+    REQUIRE(error.has_value());
+    return *error;
+}
+
+} // namespace
+
+TEST_CASE("a narrow token can read but not type", "[vthost][native][grants]")
+{
+    // Review focus 6.
+    auto daemon = vthost::testing::FakeDaemonControl {};
+    auto options = narrowTokenOptions();
+    options.services.daemon = daemon;
+    auto h = NativeHarness { options };
+    std::ignore = newSession(h.host);
+    auto hello = controlApiHello();
+    hello.token = "ro";
+    auto const got = h.exchange({ hello,
+                                  controlCall(1, "pane.capture"),
+                                  controlCall(2, "pane.send", R"({"text":"rm -rf ~\n"})"),
+                                  controlCall(3, "workspace.list"),
+                                  proto::StopDaemon {},
+                                  proto::DaemonStatusRequest {} },
+                                6);
+    REQUIRE(got.size() == 6);
+    REQUIRE(std::holds_alternative<proto::ServerHello>(got[0].pdu));
+    CHECK(h.session->grants()
+          == vtcontrol::ControlGrants::of({ vtcontrol::Permission::Read, vtcontrol::Permission::Screen }));
+
+    REQUIRE(isControlReply(got[1]));
+    CHECK(std::get<proto::ControlReply>(got[1].pdu).outcome == proto::ControlOutcome::Ok);
+
+    REQUIRE(isControlReply(got[2]));
+    auto const forbidden = controlErrorOf(got[2]);
+    CHECK(forbidden.code == vtcontrol::ControlErrorCode::Forbidden);
+    CHECK(forbidden.message.contains("'input'"));
+
+    // The connection stays open, and a stop needs `write`.
+    REQUIRE(isControlReply(got[3]));
+    CHECK(std::get<proto::ControlReply>(got[3].pdu).outcome == proto::ControlOutcome::Ok);
+    REQUIRE(std::holds_alternative<proto::Unsupported>(got[4].pdu));
+    CHECK(std::get<proto::Unsupported>(got[4].pdu).ident == std::to_underlying(proto::PduType::StopDaemon));
+    CHECK(daemon.stops.empty());
+    CHECK(std::holds_alternative<proto::DaemonStatusReply>(got[5].pdu));
+}
+
+TEST_CASE("a write token can rearrange but not run a command", "[vthost][native][grants]")
+{
+    auto h = NativeHarness { narrowTokenOptions() };
+    std::ignore = newSession(h.host);
+    auto hello = controlApiHello();
+    hello.token = "arranger";
+    auto const got = h.exchange({ hello,
+                                  controlCall(1, "tab.create"),
+                                  controlCall(2, "tab.create", R"({"command":["sh","-c","id"]})"),
+                                  controlCall(3, "tab.create", R"({"placement":"new","command":["sh"]})"),
+                                  controlCall(4, "pane.split", R"({"command":["sh","-c","id"]})"),
+                                  controlCall(5, "pane.split", R"({"cwd":"/tmp"})") },
+                                6);
+    REQUIRE(got.size() == 6);
+    REQUIRE(isControlReply(got[1]));
+    CHECK(std::get<proto::ControlReply>(got[1].pdu).outcome == proto::ControlOutcome::Ok);
+    for (auto const index: { 2, 3, 4 })
+    {
+        INFO("reply " << index);
+        REQUIRE(isControlReply(got[static_cast<std::size_t>(index)]));
+        auto const forbidden = controlErrorOf(got[static_cast<std::size_t>(index)]);
+        CHECK(forbidden.code == vtcontrol::ControlErrorCode::Forbidden);
+        CHECK(forbidden.message.contains("running a command needs grant 'input'"));
+    }
+    REQUIRE(isControlReply(got[5]));
+    CHECK(std::get<proto::ControlReply>(got[5].pdu).outcome == proto::ControlOutcome::Ok);
+    // The first session, the shell tab.create opened and the split's: nothing the refused calls named.
+    CHECK(h.host.sessionCount() == 3);
+}
+
+TEST_CASE("a connection past its subscription share is refused and stays open",
+          "[vthost][native][control][limits]")
+{
+    auto h = NativeHarness { controlApiOptions() };
+    auto const share = vthost::control::DefaultMaxSubscriptionsPerConnection;
+    auto pdus = std::vector<proto::DecodedPdu> { controlApiHello() };
+    for (auto const id: std::views::iota(uint64_t { 1 }, uint64_t { share + 2 }))
+        pdus.emplace_back(controlCall(id, "events.subscribe"));
+    pdus.emplace_back(controlCall(share + 2, "events.unsubscribe", R"({"subscription":1})"));
+    pdus.emplace_back(controlCall(share + 3, "events.subscribe"));
+    auto const got = h.exchange(pdus, pdus.size());
+    REQUIRE(got.size() == pdus.size());
+    for (auto const index: std::views::iota(std::size_t { 1 }, share + 1))
+    {
+        REQUIRE(isControlReply(got[index]));
+        CHECK(std::get<proto::ControlReply>(got[index].pdu).outcome == proto::ControlOutcome::Ok);
+    }
+    REQUIRE(isControlReply(got[share + 1]));
+    CHECK(controlErrorOf(got[share + 1]).code == vtcontrol::ControlErrorCode::LimitReached);
+    // Ending one frees a place.
+    REQUIRE(isControlReply(got[share + 2]));
+    CHECK(std::get<proto::ControlReply>(got[share + 2].pdu).outcome == proto::ControlOutcome::Ok);
+    REQUIRE(isControlReply(got[share + 3]));
+    CHECK(std::get<proto::ControlReply>(got[share + 3].pdu).outcome == proto::ControlOutcome::Ok);
+}
+
+TEST_CASE("an attach with a narrow token is refused like a wrong token", "[vthost][native][grants]")
+{
+    auto const answerTo = [](std::string token) {
+        auto h = NativeHarness { narrowTokenOptions() };
+        auto const got = h.exchange({ proto::ClientHello { .token = std::move(token) } }, 1);
+        CHECK(h.host.sessionCount() == 0);
+        CHECK(h.host.connectedClients() == 0);
+        CHECK(h.session->phase() == NativeSession::ConnectionPhase::AwaitingHello);
+        REQUIRE(got.size() == 1);
+        auto bytes = proto::Writer {};
+        proto::encodePdu(bytes, got[0].serial, got[0].pdu);
+        return std::vector<std::byte> { bytes.view().begin(), bytes.view().end() };
+    };
+    auto const narrow = answerTo("ro");
+    CHECK(narrow == answerTo("wrong"));
+
+    // The full token attaches.
+    auto h = NativeHarness { narrowTokenOptions() };
+    std::ignore = h.exchange({ proto::ClientHello { .token = "admin" } }, 1);
+    CHECK(h.session->phase() == NativeSession::ConnectionPhase::Viewing);
+    CHECK(h.session->grants() == vtcontrol::ControlGrants::all());
+}
+
+TEST_CASE("an AF_UNIX connection holds every grant", "[vthost][native][grants]")
+{
+    auto h = NativeHarness { controlApiOptions() };
+    REQUIRE(h.session->grants() == vtcontrol::ControlGrants::none());
+    std::ignore = h.exchange({ controlApiHello(), controlCall(1, "workspace.list") }, 2);
+    CHECK(h.session->grants() == vtcontrol::ControlGrants::all());
 }

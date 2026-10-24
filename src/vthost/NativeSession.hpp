@@ -23,8 +23,9 @@
 /// reference; image pixels only on FetchImage.
 ///
 /// All of that is for an Attach connection, the hello's default role. A Control connection only asks the
-/// daemon about itself: it is sent its ServerHello and the answers to its daemon-control requests, and
-/// nothing else — no layout, no snapshot, no event of the host's — and it counts as no client.
+/// daemon about itself and calls its control API: it is sent its ServerHello, the answers to its
+/// daemon-control and control requests and the control events it subscribed to, and nothing else — no
+/// layout, no snapshot, no screen of the host's — and it counts as no client.
 
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
@@ -51,6 +52,10 @@
 #include <unordered_set>
 #include <vector>
 
+#include <vtcontrol/Catalog.hpp>
+#include <vtcontrol/ControlApi.hpp>
+#include <vtcontrol/Events.hpp>
+#include <vthost/AccessFile.hpp>
 #include <vthost/AttachPlan.hpp>
 #include <vthost/ClientCensus.hpp>
 #include <vthost/ConnectionAcceptor.hpp>
@@ -69,9 +74,10 @@ namespace vthost
 /// and offers.
 struct HandshakePolicy
 {
-    /// The preshared token every ClientHello must carry; empty accepts any (the AF_UNIX default, where
-    /// the socket's permissions are the gate).
-    std::string expectedToken = {};
+    /// The preshared tokens a ClientHello may carry, each with what it grants; empty accepts any hello with
+    /// every grant (the AF_UNIX default, where the socket's permissions are the gate). An Attach hello needs
+    /// a token that grants everything.
+    std::vector<AcceptedToken> acceptedTokens = {};
     /// The protocol versions this endpoint speaks; the highest one shared with the client is agreed.
     proto::VersionRange versions = proto::SupportedVersions;
     /// The optional features this endpoint offers on top of the agreed version.
@@ -93,6 +99,9 @@ struct NativeSessionServices
     /// connection as a client. The null object, which serves nothing, for an endpoint without a daemon.
     std::reference_wrapper<DaemonControl> daemon = nullDaemonControl();
     FlushPolicy flush = {}; ///< When a pending screen increment is flushed: at once, or coalesced.
+    /// The control API a Control connection that shares Capability::ControlApi calls, and that is told of
+    /// every Attach connection coming and going. The null object, which serves nothing, by default.
+    std::reference_wrapper<vtcontrol::ControlApi> control = vtcontrol::nullControlApi();
 };
 
 /// One connected native-protocol client.
@@ -101,6 +110,15 @@ class NativeSession final: public SessionStreamEvents
   public:
     /// The default send-queue bound (see the constructor).
     static constexpr std::size_t DefaultWriteQueueBytes = std::size_t { 4 } * 1024 * 1024;
+
+    /// Where a connection is in its life, and so what it is for. The single stored state the handshake
+    /// decides; what was agreed on along with it is negotiated().
+    enum class ConnectionPhase : uint8_t
+    {
+        AwaitingHello = 0, ///< No ClientHello accepted yet: nothing but a hello is read.
+        Viewing,           ///< An accepted Attach hello: a client that shows the host's windows.
+        Controlling, ///< An accepted Control hello: calls the daemon and its control API, views nothing.
+    };
 
     /// The largest snapshot payload one PDU carries; a grid bigger than this travels as several.
     ///
@@ -239,6 +257,13 @@ class NativeSession final: public SessionStreamEvents
 
     /// @return What the handshake agreed on; nullopt until a ClientHello was accepted.
     [[nodiscard]] std::optional<proto::Negotiated> const& negotiated() const noexcept { return _negotiated; }
+
+    /// @return Where the connection is in its life.
+    [[nodiscard]] ConnectionPhase phase() const noexcept { return _phase; }
+
+    /// @return What the hello's token granted: every permission over a socket that takes any hello, those of
+    ///         the matched token otherwise; none before a hello is accepted.
+    [[nodiscard]] vtcontrol::ControlGrants grants() const noexcept { return _grants; }
 
     /// @param window A daemon window.
     /// @return Whether this connection is shown @p window: its layout, its sessions' screens and events.
@@ -384,7 +409,8 @@ class NativeSession final: public SessionStreamEvents
 
     void handlePdu(proto::DecodedFrame const& frame);
 
-    /// Whether a frame was a daemon-control request, which a connection of either role may send.
+    /// Whether a frame was a request to the daemon itself -- daemon control, or the control API -- which is
+    /// served (or refused) before the frame would be dispatched on.
     enum class DaemonRequest : uint8_t
     {
         None = 0,   ///< It was not one: the frame is dispatched on.
@@ -392,11 +418,56 @@ class NativeSession final: public SessionStreamEvents
     };
 
     /// Serves @p frame if it is a DaemonStatusRequest or a StopDaemon, through NativeSessionServices::daemon.
-    /// What the daemon does not serve, and a stop for a reason this version does not know, is answered
-    /// Unsupported.
+    /// What the daemon does not serve, a stop for a reason this version does not know, and a request the
+    /// token does not grant (`read` for the status, `write` for a stop) is answered Unsupported.
     /// @param frame A frame received after the handshake.
     /// @return Whether it was such a request.
     [[nodiscard]] DaemonRequest serveDaemonRequest(proto::DecodedFrame const& frame);
+
+    /// What requireGrant() decided.
+    enum class GrantCheck : uint8_t
+    {
+        Refused = 0, ///< The connection lacks the permission; the frame was answered Unsupported.
+        Granted,     ///< Serve the frame.
+    };
+
+    /// Refuses @p frame unless the connection holds @p permission: answered Unsupported, and why logged.
+    /// @param permission What serving @p frame needs.
+    /// @param frame The request.
+    /// @return Whether it was refused or is to be served.
+    [[nodiscard]] GrantCheck requireGrant(vtcontrol::Permission permission, proto::DecodedFrame const& frame);
+
+    /// Serves @p frame if it is a ControlRequest: through the control API on a Controlling connection that
+    /// shares Capability::ControlApi, else answered Unsupported.
+    /// @param frame A frame received after the handshake.
+    /// @return Whether it was a ControlRequest.
+    [[nodiscard]] DaemonRequest serveControlApiRequest(proto::DecodedFrame const& frame);
+
+    /// Serves one call of the control API through NativeSessionServices::control, and answers it with a
+    /// ControlReply under @p serial once the call completes, at once or later, unless the connection closed
+    /// meanwhile.
+    /// @param serial The request's serial.
+    /// @param request The call.
+    void serveControlRequest(uint64_t serial, proto::ControlRequest const& request);
+
+    /// Sends one event of a subscription, or counts it dropped while the send backlog is past half its bound:
+    /// a subscriber that does not read loses events, never the connection, and is told how many it lost as
+    /// the next event that fits arrives.
+    /// @param subscription The subscription.
+    /// @param event The event.
+    void deliverControlEvent(uint32_t subscription, vtcontrol::Event const& event);
+
+    /// The connection as the control API's subscriptions and waits know it.
+    struct ControlEventSink final: vtcontrol::EventSink
+    {
+        explicit ControlEventSink(NativeSession& owner): session(owner) {}
+        void deliverEvent(uint32_t subscription, vtcontrol::Event const& event) override
+        {
+            session.deliverControlEvent(subscription, event);
+        }
+        void subscriptionEnded(uint32_t subscription) override { session._droppedEvents.erase(subscription); }
+        NativeSession& session; ///< The connection.
+    };
 
     /// Answers @p frame with an Unsupported naming its serial and tag: a PDU this connection knows but cannot
     /// serve.
@@ -722,11 +793,19 @@ class NativeSession final: public SessionStreamEvents
     std::size_t _snapshotPieceBytes;
     ConnectionId _id;                ///< Prefixes this connection's every log line.
     NativeSessionServices _services; ///< The handshake's policy, the daemon, and later phases' collaborators.
-    /// What the accepted hello said this connection is for; Attach until then.
-    proto::ConnectionRole _role = proto::ConnectionRole::Attach;
-    /// What the handshake agreed on; engaged once a ClientHello was accepted, which is what "handshaken"
-    /// means everywhere below.
+    /// Where the connection is in its life: decided by the accepted hello's role. @see phase
+    ConnectionPhase _phase = ConnectionPhase::AwaitingHello;
+    vtcontrol::ControlGrants _grants = vtcontrol::ControlGrants::none(); ///< @see grants()
+    /// What the handshake agreed on, the shared capabilities among it; engaged once a ClientHello was
+    /// accepted.
     std::optional<proto::Negotiated> _negotiated;
+    /// The send-queue bound, half of which is where control events start to be dropped.
+    std::size_t _maxWriteQueueBytes;
+    /// Where this connection's control events are delivered. @see deliverControlEvent
+    ControlEventSink _controlEvents { *this };
+    /// The events dropped per subscription since its last one sent, erased as the subscription ends; at most
+    /// one entry per subscription, which ControlServiceConfig caps. @see deliverControlEvent
+    std::unordered_map<uint32_t, uint32_t> _droppedEvents;
     /// The emulation settings this client asked the sessions IT creates to have, layered onto the
     /// host's own in completeHandshake; nullopt when the client stated no preference.
     ///

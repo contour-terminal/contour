@@ -321,3 +321,111 @@ TEST_CASE("a restore whose first window comes back empty fills the host's own wi
     CHECK(host->model().windowCount() == 1);
     CHECK(host->model().window(host->windowId())->tabCount() == 1);
 }
+
+namespace
+{
+
+/// @return What @p host's registry names @p session's pane, tab and window by, as their references.
+[[nodiscard]] std::vector<std::string> refsOf(SessionHost& host, vtworkspace::SessionId session)
+{
+    auto const [window, tab, leaf] = host.model().findSessionLeaf(session);
+    REQUIRE(leaf != nullptr);
+    auto const& objects = host.objects();
+    return {
+        vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, *objects.uuidOf(session) }),
+        vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }),
+        vtcontrol::toString(
+            vtcontrol::ObjectRef { vtcontrol::ObjectKind::Window, *objects.uuidOf(window->id()) }),
+    };
+}
+
+/// @return The CONTOUR_PANE, CONTOUR_TAB and CONTOUR_WINDOW a spawn was given.
+[[nodiscard]] std::vector<std::string> exportedRefsOf(std::optional<vtpty::Process::ExecInfo> const& spawn)
+{
+    REQUIRE(spawn.has_value());
+    return { spawn->env.at("CONTOUR_PANE"), spawn->env.at("CONTOUR_TAB"), spawn->env.at("CONTOUR_WINDOW") };
+}
+
+} // namespace
+
+TEST_CASE("a restored pane gets a UUID and exports it to its shell", "[vthost][snapshot][restore][ids]")
+{
+    auto h = RestoreHarness {};
+    auto const host = h.restore(WorkspaceRestore { .snapshot = workspaceOf({ PaneSnapshot {} }) });
+    REQUIRE(host->restoreOutcome() == RestoreOutcome::Realized);
+    REQUIRE(h.recorded.overrides.size() == 1);
+
+    auto const session = host->model().window(host->windowId())->tabAt(0)->activePane()->session();
+    CHECK(host->objects().uuidOf(session).has_value());
+    CHECK(exportedRefsOf(h.recorded.overrides.front()) == refsOf(*host, session));
+}
+
+TEST_CASE("restored windows, tabs and panes keep the UUIDs and labels they were captured with",
+          "[vthost][snapshot][restore][ids]")
+{
+    auto h = RestoreHarness {};
+    auto source = h.makeHost({});
+    auto* tab = source->createTab();
+    REQUIRE(tab != nullptr);
+    source->splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+    REQUIRE(source->createWindow() != nullptr);
+    auto& objects = source->objects();
+    auto const firstPane = tab->rootPane()->first()->session();
+    objects.setLabel({ vtcontrol::ObjectKind::Pane, *objects.uuidOf(firstPane) }, "logs");
+    objects.setLabel({ vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }, "ops");
+    objects.setLabel({ vtcontrol::ObjectKind::Window, *objects.uuidOf(source->windowId()) }, "main");
+
+    auto const captured = captureWorkspace(*source, { .scrollback = ScrollbackPersistence::Off }, Now);
+    auto decoded = decodeSnapshot(encodeSnapshot(captured));
+    REQUIRE(decoded.has_value());
+    auto const& snap = decoded->snapshot;
+    REQUIRE(snap.windows.size() == 2);
+    REQUIRE(snap.windows[0].identity.has_value());
+    CHECK(snap.windows[0].identity->uuid == objects.uuidOf(source->windowId())->bytes);
+    CHECK(snap.windows[0].identity->label == "main");
+    REQUIRE(snap.windows[0].tabs.front().identity.has_value());
+    CHECK(snap.windows[0].tabs.front().identity->label == "ops");
+    REQUIRE(snap.windows[0].tabs.front().root.children.size() == 2);
+    auto const& firstLeaf = snap.windows[0].tabs.front().root.children[0].pane;
+    REQUIRE(firstLeaf.identity.has_value());
+    CHECK(firstLeaf.identity->uuid == objects.uuidOf(firstPane)->bytes);
+    CHECK(firstLeaf.identity->label == "logs");
+    CHECK_FALSE(snap.windows[0].tabs.front().root.children[1].pane.identity->label.has_value());
+
+    h.recorded.overrides.clear();
+    auto const restored = h.restore(WorkspaceRestore { .snapshot = snap });
+    REQUIRE(restored->restoreOutcome() == RestoreOutcome::Realized);
+    auto const* const window = restored->model().window(restored->windowId());
+    REQUIRE(window != nullptr);
+    auto const* const restoredTab = window->tabAt(0);
+    REQUIRE(restoredTab != nullptr);
+    auto const restoredFirst = restoredTab->rootPane()->first()->session();
+    auto const& now = restored->objects();
+    CHECK(now.uuidOf(restoredFirst) == objects.uuidOf(firstPane));
+    CHECK(now.uuidOf(restoredTab->id()) == objects.uuidOf(tab->id()));
+    CHECK(now.uuidOf(restored->windowId()) == objects.uuidOf(source->windowId()));
+    CHECK(now.labelOf({ vtcontrol::ObjectKind::Pane, *objects.uuidOf(firstPane) }) == "logs");
+    CHECK(now.labelOf({ vtcontrol::ObjectKind::Tab, *objects.uuidOf(tab->id()) }) == "ops");
+    CHECK(now.labelOf({ vtcontrol::ObjectKind::Window, *objects.uuidOf(source->windowId()) }) == "main");
+    // The first restored spawn is the first pane, and its shell is told the ids it came back with.
+    REQUIRE(h.recorded.overrides.size() == source->sessionCount());
+    CHECK(exportedRefsOf(h.recorded.overrides.front()) == refsOf(*restored, restoredFirst));
+}
+
+TEST_CASE("a snapshot that repeats a UUID restores the second object under a fresh one",
+          "[vthost][snapshot][restore][ids]")
+{
+    auto const repeated = ObjectIdentityRecord { .uuid = { 0x01, 0x9a }, .label = "twin" };
+    auto h = RestoreHarness {};
+    auto const host =
+        h.restore(WorkspaceRestore { .snapshot = workspaceOf({ PaneSnapshot { .identity = repeated },
+                                                               PaneSnapshot { .identity = repeated } }) });
+    auto const* const window = host->model().window(host->windowId());
+    REQUIRE(window != nullptr);
+    REQUIRE(window->tabCount() == 2);
+    auto const first = host->objects().uuidOf(window->tabAt(0)->activePane()->session());
+    auto const second = host->objects().uuidOf(window->tabAt(1)->activePane()->session());
+    REQUIRE((first.has_value() && second.has_value()));
+    CHECK(first->bytes == repeated.uuid);
+    CHECK(*second != *first);
+}

@@ -139,6 +139,15 @@ namespace vthost::testing
           proto::DecodedPdu {
               proto::EditTab { .session = 4, .kind = proto::TabEditKind::SetTitle, .title = "build" } } },
         { proto::PduType::Heartbeat, proto::DecodedPdu { proto::Heartbeat { .nonce = 7 } } },
+        { proto::PduType::ControlRequest,
+          proto::DecodedPdu { proto::ControlRequest {
+              .requestId = 7, .method = "pane.split", .params = R"({"pane":"x"})", .context = "pane:p" } } },
+        { proto::PduType::ControlReply,
+          proto::DecodedPdu { proto::ControlReply {
+              .requestId = 7, .outcome = proto::ControlOutcome::Error, .body = "{}" } } },
+        { proto::PduType::ControlEvent,
+          proto::DecodedPdu {
+              proto::ControlEvent { .subscription = 3, .event = R"({"type":"pane.bell"})" } } },
     };
 }
 

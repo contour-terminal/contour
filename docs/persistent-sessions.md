@@ -139,6 +139,7 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 | `--listen-tcp HOST:PORT` | Also serve the native protocol over TCP. Opt-in; always TLS-encrypted and token-authenticated. See [Remote access](#remote-access-over-tcp). |
 | `--token TOKEN` | Preshared token every TCP client must present. Required with `--listen-tcp`. Visible to other local users through the process list — prefer `--token-file`. |
 | `--token-file FILE` | Reads the token from `FILE` instead, so the secret is protected by that file's permissions. Trailing newlines are ignored. |
+| `--access-file FILE` | Further TCP tokens with narrower grants, one per line. Needs `--listen-tcp`. See [Narrower tokens](#narrower-tokens-for-scripts). |
 | `--tls-cert FILE`, `--tls-key FILE` | PEM certificate and matching private key for the TCP listener. Omit both to have the daemon generate an ephemeral self-signed certificate. |
 | `--log TAGS` | Enable logging for a comma-separated list of tags, or `all`. See [Diagnostics](#diagnostics). |
 | `--log-file FILE` | Append log output to `FILE` instead of standard error; `-` means standard error explicitly. |
@@ -252,6 +253,41 @@ Properties worth knowing before you open a port:
   the host you connect to**, not merely signed by that CA.
 - **Bind deliberately.** `127.0.0.1` reaches only the local machine; `0.0.0.0` reaches everyone who
   can route to you. Prefer forwarding the loopback port over SSH to exposing it directly.
+- **Control requests need a verified daemon.** A client of the control API refuses to send a single
+  request over TLS it has not verified: without `--tls-ca` it stops before connecting. With the
+  control API a token types into and reads every pane, so it must not be handed to whoever answers.
+
+### Narrower tokens for scripts
+
+`--token` grants everything. A script that only needs to read a pane can be given a token of its
+own that grants less, through `--access-file FILE`, one entry per line:
+
+```text
+# grants   token (to the end of the line)
+read,screen ci-reader s3cret
+all admin-token
+```
+
+A line is a grant list — `all`, or a comma list of `read` (look at the workspace), `screen` (read
+what is on screen and in command blocks), `input` (type into a pane) and `write` (change the
+workspace, stop the daemon) — one space, then the token, which may contain spaces. Carriage returns
+and trailing whitespace are dropped, as for `--token-file`; blank lines and lines starting with `#`
+are ignored. An unknown grant, an empty token or a token that appears twice stops the daemon from
+starting, naming the line. The file adds tokens beside `--token`/`--token-file`, never instead of
+them: a hello may present either, and the `--token` keeps granting everything, so moving everyone to
+the access file means removing `--token` as well. A line that repeats the `--token` stops the daemon
+from starting too, since its narrower grants would silently read as everything.
+
+Running a program is typing it: `tab.create` and `pane.split` with a `command` need `input` as well
+as `write`, so a token granted `read,screen,write` can open shells and rearrange the workspace but
+cannot run a program of its choosing in it.
+Events follow the same grants: `block.finished` carries the command line and needs `screen`, so a
+subscription of a `read` token is handed every other kind but that one, and a subscribe naming only
+kinds the token may not see is answered `forbidden`.
+
+A call outside a token's grants is answered `forbidden` and the connection stays open. Viewing the
+sessions needs every grant, so a `contour client` with a narrower token is refused exactly as with a
+wrong one.
 
 ## Starting the daemon at login
 

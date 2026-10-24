@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <contour/ContourGuiApp.hpp>
 #include <contour/platform/BlurBehind.hpp>
 #include <contour/platform/XcbProperty.hpp>
 

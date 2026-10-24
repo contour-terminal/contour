@@ -236,6 +236,18 @@ namespace
     {
         return std::to_underlying(PduType::Heartbeat);
     }
+    [[nodiscard]] constexpr uint64_t tagOf(ControlRequest const&) noexcept
+    {
+        return std::to_underlying(PduType::ControlRequest);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ControlReply const&) noexcept
+    {
+        return std::to_underlying(PduType::ControlReply);
+    }
+    [[nodiscard]] constexpr uint64_t tagOf(ControlEvent const&) noexcept
+    {
+        return std::to_underlying(PduType::ControlEvent);
+    }
 
     // --- body encoders ------------------------------------------------------
 
@@ -766,6 +778,27 @@ namespace
     void encodeBody(Writer& out, Heartbeat const& pdu)
     {
         out.varint(pdu.nonce);
+    }
+
+    void encodeBody(Writer& out, ControlRequest const& pdu)
+    {
+        out.varint(pdu.requestId);
+        out.string(pdu.method);
+        out.string(pdu.params);
+        out.string(pdu.context);
+    }
+
+    void encodeBody(Writer& out, ControlReply const& pdu)
+    {
+        out.varint(pdu.requestId);
+        out.u8(std::to_underlying(pdu.outcome));
+        out.string(pdu.body);
+    }
+
+    void encodeBody(Writer& out, ControlEvent const& pdu)
+    {
+        out.varint(pdu.subscription);
+        out.string(pdu.event);
     }
 
     void encodeBody(Writer& out, ResizeSplit const& pdu)
@@ -1550,6 +1583,39 @@ namespace
         return pdu;
     }
 
+    DecodeResult decodeControlRequest(Reader& in)
+    {
+        auto pdu = ControlRequest {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.requestId, error) || !assign(in.string(), pdu.method, error)
+            || !assign(in.string(), pdu.params, error) || !assign(in.string(), pdu.context, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
+    DecodeResult decodeControlReply(Reader& in)
+    {
+        auto pdu = ControlReply {};
+        auto error = DecodeError {};
+        auto outcome = uint8_t {};
+        if (!assign(in.varint(), pdu.requestId, error) || !assign(in.u8(), outcome, error)
+            || !assign(in.string(), pdu.body, error))
+            return std::unexpected(error);
+        // An outcome this build does not know is an error: the body of a future outcome is not a reply.
+        pdu.outcome =
+            outcome == std::to_underlying(ControlOutcome::Ok) ? ControlOutcome::Ok : ControlOutcome::Error;
+        return pdu;
+    }
+
+    DecodeResult decodeControlEvent(Reader& in)
+    {
+        auto pdu = ControlEvent {};
+        auto error = DecodeError {};
+        if (!assign(in.varint(), pdu.subscription, error) || !assign(in.string(), pdu.event, error))
+            return std::unexpected(error);
+        return pdu;
+    }
+
     DecodeResult decodeResizeSplit(Reader& in)
     {
         auto pdu = ResizeSplit {};
@@ -1662,6 +1728,9 @@ namespace
         DecodeRow { PduType::StopDaemon, decodeStopDaemon },
         DecodeRow { PduType::EditTab, decodeEditTab },
         DecodeRow { PduType::Heartbeat, decodeHeartbeat },
+        DecodeRow { PduType::ControlRequest, decodeControlRequest },
+        DecodeRow { PduType::ControlReply, decodeControlReply },
+        DecodeRow { PduType::ControlEvent, decodeControlEvent },
     };
 
     // The catalog and its decode half must stay in step. Invalid is the one alternative with

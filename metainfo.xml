@@ -107,7 +107,9 @@
     <release version="0.9.0" urgency="medium" type="development">
       <description>
         <ul>
-
+          <li>Daemon: every window, tab and pane has a stable UUID, and each hosted shell finds its own with $CONTOUR_PANE, $CONTOUR_TAB, $CONTOUR_WINDOW and $CONTOUR_DAEMON.</li>
+          <li>Daemon: serves a typed control API on its native socket: list, capture and label windows, tabs and panes, open tabs and splits, type into panes, read and wait for command blocks, and subscribe to events.</li>
+          <li>Daemon: contour daemon --access-file FILE issues TCP tokens with narrower control API grants (read, screen, input, write); a call outside them is refused as forbidden, and a narrow token cannot attach.</li>
         </ul>
       </description>
     </release>

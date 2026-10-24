@@ -5,13 +5,16 @@
 
 #include <algorithm>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include <vthost/CommandBlockWire.hpp>
 #include <vthost/GridWire.hpp>
+#include <vthost/ObjectRegistry.hpp>
 #include <vtworkspace/Pane.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -50,6 +53,21 @@ namespace
         return std::string { line };
     }
 
+    /// @return What @p objects names @p uuid's object by: its UUID and label; nullopt for one it does not
+    /// name.
+    [[nodiscard]] std::optional<ObjectIdentityRecord> identityOf(ObjectRegistry const& objects,
+                                                                 vtcontrol::ObjectKind kind,
+                                                                 std::optional<vtcontrol::Uuid> const& uuid)
+    {
+        if (!uuid)
+            return std::nullopt;
+        auto record = ObjectIdentityRecord { .uuid = uuid->bytes };
+        if (auto const label = objects.labelOf(vtcontrol::ObjectRef { .kind = kind, .uuid = *uuid });
+            !label.empty())
+            record.label = std::string { label };
+        return record;
+    }
+
     /// Walks a pane tree depth first, first child first, converting it.
     class TreeCapture
     {
@@ -83,6 +101,8 @@ namespace
         [[nodiscard]] PaneSnapshot capturePane(vtworkspace::SessionId session)
         {
             auto pane = PaneSnapshot {};
+            pane.identity =
+                identityOf(_host.objects(), vtcontrol::ObjectKind::Pane, _host.objects().uuidOf(session));
             auto runtime = _host.paneRuntime(session);
             pane.workingDirectory = std::move(runtime.workingDirectory);
             pane.foregroundProcess = std::move(runtime.foregroundProcess);
@@ -175,7 +195,10 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
         if (window == nullptr || window->empty())
             continue;
         auto captured =
-            WindowSnapshot { .activeTab = static_cast<std::uint32_t>(std::max(window->activeTabIndex(), 0)) };
+            WindowSnapshot { .identity = identityOf(host.objects(),
+                                                    vtcontrol::ObjectKind::Window,
+                                                    host.objects().uuidOf(window->id())),
+                             .activeTab = static_cast<std::uint32_t>(std::max(window->activeTabIndex(), 0)) };
         for (auto const tabIndex: std::views::iota(0, window->tabCount()))
         {
             auto const* const tab = window->tabAt(tabIndex);
@@ -183,6 +206,8 @@ WorkspaceSnapshot captureWorkspace(SessionHost& host,
                 continue;
             auto tree = TreeCapture { host, options, tab->activePane() };
             auto entry = TabSnapshot {};
+            entry.identity =
+                identityOf(host.objects(), vtcontrol::ObjectKind::Tab, host.objects().uuidOf(tab->id()));
             entry.title = tab->runtimeTitle();
             entry.color = tab->color(vtworkspace::TabColorSource::User);
             entry.root = tree.capture(*tab->rootPane());

@@ -261,3 +261,27 @@ TEST_CASE("the trace names the new PDUs without revealing a title", "[vthost][pr
           == "session=3 profile=\"ssh\"");
     CHECK(summarize(DecodedPdu { NewWindow { .profileName = "y" } }) == "profile=\"y\"");
 }
+
+TEST_CASE("a ControlRequest's trace names the method but not the params", "[vthost][proto][control]")
+{
+    auto const line =
+        traceLine(Direction::Recv,
+                  4,
+                  DecodedPdu { ControlRequest {
+                      .requestId = 7, .method = "pane.send", .params = R"({"text":"secret"})" } },
+                  40);
+    CHECK(line.contains("pane.send"));
+    CHECK(line.contains("id=7"));
+    CHECK_FALSE(line.contains("secret"));
+}
+
+TEST_CASE("a control reply and event are traced by size only", "[vthost][proto][control]")
+{
+    CHECK(summarize(DecodedPdu { ControlReply { .requestId = 7, .body = "pane text" } })
+          == "id=7 ok body=9B");
+    CHECK(summarize(
+              DecodedPdu { ControlReply { .requestId = 7, .outcome = ControlOutcome::Error, .body = "x" } })
+          == "id=7 error body=1B");
+    CHECK(summarize(DecodedPdu { ControlEvent { .subscription = 3, .event = "secret pane text" } })
+          == "subscription=3 event=16B");
+}

@@ -74,6 +74,9 @@ enum class PduType : uint8_t
     StopDaemon = 27,
     EditTab = 28,
     Heartbeat = 29,
+    ControlRequest = 30,
+    ControlReply = 31,
+    ControlEvent = 32,
 };
 
 static_assert(std::to_underlying(PduType::ClientHello) == 1 && std::to_underlying(PduType::ServerHello) == 2,
@@ -1216,6 +1219,42 @@ struct Heartbeat
     bool operator==(Heartbeat const&) const = default;
 };
 
+/// Whether a ControlReply carries the reply or an error.
+enum class ControlOutcome : uint8_t
+{
+    Ok = 0,    ///< `body` is the method's reply JSON.
+    Error = 1, ///< `body` is a `ControlError` JSON.
+};
+
+/// Client→server: one call of the control API (Capability::ControlApi). The reply comes under the same
+/// serial and carries the same `requestId`. `params`, `body` and `event` can hold pane text, so the trace
+/// never shows them.
+struct ControlRequest
+{
+    uint64_t requestId = 0;   ///< Chosen by the caller; echoed by the reply.
+    std::string method = {};  ///< The method name, e.g. `pane.split`.
+    std::string params = {};  ///< The request JSON; empty reads as `{}`.
+    std::string context = {}; ///< The caller's pane id (`$CONTOUR_PANE`), or empty.
+    bool operator==(ControlRequest const&) const = default;
+};
+
+/// Server→client: the outcome of a ControlRequest.
+struct ControlReply
+{
+    uint64_t requestId = 0;                      ///< The request's id.
+    ControlOutcome outcome = ControlOutcome::Ok; ///< Whether `body` is a reply or an error.
+    std::string body = {};                       ///< The reply JSON, or a `ControlError` JSON on `Error`.
+    bool operator==(ControlReply const&) const = default;
+};
+
+/// Server→client push: an event of a subscription made with `events.subscribe`.
+struct ControlEvent
+{
+    uint32_t subscription = 0; ///< The subscription it belongs to.
+    std::string event = {};    ///< The event JSON, as `vtcontrol::encodeEvent` writes it.
+    bool operator==(ControlEvent const&) const = default;
+};
+
 using DecodedPdu = std::variant<Invalid,
                                 ClientHello,
                                 ServerHello,
@@ -1245,7 +1284,10 @@ using DecodedPdu = std::variant<Invalid,
                                 DaemonStatusReply,
                                 StopDaemon,
                                 EditTab,
-                                Heartbeat>;
+                                Heartbeat,
+                                ControlRequest,
+                                ControlReply,
+                                ControlEvent>;
 
 /// Encodes @p pdu (body + frame) into @p sink.
 /// @param sink The output writer.

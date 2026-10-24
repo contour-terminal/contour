@@ -142,3 +142,17 @@ TEST_CASE("the TLS factory names its endpoint", "[vthost][transport]")
         .host = "127.0.0.1", .port = 4711, .token = "secret", .caPem = {} } };
     CHECK(factory.describe() == "tls://127.0.0.1:4711");
 }
+
+TEST_CASE("transports report their peer trust", "[vthost][transport][grants]")
+{
+    CHECK(vthost::UnixTransportFactory { "/run/contour/socket", {} }.peerTrust() == vthost::PeerTrust::Local);
+    CHECK(vthost::TlsTransportFactory {
+              vthost::TcpEndpoint { .host = "h", .port = 7297, .token = "t", .caPem = {} } }
+              .peerTrust()
+          == vthost::PeerTrust::Unverified);
+    CHECK(vthost::TlsTransportFactory {
+              vthost::TcpEndpoint {
+                  .host = "h", .port = 7297, .token = "t", .caPem = "-----BEGIN CERTIFICATE-----" } }
+              .peerTrust()
+          == vthost::PeerTrust::Verified);
+}

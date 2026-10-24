@@ -51,6 +51,9 @@
 #include <utility>
 #include <vector>
 
+#include <vtcontrol/ObjectRef.hpp>
+#include <vtcontrol/testing/SequentialUuidSource.hpp>
+
 #ifdef CONTOUR_EXTENSIONS
     #include <vtextension/wasm/DefaultBackend.hpp>
     #include <vtextension/wasm/WasmRuntime.hpp>
@@ -59,6 +62,7 @@
 #endif
 #include <vthost/ConfigReload.hpp>
 #include <vthost/HostedShell.hpp>
+#include <vthost/ObjectRegistry.hpp>
 #include <vthost/SessionHost.hpp>
 #include <vthost/TappingPty.hpp>
 #include <vthost/testing/FakeExtensionHosting.hpp>
@@ -236,17 +240,38 @@ struct HostHarness
     StubClient otherClient;           ///< For the multi-client policy cases.
     vthost::ClientSizePolicy policy;  // set by the constructor, before `host` reads it
     vtbackend::HostIdentity identity; // set by the constructor, before `host` reads it
-    SessionHost host { loop,
-                       [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
-                           return std::make_unique<vtpty::MockPty>(size);
-                       },
-                       vtbackend::Settings {},
-                       core::defaultEnvironment(),
-                       vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
-                                                   .sizePolicy = policy,
-                                                   .startupLayout = vtworkspace::Layout {},
-                                                   .identity = identity } };
+    /// The override every spawn was given, in spawn order (an absent one as an empty shell).
+    std::vector<vtpty::Process::ExecInfo> seen;
+    SessionHost host {
+        loop,
+        [this](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const& spawn) {
+            seen.push_back(spawn.value_or(vtpty::Process::ExecInfo {}));
+            return std::make_unique<vtpty::MockPty>(size);
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .sizePolicy = policy,
+                                    .startupLayout = vtworkspace::Layout {},
+                                    .identity = identity,
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
 };
+
+/// @param count Which identifier of a `SequentialUuidSource` (1-based).
+/// @return That identifier.
+[[nodiscard]] vtcontrol::Uuid seq(unsigned count)
+{
+    return *vtcontrol::parseUuid(std::format("00000000-0000-7000-8000-{:012x}", count));
+}
+
+/// @param kind What the id names.
+/// @param count Which identifier of a `SequentialUuidSource`.
+/// @return Its reference as the environment spells it, e.g. `pane:00000000-...-000000000002`.
+[[nodiscard]] std::string ref(vtcontrol::ObjectKind kind, unsigned count)
+{
+    return vtcontrol::toString(vtcontrol::ObjectRef { kind, seq(count) });
+}
 
 } // namespace
 
@@ -804,6 +829,7 @@ TEST_CASE("a hosted session whose program reads no input terminates at once", "[
                                            {},
                                            {},
                                            {},
+                                           {},
                                            {} };
     session.start();
     // Lines, which the slave's line discipline keeps for a reader: a megabyte of them parks the pump.
@@ -1257,8 +1283,13 @@ TEST_CASE("SessionHost engages no override for a startup layout pane's arguments
 
     REQUIRE(host.sessionCount() == 1);
 
-    // The pane still spawns the daemon's configured shell -- just with no override at all.
-    CHECK(!seen.has_value());
+    // The pane still spawns the daemon's configured shell: the override is always engaged now (it carries
+    // the pane's ids), but names no program, arguments or directory, which the factory reads as "the
+    // configured one".
+    REQUIRE(seen.has_value());
+    CHECK(seen->program.empty());
+    CHECK(seen->arguments.empty());
+    CHECK(seen->workingDirectory.empty());
 }
 
 TEST_CASE("SessionHost still passes through an engaged-but-empty command with its arguments",
@@ -2019,7 +2050,8 @@ std::shared_ptr<vthost::ProfileCatalog const> profileCatalog(
 /// timed by a clock the case advances.
 struct ProfileHost
 {
-    explicit ProfileHost(vtworkspace::Layout layout = {}):
+    explicit ProfileHost(vtworkspace::Layout layout = {},
+                         std::shared_ptr<vthost::ProfileCatalog const> catalog = profileCatalog()):
         host { loop,
                [this](vtbackend::PageSize size,
                       std::optional<vtpty::Process::ExecInfo> const& commandOverride) {
@@ -2031,7 +2063,7 @@ struct ProfileHost
                core::defaultEnvironment(),
                vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
                                            .startupLayout = std::move(layout),
-                                           .profiles = profileCatalog(),
+                                           .profiles = std::move(catalog),
                                            .profilePtys = recordProfileSpawn() } }
     {
     }
@@ -2077,6 +2109,23 @@ TEST_CASE("a session spawned under a profile name runs that profile's shell and 
     CHECK(h.host.terminal(session)->settings().historyLimits.guaranteed
           == vtbackend::MaxHistoryLineCount { vtbackend::LineCount(5000) });
     CHECK(h.host.hostedSession(session)->profileName() == "build");
+}
+
+TEST_CASE("a profile's shell still learns the pane's own ids", "[vthost][profiles][ids]")
+{
+    // A profile that sets a CONTOUR_PANE of its own loses to the real one, and keeps its other variables.
+    auto main = vthost::testing::fakeProfile("/bin/zsh", vtbackend::LineCount(1000));
+    main.shell.env["A"] = "1";
+    main.shell.env["CONTOUR_PANE"] = "bogus";
+    auto catalog = std::make_shared<vthost::testing::FakeProfileCatalog>(
+        std::map<std::string, vthost::ResolvedProfile> { { "main", std::move(main) } }, "main");
+    auto h = ProfileHost { {}, catalog };
+    REQUIRE(h.host.createTab() != nullptr);
+    REQUIRE(h.shells.size() == 1);
+    CHECK(h.shells.back().env.at("A") == "1");
+    CHECK(h.shells.back().env.at("CONTOUR_PANE").starts_with("pane:"));
+    CHECK(h.shells.back().env.at("CONTOUR_TAB").starts_with("tab:"));
+    CHECK(h.shells.back().env.at("CONTOUR_WINDOW").starts_with("window:"));
 }
 
 TEST_CASE("an unknown profile name runs the host's default profile", "[vthost][profiles]")
@@ -2388,4 +2437,280 @@ TEST_CASE("paneRuntime reports the reported directory and the spawn profile", "[
         CHECK_FALSE(runtime.workingDirectory);
         CHECK_FALSE(runtime.profile);
     }
+}
+
+// {{{ Object ids
+
+namespace
+{
+
+/// Model events that do nothing, for a probe that overrides the one it watches.
+struct NullModelEvents: vtworkspace::ModelEvents
+{
+    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
+    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
+    void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override {}
+    void tabTitleChanged(vtworkspace::TabId) override {}
+    void tabColorChanged(vtworkspace::TabId) override {}
+};
+
+} // namespace
+
+TEST_CASE("createTab mints window, pane and tab ids and exports them to the shell", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+
+    // The window is minted at construction, then the tab's pane, then the tab.
+    CHECK(h.host.objects().uuidOf(h.host.windowId()) == seq(1));
+    CHECK(h.host.objects().uuidOf(session) == seq(2));
+    CHECK(h.host.objects().uuidOf(tab->id()) == seq(3));
+    REQUIRE(h.seen.size() == 1);
+    CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
+    CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    // The override engaged for the ids names no program: the configured shell runs.
+    CHECK(h.seen.back().program.empty());
+}
+
+TEST_CASE("the tab's id is bound before observers hear of the tab", "[vthost][host][ids]")
+{
+    struct Probe final: NullModelEvents
+    {
+        void tabAdded(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        {
+            uuid = host->objects().uuidOf(tab);
+        }
+        SessionHost* host = nullptr;
+        std::optional<vtcontrol::Uuid> uuid;
+    };
+    auto h = HostHarness {};
+    auto probe = Probe {};
+    probe.host = &h.host;
+    h.host.subscribe(&probe);
+    REQUIRE(h.host.createTab() != nullptr);
+    h.host.unsubscribe(&probe);
+    CHECK(probe.uuid == seq(3));
+}
+
+TEST_CASE("a split pane gets a new id and its tab's id in CONTOUR_TAB", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+
+    h.host.splitActivePane(tab->id(), SplitState::Vertical, 0.5);
+
+    REQUIRE(h.seen.size() == 2);
+    CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
+    CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(h.host.objects().uuidOf(tab->rootPane()->second()->session()) == seq(4));
+    // The first pane keeps its own.
+    CHECK(h.host.objects().uuidOf(tab->rootPane()->first()->session()) == seq(2));
+}
+
+TEST_CASE("a new window gets its own id, and its first pane lives in it", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* window = h.host.createWindow();
+    REQUIRE(window != nullptr);
+
+    // pane, tab, window.
+    CHECK(h.host.objects().uuidOf(window->id()) == seq(4));
+    CHECK(h.seen.back().env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
+    CHECK(h.seen.back().env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(h.seen.back().env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 4));
+    auto const* tab = window->activeTab();
+    REQUIRE(tab != nullptr);
+    CHECK(h.host.objects().uuidOf(tab->id()) == seq(3));
+}
+
+TEST_CASE("startup layout panes share their tab's and window's ids", "[vthost][host][ids]")
+{
+    auto tab = vtworkspace::LayoutTab {};
+    tab.root.orientation = vtworkspace::SplitState::Horizontal;
+    tab.root.children.emplace_back();
+    tab.root.children.emplace_back();
+    auto seen = std::vector<vtpty::Process::ExecInfo> {};
+    auto source = core::net::testing::ScriptedBackend {};
+    auto loop = core::net::EventLoop { source };
+    auto host = SessionHost {
+        loop,
+        [&](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const& spawn) {
+            seen.push_back(spawn.value_or(vtpty::Process::ExecInfo {}));
+            return std::make_unique<vtpty::MockPty>(size);
+        },
+        vtbackend::Settings {},
+        core::defaultEnvironment(),
+        vthost::SessionHostConfig { .pumping = vthost::SessionPumping::Manual,
+                                    .startupLayout = vtworkspace::Layout { .tabs = { tab } },
+                                    .uuids = std::make_shared<vtcontrol::testing::SequentialUuidSource>() }
+    };
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[0].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(seen[1].env.at("CONTOUR_WINDOW") == ref(vtcontrol::ObjectKind::Window, 1));
+    CHECK(seen[0].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 2));
+    CHECK(seen[0].env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+    CHECK(seen[1].env.at("CONTOUR_PANE") == ref(vtcontrol::ObjectKind::Pane, 4));
+    CHECK(seen[1].env.at("CONTOUR_TAB") == ref(vtcontrol::ObjectKind::Tab, 3));
+}
+
+TEST_CASE("preset ids and labels are honoured", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto const pane = seq(100);
+    auto const tabId = seq(101);
+    auto* tab = h.host.createTab(vthost::SessionSpawnRequest {
+        .presetIds =
+            vthost::PresetObjectIds { .pane = pane, .tab = tabId, .paneLabel = "logs", .tabLabel = "ops" } });
+    REQUIRE(tab != nullptr);
+
+    CHECK(h.host.objects().uuidOf(tab->rootPane()->session()) == pane);
+    CHECK(h.host.objects().uuidOf(tab->id()) == tabId);
+    CHECK(h.host.objects().labelOf(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }) == "logs");
+    CHECK(h.host.objects().labelOf(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, tabId }) == "ops");
+    CHECK(h.seen.back().env.at("CONTOUR_PANE")
+          == vtcontrol::toString(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, pane }));
+
+    // The source minted nothing for them: the next ids continue from the window's.
+    auto* next = h.host.createTab();
+    REQUIRE(next != nullptr);
+    CHECK(h.host.objects().uuidOf(next->rootPane()->session()) == seq(2));
+    CHECK(h.host.objects().uuidOf(next->id()) == seq(3));
+}
+
+TEST_CASE("closed objects are forgotten and ids never repeat", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    auto const tabId = tab->id();
+    auto const paneRef = vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, seq(2) };
+    auto const tabRef = vtcontrol::ObjectRef { vtcontrol::ObjectKind::Tab, seq(3) };
+    REQUIRE(h.host.objects().find(paneRef));
+
+    h.host.handleSessionExit(session);
+
+    CHECK_FALSE(h.host.objects().uuidOf(session));
+    CHECK_FALSE(h.host.objects().uuidOf(tabId));
+    CHECK_FALSE(h.host.objects().find(paneRef));
+    CHECK_FALSE(h.host.objects().find(tabRef));
+
+    auto* again = h.host.createTab();
+    REQUIRE(again != nullptr);
+    CHECK(h.host.objects().uuidOf(again->rootPane()->session()) == seq(4));
+    CHECK(h.host.objects().uuidOf(again->id()) == seq(5));
+}
+
+TEST_CASE("observers can still name what closed while they are told", "[vthost][host][ids]")
+{
+    struct Probe final: NullModelEvents
+    {
+        void tabClosed(vtworkspace::WindowId /*window*/, vtworkspace::TabId tab, int /*index*/) override
+        {
+            uuid = host->objects().uuidOf(tab);
+        }
+        SessionHost* host = nullptr;
+        std::optional<vtcontrol::Uuid> uuid;
+    };
+    auto h = HostHarness {};
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto probe = Probe {};
+    probe.host = &h.host;
+    h.host.subscribe(&probe);
+    h.host.handleSessionExit(tab->rootPane()->session());
+    h.host.unsubscribe(&probe);
+    CHECK(probe.uuid == seq(3));
+}
+
+TEST_CASE("a refused split leaves no pane id behind", "[vthost][host][ids]")
+{
+    auto h = HostHarness {};
+    REQUIRE(h.host.createTab() != nullptr);
+    h.host.splitActivePane(vtworkspace::TabId { 4711 }, SplitState::Vertical, 0.5);
+    CHECK_FALSE(h.host.objects().find(vtcontrol::ObjectRef { vtcontrol::ObjectKind::Pane, seq(4) }));
+}
+
+TEST_CASE("applyCommandOverride overlays env entries", "[vthost][host]")
+{
+    auto shell = vtpty::Process::ExecInfo {};
+    shell.program = "/bin/zsh";
+    shell.env = { { "A", "0" }, { "B", "2" } };
+    auto commandOverride = std::optional { vtpty::Process::ExecInfo {} };
+    commandOverride->env = { { "A", "1" } };
+    vtpty::Process::applyCommandOverride(shell, commandOverride);
+    CHECK(shell.env == vtpty::Process::Environment { { "A", "1" }, { "B", "2" } });
+    CHECK(shell.program == "/bin/zsh");
+}
+
+// }}}
+
+namespace
+{
+/// Keeps every signal the host fans out, in order.
+struct SignalRecorder final: vthost::SessionStreamEvents
+{
+    void sessionSignal(vtworkspace::SessionId session, vthost::SessionSignal const& signal) override
+    {
+        signals.emplace_back(session, signal);
+    }
+
+    template <typename T>
+    [[nodiscard]] std::vector<T> all() const
+    {
+        auto found = std::vector<T> {};
+        for (auto const& [session, signal]: signals)
+            if (auto const* value = std::get_if<T>(&signal))
+                found.push_back(*value);
+        return found;
+    }
+
+    std::vector<std::pair<vtworkspace::SessionId, vthost::SessionSignal>> signals;
+};
+} // namespace
+
+TEST_CASE("hosted sessions fan out block, title and cwd signals", "[vthost][host][signals]")
+{
+    auto h = HostHarness {};
+    auto recorder = SignalRecorder {};
+    auto const subscription = vthost::makeScopedStreamSubscription(h.host, recorder);
+    auto* tab = h.host.createTab();
+    REQUIRE(tab != nullptr);
+    auto const session = tab->rootPane()->session();
+    auto& terminal = *h.host.terminal(session);
+    auto const drain = [&] {
+        std::ignore = h.loop.runUntilIdle();
+    };
+
+    terminal.writeToScreen("\033]133;A\007$ \033]133;B\007make\r\n\033]133;C\007out\r\n\033]133;D;3\007");
+    // Nothing reaches an observer before the loop runs: the parser thread only posts.
+    CHECK(recorder.signals.empty());
+    drain();
+    auto const finished = recorder.all<vthost::CommandBlockFinishedSignal>();
+    REQUIRE(finished.size() == 1);
+    CHECK(finished.front().summary.exitCode == 3);
+    auto const changed = recorder.all<vthost::CommandBlockChangedSignal>();
+    CHECK(std::ranges::any_of(changed, [&](auto const& c) { return c.id == finished.front().summary.id; }));
+    CHECK(recorder.signals.front().first == session);
+
+    terminal.writeToScreen("\033]2;hello\007");
+    drain();
+    auto const titles = recorder.all<vthost::TitleChangedSignal>();
+    REQUIRE(titles.size() == 1);
+    CHECK(titles.front().title == "hello");
+
+    terminal.writeToScreen("\033]7;file://h/tmp\033\\");
+    terminal.writeToScreen("\033]7;file://h/tmp\033\\");
+    drain();
+    CHECK(recorder.all<vthost::WorkingDirectoryChangedSignal>().size() == 1);
 }

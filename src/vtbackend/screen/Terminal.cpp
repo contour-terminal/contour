@@ -6612,8 +6612,11 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
                       core::escape(url));
         return;
     }
+    auto const changed = *parsed != _currentWorkingDirectory;
     _currentWorkingDirectory = *std::move(parsed);
     recordForeignDirectory();
+    if (changed)
+        _eventListener.workingDirectoryChanged();
     _extensionEvents.post(
         [&] { return StatusLineEvents::CwdChanged { .cwd = _currentWorkingDirectory.path }; });
 }
