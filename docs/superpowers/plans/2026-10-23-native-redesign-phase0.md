@@ -292,7 +292,12 @@ The test needs `contrastRatio`. Add it to `src/vtbackend/core/Color.hpp`:
 Use whatever accessor `defaultColorPalettes` actually exposes. If it takes a palette by reference, adapt the test shape, not the assertions.
 
 - [ ] **Step 2: Run and see it fail.** Run: `cmake --build --preset appleclang-debug --target vtbackend_test && out/appleclang-debug/src/vtbackend/vtbackend_test "ColorPalette.*"`
-- [ ] **Step 3: Implement** the three rows and `contrastRatio`.
+- [ ] **Step 3: Implement** the three rows and `contrastRatio`. contour-dark and contour-light also set the four `indicatorStatusLine*` pairs, because the status line is on by default and must never be white on `#0270C0` in these schemes:
+  - Inactive and Insert: fg = white (index 7), bg = black (index 0).
+  - Normal: fg = scheme background, bg = blue (index 4).
+  - Visual: fg = scheme background, bg = magenta (index 5).
+
+  Add a contrast assertion for each pair, at ≥ 4.5 : 1.
 - [ ] **Step 4: Run** `out/appleclang-debug/src/vtbackend/vtbackend_test "ColorPalette.*,Color.*"`. Expected: PASS.
 - [ ] **Step 5: Commit:** `git commit -am "vtbackend: add the contour-dark, contour-light and contour-classic schemes"`
 
@@ -334,6 +339,12 @@ Use whatever accessor `defaultColorPalettes` actually exposes. If it takes a pal
   - `qml/StatusLineItemDialog.qml:226`: Warning.
   - `qml/WindowControls.qml`: the `#99000000` glyph and the `"white"` hover text come from tokens or the palette.
   - `qml/TabColorFlyout.qml`: the swatch border becomes `palette.mid`.
+  - The surfaces PR #2176 added (merged as 4637e4a6):
+    - `qml/TerminalPane.qml` `reconnectingOverlay`: `Qt.rgba(0, 0, 0, 0.6)` becomes the pane-dim token, and `"white"` / `pixelSize: 18` come from the palette and the chrome font;
+    - `qml/DaemonDriftBadge.qml`: `font.pointSize: 9` becomes the chrome font's caption size;
+    - `qml/Main.qml` `hostingNoticeBar`: its alphas become tokens.
+
+    Only the literals move here; Phase 1 restyles these surfaces into HostChip, Banner and Toast.
 - Seed `scripts/qml-color-allowlist.txt` only with protocol-defined colours that are data:
   - the traffic-light hex (already a token, so read it);
   - the transparent `"#00000000"`.
@@ -382,7 +393,7 @@ Use whatever accessor `defaultColorPalettes` actually exposes. If it takes a pal
 ### Task 8: First-launch defaults
 
 **Files:**
-- Modify `src/contour/config/Config.hpp`; the line numbers are those the defaults audit recorded:
+- Modify `src/contour/config/Config.hpp`. The line numbers below are from the audit before PR #2176 merged; locate each entry by name.
 
 | Line | Setting | New value |
 |---|---|---|
@@ -390,16 +401,20 @@ Use whatever accessor `defaultColorPalettes` actually exposes. If it takes a pal
 | `:889` | font size | 13 on `__APPLE__`, 12 elsewhere |
 | `:973-976` | terminal size | 100 × 30 |
 | `:977-978` | margins | horizontal 8, vertical 6 |
-| `:621-643` | status line display | none |
+| `:621-643` | status line | **on** (indicator), with the interim template `left " {InputMode:Bold}{Context:Left=  }"`, `middle "{Title}"`, `right "{HistoryLineCount:Faint}  {Clock:Faint} "`. `{Tabs}` and every `Color=#…` literal leave it, so colours come from the scheme's `indicatorStatusLine*` pairs (Task 4). Phase 3 replaces it with the full template. |
 | `:1522-1525` | tab bar visibility | `Multiple` |
 | `:651-658` | link decoration mode | `LinkDecorationMode::Modifier` |
 | `:960` | `dim_unfocused` | 0.15 |
 | `:965` | bell | `.sound = "off"`, alert true |
 | `:374` | scrollback | 10000 |
 | `:1000-1013` | cursor (insert mode) | block, steady |
+| (by name) | `hyperlink_hover_tooltip` | false |
+| (by name) | `screen_transition_duration` | 150 ms |
+| `TabLabel` | tab label fallback | `{WindowTitle}`, or the foreground process name when the title is empty |
 | `:1020` | colors | `DualColorConfig { .colorSchemeLight = "contour-light", .colorSchemeDark = "contour-dark" }`, with the palettes resolved the way the loader resolves names |
 
 - Modify `src/contour/config/ConfigDocumentation.hpp` so that every generated value above matches.
+- Not in this task, because each needs its consumer first: `chrome_density` (Phase 2), the overlay scrollbar (Phase 3), Reduce Motion for the cursor glide and screen transition (Phase 1, with the motion tokens), and per-side `option_as_alt` (Phase 4).
 - Test: `src/contour/config/Config_test.cpp`
 
 - [ ] **Step 1: Write the failing test** `TEST_CASE("Config.firstLaunchDefaults", "[config]")`, asserting each value in the table against `Config {}` and its default profile. It also asserts that `contour generate config` output contains `colors:\n  dark: contour-dark` (use the existing YAML-writer test helper).
