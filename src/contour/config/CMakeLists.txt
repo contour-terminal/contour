@@ -5,9 +5,11 @@
 # lets a CONTOUR_FRONTEND_GUI=OFF build read the very configuration whose point is not to render.
 # Anything here that needs a QObject, a QML property or a widget belongs a layer up.
 add_library(contour_config STATIC
+    AccessibilityPreferences.hpp
     Actions.cpp Actions.hpp
     AtomicFileWrite.cpp AtomicFileWrite.hpp
     BlockActionEnums.hpp
+    ChromeTokenGroups.hpp
     Config.cpp Config.hpp
     ConfigDocumentation.hpp
     ConfigEnum.hpp
