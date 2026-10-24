@@ -6412,7 +6412,7 @@ std::optional<vtbackend::RGBColor>& blockStatusHoverOf(vtbackend::ColorPalette& 
 TEST_CASE("Config: each gutter color a scheme sets is written back on its own", "[config]")
 {
     // One key at a time, so a key the writer skips, or spells as another, shows up as exactly that key.
-    using Slot = std::optional<vtbackend::RGBColor>& (*)(vtbackend::ColorPalette&);
+    using Slot = std::optional<vtbackend::RGBColor>& (*) (vtbackend::ColorPalette&);
     auto constexpr Slots = std::array {
         std::pair { "block_status.success"sv,
                     Slot { &blockStatusOf<vtbackend::CommandBlockOutcome::Success> } },

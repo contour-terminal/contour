@@ -7,7 +7,9 @@ JetBrains Mono, the default terminal font on macOS and Linux (Windows uses Casca
 - Archive: <https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip>
 - Licence: SIL Open Font License 1.1, see `OFL.txt`
 
-The two variable fonts are taken unmodified from `fonts/variable/` of the archive.
+The two variable fonts are taken unmodified from `fonts/variable/` of the archive. `OFL.txt` is the
+archive's, with one trailing space removed (line 21) for the repository's editorconfig check; its
+text is unchanged. The table gives the archive's hash of it.
 
 | File | sha256 |
 | --- | --- |
