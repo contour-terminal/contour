@@ -1814,7 +1814,7 @@ constexpr StringLiteral BlockStatusConfig {
     "{comment} Colors of the gutter's block column by how each command ended: its fold controls, the\n"
     "{comment} triangle beside a running command and the dot beside a finished one all take them.\n"
     "{comment} Unset by default: success then looks exactly like the fold column (fold_marker above),\n"
-    "{comment} failure takes this scheme's red (normal color 1) and running its yellow (normal color 3),\n"
+    "{comment} failure takes this scheme's red (normal color 1) and running its blue (normal color 4),\n"
     "{comment} so a scheme that has never heard of them still shows them legibly. Uncomment to override.\n"
     "{comment} The values shown are what the default scheme derives, so uncommenting failure and running\n"
     "{comment} as they are changes nothing. Uncommenting success changes one thing: a success the scheme\n"
@@ -1823,7 +1823,7 @@ constexpr StringLiteral BlockStatusConfig {
     "{comment} block_status:\n"
     "{comment}     success: '#7E7C7C'\n"
     "{comment}     failure: '#C63939'\n"
-    "{comment}     running: '#A0A000'\n"
+    "{comment}     running: '#4D79FF'\n"
 };
 
 constexpr StringLiteral BlockStatusHeaderConfig {

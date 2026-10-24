@@ -41,6 +41,94 @@ namespace
         void (*apply)(ColorPalette&); ///< Applies it to @p palette.
     };
 
+    /// The data of one Contour-designed scheme: everything a row of that family sets.
+    ///
+    /// The status-line indicators and the running-block colour are derived from the sixteen colors
+    /// (see applyContourScheme()) rather than listed, so a scheme cannot leave them unreadable.
+    struct ContourScheme
+    {
+        RGBColor background;        ///< The scheme's page color.
+        RGBColor foreground;        ///< The scheme's text color.
+        RGBColor cursor;            ///< The cursor color.
+        RGBColor selection;         ///< The selection's background.
+        RGBColor idleIndicatorText; ///< Text of the inactive and insert indicators, set on palette black.
+        std::array<RGBColor, 16> ansiColors; ///< Palette entries 0..15: normal, then bright.
+    };
+
+    constexpr auto ContourDark = ContourScheme {
+        .background = 0x1C1E24_rgb,
+        .foreground = 0xD9DCE3_rgb,
+        .cursor = 0xE8C26E_rgb,
+        .selection = 0x3A4A6B_rgb,
+        .idleIndicatorText = 0xC5CAD3_rgb, // the scheme's white
+        .ansiColors = { 0x2A2D35_rgb,
+                        0xF0757A_rgb,
+                        0x8FCB7A_rgb,
+                        0xE6C06B_rgb,
+                        0x6FA8F5_rgb,
+                        0xC79BF2_rgb,
+                        0x5FC8C4_rgb,
+                        0xC5CAD3_rgb,
+                        0x848DA2_rgb,
+                        0xFF9095_rgb,
+                        0xA8DE94_rgb,
+                        0xF2D48A_rgb,
+                        0x93BEFF_rgb,
+                        0xD9B5FF_rgb,
+                        0x84DDD8_rgb,
+                        0xF4F6FA_rgb },
+    };
+
+    constexpr auto ContourLight = ContourScheme {
+        .background = 0xFAFAF8_rgb,
+        .foreground = 0x2B2E35_rgb,
+        .cursor = 0x1F5FBF_rgb,
+        .selection = 0xC8D8F5_rgb,
+        // Not the scheme's white (#5F6670): on a light scheme that is a mid gray, 2.3:1 on its black.
+        .idleIndicatorText = 0xFAFAF8_rgb,
+        .ansiColors = { 0x2B2E35_rgb,
+                        0xB42D35_rgb,
+                        0x2A7A1F_rgb,
+                        0x8A6100_rgb,
+                        0x1F5FBF_rgb,
+                        0x8A3FB0_rgb,
+                        0x12757A_rgb,
+                        0x5F6670_rgb,
+                        0x6B7280_rgb,
+                        0xC9343D_rgb,
+                        0x277F1C_rgb,
+                        0x8F6400_rgb,
+                        0x2B6FD6_rgb,
+                        0x9B4CC2_rgb,
+                        0x0F7A80_rgb,
+                        0x3A3F48_rgb },
+    };
+
+    /// Applies @p scheme to @p palette, including the colors that follow from it: the status-line
+    /// indicators (inactive and insert: the scheme's idle text on black; normal: page on blue; visual: page
+    /// on magenta) and a running block in blue, because yellow means search.
+    void applyContourScheme(ColorPalette& palette, ContourScheme const& scheme) noexcept
+    {
+        std::ranges::copy(scheme.ansiColors, palette.palette.begin());
+        palette.defaultForeground = scheme.foreground;
+        palette.defaultBackground = scheme.background;
+        palette.cursor.color = scheme.cursor;
+        palette.selection.background = scheme.selection;
+        palette.selection.backgroundAlpha = 1.0f;
+
+        constexpr auto Black = 0;
+        constexpr auto Blue = 4;
+        constexpr auto Magenta = 5;
+        palette.indicatorStatusLineInactive = { .foreground = scheme.idleIndicatorText,
+                                                .background = palette.palette[Black] };
+        palette.indicatorStatusLineInsertMode = palette.indicatorStatusLineInactive;
+        palette.indicatorStatusLineNormalMode = { .foreground = scheme.background,
+                                                  .background = palette.palette[Blue] };
+        palette.indicatorStatusLineVisualMode = { .foreground = scheme.background,
+                                                  .background = palette.palette[Magenta] };
+        palette.blockStatus[static_cast<size_t>(CommandBlockOutcome::Running)] = palette.palette[Blue];
+    }
+
     /// Every built-in color scheme, as one table.
     ///
     /// The single source of truth for which names exist: defaultColorPalettes() looks a name up here,
@@ -51,6 +139,13 @@ namespace
     /// TODO add dim colors, do we need to adapt them to each of color palettes?
     constexpr auto BuiltinColorPalettes = std::array {
         BuiltinColorPalette { "contour", [](ColorPalette&) {} },
+        // The shipped palette under a name that stays valid now that "contour-dark" and "contour-light"
+        // exist; it must remain equal to "contour".
+        BuiltinColorPalette { "contour-classic", [](ColorPalette&) {} },
+        BuiltinColorPalette { "contour-dark",
+                              [](ColorPalette& palette) { applyContourScheme(palette, ContourDark); } },
+        BuiltinColorPalette { "contour-light",
+                              [](ColorPalette& palette) { applyContourScheme(palette, ContourLight); } },
         BuiltinColorPalette { "monokai",
                               [](ColorPalette& palette) {
                                   // Monokai dark colors

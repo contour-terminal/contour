@@ -389,7 +389,7 @@ struct ColorPalette
     ///
     /// Success derives from the fold column's resting colour -- neutral, so a column of successful
     /// commands looks exactly as the fold column always did -- while failure and running derive from the
-    /// palette's own red and yellow, which every scheme already tunes to read on its background.
+    /// palette's own red and blue (yellow means search), which every scheme already tunes to read on its background.
     ///
     /// @param outcome How the block's command ended, or that it is still running.
     /// @return The scheme's colour for @p outcome, or the derived one when the scheme sets none.
@@ -401,7 +401,7 @@ struct ColorPalette
         {
             case CommandBlockOutcome::Success: return foldMarkerColors().foreground;
             case CommandBlockOutcome::Failure: return normalColor(1);
-            case CommandBlockOutcome::Running: return normalColor(3);
+            case CommandBlockOutcome::Running: return normalColor(4);
         }
         return foldMarkerColors().foreground;
     }

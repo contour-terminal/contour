@@ -3,7 +3,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <string_view>
+
 using namespace vtbackend;
+using namespace std::string_view_literals;
 
 TEST_CASE("ColorPalette.foldMarker.derivesWhenUnset", "[ColorPalette]")
 {
@@ -145,10 +150,10 @@ TEST_CASE("ColorPalette.blockStatus.derivesWhenUnset", "[ColorPalette]")
     auto const palette = ColorPalette {};
 
     // A success looks like the fold column always did; a failure and a running command take the
-    // palette's own red and yellow, which every scheme already tunes to read on its background.
+    // palette's own red and blue, which every scheme already tunes to read on its background.
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == palette.foldMarkerColors().foreground);
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == palette.normalColor(1));
-    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == palette.normalColor(3));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == palette.normalColor(4));
 
     // Line numbers and timestamps are as quiet as the resting fold column.
     CHECK(palette.gutterTextColor() == palette.foldMarkerColors().foreground);
@@ -158,7 +163,7 @@ TEST_CASE("ColorPalette.blockStatus.followsThePalettesOwnColours", "[ColorPalett
 {
     auto palette = ColorPalette {};
     palette.palette[1] = RGBColor(0x11, 0x22, 0x33);
-    palette.palette[3] = RGBColor(0x44, 0x55, 0x66);
+    palette.palette[4] = RGBColor(0x44, 0x55, 0x66);
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == RGBColor(0x11, 0x22, 0x33));
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0x44, 0x55, 0x66));
 }
@@ -226,7 +231,7 @@ TEST_CASE("ColorPalette.blockStatus.defaultSchemeMatchesTheDocumentedColors", "[
     auto const palette = ColorPalette {};
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Success) == RGBColor(0x7E, 0x7C, 0x7C));
     CHECK(palette.blockStatusColor(CommandBlockOutcome::Failure) == RGBColor(0xC6, 0x39, 0x39));
-    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0xA0, 0xA0, 0x00));
+    CHECK(palette.blockStatusColor(CommandBlockOutcome::Running) == RGBColor(0x4D, 0x79, 0xFF));
     CHECK(palette.gutterTextColor() == RGBColor(0x7E, 0x7C, 0x7C));
 }
 
@@ -269,4 +274,104 @@ TEST_CASE("ColorPalette.stickyHeader.isDistinctInTheBuiltinSchemes", "[ColorPale
         CHECK(distance(palette.stickyHeaderBackgroundColor(), palette.defaultBackground) > 6.0);
         CHECK(distance(palette.stickyHeaderSeparatorColor(), palette.stickyHeaderBackgroundColor()) > 15.0);
     }
+}
+
+namespace
+{
+/// Resolves the built-in scheme @p name on top of a default-constructed palette.
+ColorPalette schemeNamed(std::string_view name)
+{
+    auto palette = ColorPalette {};
+    REQUIRE(defaultColorPalettes(name, palette));
+    return palette;
+}
+} // namespace
+
+TEST_CASE("ColorPalette.contourSchemesAreReadable", "[ColorPalette]")
+{
+    for (auto const name: { "contour-dark"sv, "contour-light"sv })
+    {
+        INFO("scheme: " << name);
+        auto const p = schemeNamed(name);
+        CHECK(contrastRatio(p.defaultForeground, p.defaultBackground) >= 4.5);
+        for (auto const i: { 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14 })
+        {
+            INFO("palette index: " << i);
+            CHECK(contrastRatio(p.palette[i], p.defaultBackground) >= 4.5);
+        }
+    }
+    CHECK(schemeNamed("contour-dark").defaultBackground == 0x1C1E24_rgb);
+    CHECK(schemeNamed("contour-dark").defaultForeground == 0xD9DCE3_rgb);
+    CHECK(schemeNamed("contour-light").defaultBackground == 0xFAFAF8_rgb);
+    CHECK(schemeNamed("contour-light").palette[4] == 0x1F5FBF_rgb);
+    CHECK(schemeNamed("contour-dark").palette[4] == 0x6FA8F5_rgb);
+    CHECK(schemeNamed("contour-dark").palette[8] == 0x848DA2_rgb);
+    CHECK(schemeNamed("contour-light").palette[15] == 0x3A3F48_rgb);
+    // Bright black on dark is allowed at 5.0.
+    CHECK(contrastRatio(schemeNamed("contour-dark").palette[8], 0x1C1E24_rgb) >= 5.0);
+}
+
+TEST_CASE("ColorPalette.contourSchemes.cursorAndSelection", "[ColorPalette]")
+{
+    auto const dark = schemeNamed("contour-dark");
+    auto const light = schemeNamed("contour-light");
+    CHECK(dark.cursor.color == CellRGBColor { 0xE8C26E_rgb });
+    CHECK(light.cursor.color == CellRGBColor { 0x1F5FBF_rgb });
+    CHECK(dark.selection.background == CellRGBColor { 0x3A4A6B_rgb });
+    CHECK(light.selection.background == CellRGBColor { 0xC8D8F5_rgb });
+}
+
+TEST_CASE("ColorPalette.contourSchemes.indicatorStatusLinesAreReadable", "[ColorPalette]")
+{
+    for (auto const name: { "contour-dark"sv, "contour-light"sv })
+    {
+        INFO("scheme: " << name);
+        auto const p = schemeNamed(name);
+        // Palette white on dark; on light that white is a mid gray (2.3:1 on black), so the page color.
+        auto const idleText = name == "contour-dark"sv ? p.palette[7] : p.defaultBackground;
+        CHECK(p.indicatorStatusLineInactive.foreground == idleText);
+        CHECK(p.indicatorStatusLineInactive.background == p.palette[0]);
+        CHECK(p.indicatorStatusLineInsertMode.foreground == idleText);
+        CHECK(p.indicatorStatusLineInsertMode.background == p.palette[0]);
+        CHECK(p.indicatorStatusLineNormalMode.foreground == p.defaultBackground);
+        CHECK(p.indicatorStatusLineNormalMode.background == p.palette[4]);
+        CHECK(p.indicatorStatusLineVisualMode.foreground == p.defaultBackground);
+        CHECK(p.indicatorStatusLineVisualMode.background == p.palette[5]);
+
+        for (auto const& pair: { p.indicatorStatusLineInactive,
+                                 p.indicatorStatusLineInsertMode,
+                                 p.indicatorStatusLineNormalMode,
+                                 p.indicatorStatusLineVisualMode })
+            CHECK(contrastRatio(pair.foreground, pair.background) >= 4.5);
+    }
+}
+
+TEST_CASE("ColorPalette.contourSchemes.runningBlockIsBlue", "[ColorPalette]")
+{
+    // Yellow means search, so a running command is blue, by fallback and by explicit scheme choice.
+    CHECK(ColorPalette {}.blockStatusColor(CommandBlockOutcome::Running) == ColorPalette {}.normalColor(4));
+    for (auto const name: { "contour-dark"sv, "contour-light"sv })
+    {
+        auto const p = schemeNamed(name);
+        REQUIRE(p.blockStatus[static_cast<size_t>(CommandBlockOutcome::Running)].has_value());
+        CHECK(p.blockStatusColor(CommandBlockOutcome::Running) == p.palette[4]);
+    }
+}
+
+TEST_CASE("ColorPalette.classicIsTodaysPalette", "[ColorPalette]")
+{
+    // The old palette survives under both names.
+    auto const today = ColorPalette {};
+    CHECK(schemeNamed("contour-classic").palette == today.palette);
+    CHECK(schemeNamed("contour").palette == today.palette);
+    CHECK(schemeNamed("contour-classic").defaultBackground == today.defaultBackground);
+    CHECK(schemeNamed("contour-classic").indicatorStatusLineNormalMode
+          == today.indicatorStatusLineNormalMode);
+}
+
+TEST_CASE("ColorPalette.contourSchemes.areListed", "[ColorPalette]")
+{
+    auto const names = defaultColorPaletteNames();
+    for (auto const name: { "contour-dark"sv, "contour-light"sv, "contour-classic"sv })
+        CHECK(std::ranges::find(names, name) != names.end());
 }
