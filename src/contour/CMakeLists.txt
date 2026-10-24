@@ -409,6 +409,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ColorSlotField.qml
         qml/Banner.qml
         qml/Toast.qml
+        qml/KitDialog.qml
     )
 
     # The files live in ui/ but the module is flat: without an alias each one would land at

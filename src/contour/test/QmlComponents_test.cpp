@@ -6019,6 +6019,125 @@ TEST_CASE("Toast: Reduce Motion fades without travel (offscreen)", "[contour][gu
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+namespace
+{
+/// Creates the KitDialog under @p engine, parented to @p parent, with @p initialProperties, and opens it.
+[[nodiscard]] std::unique_ptr<QObject> openKitDialog(QQmlEngine& engine,
+                                                     QQuickItem* parent,
+                                                     QVariantMap initialProperties)
+{
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml")));
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    initialProperties.insert(QStringLiteral("parent"), QVariant::fromValue(parent));
+    auto dialog = std::unique_ptr<QObject>(component.createWithInitialProperties(initialProperties));
+    REQUIRE(dialog != nullptr);
+    REQUIRE(QMetaObject::invokeMethod(dialog.get(), "open"));
+    auto const* opened = dialog.get();
+    REQUIRE(QTest::qWaitFor([&] { return opened->property("opened").toBool(); }, 2000));
+    return dialog;
+}
+
+/// A 1024 x 640 window with a root item to parent a dialog to.
+struct DialogHost
+{
+    QQuickWindow window;
+    DialogHost()
+    {
+        window.resize(1024, 640);
+        window.show();
+        REQUIRE(QTest::qWaitForWindowExposed(&window));
+    }
+};
+} // namespace
+
+TEST_CASE("KitDialog: a sheet on the macOS row, centred elsewhere (offscreen)",
+          "[contour][gui][qml][kit][dialog]")
+{
+    using contour::config::ChromeStyle;
+    QQmlEngine engine;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = GENERATE(ChromeStyle::MacOS, ChromeStyle::ContourLinux, ChromeStyle::Terminal);
+    contour::test::installChromeStyle(engine, setup);
+    contour::test::QmlMessageCapture const warnings;
+
+    DialogHost host;
+    auto dialog = openKitDialog(
+        engine, host.window.contentItem(), QVariantMap { { "heading", QStringLiteral("Close this tab?") } });
+    auto const overlayWidth = host.window.contentItem()->width();
+    auto const overlayHeight = host.window.contentItem()->height();
+
+    CHECK(dialog->property("width").toReal() == chromeToken(engine, "size", "dialogWidth"));
+    CHECK(std::abs(dialog->property("x").toReal() - (overlayWidth - dialog->property("width").toReal()) / 2)
+          <= 1);
+    if (setup.row == ChromeStyle::MacOS)
+        CHECK(dialog->property("y").toReal() == 0);
+    else
+        CHECK(std::abs(dialog->property("y").toReal()
+                       - (overlayHeight - dialog->property("height").toReal()) / 2)
+              <= 1);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitDialog: accept and reject close it and emit (offscreen)", "[contour][gui][qml][kit][dialog]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    DialogHost host;
+    auto dialog = openKitDialog(engine,
+                                host.window.contentItem(),
+                                QVariantMap { { "heading", QStringLiteral("Close this tab?") },
+                                              { "acceptText", QStringLiteral("Close Tab") } });
+    auto* accept = dialog->findChild<QObject*>(QStringLiteral("kitDialogAccept"));
+    auto* reject = dialog->findChild<QObject*>(QStringLiteral("kitDialogReject"));
+    auto* heading = dialog->findChild<QObject*>(QStringLiteral("kitDialogHeading"));
+    REQUIRE(accept != nullptr);
+    REQUIRE(reject != nullptr);
+    REQUIRE(heading != nullptr);
+    CHECK(accept->property("text").toString() == QStringLiteral("Close Tab"));
+    CHECK(heading->property("text").toString() == QStringLiteral("Close this tab?"));
+
+    QSignalSpy const acceptedSpy(dialog.get(), SIGNAL(accepted()));
+    QSignalSpy const rejectedSpy(dialog.get(), SIGNAL(rejected()));
+    REQUIRE(QMetaObject::invokeMethod(accept, "clicked"));
+    CHECK(acceptedSpy.count() == 1);
+    CHECK(QTest::qWaitFor([&] { return !dialog->property("visible").toBool(); }, 2000));
+
+    REQUIRE(QMetaObject::invokeMethod(dialog.get(), "open"));
+    REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+    REQUIRE(QMetaObject::invokeMethod(reject, "clicked"));
+    CHECK(rejectedSpy.count() == 1);
+    CHECK(acceptedSpy.count() == 1);
+    CHECK(QTest::qWaitFor([&] { return !dialog->property("visible").toBool(); }, 2000));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitDialog: a destructive accept is painted in the danger colour (offscreen)",
+          "[contour][gui][qml][kit][dialog]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    DialogHost host;
+    auto dialog = openKitDialog(engine,
+                                host.window.contentItem(),
+                                QVariantMap { { "heading", QStringLiteral("Close this tab?") },
+                                              { "acceptRole", provider->statusDanger() } });
+    auto* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    REQUIRE(accept != nullptr);
+    auto const* background = accept->property("background").value<QQuickItem*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("color").value<QColor>() == provider->statusColor(provider->statusDanger()));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 #include <QmlComponents_test.moc>
 
 namespace

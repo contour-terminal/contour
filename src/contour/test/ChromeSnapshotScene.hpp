@@ -36,6 +36,7 @@
 #include <QtGui/QPalette>
 #include <QtGui/QStyleHints>
 #include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
@@ -187,6 +188,9 @@ class ChromeSnapshotScene
     ChromeSnapshotScene& operator=(ChromeSnapshotScene&&) = delete;
     ~ChromeSnapshotScene() = default;
 
+    /// @return The object the script's action created over the window, or null when it created none.
+    [[nodiscard]] QObject const* overlay() const noexcept { return _overlay.get(); }
+
     /// Shows the window at SnapshotWindowSize, performs the script's action, and lets the scene settle.
     void show()
     {
@@ -203,6 +207,7 @@ class ChromeSnapshotScene
                 break;
             }
             case ScriptAction::ShowToast: showToast(); break;
+            case ScriptAction::OpenKitDialog: openKitDialog(); break;
         }
         _incubation.settle();
         QCoreApplication::processEvents();
@@ -237,6 +242,13 @@ class ChromeSnapshotScene
 
     /// The toast's message.
     static inline auto const ToastText = QStringLiteral("Copied 3 lines");
+
+    /// The dialog's texts.
+    static inline auto const DialogHeading = QStringLiteral("Close this tab?");
+    static inline auto const DialogMessage =
+        QStringLiteral("\u201Ccmake\u201D is still running. Closing the tab will end it.");
+    static inline auto const DialogAcceptText = QStringLiteral("Close Tab");
+    static inline auto const DialogRejectText = QStringLiteral("Cancel");
 
     /// What halves a length to centre an item.
     static constexpr qreal HalfDivisor = 2;
@@ -348,6 +360,30 @@ class ChromeSnapshotScene
         item->setX((content->width() - item->implicitWidth()) / HalfDivisor);
         item->setWidth(item->implicitWidth());
         _overlay = std::move(overlay);
+    }
+
+    /// Creates the dialog over the window's overlay, with a destructive accept, and waits for it to open.
+    void openKitDialog()
+    {
+        auto component =
+            QQmlComponent(&_engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml")));
+        INFO("KitDialog.qml errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        auto* style = _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        auto dialog = std::unique_ptr<QObject>(component.createWithInitialProperties(QVariantMap {
+            { QStringLiteral("parent"), QVariant::fromValue(window().contentItem()) },
+            { QStringLiteral("heading"), DialogHeading },
+            { QStringLiteral("message"), DialogMessage },
+            { QStringLiteral("acceptText"), DialogAcceptText },
+            { QStringLiteral("rejectText"), DialogRejectText },
+            { QStringLiteral("acceptRole"), style->property("statusDanger") },
+        }));
+        REQUIRE(dialog != nullptr);
+        REQUIRE(QMetaObject::invokeMethod(dialog.get(), "open"));
+        auto const* opened = dialog.get();
+        REQUIRE(QTest::qWaitFor([&] { return opened->property("opened").toBool(); }, 2000));
+        _overlay = std::move(dialog);
     }
 
     /// Loads Main.qml against the controller under the variant's chrome row.

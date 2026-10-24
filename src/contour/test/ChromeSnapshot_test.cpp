@@ -100,6 +100,13 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(text->property("text").toString() == QStringLiteral("Copied 3 lines"));
                 break;
             }
+            case SnapshotScript::KitDialog: {
+                auto const* dialog = scene.overlay();
+                REQUIRE(dialog != nullptr);
+                CHECK(dialog->objectName() == QStringLiteral("kitDialog"));
+                CHECK(dialog->property("opened").toBool());
+                break;
+            }
             case SnapshotScript::SingleTab: break;
         }
     }

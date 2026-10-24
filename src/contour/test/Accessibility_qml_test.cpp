@@ -166,13 +166,19 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                QVariantMap { { "text", QStringLiteral("Contour has new defaults") } } },
         Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
                QVariantMap { { "text", QStringLiteral("Copied 3 lines") } } },
+        Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml"),
+               QVariantMap { { "heading", QStringLiteral("Close this tab?") } } },
     };
 
     for (auto const& testCase: cases)
     {
         INFO("kit primitive: " << testCase.url.toStdString());
         auto root = loadComponent(engine, testCase.url, testCase.initialProperties);
-        auto* attached = accessibleAttachedOf(root.get());
+        // A Popup is not an Item: its role and name live on its content item.
+        auto* host = qobject_cast<QQuickItem*>(root.get()) != nullptr
+                         ? root.get()
+                         : root->property("contentItem").value<QObject*>();
+        auto* attached = accessibleAttachedOf(host);
         REQUIRE(attached != nullptr);
         CHECK(attached->property("role").isValid());
         CHECK_FALSE(attached->property("name").toString().isEmpty());
