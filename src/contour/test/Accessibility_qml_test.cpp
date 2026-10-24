@@ -149,3 +149,32 @@ TEST_CASE("accessibility: every settings editor carries the row's label", "[cont
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+TEST_CASE("accessibility: every kit primitive declares a role and a name", "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    struct Case
+    {
+        QString url;
+        QVariantMap initialProperties;
+    };
+    auto const cases = std::array {
+        Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml"),
+               QVariantMap { { "text", QStringLiteral("Contour has new defaults") } } },
+    };
+
+    for (auto const& testCase: cases)
+    {
+        INFO("kit primitive: " << testCase.url.toStdString());
+        auto root = loadComponent(engine, testCase.url, testCase.initialProperties);
+        auto* attached = accessibleAttachedOf(root.get());
+        REQUIRE(attached != nullptr);
+        CHECK(attached->property("role").isValid());
+        CHECK_FALSE(attached->property("name").toString().isEmpty());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}

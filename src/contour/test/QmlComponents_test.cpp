@@ -5816,6 +5816,122 @@ TEST_CASE("the drift badge ignores clicks while a restart runs", "[contour][qml]
     CHECK(label->property("text").toString() == QStringLiteral("Restarting daemon…"));
 }
 
+namespace
+{
+/// Creates the Banner under @p engine with @p initialProperties.
+[[nodiscard]] std::unique_ptr<QObject> createBanner(QQmlEngine& engine, QVariantMap const& initialProperties)
+{
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml")));
+    INFO("component errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto banner = std::unique_ptr<QObject>(component.createWithInitialProperties(initialProperties));
+    REQUIRE(banner != nullptr);
+    QCoreApplication::processEvents();
+    return banner;
+}
+
+/// The named token @p name of group @p group of the installed `chromeStyle`.
+[[nodiscard]] qreal chromeToken(QQmlEngine& engine, char const* group, char const* name)
+{
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto* tokens = style->property(group).value<QObject*>();
+    REQUIRE(tokens != nullptr);
+    return tokens->property(name).toReal();
+}
+} // namespace
+
+TEST_CASE("Banner: shows its text, and its buttons emit (offscreen)", "[contour][gui][qml][kit][banner]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    auto banner = createBanner(engine,
+                               QVariantMap { { "text", QStringLiteral("Contour has new defaults") },
+                                             { "actionText", QStringLiteral("Use New") },
+                                             { "dismissText", QStringLiteral("Keep Mine") } });
+    auto* item = qobject_cast<QQuickItem*>(banner.get());
+    REQUIRE(item != nullptr);
+    CHECK(item->isVisible());
+    CHECK(item->height() > 0);
+
+    auto* text = item->findChild<QObject*>(QStringLiteral("bannerText"));
+    auto* action = item->findChild<QQuickItem*>(QStringLiteral("bannerAction"));
+    auto* dismiss = item->findChild<QQuickItem*>(QStringLiteral("bannerDismiss"));
+    REQUIRE(text != nullptr);
+    REQUIRE(action != nullptr);
+    REQUIRE(dismiss != nullptr);
+    CHECK(text->property("text").toString() == QStringLiteral("Contour has new defaults"));
+    CHECK(action->property("text").toString() == QStringLiteral("Use New"));
+    CHECK(dismiss->property("text").toString() == QStringLiteral("Keep Mine"));
+
+    QSignalSpy const actionSpy(banner.get(), SIGNAL(actionTriggered()));
+    QSignalSpy const dismissedSpy(banner.get(), SIGNAL(dismissed()));
+    REQUIRE(QMetaObject::invokeMethod(action, "clicked"));
+    REQUIRE(QMetaObject::invokeMethod(dismiss, "clicked"));
+    CHECK(actionSpy.count() == 1);
+    CHECK(dismissedSpy.count() == 1);
+
+    SECTION("no action text hides the action button")
+    {
+        item->setProperty("actionText", QString());
+        CHECK_FALSE(action->isVisible());
+        CHECK(dismiss->isVisible());
+    }
+    SECTION("no text hides the whole banner")
+    {
+        item->setProperty("text", QString());
+        CHECK_FALSE(item->isVisible());
+        CHECK(item->height() == 0);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Banner: the Terminal row is the content's height in the scheme's palette[0] (offscreen)",
+          "[contour][gui][qml][kit][banner]")
+{
+    using contour::config::ChromeStyle;
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = GENERATE(ChromeStyle::Terminal, ChromeStyle::MacOS);
+    setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Bar)] =
+        vtbackend::RGBColor { 0x2A2D35u };
+    contour::test::installChromeStyle(engine, setup);
+
+    auto banner =
+        createBanner(engine, QVariantMap { { "text", QStringLiteral("Contour has new defaults") } });
+    auto* item = qobject_cast<QQuickItem*>(banner.get());
+    REQUIRE(item != nullptr);
+    auto* content = item->property("contentItem").value<QQuickItem*>();
+    auto* background = item->property("background").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+    REQUIRE(background != nullptr);
+
+    auto const inset = chromeToken(engine, "space", "s3");
+    CHECK(item->property("topPadding").toReal() == inset);
+    CHECK(item->property("bottomPadding").toReal() == inset);
+    CHECK(item->height() == item->implicitHeight());
+    CHECK(item->height() == content->implicitHeight() + 2 * inset);
+
+    if (setup.row == ChromeStyle::Terminal)
+    {
+        CHECK(inset == 0);
+        CHECK(item->height() == content->implicitHeight());
+        CHECK(background->property("color").value<QColor>() == QColor(0x2A, 0x2D, 0x35));
+    }
+    else
+    {
+        CHECK(inset > 0);
+        CHECK(item->height() > content->implicitHeight());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 #include <QmlComponents_test.moc>
 
 namespace
