@@ -147,20 +147,45 @@ owned by you, and must not be world-accessible. Group access is permitted, match
 
 ## Hosting from a plain `contour`
 
-`contour client` always attaches. A plain `contour` decides by `daemon.mode` in the configuration, or
-by `--daemon-mode` on its command line:
+The thin client is the default: a plain `contour` shows sessions that a daemon hosts, starting that
+daemon when none runs. `contour client` always attaches; a plain `contour` decides by `daemon.mode` in
+the configuration, or by `--daemon-mode` on its command line:
 
 | Mode | Where the sessions run |
 | --- | --- |
-| `in_process` (the default) | In the window's own process, as before daemon mode existed |
-| `auto` | In the daemon, started if none runs; when none can be had, in the window's process, with a bar saying why — those shells end when the window closes |
+| `auto` (the default) | In the daemon, started if none runs; when none can be had, in the window's process, with a bar saying why — those shells end when the window closes |
+| `in_process` | In the window's own process, as before daemon mode existed |
 | `required` | In the daemon, or not at all: the launch ends with the reason before any window opens |
 
-An attaching launch opens one new window beside whatever the daemon already shows, or brings every
-daemon window back when no other window is attached.
+```yaml
+daemon:
+  mode: auto          # auto, in_process or required
+  socket: ""          # the daemon's socket path; empty selects the default
+  size_policy: latest # whose size wins when clients disagree: latest, smallest or largest
+  history_limit: 1000 # scrollback lines per session, -1 for unlimited; unset follows the profile
+```
+
+```sh
+contour --daemon-mode in_process   # this launch only: keep the sessions in this window
+contour --daemon-mode required     # this launch only: fail rather than fall back
+```
+
+### What a launch opens
+
+An attaching launch opens one new window beside whatever the daemon already shows. When no other
+window is attached to the daemon, it instead brings every window the daemon holds back, so reopening
+Contour after closing its last window finds your sessions where you left them.
 
 A launch that names a program (`-e`, or a command after the options) runs it in the window's own process
 under `auto`; under `required` it ends before any window, since a daemon session runs the host's profile.
+
+### When the connection is lost
+
+A window attached to a daemon keeps its panes when the connection drops. They show "Reconnecting…"
+while the window reconnects with backoff (250 ms doubling to 5 s) and picks its windows up again. A
+connection gone half-open — a laptop that changed networks — is noticed by a heartbeat within about
+15 s instead of whenever TCP gives up. Input typed while disconnected is dropped rather than replayed
+into whatever shell answers next. A launch that falls back to `in_process` has no connection to lose.
 
 ## `contour client` options
 

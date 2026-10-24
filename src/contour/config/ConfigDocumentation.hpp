@@ -1422,9 +1422,10 @@ constexpr StringLiteral ImagesConfig {
 
 constexpr StringLiteral DaemonConfig {
     "daemon:\n"
-    "    {comment} Where sessions live. in_process keeps them in this process; auto hosts them in a\n"
-    "    {comment} daemon and falls back to in_process, with a notice, when none can be reached;\n"
-    "    {comment} required hosts them in a daemon and fails when none can be reached.\n"
+    "    {comment} Where sessions live. auto (the default) hosts them in a daemon, starting one when\n"
+    "    {comment} none runs, and falls back to in_process, with a notice, when none can be reached;\n"
+    "    {comment} in_process keeps them in this process; required hosts them in a daemon and fails\n"
+    "    {comment} when none can be reached.\n"
     "    mode: {}\n"
     "\n"
     "    {comment} The daemon's socket path. Empty selects the default.\n"
@@ -2118,7 +2119,7 @@ constexpr StringLiteral DaemonWeb {
     "section decides whether sessions are hosted by a daemon process, so they outlive the window.\n"
     "``` yaml\n"
     "daemon:\n"
-    "  mode: in_process\n"
+    "  mode: auto\n"
     "  socket: \"\"\n"
     "  size_policy: latest\n"
     "  history_limit: 1000\n"

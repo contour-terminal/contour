@@ -880,7 +880,7 @@ struct DaemonRestoreConfig
 struct DaemonSettings
 {
     /// Whether to host sessions in a daemon (`daemon.mode`).
-    DaemonMode mode { DaemonMode::InProcess };
+    DaemonMode mode { DaemonMode::Auto };
 
     /// The daemon's socket path; empty means the `vthost::muxSocketPath` default.
     std::string socket {};

@@ -43,6 +43,7 @@ touch "$OUT/blocker"
 cat > "$XDG_CONFIG_HOME/contour/contour.yml" <<YAML
 default_profile: main
 daemon:
+  mode: required
   socket: $OUT/blocker/run/sock
 profiles:
   main:

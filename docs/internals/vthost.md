@@ -908,6 +908,15 @@ next, restarts each pane's mirror for the new connection's snapshots, and report
 (`windowsLost`) with the first window that came instead, so it can close them without closing the last
 one.
 
+A connection gone half-open (a laptop that changed networks, a host that vanished) produces no EOF, so
+the client does not wait for TCP to notice. `client::LivenessTracker` is a pure decision over time points
+the connection's loop clock supplies: after `idleBeforeProbe` (5 s) of daemon silence it asks for a
+`Heartbeat` and, after `deadAfter` (15 s) without any inbound frame, declares the connection lost, which
+hands over to the reconnect loop above. Any inbound frame counts as life, not only the echo. The probe is
+sent only to a daemon that shares `Capability::Heartbeat`; the `ClientHello` answer has its own
+`handshakeDeadline` (10 s) that applies to every daemon, so an old one that predates heartbeats is still
+not waited on forever.
+
 ### Control channel
 
 The daemon's control API (`src/vtcontrol`: windows, tabs, panes and command blocks, named by UUID,
