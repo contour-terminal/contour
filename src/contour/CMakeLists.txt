@@ -841,6 +841,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/TabSizeInheritance_test.cpp
             session/TerminalSessionManager_test.cpp
             session/TerminalSession_test.cpp
+            test/ChromeSnapshot_test.cpp
             test/ContourGuiApp_test.cpp
             test/QmlComponents_test.cpp
             test/SettingsPageQml_test.cpp

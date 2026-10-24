@@ -88,6 +88,7 @@ Row {
 
         ListView {
             id: list
+            objectName: "tabList" // so offscreen tests can findChild() it
             anchors.fill: parent
             // Shrink to content width (the Row's implicitWidth then reflects the tabs + button); the
             // parent layout caps the Row, and clip keeps overflow tidy.

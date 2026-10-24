@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/TabBarMode.hpp>
+#include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -8,6 +10,7 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 #include <QtQml/QQmlComponent>
@@ -23,6 +26,22 @@
 
 namespace contour::test
 {
+
+/// The shape a MockMainController is built in: what its window holds, fixed for its lifetime.
+///
+/// The defaults are the mock every Main.qml load case has always seen: two local tabs, a strip that is
+/// always shown, and no pane tree, palette model or settings controller.
+struct MainWindowScene
+{
+    int tabCount = 2;                      ///< How many tabs the strip lists.
+    QObject* rootPane = nullptr;           ///< The active tab's pane tree; borrowed, may be null.
+    QObject* commandPalette = nullptr;     ///< The command palette's model; borrowed, may be null.
+    QObject* settingsController = nullptr; ///< The settings page's controller; borrowed, may be null.
+    snapshot::ContentPage page = snapshot::ContentPage::Terminal; ///< What the content area shows.
+    QString hostLabel; ///< The attached host; empty for a local window.
+    /// When the tab strip is shown, resolved against @c tabCount into the initial tabBarShouldShow.
+    config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
+};
 
 /// Manager + WindowController in one mock: `terminalSessions` context property AND the object
 /// Main.qml assigns to `win` (createWindowController returns this). The QAbstractListModel rows
@@ -58,6 +77,10 @@ class MockMainController: public MainWindowControllerMock
                    titleBarContextMenuModelChanged)
     // Mirrors WindowController's hosting notice; writable here so a test can raise it before the load.
     Q_PROPERTY(QString hostingNotice READ hostingNotice WRITE setHostingNotice NOTIFY hostingNoticeChanged)
+    // Mirrors WindowController's settings surface: the content area shows the settings page while
+    // settingsActive holds, bound to settingsController.
+    Q_PROPERTY(bool settingsActive READ settingsActive CONSTANT)
+    Q_PROPERTY(QObject* settingsController READ settingsController CONSTANT)
 
   public:
     enum class Roles : std::uint16_t
@@ -76,6 +99,14 @@ class MockMainController: public MainWindowControllerMock
         ProgramStatusTextRole = Qt::UserRole + 11,
         ProgramStatusProgressRole = Qt::UserRole + 12,
     };
+
+    /// @param scene What the window holds; see MainWindowScene. Its pointers must outlive the mock.
+    explicit MockMainController(MainWindowScene scene = {}):
+        _scene { std::move(scene) },
+        _tabBarShouldShow { config::isTabBarShown(_scene.tabBarVisibility, _scene.tabCount) }
+    {
+        attachedHost = _scene.hostLabel;
+    }
 
     [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
     [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
@@ -131,9 +162,18 @@ class MockMainController: public MainWindowControllerMock
             emit chromeHeightChanged();
         }
     }
-    [[nodiscard]] QObject* activeTabRootPane() const noexcept { return nullptr; }
+    [[nodiscard]] QObject* activeTabRootPane() const noexcept { return _scene.rootPane; }
     [[nodiscard]] QObject* activeSession() const noexcept { return nullptr; }
-    [[nodiscard]] QObject* commandPalette() const noexcept { return nullptr; }
+    [[nodiscard]] QObject* commandPalette() const noexcept { return _scene.commandPalette; }
+    /// Mirrors WindowController::settingsActive(): whether the content area shows the settings page.
+    [[nodiscard]] bool settingsActive() const noexcept
+    {
+        return _scene.page == snapshot::ContentPage::Settings;
+    }
+    [[nodiscard]] QObject* settingsController() const noexcept { return _scene.settingsController; }
+    /// Mirrors WindowController::closeSettings(): what the settings page's close button calls. The
+    /// page is part of the scene, so it stays.
+    Q_INVOKABLE void closeSettings() {}
     Q_INVOKABLE void runCommand(QString const&) {}
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
     /// OpenCommandPalette action, and what makes Main.qml's popup appear.
@@ -197,15 +237,18 @@ class MockMainController: public MainWindowControllerMock
     Q_INVOKABLE void saveLayoutAs(QString const&) {}
     Q_INVOKABLE void setTabColor(int, QColor const&) {}
     Q_INVOKABLE void resetTabColor(int) {}
+    /// Mirrors WindowController::tabWorkingDirectory(): what TabItem's hover tooltip asks for the
+    /// hovered tab, which a shown window's tab strip can be. No session runs anywhere, so none.
+    Q_INVOKABLE [[nodiscard]] QString tabWorkingDirectory(int /*index*/) const { return {}; }
     Q_INVOKABLE void closeTabAtIndex(int) {}
     Q_INVOKABLE void closeOtherTabs(int) {}
     Q_INVOKABLE void closeTabsToRight(int) {}
 
     // {{{ QAbstractListModel (feeds the TabStrip delegates)
-    [[nodiscard]] int rowCount(QModelIndex const& = QModelIndex()) const override { return 2; }
+    [[nodiscard]] int rowCount(QModelIndex const& = QModelIndex()) const override { return _scene.tabCount; }
     [[nodiscard]] QVariant data(QModelIndex const& index, int role) const override
     {
-        if (index.row() < 0 || index.row() >= 2)
+        if (index.row() < 0 || index.row() >= _scene.tabCount)
             return {};
         switch (static_cast<Roles>(role))
         {
@@ -264,9 +307,10 @@ class MockMainController: public MainWindowControllerMock
     void tabColorPickRequested(int /*index*/);
 
   private:
+    MainWindowScene _scene;
     int _chromeHeight = 0;
     int _tabBarPosition = 0;       // 0 = Top (default), 1 = Bottom
-    bool _tabBarShouldShow = true; // strip shown by default
+    bool _tabBarShouldShow;        // seeded from the scene's tab-bar visibility
     bool _multimediaReady = false; // the background probe has not finished
     QString _hostingNotice;
 };

@@ -215,6 +215,7 @@ ApplicationWindow
         // pane-tree Loader, honoring the "single renderer" architecture — settings is not a pane.
         Loader {
             id: settingsPageLoader
+            objectName: "settingsPageLoader" // so offscreen tests can findChild() it
             anchors.fill: parent
             active: appWindow.win !== null && appWindow.win.settingsActive === true
             visible: active
@@ -288,6 +289,7 @@ ApplicationWindow
     // overlay layer and sits above the terminal content and the resize border without needing a z.
     CommandPalette {
         id: commandPalette
+        objectName: "commandPalette" // so offscreen tests can findChild() it
         controller: appWindow.win
         window: appWindow
     }

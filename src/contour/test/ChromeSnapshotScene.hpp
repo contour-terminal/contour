@@ -1,0 +1,363 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <contour/command/CommandCatalog.hpp>
+#include <contour/command/CommandHistory.hpp>
+#include <contour/command/Shortcut.hpp>
+#include <contour/config/Config.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/TabBarMode.hpp>
+#include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/GuiTheme.hpp>
+#include <contour/test/ChromeSnapshotPlan.hpp>
+#include <contour/test/MockMainController.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlIncubation.hpp>
+#include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/QmlMocks.hpp>
+#include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/UiStyleProvider.hpp>
+
+#include <core/platform/FileSystem.hpp>
+
+#include <QtCore/QByteArray>
+#include <QtCore/QCoreApplication>
+#include <QtCore/QSize>
+#include <QtCore/QStringList>
+#include <QtCore/QTemporaryDir>
+#include <QtGui/QFont>
+#include <QtGui/QFontDatabase>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
+#include <QtGui/QPalette>
+#include <QtGui/QStyleHints>
+#include <QtQml/QQmlEngine>
+#include <QtQuick/QQuickWindow>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <memory>
+#include <ranges>
+#include <span>
+#include <vector>
+
+#include <QtTest/QTest>
+
+/// The chrome snapshot driver's scene: one SnapshotVariant built as Main.qml over mocks, offscreen.
+///
+/// The plan (ChromeSnapshotPlan.hpp) decides what each picture shows; this only interprets a row of it,
+/// so a new script is a row there rather than a branch here.
+namespace contour::test::snapshot
+{
+
+/// The size every snapshot window is rendered at, in device-independent pixels.
+inline constexpr QSize SnapshotWindowSize { 1024, 640 };
+
+/// Why the bundled chrome fonts could not be registered.
+enum class SnapshotFontError : uint8_t
+{
+    DirectoryMissing = 0, ///< The font directory does not exist, or is not a directory.
+    NoFontLoaded,         ///< The directory holds no `*.ttf` that Qt accepted.
+};
+
+/// The directory the repository's bundled chrome fonts live in.
+/// @return `<CONTOUR_GUI_SOURCE_DIR>/res/fonts`.
+[[nodiscard]] inline std::filesystem::path bundledChromeFontDirectory()
+{
+    return std::filesystem::path(CONTOUR_GUI_SOURCE_DIR) / "res" / "fonts";
+}
+
+/// Registers every `*.ttf` in @p directory with Qt, so the chrome renders in the same font everywhere.
+///
+/// A file that cannot be read, or that Qt does not accept as a font, is skipped.
+/// @param files     The file system to read the fonts from.
+/// @param directory The directory to read.
+/// @return The families Qt loaded, without duplicates; or why none were.
+[[nodiscard]] inline std::expected<QStringList, SnapshotFontError> registerBundledChromeFonts(
+    core::platform::FileSystem const& files, std::filesystem::path const& directory)
+{
+    if (!files.isDirectory(directory))
+        return std::unexpected { SnapshotFontError::DirectoryMissing };
+    auto const entries = files.listDirectory(directory);
+    if (!entries)
+        return std::unexpected { SnapshotFontError::DirectoryMissing };
+
+    auto const isFontFile = [](core::platform::FileSystem::DirectoryEntry const& entry) {
+        return entry.isRegularFile && entry.path.extension() == ".ttf";
+    };
+    auto families = QStringList {};
+    for (auto const& entry: *entries | std::views::filter(isFontFile))
+    {
+        auto const bytes = files.readFile(entry.path);
+        if (!bytes)
+            continue;
+        auto const id = QFontDatabase::addApplicationFontFromData(QByteArray::fromStdString(*bytes));
+        if (id >= 0)
+            families << QFontDatabase::applicationFontFamilies(id);
+    }
+    if (families.isEmpty())
+        return std::unexpected { SnapshotFontError::NoFontLoaded };
+    families.removeDuplicates();
+    return families;
+}
+
+/// Forces the application's palette and color scheme to one appearance for the lifetime of the scope.
+///
+/// The suite never pins a scheme (see test_main.cpp), so the destructor gives back the palette it found
+/// and unpins the scheme.
+class ScopedChromeAppearance
+{
+  public:
+    /// @param appearance The appearance to force: buildThemePalette's palette, and on Qt 6.8 or later
+    ///                   the matching QStyleHints color scheme.
+    explicit ScopedChromeAppearance(vtbackend::ColorPreference appearance):
+        _saved { QGuiApplication::palette() }
+    {
+        auto const scheme =
+            appearance == vtbackend::ColorPreference::Light ? Qt::ColorScheme::Light : Qt::ColorScheme::Dark;
+        QGuiApplication::setPalette(platform::buildThemePalette(scheme));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+        QGuiApplication::styleHints()->setColorScheme(scheme);
+#endif
+    }
+
+    ~ScopedChromeAppearance()
+    {
+        QGuiApplication::setPalette(_saved);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+        QGuiApplication::styleHints()->unsetColorScheme();
+#endif
+    }
+
+    ScopedChromeAppearance(ScopedChromeAppearance const&) = delete;
+    ScopedChromeAppearance& operator=(ScopedChromeAppearance const&) = delete;
+    ScopedChromeAppearance(ScopedChromeAppearance&&) = delete;
+    ScopedChromeAppearance& operator=(ScopedChromeAppearance&&) = delete;
+
+  private:
+    QPalette _saved;
+};
+
+/// One snapshot variant, built as the real Main.qml over mocks and ready to show.
+///
+/// Construction builds everything the variant names and loads Main.qml, failing the enclosing test unless
+/// the load is clean. Everything is owned here; the members are ordered so the QML tree dies before the
+/// mocks it borrows, and the application palette is given back after everything else.
+class ChromeSnapshotScene
+{
+  public:
+    /// @param variant The picture to build: its script, chrome row, defaults edition and appearance.
+    explicit ChromeSnapshotScene(SnapshotVariant variant):
+        _appearance { variant.appearance },
+        _variant { variant },
+        _config { .defaultsEdition = variant.edition },
+        _look { snapshotLook(variant.edition, variant.appearance) },
+        _chromeFont { window::resolveChromeFont(_config, variant.row, _config.defaultProfileName.value()) },
+        _sessions { makeSessions(scriptRow(variant.script), _look) },
+        _rootPane { makePaneTree(scriptRow(variant.script).panes, _sessions) },
+        _history { PaletteHistoryCapacity },
+        _paletteModel { makePaletteModel(
+            _history, _actionCommands, _config, rowHost(variant.row).shortcuts) },
+        _settings { makeSettings(scriptRow(variant.script).page) },
+        _controller { MainWindowScene {
+            .tabCount = scriptRow(variant.script).tabCount,
+            .rootPane = _rootPane.get(),
+            .commandPalette = _paletteModel.get(),
+            .settingsController = _settings.get(),
+            .page = scriptRow(variant.script).page,
+            .hostLabel =
+                QString::fromUtf8(scriptRow(variant.script).hostLabel.data(),
+                                  static_cast<qsizetype>(scriptRow(variant.script).hostLabel.size())),
+            .tabBarVisibility = _look.tabBarVisibility,
+        } },
+        _root { load() }
+    {
+    }
+
+    ChromeSnapshotScene(ChromeSnapshotScene const&) = delete;
+    ChromeSnapshotScene& operator=(ChromeSnapshotScene const&) = delete;
+    ChromeSnapshotScene(ChromeSnapshotScene&&) = delete;
+    ChromeSnapshotScene& operator=(ChromeSnapshotScene&&) = delete;
+    ~ChromeSnapshotScene() = default;
+
+    /// Shows the window at SnapshotWindowSize, performs the script's action, and lets the scene settle.
+    void show()
+    {
+        window().resize(SnapshotWindowSize);
+        window().show();
+        switch (scriptRow(_variant.script).action)
+        {
+            case ScriptAction::None: break;
+            case ScriptAction::OpenPalette: {
+                auto const* palette = root().findChild<QObject*>(QStringLiteral("commandPalette"));
+                REQUIRE(palette != nullptr);
+                _controller.openCommandPalette();
+                REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, 2000));
+                break;
+            }
+        }
+        _incubation.settle();
+        QCoreApplication::processEvents();
+        QCoreApplication::processEvents();
+    }
+
+    /// The window as rendered. Needs a display: the offscreen platform grabs nothing worth keeping.
+    /// @return The grabbed frame.
+    [[nodiscard]] QImage grab() const { return window().grabWindow(); }
+
+    /// @return Main.qml's ApplicationWindow.
+    [[nodiscard]] QQuickWindow& window() const { return *qobject_cast<QQuickWindow*>(_root.get()); }
+
+    /// @return Main.qml's root object, for findChild().
+    [[nodiscard]] QObject& root() const { return *_root; }
+
+    /// @return The QML diagnostics captured since construction (see isQmlDiagnostic).
+    [[nodiscard]] QStringList diagnostics() const
+    {
+        auto diagnostics = QStringList {};
+        for (auto const& message: _warnings.messages() | std::views::filter(isQmlDiagnostic))
+            diagnostics << message;
+        return diagnostics;
+    }
+
+    /// @return The font the chrome was configured with, as resolved for the variant's row.
+    [[nodiscard]] QFont const& chromeFont() const noexcept { return _chromeFont; }
+
+  private:
+    /// How many recent commands the palette remembers, as MockPaletteController remembers them.
+    static constexpr std::size_t PaletteHistoryCapacity = 5;
+
+    /// The leaf that holds focus in every pane shape.
+    static constexpr std::size_t ActiveLeaf = 0;
+
+    /// How many panes @p shape divides a tab into.
+    [[nodiscard]] static constexpr std::size_t leafCount(PaneShape shape) noexcept
+    {
+        switch (shape)
+        {
+            case PaneShape::SingleLeaf: break;
+            case PaneShape::SplitThree: return 3;
+        }
+        return 1;
+    }
+
+    /// One session per leaf of @p script's pane shape, in the look's background; every one but the
+    /// active leaf's dimmed as unfocused, and all of them reconnecting when the host connection is.
+    [[nodiscard]] static std::vector<std::unique_ptr<MockSession>> makeSessions(
+        SnapshotScriptRow const& script, SnapshotLook const& look)
+    {
+        auto sessions = std::vector<std::unique_ptr<MockSession>> {};
+        for (auto const leaf: std::views::iota(std::size_t { 0 }, leafCount(script.panes)))
+        {
+            auto session = std::make_unique<MockSession>(platform::toQColor(look.terminalBackground));
+            if (leaf != ActiveLeaf)
+                session->setDimUnfocused(static_cast<float>(look.dimUnfocused));
+            if (script.connection == HostConnection::Reconnecting)
+                session->setReconnecting(true);
+            sessions.push_back(std::move(session));
+        }
+        return sessions;
+    }
+
+    /// The pane tree @p shape describes over @p sessions, one leaf per session in order.
+    [[nodiscard]] static std::unique_ptr<MockPaneProxy> makePaneTree(
+        PaneShape shape, std::span<std::unique_ptr<MockSession> const> sessions)
+    {
+        auto const leaf = [&](std::size_t index) {
+            auto pane = std::make_unique<MockPaneProxy>(/*leaf=*/true);
+            pane->setSession(sessions[index].get());
+            pane->setActive(index == ActiveLeaf);
+            return pane;
+        };
+        switch (shape)
+        {
+            case PaneShape::SingleLeaf: break;
+            case PaneShape::SplitThree: {
+                // A split node takes QObject ownership of its children as it is built.
+                auto first = leaf(0);
+                auto second = leaf(1);
+                auto third = leaf(2);
+                auto inner =
+                    std::make_unique<MockPaneProxy>(/*leaf=*/false, second.release(), third.release());
+                return std::make_unique<MockPaneProxy>(/*leaf=*/false, first.release(), inner.release());
+            }
+        }
+        return leaf(ActiveLeaf);
+    }
+
+    /// The command palette's model, wired as MockPaletteController wires it, with the shortcuts spelled
+    /// the way the row's host spells them.
+    [[nodiscard]] static std::unique_ptr<window::CommandPaletteModel> makePaletteModel(
+        command::CommandHistory const& history,
+        command::ActionCommandSource const& actions,
+        config::Config const& config,
+        command::ShortcutStyle shortcuts)
+    {
+        auto model = std::make_unique<window::CommandPaletteModel>(history);
+        model->setSources({ &actions });
+        model->setShortcuts(command::shortcutIndex(config, shortcuts));
+        model->refresh();
+        return model;
+    }
+
+    /// The settings page's controller over a store in a temporary directory, or null unless @p page
+    /// shows it.
+    [[nodiscard]] std::unique_ptr<window::SettingsController> makeSettings(ContentPage page) const
+    {
+        switch (page)
+        {
+            case ContentPage::Terminal: break;
+            case ContentPage::Settings:
+                REQUIRE(_settingsDir.isValid());
+                return std::make_unique<window::SettingsController>(
+                    [this]() -> config::Config const& { return _config; },
+                    std::make_shared<config::FileGuiConfigStore>(
+                        std::filesystem::path(_settingsDir.path().toStdU16String())),
+                    [] {},
+                    nullptr);
+        }
+        return nullptr;
+    }
+
+    /// Loads Main.qml against the controller under the variant's chrome row.
+    [[nodiscard]] std::unique_ptr<QObject> load()
+    {
+        _engine.setIncubationController(&_incubation);
+        auto const chrome = ChromeSetup {
+            .row = _variant.row,
+            .font = _chromeFont,
+            .windowControls = config::resolveWindowControlStyle(config::WindowControlStyle::Auto,
+                                                                rowHost(_variant.row).host),
+        };
+        auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
+        REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
+        _incubation.settle();
+        return root;
+    }
+
+    ScopedChromeAppearance _appearance; ///< First: the palette is given back after everything else.
+    SnapshotVariant _variant;
+    config::Config _config;
+    SnapshotLook _look;
+    QFont _chromeFont;
+    QmlMessageCapture _warnings;
+    std::vector<std::unique_ptr<MockSession>> _sessions;
+    std::unique_ptr<MockPaneProxy> _rootPane;
+    command::CommandHistory _history;
+    command::ActionCommandSource _actionCommands;
+    std::unique_ptr<window::CommandPaletteModel> _paletteModel;
+    QTemporaryDir _settingsDir;
+    std::unique_ptr<window::SettingsController> _settings;
+    MockMainController _controller;
+    QQmlEngine _engine;
+    IncubationDriver _incubation;
+    std::unique_ptr<QObject> _root; ///< Last: the QML tree dies before everything it borrows.
+};
+
+} // namespace contour::test::snapshot
