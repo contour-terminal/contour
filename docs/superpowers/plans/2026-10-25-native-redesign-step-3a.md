@@ -189,7 +189,7 @@ Implementers follow these; those marked **(owner)** are repeated under *Owner de
 - **R-f. Roles.** Parsed case-insensitively, written lowercase. They apply to `Color`, `BackgroundColor`, and `Tabs`'
   `ActiveColor`/`ActiveBackground` alike: one colour type, one parser. A word that is neither a role nor
   `parseColor`'s syntax leaves the colour unset, as `Color=Yellow` does today. The settings bridge parses through the
-  same function, so an unparseable value becomes unset, not black (`hexToRgb` gives black today).
+  same function, so an unparsable value becomes unset, not black (`hexToRgb` gives black today).
 - **R-g. Intrinsic colours.** `{LastCommand}` draws its status run (`✓` / `✗ exit N`) in success / danger and ` · <duration>`
   in muted, and the chip draws in its mode pair, **only when the item names no `Color=` of its own**; with one, the
   whole item takes it (user colours win).

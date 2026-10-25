@@ -159,7 +159,7 @@ keep it current. The page is kept with `/status-board` (the `contour-workflows` 
 5. **RTL or very long command names** (a Hebrew profile name, a 300-character tab title set by a shell). Expected:
    the title elides at the row's end, the shortcut and `›` stay inside the row, an RTL title starts at the row's
    leading edge like every other, and the bold match lands on the typed characters. Pinned in Task 2
-   (`paletteTree.matchOffsetsLandOnTheChildsArgument`, a Hebrew argument), Task 3 (UTF-16 offsets through the prefix)
+   (`paletteTree.matchOffsetsLandOnTheChildArgument`, a Hebrew argument), Task 3 (UTF-16 offsets through the prefix)
    and Task 5 ("a long or right-to-left title elides inside its row").
 
 Also pinned, beyond the five: reopening the palette always starts at the top level (Task 3); a recent child shows
@@ -436,7 +436,7 @@ git commit -m "command: give every catalogue action a palette category, from one
     `iota(0, 200)`); unfiltered top → exactly one row whose `kind == DrillIn` and title "Change Profile", and no
     `ChangeProfile` child row; the level lists 200 rows; filter `p199` at the top → row 0 is
     "Change Profile · p199".
-  - `paletteTree.matchOffsetsLandOnTheChildsArgument` (Review Focus 5): profile `"שלום"`; filter `"של"` → the child row's
+  - `paletteTree.matchOffsetsLandOnTheChildArgument` (Review Focus 5): profile `"שלום"`; filter `"של"` → the child row's
     `titleMatches` equal `{ prefix + 0, prefix + 1, prefix + 2, prefix + 3 }` (fuzzy matching is per byte, two bytes per
     Hebrew letter; the Qt model keeps the code-point boundaries, Task 3), `prefix` = "Change Profile" + separator.
   - `paletteTree.footerHints`: `paletteFooterHints(Command, Top, MacGlyphs) == "↩ Run · ⎋ Close"`;

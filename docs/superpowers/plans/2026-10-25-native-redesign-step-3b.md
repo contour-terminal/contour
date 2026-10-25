@@ -404,13 +404,13 @@ git commit -m "vtbackend: search options and a query compiled once, with an inva
     `{(0,7)-(1,0)}`, one segment `{0, 1}`; written instead as `"abc 12 de\r\n345"`, `de.*3` finds nothing in either
     row's segment, and `searchSegmentAt(grid, 1) == {1, 1}`.
   - `searchQuery.wholeWordUsesTheWordDelimiters`: page 1 × 30, `"foo foobar barfoo foo."`, whole-word `foo` → starts
-    at columns 0 and 18 only, for literal `foo` and regex `fo+` alike; `.wordBoundary = Any` → four.
+    at columns 0 and 18 only, for literal `foo` and regex `[f]o+` alike; `.wordBoundary = Any` → four.
   - `searchQuery.wholeWordLooksAcrossASoftWrap` (Review Focus 2): page 2 × 4, `"ab foo"` → whole-word `foo` is
     `{(0,3)-(1,1)}`; `"ab foox"` → none.
   - `searchQuery.wideAndCombiningCharacters` (Review Focus 4): page 1 × 12, `U"日本語 café"` (cells 日 0–1,
     本 2–3, 語 4–5, space 6, c 7, a 8, f 9, é 10):
     - literal `本語` → `{(0,2)-(0,5)}`; regex `日.` → `{(0,0)-(0,3)}`; regex `語 c` → `{(0,4)-(0,7)}`;
-    - literal `café` typed precomposed (`U"café"`) → `{(0,7)-(0,10)}`, and decomposed likewise; regex `caf.` →
+    - literal `café` typed precomposed (`U"café"`) → `{(0,7)-(0,10)}`, and decomposed likewise; regex `ca[f].` →
       `{(0,7)-(0,10)}`;
     - literal `cafe` and regex `cafe` → none (the cell is é, not e); regex `e` → none.
   - `searchQuery.blankRowsAndPaddingAreNotText`: a wide character pushed to the next row leaves wrap padding at the
