@@ -905,6 +905,21 @@ jobs:
             echo "::error::$binary [shells] reported SKIPPED; a shell the integration scripts target is not being exercised on macOS"
             exit 1
           fi
+      - name: "verify the macOS menu bar's key seam on the cocoa platform"
+        # The ctest above runs contour_gui_test offscreen, where every [display] case SKIPs: the menu bar
+        # needs Qt Widgets on the cocoa plugin, so the chords the terminal leaves to the menu (Cmd-Q, Cmd-,,
+        # Cmd-M, Cmd-H) and what AppKit does with them reach no assertion there. The runner has a
+        # logged-in Aqua session, so this runs them on the real platform. Gating, and checked for SKIPs
+        # like the steps above: a Catch2 SKIP exits 0.
+        run: |
+          set -o pipefail
+          binary=out/macos-package/src/contour/contour_gui_test
+          output=$(CONTOUR_TEST_DISPLAY=1 "$binary" '[shortcutoverride],[menubar]' 2>&1) || { printf '%s\n' "$output"; exit 1; }
+          printf '%s\n' "$output"
+          if printf '%s' "$output" | grep -q 'skipped'; then
+            echo "::error::$binary [shortcutoverride],[menubar] reported SKIPPED; the menu bar's key seam is not being exercised on macOS"
+            exit 1
+          fi
       - name: "Create Package(s)"
         # cpack deploys, prunes unloadable plugins, verifies the bundle is self-contained,
         # signs it inside-out, notarizes and staples both the app and the image. Each of
