@@ -1142,6 +1142,12 @@ void TerminalSessionManager::updateColorPreference(vtbackend::ColorPreference co
         session->updateColorPreference(preference);
 }
 
+void TerminalSessionManager::updateMotionPreference(config::MotionPreference motion)
+{
+    for (auto* session: _sessionsById | std::views::values)
+        session->applyMotionPreference(motion);
+}
+
 vtworkspace::Tab* TerminalSessionManager::tabAtRow(vtworkspace::WindowId window, int index) const noexcept
 {
     auto* win = _model->window(window);

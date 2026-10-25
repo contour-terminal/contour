@@ -385,7 +385,9 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 app.processEnvironment(),
                 app.fileSystem(),
                 std::move(pty),
-                config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
+                config::motionAdjusted(
+                    config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
+                    app.accessibilityPreferences().motion),
                 app.statusLineCommandServices(),
                 app.terminalClocks(),
                 vtbackend::randomSemanticBlockTokens(),
@@ -1293,6 +1295,23 @@ void TerminalSession::updateColorPreference(vtbackend::ColorPreference preferenc
         requestScrollbarMarksRefresh(); // the ticks are drawn in the scheme's colours
 
         emit backgroundColorChanged();
+    }
+}
+
+void TerminalSession::applyMotionPreference(config::MotionPreference motion)
+{
+    // Recomputed from the configuration rather than remembered, so turning Reduce Motion off restores
+    // exactly what the profile configures. Built before the lock, from GUI-thread state only.
+    auto const adjusted = config::motionAdjusted(
+        config::sessionSettings(_config, _profile, _currentColorPreference, std::nullopt), motion);
+
+    // Locked: the render thread reads both durations as it animates. The factory settings follow too, so a
+    // RIS returns to the durations the preference allows, as configureTerminal() hands them over.
+    auto const _ = std::scoped_lock { _terminal };
+    for (auto const setting: config::MotionSettings)
+    {
+        _terminal.settings().*setting = adjusted.*setting;
+        _terminal.factorySettings().*setting = adjusted.*setting;
     }
 }
 
@@ -5922,7 +5941,10 @@ void TerminalSession::configureTerminal()
     // updateColorPreference(): that re-seeds only when the preference changed, so a reload that changed
     // the profile's colors kept the old ones.
     _currentColorPreference = _app.colorPreference();
-    auto configured = config::sessionSettings(_config, _profile, _currentColorPreference, std::nullopt);
+    // Under Reduce Motion as a new terminal would be, so a reload does not bring the glide back.
+    auto configured = config::motionAdjusted(
+        config::sessionSettings(_config, _profile, _currentColorPreference, std::nullopt),
+        _app.accessibilityPreferences().motion);
 
     // Locked: the profile's status line may resize the page, which may write a report, and so may re-seeding
     // the palette with mode 2031 set. See ViNormalMode.

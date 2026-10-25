@@ -944,6 +944,19 @@ std::optional<vtbackend::Modifiers> followHyperlinkModifiers(Config const& confi
     return std::nullopt;
 }
 
+vtbackend::Settings motionAdjusted(vtbackend::Settings settings, MotionPreference motion)
+{
+    switch (motion)
+    {
+        case MotionPreference::Full: break;
+        case MotionPreference::Reduced:
+            for (auto const setting: MotionSettings)
+                settings.*setting = std::chrono::milliseconds { 0 };
+            break;
+    }
+    return settings;
+}
+
 vtbackend::Settings sessionSettings(Config const& config,
                                     TerminalProfile const& profile,
                                     vtbackend::ColorPreference colorPreference,

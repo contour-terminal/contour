@@ -884,6 +884,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     void updateColorPreference(vtbackend::ColorPreference preference);
 
+    /// Applies the OS motion preference to the running terminal: under Reduce Motion the cursor glide and
+    /// the screen transition take no time, otherwise they take what the profile configures. The
+    /// configuration itself is left as it is.
+    /// @param motion The OS motion preference.
+    void applyMotionPreference(config::MotionPreference motion);
+
     // vtbackend::Events
     //
     void requestCaptureBuffer(vtbackend::LineCount lines, bool logical) override;

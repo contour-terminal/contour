@@ -1777,9 +1777,11 @@ void ContourGuiApp::refreshChromeStyle()
         _chromeStyleHost->update(chromeInputs());
 }
 
-void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPreferences /*preferences*/)
+void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPreferences preferences)
 {
     refreshChromeStyle();
+    // The terminal's own animations follow the motion preference too, in every running session.
+    sessionsManager().updateMotionPreference(preferences.motion);
 }
 
 void ContourGuiApp::onPlatformAppearanceChanged(platform::PlatformAppearance /*appearance*/)

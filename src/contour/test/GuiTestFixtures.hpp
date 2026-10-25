@@ -764,8 +764,14 @@ class ConfiguredTestApp
 {
   public:
     /// @param factory Optional PTY factory override, as TestApp takes it.
-    explicit ConfiguredTestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr):
-        _testApp { std::move(factory) },
+    /// @param appearance The OS accessibility and appearance sources, as TestApp takes them.
+    explicit ConfiguredTestApp(std::unique_ptr<contour::session::SessionFactory> factory = nullptr,
+                               contour::platform::AppearanceServices const& appearance =
+                                   contour::platform::nullAppearanceServices()):
+        _testApp {
+            std::move(factory), nullptr, nullptr, nullptr, TestApp::testHostIdentity(), nullptr, {}, nullptr,
+            appearance
+        },
         _configFile { std::filesystem::path(_configDir.path().toStdU16String()) / "contour.yml" }
     {
         REQUIRE(_configDir.isValid());

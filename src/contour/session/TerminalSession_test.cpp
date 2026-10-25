@@ -23,6 +23,7 @@
 #include <contour/session/SessionInput.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
@@ -10994,4 +10995,88 @@ TEST_CASE("TerminalSessionManager: the host connection reaches every remotely ho
     app.manager().setHostConnection(ConnectionState::Connected);
     CHECK_FALSE(first->isReconnecting());
     CHECK_FALSE(second->isReconnecting());
+}
+
+namespace
+{
+/// The TestApp a motion test runs in: one whose accessibility preferences are read from @p accessibility.
+/// @param accessibility The switch the app's accessibility source reads; it must outlive the app.
+/// @param appearance The switch the app's appearance source reads; it must outlive the app.
+/// @return The app.
+[[nodiscard]] std::unique_ptr<contour::test::TestApp> makeMotionTestApp(
+    contour::test::AccessibilitySwitch& accessibility, contour::test::AppearanceSwitch& appearance)
+{
+    return std::make_unique<contour::test::TestApp>(
+        std::make_unique<contour::test::MockPtySessionFactory>(),
+        nullptr,
+        nullptr,
+        nullptr,
+        contour::test::TestApp::testHostIdentity(),
+        nullptr,
+        contour::test::TestEnvironment::Overrides {},
+        nullptr,
+        contour::test::appearanceServicesWith(accessibility, appearance));
+}
+} // namespace
+
+TEST_CASE("TerminalSession: a session born under Reduce Motion has no glide and no transition",
+          "[contour][session][motion]")
+{
+    using namespace std::chrono_literals;
+    // Declared before the app, so the switches outlive the sources reading them.
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    accessibility.preferences.motion = contour::config::MotionPreference::Reduced;
+    auto const testApp = makeMotionTestApp(accessibility, appearance);
+
+    auto const session = makeDisplaylessSession(testApp->app());
+    CHECK(session->terminal().settings().screenTransitionDuration == 0ms);
+    CHECK(session->terminal().settings().cursorMotionAnimationDuration == 0ms);
+    // The configuration keeps what the user asked for.
+    CHECK(session->profile().screenTransitionDuration.value() != 0ms);
+}
+
+TEST_CASE("TerminalSession: turning Reduce Motion on and off follows live", "[contour][session][motion]")
+{
+    using namespace std::chrono_literals;
+    using contour::config::MotionPreference;
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    auto const testApp = makeMotionTestApp(accessibility, appearance);
+
+    // Through the manager, so updateMotionPreference() reaches it.
+    contour::test::ScopedController const win { testApp->manager() };
+    auto* session = testApp->manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    auto const& settings = session->terminal().settings();
+    REQUIRE(settings.screenTransitionDuration == 250ms);
+    REQUIRE(settings.cursorMotionAnimationDuration == 80ms);
+
+    accessibility.set(contour::config::AccessibilityPreferences {
+        .motion = MotionPreference::Reduced, .transparency = {}, .contrast = {} });
+    CHECK(settings.screenTransitionDuration == 0ms);
+    CHECK(settings.cursorMotionAnimationDuration == 0ms);
+
+    accessibility.set(contour::config::AccessibilityPreferences {
+        .motion = MotionPreference::Full, .transparency = {}, .contrast = {} });
+    CHECK(settings.screenTransitionDuration == 250ms);
+    CHECK(settings.cursorMotionAnimationDuration == 80ms);
+}
+
+TEST_CASE("TerminalSession: a configuration reload keeps Reduce Motion", "[contour][session][motion]")
+{
+    using namespace std::chrono_literals;
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+    accessibility.preferences.motion = contour::config::MotionPreference::Reduced;
+    contour::test::ConfiguredTestApp testApp {
+        nullptr, contour::test::appearanceServicesWith(accessibility, appearance)
+    };
+
+    auto session = makeDisplaylessSession(testApp.app());
+    REQUIRE(session->terminal().settings().screenTransitionDuration == 0ms);
+
+    reloadSessionWith(*session, "", "        screen_transition_duration: 333\n");
+    CHECK(session->terminal().settings().screenTransitionDuration == 0ms);
+    CHECK(session->profile().screenTransitionDuration.value() == 333ms);
 }

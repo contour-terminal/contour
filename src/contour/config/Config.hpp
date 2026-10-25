@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/BlockActionEnums.hpp>
 #include <contour/config/ConfigDocumentation.hpp>
@@ -65,6 +66,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -3282,6 +3284,20 @@ struct ResolvedSessionConfig
     TerminalProfile const& profile,
     vtbackend::ColorPreference colorPreference,
     std::optional<vtbackend::PageSize> initialPageSize = std::nullopt);
+
+/// The animation durations Reduce Motion zeroes: the cursor glide and the screen transition. A duration
+/// that should follow Reduce Motion too is a new entry here, and nothing else changes.
+inline constexpr auto MotionSettings = std::array {
+    &vtbackend::Settings::screenTransitionDuration,
+    &vtbackend::Settings::cursorMotionAnimationDuration,
+};
+
+/// The settings a terminal runs with under the OS motion preference, leaving the configured ones intact.
+/// @param settings The settings as configured, e.g. from @ref sessionSettings.
+/// @param motion The OS motion preference.
+/// @return @p settings with every @ref MotionSettings duration at zero under
+///         MotionPreference::Reduced, or @p settings unchanged under MotionPreference::Full.
+[[nodiscard]] vtbackend::Settings motionAdjusted(vtbackend::Settings settings, MotionPreference motion);
 
 /// Why the reader skips a hint_patterns entry: one needs a name, and a regex unless it names a built-in.
 /// @param pattern The entry as read.

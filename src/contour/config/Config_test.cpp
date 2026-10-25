@@ -8931,3 +8931,25 @@ TEST_CASE("Config: a malformed key drops its hint pattern alone, and says which"
 }
 
 // }}}
+
+TEST_CASE("Config: motionAdjusted zeroes the motion durations under Reduce Motion and nothing else",
+          "[config][motion]")
+{
+    using namespace std::chrono_literals;
+    using contour::config::MotionPreference;
+
+    auto settings = vtbackend::Settings {};
+    settings.screenTransitionDuration = 150ms;
+    settings.cursorMotionAnimationDuration = 80ms;
+    settings.smoothScrolling = true;
+
+    auto const reduced = contour::config::motionAdjusted(settings, MotionPreference::Reduced);
+    CHECK(reduced.screenTransitionDuration == 0ms);
+    CHECK(reduced.cursorMotionAnimationDuration == 0ms);
+    CHECK(reduced.smoothScrolling);
+
+    auto const full = contour::config::motionAdjusted(settings, MotionPreference::Full);
+    for (auto const setting: contour::config::MotionSettings)
+        CHECK(full.*setting == settings.*setting);
+    CHECK(full.smoothScrolling);
+}

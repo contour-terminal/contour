@@ -481,6 +481,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
 
+    /// Applies the OS motion preference to every session's terminal.
+    /// @param motion The OS motion preference.
+    void updateMotionPreference(config::MotionPreference motion);
+
     void focusOnDisplay(display::TerminalDisplay* display);
 
     /// Single authority for terminal (VT) focus: sends a focus-OUT to the previously focused session
