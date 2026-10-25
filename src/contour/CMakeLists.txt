@@ -867,6 +867,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/SettingsController_test.cpp
             window/TabListModel_test.cpp
             window/UiStyleProvider_test.cpp
+            window/WindowMenus_test.cpp
             window/WindowSizing_test.cpp
         )
         if(CONTOUR_EXTENSIONS)

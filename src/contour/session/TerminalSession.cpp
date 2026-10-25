@@ -5371,6 +5371,30 @@ bool TerminalSession::operator()(actions::CloseTab)
     return true;
 }
 
+bool TerminalSession::operator()(actions::CloseOtherTabs const& action)
+{
+    _manager->runTabAction(actions::Action { action }, this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::CloseTabsToRight const& action)
+{
+    _manager->runTabAction(actions::Action { action }, this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::MoveTabToNewWindow const& action)
+{
+    _manager->runTabAction(actions::Action { action }, this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ShowAbout)
+{
+    _manager->showAbout(this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::MoveTabTo event)
 {
     _manager->moveTabTo(event.position, this);

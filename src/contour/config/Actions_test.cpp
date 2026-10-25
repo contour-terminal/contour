@@ -355,3 +355,22 @@ TEST_CASE("actions: OpenCommandOutput writes its arguments and is not repeated",
     // Every fire forks a pager pane, as a split does: a held key must not open a burst of them.
     CHECK(actions::isNonRepeatable(actions::Action { actions::OpenCommandOutput {} }));
 }
+
+TEST_CASE("Actions: the tab-menu actions map by name", "[actions][catalog]")
+{
+    CHECK(std::holds_alternative<actions::CloseOtherTabs>(*actions::fromString("CloseOtherTabs")));
+    CHECK(std::holds_alternative<actions::CloseTabsToRight>(*actions::fromString("CloseTabsToRight")));
+    CHECK(std::holds_alternative<actions::MoveTabToNewWindow>(*actions::fromString("MoveTabToNewWindow")));
+    CHECK(std::holds_alternative<actions::ShowAbout>(*actions::fromString("ShowAbout")));
+}
+
+TEST_CASE("Actions: the tab-menu actions are dropped on key repeat", "[actions][repeat]")
+{
+    std::vector<actions::Action> const held {
+        actions::CloseOtherTabs {},
+        actions::CloseTabsToRight {},
+        actions::MoveTabToNewWindow {},
+        actions::ShowAbout {},
+    };
+    CHECK(actions::filterRepeatableActions(held).empty());
+}

@@ -340,6 +340,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// SetTabTitle keybinding), routed like the other tab ops via the acting session's window.
     /// @param acting The session that received the keybinding; its hosting window is the target.
     void beginTabTitleEdit(TerminalSession* acting);
+    /// Runs a tab action against the tab hosting @p acting, through the hosting window's controller
+    /// (which alone maps a tab to its row). Does nothing when @p acting has no tab or window.
+    /// @param action The tab action to run.
+    /// @param acting The session that received the action; its tab is the target.
+    void runTabAction(actions::Action const& action, TerminalSession* acting);
+    /// Shows the About dialog over the window hosting @p acting.
+    /// @param acting The session that received the action; its hosting window is the target.
+    void showAbout(TerminalSession* acting);
     /// Opens the color picker for the active tab of the window hosting @p acting (a `SetTabColor`
     /// keybinding that names no color), routed exactly like beginTabTitleEdit().
     /// @param acting The session that received the keybinding; its hosting window is the target.

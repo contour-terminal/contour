@@ -257,6 +257,17 @@ class WindowController:
     Q_INVOKABLE void closeTabAtIndex(int index);
     Q_INVOKABLE void closeOtherTabs(int index);
     Q_INVOKABLE void closeTabsToRight(int index);
+    /// Runs @p action against the tab at row @p row: the one mapping from a tab action to a tab. The
+    /// tab actions act on @p row; any other action runs on the active session.
+    /// @param row The tab's row in this window.
+    /// @param action The action to run.
+    void runTabAction(int row, actions::Action const& action);
+    /// Runs @p action against @p tab, resolved to its row. Does nothing when the tab has no row.
+    /// @param tab The tab to act on.
+    /// @param action The action to run.
+    void runTabAction(vtworkspace::TabId tab, actions::Action const& action);
+    /// Asks the window to show its About dialog; emits aboutRequested().
+    void showAbout();
     Q_INVOKABLE [[nodiscard]] QVariantList tabColorPalette() const;
 
     /// The fill for a colored tab, faded per the focus flags (WT-style); math in TabColorScheme.h.
@@ -679,6 +690,8 @@ class WindowController:
     /// Requests that the tab at @p index open its color picker. Per-window, exactly like
     /// tabTitleEditRequested: the delegate whose row matches @p index opens its TabColorFlyout.
     void tabColorPickRequested(int index);
+    /// Requests that this window show its About dialog.
+    void aboutRequested();
     /// Requests that this window show its command palette. Per-window (like tabTitleEditRequested), so
     /// the popup opens over the window the user pressed the chord in — not over every open window.
     void commandPaletteRequested();

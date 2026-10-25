@@ -971,6 +971,20 @@ void TerminalSessionManager::beginTabTitleEdit(TerminalSession* acting)
         controller->beginActiveTabTitleEdit();
 }
 
+void TerminalSessionManager::runTabAction(actions::Action const& action, TerminalSession* acting)
+{
+    auto* controller = controllerHostingSession(acting);
+    auto const* tab = tabHostingSession(acting);
+    if (controller != nullptr && tab != nullptr)
+        controller->runTabAction(tab->id(), action);
+}
+
+void TerminalSessionManager::showAbout(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->showAbout();
+}
+
 void TerminalSessionManager::beginTabColorPick(TerminalSession* acting)
 {
     if (auto* controller = controllerHostingSession(acting); controller != nullptr)

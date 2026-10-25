@@ -24,6 +24,8 @@
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
+#include <core/Overloaded.hpp>
+
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
@@ -568,6 +570,40 @@ void WindowController::tearOffTab(int index)
     // Open the new window on this window's current screen (the best pre-show DPR predictor), matching
     // how spawning a new terminal picks the spawning window's screen.
     _manager.tearOffTabToNewWindow(_windowId, index, _osWindow != nullptr ? _osWindow->screen() : nullptr);
+}
+
+void WindowController::runTabAction(int row, actions::Action const& action)
+{
+    std::visit(core::Overloaded {
+                   [&](actions::SetTabTitle const&) { emit tabTitleEditRequested(row); },
+                   [&](actions::SetTabColor const& color) {
+                       if (color.color.has_value())
+                           setTabColor(row, platform::toQColor(*color.color));
+                       else
+                           emit tabColorPickRequested(row);
+                   },
+                   [&](actions::ResetTabColor const&) { resetTabColor(row); },
+                   [&](actions::MoveTabToNewWindow const&) { tearOffTab(row); },
+                   [&](actions::CloseTab const&) { closeTabAtIndex(row); },
+                   [&](actions::CloseOtherTabs const&) { closeOtherTabs(row); },
+                   [&](actions::CloseTabsToRight const&) { closeTabsToRight(row); },
+                   [&](auto const& other) {
+                       if (auto* session = activeSession())
+                           session->executeAction(actions::Action { other });
+                   },
+               },
+               action);
+}
+
+void WindowController::runTabAction(vtworkspace::TabId tab, actions::Action const& action)
+{
+    if (auto const row = rowOfTab(tab); row >= 0)
+        runTabAction(row, action);
+}
+
+void WindowController::showAbout()
+{
+    emit aboutRequested();
 }
 
 void WindowController::setTabTitle(int index, QString const& title)

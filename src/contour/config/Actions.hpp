@@ -156,6 +156,10 @@ struct RerunCommand{ vtbackend::CommandBlockTarget target = vtbackend::CommandBl
 struct ClearToPrompt{}; // OSC 133: drop every row above the current prompt, scrollback and page alike
 // OSC 133: show a block's output in a pager (a split or a tab over a private file), or pipe it into a program
 struct OpenCommandOutput{ vtbackend::CommandBlockTarget target = vtbackend::CommandBlockTarget::Last; std::string program {}; OutputPlacement placement = OutputPlacement::Split; std::optional<OutputFormat> format {}; vtbackend::CommandBlockId block {}; bool operator==(OpenCommandOutput const&) const = default; };
+struct CloseOtherTabs{};      // close every tab in THIS window except the current one
+struct CloseTabsToRight{};    // close every tab to the right of the current one
+struct MoveTabToNewWindow{};  // tear the current tab off into a window of its own
+struct ShowAbout{};           // show the version of Contour
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -268,7 +272,11 @@ using Action = std::variant<CancelSelection,
                             CopyCommandLine,
                             RerunCommand,
                             ClearToPrompt,
-                            OpenCommandOutput>;
+                            OpenCommandOutput,
+                            CloseOtherTabs,
+                            CloseTabsToRight,
+                            MoveTabToNewWindow,
+                            ShowAbout>;
 
 /// Actions that act on one command block, which they all address the same way: a `target` (pointer, cursor
 /// or last), a `block` that pins one regardless of the target (a context-menu row's), and -- where the
@@ -329,7 +337,11 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     ClearToPrompt,
                                                     CopyLastCommandPrompt,
                                                     CopyLastCommandOutput,
-                                                    CopyLastCommandBlock>;
+                                                    CopyLastCommandBlock,
+                                                    CloseOtherTabs,
+                                                    CloseTabsToRight,
+                                                    MoveTabToNewWindow,
+                                                    ShowAbout>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -577,6 +589,16 @@ namespace documentation
     constexpr inline std::string_view CloseAllTabs {
         "Closes every tab in this window. With only one window open, that closes Contour."
     };
+    constexpr inline std::string_view CloseOtherTabs {
+        "Closes every tab in this window except the current one."
+    };
+    constexpr inline std::string_view CloseTabsToRight {
+        "Closes every tab to the right of the current one."
+    };
+    constexpr inline std::string_view MoveTabToNewWindow {
+        "Moves the current tab into a new window of its own. Does nothing with a single tab."
+    };
+    constexpr inline std::string_view ShowAbout { "Shows the version of Contour." };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "
         "window until it is closed; the settings page is where the choice is made permanent."
@@ -877,6 +899,12 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "ClearToPrompt", Action { ClearToPrompt {} }, documentation::ClearToPrompt },
         ActionCatalogEntry {
             "OpenCommandOutput", Action { OpenCommandOutput {} }, documentation::OpenCommandOutput },
+        ActionCatalogEntry { "CloseOtherTabs", Action { CloseOtherTabs {} }, documentation::CloseOtherTabs },
+        ActionCatalogEntry {
+            "CloseTabsToRight", Action { CloseTabsToRight {} }, documentation::CloseTabsToRight },
+        ActionCatalogEntry {
+            "MoveTabToNewWindow", Action { MoveTabToNewWindow {} }, documentation::MoveTabToNewWindow },
+        ActionCatalogEntry { "ShowAbout", Action { ShowAbout {} }, documentation::ShowAbout },
     };
     return catalog;
 }
