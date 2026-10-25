@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/platform/GuiTheme.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
@@ -7,6 +8,8 @@
 #include <QtGui/QPalette>
 
 #include <cmath>
+#include <span>
+#include <utility>
 
 namespace contour::window
 {
@@ -21,6 +24,16 @@ namespace
         auto sized = font;
         sized.setPixelSize(static_cast<int>(std::lround(pixelSize)));
         return sized;
+    }
+
+    /// The row of a kit table a 1-based @p level names.
+    /// @return The row, or null for a level outside the table.
+    template <typename T>
+    [[nodiscard]] T const* stepOf(std::span<T const> table, int level) noexcept
+    {
+        if (level < 1 || std::cmp_greater(level, table.size()))
+            return nullptr;
+        return &table[static_cast<size_t>(level - 1)];
     }
 } // namespace
 
@@ -85,6 +98,11 @@ ChromeTuiTokens::ChromeTuiTokens(config::TuiTokens tokens, QObject* parent):
 {
 }
 
+ChromeTintTokens::ChromeTintTokens(config::TintTokens tokens, QObject* parent):
+    QObject { parent }, _tokens { tokens }
+{
+}
+
 ChromeLayoutTokens::ChromeLayoutTokens(config::LayoutTokens tokens, QObject* parent):
     QObject { parent }, _tokens { tokens }
 {
@@ -100,24 +118,54 @@ ChromeColorTokens::ChromeColorTokens(Sources sources,
 
 QColor ChromeColorTokens::color(config::ChromeColorRole role) const
 {
-    auto const& source = _sources[static_cast<size_t>(role)];
-    auto const base = [&]() -> QColor {
-        switch (source.kind)
-        {
-            case config::ColorSourceKind::Fixed: return platform::toQColor(vtbackend::RGBColor(source.rgb));
-            case config::ColorSourceKind::PaletteWindow:
-                return QGuiApplication::palette().color(QPalette::Window);
-            case config::ColorSourceKind::PaletteWindowText:
-                return QGuiApplication::palette().color(QPalette::WindowText);
-            case config::ColorSourceKind::Status:
-                return _provider.statusColor(static_cast<int>(source.status));
-            case config::ColorSourceKind::Scheme:
-                return platform::toQColor(_scheme.bySlot[static_cast<size_t>(source.slot)]);
-        }
-        return { Qt::transparent };
-    }();
+    return resolve(_sources[static_cast<size_t>(role)]);
+}
 
-    return platform::atOpacity(base, source.alphaPercent);
+QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source) const
+{
+    auto const window = platform::toRGBColor(QGuiApplication::palette().color(QPalette::Window));
+    return resolve(source, platform::colorSchemeOfBackground(window));
+}
+
+QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::ColorScheme chrome) const
+{
+    auto const dark = chrome == Qt::ColorScheme::Dark;
+    auto const faded = [&source](QColor const& base) {
+        return platform::atOpacity(base, source.alphaPercent);
+    };
+    // A kit wash or label is black on a light chrome and white on a dark one, at the table's alpha
+    // scaled by the source's own. A level outside its table paints nothing.
+    auto const kitInk = [&](std::span<config::AlphaPair const> table) -> QColor {
+        auto const* const pair = stepOf(table, source.level);
+        if (pair == nullptr)
+            return { Qt::transparent };
+        return platform::atOpacity(QColor(dark ? Qt::white : Qt::black),
+                                   (dark ? pair->dark : pair->light) * source.alphaPercent / 100);
+    };
+
+    switch (source.kind)
+    {
+        case config::ColorSourceKind::Fixed:
+            return faded(platform::toQColor(vtbackend::RGBColor(source.rgb)));
+        case config::ColorSourceKind::PaletteWindow:
+            return faded(QGuiApplication::palette().color(QPalette::Window));
+        case config::ColorSourceKind::PaletteWindowText:
+            return faded(QGuiApplication::palette().color(QPalette::WindowText));
+        case config::ColorSourceKind::Status:
+            return faded(_provider.statusColor(static_cast<int>(source.status)));
+        case config::ColorSourceKind::Scheme:
+            return faded(platform::toQColor(_scheme.bySlot[static_cast<size_t>(source.slot)]));
+        case config::ColorSourceKind::SchemeOnBar:
+            return faded(platform::toQColor(config::legibleOnBar(_scheme, source.slot)));
+        case config::ColorSourceKind::Fill: return kitInk(config::FillAlphas);
+        case config::ColorSourceKind::Label: return kitInk(config::LabelAlphas);
+        case config::ColorSourceKind::Surface:
+            if (auto const* const pair =
+                    stepOf(std::span<config::SurfacePair const>(config::SurfaceColors), source.level))
+                return faded(platform::toQColor(vtbackend::RGBColor(dark ? pair->dark : pair->light)));
+            return { Qt::transparent };
+    }
+    return { Qt::transparent };
 }
 
 } // namespace contour::window

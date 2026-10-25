@@ -46,39 +46,78 @@ namespace
 /// Every numeric field of a row, in declaration order, so a whole row compares against one list.
 std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
 {
-    auto out = std::vector<double> { double(row.size.titleBar),
-                                     double(row.size.tabWell),
-                                     double(row.size.tab),
-                                     double(row.size.control),
-                                     double(row.size.paneHeader),
-                                     double(row.size.toast),
-                                     double(row.size.dialogWidth),
-                                     double(row.size.swatchWidth),
-                                     double(row.size.swatchHeight),
-                                     double(row.size.settingsWidth),
-                                     double(row.size.settingsHeight),
-                                     double(row.size.settingsMinWidth),
-                                     double(row.size.settingsMinHeight),
-                                     double(row.space.paneGap),
-                                     double(row.space.splitHit),
-                                     double(row.space.paneInset) };
+    auto out = std::vector<double> {};
+    auto const append = [&out](std::initializer_list<double> values) {
+        out.insert(out.end(), values.begin(), values.end());
+    };
+    auto const& size = row.size;
+    append({ double(size.titleBar),
+             double(size.tabWell),
+             double(size.tab),
+             double(size.control),
+             double(size.paneHeader),
+             double(size.toast),
+             double(size.dialogWidth),
+             double(size.swatchWidth),
+             double(size.swatchHeight),
+             double(size.settingsWidth),
+             double(size.settingsHeight),
+             double(size.settingsMinWidth),
+             double(size.settingsMinHeight) });
+    append({ double(size.tabIcon),
+             double(size.tabClose),
+             double(size.badge),
+             double(size.badgeDot),
+             double(size.progressBar),
+             double(size.hostChip),
+             double(size.hostDot),
+             double(size.toolbarButton),
+             double(size.toolbarChip) });
+    append({ double(row.space.paneGap), double(row.space.splitHit), double(row.space.paneInset) });
     for (auto const v: row.space.scale)
         out.push_back(v);
-    for (auto const v:
-         { row.radii.control, row.radii.popover, row.radii.menu, row.radii.paneCard, row.radii.toast })
-        out.push_back(v);
-    for (auto const v: { row.type.caption, row.type.footnote, row.type.body, row.type.tab, row.type.title })
-        out.push_back(v);
-    for (auto const v:
-         { row.motion.fastMs, row.motion.standardMs, row.motion.emphasizedMs, row.motion.travel })
-        out.push_back(v);
+    append({ double(row.space.dragReserve),
+             double(row.space.revealEdge),
+             double(row.space.toolbarChipPadding) });
+    auto const& radii = row.radii;
+    append({ double(radii.control),
+             double(radii.popover),
+             double(radii.menu),
+             double(radii.paneCard),
+             double(radii.toast) });
+    append({ double(radii.tab),
+             double(radii.tabWell),
+             double(radii.tabIcon),
+             double(radii.tabClose),
+             double(radii.badge),
+             double(radii.hostChip),
+             double(radii.toolbarChip) });
+    append({ row.type.caption, row.type.footnote, row.type.body, row.type.tab, row.type.title });
+    append({ double(row.motion.fastMs),
+             double(row.motion.standardMs),
+             double(row.motion.emphasizedMs),
+             double(row.motion.travel),
+             double(row.motion.spinnerMs),
+             double(row.motion.pulseMs) });
     for (auto const& level: row.elevation.levels)
-        for (auto const v: { level.offsetX, level.offsetY, level.blur, level.opacityPercent })
-            out.push_back(v);
+        append({ double(level.offsetX),
+                 double(level.offsetY),
+                 double(level.blur),
+                 double(level.opacityPercent) });
     out.push_back(row.contrast.separatorPercent);
     out.push_back(row.contrast.activeCardRing);
     out.push_back(row.contrast.paneDimPercent.value_or(-1));
     out.push_back(row.tui.inactivePaneOpacity);
+    out.push_back(row.tint.tabPercent);
+    return out;
+}
+
+/// @return The concatenation of @p parts.
+std::vector<double> joined(std::initializer_list<std::vector<double>> parts)
+{
+    auto out = std::vector<double> {};
+    for (auto const& part: parts)
+        out.insert(out.end(), part.begin(), part.end());
     return out;
 }
 
@@ -91,66 +130,96 @@ struct ExpectedRow
     contour::config::ToastStyle toast = contour::config::ToastStyle::Floating;
     contour::config::DialogPlacement dialog = contour::config::DialogPlacement::Centered;
     contour::config::MenuPresentation menu = contour::config::MenuPresentation::InScene;
+    contour::config::TabShape tabShape = contour::config::TabShape::Flat;
+    contour::config::ProfileMenuAffordance profileMenu = contour::config::ProfileMenuAffordance::Caret;
 };
 } // namespace
 
 TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
 {
     using namespace contour::config;
-    // size(13) space(3) scale(10) radii(5) type(5) motion(4) elevation e0..e3 (16) separator ring dim opacity
+    // size(13+9) space(3) scale(10) space(3) radii(5+7) type(5) motion(6) elevation e0..e3 (16)
+    // separator ring dim opacity tint
     auto const native = std::vector<double> { 2, 4, 6, 8, 10, 12, 16, 20, 24, 32 };
-    auto const nativeTail = std::vector<double> { 100, 160, 220, 8,  0, 0,  0,  0,  0,  1,   2,  12,
-                                                  0,   4,   16,  25, 0, 12, 40, 35, 10, 0.0, -1, 1.0 };
-    auto const join = [](std::vector<double> head,
-                         std::vector<double> const& scale,
-                         std::vector<double> const& mid,
-                         std::vector<double> const& tail) {
-        head.insert(head.end(), scale.begin(), scale.end());
-        head.insert(head.end(), mid.begin(), mid.end());
-        head.insert(head.end(), tail.begin(), tail.end());
-        return head;
-    };
+    auto const nativeBand = std::vector<double> { 40, 2, 9 };
+    auto const nativeRadii =
+        std::vector<double> { 3, 8, 7, 12, 11 }; // tabIcon tabClose badge hostChip toolbarChip
+    auto const nativeMotion = std::vector<double> { 100, 160, 220, 8, 1200, 700 };
+    auto const nativeTail =
+        std::vector<double> { 0, 0, 0, 0, 0, 1, 2, 12, 0, 4, 16, 25, 0, 12, 40, 35, 10, 0.0, -1, 1.0, 20 };
     auto const rows = std::vector<ExpectedRow> {
         { ChromeStyle::MacOS,
-          join({ 38, 28, 24, 28, 22, 36, 280, 16, 16, 960, 820, 720, 480, 6, 10, 6 },
-               native,
-               { 6, 14, 10, 10, 18, 10, 11, 13, 12, 15 },
-               nativeTail),
+          joined({ { 38, 28, 24, 28, 22, 36, 280, 16, 16, 960, 820, 720, 480 },
+                   { 14, 16, 14, 6, 2, 24, 7, 28, 22 },
+                   { 6, 10, 6 },
+                   native,
+                   nativeBand,
+                   { 6, 14, 10, 10, 18, 12, 14 },
+                   nativeRadii,
+                   { 10, 11, 13, 12, 15 },
+                   nativeMotion,
+                   nativeTail }),
           Material::Glass,
           Material::Glass,
           ToastStyle::Floating,
           DialogPlacement::Sheet,
-          MenuPresentation::Native },
+          MenuPresentation::Native,
+          TabShape::Pill,
+          ProfileMenuAffordance::SecondaryClick },
         { ChromeStyle::Fluent,
-          join({ 40, 0, 34, 32, 28, 36, 280, 16, 16, 1110, 920, 720, 480, 4, 10, 4 },
-               native,
-               { 4, 8, 8, 4, 18, 12, 12, 14, 12, 20 },
-               nativeTail),
+          joined({ { 40, 0, 34, 32, 28, 36, 280, 16, 16, 1110, 920, 720, 480 },
+                   { 14, 16, 14, 6, 2, 24, 7, 32, 22 },
+                   { 4, 10, 4 },
+                   native,
+                   nativeBand,
+                   { 4, 8, 8, 4, 18, 6, 0 },
+                   nativeRadii,
+                   { 12, 12, 14, 12, 20 },
+                   nativeMotion,
+                   nativeTail }),
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
           DialogPlacement::Centered,
-          MenuPresentation::InScene },
+          MenuPresentation::InScene,
+          TabShape::Flat,
+          ProfileMenuAffordance::Caret },
         { ChromeStyle::ContourLinux,
-          join({ 46, 0, 34, 34, 28, 36, 280, 16, 16, 1100, 920, 720, 480, 6, 10, 6 },
-               native,
-               { 8, 12, 10, 6, 18, 12, 12.5, 14, 13.5, 15 },
-               nativeTail),
+          joined({ { 46, 0, 34, 34, 28, 36, 280, 16, 16, 1100, 920, 720, 480 },
+                   { 14, 16, 14, 6, 2, 24, 7, 34, 22 },
+                   { 6, 10, 6 },
+                   native,
+                   nativeBand,
+                   { 8, 12, 10, 6, 18, 8, 0 },
+                   nativeRadii,
+                   { 12, 12.5, 14, 13.5, 15 },
+                   nativeMotion,
+                   nativeTail }),
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
           DialogPlacement::Centered,
-          MenuPresentation::InScene },
+          MenuPresentation::InScene,
+          TabShape::Flat,
+          ProfileMenuAffordance::Caret },
         { ChromeStyle::Terminal,
-          join({ 1, 1, 1, 2, 1, 1, 32, 2, 1, 120, 40, 90, 24, 1, 1, 0 },
-               { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
-               { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-               { 100, 160, 220, 0, 0, 0, 0, 0, 1, 1, 0, 60, 1, 1, 0, 60, 1, 1, 0, 60, 10, 0.0, -1, 0.62 }),
+          joined({ { 1, 1, 1, 2, 1, 1, 32, 2, 1, 120, 40, 90, 24 },
+                   { 1, 1, 1, 1, 1, 1, 1, 2, 1 },
+                   { 1, 1, 0 },
+                   { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
+                   { 4, 1, 1 },
+                   { 0, 0, 0, 0, 0, 0, 0 },
+                   { 0, 0, 0, 0, 0 },
+                   { 0, 0, 0, 0, 0 },
+                   { 100, 160, 220, 0, 1200, 700 },
+                   { 0, 0, 0, 0, 1, 1, 0, 60, 1, 1, 0, 60, 1, 1, 0, 60, 10, 0.0, -1, 0.62, 0 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,
           DialogPlacement::Centered,
-          MenuPresentation::InScene },
+          MenuPresentation::InScene,
+          TabShape::Flat,
+          ProfileMenuAffordance::Caret },
     };
 
     for (auto const& expected: rows)
@@ -169,6 +238,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
         CHECK(row.tui.toastStyle == expected.toast);
         CHECK(row.layout.dialog == expected.dialog);
         CHECK(row.layout.menu == expected.menu);
+        CHECK(row.layout.tabShape == expected.tabShape);
+        CHECK(row.layout.profileMenu == expected.profileMenu);
 
         auto const& fill = row.colors[static_cast<size_t>(ChromeColorRole::BannerFill)];
         auto const& text = row.colors[static_cast<size_t>(ChromeColorRole::BannerText)];
@@ -229,6 +300,8 @@ TEST_CASE("chromeTokens.allOverridesTogether", "[chrometokens]")
         CHECK(tokens.contrast.paneDimPercent == 5);
         CHECK(tokens.size == base.size);
         CHECK(tokens.colors == base.colors);
+        CHECK(tokens.tint == base.tint);
+        CHECK(tokens.statusInk == base.statusInk);
     }
 }
 
@@ -257,6 +330,8 @@ TEST_CASE("chromeTokens.reducedMotion", "[chrometokens]")
         CHECK(reduced.tui == base.tui);
         CHECK(reduced.layout == base.layout);
         CHECK(reduced.colors == base.colors);
+        CHECK(reduced.tint == base.tint);
+        CHECK(reduced.statusInk == base.statusInk);
     }
 }
 
@@ -395,4 +470,240 @@ TEST_CASE("chromeTokens.menuPresentationIgnoresPreferences", "[chrometokens]")
                           == ChromeTokenRows[index].layout.menu);
                 }
     }
+}
+
+TEST_CASE("chromeTokens.titleBandTokens", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const mac = resolveChromeTokens(ChromeStyle::MacOS, {});
+    CHECK(mac.size.titleBar == 38);
+    CHECK(mac.size.tabWell == 28);
+    CHECK(mac.size.tab == 24);
+    CHECK(mac.size.tabIcon == 14);
+    CHECK(mac.size.tabClose == 16);
+    CHECK(mac.size.badge == 14);
+    CHECK(mac.size.badgeDot == 6);
+    CHECK(mac.size.progressBar == 2);
+    CHECK(mac.size.hostChip == 24);
+    CHECK(mac.size.hostDot == 7);
+    CHECK(mac.size.toolbarButton == 28);
+    CHECK(mac.size.toolbarChip == 22);
+    CHECK(mac.space.dragReserve == 40);
+    CHECK(mac.space.revealEdge == 2);
+    CHECK(mac.space.toolbarChipPadding == 9);
+    CHECK(mac.radii.tab == 12);
+    CHECK(mac.radii.tabWell == 14);
+    CHECK(mac.radii.tabIcon == 3);
+    CHECK(mac.radii.tabClose == 8);
+    CHECK(mac.radii.badge == 7);
+    CHECK(mac.radii.hostChip == 12);
+    CHECK(mac.radii.toolbarChip == 11);
+    CHECK(mac.motion.spinnerMs == 1200);
+    CHECK(mac.motion.pulseMs == 700);
+    CHECK(mac.motion.style == MotionStyle::Full);
+    CHECK(mac.tint.tabPercent == 20);
+    CHECK(mac.layout.tabShape == TabShape::Pill);
+    CHECK(mac.layout.profileMenu == ProfileMenuAffordance::SecondaryClick);
+
+    auto const tui = resolveChromeTokens(ChromeStyle::Terminal, {});
+    CHECK(tui.size.tabIcon == 1);
+    CHECK(tui.radii.tab == 0);
+    CHECK(tui.tint.tabPercent == 0);
+}
+
+TEST_CASE("chromeTokens.onlyTheMacRowIsAPill", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const index: AllStyles())
+    {
+        CAPTURE(index);
+        auto const isMac = static_cast<ChromeStyle>(index) == ChromeStyle::MacOS;
+        CHECK((ChromeTokenRows[index].layout.tabShape == TabShape::Pill) == isMac);
+    }
+}
+
+TEST_CASE("chromeTokens.reducedMotionCrossFades", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const reduced = AccessibilityPreferences { .motion = MotionPreference::Reduced,
+                                                    .transparency = TransparencyPreference::Allowed,
+                                                    .contrast = ContrastPreference::Standard };
+    for (auto const index: AllStyles())
+    {
+        CAPTURE(index);
+        auto const style = static_cast<ChromeStyle>(index);
+        auto const full = resolveChromeTokens(style, {});
+        auto const crossFade = resolveChromeTokens(style, reduced);
+        CHECK(full.motion.style == MotionStyle::Full);
+        CHECK(crossFade.motion.style == MotionStyle::CrossFade);
+        CHECK(crossFade.motion.spinnerMs == full.motion.spinnerMs);
+        CHECK(crossFade.motion.pulseMs == full.motion.pulseMs);
+    }
+}
+
+TEST_CASE("chromeTokens.kitAlphaTables", "[chrometokens]")
+{
+    using namespace contour::config;
+    CHECK(FillAlphas[0] == AlphaPair { .light = 20, .dark = 24 });
+    CHECK(FillAlphas[3] == AlphaPair { .light = 5, .dark = 6 });
+    CHECK(LabelAlphas[0] == AlphaPair { .light = 88, .dark = 92 });
+    CHECK(LabelAlphas[1] == AlphaPair { .light = 60, .dark = 62 });
+    CHECK(LabelAlphas[2] == AlphaPair { .light = 45, .dark = 50 });
+    CHECK(SurfaceColors[0] == SurfacePair { .light = 0xFFFFFF, .dark = 0x2C2C2E });
+    CHECK(SurfaceColors[1] == SurfacePair { .light = 0xF2F2F7, .dark = 0x1C1C1E });
+}
+
+namespace
+{
+/// One new colour role and the source each kind of row gives it.
+struct BandColorRow
+{
+    contour::config::ChromeColorRole role = contour::config::ChromeColorRole::TabWellFill;
+    contour::config::ChromeColorSource native {};
+    contour::config::ChromeColorSource terminal {};
+};
+} // namespace
+
+TEST_CASE("chromeTokens.bandColourRoles", "[chrometokens]")
+{
+    using namespace contour::config;
+    using contour::config::detail::fill;
+    using contour::config::detail::label;
+    using contour::config::detail::schemeColor;
+    using contour::config::detail::surface;
+    using enum ChromeColorRole;
+    auto const rows = std::array {
+        BandColorRow { .role = TabWellFill, .native = fill(4), .terminal = schemeColor(SchemeSlot::Bar) },
+        BandColorRow {
+            .role = TabActiveFill, .native = surface(1), .terminal = schemeColor(SchemeSlot::Selection) },
+        BandColorRow { .role = TabHoverFill, .native = fill(3), .terminal = schemeColor(SchemeSlot::Bar) },
+        BandColorRow { .role = TabCloseFill, .native = fill(3), .terminal = schemeColor(SchemeSlot::Bar) },
+        BandColorRow {
+            .role = ControlPressedFill, .native = fill(2), .terminal = schemeColor(SchemeSlot::Selection) },
+        BandColorRow { .role = TabText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarText) },
+        BandColorRow {
+            .role = TabTextActive, .native = label(1), .terminal = schemeColor(SchemeSlot::SelectionText) },
+        BandColorRow {
+            .role = TabTextDimmed, .native = label(3), .terminal = schemeColor(SchemeSlot::BarText) },
+        BandColorRow { .role = ChipFill, .native = fill(4), .terminal = schemeColor(SchemeSlot::Bar) },
+        BandColorRow { .role = ChipText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarText) },
+        BandColorRow {
+            .role = ChipTextStrong, .native = label(1), .terminal = schemeColor(SchemeSlot::BarText) },
+    };
+    // Every role from TabWellFill to the end of the enumeration has a row here.
+    CHECK(rows.size() == ChromeColorRoleCount - static_cast<size_t>(TabWellFill));
+
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        for (auto const& row: rows)
+        {
+            CAPTURE(static_cast<int>(row.role));
+            auto const& expected = style == ChromeStyle::Terminal ? row.terminal : row.native;
+            CHECK(ChromeTokenRows[index].colors[static_cast<size_t>(row.role)] == expected);
+        }
+    }
+
+    CHECK(fill(4).kind == ColorSourceKind::Fill);
+    CHECK(fill(4).level == 4);
+    CHECK(label(1).kind == ColorSourceKind::Label);
+    CHECK(surface(2).kind == ColorSourceKind::Surface);
+    CHECK(surface(2).level == 2);
+    CHECK(contour::config::detail::schemeOnBar(SchemeSlot::Accent).kind == ColorSourceKind::SchemeOnBar);
+    CHECK(contour::config::detail::schemeOnBar(SchemeSlot::Accent).slot == SchemeSlot::Accent);
+}
+
+TEST_CASE("chromeTokens.statusInkPerRow", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const schemeHue =
+        std::array { SchemeSlot::Danger, SchemeSlot::Warning, SchemeSlot::Success, SchemeSlot::Accent };
+    static_assert(schemeHue.size() == StatusColorRoleCount);
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        for (auto const role: std::views::iota(std::size_t { 0 }, StatusColorRoleCount))
+        {
+            CAPTURE(role);
+            auto const& ink = ChromeTokenRows[index].statusInk[role];
+            if (style == ChromeStyle::Terminal)
+                CHECK(ink == contour::config::detail::schemeOnBar(schemeHue[role]));
+            else
+            {
+                CHECK(ink.kind == ColorSourceKind::Status);
+                CHECK(ink.status == static_cast<StatusColorRole>(role));
+                CHECK(ink.alphaPercent == 100);
+            }
+        }
+    }
+}
+
+namespace
+{
+[[nodiscard]] vtbackend::RGBColor slotIn(contour::config::ChromeSchemeColors const& colors,
+                                         contour::config::SchemeSlot slot)
+{
+    return colors.bySlot[static_cast<size_t>(slot)];
+}
+} // namespace
+
+TEST_CASE("chromeTokens.selectionTextReadsOnTheSelection", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        auto const selection = slotIn(colors, SchemeSlot::Selection);
+        auto const text = slotIn(colors, SchemeSlot::SelectionText);
+        CHECK((text == palette.defaultForeground || text == palette.defaultBackground));
+        CHECK(contrastRatio(text, selection)
+              >= std::max(contrastRatio(palette.defaultForeground, selection),
+                          contrastRatio(palette.defaultBackground, selection)));
+    }
+
+    for (auto const* name: { "contour-light", "contour-dark" })
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        CHECK(contrastRatio(slotIn(colors, SchemeSlot::SelectionText), slotIn(colors, SchemeSlot::Selection))
+              >= 4.5);
+    }
+}
+
+TEST_CASE("chromeTokens.statusInkLegibleOnTheBar", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        auto const bar = slotIn(colors, SchemeSlot::Bar);
+        auto const floor = std::min(4.5, contrastRatio(slotIn(colors, SchemeSlot::BarText), bar));
+        for (auto const hue:
+             { SchemeSlot::Accent, SchemeSlot::Danger, SchemeSlot::Success, SchemeSlot::Warning })
+        {
+            CAPTURE(static_cast<int>(hue));
+            auto const ink = legibleOnBar(colors, hue);
+            CHECK((ink == slotIn(colors, hue) || ink == slotIn(colors, SchemeSlot::BarText)));
+            CHECK(contrastRatio(ink, bar) >= floor);
+        }
+    }
+
+    auto light = ColorPalette {};
+    REQUIRE(defaultColorPalettes("contour-light", light));
+    auto const lightColors = chromeSchemeColorsOf(light);
+    CHECK(legibleOnBar(lightColors, SchemeSlot::Accent) == slotIn(lightColors, SchemeSlot::BarText));
+
+    auto dark = ColorPalette {};
+    REQUIRE(defaultColorPalettes("contour-dark", dark));
+    CHECK(legibleOnBar(chromeSchemeColorsOf(dark), SchemeSlot::Accent) == dark.normalColor(4));
 }

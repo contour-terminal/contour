@@ -15,9 +15,12 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <text_shaper/Font.hpp>
 
@@ -41,10 +44,14 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <utility>
+
+#include <vtworkspace/ModelEvents.hpp>
+#include <vtworkspace/SessionModel.hpp>
 
 using contour::config::UiStyle;
 using contour::window::resolveChromeFont;
@@ -617,4 +624,297 @@ TEST_CASE("ChromeStyleHost republishes chromeStyle and keeps the old provider al
     CHECK(first.isNull());
     INFO(capture.messages().join(QStringLiteral("\n")).toStdString());
     CHECK(capture.messages().isEmpty());
+}
+
+namespace
+{
+
+/// @p top laid over the opaque @p bottom, as the compositor paints it.
+[[nodiscard]] QColor over(QColor const& top, QColor const& bottom)
+{
+    auto const a = top.alphaF();
+    auto const mix = [a](float t, float b) {
+        return (t * a) + (b * (1.0F - a));
+    };
+    return QColor::fromRgbF(
+        mix(top.redF(), bottom.redF()), mix(top.greenF(), bottom.greenF()), mix(top.blueF(), bottom.blueF()));
+}
+
+/// @return The WCAG contrast ratio of two opaque colours.
+[[nodiscard]] double contrastOf(QColor const& a, QColor const& b)
+{
+    return vtbackend::contrastRatio(contour::platform::toRGBColor(a), contour::platform::toRGBColor(b));
+}
+
+/// A model that reports nothing, for reading its tab colour palette.
+class SilentModelEvents final: public vtworkspace::ModelEvents
+{
+  public:
+    void tabAdded(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabClosed(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void tabMoved(vtworkspace::WindowId, vtworkspace::TabId, int, int) override {}
+    void activeTabChanged(vtworkspace::WindowId, vtworkspace::TabId, int) override {}
+    void paneSplit(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void paneClosed(vtworkspace::TabId, vtworkspace::PaneId, vtworkspace::PaneId) override {}
+    void activePaneChanged(vtworkspace::TabId, vtworkspace::PaneId) override {}
+    void paneRatioChanged(vtworkspace::TabId, vtworkspace::PaneId, double) override {}
+    void tabTitleChanged(vtworkspace::TabId) override {}
+    void tabColorChanged(vtworkspace::TabId) override {}
+};
+
+/// The window colours of the two chromes the kit's tables are drawn for.
+constexpr auto LightChrome = QRgb { 0xF5F5F7 };
+constexpr auto DarkChrome = QRgb { 0x1E1E1E };
+
+} // namespace
+
+TEST_CASE("UiStyleProvider resolves the tab and chip roles on a light and a dark chrome",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::platform::atOpacity;
+    auto const mac = contour::window::UiStyleProvider(
+        contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font()));
+    auto const role = [&mac](char const* name) {
+        return tokenOf(mac, "colors", name).value<QColor>();
+    };
+
+    withWindowColor(QColor(LightChrome), [&] {
+        CHECK(role("tabWellFill") == atOpacity(QColor(Qt::black), 5));
+        CHECK(role("tabHoverFill") == atOpacity(QColor(Qt::black), 8));
+        CHECK(role("controlPressedFill") == atOpacity(QColor(Qt::black), 12));
+        CHECK(role("tabTextActive") == atOpacity(QColor(Qt::black), 88));
+        CHECK(role("tabText") == atOpacity(QColor(Qt::black), 60));
+        CHECK(role("tabTextDimmed") == atOpacity(QColor(Qt::black), 45));
+        CHECK(role("tabActiveFill") == QColor(0xFFFFFF));
+        CHECK(role("chipFill") == atOpacity(QColor(Qt::black), 5));
+        CHECK(role("chipTextStrong") == atOpacity(QColor(Qt::black), 88));
+    });
+    withWindowColor(QColor(DarkChrome), [&] {
+        CHECK(role("tabWellFill") == atOpacity(QColor(Qt::white), 6));
+        CHECK(role("tabTextActive") == atOpacity(QColor(Qt::white), 92));
+        CHECK(role("tabText") == atOpacity(QColor(Qt::white), 62));
+        CHECK(role("tabTextDimmed") == atOpacity(QColor(Qt::white), 50));
+        CHECK(role("tabActiveFill") == QColor(0x2C2C2E));
+    });
+}
+
+TEST_CASE("UiStyleProvider: the tab text reads at 4.5:1 on every fill it sits on", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    auto const mac = contour::window::UiStyleProvider(
+        contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font()));
+    auto const role = [&mac](char const* name) {
+        return tokenOf(mac, "colors", name).value<QColor>();
+    };
+    auto const tint = tokenOf(mac, "tint", "tab").toReal();
+    CHECK(tint == Catch::Approx(0.20));
+
+    auto events = SilentModelEvents {};
+    auto nextSession = uint64_t { 1 };
+    auto const model =
+        vtworkspace::SessionModel { events, [&] { return vtworkspace::SessionId { nextSession++ }; } };
+    REQUIRE(!model.colorPalette().empty());
+
+    for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+        withWindowColor(window, [&] {
+            INFO("chrome: " << window.name().toStdString());
+            auto const well = over(role("tabWellFill"), window);
+            auto const active = over(role("tabActiveFill"), window);
+            auto const chip = over(role("chipFill"), window);
+            CHECK(contrastOf(over(role("tabTextActive"), active), active) >= 4.5);
+            CHECK(contrastOf(over(role("tabText"), well), well) >= 4.5);
+            CHECK(contrastOf(over(role("chipText"), chip), chip) >= 4.5);
+
+            for (auto const& swatch: model.colorPalette())
+            {
+                auto tinted = contour::platform::toQColor(swatch);
+                tinted.setAlphaF(static_cast<float>(tint));
+                auto const pill = over(tinted, active);
+                INFO("swatch: " << pill.name().toStdString());
+                CHECK(contrastOf(over(role("tabTextActive"), pill), pill) >= 4.5);
+            }
+        });
+}
+
+TEST_CASE("UiStyleProvider: progressColor is the accent while running", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::StatusColorRole;
+    using vtbackend::operator""_rgb;
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font());
+    inputs.appearance.accent = 0x007AFF_rgb;
+    auto const provider = contour::window::UiStyleProvider(inputs);
+    auto const danger = static_cast<int>(StatusColorRole::Danger);
+
+    for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+        withWindowColor(window, [&] {
+            CHECK(provider.progressColor(1) == QColor(0x007AFF));
+            CHECK(provider.progressColor(3) == QColor(0x007AFF));
+            CHECK(provider.progressColor(2) == provider.statusColor(danger));
+            CHECK(provider.progressColor(4)
+                  == provider.statusColor(static_cast<int>(StatusColorRole::Warning)));
+            CHECK(provider.progressColor(0).alpha() == 0);
+            CHECK(provider.progressColor(5).alpha() == 0);
+            CHECK(provider.progressColor(-1).alpha() == 0);
+            // "This failed" is the status token, on any surface the error text sits on.
+            CHECK(provider.errorColor() == provider.statusColor(danger));
+        });
+    CHECK(provider.statusInk(-1).alpha() == 0);
+    CHECK(provider.statusInk(static_cast<int>(contour::config::StatusColorRoleCount)).alpha() == 0);
+}
+
+TEST_CASE("UiStyleProvider: the Terminal row's inks stay legible on its bar", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::SchemeSlot;
+    using contour::config::StatusColorRole;
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes("contour-light", palette));
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::Terminal, QGuiApplication::font());
+    inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+    auto const terminal = contour::window::UiStyleProvider(inputs);
+
+    auto const slot = [&](SchemeSlot value) {
+        return contour::platform::toQColor(inputs.scheme.bySlot[static_cast<size_t>(value)]);
+    };
+    // Blue on contour-light's dark bar fails 4.5:1, so Running falls back to the bar's text.
+    CHECK(terminal.statusInk(static_cast<int>(StatusColorRole::Running)) == slot(SchemeSlot::BarText));
+    CHECK(terminal.progressColor(1) == slot(SchemeSlot::BarText));
+    for (auto const role: std::views::iota(0, static_cast<int>(contour::config::StatusColorRoleCount)))
+    {
+        CAPTURE(role);
+        CHECK(contrastOf(terminal.statusInk(role), slot(SchemeSlot::Bar))
+              >= std::min(4.5, contrastOf(slot(SchemeSlot::BarText), slot(SchemeSlot::Bar))));
+    }
+    auto const role = [&terminal](char const* name) {
+        return tokenOf(terminal, "colors", name).value<QColor>();
+    };
+    CHECK(role("tabActiveFill") == slot(SchemeSlot::Selection));
+    CHECK(role("tabTextActive") == slot(SchemeSlot::SelectionText));
+    CHECK(role("tabText") == slot(SchemeSlot::BarText));
+    CHECK(contrastOf(role("tabTextActive"), role("tabActiveFill")) >= 4.5);
+    CHECK(contrastOf(role("tabText"), role("tabWellFill")) >= 4.5);
+}
+
+TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout answer the pure tables",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+
+    auto const blocked = mac.badgeLook(static_cast<int>(contour::window::TabBadgeKind::Blocked));
+    CHECK(blocked.value("mark").toString() == QStringLiteral("disc"));
+    CHECK(blocked.value("glyph").toString() == QStringLiteral("!"));
+    CHECK(blocked.value("name").toString() == QStringLiteral("Waiting for you"));
+    CHECK(blocked.value("ink").value<QColor>()
+          == mac.statusInk(static_cast<int>(contour::config::StatusColorRole::Warning)));
+    CHECK(mac.badgeLook(-1).isEmpty());
+    CHECK(mac.badgeLook(static_cast<int>(contour::window::TabBadgeKindCount)).isEmpty());
+
+    auto const reconnecting =
+        mac.hostChipLook(static_cast<int>(contour::window::HostChipState::Reconnecting));
+    CHECK(reconnecting.value("status").toString() == QStringLiteral("Reconnecting…"));
+    CHECK(reconnecting.value("accessibleState").toString() == QStringLiteral("reconnecting"));
+    CHECK(reconnecting.value("dot").value<QColor>()
+          == mac.statusInk(static_cast<int>(contour::config::StatusColorRole::Warning)));
+    CHECK(mac.hostChipLook(99).isEmpty());
+
+    auto const macBand = mac.titleBand(0, 0, 0, 0);
+    CHECK(macBand.value("band").toString() == QStringLiteral("shown"));
+    CHECK(macBand.value("bandEdge").toString() == QStringLiteral("top"));
+    CHECK(macBand.value("centre").toString() == QStringLiteral("title"));
+    CHECK(macBand.value("tabBar").toString() == QStringLiteral("hidden"));
+    auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
+    CHECK(fluent.titleBand(0, 0, 0, 0).value("band").toString() == QStringLiteral("hidden"));
+    CHECK(fluent.titleBand(0, 0, 1, 0).value("centre").toString() == QStringLiteral("tabs"));
+    CHECK(mac.titleBand(0, 1, 1, 0).value("band").toString() == QStringLiteral("reveal"));
+    CHECK(mac.titleBand(2, 0, 0, 0).isEmpty());
+    CHECK(mac.titleBand(0, 0, 0, -1).isEmpty());
+
+    auto const crowded = mac.tabWellLayout(300, 12);
+    CHECK(crowded.value("scrolls").toBool());
+    CHECK(crowded.value("label").toString() == QStringLiteral("iconOnly"));
+    CHECK(crowded.value("tabWidth").toReal() == 34.0);
+    auto const roomy = mac.tabWellLayout(1000, 3);
+    CHECK(!roomy.value("scrolls").toBool());
+    CHECK(roomy.value("tabWidth").toReal() == 240.0);
+    CHECK(roomy.value("wellWidth").toReal() == 728.0);
+    CHECK(roomy.value("label").toString() == QStringLiteral("full"));
+}
+
+TEST_CASE("UiStyleProvider: snapToCells rounds up to whole cells on the Terminal row", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    auto const cell = terminal.widthQuantum();
+    REQUIRE(cell > 1.0);
+    CHECK(terminal.snapToCells(8.75 * cell) == Catch::Approx(9 * cell));
+    CHECK(terminal.snapToCells(9 * cell) == Catch::Approx(9 * cell));
+    CHECK(terminal.snapToCells(0.0) == 0.0);
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(mac.snapToCells(70) == 70.0);
+}
+
+TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::MotionPreference;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "size", "tabIcon").toReal() == 14.0);
+    CHECK(tokenOf(mac, "size", "toolbarButton").toReal() == 28.0);
+    CHECK(tokenOf(mac, "size", "hostDot").toReal() == 7.0);
+    CHECK(tokenOf(mac, "space", "dragReserve").toReal() == 40.0);
+    CHECK(tokenOf(mac, "space", "revealEdge").toReal() == 2.0);
+    CHECK(tokenOf(mac, "space", "toolbarChipPadding").toReal() == 9.0);
+    CHECK(tokenOf(mac, "radii", "tab").toReal() == 12.0);
+    CHECK(tokenOf(mac, "radii", "tabWell").toReal() == 14.0);
+    CHECK(tokenOf(mac, "radii", "toolbarChip").toReal() == 11.0);
+    CHECK(tokenOf(mac, "motion", "spinner").toInt() == 1200);
+    CHECK(tokenOf(mac, "motion", "pulse").toInt() == 700);
+    CHECK(tokenOf(mac, "motion", "style").toInt() == tokenOf(mac, "motion", "full").toInt());
+    CHECK(tokenOf(mac, "motion", "full").toInt() != tokenOf(mac, "motion", "crossFade").toInt());
+    CHECK(tokenOf(mac, "layout", "tabShape").toInt() == tokenOf(mac, "layout", "pill").toInt());
+    CHECK(tokenOf(mac, "layout", "flat").toInt() != tokenOf(mac, "layout", "pill").toInt());
+    CHECK(tokenOf(mac, "layout", "profileMenu").toInt() == tokenOf(mac, "layout", "secondaryClick").toInt());
+    CHECK(tokenOf(mac, "layout", "caret").toInt() != tokenOf(mac, "layout", "secondaryClick").toInt());
+    // The Pill band is the title bar's own height; a Flat bar keeps today's strip height.
+    CHECK(mac.property("bandHeight").toReal() == 38.0);
+    CHECK(mac.property("tabColorGlyph").toString().isEmpty());
+    CHECK(mac.property("hostDotGlyph").toString().isEmpty());
+
+    auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
+    CHECK(fluent.property("bandHeight").toReal() == fluent.chromeHeight());
+    CHECK(fluent.chromeHeight() == 34.0);
+    CHECK(tokenOf(fluent, "layout", "tabShape").toInt() == tokenOf(fluent, "layout", "flat").toInt());
+    CHECK(tokenOf(fluent, "layout", "profileMenu").toInt() == tokenOf(fluent, "layout", "caret").toInt());
+
+    auto inputs = chromeInputsFor(ChromeStyle::MacOS, font);
+    inputs.accessibility.motion = MotionPreference::Reduced;
+    auto const reduced = UiStyleProvider(inputs);
+    CHECK(tokenOf(reduced, "motion", "style").toInt() == tokenOf(reduced, "motion", "crossFade").toInt());
+    CHECK(tokenOf(reduced, "motion", "spinner").toInt() == 1200);
+
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    CHECK(tokenOf(terminal, "size", "tabIcon").toReal() == Catch::Approx(terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "size", "hostChip").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "space", "dragReserve").toReal() == Catch::Approx(4 * terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "tint", "tab").toReal() == 0.0);
+    CHECK(terminal.property("bandHeight").toReal() == terminal.chromeHeight());
+    CHECK(terminal.property("tabColorGlyph").toString() == QStringLiteral("▌"));
+    CHECK(terminal.property("chipOpenGlyph").toString() == QStringLiteral("["));
+    CHECK(terminal.property("chipCloseGlyph").toString() == QStringLiteral("]"));
+    CHECK(terminal.property("hostDotGlyph").toString() == QStringLiteral("●"));
 }

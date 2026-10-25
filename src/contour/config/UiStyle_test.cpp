@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/UiStyle.hpp>
 
+#include <vtbackend/vt/ProgressState.hpp>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstddef>
 
 using contour::config::ChromeFontSource;
 using contour::config::ChromeStyle;
@@ -221,4 +224,36 @@ TEST_CASE("UiStyle.chromeStyleName", "[config]")
     CHECK(contour::config::chromeStyleName(ChromeStyle::Fluent) == "fluent");
     CHECK(contour::config::chromeStyleName(ChromeStyle::ContourLinux) == "linux");
     CHECK(contour::config::chromeStyleName(ChromeStyle::Terminal) == "terminal");
+}
+
+TEST_CASE("UiStyle: progress follows the status roles", "[uistyle]")
+{
+    using contour::config::ProgressStatusRoles;
+    using contour::config::StatusColorRole;
+    using vtbackend::ProgressState;
+    auto const roleOf = [](ProgressState state) {
+        return ProgressStatusRoles[static_cast<size_t>(state)];
+    };
+    // Running is the accent, never a fixed green: the indicator says the program is working.
+    CHECK(roleOf(ProgressState::Normal) == StatusColorRole::Running);
+    CHECK(roleOf(ProgressState::Error) == StatusColorRole::Danger);
+    CHECK(roleOf(ProgressState::Indeterminate) == StatusColorRole::Running);
+    CHECK(roleOf(ProgressState::Paused) == StatusColorRole::Warning);
+}
+
+TEST_CASE("UiStyle: only the Terminal row draws the band's glyphs", "[uistyle]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto const& tokens = uiStyleTokens(row);
+        CHECK(tokens.tabColorGlyph.empty());
+        CHECK(tokens.chipOpenGlyph.empty());
+        CHECK(tokens.chipCloseGlyph.empty());
+        CHECK(tokens.hostDotGlyph.empty());
+    }
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
+    CHECK(terminal.tabColorGlyph == "▌");
+    CHECK(terminal.chipOpenGlyph == "[");
+    CHECK(terminal.chipCloseGlyph == "]");
+    CHECK(terminal.hostDotGlyph == "●");
 }

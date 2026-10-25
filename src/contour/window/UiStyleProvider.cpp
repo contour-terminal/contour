@@ -3,6 +3,10 @@
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/TabBadge.hpp>
+#include <contour/window/TabWellLayout.hpp>
+#include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/vt/ProgressState.hpp>
@@ -18,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace contour::window
@@ -147,7 +152,30 @@ namespace
             .newTab = QString::fromUtf8(tokens.newTabGlyph),
             .menu = QString::fromUtf8(tokens.menuGlyph),
             .submenu = QString::fromUtf8(tokens.submenuGlyph),
+            .tabColor = QString::fromUtf8(tokens.tabColorGlyph),
+            .chipOpen = QString::fromUtf8(tokens.chipOpenGlyph),
+            .chipClose = QString::fromUtf8(tokens.chipCloseGlyph),
+            .hostDot = QString::fromUtf8(tokens.hostDotGlyph),
         };
+    }
+
+    /// Whether @p value names an enumerator of an enum with @p count of them, counted from 0.
+    [[nodiscard]] constexpr bool inRange(int value, size_t count) noexcept
+    {
+        return value >= 0 && std::cmp_less(value, count);
+    }
+
+    /// Whether @p value names an enumerator of an enum counted from 0 up to @p last.
+    template <typename Enum>
+    [[nodiscard]] constexpr bool isEnumerator(int value, Enum last) noexcept
+    {
+        return value >= 0 && value <= static_cast<int>(std::to_underlying(last));
+    }
+
+    /// @return @p name as the QString QML reads it.
+    [[nodiscard]] QString nameOf(std::string_view name)
+    {
+        return QString::fromUtf8(name);
     }
 } // namespace
 
@@ -182,6 +210,7 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _contrast { _groups.contrast, this },
     _tui { _groups.tui, this },
     _layout { _groups.layout, this },
+    _tint { _groups.tint, this },
     _colors { _groups.colors, _inputs.scheme, *this }
 {
     if (auto* application = QCoreApplication::instance())
@@ -230,14 +259,91 @@ QColor UiStyleProvider::shadowTint(QColor const& base) const
 
 QColor UiStyleProvider::progressColor(int state) const
 {
-    // One accessor taking the state rather than three named ones: the mapping is an index into the
-    // style's own row, so QML says `progressColor(tabProgressState)` and neither side repeats the
-    // state->appearance table. Out-of-range is answered rather than asserted -- the value crosses
-    // from QML, and an unknown state paints nothing rather than aborting the GUI.
-    auto const& colors = _tokens.progressColors;
-    if (state < 0 || std::cmp_greater_equal(state, colors.size()))
+    // One accessor taking the state rather than three named ones: the state's role is one row of
+    // config::ProgressStatusRoles, so QML says `progressColor(tabProgressState)` and neither side
+    // repeats the table. Out-of-range is answered rather than asserted -- the value crosses from QML,
+    // and an unknown state paints nothing rather than aborting the GUI.
+    if (state <= static_cast<int>(vtbackend::ProgressState::Inactive)
+        || !inRange(state, config::ProgressStatusRoles.size()))
         return { Qt::transparent };
-    return QColor::fromRgb(colors[static_cast<size_t>(state)]);
+    return statusInk(static_cast<int>(config::ProgressStatusRoles[static_cast<size_t>(state)]));
+}
+
+QColor UiStyleProvider::statusInk(int role) const
+{
+    if (!inRange(role, config::StatusColorRoleCount))
+        return { Qt::transparent };
+    return _colors.resolve(_groups.statusInk[static_cast<size_t>(role)]);
+}
+
+QVariantMap UiStyleProvider::badgeLook(int kind) const
+{
+    if (!inRange(kind, TabBadgeKindCount))
+        return {};
+    auto const& look = tabBadgeLook(static_cast<TabBadgeKind>(kind));
+    return { { QStringLiteral("glyph"), nameOf(look.glyph) },
+             { QStringLiteral("mark"), nameOf(badgeMarkName(look.mark)) },
+             { QStringLiteral("ink"), statusInk(static_cast<int>(look.ink)) },
+             { QStringLiteral("name"), nameOf(look.accessibleName) } };
+}
+
+QVariantMap UiStyleProvider::hostChipLook(int state) const
+{
+    if (!inRange(state, HostChipStateCount))
+        return {};
+    auto const& look = window::hostChipLook(static_cast<HostChipState>(state));
+    return { { QStringLiteral("dot"), statusInk(static_cast<int>(look.dot)) },
+             { QStringLiteral("status"), nameOf(look.status) },
+             { QStringLiteral("accessibleState"), nameOf(look.accessibleState) } };
+}
+
+QVariantMap UiStyleProvider::titleBand(int frame, int mode, int strip, int position) const
+{
+    if (!isEnumerator(frame, WindowFrame::NativeFrame) || !isEnumerator(mode, WindowMode::FullScreen)
+        || !isEnumerator(strip, TabStripGate::Shown)
+        || !isEnumerator(position, config::TabBarPosition::Bottom))
+        return {};
+    auto const band =
+        resolveTitleBand(TitleBandInputs { .shape = _groups.layout.tabShape,
+                                           .frame = static_cast<WindowFrame>(frame),
+                                           .mode = static_cast<WindowMode>(mode),
+                                           .strip = static_cast<TabStripGate>(strip),
+                                           .position = static_cast<config::TabBarPosition>(position) });
+    return { { QStringLiteral("band"), nameOf(barPresenceName(band.band)) },
+             { QStringLiteral("bandEdge"), nameOf(barEdgeName(band.bandEdge)) },
+             { QStringLiteral("centre"), nameOf(barCentreName(band.centre)) },
+             { QStringLiteral("tabBar"), nameOf(barPresenceName(band.tabBar)) } };
+}
+
+QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
+{
+    auto const layout = layoutTabWell(available,
+                                      tabCount,
+                                      TabWellMetrics { .minTab = _metrics.minTabWidth,
+                                                       .maxTab = _metrics.maxTabWidth,
+                                                       .iconOnlyTab = (2 * _space.s5()) + _size.tabIcon(),
+                                                       .gap = _space.s1(),
+                                                       .padding = _space.s1() });
+    return { { QStringLiteral("tabWidth"), layout.tabWidth },
+             { QStringLiteral("wellWidth"), layout.wellWidth },
+             { QStringLiteral("label"), nameOf(tabLabelModeName(layout.label)) },
+             { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
+}
+
+qreal UiStyleProvider::snapToCells(qreal length) const
+{
+    auto const quantum = _metrics.widthQuantum;
+    return quantum * std::ceil(length / quantum);
+}
+
+qreal UiStyleProvider::bandHeight() const noexcept
+{
+    switch (_groups.layout.tabShape)
+    {
+        case config::TabShape::Pill: return _size.titleBar();
+        case config::TabShape::Flat: break;
+    }
+    return _metrics.chromeHeight;
 }
 
 QColor UiStyleProvider::statusColor(int role) const
@@ -296,7 +402,7 @@ QColor UiStyleProvider::dotGlyphColor() const
 
 QColor UiStyleProvider::errorColor() const
 {
-    return progressColor(static_cast<int>(vtbackend::ProgressState::Error));
+    return statusColor(static_cast<int>(config::StatusColorRole::Danger));
 }
 
 QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, std::string const& profileName)

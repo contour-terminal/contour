@@ -4,6 +4,8 @@
 #include <contour/config/ConfigEnumInfo.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 
+#include <vtbackend/vt/ProgressState.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -199,15 +201,6 @@ struct UiStyleTokens
     /// the surrounding text.
     int badgePixelSize;
 
-    /// The colors a tab's OSC 9;4 progress bar is painted in, as 0xRRGGBB, indexed by
-    /// vtbackend::ProgressState. Index 0 (Inactive) paints nothing and is never read.
-    ///
-    /// A row here rather than a literal in the provider, so a style that wants its own palette says
-    /// so in the table like every other style value. They are stated rather than derived from the OS
-    /// palette because they say what an operation is DOING -- a theme-picked hue could render a
-    /// failure green. Both rows agree today; the point is that they need not.
-    std::array<uint32_t, 5> progressColors;
-
     /// How a traffic-light dot is drawn: empty paints a vector circle, and any other value is the
     /// glyph to paint in the dot's color instead.
     ///
@@ -218,6 +211,14 @@ struct UiStyleTokens
     std::string_view trafficLightGlyph;
 
     std::string_view tabSeparator; ///< Drawn between adjacent tabs; empty when the style has none.
+
+    /// The cell a coloured tab leads with, in the tab's colour; empty where the colour tints the tab
+    /// instead (the native rows' pill and fill).
+    std::string_view tabColorGlyph;
+    std::string_view chipOpenGlyph;  ///< Opens a toolbar or host chip; empty where the chip is a shape.
+    std::string_view chipCloseGlyph; ///< Closes a toolbar or host chip; empty where the chip is a shape.
+    std::string_view hostDotGlyph;   ///< The host chip's state dot; empty where it is a vector circle.
+
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).
     std::string_view newTabGlyph;  ///< The "new tab" button.
@@ -262,6 +263,22 @@ inline constexpr std::array<StatusColor, StatusColorRoleCount> StatusColors = {
     StatusColor { StatusColorSource::Fixed, 0x248A3D, 0x32D74B }, // Success
     StatusColor { StatusColorSource::PaletteAccent, 0, 0 },       // Running
 };
+
+/// The status role a tab's OSC 9;4 progress indicator is inked in, indexed by @c vtbackend::ProgressState.
+///
+/// A role rather than a hue, so each chrome row resolves it as it resolves every status ink: running
+/// is the accent (never a fixed green), a failure is @c Danger, a pause is @c Warning. Index 0
+/// (@c Inactive) paints nothing and is never read.
+inline constexpr std::array<StatusColorRole, 5> ProgressStatusRoles {
+    StatusColorRole::Running, // Inactive: never painted
+    StatusColorRole::Running, // Normal
+    StatusColorRole::Danger,  // Error
+    StatusColorRole::Running, // Indeterminate: drawn as running, pulsing
+    StatusColorRole::Warning, // Paused
+};
+
+static_assert(ProgressStatusRoles.size() == static_cast<size_t>(vtbackend::ProgressState::Paused) + 1,
+              "ProgressStatusRoles needs one row per vtbackend::ProgressState");
 
 /// Chrome tokens no style row varies, kept together so a restyle changes a number here and not a
 /// literal in a QML file.
@@ -344,17 +361,14 @@ namespace detail
         .menuPointSize = 10,
         .windowControlPointSize = 10,
         .badgePixelSize = 10,
-        .progressColors = {
-            0x000000,  // Inactive: never painted
-            0x3D9A50,  // Normal: running
-            0xD13438,  // Error: failed
-            0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
-            0xE8A317,  // Paused: paused, or warning
-        },
         // Empty: at 12 logical pixels a dot is smaller than any text this chrome sets, so it is
         // drawn as the shape it is rather than as a glyph scaled down to fit.
         .trafficLightGlyph = "",
         .tabSeparator = "",
+        .tabColorGlyph = "",
+        .chipOpenGlyph = "",
+        .chipCloseGlyph = "",
+        .hostDotGlyph = "",
         .closeGlyph = "✕",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",
@@ -419,17 +433,15 @@ namespace detail
         .menuPointSize = 0,
         .windowControlPointSize = 0,
         .badgePixelSize = 0,
-        .progressColors = {
-            0x000000,  // Inactive: never painted
-            0x3D9A50,  // Normal: running
-            0xD13438,  // Error: failed
-            0x3D9A50,  // Indeterminate: busy, drawn as running but pulsing
-            0xE8A317,  // Paused: paused, or warning
-        },
         // A dot is a character here, like everything else this style paints: one cell of "●" in
         // the traffic light's color, set in the same monospace font as the tabs beside it.
         .trafficLightGlyph = "●",
         .tabSeparator = "│",
+        // The tab's colour as its leading cell, and a chip as the bracketed run a status line sets.
+        .tabColorGlyph = "▌",
+        .chipOpenGlyph = "[",
+        .chipCloseGlyph = "]",
+        .hostDotGlyph = "●",
         .closeGlyph = "×",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",

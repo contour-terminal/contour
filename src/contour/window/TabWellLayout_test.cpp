@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/window/TabWellLayout.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,9 +16,18 @@ using Catch::Matchers::WithinAbs;
 namespace
 {
 
+constexpr auto const& MacRow =
+    contour::config::ChromeTokenRows[static_cast<size_t>(contour::config::ChromeStyle::MacOS)];
+constexpr auto const& MacStyle = contour::config::uiStyleTokens(contour::config::ChromeStyle::MacOS);
+
 // The macOS row's metrics: min/max tab width, 2·s5 + size.tabIcon, and s1 for the gap and the padding.
-constexpr auto Metrics =
-    TabWellMetrics { .minTab = 120, .maxTab = 240, .iconOnlyTab = 34, .gap = 2, .padding = 2 };
+constexpr auto Metrics = TabWellMetrics { .minTab = MacStyle.minTabUnits,
+                                          .maxTab = MacStyle.maxTabUnits,
+                                          .iconOnlyTab = (2 * MacRow.space.scale[4]) + MacRow.size.tabIcon,
+                                          .gap = MacRow.space.scale[0],
+                                          .padding = MacRow.space.scale[0] };
+static_assert(Metrics.minTab == 120 && Metrics.maxTab == 240 && Metrics.iconOnlyTab == 34
+              && Metrics.gap == 2);
 
 } // namespace
 
@@ -59,9 +69,9 @@ TEST_CASE("tabWell.neverPastTheRange", "[tabwell]")
 
 TEST_CASE("tabWell.overflow", "[tabwell]")
 {
-    // The drag reserve is the canvas's "at least 40 pt of empty bar always stays draggable" (mac-dark);
-    // a literal until Task 4 lands ChromeTokenRows' space.dragReserve.
-    constexpr auto DragReserve = 40.0;
+    // The drag reserve is the canvas's "at least 40 pt of empty bar always stays draggable" (mac-dark).
+    constexpr auto DragReserve = static_cast<double>(MacRow.space.dragReserve);
+    static_assert(DragReserve == 40.0);
     auto const twenty = layoutTabWell(900 - DragReserve, 20, Metrics);
     CHECK(twenty.label == TabLabelMode::IconOnly);
     CHECK(twenty.overflow == TabWellOverflow::Fits);

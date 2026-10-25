@@ -53,6 +53,20 @@ enum class TabShape : uint8_t
     Pill,     //!< A well of pills inside the window's title band.
 };
 
+/// How the chrome animates.
+enum class MotionStyle : uint8_t
+{
+    Full = 0,  //!< Slides, spinners and pulses run.
+    CrossFade, //!< Reduce Motion: every transition is a cross-fade, and nothing spins or pulses.
+};
+
+/// How the new-tab profile menu is reached.
+enum class ProfileMenuAffordance : uint8_t
+{
+    Caret = 0,      //!< A "▾" button beside the "+".
+    SecondaryClick, //!< A secondary click or a long press on the "+" itself.
+};
+
 /// The chrome colours a row describes; enumerator order is the order of @c ChromeTokenRow::colors.
 enum class ChromeColorRole : uint8_t
 {
@@ -62,6 +76,21 @@ enum class ChromeColorRole : uint8_t
     ToastFill,      //!< Background of a toast.
     ToastText,      //!< Text of a toast.
     SwatchRing,     //!< Ring around the checked colour swatch of a menu.
+
+    // The tab well and its pills.
+    TabWellFill,        //!< The well the tabs sit in.
+    TabActiveFill,      //!< The active tab.
+    TabHoverFill,       //!< A hovered tab.
+    TabCloseFill,       //!< A hovered tab's close button.
+    ControlPressedFill, //!< A pressed band control.
+    TabText,            //!< An inactive tab's label.
+    TabTextActive,      //!< The active tab's label.
+    TabTextDimmed,      //!< A label one level down (an inactive window, a tab icon without a colour).
+
+    // The band's chips.
+    ChipFill,       //!< A toolbar or host chip.
+    ChipText,       //!< A chip's text.
+    ChipTextStrong, //!< A chip's emphasised text (the host name).
 };
 
 /// Where a chrome colour comes from.
@@ -72,6 +101,12 @@ enum class ColorSourceKind : uint8_t
     PaletteWindowText, //!< The OS palette's window text colour.
     Status,            //!< A status hue, picked by the source's @c status.
     Scheme,            //!< A slot of the terminal's colour scheme, picked by the source's @c slot.
+    // The kit's tables (FillAlphas, LabelAlphas, SurfaceColors), by the source's @c level: black or the
+    // light surface on a light chrome, white or the dark surface on a dark one.
+    Fill,        //!< The kit's @c fill.N wash.
+    Label,       //!< The kit's @c label.N text.
+    Surface,     //!< The kit's opaque @c surface.N: 1 elevated, 2 secondary.
+    SchemeOnBar, //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else @c BarText.
 };
 
 /// The terminal colour-scheme slots the Terminal style paints its chrome with.
@@ -83,6 +118,7 @@ enum class SchemeSlot : uint8_t
     BarText,        //!< Whichever of the default foreground and background reads better on @c Bar.
     Secondary,      //!< ANSI colour 8.
     Selection,      //!< The selection background.
+    SelectionText,  //!< Whichever of the default foreground and background reads better on @c Selection.
     Accent,         //!< ANSI colour 4.
     Danger,         //!< ANSI colour 1.
     Success,        //!< ANSI colour 2.
@@ -93,7 +129,7 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::Warning) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::SwatchRing) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::ChipTextStrong) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -101,10 +137,50 @@ struct ChromeColorSource
     ColorSourceKind kind = ColorSourceKind::Fixed;    ///< Where the colour comes from.
     uint32_t rgb = 0;                                 ///< @c 0xRRGGBB, for @c Fixed.
     StatusColorRole status = StatusColorRole::Danger; ///< The hue, for @c Status.
-    SchemeSlot slot = SchemeSlot::Background;         ///< The slot, for @c Scheme.
+    SchemeSlot slot = SchemeSlot::Background;         ///< The slot, for @c Scheme and @c SchemeOnBar.
     int alphaPercent = 100;                           ///< Opacity of the resulting colour.
+    int level = 0; ///< The 1-based step of a @c Fill, @c Label or @c Surface source; 0 for other kinds.
 
     [[nodiscard]] bool operator==(ChromeColorSource const&) const = default;
+};
+
+/// One alpha of the kit's tables on each chrome, as a percentage.
+struct AlphaPair
+{
+    int light = 0; ///< Over a light chrome, in black.
+    int dark = 0;  ///< Over a dark chrome, in white.
+
+    [[nodiscard]] bool operator==(AlphaPair const&) const = default;
+};
+
+/// The kit's @c fill.1-4 washes (kit-tokens), @c fill.1 first.
+inline constexpr std::array<AlphaPair, 4> FillAlphas {
+    AlphaPair { .light = 20, .dark = 24 },
+    AlphaPair { .light = 12, .dark = 16 },
+    AlphaPair { .light = 8, .dark = 10 },
+    AlphaPair { .light = 5, .dark = 6 },
+};
+
+/// The kit's @c label.primary/secondary/tertiary text (kit-tokens), primary first.
+inline constexpr std::array<AlphaPair, 3> LabelAlphas {
+    AlphaPair { .light = 88, .dark = 92 },
+    AlphaPair { .light = 60, .dark = 62 },
+    AlphaPair { .light = 45, .dark = 50 },
+};
+
+/// One opaque surface of the kit on each chrome, as @c 0xRRGGBB.
+struct SurfacePair
+{
+    uint32_t light = 0; ///< On a light chrome.
+    uint32_t dark = 0;  ///< On a dark chrome.
+
+    [[nodiscard]] bool operator==(SurfacePair const&) const = default;
+};
+
+/// The kit's @c surface.elevated and @c surface.secondary (kit-tokens), elevated first.
+inline constexpr std::array<SurfacePair, 2> SurfaceColors {
+    SurfacePair { .light = 0xFFFFFF, .dark = 0x2C2C2E },
+    SurfacePair { .light = 0xF2F2F7, .dark = 0x1C1C1E },
 };
 
 /// The terminal colour scheme reduced to the slots the chrome reads, indexed by @c SchemeSlot.
@@ -134,6 +210,17 @@ struct SizeTokens
     int settingsMinWidth = 0;  ///< Smallest width the Settings window may be resized to.
     int settingsMinHeight = 0; ///< Smallest height the Settings window may be resized to.
 
+    // The title band and its tabs.
+    int tabIcon = 0;       ///< Edge of a tab's icon square.
+    int tabClose = 0;      ///< Edge of a tab's close button.
+    int badge = 0;         ///< Diameter of a badge disc or ring.
+    int badgeDot = 0;      ///< Diameter of the unseen-output dot.
+    int progressBar = 0;   ///< Height of a tab's progress bar.
+    int hostChip = 0;      ///< Height of the host chip.
+    int hostDot = 0;       ///< Diameter of the host chip's state dot.
+    int toolbarButton = 0; ///< Width of a band toolbar button.
+    int toolbarChip = 0;   ///< Height of a band toolbar chip.
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -144,6 +231,11 @@ struct SpaceTokens
     int splitHit = 0;             ///< Hit target of a split divider.
     int paneInset = 0;            ///< Inset of a pane's content inside its card.
     std::array<int, 10> scale {}; ///< The spacing scale, s1 first.
+
+    // The title band.
+    int dragReserve = 0;        ///< Empty band that always stays draggable.
+    int revealEdge = 0;         ///< Height of the full-screen edge that reveals the band.
+    int toolbarChipPadding = 0; ///< Horizontal padding inside a toolbar chip.
 
     [[nodiscard]] bool operator==(SpaceTokens const&) const = default;
 };
@@ -156,6 +248,15 @@ struct RadiusTokens
     int menu = 0;     ///< Menus.
     int paneCard = 0; ///< Pane cards.
     int toast = 0;    ///< Toasts.
+
+    // The title band.
+    int tab = 0;         ///< A tab pill.
+    int tabWell = 0;     ///< The well the pills sit in.
+    int tabIcon = 0;     ///< A tab's icon square.
+    int tabClose = 0;    ///< A tab's close button.
+    int badge = 0;       ///< A badge disc.
+    int hostChip = 0;    ///< The host chip.
+    int toolbarChip = 0; ///< A toolbar chip.
 
     [[nodiscard]] bool operator==(RadiusTokens const&) const = default;
 };
@@ -179,6 +280,10 @@ struct MotionTokens
     int standardMs = 0;   ///< Standard transitions, in milliseconds.
     int emphasizedMs = 0; ///< Emphasised transitions, in milliseconds.
     int travel = 0;       ///< Distance a sliding element travels.
+
+    int spinnerMs = 0; ///< One turn of the Working spinner, in milliseconds.
+    int pulseMs = 0;   ///< One half-cycle of the indeterminate progress pulse, in milliseconds.
+    MotionStyle style = MotionStyle::Full; ///< Whether things slide, spin and pulse, or cross-fade.
 
     [[nodiscard]] bool operator==(MotionTokens const&) const = default;
 };
@@ -230,11 +335,21 @@ struct TuiTokens
     [[nodiscard]] bool operator==(TuiTokens const&) const = default;
 };
 
+/// Tints laid over chrome surfaces.
+struct TintTokens
+{
+    int tabPercent = 0; ///< Opacity of a tab colour over its pill; 0 where the colour is a glyph instead.
+
+    [[nodiscard]] bool operator==(TintTokens const&) const = default;
+};
+
 /// Layout choices that differ per style.
 struct LayoutTokens
 {
     DialogPlacement dialog = DialogPlacement::Centered; ///< Where dialogs appear.
     MenuPresentation menu = MenuPresentation::InScene;  ///< How menus are presented; read by C++ only.
+    TabShape tabShape = TabShape::Flat;                 ///< How the tabs are drawn.
+    ProfileMenuAffordance profileMenu = ProfileMenuAffordance::Caret; ///< How the profile menu is reached.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -252,9 +367,15 @@ struct ChromeTokenRow
     ContrastTokens contrast {};   ///< Separation strength.
     TuiTokens tui {};             ///< Terminal-style specifics.
     LayoutTokens layout {};       ///< Per-style layout choices.
+    TintTokens tint {};           ///< Tints over chrome surfaces.
     std::array<ChromeColorSource, ChromeColorRoleCount>
         colors {}; ///< Colour sources, indexed by @c ChromeColorRole.
+    /// What each status role is inked in on this row's chrome, indexed by @c StatusColorRole.
+    std::array<ChromeColorSource, StatusColorRoleCount> statusInk {};
 };
+
+/// The WCAG AA ratio chrome text must reach against what it sits on.
+inline constexpr double MinimumTextContrast = 4.5;
 
 /// Duration every transition collapses to under @c MotionPreference::Reduced.
 inline constexpr int ReducedMotionCrossFadeMs = 100;
@@ -266,12 +387,19 @@ namespace detail
         return SpaceTokens { .paneGap = paneGap,
                              .splitHit = 10,
                              .paneInset = paneInset,
-                             .scale = { 2, 4, 6, 8, 10, 12, 16, 20, 24, 32 } };
+                             .scale = { 2, 4, 6, 8, 10, 12, 16, 20, 24, 32 },
+                             .dragReserve = 40,
+                             .revealEdge = 2,
+                             .toolbarChipPadding = 9 };
     }
 
-    inline constexpr MotionTokens NativeMotion {
-        .fastMs = 100, .standardMs = 160, .emphasizedMs = 220, .travel = 8
-    };
+    inline constexpr MotionTokens NativeMotion { .fastMs = 100,
+                                                 .standardMs = 160,
+                                                 .emphasizedMs = 220,
+                                                 .travel = 8,
+                                                 .spinnerMs = 1200,
+                                                 .pulseMs = 700,
+                                                 .style = MotionStyle::Full };
 
     inline constexpr ElevationTokens NativeElevation {
         .levels = { ElevationLevel { .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
@@ -284,49 +412,138 @@ namespace detail
                                                        .activeCardRing = 0.0,
                                                        .paneDimPercent = std::nullopt };
 
-    inline constexpr ChromeColorSource StatusWarning { .kind = ColorSourceKind::Status,
-                                                       .rgb = 0,
-                                                       .status = StatusColorRole::Warning,
-                                                       .slot = SchemeSlot::Background,
-                                                       .alphaPercent = 100 };
-
-    inline constexpr std::array<ChromeColorSource, ChromeColorRoleCount> NativeColors {
-        ChromeColorSource { .kind = ColorSourceKind::PaletteWindow,
-                            .rgb = 0,
-                            .status = StatusColorRole::Danger,
-                            .slot = SchemeSlot::Background,
-                            .alphaPercent = 100 },
-        ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
-                            .rgb = 0,
-                            .status = StatusColorRole::Danger,
-                            .slot = SchemeSlot::Background,
-                            .alphaPercent = 100 },
-        StatusWarning,
-        ChromeColorSource { .kind = ColorSourceKind::Fixed,
-                            .rgb = 0x28282C,
-                            .status = StatusColorRole::Danger,
-                            .slot = SchemeSlot::Background,
-                            .alphaPercent = 92 },
-        ChromeColorSource { .kind = ColorSourceKind::Fixed,
-                            .rgb = 0xFFFFFF,
-                            .status = StatusColorRole::Danger,
-                            .slot = SchemeSlot::Background,
-                            .alphaPercent = 100 },
-        ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
-                            .rgb = 0,
-                            .status = StatusColorRole::Danger,
-                            .slot = SchemeSlot::Background,
-                            .alphaPercent = 100 },
-    };
-
+    /// @param slot The scheme slot.
+    /// @return A @c Scheme source at full opacity.
     constexpr ChromeColorSource schemeColor(SchemeSlot slot) noexcept
     {
         return ChromeColorSource { .kind = ColorSourceKind::Scheme,
                                    .rgb = 0,
                                    .status = StatusColorRole::Danger,
                                    .slot = slot,
-                                   .alphaPercent = 100 };
+                                   .alphaPercent = 100,
+                                   .level = 0 };
     }
+
+    /// @param level The kit's @c fill step, 1 to 4.
+    /// @return A @c Fill source.
+    constexpr ChromeColorSource fill(int level) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Fill,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = 100,
+                                   .level = level };
+    }
+
+    /// @param level The kit's @c label step, 1 (primary) to 3 (tertiary).
+    /// @return A @c Label source.
+    constexpr ChromeColorSource label(int level) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Label,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = 100,
+                                   .level = level };
+    }
+
+    /// @param level The kit's surface: 1 elevated, 2 secondary.
+    /// @return A @c Surface source.
+    constexpr ChromeColorSource surface(int level) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Surface,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = 100,
+                                   .level = level };
+    }
+
+    /// @param slot The scheme hue to ink with where it reads on the bar.
+    /// @return A @c SchemeOnBar source.
+    constexpr ChromeColorSource schemeOnBar(SchemeSlot slot) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::SchemeOnBar,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = slot,
+                                   .alphaPercent = 100,
+                                   .level = 0 };
+    }
+
+    /// @param role The status hue.
+    /// @return A @c Status source at full opacity.
+    constexpr ChromeColorSource statusSource(StatusColorRole role) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Status,
+                                   .rgb = 0,
+                                   .status = role,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = 100,
+                                   .level = 0 };
+    }
+
+    inline constexpr ChromeColorSource StatusWarning { .kind = ColorSourceKind::Status,
+                                                       .rgb = 0,
+                                                       .status = StatusColorRole::Warning,
+                                                       .slot = SchemeSlot::Background,
+                                                       .alphaPercent = 100,
+                                                       .level = 0 };
+
+    /// The native rows' colours: the 1a roles, then the kit's tables for the band (kit-components).
+    inline constexpr std::array<ChromeColorSource, ChromeColorRoleCount> NativeColors {
+        ChromeColorSource { .kind = ColorSourceKind::PaletteWindow,
+                            .rgb = 0,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 },
+        ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
+                            .rgb = 0,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 },
+        StatusWarning,
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0x28282C,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 92,
+                            .level = 0 },
+        ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                            .rgb = 0xFFFFFF,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 },
+        ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
+                            .rgb = 0,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100,
+                            .level = 0 },
+        fill(4),    // TabWellFill
+        surface(1), // TabActiveFill
+        fill(3),    // TabHoverFill
+        fill(3),    // TabCloseFill
+        fill(2),    // ControlPressedFill
+        label(2),   // TabText
+        label(1),   // TabTextActive
+        label(3),   // TabTextDimmed
+        fill(4),    // ChipFill
+        label(2),   // ChipText
+        label(1),   // ChipTextStrong
+    };
+
+    /// The native rows' status inks: the status hues themselves, indexed by @c StatusColorRole.
+    inline constexpr std::array<ChromeColorSource, StatusColorRoleCount> NativeStatusInk {
+        statusSource(StatusColorRole::Danger),
+        statusSource(StatusColorRole::Warning),
+        statusSource(StatusColorRole::Success),
+        statusSource(StatusColorRole::Running),
+    };
 
     inline constexpr ChromeTokenRow MacRow {
         .size = { .titleBar = 38,
@@ -341,17 +558,42 @@ namespace detail
                   .settingsWidth = 960,
                   .settingsHeight = 820,
                   .settingsMinWidth = 720,
-                  .settingsMinHeight = 480 },
+                  .settingsMinHeight = 480,
+                  .tabIcon = 14,
+                  .tabClose = 16,
+                  .badge = 14,
+                  .badgeDot = 6,
+                  .progressBar = 2,
+                  .hostChip = 24,
+                  .hostDot = 7,
+                  .toolbarButton = 28,
+                  .toolbarChip = 22 },
         .space = nativeSpace(6, 6),
-        .radii = { .control = 6, .popover = 14, .menu = 10, .paneCard = 10, .toast = 18 },
+        .radii = { .control = 6,
+                   .popover = 14,
+                   .menu = 10,
+                   .paneCard = 10,
+                   .toast = 18,
+                   .tab = 12,
+                   .tabWell = 14,
+                   .tabIcon = 3,
+                   .tabClose = 8,
+                   .badge = 7,
+                   .hostChip = 12,
+                   .toolbarChip = 11 },
         .type = { .caption = 10, .footnote = 11, .body = 13, .tab = 12, .title = 15 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Glass, .popover = Material::Glass },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
-        .layout = { .dialog = DialogPlacement::Sheet, .menu = MenuPresentation::Native },
+        .layout = { .dialog = DialogPlacement::Sheet,
+                    .menu = MenuPresentation::Native,
+                    .tabShape = TabShape::Pill,
+                    .profileMenu = ProfileMenuAffordance::SecondaryClick },
+        .tint = { .tabPercent = 20 },
         .colors = NativeColors,
+        .statusInk = NativeStatusInk,
     };
 
     inline constexpr ChromeTokenRow FluentRow {
@@ -367,17 +609,42 @@ namespace detail
                   .settingsWidth = 1110,
                   .settingsHeight = 920,
                   .settingsMinWidth = 720,
-                  .settingsMinHeight = 480 },
+                  .settingsMinHeight = 480,
+                  .tabIcon = 14,
+                  .tabClose = 16,
+                  .badge = 14,
+                  .badgeDot = 6,
+                  .progressBar = 2,
+                  .hostChip = 24,
+                  .hostDot = 7,
+                  .toolbarButton = 32,
+                  .toolbarChip = 22 },
         .space = nativeSpace(4, 4),
-        .radii = { .control = 4, .popover = 8, .menu = 8, .paneCard = 4, .toast = 18 },
+        .radii = { .control = 4,
+                   .popover = 8,
+                   .menu = 8,
+                   .paneCard = 4,
+                   .toast = 18,
+                   .tab = 6,
+                   .tabWell = 0,
+                   .tabIcon = 3,
+                   .tabClose = 8,
+                   .badge = 7,
+                   .hostChip = 12,
+                   .toolbarChip = 11 },
         .type = { .caption = 12, .footnote = 12, .body = 14, .tab = 12, .title = 20 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Mica, .popover = Material::Solid },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
-        .layout = { .dialog = DialogPlacement::Centered, .menu = MenuPresentation::InScene },
+        .layout = { .dialog = DialogPlacement::Centered,
+                    .menu = MenuPresentation::InScene,
+                    .tabShape = TabShape::Flat,
+                    .profileMenu = ProfileMenuAffordance::Caret },
+        .tint = { .tabPercent = 20 },
         .colors = NativeColors,
+        .statusInk = NativeStatusInk,
     };
 
     inline constexpr ChromeTokenRow LinuxRow {
@@ -393,17 +660,42 @@ namespace detail
                   .settingsWidth = 1100,
                   .settingsHeight = 920,
                   .settingsMinWidth = 720,
-                  .settingsMinHeight = 480 },
+                  .settingsMinHeight = 480,
+                  .tabIcon = 14,
+                  .tabClose = 16,
+                  .badge = 14,
+                  .badgeDot = 6,
+                  .progressBar = 2,
+                  .hostChip = 24,
+                  .hostDot = 7,
+                  .toolbarButton = 34,
+                  .toolbarChip = 22 },
         .space = nativeSpace(6, 6),
-        .radii = { .control = 8, .popover = 12, .menu = 10, .paneCard = 6, .toast = 18 },
+        .radii = { .control = 8,
+                   .popover = 12,
+                   .menu = 10,
+                   .paneCard = 6,
+                   .toast = 18,
+                   .tab = 8,
+                   .tabWell = 0,
+                   .tabIcon = 3,
+                   .tabClose = 8,
+                   .badge = 7,
+                   .hostChip = 12,
+                   .toolbarChip = 11 },
         .type = { .caption = 12, .footnote = 12.5, .body = 14, .tab = 13.5, .title = 15 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Solid, .popover = Material::Solid },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
-        .layout = { .dialog = DialogPlacement::Centered, .menu = MenuPresentation::InScene },
+        .layout = { .dialog = DialogPlacement::Centered,
+                    .menu = MenuPresentation::InScene,
+                    .tabShape = TabShape::Flat,
+                    .profileMenu = ProfileMenuAffordance::Caret },
+        .tint = { .tabPercent = 20 },
         .colors = NativeColors,
+        .statusInk = NativeStatusInk,
     };
 
     inline constexpr ElevationLevel TerminalShadow {
@@ -423,11 +715,43 @@ namespace detail
                   .settingsWidth = 120,
                   .settingsHeight = 40,
                   .settingsMinWidth = 90,
-                  .settingsMinHeight = 24 },
-        .space = { .paneGap = 1, .splitHit = 1, .paneInset = 0, .scale = { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 } },
-        .radii = { .control = 0, .popover = 0, .menu = 0, .paneCard = 0, .toast = 0 },
+                  .settingsMinHeight = 24,
+                  .tabIcon = 1,
+                  .tabClose = 1,
+                  .badge = 1,
+                  .badgeDot = 1,
+                  .progressBar = 1,
+                  .hostChip = 1,
+                  .hostDot = 1,
+                  .toolbarButton = 2,
+                  .toolbarChip = 1 },
+        .space = { .paneGap = 1,
+                   .splitHit = 1,
+                   .paneInset = 0,
+                   .scale = { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
+                   .dragReserve = 4,
+                   .revealEdge = 1,
+                   .toolbarChipPadding = 1 },
+        .radii = { .control = 0,
+                   .popover = 0,
+                   .menu = 0,
+                   .paneCard = 0,
+                   .toast = 0,
+                   .tab = 0,
+                   .tabWell = 0,
+                   .tabIcon = 0,
+                   .tabClose = 0,
+                   .badge = 0,
+                   .hostChip = 0,
+                   .toolbarChip = 0 },
         .type = { .caption = 0, .footnote = 0, .body = 0, .tab = 0, .title = 0 },
-        .motion = { .fastMs = 100, .standardMs = 160, .emphasizedMs = 220, .travel = 0 },
+        .motion = { .fastMs = 100,
+                    .standardMs = 160,
+                    .emphasizedMs = 220,
+                    .travel = 0,
+                    .spinnerMs = 1200,
+                    .pulseMs = 700,
+                    .style = MotionStyle::Full },
         .elevation = { .levels = { ElevationLevel {
                                        .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
                                    TerminalShadow,
@@ -436,13 +760,35 @@ namespace detail
         .material = { .titleBand = Material::None, .popover = Material::None },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 0.62, .toastStyle = ToastStyle::Inverse },
-        .layout = { .dialog = DialogPlacement::Centered, .menu = MenuPresentation::InScene },
+        .layout = { .dialog = DialogPlacement::Centered,
+                    .menu = MenuPresentation::InScene,
+                    .tabShape = TabShape::Flat,
+                    .profileMenu = ProfileMenuAffordance::Caret },
+        // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
+        .tint = { .tabPercent = 0 },
         .colors = { schemeColor(SchemeSlot::Bar),
                     schemeColor(SchemeSlot::BarText),
                     schemeColor(SchemeSlot::Warning),
                     schemeColor(SchemeSlot::Foreground),
                     schemeColor(SchemeSlot::Background),
-                    schemeColor(SchemeSlot::Foreground) },
+                    schemeColor(SchemeSlot::Foreground),
+                    schemeColor(SchemeSlot::Bar),           // TabWellFill
+                    schemeColor(SchemeSlot::Selection),     // TabActiveFill
+                    schemeColor(SchemeSlot::Bar),           // TabHoverFill
+                    schemeColor(SchemeSlot::Bar),           // TabCloseFill
+                    schemeColor(SchemeSlot::Selection),     // ControlPressedFill
+                    schemeColor(SchemeSlot::BarText),       // TabText
+                    schemeColor(SchemeSlot::SelectionText), // TabTextActive
+                    // Not Secondary: ANSI 8 on a light scheme's dark bar fails 4.5:1, so it does not dim.
+                    schemeColor(SchemeSlot::BarText),   // TabTextDimmed
+                    schemeColor(SchemeSlot::Bar),       // ChipFill
+                    schemeColor(SchemeSlot::BarText),   // ChipText
+                    schemeColor(SchemeSlot::BarText) }, // ChipTextStrong
+        // The scheme's hues, each falling back to the bar's text where it would not read on the bar.
+        .statusInk = { schemeOnBar(SchemeSlot::Danger),
+                       schemeOnBar(SchemeSlot::Warning),
+                       schemeOnBar(SchemeSlot::Success),
+                       schemeOnBar(SchemeSlot::Accent) },
     };
 } // namespace detail
 
@@ -472,6 +818,7 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
         tokens.motion.standardMs = ReducedMotionCrossFadeMs;
         tokens.motion.emphasizedMs = ReducedMotionCrossFadeMs;
         tokens.motion.travel = 0;
+        tokens.motion.style = MotionStyle::CrossFade;
     }
 
     if (preferences.transparency == TransparencyPreference::Reduced)
@@ -505,25 +852,45 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
     }();
 
     // ANSI colour 0 is black in a light scheme as in a dark one, but a light scheme's foreground is dark
-    // too: text on the bar takes whichever end of the scheme stands off it.
+    // too: text on the bar (and on the selection) takes whichever end of the scheme stands off it.
     auto const bar = palette.normalColor(0);
-    auto const barText = vtbackend::contrastRatio(palette.defaultForeground, bar)
-                                 >= vtbackend::contrastRatio(palette.defaultBackground, bar)
-                             ? palette.defaultForeground
-                             : palette.defaultBackground;
+    auto const readableOn = [&palette](vtbackend::RGBColor fill) {
+        return vtbackend::contrastRatio(palette.defaultForeground, fill)
+                       >= vtbackend::contrastRatio(palette.defaultBackground, fill)
+                   ? palette.defaultForeground
+                   : palette.defaultBackground;
+    };
 
     auto colors = ChromeSchemeColors {};
     colors.bySlot[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Foreground)] = palette.defaultForeground;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = bar;
-    colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)] = barText;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)] = readableOn(bar);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Secondary)] = palette.brightColor(0);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Selection)] = selection;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::SelectionText)] = readableOn(selection);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Accent)] = palette.normalColor(4);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Danger)] = palette.normalColor(1);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Success)] = palette.normalColor(2);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Warning)] = palette.normalColor(3);
     return colors;
+}
+
+/// The colour a scheme hue is inked in on the Terminal row's bar.
+///
+/// A hue that reads at 4.5:1 on @c Bar is itself; one that does not (blue on contour-light's dark bar)
+/// gives way to @c BarText, so the glyph it inks keeps its meaning by shape rather than vanishing.
+/// @param colors The scheme's chrome slots.
+/// @param hue    The slot to ink with.
+/// @return The hue, or @c BarText.
+[[nodiscard]] inline vtbackend::RGBColor legibleOnBar(ChromeSchemeColors const& colors,
+                                                      SchemeSlot hue) noexcept
+{
+    auto const color = colors.bySlot[static_cast<size_t>(hue)];
+    auto const bar = colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)];
+    if (vtbackend::contrastRatio(color, bar) >= MinimumTextContrast)
+        return color;
+    return colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)];
 }
 
 } // namespace contour::config

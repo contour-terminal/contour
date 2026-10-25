@@ -9,6 +9,7 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 
@@ -79,6 +80,10 @@ struct ChromeGlyphs
     QString newTab;
     QString menu;
     QString submenu;
+    QString tabColor;  ///< A coloured tab's leading cell; empty where the colour tints the tab.
+    QString chipOpen;  ///< Opens a chip; empty where the chip is a shape.
+    QString chipClose; ///< Closes a chip; empty where the chip is a shape.
+    QString hostDot;   ///< The host chip's state dot; empty where it is a vector circle.
 };
 
 /// Everything a UiStyleProvider is built from.
@@ -177,7 +182,12 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(qreal shadowMargin READ shadowMargin CONSTANT)
     Q_PROPERTY(bool hasPopupShadow READ hasPopupShadow CONSTANT)
 
-    Q_PROPERTY(QColor errorColor READ errorColor CONSTANT)
+    /// "This failed", the @c Danger status colour; it follows the application palette.
+    Q_PROPERTY(QColor errorColor READ errorColor NOTIFY paletteRevisionChanged)
+
+    /// The title band's height: @c size.titleBar under the @c Pill shape, else today's strip height
+    /// (@c chromeHeight), so the Flat rows keep their geometry while @c size.titleBar records the kit's.
+    Q_PROPERTY(qreal bandHeight READ bandHeight CONSTANT)
 
     /// The 1a token groups, each a sub-object whose extents are already in logical pixels.
     Q_PROPERTY(QObject* size READ size CONSTANT)
@@ -190,6 +200,7 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* contrast READ contrast CONSTANT)
     Q_PROPERTY(QObject* tui READ tui CONSTANT)
     Q_PROPERTY(QObject* layout READ layout CONSTANT)
+    Q_PROPERTY(QObject* tint READ tint CONSTANT)
     /// The chrome colour roles. The object is CONSTANT; its own properties notify.
     Q_PROPERTY(QObject* colors READ colors CONSTANT)
 
@@ -209,6 +220,10 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString newTabGlyph READ newTabGlyph CONSTANT)
     Q_PROPERTY(QString menuGlyph READ menuGlyph CONSTANT)
     Q_PROPERTY(QString submenuGlyph READ submenuGlyph CONSTANT)
+    Q_PROPERTY(QString tabColorGlyph READ tabColorGlyph CONSTANT)
+    Q_PROPERTY(QString chipOpenGlyph READ chipOpenGlyph CONSTANT)
+    Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
+    Q_PROPERTY(QString hostDotGlyph READ hostDotGlyph CONSTANT)
 
   public:
     /// @param inputs What the chrome is built from. @c inputs.font is the font the chrome is drawn
@@ -317,11 +332,58 @@ class UiStyleProvider: public QObject
         return _tokens.shadowBlurPixels > 0 || _tokens.shadowOffsetUnits > 0;
     }
 
-    /// The color a tab's OSC 9;4 progress bar is painted in for @p state.
+    /// The color a tab's OSC 9;4 progress bar is painted in for @p state: the row's status ink for
+    /// that state's role (config::ProgressStatusRoles), so running is the accent.
     ///
     /// @param state A vtbackend::ProgressState as its underlying value, as the tab model reports it.
-    /// @return The style's color for that state; transparent for a state that paints nothing.
+    /// @return The ink; transparent for a state that paints nothing.
     [[nodiscard]] Q_INVOKABLE QColor progressColor(int state) const;
+
+    /// What @p role is inked in on this row's chrome: the status hue itself on the native rows, and
+    /// on the Terminal row the scheme's hue where it reads on the bar, else the bar's text.
+    ///
+    /// Reads the application palette, so a binding over it also reads @ref paletteRevision.
+    /// @param role A config::StatusColorRole as its underlying value.
+    /// @return The ink; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor statusInk(int role) const;
+
+    /// How a tab badge kind looks.
+    /// @param kind A window::TabBadgeKind as its underlying value.
+    /// @return `{ glyph, mark, ink, name }`: the Flat glyph, the Pill mark's name (badgeMarkName), the
+    ///         status ink and the accessible name; empty for a kind outside the table.
+    [[nodiscard]] Q_INVOKABLE QVariantMap badgeLook(int kind) const;
+
+    /// How the host chip looks in @p state.
+    /// @param state A window::HostChipState as its underlying value.
+    /// @return `{ dot, status, accessibleState }`: the dot's ink and the two texts; empty for a state
+    ///         outside the table.
+    [[nodiscard]] Q_INVOKABLE QVariantMap hostChipLook(int state) const;
+
+    /// Where the title band and the tabs go, for this row's tab shape (window::resolveTitleBand).
+    ///
+    /// Four ints rather than enums: this is the QML-facing carve-out, whose one caller (Main.qml) passes
+    /// the enumerators' underlying values; a value out of range answers an empty map.
+    /// @param frame    A window::WindowFrame.
+    /// @param mode     A window::WindowMode.
+    /// @param strip    A window::TabStripGate.
+    /// @param position A config::TabBarPosition.
+    /// @return `{ band, bandEdge, centre, tabBar }` as their names.
+    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(int frame, int mode, int strip, int position) const;
+
+    /// The tab well's widths for @p tabCount tabs in @p available logical pixels (window::layoutTabWell).
+    /// @param available The width the band leaves the well.
+    /// @param tabCount  The number of tabs.
+    /// @return `{ tabWidth, wellWidth, label, scrolls }`: the widths, the label mode's name, and whether
+    ///         the well scrolls (a QML-facing bool, the documented carve-out).
+    [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
+
+    /// @p length rounded up to whole chrome cells (R-q): a cell on the Terminal row, a pixel elsewhere.
+    /// @param length A horizontal extent in logical pixels.
+    /// @return The extent, snapped up to the width quantum.
+    [[nodiscard]] Q_INVOKABLE qreal snapToCells(qreal length) const;
+
+    /// @return The title band's height in logical pixels. @see bandHeight
+    [[nodiscard]] qreal bandHeight() const noexcept;
 
     /// The colour that says @p role, for the chrome the application palette currently paints.
     ///
@@ -343,11 +405,10 @@ class UiStyleProvider: public QObject
     /// @return Black or white, see onColor().
     [[nodiscard]] Q_INVOKABLE QColor onStatusColor(int role) const;
 
-    /// The colour this style says "this failed" in.
+    /// The colour this style says "this failed" in: @c statusColor(Danger).
     ///
-    /// Taken from the same token row the progress bar's failure state uses, rather than invented
-    /// afresh or derived from the OS palette: which hue reads as an error is a statement about
-    /// meaning, and a theme-picked one could render a failure green. @see UiStyleTokens.
+    /// The status token rather than the bar's ink (@ref statusInk): error text sits on pages, fields
+    /// and the find bar, not on the Terminal row's bar, so it keeps the hue the status table pins.
     [[nodiscard]] QColor errorColor() const;
 
     /// The accent the chrome highlights with, and the colour of @c Running.
@@ -367,6 +428,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* contrast() noexcept { return &_contrast; }
     [[nodiscard]] QObject* tui() noexcept { return &_tui; }
     [[nodiscard]] QObject* layout() noexcept { return &_layout; }
+    [[nodiscard]] QObject* tint() noexcept { return &_tint; }
     [[nodiscard]] QObject* colors() noexcept { return &_colors; }
 
     [[nodiscard]] QString const& tabSeparator() const noexcept { return _glyphs.tabSeparator; }
@@ -376,6 +438,10 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& newTabGlyph() const noexcept { return _glyphs.newTab; }
     [[nodiscard]] QString const& menuGlyph() const noexcept { return _glyphs.menu; }
     [[nodiscard]] QString const& submenuGlyph() const noexcept { return _glyphs.submenu; }
+    [[nodiscard]] QString const& tabColorGlyph() const noexcept { return _glyphs.tabColor; }
+    [[nodiscard]] QString const& chipOpenGlyph() const noexcept { return _glyphs.chipOpen; }
+    [[nodiscard]] QString const& chipCloseGlyph() const noexcept { return _glyphs.chipClose; }
+    [[nodiscard]] QString const& hostDotGlyph() const noexcept { return _glyphs.hostDot; }
 
     /// @p base laid over the chrome at hover strength.
     ///
@@ -438,6 +504,7 @@ class UiStyleProvider: public QObject
     ChromeContrastTokens _contrast;
     ChromeTuiTokens _tui;
     ChromeLayoutTokens _layout;
+    ChromeTintTokens _tint;
     ChromeColorTokens _colors;
     int _paletteRevision = 0;
 };

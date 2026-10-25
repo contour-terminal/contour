@@ -48,6 +48,15 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal settingsHeight READ settingsHeight CONSTANT)
     Q_PROPERTY(qreal settingsMinWidth READ settingsMinWidth CONSTANT)
     Q_PROPERTY(qreal settingsMinHeight READ settingsMinHeight CONSTANT)
+    Q_PROPERTY(qreal tabIcon READ tabIcon CONSTANT)
+    Q_PROPERTY(qreal tabClose READ tabClose CONSTANT)
+    Q_PROPERTY(qreal badge READ badge CONSTANT)
+    Q_PROPERTY(qreal badgeDot READ badgeDot CONSTANT)
+    Q_PROPERTY(qreal progressBar READ progressBar CONSTANT)
+    Q_PROPERTY(qreal hostChip READ hostChip CONSTANT)
+    Q_PROPERTY(qreal hostDot READ hostDot CONSTANT)
+    Q_PROPERTY(qreal toolbarButton READ toolbarButton CONSTANT)
+    Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -88,12 +97,33 @@ class ChromeSizeTokens: public QObject
         return _tokens.settingsMinHeight * _units.vertical;
     }
 
+    // The band's square and round marks are widths, as a traffic-light dot is: a circle quantized to
+    // different horizontal and vertical cells would be an ellipse. The bar and the chips are heights.
+    /// @return The edge of a tab's icon square in logical pixels.
+    [[nodiscard]] qreal tabIcon() const noexcept { return _tokens.tabIcon * _units.horizontal; }
+    /// @return The edge of a tab's close button in logical pixels.
+    [[nodiscard]] qreal tabClose() const noexcept { return _tokens.tabClose * _units.horizontal; }
+    /// @return The diameter of a badge disc or ring in logical pixels.
+    [[nodiscard]] qreal badge() const noexcept { return _tokens.badge * _units.horizontal; }
+    /// @return The diameter of the unseen-output dot in logical pixels.
+    [[nodiscard]] qreal badgeDot() const noexcept { return _tokens.badgeDot * _units.horizontal; }
+    /// @return The height of a tab's progress bar in logical pixels.
+    [[nodiscard]] qreal progressBar() const noexcept { return _tokens.progressBar * _units.vertical; }
+    /// @return The height of the host chip in logical pixels.
+    [[nodiscard]] qreal hostChip() const noexcept { return _tokens.hostChip * _units.vertical; }
+    /// @return The diameter of the host chip's dot in logical pixels.
+    [[nodiscard]] qreal hostDot() const noexcept { return _tokens.hostDot * _units.horizontal; }
+    /// @return The width of a band toolbar button in logical pixels.
+    [[nodiscard]] qreal toolbarButton() const noexcept { return _tokens.toolbarButton * _units.horizontal; }
+    /// @return The height of a band toolbar chip in logical pixels.
+    [[nodiscard]] qreal toolbarChip() const noexcept { return _tokens.toolbarChip * _units.vertical; }
+
   private:
     config::SizeTokens _tokens {};
     ChromeUnits _units {};
 };
 
-/// Gaps and the spacing scale, `chromeStyle.space`. Every value is horizontal.
+/// Gaps and the spacing scale, `chromeStyle.space`. Every value but @c revealEdge is horizontal.
 class ChromeSpaceTokens: public QObject
 {
     Q_OBJECT
@@ -110,6 +140,9 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal s8 READ s8 CONSTANT)
     Q_PROPERTY(qreal s9 READ s9 CONSTANT)
     Q_PROPERTY(qreal s10 READ s10 CONSTANT)
+    Q_PROPERTY(qreal dragReserve READ dragReserve CONSTANT)
+    Q_PROPERTY(qreal revealEdge READ revealEdge CONSTANT)
+    Q_PROPERTY(qreal toolbarChipPadding READ toolbarChipPadding CONSTANT)
 
   public:
     /// @param tokens The resolved space group.
@@ -140,6 +173,16 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal s9() const noexcept { return step(8); }
     [[nodiscard]] qreal s10() const noexcept { return step(9); }
 
+    /// @return The band width that always stays draggable, in logical pixels.
+    [[nodiscard]] qreal dragReserve() const noexcept { return _tokens.dragReserve * _units.horizontal; }
+    /// @return The height of the full-screen reveal edge, in logical pixels (vertical, unlike the rest).
+    [[nodiscard]] qreal revealEdge() const noexcept { return _tokens.revealEdge * _units.vertical; }
+    /// @return The horizontal padding inside a toolbar chip, in logical pixels.
+    [[nodiscard]] qreal toolbarChipPadding() const noexcept
+    {
+        return _tokens.toolbarChipPadding * _units.horizontal;
+    }
+
   private:
     config::SpaceTokens _tokens {};
     ChromeUnits _units {};
@@ -154,6 +197,13 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal menu READ menu CONSTANT)
     Q_PROPERTY(qreal paneCard READ paneCard CONSTANT)
     Q_PROPERTY(qreal toast READ toast CONSTANT)
+    Q_PROPERTY(qreal tab READ tab CONSTANT)
+    Q_PROPERTY(qreal tabWell READ tabWell CONSTANT)
+    Q_PROPERTY(qreal tabIcon READ tabIcon CONSTANT)
+    Q_PROPERTY(qreal tabClose READ tabClose CONSTANT)
+    Q_PROPERTY(qreal badge READ badge CONSTANT)
+    Q_PROPERTY(qreal hostChip READ hostChip CONSTANT)
+    Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
 
   public:
     /// @param tokens The resolved radius group.
@@ -171,6 +221,20 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal paneCard() const noexcept { return _tokens.paneCard * _units.horizontal; }
     /// @return The radius of toasts.
     [[nodiscard]] qreal toast() const noexcept { return _tokens.toast * _units.horizontal; }
+    /// @return The radius of a tab pill.
+    [[nodiscard]] qreal tab() const noexcept { return _tokens.tab * _units.horizontal; }
+    /// @return The radius of the tab well.
+    [[nodiscard]] qreal tabWell() const noexcept { return _tokens.tabWell * _units.horizontal; }
+    /// @return The radius of a tab's icon square.
+    [[nodiscard]] qreal tabIcon() const noexcept { return _tokens.tabIcon * _units.horizontal; }
+    /// @return The radius of a tab's close button.
+    [[nodiscard]] qreal tabClose() const noexcept { return _tokens.tabClose * _units.horizontal; }
+    /// @return The radius of a badge disc.
+    [[nodiscard]] qreal badge() const noexcept { return _tokens.badge * _units.horizontal; }
+    /// @return The radius of the host chip.
+    [[nodiscard]] qreal hostChip() const noexcept { return _tokens.hostChip * _units.horizontal; }
+    /// @return The radius of a toolbar chip.
+    [[nodiscard]] qreal toolbarChip() const noexcept { return _tokens.toolbarChip * _units.horizontal; }
 
   private:
     config::RadiusTokens _tokens {};
@@ -220,6 +284,11 @@ class ChromeMotionTokens: public QObject
     Q_PROPERTY(int standard READ standard CONSTANT)
     Q_PROPERTY(int emphasized READ emphasized CONSTANT)
     Q_PROPERTY(qreal travel READ travel CONSTANT)
+    Q_PROPERTY(int spinner READ spinner CONSTANT)
+    Q_PROPERTY(int pulse READ pulse CONSTANT)
+    Q_PROPERTY(int style READ style CONSTANT)
+    Q_PROPERTY(int full READ full CONSTANT)
+    Q_PROPERTY(int crossFade READ crossFade CONSTANT)
 
   public:
     /// @param tokens The resolved motion group.
@@ -235,6 +304,19 @@ class ChromeMotionTokens: public QObject
     [[nodiscard]] int emphasized() const noexcept { return _tokens.emphasizedMs; }
     /// @return How far a sliding element travels, in logical pixels.
     [[nodiscard]] qreal travel() const noexcept { return _tokens.travel * _units.horizontal; }
+    /// @return One turn of the Working spinner, in milliseconds.
+    [[nodiscard]] int spinner() const noexcept { return _tokens.spinnerMs; }
+    /// @return One half-cycle of the progress pulse, in milliseconds.
+    [[nodiscard]] int pulse() const noexcept { return _tokens.pulseMs; }
+    /// @return How the chrome animates, a config::MotionStyle as its underlying value.
+    [[nodiscard]] int style() const noexcept { return static_cast<int>(_tokens.style); }
+
+    /// @return The QML names of config::MotionStyle's enumerators.
+    [[nodiscard]] static constexpr int full() noexcept { return static_cast<int>(config::MotionStyle::Full); }
+    [[nodiscard]] static constexpr int crossFade() noexcept
+    {
+        return static_cast<int>(config::MotionStyle::CrossFade);
+    }
 
   private:
     config::MotionTokens _tokens {};
@@ -386,6 +468,24 @@ class ChromeTuiTokens: public QObject
     config::TuiTokens _tokens {};
 };
 
+/// Tints over chrome surfaces, `chromeStyle.tint`.
+class ChromeTintTokens: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(qreal tab READ tab CONSTANT)
+
+  public:
+    /// @param tokens The resolved tint group.
+    /// @param parent Qt ownership.
+    ChromeTintTokens(config::TintTokens tokens, QObject* parent);
+
+    /// @return A tab colour's opacity over its pill, 0 to 1.
+    [[nodiscard]] qreal tab() const noexcept { return _tokens.tabPercent / 100.0; }
+
+  private:
+    config::TintTokens _tokens {};
+};
+
 /// Per-style layout choices, `chromeStyle.layout`.
 class ChromeLayoutTokens: public QObject
 {
@@ -393,6 +493,12 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int dialog READ dialog CONSTANT)
     Q_PROPERTY(int centered READ centered CONSTANT)
     Q_PROPERTY(int sheet READ sheet CONSTANT)
+    Q_PROPERTY(int tabShape READ tabShape CONSTANT)
+    Q_PROPERTY(int flat READ flat CONSTANT)
+    Q_PROPERTY(int pill READ pill CONSTANT)
+    Q_PROPERTY(int profileMenu READ profileMenu CONSTANT)
+    Q_PROPERTY(int caret READ caret CONSTANT)
+    Q_PROPERTY(int secondaryClick READ secondaryClick CONSTANT)
 
   public:
     /// @param tokens The resolved layout group.
@@ -410,6 +516,24 @@ class ChromeLayoutTokens: public QObject
     [[nodiscard]] static constexpr int sheet() noexcept
     {
         return static_cast<int>(config::DialogPlacement::Sheet);
+    }
+
+    /// @return How the tabs are drawn, a config::TabShape as its underlying value.
+    [[nodiscard]] int tabShape() const noexcept { return static_cast<int>(_tokens.tabShape); }
+    /// @return The QML names of config::TabShape's enumerators.
+    [[nodiscard]] static constexpr int flat() noexcept { return static_cast<int>(config::TabShape::Flat); }
+    [[nodiscard]] static constexpr int pill() noexcept { return static_cast<int>(config::TabShape::Pill); }
+
+    /// @return How the profile menu is reached, a config::ProfileMenuAffordance as its underlying value.
+    [[nodiscard]] int profileMenu() const noexcept { return static_cast<int>(_tokens.profileMenu); }
+    /// @return The QML names of config::ProfileMenuAffordance's enumerators.
+    [[nodiscard]] static constexpr int caret() noexcept
+    {
+        return static_cast<int>(config::ProfileMenuAffordance::Caret);
+    }
+    [[nodiscard]] static constexpr int secondaryClick() noexcept
+    {
+        return static_cast<int>(config::ProfileMenuAffordance::SecondaryClick);
     }
 
   private:
@@ -430,6 +554,17 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor toastFill READ toastFill NOTIFY changed)
     Q_PROPERTY(QColor toastText READ toastText NOTIFY changed)
     Q_PROPERTY(QColor swatchRing READ swatchRing NOTIFY changed)
+    Q_PROPERTY(QColor tabWellFill READ tabWellFill NOTIFY changed)
+    Q_PROPERTY(QColor tabActiveFill READ tabActiveFill NOTIFY changed)
+    Q_PROPERTY(QColor tabHoverFill READ tabHoverFill NOTIFY changed)
+    Q_PROPERTY(QColor tabCloseFill READ tabCloseFill NOTIFY changed)
+    Q_PROPERTY(QColor controlPressedFill READ controlPressedFill NOTIFY changed)
+    Q_PROPERTY(QColor tabText READ tabText NOTIFY changed)
+    Q_PROPERTY(QColor tabTextActive READ tabTextActive NOTIFY changed)
+    Q_PROPERTY(QColor tabTextDimmed READ tabTextDimmed NOTIFY changed)
+    Q_PROPERTY(QColor chipFill READ chipFill NOTIFY changed)
+    Q_PROPERTY(QColor chipText READ chipText NOTIFY changed)
+    Q_PROPERTY(QColor chipTextStrong READ chipTextStrong NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -445,6 +580,18 @@ class ChromeColorTokens: public QObject
     /// @return The role's colour as the application palette paints it now.
     [[nodiscard]] QColor color(config::ChromeColorRole role) const;
 
+    /// Resolves any colour source of this row, on the chrome the application palette paints now.
+    /// @param source The source, e.g. one of the row's status inks.
+    /// @return Its colour.
+    [[nodiscard]] QColor resolve(config::ChromeColorSource const& source) const;
+
+    /// Resolves @p source as it reads on a chrome of colour scheme @p chrome: the kit's @c Fill,
+    /// @c Label and @c Surface sources pick their light or dark half by it, every other kind ignores it.
+    /// @param source The source.
+    /// @param chrome Whether the ground it sits on is light or dark.
+    /// @return Its colour.
+    [[nodiscard]] QColor resolve(config::ChromeColorSource const& source, Qt::ColorScheme chrome) const;
+
     /// @return The resolved colour of each role.
     [[nodiscard]] QColor bannerFill() const { return color(config::ChromeColorRole::BannerFill); }
     [[nodiscard]] QColor bannerText() const { return color(config::ChromeColorRole::BannerText); }
@@ -452,6 +599,20 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor toastFill() const { return color(config::ChromeColorRole::ToastFill); }
     [[nodiscard]] QColor toastText() const { return color(config::ChromeColorRole::ToastText); }
     [[nodiscard]] QColor swatchRing() const { return color(config::ChromeColorRole::SwatchRing); }
+    [[nodiscard]] QColor tabWellFill() const { return color(config::ChromeColorRole::TabWellFill); }
+    [[nodiscard]] QColor tabActiveFill() const { return color(config::ChromeColorRole::TabActiveFill); }
+    [[nodiscard]] QColor tabHoverFill() const { return color(config::ChromeColorRole::TabHoverFill); }
+    [[nodiscard]] QColor tabCloseFill() const { return color(config::ChromeColorRole::TabCloseFill); }
+    [[nodiscard]] QColor controlPressedFill() const
+    {
+        return color(config::ChromeColorRole::ControlPressedFill);
+    }
+    [[nodiscard]] QColor tabText() const { return color(config::ChromeColorRole::TabText); }
+    [[nodiscard]] QColor tabTextActive() const { return color(config::ChromeColorRole::TabTextActive); }
+    [[nodiscard]] QColor tabTextDimmed() const { return color(config::ChromeColorRole::TabTextDimmed); }
+    [[nodiscard]] QColor chipFill() const { return color(config::ChromeColorRole::ChipFill); }
+    [[nodiscard]] QColor chipText() const { return color(config::ChromeColorRole::ChipText); }
+    [[nodiscard]] QColor chipTextStrong() const { return color(config::ChromeColorRole::ChipTextStrong); }
 
   signals:
     /// Every role may have changed colour.
