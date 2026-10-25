@@ -159,6 +159,12 @@ int TerminalSessionManager::rowOfTab(vtworkspace::TabId tab) const noexcept
 
 window::WindowController* TerminalSessionManager::createWindowController()
 {
+    return createWindowController(_app.menuPresentation());
+}
+
+window::WindowController* TerminalSessionManager::createWindowController(
+    config::MenuPresentation menuPresentation)
+{
     // Every OS window gets its own vtworkspace::Window; the controller adapts exactly that window (all its
     // reads and writes are keyed by the WindowId).
     auto* window = _model->createWindow();
@@ -173,7 +179,7 @@ window::WindowController* TerminalSessionManager::createWindowController()
         else
             errorLog()("Failed to load window position: {}", saved.error());
     }
-    auto* controller = new window::WindowController(*this, window->id(), initialPosition);
+    auto* controller = new window::WindowController(*this, window->id(), menuPresentation, initialPosition);
     QQmlEngine::setObjectOwnership(controller, QQmlEngine::CppOwnership);
     _controllersByWindow[window->id().value] = controller;
     // A freshly spawned window is the one the user is looking at. Seeding ownership here (rather than

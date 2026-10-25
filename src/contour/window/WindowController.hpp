@@ -163,9 +163,12 @@ class WindowController:
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
     /// @param windowId The backing vtworkspace::Window this controller adapts.
+    /// @param menuPresentation Whether this window's menus open natively or in the scene: the app's
+    ///                 ContourGuiApp::menuPresentation() in production, fixed for the window's life.
     /// @param initialPosition The first window's remembered location, absent for additional windows.
     WindowController(session::TerminalSessionManager& manager,
                      vtworkspace::WindowId windowId,
+                     config::MenuPresentation menuPresentation,
                      std::optional<WindowPosition> initialPosition = std::nullopt);
     ~WindowController() override;
 
@@ -973,7 +976,7 @@ class WindowController:
     // }}}
 
     // {{{ Menu routing
-    /// Whether menus open natively or in the scene: the style's `layout.menu` token, read once.
+    /// Whether menus open natively or in the scene, as the constructor was handed it.
     config::MenuPresentation _menuPresentation = config::MenuPresentation::InScene;
     /// Shows a menu natively; the app's, which outlives every window.
     platform::INativeMenuPresenter& _nativeMenus;

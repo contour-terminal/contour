@@ -49,6 +49,7 @@ namespace contour::window
 
 WindowController::WindowController(session::TerminalSessionManager& manager,
                                    vtworkspace::WindowId windowId,
+                                   config::MenuPresentation menuPresentation,
                                    std::optional<WindowPosition> initialPosition):
     _manager { manager },
     _windowId { windowId },
@@ -62,7 +63,7 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _hostCommands { manager.app().config() },
     _boundCommands { manager.app().config().inputMappings.value() },
     _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) },
-    _menuPresentation { manager.app().menuPresentation() },
+    _menuPresentation { menuPresentation },
     _nativeMenus { manager.app().nativeMenuPresenter() }
 {
     _commandPalette->setSources({ &_tabCommands,

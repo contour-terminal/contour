@@ -804,6 +804,12 @@ struct ScopedController
         manager(m), controller(m.createWindowController()), id(controller->windowId())
     {
     }
+    /// A controller whose menus open as @p menuPresentation says, whatever the app's style says.
+    ScopedController(contour::session::TerminalSessionManager& m,
+                     contour::config::MenuPresentation menuPresentation):
+        manager(m), controller(m.createWindowController(menuPresentation)), id(controller->windowId())
+    {
+    }
     ~ScopedController()
     {
         manager.removeWindowController(id); // no-op if the test already removed it

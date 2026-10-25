@@ -10,6 +10,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/MenuFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -123,6 +124,34 @@ void runMenuBarRow(TestApp& app, contour::command::MenuTree const& tree, std::st
     auto const* row = nodeTitled(tree.nodes, title);
     REQUIRE(row != nullptr);
     app.app().runMenuBarAction(tree.actions[row->actionIndex], row->scope);
+}
+
+/// A test app whose native menus go to a RecordingMenuPresenter, which the test picks rows from.
+struct NativeMenuApp
+{
+    contour::test::RecordingMenuPresenter* presenter = nullptr; ///< Owned by the app; set as it is built.
+    TestApp app { nullptr, nullptr, nullptr, nullptr,   TestApp::testHostIdentity(),
+                  nullptr, {},      nullptr, services() };
+
+    /// The app's null services, but for the recording presenter.
+    [[nodiscard]] contour::platform::AppearanceServices services()
+    {
+        auto result = contour::platform::nullAppearanceServices();
+        result.menus = [this]() -> std::unique_ptr<contour::platform::INativeMenuPresenter> {
+            auto recording = std::make_unique<contour::test::RecordingMenuPresenter>();
+            presenter = recording.get();
+            return recording;
+        };
+        return result;
+    }
+};
+
+/// The action index of the command row titled @p title in @p tree.
+[[nodiscard]] std::size_t actionIndexOf(contour::command::MenuTree const& tree, std::string_view title)
+{
+    auto const* row = nodeTitled(tree.nodes, title);
+    REQUIRE(row != nullptr);
+    return row->actionIndex;
 }
 
 } // namespace
@@ -487,4 +516,50 @@ TEST_CASE("a window row of the menu bar runs in the focused window", "[contour][
 
     QTRY_COMPARE_WITH_TIMEOUT(window->activeTabIndex(), 1, 5000);
     contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("a native pick against a tab closed while its menu stood open is a no-op",
+          "[contour][windowmenus][menurouting]")
+{
+    auto native = NativeMenuApp {};
+    REQUIRE(native.presenter != nullptr);
+    ScopedController const window { native.app.manager(), contour::config::MenuPresentation::Native };
+    auto const ids = createTabs(native.app.manager(), *window, 3);
+
+    window->openTabContextMenu(1, {});
+    QCoreApplication::sendPostedEvents(); // the menu is posted, not shown inside the press handler
+    REQUIRE(native.presenter->trees.size() == 1);
+
+    native.app.manager().model().closeTab(window->windowId(), ids[1]);
+    REQUIRE(window->count() == 2);
+
+    native.presenter->pick(actionIndexOf(native.presenter->trees.front(), "Close Other Tabs"));
+    QCoreApplication::sendPostedEvents();
+
+    CHECK(window->count() == 2);
+}
+
+TEST_CASE("a native pick runs on the menu it was shown for, though another has opened since",
+          "[contour][windowmenus][menurouting]")
+{
+    auto native = NativeMenuApp {};
+    REQUIRE(native.presenter != nullptr);
+    ScopedController const window { native.app.manager(), contour::config::MenuPresentation::Native };
+    auto const ids = createTabs(native.app.manager(), *window, 3);
+
+    window->openTabContextMenu(0, {});
+    QCoreApplication::sendPostedEvents();
+    REQUIRE(native.presenter->trees.size() == 1);
+    auto const first = native.presenter->lastPicked;
+    auto const firstTree = native.presenter->trees.front();
+
+    window->openTabContextMenu(2, {});
+    QCoreApplication::sendPostedEvents();
+    REQUIRE(native.presenter->trees.size() == 2);
+
+    first(actionIndexOf(firstTree, "Close Other Tabs"));
+    QCoreApplication::sendPostedEvents();
+
+    REQUIRE(window->count() == 1);
+    CHECK(native.app.manager().model().findTab(ids[0]) != nullptr);
 }

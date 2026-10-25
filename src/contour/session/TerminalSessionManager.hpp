@@ -702,6 +702,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// first tab.
     Q_INVOKABLE contour::window::WindowController* createWindowController();
 
+    /// createWindowController(), its menus presented as @p menuPresentation says rather than as the app's
+    /// chrome style does: the seam a test opens native menus through, on a style that has none.
+    /// @param menuPresentation Whether the window's menus open natively or in the scene.
+    /// @return The new controller.
+    window::WindowController* createWindowController(config::MenuPresentation menuPresentation);
+
     /// If a tab tear-off is pending (staged by tearOffTabToNewWindow before this window was spawned),
     /// transplants that tab into @p newController's window and returns true; the window must NOT then
     /// create its own first tab. Returns false when there is no pending transplant, in which case
