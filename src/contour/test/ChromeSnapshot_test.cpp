@@ -145,6 +145,12 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(visibleItemsNamed(*scene.window().contentItem(), QStringLiteral("menuSwatch")) > 0);
                 break;
             }
+            case SnapshotScript::About: {
+                auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("aboutDialog"));
+                REQUIRE(dialog != nullptr);
+                CHECK(dialog->property("opened").toBool());
+                break;
+            }
             case SnapshotScript::SingleTab: break;
         }
     }

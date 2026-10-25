@@ -76,6 +76,8 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_OBJECT
     // Mirrors WindowController's remote chrome, which Main.qml's title and the tab strip's badge read.
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    // Mirrors WindowController's version string, which the About dialog shows.
+    Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
     // Connections-targets.
     Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
@@ -86,6 +88,12 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::hostLabel(): the attached host, set by a test before Main.qml loads.
     [[nodiscard]] QString const& hostLabel() const noexcept { return attachedHost; }
+
+    /// Mirrors WindowController::applicationVersion() with a fixed test value.
+    [[nodiscard]] QString applicationVersion() const { return QStringLiteral("0.0.0-test"); }
+
+    /// Mirrors WindowController::showAbout(): asks the window for its About dialog.
+    Q_INVOKABLE void showAbout() { emit aboutRequested(); }
 
     /// Mirrors WindowController::windowTitle(), through the same remoteWindowTitle().
     Q_INVOKABLE [[nodiscard]] QString windowTitle(QString const& sessionTitle) const

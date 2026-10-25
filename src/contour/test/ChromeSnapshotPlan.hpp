@@ -45,6 +45,7 @@ enum class SnapshotScript : uint8_t
     HostingBanner,
     NewDefaultsBanner,
     TabMenu,
+    About,
 };
 
 /// How a script's active tab is divided into panes.
@@ -69,6 +70,7 @@ enum class ScriptAction : uint8_t
     ShowToast,
     OpenKitDialog,
     OpenTabMenu, //!< The second tab's context menu, with its "Tab Color" sub-menu open.
+    OpenAbout,   //!< The About dialog, raised by the ShowAbout action.
 };
 
 /// Whether the window is attached to a host, and in which state.
@@ -203,6 +205,15 @@ inline constexpr auto SnapshotScripts = std::array {
                         .panes = PaneShape::SingleLeaf,
                         .page = ContentPage::Terminal,
                         .action = ScriptAction::OpenTabMenu,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
+    SnapshotScriptRow { .script = SnapshotScript::About,
+                        .name = "about",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .page = ContentPage::Terminal,
+                        .action = ScriptAction::OpenAbout,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
                         .banner = SnapshotBanner::None },

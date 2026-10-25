@@ -93,6 +93,8 @@ Dialog {
 
             Button {
                 objectName: "kitDialogReject"
+                // A dialog with nothing to decline (About) names no reject text and shows one button.
+                visible: root.rejectText.length > 0
                 // Labelled from the application palette for the reason the heading is (see `sys`).
                 palette.buttonText: sys.buttonText
                 text: root.rejectText

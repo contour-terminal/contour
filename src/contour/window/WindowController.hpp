@@ -129,6 +129,7 @@ class WindowController:
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
     // CONSTANT: a process attaches to one host for its life, and has done so before its first window.
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     Q_PROPERTY(contour::window::SettingsController* settingsController READ settingsController CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -722,6 +723,10 @@ class WindowController:
     /// strip name, so it is never mistaken for a local window.
     /// @return The host's label; empty for a local window.
     [[nodiscard]] QString hostLabel() const;
+
+    /// The application's version string, shown by the About dialog.
+    /// @return The build constant, reached through the composition root.
+    [[nodiscard]] QString applicationVersion() const;
 
     /// The OS window title for the active session's @p sessionTitle: prefixed with the host for a remote
     /// window. @see remoteWindowTitle

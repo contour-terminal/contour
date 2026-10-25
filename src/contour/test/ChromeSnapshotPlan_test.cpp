@@ -21,6 +21,7 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::ThreeTabs).tabCount == 3);
     CHECK(scriptRow(SnapshotScript::TabMenu).tabCount == 3);
     CHECK(scriptRow(SnapshotScript::TabMenu).action == ScriptAction::OpenTabMenu);
+    CHECK(scriptRow(SnapshotScript::About).action == ScriptAction::OpenAbout);
     CHECK(scriptRow(SnapshotScript::RemoteReconnecting).connection == HostConnection::Reconnecting);
     CHECK(scriptRow(SnapshotScript::Settings).page == ContentPage::Settings);
     CHECK(scriptRow(SnapshotScript::HostingBanner).banner == SnapshotBanner::Hosting);

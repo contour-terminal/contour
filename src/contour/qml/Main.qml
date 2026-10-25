@@ -322,9 +322,21 @@ ApplicationWindow
         }
     }
 
+    // The About dialog: an in-scene KitDialog, not AppKit's panel, so it carries the chrome row's look.
+    // Opened by the ShowAbout action; one button, since there is nothing to decline.
+    KitDialog {
+        id: aboutDialog
+        objectName: "aboutDialog"
+        heading: qsTr("Contour")
+        message: qsTr("Version %1").arg(appWindow.win ? appWindow.win.applicationVersion : "")
+        acceptText: qsTr("OK")
+        rejectText: ""
+    }
+
     Connections {
         target: appWindow.win
         function onCommandPaletteRequested() { commandPalette.open(); }
+        function onAboutRequested() { aboutDialog.open(); }
         function onSaveLayoutRequested() { saveLayoutDialog.open(); }
         function onContextMenuRequested() { terminalContextMenu.popup(); }
         function onTitleBarContextMenuRequested() { titleBarContextMenu.popup(); }

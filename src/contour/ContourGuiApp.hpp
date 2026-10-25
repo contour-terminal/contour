@@ -502,6 +502,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         return _appliedGuiScheme;
     }
 
+    /// The application's version string, as the About dialog shows it.
+    /// Defined in ContourGuiApp.cpp, the one place the build-wide version macro is visible to the GUI.
+    /// @return The version, with the branch and commit it was built from.
+    [[nodiscard]] QString applicationVersion() const;
+
     /// The color configuration of the default profile, which @c GuiTheme::Terminal follows.
     [[nodiscard]] config::ColorConfig const& defaultProfileColors() const noexcept
     {

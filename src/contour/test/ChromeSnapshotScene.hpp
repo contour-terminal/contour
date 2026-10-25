@@ -172,6 +172,7 @@ class ChromeSnapshotScene
             case ScriptAction::ShowToast: showToast(); break;
             case ScriptAction::OpenKitDialog: openKitDialog(); break;
             case ScriptAction::OpenTabMenu: openTabMenu(); break;
+            case ScriptAction::OpenAbout: openAbout(); break;
         }
         _incubation.settle();
         QCoreApplication::processEvents();
@@ -382,6 +383,15 @@ class ChromeSnapshotScene
         auto const* opened = dialog.get();
         REQUIRE(QTest::qWaitFor([&] { return opened->property("opened").toBool(); }, 2000));
         _overlay = std::move(dialog);
+    }
+
+    /// Raises the About dialog the way the ShowAbout action does, and waits for it to open.
+    void openAbout()
+    {
+        auto const* dialog = root().findChild<QObject*>(QStringLiteral("aboutDialog"));
+        REQUIRE(dialog != nullptr);
+        _controller.showAbout();
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
     }
 
     /// Opens the second tab's context menu below its tab, then its "Tab Color" sub-menu, and waits for both.

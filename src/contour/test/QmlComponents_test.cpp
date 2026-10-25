@@ -23,6 +23,7 @@
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
+#include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
@@ -6517,6 +6518,92 @@ TEST_CASE("KitDialog: the Terminal row's heading and buttons read on its surface
     REQUIRE(rejectLabel != nullptr);
     CHECK(contrastOn(rejectLabel, surfaceFill) >= 4.5);
 
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a KitDialog without a reject text shows one button (offscreen)",
+          "[contour][gui][qml][kit][dialog]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    DialogHost host;
+
+    SECTION("an empty reject text hides the reject button")
+    {
+        auto dialog = openKitDialog(
+            engine,
+            host.window.contentItem(),
+            QVariantMap { { "heading", QStringLiteral("Contour") }, { "rejectText", QString {} } });
+        auto const* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+        auto const* reject = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+        REQUIRE(accept != nullptr);
+        REQUIRE(reject != nullptr);
+        CHECK(accept->isVisible());
+        CHECK_FALSE(reject->isVisible());
+    }
+
+    SECTION("the default shows both")
+    {
+        auto dialog = openKitDialog(
+            engine, host.window.contentItem(), QVariantMap { { "heading", QStringLiteral("Close?") } });
+        auto const* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+        auto const* reject = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+        REQUIRE(accept != nullptr);
+        REQUIRE(reject != nullptr);
+        CHECK(accept->isVisible());
+        CHECK(reject->isVisible());
+    }
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("ShowAbout opens the About dialog with the version (offscreen)", "[contour][gui][qml][about]")
+{
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    INFO("Qt palette: " << appearanceName(appearance));
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    QQmlEngine engine;
+    contour::test::MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = contour::test::loadMainWindow(engine, controller, warnings, terminalRowSetup("contour"));
+    auto& window = *qobject_cast<QQuickWindow*>(root.get());
+    window.resize(1024, 640);
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+
+    auto const* dialog = root->findChild<QObject*>(QStringLiteral("aboutDialog"));
+    REQUIRE(dialog != nullptr);
+    CHECK_FALSE(dialog->property("opened").toBool());
+    controller.showAbout();
+    REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+
+    auto const* message = dialog->findChild<QObject*>(QStringLiteral("kitDialogMessage"));
+    auto const* heading = dialog->findChild<QObject*>(QStringLiteral("kitDialogHeading"));
+    auto const* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    auto const* reject = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+    REQUIRE(message != nullptr);
+    REQUIRE(heading != nullptr);
+    REQUIRE(accept != nullptr);
+    REQUIRE(reject != nullptr);
+    CHECK(message->property("text").toString().contains(QStringLiteral("0.0.0-test")));
+    CHECK_FALSE(reject->isVisible());
+
+    // Centred in the overlay, as the Terminal row places every dialog.
+    auto const overlayHeight = window.contentItem()->height();
+    CHECK(std::abs(dialog->property("y").toReal() - (overlayHeight - dialog->property("height").toReal()) / 2)
+          <= 1);
+
+    // Every About text reads on the surface it sits on.
+    auto const* surface = dialog->property("background").value<QQuickItem*>();
+    REQUIRE(surface != nullptr);
+    auto const surfaceFill = fillOf(surface);
+    CHECK(contrastOn(heading, surfaceFill) >= 4.5);
+    CHECK(contrastOn(message, surfaceFill) >= 4.5);
+    auto const* acceptLabel = accept->property("contentItem").value<QQuickItem*>();
+    auto const* acceptFill = accept->property("background").value<QQuickItem*>();
+    REQUIRE(acceptLabel != nullptr);
+    REQUIRE(acceptFill != nullptr);
+    CHECK(contrastOn(acceptLabel, fillOf(acceptFill)) >= 4.5);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

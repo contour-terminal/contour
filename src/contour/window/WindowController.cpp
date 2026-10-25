@@ -345,6 +345,11 @@ QString WindowController::hostLabel() const
     return QString::fromStdString(_manager.app().attachedHostLabel());
 }
 
+QString WindowController::applicationVersion() const
+{
+    return _manager.app().applicationVersion();
+}
+
 QString WindowController::windowTitle(QString const& sessionTitle) const
 {
     return QString::fromStdString(

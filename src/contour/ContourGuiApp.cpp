@@ -1724,6 +1724,11 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme,
 #endif
 }
 
+QString ContourGuiApp::applicationVersion() const
+{
+    return QStringLiteral(CONTOUR_VERSION_STRING);
+}
+
 void ContourGuiApp::followLiveBackground(vtbackend::RGBColor liveBackground)
 {
     // Only `theme: terminal` follows the terminal's background; any other theme would only repaint the
