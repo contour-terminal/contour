@@ -5,6 +5,7 @@
 #include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Actions.hpp>
+#include <contour/config/Config.hpp>
 #include <contour/platform/MenuBarIntegration.hpp>
 
 #include <QtCore/QKeyCombination>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
 class QMenu;
 class QMenuBar;
@@ -50,6 +52,16 @@ namespace contour::window
 /// @param chord The chord.
 /// @return True when it holds Control or Super.
 [[nodiscard]] bool carriesKeyEquivalent(command::ShortcutChord const& chord) noexcept;
+
+/// The chords of @p mappings that the menu bar takes from the terminal: one per key or character binding
+/// whose chord is one of display::MenuOwnedKeys, decided as the terminal's ShortcutOverride claim decides
+/// it, so the binding never runs.
+/// @param mappings The configured input mappings.
+/// @param placement Where this host's menu bar lives; only a global one takes a chord.
+/// @return The bindings' chords, in configuration order (key bindings, then character bindings); empty
+///         without a global menu bar.
+[[nodiscard]] std::vector<command::ShortcutChord> menuOwnedBindings(config::InputMappings const& mappings,
+                                                                    command::MenuBarPlacement placement);
 
 /// What the menu bar reads the world through, and runs its rows with.
 struct AppMenuBarSources

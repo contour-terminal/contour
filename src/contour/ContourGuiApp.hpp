@@ -566,6 +566,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     void runMenuBarAction(actions::Action const& action, command::ActionScope scope);
 
   private:
+    /// Logs, once per binding, each input mapping whose chord the macOS menu bar takes from the terminal
+    /// (see window::menuOwnedBindings()), so a binding that never runs does not go unexplained. For a load
+    /// and a reload of the configuration, under a global menu bar.
+    void warnOfMenuOwnedBindings() const;
+
     /// Runs @p action with no session to run it on: the Application-scoped rows that need no window.
     /// @param action The picked row's action.
     void runWithoutWindow(actions::Action const& action);

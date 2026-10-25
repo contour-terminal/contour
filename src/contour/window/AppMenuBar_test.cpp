@@ -9,11 +9,14 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/test/CoreFixtures.hpp>
 #include <contour/test/MenuFixtures.hpp>
+#include <contour/test/ScopedApplicationAttribute.hpp>
 #include <contour/window/AppMenuBar.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QAction>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QKeySequence>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMenu>
@@ -222,6 +225,39 @@ TEST_CASE("only ⌃ and ⌘ chords are key equivalents", "[menubar][keys]")
 // }}}
 
 // {{{ [display][menubar]
+TEST_CASE("the user's bindings of menu-owned chords are named under a global menu bar alone",
+          "[menubar][keys]")
+{
+    // As the app runs: ⌘ is Qt::MetaModifier, as the menu-owned key table spells it.
+    auto const unswapped = test::ScopedApplicationAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
+    auto const config = test::loadConfigFromYaml(R"(
+input_mapping:
+    - { mods: [Super], key: 'Q', action: Quit }
+    - { mods: [Super], key: ',', action: OpenConfiguration }
+    - { mods: [Super], key: 'M', action: MinimizeWindow }
+    - { mods: [Super], key: 'H', action: ScrollToTop }
+    - { mods: [Super, Alt], key: 'H', action: ScrollToBottom }
+    - { mods: [Super], key: 'W', action: CloseTab }
+    - { mods: [Control], key: 'Q', action: Quit }
+)");
+    auto const& mappings = config.inputMappings.value();
+
+    auto const owned = window::menuOwnedBindings(mappings, command::MenuBarPlacement::Global);
+
+    auto const spelled =
+        std::ranges::to<std::vector>(owned | std::views::transform([](auto const& chord) {
+                                         return command::shortcutText(chord, command::ShortcutStyle::Text);
+                                     }));
+    // One per binding, in config order; ⌘W and ⌃Q stay the terminal's. Quit's and Settings…'s keys are the
+    // platform theme's standard keys, which only the macOS theme binds to ⌘Q and ⌘, -- offscreen, Quit is
+    // Qt::Key_Exit -- so those two are owned on the cocoa platform alone (CONTOUR_TEST_DISPLAY=1).
+    auto expected = std::vector<std::string> { "Super+M", "Super+H", "Alt+Super+H" };
+    if (QGuiApplication::platformName() == QStringLiteral("cocoa"))
+        expected.insert(expected.begin(), { "Super+Q", "Super+," });
+    CHECK(spelled == expected);
+    CHECK(window::menuOwnedBindings(mappings, command::MenuBarPlacement::None).empty());
+}
+
 TEST_CASE("the bar holds the six menus", "[display][menubar]")
 {
     REQUIRE_WIDGETS_OR_SKIP();

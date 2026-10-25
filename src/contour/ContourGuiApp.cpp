@@ -1852,6 +1852,15 @@ void ContourGuiApp::runMenuBarAction(actions::Action const& action, command::Act
     }
 }
 
+void ContourGuiApp::warnOfMenuOwnedBindings() const
+{
+    for (auto const& chord: window::menuOwnedBindings(_config.inputMappings.value(), _menuBarPlacement))
+        errorLog()(
+            "input_mapping binds {}, which the macOS menu bar owns: the menu takes it, and the binding "
+            "never runs.",
+            command::shortcutText(chord, command::ShortcutStyle::Text));
+}
+
 void ContourGuiApp::runWithoutWindow(actions::Action const& action)
 {
     if (std::holds_alternative<actions::Quit>(action))
@@ -1882,7 +1891,10 @@ void ContourGuiApp::onConfigurationReloaded()
     // Guarded likewise: the bar is built with the engine, under a global placement alone. Its rows carry
     // the profiles, hosts, layouts and chords the reload may have changed.
     if (_appMenuBar)
+    {
         _appMenuBar->rebuild();
+        warnOfMenuOwnedBindings();
+    }
 }
 
 void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPreferences preferences)
@@ -2443,6 +2455,7 @@ int ContourGuiApp::terminalGuiAction()
     if (_menuBarPlacement == command::MenuBarPlacement::Global)
     {
         _appMenuBar = make_unique<window::AppMenuBar>(appMenuBarSources(), *_menuBarIntegration);
+        warnOfMenuOwnedBindings();
         // Built before any window, so its window rows start disabled; a menu-owned key (⌘M) fires its row
         // with no menu ever opened, so the rows follow the focused window as it changes. Posted, so the
         // window controllers have taken the change first (WindowController::onOSWindowActiveChanged).

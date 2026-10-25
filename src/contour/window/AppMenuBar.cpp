@@ -7,6 +7,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QString>
 #include <QtCore/QTranslator>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QKeySequence>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMenuBar>
@@ -355,6 +356,29 @@ std::optional<QKeyCombination> qtKeyFor(command::ShortcutChord const& chord)
 bool carriesKeyEquivalent(command::ShortcutChord const& chord) noexcept
 {
     return std::ranges::any_of(KeyEquivalentModifiers, [&](Modifier m) { return chord.modifiers.test(m); });
+}
+
+std::vector<command::ShortcutChord> menuOwnedBindings(config::InputMappings const& mappings,
+                                                      command::MenuBarPlacement placement)
+{
+    auto owned = std::vector<command::ShortcutChord> {};
+    auto const collect = [&](auto const& bindings) {
+        for (auto const& binding: bindings)
+        {
+            auto const chord = command::ShortcutChord { .modifiers = binding.modifiers,
+                                                        .input = command::ShortcutInput { binding.input } };
+            auto const key = qtKeyFor(chord);
+            if (!key)
+                continue;
+            // The event the terminal is asked about when the chord is pressed, and the very claim it makes.
+            auto const event = QKeyEvent(QEvent::ShortcutOverride, key->key(), key->keyboardModifiers());
+            if (display::shortcutOverrideClaim(event, placement) == display::ShortcutOverrideClaim::Menu)
+                owned.push_back(chord);
+        }
+    };
+    collect(mappings.keyMappings);
+    collect(mappings.charMappings);
+    return owned;
 }
 
 AppMenuBar::AppMenuBar(AppMenuBarSources sources, platform::IMenuBarIntegration& integration):
