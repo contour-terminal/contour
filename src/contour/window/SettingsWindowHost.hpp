@@ -59,7 +59,7 @@ class SettingsWindowHost final: public QObject
 {
     Q_OBJECT
     // The `controller` property's type, which moc's code needs complete; this header only names it.
-    Q_MOC_INCLUDE(<contour / window / SettingsController.hpp>)
+    Q_MOC_INCLUDE("contour/window/SettingsController.hpp")
     Q_PROPERTY(contour::window::SettingsController* controller READ controller CONSTANT)
     Q_PROPERTY(QString title READ title CONSTANT)
     Q_PROPERTY(Qt::WindowFlags windowFlags READ windowFlags CONSTANT)

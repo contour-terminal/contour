@@ -2796,9 +2796,8 @@ void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::Wi
 
 window::SettingsController& ContourGuiApp::settingsController()
 {
-    // The collaborators WindowController gives its own today (Task 4 removes that one): the app's live
-    // configuration, a side-file store rooted at the configuration directory, and an apply step that
-    // reloads every session after a save.
+    // Its collaborators: the app's live configuration, a side-file store rooted at the configuration
+    // directory, and an apply step that reloads every session after a save.
     if (!_settingsController)
         _settingsController = std::make_unique<window::SettingsController>(
             [this]() -> config::Config const& { return _config; },

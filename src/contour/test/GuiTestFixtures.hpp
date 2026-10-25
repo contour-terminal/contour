@@ -4,6 +4,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
+#include <contour/command/MenuTree.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/LayoutStore.hpp>
@@ -57,6 +58,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -871,6 +873,63 @@ inline void closeAllTabs(contour::window::WindowController& window)
 {
     for (auto const row: std::views::iota(0, window.count()) | std::views::reverse)
         window.closeTabAtIndex(row);
+}
+
+/// Tabs that each have a real (mock-PTY) session: their ids and session ids in row order.
+struct SessionTabs
+{
+    std::vector<vtworkspace::TabId> tabs {};
+    std::vector<vtworkspace::SessionId> sessions {};
+};
+
+/// Opens @p n tabs in @p controller's window, each with a session of its own.
+/// @param manager    The session manager owning @p controller.
+/// @param controller The window to open the tabs in.
+/// @param n          How many tabs to open.
+/// @return The tabs and their sessions, in row order.
+[[nodiscard]] inline SessionTabs createSessionTabs(contour::session::TerminalSessionManager& manager,
+                                                   contour::window::WindowController& controller,
+                                                   int n)
+{
+    auto result = SessionTabs {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, n))
+    {
+        controller.createNewTab();
+        auto const* tab = manager.model().window(controller.windowId())->activeTab();
+        REQUIRE(tab != nullptr);
+        REQUIRE(controller.activeSession() != nullptr);
+        result.tabs.push_back(tab->id());
+        result.sessions.push_back(controller.activeSession()->modelSessionId());
+    }
+    return result;
+}
+
+/// The node titled @p title in @p nodes, searching submenus too.
+/// @param nodes The nodes to search.
+/// @param title The title to find.
+/// @return The node, or nullptr if there is none.
+[[nodiscard]] inline contour::command::MenuNode const* nodeTitled(
+    std::span<contour::command::MenuNode const> nodes, std::string_view title)
+{
+    for (auto const& node: nodes)
+    {
+        if (node.title == title)
+            return &node;
+        if (auto const* nested = nodeTitled(node.children, title))
+            return nested;
+    }
+    return nullptr;
+}
+
+/// Runs the menu bar row titled @p title of @p tree through the app's own menu bar path, at the row's scope.
+/// @param app   The test app whose app() runs the row.
+/// @param tree  The menu bar's tree.
+/// @param title The row's title; the row must exist.
+inline void runMenuBarRow(TestApp& app, contour::command::MenuTree const& tree, std::string_view title)
+{
+    auto const* row = nodeTitled(tree.nodes, title);
+    REQUIRE(row != nullptr);
+    app.app().runMenuBarAction(tree.actions[row->actionIndex], row->scope);
 }
 
 /// Whether an action ran to its end while another thread held a lock.

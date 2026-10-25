@@ -194,7 +194,10 @@ class ChromeSnapshotScene
     /// @pre show() ran.
     [[nodiscard]] QQuickWindow& subject() const
     {
-        return _settingsWindow != nullptr ? *_settingsWindow->window() : window();
+        if (_settingsWindow == nullptr)
+            return window();
+        REQUIRE(_settingsWindow->window() != nullptr); // show() builds it
+        return *_settingsWindow->window();
     }
 
     /// @return Main.qml's ApplicationWindow.

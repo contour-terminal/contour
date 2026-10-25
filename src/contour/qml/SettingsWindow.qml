@@ -1,7 +1,7 @@
 // vim:syntax=qml
 // The app's one Settings window: the settings page in a top-level window of its own, built once by
-// SettingsWindowHost (window/SettingsWindowHost.hpp) and hidden, never destroyed, when it closes, so the
-// pane and the draft it shows are where the user left them.
+// SettingsWindowHost (window/SettingsWindowHost.hpp). Closing it closes the platform window but keeps this
+// object, so the pane and the draft it shows are where the user left them.
 //
 // It has no width/height binding on purpose: the host places and sizes it before its first show, from
 // preferredSize and the minimum below, and after that the size is the user's. A republished chromeStyle
