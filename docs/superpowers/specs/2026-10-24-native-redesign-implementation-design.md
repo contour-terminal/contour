@@ -5,7 +5,7 @@ gets built, which seams in today's code it uses, which types it adds, how it is 
 must not break.
 
 How things look is defined elsewhere: on the canvas
-(<https://claude.ai/artifact/6cp7tcSnurTSMbhSDePWqH>) and in the design record,
+(<https://claude.ai/artifact/12ASSTRD5ua5SwarsMJXwm>) and in the design record,
 [`2026-10-23-native-redesign-design.md`](2026-10-23-native-redesign-design.md). How they are built
 is defined here. Implementation plans are written one per PR-sized step from this document, and
 cite its section numbers.

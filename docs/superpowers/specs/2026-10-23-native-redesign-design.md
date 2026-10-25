@@ -1,7 +1,7 @@
 # Native redesign: design record
 
-The visual design lives on a canvas of 18 boards:
-<https://claude.ai/artifact/6cp7tcSnurTSMbhSDePWqH>. This file records the decisions those boards
+The visual design lives on a canvas of 23 boards:
+<https://claude.ai/artifact/12ASSTRD5ua5SwarsMJXwm>. This file records the decisions those boards
 encode, so that implementation plans can cite them from inside the repository.
 
 ## Decisions (owner-approved)

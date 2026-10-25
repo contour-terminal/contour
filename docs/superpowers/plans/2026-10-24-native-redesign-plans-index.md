@@ -12,19 +12,19 @@ coherent.
   design; the section column below cites it).
 - `docs/superpowers/specs/2026-10-23-native-redesign-design.md` (the approved visual design
   record).
-- Canvas: <https://claude.ai/artifact/6cp7tcSnurTSMbhSDePWqH>.
+- Canvas: <https://claude.ai/artifact/12ASSTRD5ua5SwarsMJXwm>.
 
 **Branch and PR:** `feature/native-redesign-phase0`, draft PR #2178.
 
 ## Status board and handoff (every step)
 
-This run is tracked on a status board: <https://claude.ai/artifact/U8h58rAp7H6yVfnvp4vvEd>. The
+This run is tracked on a status board: <https://claude.ai/artifact/YZUVcC1vdaWaLGJLsdS2AX>. The
 owner asked for the link to live here so that any agent continuing the work can find the board and
 keep it current. The page is published from `STATUS.md` at the root of the repository, which is committed with the branch.
-- **Keep it up to date.** In the worktree that owns the board, `/status-board update` edits the
-  file and republishes to the link above (`status_page.py --url` reads the same URL from the git
-  dir). In a fresh checkout, run `python3 <status_page.py> --remember-url <the link above>` once
-  before the first publish, so updates go to the same page rather than a new one.
+- **Keep it up to date.** Edit `STATUS.md`, then republish the board's page to the link above
+  with the Artifact tool (`url` set to that link). The board belongs to the owner's account, so a
+  session signed in as the owner can read and publish it; the design canvas, the owner's copy of
+  Yaraslau's, is in the same account.
 - **Every agent that continues this work updates the board.** Do it
   in the same turn as each state change: a step or task started, in review, committed, landed,
   blocked or unblocked, a plan written, or a ruling.

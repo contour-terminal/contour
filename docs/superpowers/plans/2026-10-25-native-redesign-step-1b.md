@@ -33,12 +33,12 @@ with what it cites: §1 (principles), §2.1 (token rows), §2.6 (testing; the Wi
 driver). Visual design record: `docs/superpowers/specs/2026-10-23-native-redesign-design.md` (Decisions:
 "Menus are native on macOS and Windows"; Coverage additions: "menus stay in-scene on every OS" for the TUI
 row, "Attach to Host is … a Shell submenu"; "Shortcuts render per platform: ⌃⌥⇧⌘ glyphs on macOS").
-Canvas: <https://claude.ai/artifact/6cp7tcSnurTSMbhSDePWqH>. Plans index:
+Canvas: <https://claude.ai/artifact/12ASSTRD5ua5SwarsMJXwm>. Plans index:
 `docs/superpowers/plans/2026-10-24-native-redesign-plans-index.md`.
 
 ## Status board and handoff (every step)
 
-This run is tracked on a status board, <https://claude.ai/artifact/U8h58rAp7H6yVfnvp4vvEd>, published from an untracked file at the root of the working tree. The plans index says how to keep it current.
+This run is tracked on a status board, <https://claude.ai/artifact/YZUVcC1vdaWaLGJLsdS2AX>, published from `STATUS.md` at the root of the branch. The plans index says how to keep it current.
 - **Find it** with `/status-board` in this worktree. The skill reads the remembered URL from the
   git dir (`status_page.py --url`).
 - **Every agent that continues this work updates the board, using `/status-board update`.** Do it
