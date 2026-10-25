@@ -555,12 +555,26 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// GUI exists, as refreshChromeStyle() is: an engine-less app (a headless test) reloads too.
     void onConfigurationReloaded();
 
+    /// Runs a menu bar row's @p action, where its @p scope says.
+    ///
+    /// A Window-scoped row runs on the focused window's active session, and does nothing without one. An
+    /// Application-scoped row runs on the active session of applicationController()'s window, so it
+    /// still works with every window minimised or another application in front; with no window left,
+    /// the rows that need none (Quit, New Window) run on the application itself, and the rest do nothing.
+    /// @param action The picked row's action.
+    /// @param scope What the row acts on.
+    void runMenuBarAction(actions::Action const& action, command::ActionScope scope);
+
   private:
+    /// Runs @p action with no session to run it on: the Application-scoped rows that need no window.
+    /// @param action The picked row's action.
+    void runWithoutWindow(actions::Action const& action);
+
     /// @return The focused window's controller, or nullptr when no window is focused.
     [[nodiscard]] window::WindowController* focusedController() const noexcept;
 
     /// @return What the menu bar reads and runs through: the focused window's state, or the configuration's
-    ///         alone without one; the configured chords; and that window's active session to run on.
+    ///         alone without one; the configured chords; and runMenuBarAction() to run a row with.
     [[nodiscard]] window::AppMenuBarSources appMenuBarSources();
 
     /// @return What the chrome is built from now: the row, the resolved chrome font, both OS sources'

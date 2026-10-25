@@ -104,12 +104,17 @@ struct BarFixture
     config::Config config {};
     command::MenuBarState state = windowWithTabs({ "one" });
     std::vector<actions::Action> ran {};
+    std::vector<command::ActionScope> scopes {}; ///< The scope each run of @ref ran was handed.
     test::RecordingMenuBarIntegration integration {};
     window::AppMenuBar bar {
         window::AppMenuBarSources {
             .state = [this] { return state; },
             .chords = [this] { return command::chordIndex(config); },
-            .run = [this](actions::Action const& action) { ran.push_back(action); },
+            .run =
+                [this](actions::Action const& action, command::ActionScope scope) {
+                    ran.push_back(action);
+                    scopes.push_back(scope);
+                },
         },
         integration,
     };
@@ -347,6 +352,21 @@ TEST_CASE("a triggered row runs its action", "[display][menubar]")
 
     REQUIRE(fixture.ran.size() == 1);
     CHECK(command::commandId(fixture.ran.front()) == "CreateNewTab");
+    CHECK(fixture.scopes.front() == command::ActionScope::Window);
+}
+
+TEST_CASE("a triggered row runs in its row's scope", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto fixture = BarFixture {};
+
+    fixture.action(QStringLiteral("New Window")).trigger();
+    fixture.action(QStringLiteral("Paste")).trigger();
+    QCoreApplication::processEvents();
+
+    REQUIRE(fixture.scopes.size() == 2);
+    CHECK(fixture.scopes[0] == command::ActionScope::Application);
+    CHECK(fixture.scopes[1] == command::ActionScope::Window);
 }
 
 TEST_CASE("a menu opens with the current state", "[display][menubar]")

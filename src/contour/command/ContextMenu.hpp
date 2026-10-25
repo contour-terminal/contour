@@ -136,6 +136,16 @@ enum class MenuItemRole : std::uint8_t
     Minimize,    ///< The Window menu's "Minimize" row, which answers to the platform's minimize key.
 };
 
+/// What a command row acts on, which decides where it runs when no window holds focus.
+///
+/// Only the menu bar asks: it outlives every window and stays open with none focused (after ⌘M, or with
+/// another application in front), where a pane's or a tab's menu always has the pane or tab it opened over.
+enum class ActionScope : std::uint8_t
+{
+    Window = 0,  ///< Acts on a window or its terminal: nothing to act on without a focused window.
+    Application, ///< Acts on the application: runs in some window if one is left, or without one.
+};
+
 /// One row of the menu, already resolved against a ContextMenuState.
 ///
 /// This is what the GUI renders. The action travels WITH the row rather than being looked up again by
@@ -152,6 +162,7 @@ struct ContextMenuEntry
     MenuItemRole role = MenuItemRole::None; ///< Command rows: the role a native menu gives it.
     std::optional<vtbackend::RGBColor> swatch {}; ///< Command rows drawn as a colour swatch.
     std::vector<ContextMenuEntry> children;       ///< Submenu rows: what is inside.
+    ActionScope scope = ActionScope::Window;      ///< Command rows: what the row acts on.
 };
 
 /// The context menu for @p state.

@@ -34,6 +34,7 @@ namespace
                 .check = entry.check,
                 .role = entry.role,
                 .swatch = entry.swatch,
+                .scope = entry.scope,
             };
             switch (entry.kind)
             {

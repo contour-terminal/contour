@@ -104,6 +104,7 @@ struct MenuTable
         ChildBuilder children = nullptr;        ///< Submenu rows: what is inside.
         ActionBinder bindAction = nullptr;      ///< When set, supplies the action in place of @ref action.
         ChildPlacement placement = ChildPlacement::Nested; ///< Submenu rows: nested, or spliced in place.
+        ActionScope scope = ActionScope::Window;           ///< Command rows: what the row acts on.
 
         /// This row, shown only when @p predicate holds.
         [[nodiscard]] Row shownWhen(Predicate predicate) const
@@ -145,6 +146,14 @@ struct MenuTable
             return row;
         }
 
+        /// This row, acting on @p newScope.
+        [[nodiscard]] Row inScope(ActionScope newScope) const
+        {
+            auto row = *this;
+            row.scope = newScope;
+            return row;
+        }
+
         /// Whether this row can be picked, against @p state.
         [[nodiscard]] RowAvailability availabilityFor(State const& state) const
         {
@@ -170,7 +179,8 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = nullptr,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Nested };
+                     .placement = ChildPlacement::Nested,
+                     .scope = ActionScope::Window };
     }
 
     /// A divider between groups of rows.
@@ -185,7 +195,8 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = nullptr,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Nested };
+                     .placement = ChildPlacement::Nested,
+                     .scope = ActionScope::Window };
     }
 
     /// A row named @p title that opens onto whatever @p children builds.
@@ -200,7 +211,8 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = children,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Nested };
+                     .placement = ChildPlacement::Nested,
+                     .scope = ActionScope::Window };
     }
 
     /// A run of rows that @p children builds, spliced into the menu in place of this row.
@@ -218,7 +230,8 @@ struct MenuTable
                      .role = MenuItemRole::None,
                      .children = children,
                      .bindAction = nullptr,
-                     .placement = ChildPlacement::Spliced };
+                     .placement = ChildPlacement::Spliced,
+                     .scope = ActionScope::Window };
     }
 
     /// One AttachToHost row per saved host, in `State::hostNames` order.
@@ -336,7 +349,8 @@ struct MenuTable
                                                         : RowCheck::Unchecked,
                         .role = row.role,
                         .swatch = std::nullopt,
-                        .children = {} });
+                        .children = {},
+                        .scope = row.scope });
                     break;
                 }
             }

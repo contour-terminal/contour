@@ -25,10 +25,11 @@ struct MenuNode
     RowCheck check = RowCheck::None;
     MenuItemRole role = MenuItemRole::None;
     std::optional<vtbackend::RGBColor> swatch {};
-    std::optional<ShortcutChord> chord {}; ///< Command rows: the chord that runs it, if shown.
-    std::string shortcut {};               ///< @ref chord in the tree's style; empty without one.
-    std::size_t actionIndex = 0;           ///< Command rows: index into MenuTree::actions.
-    std::vector<MenuNode> children {};     ///< Submenu rows.
+    std::optional<ShortcutChord> chord {};   ///< Command rows: the chord that runs it, if shown.
+    std::string shortcut {};                 ///< @ref chord in the tree's style; empty without one.
+    std::size_t actionIndex = 0;             ///< Command rows: index into MenuTree::actions.
+    std::vector<MenuNode> children {};       ///< Submenu rows.
+    ActionScope scope = ActionScope::Window; ///< Command rows: what the row acts on.
     [[nodiscard]] bool operator==(MenuNode const&) const = default;
 };
 

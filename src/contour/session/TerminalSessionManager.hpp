@@ -544,6 +544,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param window The window that just stopped being the active OS window (or is being destroyed).
     void clearFocusedWindow(vtworkspace::WindowId window);
 
+    /// The window an application-wide command runs in: the focused one; else, with none focused (every
+    /// window minimised, or another application in front), the one that held focus last while it lives;
+    /// else the oldest window left.
+    /// @return That window's controller, or nullptr when no window is left.
+    [[nodiscard]] window::WindowController* applicationController() const noexcept;
+
     /// @p window changed how it is presented -- minimised, restored, maximised. Restoring the
     /// focus-owning window brings its focused pane back in front of the user with no focus change at
     /// all, which is news to that pane all the same. @see TerminalSession::paneSeen
@@ -1145,6 +1151,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // it is null between a display teardown and the next Qt focus-in -- and a tab switch in that gap
     // notified nobody. @see syncFocusForWindow.
     std::optional<vtworkspace::WindowId> _focusedWindow;
+
+    // The window that held focus before it was cleared, kept where _focusedWindow is not: what an
+    // application-wide command runs in while no window is focused. @see applicationController.
+    std::optional<vtworkspace::WindowId> _lastFocusedWindow;
 
     bool _multimediaReady = false;
 

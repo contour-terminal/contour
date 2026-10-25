@@ -4,6 +4,9 @@
 // TabId, resolved to its row), headless and without backing sessions -- tabs are minted straight through
 // the vtworkspace model.
 
+#include <contour/command/MenuBarTable.hpp>
+#include <contour/command/MenuTree.hpp>
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -13,6 +16,7 @@
 
 #include <QtCore/QPointF>
 #include <QtCore/QString>
+#include <QtCore/QUrl>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
 #include <QtGui/QColor>
@@ -22,6 +26,8 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -95,6 +101,28 @@ struct SessionTabs
             return nested;
     }
     return std::nullopt;
+}
+
+/// The node titled @p title in @p nodes, searching submenus too; nullptr if there is none.
+[[nodiscard]] contour::command::MenuNode const* nodeTitled(std::span<contour::command::MenuNode const> nodes,
+                                                           std::string_view title)
+{
+    for (auto const& node: nodes)
+    {
+        if (node.title == title)
+            return &node;
+        if (auto const* nested = nodeTitled(node.children, title))
+            return nested;
+    }
+    return nullptr;
+}
+
+/// Runs the menu bar row titled @p title of @p tree through the app's own menu bar path.
+void runMenuBarRow(TestApp& app, contour::command::MenuTree const& tree, std::string_view title)
+{
+    auto const* row = nodeTitled(tree.nodes, title);
+    REQUIRE(row != nullptr);
+    app.app().runMenuBarAction(tree.actions[row->actionIndex], row->scope);
 }
 
 } // namespace
@@ -395,5 +423,68 @@ TEST_CASE("the menu bar's Minimize and Zoom reach the window", "[contour][window
     window->runMenuBarAction(actions::Action { actions::MinimizeWindow {} });
     QTRY_VERIFY_WITH_TIMEOUT(window->isMinimized(), 5000);
 
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("an application row of the menu bar runs with no window focused", "[contour][windowmenus][menubar]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    app.app().config().spawnNewProcess.value() = true; // so New Window is a recorded launch
+    ScopedController const window { app.manager() };
+    std::ignore = createSessionTabs(app.manager(), *window, 2);
+    window->activateTab(0);
+    auto const tree = contour::command::buildMenuTree(
+        contour::command::buildMenuBar(window->menuBarState()), {}, contour::command::ShortcutStyle::Text);
+
+    // As after ⌘M, or with another application in front: no window holds focus.
+    app.manager().clearFocusedWindow(window->windowId());
+    REQUIRE_FALSE(app.manager().focusedWindow().has_value());
+
+    runMenuBarRow(app, tree, "Contour Documentation");
+    REQUIRE(app.launcher().openedUrls.size() == 1);
+    CHECK(app.launcher().openedUrls.front() == QUrl(QStringLiteral("https://contour-terminal.org/")));
+
+    runMenuBarRow(app, tree, "New Window");
+    CHECK(app.launcher().detached.size() == 1);
+
+    // A row acting on the window has none to act on.
+    runMenuBarRow(app, tree, "Next Tab");
+    CHECK(window->activeTabIndex() == 0);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("an application row runs in the window that held focus last", "[contour][windowmenus][menubar]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    ScopedController const first { app.manager() };
+    std::ignore = createSessionTabs(app.manager(), *first, 1);
+    ScopedController const second { app.manager() };
+    std::ignore = createSessionTabs(app.manager(), *second, 1);
+
+    app.manager().setFocusedWindow(first->windowId());
+    app.manager().clearFocusedWindow(first->windowId());
+    CHECK(app.manager().applicationController() == first.controller);
+
+    // Gone, the next one left takes its place.
+    app.manager().removeWindowController(first->windowId());
+    CHECK(app.manager().applicationController() == second.controller);
+
+    contour::test::closeAllTabs(*second);
+}
+
+TEST_CASE("a window row of the menu bar runs in the focused window", "[contour][windowmenus][menubar]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    ScopedController const window { app.manager() };
+    std::ignore = createSessionTabs(app.manager(), *window, 2);
+    window->activateTab(0);
+    app.manager().setFocusedWindow(window->windowId());
+    auto const tree = contour::command::buildMenuTree(
+        contour::command::buildMenuBar(window->menuBarState()), {}, contour::command::ShortcutStyle::Text);
+
+    runMenuBarRow(app, tree, "Next Tab");
+
+    QTRY_COMPARE_WITH_TIMEOUT(window->activeTabIndex(), 1, 5000);
     contour::test::closeAllTabs(*window);
 }

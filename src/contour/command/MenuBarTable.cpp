@@ -56,7 +56,14 @@ namespace
     /// A row that needs a window to act on.
     [[nodiscard]] Row inWindow(Row const& row)
     {
-        return row.enabledWhen(hasWindow);
+        return row.enabledWhen(hasWindow).inScope(ActionScope::Window);
+    }
+
+    /// A row running @p action under @p title, acting on the application: it still runs with no window
+    /// focused, as after ⌘M, where a row of the default ActionScope::Window does nothing.
+    [[nodiscard]] Row appCommand(actions::Action const& action, std::string_view title)
+    {
+        return Table::command(action, title).inScope(ActionScope::Application);
     }
 
     /// A row running @p action under its catalogue title, needing a window.
@@ -108,14 +115,14 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
-            Table::command(ShowAbout {}, "About Contour").withRole(MenuItemRole::About),
+            appCommand(ShowAbout {}, "About Contour").withRole(MenuItemRole::About),
             Table::separator(),
-            Table::command(OpenConfiguration {}, "Settings…").withRole(MenuItemRole::Preferences),
-            Table::command(OpenConfiguration { .inEditor = true }, "Open Configuration File"),
-            Table::command(ReloadConfig {}, "Reload Configuration"),
-            Table::command(ResetConfig {}, "Reset Configuration"),
+            appCommand(OpenConfiguration {}, "Settings…").withRole(MenuItemRole::Preferences),
+            appCommand(OpenConfiguration { .inEditor = true }, "Open Configuration File"),
+            appCommand(ReloadConfig {}, "Reload Configuration"),
+            appCommand(ResetConfig {}, "Reset Configuration"),
             Table::separator(),
-            Table::command(Quit {}, "Quit Contour").withRole(MenuItemRole::Quit),
+            appCommand(Quit {}, "Quit Contour").withRole(MenuItemRole::Quit),
         };
         return rows;
     }
@@ -146,7 +153,7 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
-            Table::command(NewTerminal {}, "New Window"),
+            appCommand(NewTerminal {}, "New Window"),
             Table::command(CreateNewTab {}, "New Tab"),
             Table::submenu("New Tab with Profile", Table::newTabProfileRows),
             Table::attachToHostSubmenu(),
@@ -366,10 +373,9 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
-            Table::command(FollowHyperlink { .uri = "https://contour-terminal.org/" },
-                           "Contour Documentation"),
-            Table::command(FollowHyperlink { .uri = "https://github.com/contour-terminal/contour/issues" },
-                           "Report an Issue"),
+            appCommand(FollowHyperlink { .uri = "https://contour-terminal.org/" }, "Contour Documentation"),
+            appCommand(FollowHyperlink { .uri = "https://github.com/contour-terminal/contour/issues" },
+                       "Report an Issue"),
             Table::separator(),
             Table::submenu("Debug", rowsOf<debugTemplate>),
         };

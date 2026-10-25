@@ -21,6 +21,7 @@
 #include <map>
 #include <ranges>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -338,6 +339,60 @@ TEST_CASE("menuBar.tabList", "[menubar]")
         CHECK(tabs[index].check == (index == 1 ? RowCheck::Checked : RowCheck::Unchecked));
     }
     CHECK(tabs[0].title == "one");
+}
+
+/// Every command row of @p entries, submenus included.
+void collectCommands(std::vector<ContextMenuEntry> const& entries, std::vector<ContextMenuEntry const*>& out)
+{
+    for (auto const& entry: entries)
+    {
+        if (entry.kind == ContextMenuEntryKind::Command)
+            out.push_back(&entry);
+        collectCommands(entry.children, out);
+    }
+}
+
+TEST_CASE("menuBar.scopes", "[menubar]")
+{
+    auto const bar = buildMenuBar(fullState());
+
+    // The application menu acts on the application alone: every one of its rows runs with no window.
+    auto application = std::vector<ContextMenuEntry const*> {};
+    collectCommands(bar[static_cast<std::size_t>(MenuBarMenu::Application)].children, application);
+    REQUIRE_FALSE(application.empty());
+    for (auto const* row: application)
+    {
+        INFO(row->title);
+        CHECK(row->scope == ActionScope::Application);
+    }
+
+    for (auto const title: { "New Window", "Contour Documentation", "Report an Issue" })
+    {
+        INFO(title);
+        REQUIRE(find(bar, title) != nullptr);
+        CHECK(find(bar, title)->scope == ActionScope::Application);
+    }
+
+    // What acts on a terminal or a window needs the window: the Window menu's tab list, and the rest.
+    auto const& window = bar[static_cast<std::size_t>(MenuBarMenu::Window)].children;
+    for (auto const& tab: std::span(window).last(3))
+    {
+        INFO(tab.title);
+        REQUIRE(std::holds_alternative<actions::SwitchToTab>(tab.action));
+        CHECK(tab.scope == ActionScope::Window);
+    }
+    for (auto const title: { "New Tab", "Close Tab", "Copy", "Paste", "Bigger", "Minimize", "Next Tab" })
+    {
+        INFO(title);
+        REQUIRE(find(bar, title) != nullptr);
+        CHECK(find(bar, title)->scope == ActionScope::Window);
+    }
+
+    // And the scope reaches the tree every presenter draws.
+    auto const tree = buildMenuTree(bar, ChordIndex {}, ShortcutStyle::Text);
+    REQUIRE(findNode(tree.nodes, "Quit Contour") != nullptr);
+    CHECK(findNode(tree.nodes, "Quit Contour")->scope == ActionScope::Application);
+    CHECK(findNode(tree.nodes, "Copy")->scope == ActionScope::Window);
 }
 
 TEST_CASE("menuBar.placement", "[menubar]")

@@ -24,10 +24,12 @@
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickWindow>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <initializer_list>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -435,8 +437,19 @@ void TerminalSessionManager::clearFocusedWindow(vtworkspace::WindowId window)
 {
     if (_focusedWindow != window) // guarded like clearFocusIfCurrent
         return;
-    _focusedWindow.reset();
+    _lastFocusedWindow = std::exchange(_focusedWindow, std::nullopt);
     setFocusedSession(nullptr);
+}
+
+window::WindowController* TerminalSessionManager::applicationController() const noexcept
+{
+    for (auto const& window: { _focusedWindow, _lastFocusedWindow })
+        if (auto* const controller = window ? controllerFor(*window) : nullptr)
+            return controller;
+    // The oldest window left: ids are minted ascending, and the map has no order of its own.
+    auto const oldest =
+        std::ranges::min_element(_controllersByWindow, {}, [](auto const& entry) { return entry.first; });
+    return oldest != _controllersByWindow.end() ? oldest->second : nullptr;
 }
 
 void TerminalSessionManager::syncFocusForWindow(window::WindowController* controller)

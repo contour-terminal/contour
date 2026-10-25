@@ -60,7 +60,7 @@ TEST_CASE("a rebuild keeps the adopted menus", "[display][menubar][cocoa]")
         contour::window::AppMenuBarSources {
             .state = [&] { return contour::command::menuBarStateOf(config); },
             .chords = [&] { return contour::command::chordIndex(config); },
-            .run = [](contour::actions::Action const&) {},
+            .run = [](contour::actions::Action const&, contour::command::ActionScope) {},
         },
         *integration,
     };
@@ -85,7 +85,7 @@ TEST_CASE("a rebuild keeps the window list after the rows", "[display][menubar][
         contour::window::AppMenuBarSources {
             .state = [&] { return contour::command::menuBarStateOf(config); },
             .chords = [&] { return contour::command::chordIndex(config); },
-            .run = [](contour::actions::Action const&) {},
+            .run = [](contour::actions::Action const&, contour::command::ActionScope) {},
         },
         *integration,
     };
@@ -111,7 +111,7 @@ TEST_CASE("the application menu holds the Contour menu's rows", "[display][menub
         contour::window::AppMenuBarSources {
             .state = [&] { return contour::command::menuBarStateOf(config); },
             .chords = [&] { return contour::command::chordIndex(config); },
-            .run = [](contour::actions::Action const&) {},
+            .run = [](contour::actions::Action const&, contour::command::ActionScope) {},
         },
         integration,
     };
@@ -148,7 +148,7 @@ TEST_CASE("the Settings row is titled Settings… in the application menu", "[di
         contour::window::AppMenuBarSources {
             .state = [&] { return contour::command::menuBarStateOf(config); },
             .chords = [&] { return contour::command::chordIndex(config); },
-            .run = [](contour::actions::Action const&) {},
+            .run = [](contour::actions::Action const&, contour::command::ActionScope) {},
         },
         integration,
     };

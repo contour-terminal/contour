@@ -108,6 +108,7 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -117,6 +118,7 @@
 #include <ranges>
 #include <system_error>
 #include <thread>
+#include <variant>
 #include <vector>
 
 #ifndef _WIN32
@@ -1827,12 +1829,47 @@ window::AppMenuBarSources ContourGuiApp::appMenuBarSources()
                 return command::menuBarStateOf(_config);
             },
         .chords = [this] { return command::chordIndex(_config); },
-        .run =
-            [this](actions::Action const& action) {
-                if (auto* const controller = focusedController())
-                    controller->runMenuBarAction(action);
-            },
+        .run = [this](actions::Action const& action,
+                      command::ActionScope scope) { runMenuBarAction(action, scope); },
     };
+}
+
+void ContourGuiApp::runMenuBarAction(actions::Action const& action, command::ActionScope scope)
+{
+    switch (scope)
+    {
+        case command::ActionScope::Window:
+            if (auto* const controller = focusedController())
+                controller->runMenuBarAction(action);
+            return;
+        case command::ActionScope::Application:
+            if (auto* const controller = _sessionManager.applicationController();
+                controller != nullptr && controller->activeSession() != nullptr)
+                controller->runMenuBarAction(action);
+            else
+                runWithoutWindow(action);
+            return;
+    }
+}
+
+void ContourGuiApp::runWithoutWindow(actions::Action const& action)
+{
+    if (std::holds_alternative<actions::Quit>(action))
+    {
+        // As TerminalSession's Quit does: unwind the event loop rather than exit().
+        QCoreApplication::exit(EXIT_SUCCESS);
+        return;
+    }
+    if (auto const* const newTerminal = std::get_if<actions::NewTerminal>(&action))
+    {
+        // As TerminalSession::spawnNewTerminal() does, less the working directory no session can give.
+        if (!requestRemoteWindow(
+                session::RemoteSpawn { .profileName = newTerminal->profileName.value_or("") }))
+            newWindow();
+        return;
+    }
+    // Settings, About and the rest show in a window, or act on a session's configuration.
+    errorLog()("Menu bar action \"{}\" needs a window, and none is open.", actions::name(action));
 }
 
 void ContourGuiApp::onConfigurationReloaded()

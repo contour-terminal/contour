@@ -463,9 +463,10 @@ QList<QAction*> AppMenuBar::fill(
                 QObject::connect(action,
                                  &QAction::triggered,
                                  _menuBar.get(),
-                                 [this, picked = tree.actions[node.actionIndex]] {
-                                     platform::postToObject(_menuBar.get(),
-                                                            [this, picked] { _sources.run(picked); });
+                                 [this, picked = tree.actions[node.actionIndex], scope = node.scope] {
+                                     platform::postToObject(_menuBar.get(), [this, picked, scope] {
+                                         _sources.run(picked, scope);
+                                     });
                                  });
                 menu.insertAction(before, action);
                 added.push_back(action);

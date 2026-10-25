@@ -54,9 +54,10 @@ namespace contour::window
 /// What the menu bar reads the world through, and runs its rows with.
 struct AppMenuBarSources
 {
-    std::function<command::MenuBarState()> state {};    ///< The world the bar is drawn over.
-    std::function<command::ChordIndex()> chords {};     ///< The chords the rows show.
-    std::function<void(actions::Action const&)> run {}; ///< Runs a picked row's action.
+    std::function<command::MenuBarState()> state {}; ///< The world the bar is drawn over.
+    std::function<command::ChordIndex()> chords {};  ///< The chords the rows show.
+    /// Runs a picked row's action, with what the row acts on: see command::ActionScope.
+    std::function<void(actions::Action const&, command::ActionScope)> run {};
 };
 
 /// The application's own menu bar: the six menus of buildMenuBar(), as a native QMenuBar.
