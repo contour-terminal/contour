@@ -93,6 +93,6 @@ Settings window should raise or own its window), and the design canvas's macOS �
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (written) |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-4b.md` (written) |
 | 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-4b.md` (written) |
-| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | to write |
+| 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written) |
 
 Steps 3a to 3e may run in any order, or in parallel worktrees, each with its own board.
