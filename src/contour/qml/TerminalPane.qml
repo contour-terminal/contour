@@ -217,7 +217,8 @@ ContourTerminal {
             id: reconnectingLabel
             anchors.centerIn: parent
             text: qsTr("Reconnecting\u2026")
-            color: chromeStyle.paneDimTextColor
+            // The kit's dim is a light scrim, so the label inks by the pane's own background.
+            color: chromeStyle.onColor(pane.session ? pane.session.backgroundColor : "black")
             font: chromeStyle.headlineFont
         }
     }

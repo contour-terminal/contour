@@ -7,6 +7,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
 
+#include <algorithm>
 #include <cmath>
 #include <span>
 #include <utility>
@@ -24,6 +25,13 @@ namespace
         auto sized = font;
         sized.setPixelSize(static_cast<int>(std::lround(pixelSize)));
         return sized;
+    }
+
+    /// @p font at @p weight on the CSS 100-900 scale, which QFont::Weight shares.
+    [[nodiscard]] QFont weightedFont(QFont font, int weight)
+    {
+        font.setWeight(static_cast<QFont::Weight>(std::clamp(weight, 1, 1000)));
+        return font;
     }
 
     /// The row of a kit table a 1-based @p level names.
@@ -58,7 +66,9 @@ ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens, QFont const& font,
     _footnote { sizedFont(font, tokens.footnote) },
     _body { sizedFont(font, tokens.body) },
     _tab { sizedFont(font, tokens.tab) },
-    _title { sizedFont(font, tokens.title) }
+    _title { sizedFont(font, tokens.title) },
+    _paneHeader { weightedFont(sizedFont(font, tokens.paneHeader), tokens.paneHeaderWeight) },
+    _paneHeaderWeight { tokens.paneHeaderWeight }
 {
 }
 
@@ -110,8 +120,13 @@ ChromeLayoutTokens::ChromeLayoutTokens(config::LayoutTokens tokens, QObject* par
 
 ChromeColorTokens::ChromeColorTokens(Sources sources,
                                      config::ChromeSchemeColors scheme,
+                                     int separatorPercent,
                                      UiStyleProvider& provider):
-    QObject { &provider }, _sources { sources }, _scheme { scheme }, _provider { provider }
+    QObject { &provider },
+    _sources { sources },
+    _scheme { scheme },
+    _separatorPercent { separatorPercent },
+    _provider { provider }
 {
     connect(&provider, &UiStyleProvider::paletteRevisionChanged, this, &ChromeColorTokens::changed);
 }
@@ -158,7 +173,13 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
         case config::ColorSourceKind::Scheme:
             return faded(platform::toQColor(_scheme.bySlot[static_cast<size_t>(source.slot)]));
         case config::ColorSourceKind::SchemeOnBar:
-            return faded(platform::toQColor(config::legibleOnBar(_scheme, source.slot)));
+            return faded(platform::toQColor(config::inkOnBar(_scheme, source.slot)));
+        case config::ColorSourceKind::SchemeShade:
+            return faded(platform::toQColor(
+                config::shadeLightness(_scheme.bySlot[static_cast<size_t>(source.slot)], source.level)));
+        case config::ColorSourceKind::Separator:
+            return platform::atOpacity(QColor(dark ? Qt::white : Qt::black),
+                                       _separatorPercent * source.alphaPercent / 100);
         case config::ColorSourceKind::Fill: return kitInk(config::FillAlphas);
         case config::ColorSourceKind::Label: return kitInk(config::LabelAlphas);
         case config::ColorSourceKind::Surface:
@@ -168,6 +189,14 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
             return { Qt::transparent };
     }
     return { Qt::transparent };
+}
+
+ChromePaneRoleNames::ChromePaneRoleNames(QObject* parent): QObject { parent }
+{
+}
+
+ChromeBadgeKindNames::ChromeBadgeKindNames(QObject* parent): QObject { parent }
+{
 }
 
 } // namespace contour::window

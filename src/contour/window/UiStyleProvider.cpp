@@ -4,9 +4,11 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabWellLayout.hpp>
 #include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/vt/ProgressState.hpp>
@@ -17,11 +19,13 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
+#include <QtCore/QStringList>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <string_view>
@@ -149,6 +153,26 @@ namespace
         };
     }
 
+    /// @return @p glyphs as the string list QML reads.
+    template <size_t N>
+    [[nodiscard]] QStringList stringsOf(std::array<std::string_view, N> const& glyphs)
+    {
+        auto list = QStringList {};
+        list.reserve(static_cast<qsizetype>(N));
+        for (auto const glyph: glyphs)
+            list.append(QString::fromUtf8(glyph));
+        return list;
+    }
+
+    /// Whether the application palette paints a dark chrome: its Window colour's tone, as statusColor() and
+    /// the colour roles read it.
+    [[nodiscard]] bool paletteIsDark()
+    {
+        return platform::colorSchemeOfBackground(
+                   platform::toRGBColor(QGuiApplication::palette().color(QPalette::Window)))
+               == Qt::ColorScheme::Dark;
+    }
+
     /// Converts @p tokens' glyphs to the strings QML draws.
     [[nodiscard]] ChromeGlyphs chromeGlyphsFor(config::UiStyleTokens const& tokens)
     {
@@ -166,6 +190,9 @@ namespace
             .chipOpen = QString::fromUtf8(tokens.chipOpenGlyph),
             .chipClose = QString::fromUtf8(tokens.chipCloseGlyph),
             .hostDot = QString::fromUtf8(tokens.hostDotGlyph),
+            .paneActions = stringsOf(tokens.paneActionGlyphs),
+            .splitLines = stringsOf(tokens.splitLineGlyphs),
+            .restart = QString::fromUtf8(tokens.restartGlyph),
         };
     }
 
@@ -189,7 +216,8 @@ ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
                           .font = font,
                           .accessibility = {},
                           .appearance = {},
-                          .scheme = config::chromeSchemeColorsOf(vtbackend::ColorPalette {}) };
+                          .scheme = config::chromeSchemeColorsOf(vtbackend::ColorPalette {}),
+                          .density = config::ChromeDensity::Comfortable };
 }
 
 UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
@@ -199,7 +227,7 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _fonts { chromeFontsFor(_tokens, _inputs.font) },
     _metrics { chromeMetricsFor(_tokens, _inputs.font) },
     _glyphs { chromeGlyphsFor(_tokens) },
-    _groups { config::resolveChromeTokens(_inputs.row, _inputs.accessibility) },
+    _groups { config::resolveChromeTokens(_inputs.row, _inputs.accessibility, _inputs.density) },
     // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
     // legacy one land on the same grid.
     _units { .horizontal = _metrics.widthQuantum,
@@ -215,7 +243,9 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _tui { _groups.tui, this },
     _layout { _groups.layout, this },
     _tint { _groups.tint, this },
-    _colors { _groups.colors, _inputs.scheme, *this }
+    _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
+    _paneRoles { this },
+    _badgeKinds { this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);
@@ -382,17 +412,13 @@ QColor UiStyleProvider::statusColor(config::StatusColorRole role, config::Status
         return { Qt::transparent };
 
     auto const& row = config::StatusColors[static_cast<size_t>(role)];
-    auto const palette = QGuiApplication::palette();
     switch (row.source)
     {
         case config::StatusColorSource::PaletteAccent: return accentColor();
         case config::StatusColorSource::Fixed: break;
     }
-
-    auto const dark = platform::colorSchemeOfBackground(platform::toRGBColor(palette.color(QPalette::Window)))
-                      == Qt::ColorScheme::Dark;
     auto const& hues = row.hues(use);
-    return QColor::fromRgb(dark ? hues.dark : hues.light);
+    return QColor::fromRgb(paletteIsDark() ? hues.dark : hues.light);
 }
 
 QColor UiStyleProvider::accentColor() const
@@ -416,14 +442,84 @@ QColor UiStyleProvider::onStatusColor(int role) const
     return onColor(statusColor(role));
 }
 
-QColor UiStyleProvider::paneDimTextColor() const
-{
-    return onColor(QColor(Qt::black));
-}
-
 QColor UiStyleProvider::paneDimColor() const
 {
-    return platform::atOpacity(QColor(Qt::black), config::ChromeTokens::PaneDimPercent);
+    auto const& dim = _groups.dim;
+    return platform::atOpacity(
+        QColor(Qt::black),
+        _groups.contrast.paneDimPercent.value_or(paletteIsDark() ? dim.darkPercent : dim.lightPercent));
+}
+
+QString UiStyleProvider::densityName() const
+{
+    return nameOf(config::chromeDensityName(_inputs.density));
+}
+
+QStringList UiStyleProvider::paneHeaderActionNames() const
+{
+    auto names = QStringList {};
+    names.reserve(static_cast<qsizetype>(PaneHeaderActions.size()));
+    for (auto const& row: PaneHeaderActions)
+        names.append(nameOf(row.accessibleName));
+    return names;
+}
+
+QVariantMap UiStyleProvider::paneHeader(
+    int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const
+{
+    if (!inRange(reveal, HeaderRevealCount) || !inRange(pointer, PointerPresenceCount)
+        || !inRange(focus, PaneFocusCount))
+        return {};
+    auto const header = resolvePaneHeader(PaneHeaderInputs { .density = _inputs.density,
+                                                             .reveal = static_cast<HeaderReveal>(reveal),
+                                                             .pointer = static_cast<PointerPresence>(pointer),
+                                                             .focus = static_cast<PaneFocus>(focus),
+                                                             .actionsReveal = _groups.layout.paneActions,
+                                                             .visiblePanes = visiblePanes,
+                                                             .width = width,
+                                                             .height = height,
+                                                             .headerHeight = _size.paneHeader(),
+                                                             .minimumContentHeight = _metrics.cellHeight });
+    return { { QStringLiteral("content"), nameOf(paneHeaderContentName(header.content)) },
+             { QStringLiteral("actions"), nameOf(headerActionsName(header.actions)) },
+             { QStringLiteral("placement"), nameOf(headerPlacementName(header.placement)) },
+             { QStringLiteral("emphasis"), nameOf(headerEmphasisName(header.emphasis)) } };
+}
+
+QString UiStyleProvider::paneHeaderName(QString const& processName, QString const& title) const
+{
+    return QString::fromStdString(window::paneHeaderName(processName.toStdString(), title.toStdString()));
+}
+
+QColor UiStyleProvider::colorOn(int role, QColor const& background) const
+{
+    if (!inRange(role, config::ChromeColorRoleCount))
+        return { Qt::transparent };
+    auto const tone = toneOf(platform::toRGBColor(background));
+    return _colors.resolve(_groups.colors[static_cast<size_t>(role)],
+                           tone == ChromeTone::Dark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
+}
+
+qreal UiStyleProvider::hairline(qreal devicePixelRatio) const
+{
+    return devicePixelRatio > 0 ? 1.0 / devicePixelRatio : 1.0;
+}
+
+qreal UiStyleProvider::unfocusedDim(qreal profileDim) const
+{
+    auto dim = profileDim;
+    switch (_inputs.density)
+    {
+        case config::ChromeDensity::Minimal: {
+            auto const& floor = _groups.dim;
+            dim = std::max(dim, (paletteIsDark() ? floor.darkPercent : floor.lightPercent) / 100.0);
+            break;
+        }
+        case config::ChromeDensity::Comfortable: break;
+    }
+    if (auto const cap = _groups.contrast.paneDimPercent)
+        dim = std::min(dim, *cap / 100.0);
+    return dim;
 }
 
 QColor UiStyleProvider::dotGlyphColor() const

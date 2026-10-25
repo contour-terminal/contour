@@ -21,12 +21,18 @@ enum class HeaderReveal : uint8_t
     HeldModifier, //!< The reveal modifier has been held long enough.
 };
 
+/// The number of @c HeaderReveal enumerators.
+inline constexpr size_t HeaderRevealCount = static_cast<size_t>(HeaderReveal::HeldModifier) + 1;
+
 /// Whether the pointer is over the pane.
 enum class PointerPresence : uint8_t
 {
     Away = 0,
     Hovering,
 };
+
+/// The number of @c PointerPresence enumerators.
+inline constexpr size_t PointerPresenceCount = static_cast<size_t>(PointerPresence::Hovering) + 1;
 
 /// A pane's focus state.
 enum class PaneFocus : uint8_t
@@ -35,6 +41,9 @@ enum class PaneFocus : uint8_t
     Focused,
     KeyboardFocused, //!< Focus reached the header by keyboard.
 };
+
+/// The number of @c PaneFocus enumerators.
+inline constexpr size_t PaneFocusCount = static_cast<size_t>(PaneFocus::KeyboardFocused) + 1;
 
 /// What the header text shows.
 enum class PaneHeaderContent : uint8_t
@@ -137,14 +146,8 @@ inline constexpr std::array<DensityHeaderRule, config::ChromeDensityCount> Densi
     };
 }
 
-/// A button on the pane header.
-enum class PaneHeaderAction : uint8_t
-{
-    SplitRight = 0,
-    SplitDown,
-    Zoom,
-    Close,
-};
+/// A button on the pane header (declared in config, where the chrome's glyph table is sized by it).
+using config::PaneHeaderAction;
 
 /// A header button's command and its accessible name.
 struct PaneHeaderActionRow
@@ -155,7 +158,7 @@ struct PaneHeaderActionRow
 };
 
 /// The header buttons, in enumerator order.
-inline constexpr auto PaneHeaderActions = std::array {
+inline constexpr auto PaneHeaderActions = std::array<PaneHeaderActionRow, config::PaneHeaderActionCount> {
     PaneHeaderActionRow { PaneHeaderAction::SplitRight, "SplitVertical", "Split right" },
     PaneHeaderActionRow { PaneHeaderAction::SplitDown, "SplitHorizontal", "Split down" },
     PaneHeaderActionRow { PaneHeaderAction::Zoom, "TogglePaneZoom", "Zoom pane" },

@@ -34,6 +34,7 @@ struct ChromeSetup
     platform::PlatformAppearance appearance {};        ///< What the OS publishes about its own look.
     /// The terminal scheme the Terminal row paints with: the default palette's unless a test names one.
     config::ChromeSchemeColors scheme { config::chromeSchemeColorsOf(vtbackend::ColorPalette {}) };
+    config::ChromeDensity density {}; ///< The chrome density the tokens resolve with.
 };
 
 /// Installs the chrome's design tokens on @p engine, as ContourGuiApp does for the real one.
@@ -58,7 +59,8 @@ inline void installChromeStyle(QQmlEngine& engine, ChromeSetup const& setup)
                                         .font = setup.font,
                                         .accessibility = setup.accessibility,
                                         .appearance = setup.appearance,
-                                        .scheme = setup.scheme },
+                                        .scheme = setup.scheme,
+                                        .density = setup.density },
         &engine);
     engine.rootContext()->setContextProperty(QStringLiteral("chromeStyle"), provider);
 

@@ -44,10 +44,11 @@ constexpr std::span<ConfigEnumInfo<ChromeDensity> const> configEnumValues() noex
 /// @return `"comfortable"` or `"minimal"`.
 [[nodiscard]] constexpr std::string_view chromeDensityName(ChromeDensity density) noexcept
 {
-    for (auto const& row: detail::ChromeDensityTable)
+    auto const values = configEnumValues<ChromeDensity>();
+    for (auto const& row: values)
         if (row.value == density)
             return row.token;
-    return detail::ChromeDensityTable.front().token;
+    return values.front().token;
 }
 
 /// When a pane header shows its action buttons, short of the pointer being over it.
@@ -57,5 +58,18 @@ enum class PaneActionsReveal : uint8_t
     OnHover = 0,    //!< Only while the pointer is over the pane (or keyboard focus is on it).
     OnHoverOrFocus, //!< Also whenever the pane is the focused one.
 };
+
+/// A button on the pane header. Here rather than beside the header policy so the chrome's glyph table
+/// (config::UiStyleTokens::paneActionGlyphs) is sized by the same count.
+enum class PaneHeaderAction : uint8_t
+{
+    SplitRight = 0, //!< Split the pane side by side.
+    SplitDown,      //!< Split the pane one above the other.
+    Zoom,           //!< Zoom the pane to the whole tab.
+    Close,          //!< Close the pane.
+};
+
+/// The number of PaneHeaderAction enumerators, derived from the last one.
+inline constexpr size_t PaneHeaderActionCount = static_cast<size_t>(PaneHeaderAction::Close) + 1;
 
 } // namespace contour::config

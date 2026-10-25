@@ -1801,6 +1801,7 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
         .accessibility = accessibilityPreferences(),
         .appearance = platformAppearance(),
         .scheme = config::chromeSchemeColorsOf(palette ? *palette : vtbackend::ColorPalette {}),
+        .density = _config.chromeDensity.value(),
     };
 }
 

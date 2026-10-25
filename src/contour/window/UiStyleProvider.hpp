@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/AccessibilityPreferences.hpp>
+#include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
@@ -9,6 +10,7 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
@@ -84,6 +86,10 @@ struct ChromeGlyphs
     QString chipOpen;  ///< Opens a chip; empty where the chip is a shape.
     QString chipClose; ///< Closes a chip; empty where the chip is a shape.
     QString hostDot;   ///< The host chip's state dot; empty where it is a vector circle.
+
+    QStringList paneActions; ///< A pane header's action buttons, indexed by config::PaneHeaderAction.
+    QStringList splitLines;  ///< A split's line, side by side then stacked; empty where the gap draws it.
+    QString restart;         ///< Marks the exited footer's Restart button.
 };
 
 /// Everything a UiStyleProvider is built from.
@@ -97,6 +103,7 @@ struct ChromeInputs
     config::AccessibilityPreferences accessibility {}; ///< The OS accessibility choices to apply.
     platform::PlatformAppearance appearance {};        ///< What the OS publishes about its own look.
     config::ChromeSchemeColors scheme {};              ///< The terminal scheme the Terminal row paints with.
+    config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
 
     [[nodiscard]] bool operator==(ChromeInputs const&) const = default;
 };
@@ -145,8 +152,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(int statusWarning READ statusWarning CONSTANT)
     Q_PROPERTY(int statusSuccess READ statusSuccess CONSTANT)
     Q_PROPERTY(int statusRunning READ statusRunning CONSTANT)
-    Q_PROPERTY(QColor paneDimColor READ paneDimColor CONSTANT)
-    Q_PROPERTY(QColor paneDimTextColor READ paneDimTextColor CONSTANT)
+    /// The pane dim follows the chrome's tone, so it notifies with the palette.
+    Q_PROPERTY(QColor paneDimColor READ paneDimColor NOTIFY paletteRevisionChanged)
     Q_PROPERTY(QColor dotGlyphColor READ dotGlyphColor CONSTANT)
 
     Q_PROPERTY(qreal cellWidth READ cellWidth CONSTANT)
@@ -225,6 +232,20 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
     Q_PROPERTY(QString hostDotGlyph READ hostDotGlyph CONSTANT)
 
+    // {{{ Panes (Step 2)
+    /// The configured chrome density: "comfortable" or "minimal".
+    Q_PROPERTY(QString density READ densityName CONSTANT)
+    Q_PROPERTY(QStringList paneActionGlyphs READ paneActionGlyphs CONSTANT)
+    Q_PROPERTY(QStringList splitLineGlyphs READ splitLineGlyphs CONSTANT)
+    Q_PROPERTY(QString restartGlyph READ restartGlyph CONSTANT)
+    /// What assistive technology announces for each header action, indexed by config::PaneHeaderAction.
+    Q_PROPERTY(QStringList paneHeaderActionNames READ paneHeaderActionNames CONSTANT)
+    /// The QML names of the pane colour roles, for colorOn().
+    Q_PROPERTY(QObject* roles READ roles CONSTANT)
+    /// The QML names of the tab badge kinds, for badgeLook().
+    Q_PROPERTY(QObject* badgeKinds READ badgeKinds CONSTANT)
+    // }}}
+
   public:
     /// @param inputs What the chrome is built from. @c inputs.font is the font the chrome is drawn
     ///               with, already resolved against its fallbacks (see resolveChromeFont); its metrics
@@ -256,8 +277,70 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QFont const& captionFont() const noexcept { return _fonts.caption; }
     [[nodiscard]] QFont const& headlineFont() const noexcept { return _fonts.headline; }
 
-    /// The scrim laid over a pane to dim it (an unfocused or reconnecting one).
+    // {{{ Panes (Step 2)
+
+    /// The scrim laid over a pane to dim it (an unfocused or reconnecting one): black at the kit's
+    /// @c pane.dim for the chrome's tone (decided as statusColor() decides it), or at
+    /// @c contrast.paneDimPercent under Increased Contrast. Reads the palette.
     [[nodiscard]] QColor paneDimColor() const;
+
+    /// @return The configured chrome density's name: "comfortable" or "minimal".
+    [[nodiscard]] QString densityName() const;
+    [[nodiscard]] QStringList const& paneActionGlyphs() const noexcept { return _glyphs.paneActions; }
+    [[nodiscard]] QStringList const& splitLineGlyphs() const noexcept { return _glyphs.splitLines; }
+    [[nodiscard]] QString const& restartGlyph() const noexcept { return _glyphs.restart; }
+    /// @return The header actions' accessible names, indexed by config::PaneHeaderAction.
+    [[nodiscard]] QStringList paneHeaderActionNames() const;
+    [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
+    [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
+
+    /// Decides a pane's header (window::resolvePaneHeader) with this provider's density, its
+    /// @c size.paneHeader, one chrome cell as the least content height, and its @c layout.paneActions.
+    ///
+    /// Ints rather than enums: the QML-facing carve-out. A value out of range answers an empty map.
+    /// @param reveal       A window::HeaderReveal.
+    /// @param pointer      A window::PointerPresence.
+    /// @param focus        A window::PaneFocus.
+    /// @param visiblePanes The panes visible in the tab.
+    /// @param width        The pane's width in logical pixels.
+    /// @param height       The pane's height in logical pixels.
+    /// @return `{ content, actions, placement, emphasis }` as their names.
+    [[nodiscard]] Q_INVOKABLE QVariantMap
+    paneHeader(int reveal, int pointer, int focus, int visiblePanes, qreal width, qreal height) const;
+
+    /// The name a pane header shows (window::paneHeaderName).
+    /// @param processName The foreground process name.
+    /// @param title       The pane's title.
+    /// @return @p processName unless empty, else @p title.
+    [[nodiscard]] Q_INVOKABLE QString paneHeaderName(QString const& processName, QString const& title) const;
+
+    /// The colour of @p role on a pane whose own background is @p background.
+    ///
+    /// The kit's @c Fill, @c Label, @c Surface and @c Separator sources take their light or dark half by
+    /// @p background's tone (window::toneOf) rather than the palette window's, so a light-profile pane
+    /// under a dark chrome keeps a legible header; every other kind resolves as @c colors does, which
+    /// reads the palette, so a binding over it also reads @ref paletteRevision.
+    /// @param role       A config::ChromeColorRole as its underlying value (see @c roles).
+    /// @param background The pane's own background.
+    /// @return The colour; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor colorOn(int role, QColor const& background) const;
+
+    /// One device pixel, in logical pixels: the pane card's border width.
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return @c 1 / @p devicePixelRatio, or 1 for a ratio of 0 or less.
+    [[nodiscard]] Q_INVOKABLE qreal hairline(qreal devicePixelRatio) const;
+
+    /// How strongly an unfocused pane dims (R-g).
+    ///
+    /// Under Minimal, where dimming is the only focus cue (D5), at least the kit's @c pane.dim for the
+    /// chrome's tone; under Comfortable @p profileDim. Either is capped at @c contrast.paneDimPercent
+    /// where Increased Contrast sets it. Reads the palette, so a binding over it also reads
+    /// @ref paletteRevision.
+    /// @param profileDim The profile's @c dim_unfocused, 0 to 1.
+    /// @return The dim, 0 to 1.
+    [[nodiscard]] Q_INVOKABLE qreal unfocusedDim(qreal profileDim) const;
+
+    // }}}
 
     /// The QML names of the status roles, for statusColor() and onStatusColor(). Properties rather than
     /// an exported enum: a Q_ENUM is not reachable through a context-property instance, so
@@ -278,10 +361,6 @@ class UiStyleProvider: public QObject
     {
         return static_cast<int>(config::StatusColorRole::Running);
     }
-
-    /// The colour of text drawn on the pane-dim scrim: whichever of black and white contrasts more
-    /// with the scrim's black, so it is legible in every theme (a palette's bright-text role is not).
-    [[nodiscard]] QColor paneDimTextColor() const;
 
     /// The colour of the glyph drawn on a traffic-light dot. Dark and translucent: the dots are
     /// saturated in every theme, so the glyph contrasts with the dot, not with the window.
@@ -530,6 +609,8 @@ class UiStyleProvider: public QObject
     ChromeLayoutTokens _layout;
     ChromeTintTokens _tint;
     ChromeColorTokens _colors;
+    ChromePaneRoleNames _paneRoles;
+    ChromeBadgeKindNames _badgeKinds;
     int _paletteRevision = 0;
 };
 

@@ -257,3 +257,29 @@ TEST_CASE("UiStyle: only the Terminal row draws the band's glyphs", "[uistyle]")
     CHECK(terminal.chipCloseGlyph == "]");
     CHECK(terminal.hostDotGlyph == "●");
 }
+
+TEST_CASE("UiStyle: the pane glyphs per row", "[uistyle]")
+{
+    using contour::config::PaneHeaderAction;
+    auto const glyphOf = [](ChromeStyle row, PaneHeaderAction action) {
+        return uiStyleTokens(row).paneActionGlyphs[static_cast<size_t>(action)];
+    };
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto const& tokens = uiStyleTokens(row);
+        CHECK(glyphOf(row, PaneHeaderAction::SplitRight) == "⊞");
+        CHECK(glyphOf(row, PaneHeaderAction::SplitDown) == "⊟");
+        CHECK(glyphOf(row, PaneHeaderAction::Zoom) == "⤢");
+        CHECK(glyphOf(row, PaneHeaderAction::Close) == "✕");
+        CHECK(tokens.splitLineGlyphs[0].empty());
+        CHECK(tokens.splitLineGlyphs[1].empty());
+        CHECK(tokens.restartGlyph == "↩");
+    }
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::SplitRight) == "⊞");
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::Zoom) == "Z");
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::Close) == "×");
+    CHECK(terminal.splitLineGlyphs[0] == "│");
+    CHECK(terminal.splitLineGlyphs[1] == "─");
+    CHECK(terminal.restartGlyph == "↩");
+}

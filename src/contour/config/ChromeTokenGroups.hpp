@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/AccessibilityPreferences.hpp>
+#include <contour/config/ChromeDensity.hpp>
 #include <contour/config/UiStyle.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -138,6 +139,17 @@ enum class ChromeColorRole : uint8_t
     ChipFill,       //!< A toolbar or host chip.
     ChipText,       //!< A chip's text.
     ChipTextStrong, //!< A chip's emphasised text (the host name).
+
+    // The pane cards (resolved against the card's own background, see UiStyleProvider::colorOn).
+    PaneGapFill,          //!< The backdrop the cards and the gap between them sit on.
+    PaneCardBorder,       //!< A card's one-device-pixel border.
+    PaneHeaderFill,       //!< A pane header's fill.
+    PaneHeaderText,       //!< The focused pane's header text.
+    PaneHeaderTextDimmed, //!< An unfocused pane's header text, and the working directory.
+    PaneSplitLine,        //!< The line a split is drawn with where the gap does not draw it.
+    PaneGrabber,          //!< The split handle's grabber.
+    PaneFooterFill,       //!< The exited footer's fill.
+    PaneFooterText,       //!< The exited footer's text.
 };
 
 /// Where a chrome colour comes from.
@@ -153,8 +165,10 @@ enum class ColorSourceKind : uint8_t
     Fill,        //!< The kit's @c fill.N wash.
     Label,       //!< The kit's @c label.N text.
     Surface,     //!< The kit's opaque @c surface.N: 1 elevated, 2 secondary.
-    SchemeOnBar, //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else @c BarText.
+    SchemeOnBar, //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else see inkOnBar.
     StatusMark,  //!< A status hue's mark ink (@c StatusInkUse::Mark), picked by the source's @c status.
+    SchemeShade, //!< The scheme @c slot moved by @c level HSL lightness points (see shadeLightness).
+    Separator,   //!< Black on a light ground, white on a dark one, at @c contrast.separatorPercent.
 };
 
 /// The terminal colour-scheme slots the Terminal style paints its chrome with.
@@ -179,7 +193,7 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::Warning) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::ChipTextStrong) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::PaneFooterText) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -189,7 +203,9 @@ struct ChromeColorSource
     StatusColorRole status = StatusColorRole::Danger; ///< The hue, for @c Status.
     SchemeSlot slot = SchemeSlot::Background;         ///< The slot, for @c Scheme and @c SchemeOnBar.
     int alphaPercent = 100;                           ///< Opacity of the resulting colour.
-    int level = 0; ///< The 1-based step of a @c Fill, @c Label or @c Surface source; 0 for other kinds.
+    /// The 1-based step of a @c Fill, @c Label or @c Surface source, the signed lightness shift of a
+    /// @c SchemeShade one; 0 for other kinds.
+    int level = 0;
 
     [[nodiscard]] bool operator==(ChromeColorSource const&) const = default;
 };
@@ -274,6 +290,14 @@ struct SizeTokens
     // The tab colour flyout.
     int flyoutSwatch = 0; ///< Edge of a swatch in the tab colour flyout (bigger than a menu's).
 
+    // The panes.
+    int bareBand = 0;         ///< Height of a band with neither tabs nor a title (Minimal, one tab).
+    int grabber = 0;          ///< Thickness of the split handle's grabber; 0 draws none.
+    int grabberLength = 0;    ///< Length of the split handle's grabber.
+    int paneHeaderAction = 0; ///< Hit extent of a pane header's action button.
+    int paneFooter = 0;       ///< Height of the exited footer.
+    int footerButton = 0;     ///< Height of an exited footer's button.
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -282,13 +306,19 @@ struct SpaceTokens
 {
     int paneGap = 0;              ///< Gap between split panes.
     int splitHit = 0;             ///< Hit target of a split divider.
-    int paneInset = 0;            ///< Inset of a pane's content inside its card.
+    int paneInset = 0;            ///< Inset of the pane cards from the content edge.
     std::array<int, 10> scale {}; ///< The spacing scale, s1 first.
 
     // The title band.
     int dragReserve = 0;        ///< Empty band that always stays draggable.
     int revealEdge = 0;         ///< Height of the full-screen edge that reveals the band.
     int toolbarChipPadding = 0; ///< Horizontal padding inside a toolbar chip.
+
+    // The panes.
+    int paneGapRows =
+        0; ///< @c paneGap between stacked panes, in vertical units (a cell's height on Terminal).
+    int paneHeaderGap = 0; ///< Gap between a pane header's items.
+    int footerLeading = 0; ///< Leading padding of the exited footer.
 
     [[nodiscard]] bool operator==(SpaceTokens const&) const = default;
 };
@@ -311,6 +341,8 @@ struct RadiusTokens
     int hostChip = 0;    ///< The host chip.
     int toolbarChip = 0; ///< A toolbar chip.
 
+    int grabber = 0; ///< The split handle's grabber.
+
     [[nodiscard]] bool operator==(RadiusTokens const&) const = default;
 };
 
@@ -322,6 +354,9 @@ struct TypeTokens
     double body = 0.0;     ///< Body text.
     double tab = 0.0;      ///< Tab titles.
     double title = 0.0;    ///< Titles.
+
+    double paneHeader = 0.0;    ///< A pane header's text.
+    int paneHeaderWeight = 400; ///< A pane header's font weight, on the CSS 100-900 scale.
 
     [[nodiscard]] bool operator==(TypeTokens const&) const = default;
 };
@@ -337,6 +372,10 @@ struct MotionTokens
     int spinnerMs = 0; ///< One turn of the Working spinner, in milliseconds.
     int pulseMs = 0;   ///< One half-cycle of the indeterminate progress pulse, in milliseconds.
     MotionStyle style = MotionStyle::Full; ///< Whether things slide, spin and pulse, or cross-fade.
+
+    /// How long the reveal modifier is held alone before Minimal's headers show, in milliseconds. A
+    /// hold rather than an animation, so Reduce Motion leaves it be.
+    int headerRevealMs = 0;
 
     [[nodiscard]] bool operator==(MotionTokens const&) const = default;
 };
@@ -405,8 +444,31 @@ struct LayoutTokens
     ProfileMenuAffordance profileMenu = ProfileMenuAffordance::Caret; ///< How the profile menu is reached.
     TabColorSource tabColors = TabColorSource::Palette;               ///< Where a tab's colours come from.
     ActiveTabWeight activeTabWeight = ActiveTabWeight::Regular;       ///< How the active label stands out.
+    PaneActionsReveal paneActions = PaneActionsReveal::OnHover; ///< When a pane header shows its actions.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
+};
+
+/// How strongly an unfocused pane dims, by the chrome's tone (the kit's @c pane.dim).
+struct DimTokens
+{
+    int darkPercent = 0;  ///< Opacity of the black scrim on a dark chrome.
+    int lightPercent = 0; ///< Opacity of the black scrim on a light chrome.
+
+    [[nodiscard]] bool operator==(DimTokens const&) const = default;
+};
+
+/// The extents @c ChromeDensity::Minimal replaces, in the units of the groups they replace.
+struct MinimalDensityTokens
+{
+    int paneHeader = 0;     ///< Replaces @c size.paneHeader.
+    int paneGap = 0;        ///< Replaces @c space.paneGap.
+    int paneGapRows = 0;    ///< Replaces @c space.paneGapRows.
+    int splitHit = 0;       ///< Replaces @c space.splitHit.
+    int paneInset = 0;      ///< Replaces @c space.paneInset.
+    int paneCardRadius = 0; ///< Replaces @c radii.paneCard.
+
+    [[nodiscard]] bool operator==(MinimalDensityTokens const&) const = default;
 };
 
 /// One style's complete 1a token set.
@@ -427,6 +489,8 @@ struct ChromeTokenRow
         colors {}; ///< Colour sources, indexed by @c ChromeColorRole.
     /// What each status role is inked in on this row's chrome, indexed by @c StatusColorRole.
     std::array<ChromeColorSource, StatusColorRoleCount> statusInk {};
+    DimTokens dim {};                ///< How strongly an unfocused pane dims.
+    MinimalDensityTokens minimal {}; ///< The extents the Minimal density replaces.
 };
 
 /// The WCAG AA ratio chrome text must reach against what it sits on.
@@ -483,15 +547,21 @@ inline constexpr int ReducedMotionCrossFadeMs = 100;
 
 namespace detail
 {
-    constexpr SpaceTokens nativeSpace(int paneGap, int paneInset) noexcept
+    /// @param paneGap       The gap between split panes, and their inset from the content edge.
+    /// @param paneHeaderGap The gap between a pane header's items.
+    /// @return A native row's spacing.
+    constexpr SpaceTokens nativeSpace(int paneGap, int paneHeaderGap) noexcept
     {
         return SpaceTokens { .paneGap = paneGap,
                              .splitHit = 10,
-                             .paneInset = paneInset,
+                             .paneInset = paneGap,
                              .scale = { 2, 4, 6, 8, 10, 12, 16, 20, 24, 32 },
                              .dragReserve = 40,
                              .revealEdge = 2,
-                             .toolbarChipPadding = 9 };
+                             .toolbarChipPadding = 9,
+                             .paneGapRows = paneGap,
+                             .paneHeaderGap = paneHeaderGap,
+                             .footerLeading = 14 };
     }
 
     inline constexpr MotionTokens NativeMotion { .fastMs = 100,
@@ -500,7 +570,8 @@ namespace detail
                                                  .travel = 8,
                                                  .spinnerMs = 1200,
                                                  .pulseMs = 700,
-                                                 .style = MotionStyle::Full };
+                                                 .style = MotionStyle::Full,
+                                                 .headerRevealMs = 500 };
 
     inline constexpr ElevationTokens NativeElevation {
         .levels = { ElevationLevel { .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
@@ -573,6 +644,30 @@ namespace detail
                                    .level = 0 };
     }
 
+    /// @param slot  The scheme slot to shade.
+    /// @param level The HSL lightness points to move it by; negative darkens.
+    /// @return A @c SchemeShade source.
+    constexpr ChromeColorSource schemeShade(SchemeSlot slot, int level) noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::SchemeShade,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = slot,
+                                   .alphaPercent = 100,
+                                   .level = level };
+    }
+
+    /// @return A @c Separator source: the kit's separator ink, by the ground's tone.
+    constexpr ChromeColorSource separator() noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Separator,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = 100,
+                                   .level = 0 };
+    }
+
     /// @param role The status hue.
     /// @return A @c StatusMark source at full opacity.
     constexpr ChromeColorSource statusMarkSource(StatusColorRole role) noexcept
@@ -637,6 +732,30 @@ namespace detail
         fill(4),    // ChipFill
         label(2),   // ChipText
         label(1),   // ChipTextStrong
+        // The gap is the chrome scheme's background 4 L points darker (mac-dark: #101216 under #1C1E24).
+        schemeShade(SchemeSlot::Background, -4),            // PaneGapFill
+        separator(),                                        // PaneCardBorder
+        ChromeColorSource { .kind = ColorSourceKind::Fixed, // PaneHeaderFill: the card shows through.
+                            .rgb = 0,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 0,
+                            .level = 0 },
+        label(1),    // PaneHeaderText
+        label(2),    // PaneHeaderTextDimmed
+        separator(), // PaneSplitLine
+        // The canvas's 28 % grabber and 8 % footer are not kit steps; the nearest ones are.
+        fill(1),  // PaneGrabber
+        fill(3),  // PaneFooterFill
+        label(1), // PaneFooterText
+    };
+
+    /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
+    inline constexpr DimTokens PaneDim { .darkPercent = 15, .lightPercent = 10 };
+
+    /// The native rows' Minimal extents: no header, a hairline gap, a narrower hit area, no inset or radius.
+    inline constexpr MinimalDensityTokens NativeMinimal {
+        .paneHeader = 0, .paneGap = 1, .paneGapRows = 1, .splitHit = 8, .paneInset = 0, .paneCardRadius = 0
     };
 
     /// The native rows' status inks, indexed by @c StatusColorRole: the status hues' mark inks, since every
@@ -671,7 +790,13 @@ namespace detail
                   .hostDot = 7,
                   .toolbarButton = 28,
                   .toolbarChip = 22,
-                  .flyoutSwatch = 30 },
+                  .flyoutSwatch = 30,
+                  .bareBand = 32,
+                  .grabber = 2,
+                  .grabberLength = 32,
+                  .paneHeaderAction = 22,
+                  .paneFooter = 34,
+                  .footerButton = 24 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -684,8 +809,15 @@ namespace detail
                    .tabClose = 8,
                    .badge = 7,
                    .hostChip = 12,
-                   .toolbarChip = 11 },
-        .type = { .caption = 10, .footnote = 11, .body = 13, .tab = 12, .title = 15 },
+                   .toolbarChip = 11,
+                   .grabber = 1 },
+        .type = { .caption = 10,
+                  .footnote = 11,
+                  .body = 13,
+                  .tab = 12,
+                  .title = 15,
+                  .paneHeader = 11,
+                  .paneHeaderWeight = 500 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Glass, .popover = Material::Glass },
@@ -696,10 +828,13 @@ namespace detail
                     .tabShape = TabShape::Pill,
                     .profileMenu = ProfileMenuAffordance::SecondaryClick,
                     .tabColors = TabColorSource::Roles,
-                    .activeTabWeight = ActiveTabWeight::Regular },
+                    .activeTabWeight = ActiveTabWeight::Regular,
+                    .paneActions = PaneActionsReveal::OnHover },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
+        .dim = PaneDim,
+        .minimal = NativeMinimal,
     };
 
     inline constexpr ChromeTokenRow FluentRow {
@@ -725,8 +860,14 @@ namespace detail
                   .hostDot = 7,
                   .toolbarButton = 32,
                   .toolbarChip = 22,
-                  .flyoutSwatch = 30 },
-        .space = nativeSpace(4, 4),
+                  .flyoutSwatch = 30,
+                  .bareBand = 28,
+                  .grabber = 2,
+                  .grabberLength = 32,
+                  .paneHeaderAction = 22,
+                  .paneFooter = 34,
+                  .footerButton = 24 },
+        .space = nativeSpace(4, 8),
         .radii = { .control = 4,
                    .popover = 8,
                    .menu = 8,
@@ -738,8 +879,15 @@ namespace detail
                    .tabClose = 8,
                    .badge = 7,
                    .hostChip = 12,
-                   .toolbarChip = 11 },
-        .type = { .caption = 12, .footnote = 12, .body = 14, .tab = 12, .title = 20 },
+                   .toolbarChip = 11,
+                   .grabber = 1 },
+        .type = { .caption = 12,
+                  .footnote = 12,
+                  .body = 14,
+                  .tab = 12,
+                  .title = 20,
+                  .paneHeader = 12,
+                  .paneHeaderWeight = 600 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Mica, .popover = Material::Solid },
@@ -750,10 +898,13 @@ namespace detail
                     .tabShape = TabShape::Flat,
                     .profileMenu = ProfileMenuAffordance::Caret,
                     .tabColors = TabColorSource::Palette,
-                    .activeTabWeight = ActiveTabWeight::Regular },
+                    .activeTabWeight = ActiveTabWeight::Regular,
+                    .paneActions = PaneActionsReveal::OnHover },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
+        .dim = PaneDim,
+        .minimal = NativeMinimal,
     };
 
     inline constexpr ChromeTokenRow LinuxRow {
@@ -779,8 +930,14 @@ namespace detail
                   .hostDot = 7,
                   .toolbarButton = 34,
                   .toolbarChip = 22,
-                  .flyoutSwatch = 30 },
-        .space = nativeSpace(6, 6),
+                  .flyoutSwatch = 30,
+                  .bareBand = 28,
+                  .grabber = 2,
+                  .grabberLength = 32,
+                  .paneHeaderAction = 22,
+                  .paneFooter = 34,
+                  .footerButton = 24 },
+        .space = nativeSpace(6, 8),
         .radii = { .control = 8,
                    .popover = 12,
                    .menu = 10,
@@ -792,8 +949,15 @@ namespace detail
                    .tabClose = 8,
                    .badge = 7,
                    .hostChip = 12,
-                   .toolbarChip = 11 },
-        .type = { .caption = 12, .footnote = 12.5, .body = 14, .tab = 13.5, .title = 15 },
+                   .toolbarChip = 11,
+                   .grabber = 1 },
+        .type = { .caption = 12,
+                  .footnote = 12.5,
+                  .body = 14,
+                  .tab = 13.5,
+                  .title = 15,
+                  .paneHeader = 12.5,
+                  .paneHeaderWeight = 600 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Solid, .popover = Material::Solid },
@@ -804,10 +968,13 @@ namespace detail
                     .tabShape = TabShape::Flat,
                     .profileMenu = ProfileMenuAffordance::Caret,
                     .tabColors = TabColorSource::Palette,
-                    .activeTabWeight = ActiveTabWeight::Regular },
+                    .activeTabWeight = ActiveTabWeight::Regular,
+                    .paneActions = PaneActionsReveal::OnHover },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
+        .dim = PaneDim,
+        .minimal = NativeMinimal,
     };
 
     inline constexpr ElevationLevel TerminalShadow {
@@ -837,14 +1004,23 @@ namespace detail
                   .hostDot = 1,
                   .toolbarButton = 2,
                   .toolbarChip = 1,
-                  .flyoutSwatch = 2 },
+                  .flyoutSwatch = 2,
+                  .bareBand = 1,
+                  .grabber = 0,
+                  .grabberLength = 0,
+                  .paneHeaderAction = 1,
+                  .paneFooter = 1,
+                  .footerButton = 1 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,
                    .scale = { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
                    .dragReserve = 4,
                    .revealEdge = 1,
-                   .toolbarChipPadding = 1 },
+                   .toolbarChipPadding = 1,
+                   .paneGapRows = 1,
+                   .paneHeaderGap = 1,
+                   .footerLeading = 1 },
         .radii = { .control = 0,
                    .popover = 0,
                    .menu = 0,
@@ -856,15 +1032,23 @@ namespace detail
                    .tabClose = 0,
                    .badge = 0,
                    .hostChip = 0,
-                   .toolbarChip = 0 },
-        .type = { .caption = 0, .footnote = 0, .body = 0, .tab = 0, .title = 0 },
+                   .toolbarChip = 0,
+                   .grabber = 0 },
+        .type = { .caption = 0,
+                  .footnote = 0,
+                  .body = 0,
+                  .tab = 0,
+                  .title = 0,
+                  .paneHeader = 0,
+                  .paneHeaderWeight = 400 },
         .motion = { .fastMs = 100,
                     .standardMs = 160,
                     .emphasizedMs = 220,
                     .travel = 0,
                     .spinnerMs = 1200,
                     .pulseMs = 700,
-                    .style = MotionStyle::Full },
+                    .style = MotionStyle::Full,
+                    .headerRevealMs = 500 },
         .elevation = { .levels = { ElevationLevel {
                                        .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
                                    TerminalShadow,
@@ -878,7 +1062,8 @@ namespace detail
                     .tabShape = TabShape::Flat,
                     .profileMenu = ProfileMenuAffordance::Caret,
                     .tabColors = TabColorSource::Roles,
-                    .activeTabWeight = ActiveTabWeight::Bold },
+                    .activeTabWeight = ActiveTabWeight::Bold,
+                    .paneActions = PaneActionsReveal::OnHoverOrFocus },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         .colors = { schemeColor(SchemeSlot::Bar),
@@ -899,12 +1084,30 @@ namespace detail
                     schemeColor(SchemeSlot::BarText),   // TabTextTinted (the row has no tint)
                     schemeColor(SchemeSlot::Bar),       // ChipFill
                     schemeColor(SchemeSlot::BarText),   // ChipText
-                    schemeColor(SchemeSlot::BarText) }, // ChipTextStrong
+                    schemeColor(SchemeSlot::BarText),   // ChipTextStrong
+                    // A pane is its own cells: the header is a bar row, the split a line in ANSI 8.
+                    schemeColor(SchemeSlot::Background), // PaneGapFill
+                    schemeColor(SchemeSlot::Background), // PaneCardBorder
+                    schemeColor(SchemeSlot::Bar),        // PaneHeaderFill
+                    // On the bar, as the status inks are: BarText, or black or white where it does not read.
+                    schemeOnBar(SchemeSlot::BarText),   // PaneHeaderText
+                    schemeOnBar(SchemeSlot::Secondary), // PaneHeaderTextDimmed
+                    schemeColor(SchemeSlot::Secondary), // PaneSplitLine
+                    schemeColor(SchemeSlot::Accent),    // PaneGrabber
+                    schemeColor(SchemeSlot::Bar),       // PaneFooterFill
+                    schemeOnBar(SchemeSlot::BarText) }, // PaneFooterText
         // The scheme's hues, each falling back to the bar's text where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),
                        schemeOnBar(SchemeSlot::Success),
                        schemeOnBar(SchemeSlot::Accent) },
+        .dim = PaneDim,
+        .minimal = { .paneHeader = 0,
+                     .paneGap = 1,
+                     .paneGapRows = 1,
+                     .splitHit = 1,
+                     .paneInset = 0,
+                     .paneCardRadius = 0 },
     };
 } // namespace detail
 
@@ -919,14 +1122,28 @@ inline constexpr std::array<ChromeTokenRow, detail::ChromeStyleCount> ChromeToke
 static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
               "Every ChromeStyle needs exactly one 1a token row.");
 
-/// Resolves a style's token row against the user's accessibility preferences.
+/// Resolves a style's token row against the chrome density and the user's accessibility preferences.
 /// @param row The chrome style whose row to take.
 /// @param preferences The accessibility choices to apply on top of it.
+/// @param density The density whose extents to take: @c Minimal copies the row's @c minimal sub-row over
+///                the pane extents, before the accessibility steps.
 /// @return The adjusted row.
-[[nodiscard]] constexpr ChromeTokenRow resolveChromeTokens(ChromeStyle row,
-                                                           AccessibilityPreferences preferences) noexcept
+[[nodiscard]] constexpr ChromeTokenRow resolveChromeTokens(
+    ChromeStyle row,
+    AccessibilityPreferences preferences,
+    ChromeDensity density = ChromeDensity::Comfortable) noexcept
 {
     auto tokens = ChromeTokenRows[static_cast<size_t>(row)];
+
+    if (density == ChromeDensity::Minimal)
+    {
+        tokens.size.paneHeader = tokens.minimal.paneHeader;
+        tokens.space.paneGap = tokens.minimal.paneGap;
+        tokens.space.paneGapRows = tokens.minimal.paneGapRows;
+        tokens.space.splitHit = tokens.minimal.splitHit;
+        tokens.space.paneInset = tokens.minimal.paneInset;
+        tokens.radii.paneCard = tokens.minimal.paneCardRadius;
+    }
 
     if (preferences.motion == MotionPreference::Reduced)
     {
@@ -1070,6 +1287,37 @@ inline constexpr std::array SelectionFallbacks {
     if (vtbackend::contrastRatio(color, bar) >= MinimumTextContrast)
         return color;
     return colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)];
+}
+
+/// The colour a @c SchemeOnBar source inks with: legibleOnBar(), and where even @c BarText does not read
+/// at 4.5:1 on @c Bar (one-dark's grey foreground on its black ANSI 0, solarized-light's on its cream),
+/// black or white, whichever reads better there -- so the bar's text is legible on every scheme.
+/// @param colors The scheme's chrome slots.
+/// @param hue    The slot to ink with.
+/// @return The hue, @c BarText, or black or white.
+[[nodiscard]] inline vtbackend::RGBColor inkOnBar(ChromeSchemeColors const& colors, SchemeSlot hue) noexcept
+{
+    auto const ink = legibleOnBar(colors, hue);
+    auto const bar = colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)];
+    if (vtbackend::contrastRatio(ink, bar) >= MinimumTextContrast)
+        return ink;
+    auto const black = vtbackend::RGBColor { 0, 0, 0 };
+    auto const white = vtbackend::RGBColor { 255, 255, 255 };
+    return vtbackend::contrastRatio(black, bar) >= vtbackend::contrastRatio(white, bar) ? black : white;
+}
+
+/// @p color moved by @p points HSL lightness points (out of 100), keeping its hue and saturation.
+///
+/// Where the move would leave the 0-100 range -- darkening a black, lightening a white -- it goes the
+/// other way instead, so the shade always stands off the colour it was taken from (the gap between two
+/// cards on a black scheme is a lighter line, not an invisible one).
+/// @param color  The colour to shade.
+/// @param points The lightness points to move it by; negative darkens.
+/// @return The shaded colour.
+[[nodiscard]] constexpr vtbackend::RGBColor shadeLightness(vtbackend::RGBColor color, int points) noexcept
+{
+    auto const target = detail::hslOf(color).lightness + (points / 100.0);
+    return shiftLightness(color, target < 0.0 || target > 1.0 ? -points : points);
 }
 
 } // namespace contour::config

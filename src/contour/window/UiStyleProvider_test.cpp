@@ -16,6 +16,7 @@
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
@@ -366,7 +367,6 @@ TEST_CASE("UiStyleProvider publishes the pane-dim, notice and font-scale tokens"
     auto const provider = contour::window::UiStyleProvider(rowOf(UiStyle::Native), font);
 
     CHECK(provider.paneDimColor().rgb() == QColor(Qt::black).rgb());
-    CHECK(provider.paneDimColor().alpha() == 153);
     CHECK(provider.dotGlyphColor().alpha() == 153);
     CHECK(provider.captionFont().pointSizeF() < font.pointSizeF());
     CHECK(provider.headlineFont().pointSizeF() > font.pointSizeF());
@@ -390,7 +390,6 @@ TEST_CASE("UiStyleProvider.onStatusColor picks the more legible of black and whi
         CHECK(provider.onStatusColor(danger) == QColor(Qt::white));
         CHECK(ratio(provider.onStatusColor(danger), provider.statusColor(danger)) >= 4.5);
     });
-    CHECK(provider.paneDimTextColor() == QColor(Qt::white));
 }
 
 TEST_CASE("chromeStyle names the status roles as properties in QML", "[contour][uistyle][qml]")
@@ -1090,3 +1089,314 @@ TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
     CHECK(terminal.property("chipCloseGlyph").toString() == QStringLiteral("]"));
     CHECK(terminal.property("hostDotGlyph").toString() == QStringLiteral("●"));
 }
+
+// {{{ Panes (Step 2)
+
+namespace
+{
+
+/// @return @p provider's resolution of pane colour role @p role on @p background.
+[[nodiscard]] QColor paneColorOn(contour::window::UiStyleProvider const& provider,
+                                 contour::config::ChromeColorRole role,
+                                 QColor const& background)
+{
+    return provider.colorOn(static_cast<int>(role), background);
+}
+
+/// The inputs of @p row in @p density, nothing else set.
+[[nodiscard]] contour::window::ChromeInputs densityInputs(contour::config::ChromeStyle row,
+                                                          contour::config::ChromeDensity density)
+{
+    auto inputs = contour::window::chromeInputsFor(row, QGuiApplication::font());
+    inputs.density = density;
+    return inputs;
+}
+
+} // namespace
+
+TEST_CASE("UiStyleProvider takes the density from its inputs", "[contour][uistyle]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+
+    auto const minimalInputs = densityInputs(ChromeStyle::MacOS, ChromeDensity::Minimal);
+    auto const comfortableInputs = densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable);
+    CHECK(minimalInputs != comfortableInputs);
+    CHECK(contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font()).density
+          == ChromeDensity::Comfortable);
+
+    auto const minimal = UiStyleProvider(minimalInputs);
+    CHECK(minimal.property("density").toString() == QStringLiteral("minimal"));
+    CHECK(tokenOf(minimal, "size", "paneHeader").toReal() == 0.0);
+    CHECK(tokenOf(minimal, "space", "paneGap").toReal() == 1.0);
+    CHECK(tokenOf(minimal, "space", "splitHit").toReal() == 8.0);
+    CHECK(tokenOf(minimal, "radii", "paneCard").toReal() == 0.0);
+
+    auto const comfortable = UiStyleProvider(comfortableInputs);
+    CHECK(comfortable.property("density").toString() == QStringLiteral("comfortable"));
+    CHECK(tokenOf(comfortable, "size", "paneHeader").toReal() == 22.0);
+}
+
+TEST_CASE("UiStyleProvider publishes the pane tokens", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::PaneHeaderAction;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "size", "bareBand").toReal() == 32.0);
+    CHECK(tokenOf(mac, "size", "grabber").toReal() == 2.0);
+    CHECK(tokenOf(mac, "size", "grabberLength").toReal() == 32.0);
+    CHECK(tokenOf(mac, "size", "paneHeaderAction").toReal() == 22.0);
+    CHECK(tokenOf(mac, "size", "paneFooter").toReal() == 34.0);
+    CHECK(tokenOf(mac, "size", "footerButton").toReal() == 24.0);
+    CHECK(tokenOf(mac, "space", "paneGapRows").toReal() == 6.0);
+    CHECK(tokenOf(mac, "space", "paneHeaderGap").toReal() == 6.0);
+    CHECK(tokenOf(mac, "space", "footerLeading").toReal() == 14.0);
+    CHECK(tokenOf(mac, "radii", "grabber").toReal() == 1.0);
+    CHECK(tokenOf(mac, "type", "paneHeader").value<QFont>().pixelSize() == 11);
+    CHECK(tokenOf(mac, "type", "paneHeader").value<QFont>().weight() == QFont::Medium);
+    CHECK(tokenOf(mac, "type", "paneHeaderWeight").toInt() == 500);
+    CHECK(tokenOf(mac, "motion", "headerReveal").toInt() == 500);
+    CHECK(tokenOf(mac, "layout", "paneActions").toInt() == tokenOf(mac, "layout", "onHover").toInt());
+    CHECK(tokenOf(mac, "layout", "onHover").toInt() != tokenOf(mac, "layout", "onHoverOrFocus").toInt());
+
+    auto const glyphs = mac.property("paneActionGlyphs").toStringList();
+    auto const glyphCount = static_cast<size_t>(glyphs.size());
+    REQUIRE(glyphCount == contour::config::PaneHeaderActionCount);
+    CHECK(glyphs[static_cast<qsizetype>(PaneHeaderAction::Zoom)] == QStringLiteral("⤢"));
+    CHECK(mac.property("splitLineGlyphs").toStringList() == QStringList { QString(), QString() });
+    CHECK(mac.property("restartGlyph").toString() == QStringLiteral("↩"));
+
+    // The accessible names come from the header actions' own table, in its order.
+    auto const names = mac.property("paneHeaderActionNames").toStringList();
+    auto const nameCount = static_cast<size_t>(names.size());
+    REQUIRE(nameCount == contour::window::PaneHeaderActions.size());
+    for (auto const& row: contour::window::PaneHeaderActions)
+        CHECK(names[static_cast<qsizetype>(row.action)] == QString::fromUtf8(row.accessibleName));
+
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    // A vertical gap is one cell's height on the Terminal row, its horizontal twin one cell's width.
+    CHECK(tokenOf(terminal, "space", "paneGapRows").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "space", "paneGap").toReal() == Catch::Approx(terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "size", "paneFooter").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "size", "grabber").toReal() == 0.0);
+    CHECK(tokenOf(terminal, "layout", "paneActions").toInt()
+          == tokenOf(terminal, "layout", "onHoverOrFocus").toInt());
+    CHECK(terminal.property("paneActionGlyphs").toStringList()[static_cast<qsizetype>(PaneHeaderAction::Zoom)]
+          == QStringLiteral("Z"));
+    CHECK(terminal.property("splitLineGlyphs").toStringList()
+          == QStringList { QStringLiteral("│"), QStringLiteral("─") });
+}
+
+TEST_CASE("chromeStyle names the pane colour roles and the badge kinds in QML", "[contour][uistyle][qml]")
+{
+    using contour::config::ChromeColorRole;
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+    auto const evaluate = [&engine](char const* expression) {
+        auto qmlExpression = QQmlExpression(engine.rootContext(), nullptr, QString::fromLatin1(expression));
+        auto const value = qmlExpression.evaluate();
+        REQUIRE(!qmlExpression.hasError());
+        return value;
+    };
+
+    CHECK(evaluate("chromeStyle.roles.paneGapFill").toInt()
+          == static_cast<int>(ChromeColorRole::PaneGapFill));
+    CHECK(evaluate("chromeStyle.roles.paneHeaderText").toInt()
+          == static_cast<int>(ChromeColorRole::PaneHeaderText));
+    CHECK(evaluate("chromeStyle.roles.paneFooterText").toInt()
+          == static_cast<int>(ChromeColorRole::PaneFooterText));
+    CHECK(evaluate("chromeStyle.badgeKinds.working").toInt()
+          == static_cast<int>(contour::window::TabBadgeKind::Working));
+
+    // One name per pane role and per badge kind, so a new enumerator needs a QML name too.
+    auto const propertiesOf = [](QMetaObject const& meta) {
+        return static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
+    };
+    CHECK(propertiesOf(contour::window::ChromePaneRoleNames::staticMetaObject)
+          == contour::config::ChromeColorRoleCount - static_cast<size_t>(ChromeColorRole::PaneGapFill));
+    CHECK(propertiesOf(contour::window::ChromeBadgeKindNames::staticMetaObject)
+          == contour::window::TabBadgeKindCount);
+}
+
+TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uistyle]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+
+    auto const comfortable = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable));
+    auto const header = comfortable.paneHeader(0, 1, 1, 2, 400, 300);
+    CHECK(header.value("content").toString() == QStringLiteral("nameAndCwd"));
+    CHECK(header.value("actions").toString() == QStringLiteral("shown"));
+    CHECK(header.value("placement").toString() == QStringLiteral("inline"));
+    CHECK(header.value("emphasis").toString() == QStringLiteral("primary"));
+    // A lone pane has no header, and a pane too short for the header and a row of cells neither.
+    CHECK(comfortable.paneHeader(0, 1, 1, 1, 400, 300).value("content").toString()
+          == QStringLiteral("hidden"));
+    CHECK(comfortable.paneHeader(0, 1, 1, 2, 400, 22).value("content").toString()
+          == QStringLiteral("hidden"));
+    CHECK(comfortable.paneHeader(-1, 0, 0, 2, 400, 300).isEmpty());
+    CHECK(comfortable.paneHeader(0, 2, 0, 2, 400, 300).isEmpty());
+    CHECK(comfortable.paneHeader(0, 0, 3, 2, 400, 300).isEmpty());
+
+    auto const minimal = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Minimal));
+    CHECK(minimal.paneHeader(1, 0, 0, 2, 400, 300).value("placement").toString()
+          == QStringLiteral("overlay"));
+    CHECK(minimal.paneHeader(0, 0, 0, 2, 400, 300).value("content").toString() == QStringLiteral("hidden"));
+
+    // The Terminal row shows the actions on the focused pane too.
+    auto const terminal = UiStyleProvider(densityInputs(ChromeStyle::Terminal, ChromeDensity::Comfortable));
+    CHECK(terminal.paneHeader(0, 0, 1, 2, 400, 300).value("actions").toString() == QStringLiteral("shown"));
+    CHECK(comfortable.paneHeader(0, 0, 1, 2, 400, 300).value("actions").toString()
+          == QStringLiteral("hidden"));
+
+    CHECK(comfortable.paneHeaderName(QStringLiteral("vim"), QStringLiteral("~/src"))
+          == QStringLiteral("vim"));
+    CHECK(comfortable.paneHeaderName(QString(), QStringLiteral("~/src")) == QStringLiteral("~/src"));
+}
+
+TEST_CASE("UiStyleProvider: colorOn picks the label by the pane's own background", "[contour][uistyle]")
+{
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::platform::atOpacity;
+    using contour::window::UiStyleProvider;
+    auto const mac =
+        UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font()));
+
+    withWindowColor(QColor(DarkChrome), [&] {
+        CHECK(paneColorOn(mac, ChromeColorRole::PaneHeaderText, QColor(0xFAFAF8))
+              == atOpacity(QColor(Qt::black), 88));
+        CHECK(paneColorOn(mac, ChromeColorRole::PaneHeaderText, QColor(0x1C1E24))
+              == atOpacity(QColor(Qt::white), 92));
+        CHECK(paneColorOn(mac, ChromeColorRole::PaneCardBorder, QColor(0xFAFAF8))
+              == atOpacity(QColor(Qt::black), 10));
+        CHECK(paneColorOn(mac, ChromeColorRole::PaneCardBorder, QColor(0x1C1E24))
+              == atOpacity(QColor(Qt::white), 10));
+    });
+    CHECK(mac.colorOn(-1, QColor(Qt::black)).alpha() == 0);
+    CHECK(mac.colorOn(static_cast<int>(contour::config::ChromeColorRoleCount), QColor(Qt::black)).alpha()
+          == 0);
+
+    // The gap is the chrome scheme's background shaded: a SchemeShade ignores the pane's background.
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font());
+    inputs.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Background)] =
+        vtbackend::RGBColor(0x1C1E24);
+    auto const shaded = UiStyleProvider(inputs);
+    auto const gap = paneColorOn(shaded, ChromeColorRole::PaneGapFill, QColor(Qt::white));
+    CHECK(gap
+          == contour::platform::toQColor(contour::config::shadeLightness(vtbackend::RGBColor(0x1C1E24), -4)));
+    CHECK(tokenOf(shaded, "colors", "paneGapFill").value<QColor>() == gap);
+}
+
+TEST_CASE("UiStyleProvider: the pane text reads at 4.5:1 on every row, appearance and bundled scheme",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto const background = contour::platform::toQColor(palette.defaultBackground);
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+        {
+            CAPTURE(index);
+            auto inputs =
+                contour::window::chromeInputsFor(static_cast<ChromeStyle>(index), QGuiApplication::font());
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            auto const on = [&](ChromeColorRole role, QColor const& ground) {
+                return over(paneColorOn(provider, role, background), ground);
+            };
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    auto const header = on(ChromeColorRole::PaneHeaderFill, background);
+                    CHECK(contrastOf(on(ChromeColorRole::PaneHeaderText, header), header) >= 4.5);
+                    CHECK(contrastOf(on(ChromeColorRole::PaneHeaderTextDimmed, header), header) >= 4.5);
+                    auto const footer = on(ChromeColorRole::PaneFooterFill, background);
+                    CHECK(contrastOf(on(ChromeColorRole::PaneFooterText, footer), footer) >= 4.5);
+                });
+        }
+    }
+}
+
+TEST_CASE("UiStyleProvider: the pane dim is the kit's token", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::ContrastPreference;
+    using contour::window::UiStyleProvider;
+    auto const mac =
+        UiStyleProvider(contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font()));
+
+    withWindowColor(QColor(DarkChrome), [&] {
+        CHECK(mac.paneDimColor().rgb() == QColor(Qt::black).rgb());
+        CHECK(mac.paneDimColor().alphaF() == Catch::Approx(0.15).margin(0.005));
+    });
+    withWindowColor(QColor(LightChrome),
+                    [&] { CHECK(mac.paneDimColor().alphaF() == Catch::Approx(0.10).margin(0.005)); });
+
+    auto inputs = contour::window::chromeInputsFor(ChromeStyle::MacOS, QGuiApplication::font());
+    inputs.accessibility.contrast = ContrastPreference::Increased;
+    auto const increased = UiStyleProvider(inputs);
+    for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+        withWindowColor(
+            window, [&] { CHECK(increased.paneDimColor().alphaF() == Catch::Approx(0.05).margin(0.005)); });
+
+    // The dim follows the palette, so it notifies with it.
+    auto const& meta = UiStyleProvider::staticMetaObject;
+    auto const property = meta.property(meta.indexOfProperty("paneDimColor"));
+    REQUIRE(property.hasNotifySignal());
+    CHECK(property.notifySignal().name() == QByteArrayLiteral("paletteRevisionChanged"));
+    auto dark = QColor();
+    auto light = QColor();
+    withWindowColor(QColor(DarkChrome), [&] { dark = mac.property("paneDimColor").value<QColor>(); });
+    withWindowColor(QColor(LightChrome), [&] { light = mac.property("paneDimColor").value<QColor>(); });
+    CHECK(dark != light);
+}
+
+TEST_CASE("UiStyleProvider: unfocusedDim floors Minimal and caps Increased Contrast", "[contour][uistyle]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    using contour::config::ContrastPreference;
+    using contour::window::UiStyleProvider;
+
+    auto const comfortable = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable));
+    auto const minimal = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Minimal));
+    withWindowColor(QColor(DarkChrome), [&] {
+        CHECK(comfortable.unfocusedDim(0) == 0.0);
+        CHECK(comfortable.unfocusedDim(0.3) == Catch::Approx(0.3));
+        CHECK(minimal.unfocusedDim(0) == Catch::Approx(0.15));
+        CHECK(minimal.unfocusedDim(0.3) == Catch::Approx(0.3));
+    });
+    withWindowColor(QColor(LightChrome), [&] { CHECK(minimal.unfocusedDim(0) == Catch::Approx(0.10)); });
+
+    for (auto const density: { ChromeDensity::Comfortable, ChromeDensity::Minimal })
+    {
+        CAPTURE(static_cast<int>(density));
+        auto inputs = densityInputs(ChromeStyle::MacOS, density);
+        inputs.accessibility.contrast = ContrastPreference::Increased;
+        auto const increased = UiStyleProvider(inputs);
+        CHECK(increased.unfocusedDim(0.3) == Catch::Approx(0.05));
+    }
+}
+
+TEST_CASE("UiStyleProvider: hairline is one device pixel", "[contour][uistyle]")
+{
+    auto const provider = contour::window::UiStyleProvider(rowOf(UiStyle::Native), QGuiApplication::font());
+    CHECK(provider.hairline(2) == 0.5);
+    CHECK(provider.hairline(1) == 1.0);
+    CHECK(provider.hairline(0) == 1.0);
+}
+
+// }}}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ConfigEnumInfo.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 
@@ -219,6 +220,12 @@ struct UiStyleTokens
     std::string_view chipCloseGlyph; ///< Closes a toolbar or host chip; empty where the chip is a shape.
     std::string_view hostDotGlyph;   ///< The host chip's state dot; empty where it is a vector circle.
 
+    /// A pane header's action buttons, indexed by @c PaneHeaderAction.
+    std::array<std::string_view, PaneHeaderActionCount> paneActionGlyphs;
+    /// The line a split is drawn with, side by side then stacked; empty where the gap is the line.
+    std::array<std::string_view, 2> splitLineGlyphs;
+    std::string_view restartGlyph; ///< Marks the exited footer's Restart button.
+
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).
     std::string_view newTabGlyph;  ///< The "new tab" button.
@@ -314,7 +321,6 @@ static_assert(ProgressStatusRoles.size() == static_cast<size_t>(vtbackend::Progr
 /// literal in a QML file.
 namespace ChromeTokens
 {
-    inline constexpr int PaneDimPercent = 60;       ///< Opacity of the black scrim over a dimmed pane.
     inline constexpr int DotGlyphPercent = 60;      ///< Opacity of the glyph drawn on a traffic-light dot.
     inline constexpr int CaptionFontPercent = 85;   ///< Caption text size relative to the chrome font.
     inline constexpr int HeadlineFontPercent = 150; ///< Overlay headline size relative to the chrome font.
@@ -399,6 +405,10 @@ namespace detail
         .chipOpenGlyph = "",
         .chipCloseGlyph = "",
         .hostDotGlyph = "",
+        .paneActionGlyphs = { "⊞", "⊟", "⤢", "✕" },
+        // No line: the native rows split with the gap between two cards.
+        .splitLineGlyphs = { "", "" },
+        .restartGlyph = "↩",
         .closeGlyph = "✕",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",
@@ -472,6 +482,10 @@ namespace detail
         .chipOpenGlyph = "[",
         .chipCloseGlyph = "]",
         .hostDotGlyph = "●",
+        // The header row's buttons as the tui board sets them: Z for zoom, the light × for close.
+        .paneActionGlyphs = { "⊞", "⊟", "Z", "×" },
+        .splitLineGlyphs = { "│", "─" },
+        .restartGlyph = "↩",
         .closeGlyph = "×",
         .zoomGlyph = "Z",
         .newTabGlyph = "+",

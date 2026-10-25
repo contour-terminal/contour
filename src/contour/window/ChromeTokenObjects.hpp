@@ -8,6 +8,7 @@
 /// pixels and the QML never learns which style is active.
 
 #include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QObject>
 #include <QtGui/QColor>
@@ -58,6 +59,12 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal toolbarButton READ toolbarButton CONSTANT)
     Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
     Q_PROPERTY(qreal flyoutSwatch READ flyoutSwatch CONSTANT)
+    Q_PROPERTY(qreal bareBand READ bareBand CONSTANT)
+    Q_PROPERTY(qreal grabber READ grabber CONSTANT)
+    Q_PROPERTY(qreal grabberLength READ grabberLength CONSTANT)
+    Q_PROPERTY(qreal paneHeaderAction READ paneHeaderAction CONSTANT)
+    Q_PROPERTY(qreal paneFooter READ paneFooter CONSTANT)
+    Q_PROPERTY(qreal footerButton READ footerButton CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -121,12 +128,29 @@ class ChromeSizeTokens: public QObject
     /// @return The edge of a tab colour flyout swatch in logical pixels; a width, so the swatch stays square.
     [[nodiscard]] qreal flyoutSwatch() const noexcept { return _tokens.flyoutSwatch * _units.horizontal; }
 
+    /// @return The height of a band with neither tabs nor a title, in logical pixels.
+    [[nodiscard]] qreal bareBand() const noexcept { return _tokens.bareBand * _units.vertical; }
+    /// @return The split grabber's thickness in logical pixels, across a side-by-side split's divider.
+    [[nodiscard]] qreal grabber() const noexcept { return _tokens.grabber * _units.horizontal; }
+    /// @return The split grabber's length in logical pixels, along a side-by-side split's divider.
+    [[nodiscard]] qreal grabberLength() const noexcept { return _tokens.grabberLength * _units.vertical; }
+    /// @return The hit extent of a pane header's action button in logical pixels.
+    [[nodiscard]] qreal paneHeaderAction() const noexcept
+    {
+        return _tokens.paneHeaderAction * _units.horizontal;
+    }
+    /// @return The exited footer's height in logical pixels.
+    [[nodiscard]] qreal paneFooter() const noexcept { return _tokens.paneFooter * _units.vertical; }
+    /// @return The height of an exited footer's button in logical pixels.
+    [[nodiscard]] qreal footerButton() const noexcept { return _tokens.footerButton * _units.vertical; }
+
   private:
     config::SizeTokens _tokens {};
     ChromeUnits _units {};
 };
 
-/// Gaps and the spacing scale, `chromeStyle.space`. Every value but @c revealEdge is horizontal.
+/// Gaps and the spacing scale, `chromeStyle.space`. Every value but @c revealEdge and @c paneGapRows is
+/// horizontal.
 class ChromeSpaceTokens: public QObject
 {
     Q_OBJECT
@@ -146,6 +170,9 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal dragReserve READ dragReserve CONSTANT)
     Q_PROPERTY(qreal revealEdge READ revealEdge CONSTANT)
     Q_PROPERTY(qreal toolbarChipPadding READ toolbarChipPadding CONSTANT)
+    Q_PROPERTY(qreal paneGapRows READ paneGapRows CONSTANT)
+    Q_PROPERTY(qreal paneHeaderGap READ paneHeaderGap CONSTANT)
+    Q_PROPERTY(qreal footerLeading READ footerLeading CONSTANT)
 
   public:
     /// @param tokens The resolved space group.
@@ -157,7 +184,7 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal paneGap() const noexcept { return _tokens.paneGap * _units.horizontal; }
     /// @return The split divider's hit target in logical pixels.
     [[nodiscard]] qreal splitHit() const noexcept { return _tokens.splitHit * _units.horizontal; }
-    /// @return The pane content inset in logical pixels.
+    /// @return The pane cards' inset from the content edge in logical pixels.
     [[nodiscard]] qreal paneInset() const noexcept { return _tokens.paneInset * _units.horizontal; }
 
     /// @param index Zero-based position in the scale: 0 is s1.
@@ -186,6 +213,13 @@ class ChromeSpaceTokens: public QObject
         return _tokens.toolbarChipPadding * _units.horizontal;
     }
 
+    /// @return The gap between stacked panes in logical pixels (vertical: one cell's height on Terminal).
+    [[nodiscard]] qreal paneGapRows() const noexcept { return _tokens.paneGapRows * _units.vertical; }
+    /// @return The gap between a pane header's items in logical pixels.
+    [[nodiscard]] qreal paneHeaderGap() const noexcept { return _tokens.paneHeaderGap * _units.horizontal; }
+    /// @return The exited footer's leading padding in logical pixels.
+    [[nodiscard]] qreal footerLeading() const noexcept { return _tokens.footerLeading * _units.horizontal; }
+
   private:
     config::SpaceTokens _tokens {};
     ChromeUnits _units {};
@@ -207,6 +241,7 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal badge READ badge CONSTANT)
     Q_PROPERTY(qreal hostChip READ hostChip CONSTANT)
     Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
+    Q_PROPERTY(qreal grabber READ grabber CONSTANT)
 
   public:
     /// @param tokens The resolved radius group.
@@ -238,6 +273,8 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal hostChip() const noexcept { return _tokens.hostChip * _units.horizontal; }
     /// @return The radius of a toolbar chip.
     [[nodiscard]] qreal toolbarChip() const noexcept { return _tokens.toolbarChip * _units.horizontal; }
+    /// @return The radius of the split grabber.
+    [[nodiscard]] qreal grabber() const noexcept { return _tokens.grabber * _units.horizontal; }
 
   private:
     config::RadiusTokens _tokens {};
@@ -253,6 +290,8 @@ class ChromeTypeTokens: public QObject
     Q_PROPERTY(QFont body READ body CONSTANT)
     Q_PROPERTY(QFont tab READ tab CONSTANT)
     Q_PROPERTY(QFont title READ title CONSTANT)
+    Q_PROPERTY(QFont paneHeader READ paneHeader CONSTANT)
+    Q_PROPERTY(int paneHeaderWeight READ paneHeaderWeight CONSTANT)
 
   public:
     /// @param tokens The resolved type group; a size of 0 keeps @p font's own.
@@ -270,6 +309,10 @@ class ChromeTypeTokens: public QObject
     [[nodiscard]] QFont const& tab() const noexcept { return _tab; }
     /// @return The title font.
     [[nodiscard]] QFont const& title() const noexcept { return _title; }
+    /// @return The pane header font, at the row's header weight.
+    [[nodiscard]] QFont const& paneHeader() const noexcept { return _paneHeader; }
+    /// @return The pane header's weight on the CSS 100-900 scale.
+    [[nodiscard]] int paneHeaderWeight() const noexcept { return _paneHeaderWeight; }
 
   private:
     QFont _caption {};
@@ -277,6 +320,8 @@ class ChromeTypeTokens: public QObject
     QFont _body {};
     QFont _tab {};
     QFont _title {};
+    QFont _paneHeader {};
+    int _paneHeaderWeight = 0;
 };
 
 /// Animation durations and travel, `chromeStyle.motion`.
@@ -295,6 +340,7 @@ class ChromeMotionTokens: public QObject
     // of truth as a config::MotionStyle; QML would otherwise compare it to `full` at every use.
     Q_PROPERTY(bool animates READ animates CONSTANT)
     Q_PROPERTY(int crossFade READ crossFade CONSTANT)
+    Q_PROPERTY(int headerReveal READ headerReveal CONSTANT)
 
   public:
     /// @param tokens The resolved motion group.
@@ -316,6 +362,8 @@ class ChromeMotionTokens: public QObject
     [[nodiscard]] int pulse() const noexcept { return _tokens.pulseMs; }
     /// @return How the chrome animates, a config::MotionStyle as its underlying value.
     [[nodiscard]] int style() const noexcept { return static_cast<int>(_tokens.style); }
+    /// @return How long the reveal modifier is held before Minimal's headers show, in milliseconds.
+    [[nodiscard]] int headerReveal() const noexcept { return _tokens.headerRevealMs; }
 
     /// @return The QML names of config::MotionStyle's enumerators.
     [[nodiscard]] static constexpr int full() noexcept { return static_cast<int>(config::MotionStyle::Full); }
@@ -514,6 +562,9 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int tabColors READ tabColors CONSTANT)
     Q_PROPERTY(int palette READ palette CONSTANT)
     Q_PROPERTY(int roles READ roles CONSTANT)
+    Q_PROPERTY(int paneActions READ paneActions CONSTANT)
+    Q_PROPERTY(int onHover READ onHover CONSTANT)
+    Q_PROPERTY(int onHoverOrFocus READ onHoverOrFocus CONSTANT)
 
   public:
     /// @param tokens The resolved layout group.
@@ -565,6 +616,18 @@ class ChromeLayoutTokens: public QObject
         return static_cast<int>(config::TabColorSource::Roles);
     }
 
+    /// @return When a pane header shows its actions, a config::PaneActionsReveal as its underlying value.
+    [[nodiscard]] int paneActions() const noexcept { return static_cast<int>(_tokens.paneActions); }
+    /// @return The QML names of config::PaneActionsReveal's enumerators.
+    [[nodiscard]] static constexpr int onHover() noexcept
+    {
+        return static_cast<int>(config::PaneActionsReveal::OnHover);
+    }
+    [[nodiscard]] static constexpr int onHoverOrFocus() noexcept
+    {
+        return static_cast<int>(config::PaneActionsReveal::OnHoverOrFocus);
+    }
+
   private:
     config::LayoutTokens _tokens {};
 };
@@ -595,16 +658,30 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor chipFill READ chipFill NOTIFY changed)
     Q_PROPERTY(QColor chipText READ chipText NOTIFY changed)
     Q_PROPERTY(QColor chipTextStrong READ chipTextStrong NOTIFY changed)
+    Q_PROPERTY(QColor paneGapFill READ paneGapFill NOTIFY changed)
+    Q_PROPERTY(QColor paneCardBorder READ paneCardBorder NOTIFY changed)
+    Q_PROPERTY(QColor paneHeaderFill READ paneHeaderFill NOTIFY changed)
+    Q_PROPERTY(QColor paneHeaderText READ paneHeaderText NOTIFY changed)
+    Q_PROPERTY(QColor paneHeaderTextDimmed READ paneHeaderTextDimmed NOTIFY changed)
+    Q_PROPERTY(QColor paneSplitLine READ paneSplitLine NOTIFY changed)
+    Q_PROPERTY(QColor paneGrabber READ paneGrabber NOTIFY changed)
+    Q_PROPERTY(QColor paneFooterFill READ paneFooterFill NOTIFY changed)
+    Q_PROPERTY(QColor paneFooterText READ paneFooterText NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
     using Sources = std::array<config::ChromeColorSource, config::ChromeColorRoleCount>;
 
-    /// @param sources  The row's colour sources.
-    /// @param scheme   The terminal scheme a @c Scheme source reads.
-    /// @param provider The provider a @c Status source asks, whose palette changes this re-announces.
-    ///                 Borrowed; it is also this object's Qt parent.
-    ChromeColorTokens(Sources sources, config::ChromeSchemeColors scheme, UiStyleProvider& provider);
+    /// @param sources          The row's colour sources.
+    /// @param scheme           The terminal scheme a @c Scheme source reads.
+    /// @param separatorPercent The separator ink's opacity a @c Separator source takes
+    ///                         (@c contrast.separatorPercent).
+    /// @param provider         The provider a @c Status source asks, whose palette changes this re-announces.
+    ///                         Borrowed; it is also this object's Qt parent.
+    ChromeColorTokens(Sources sources,
+                      config::ChromeSchemeColors scheme,
+                      int separatorPercent,
+                      UiStyleProvider& provider);
 
     /// @param role The role to resolve.
     /// @return The role's colour as the application palette paints it now.
@@ -616,7 +693,8 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor resolve(config::ChromeColorSource const& source) const;
 
     /// Resolves @p source as it reads on a chrome of colour scheme @p chrome: the kit's @c Fill,
-    /// @c Label and @c Surface sources pick their light or dark half by it, every other kind ignores it.
+    /// @c Label, @c Surface and @c Separator sources pick their light or dark half by it, every other kind
+    /// ignores it.
     /// @param source The source.
     /// @param chrome Whether the ground it sits on is light or dark.
     /// @return Its colour.
@@ -644,6 +722,18 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor chipFill() const { return color(config::ChromeColorRole::ChipFill); }
     [[nodiscard]] QColor chipText() const { return color(config::ChromeColorRole::ChipText); }
     [[nodiscard]] QColor chipTextStrong() const { return color(config::ChromeColorRole::ChipTextStrong); }
+    [[nodiscard]] QColor paneGapFill() const { return color(config::ChromeColorRole::PaneGapFill); }
+    [[nodiscard]] QColor paneCardBorder() const { return color(config::ChromeColorRole::PaneCardBorder); }
+    [[nodiscard]] QColor paneHeaderFill() const { return color(config::ChromeColorRole::PaneHeaderFill); }
+    [[nodiscard]] QColor paneHeaderText() const { return color(config::ChromeColorRole::PaneHeaderText); }
+    [[nodiscard]] QColor paneHeaderTextDimmed() const
+    {
+        return color(config::ChromeColorRole::PaneHeaderTextDimmed);
+    }
+    [[nodiscard]] QColor paneSplitLine() const { return color(config::ChromeColorRole::PaneSplitLine); }
+    [[nodiscard]] QColor paneGrabber() const { return color(config::ChromeColorRole::PaneGrabber); }
+    [[nodiscard]] QColor paneFooterFill() const { return color(config::ChromeColorRole::PaneFooterFill); }
+    [[nodiscard]] QColor paneFooterText() const { return color(config::ChromeColorRole::PaneFooterText); }
 
   signals:
     /// Every role may have changed colour.
@@ -652,7 +742,101 @@ class ChromeColorTokens: public QObject
   private:
     Sources _sources {};
     config::ChromeSchemeColors _scheme {};
+    int _separatorPercent = 0;
     UiStyleProvider const& _provider;
+};
+
+/// The QML names of the pane colour roles, `chromeStyle.roles`, for UiStyleProvider::colorOn().
+///
+/// Properties rather than an exported enum: a Q_ENUM is not reachable through a context-property instance
+/// (see UiStyleProvider::statusDanger). One property per role from @c PaneGapFill on.
+class ChromePaneRoleNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int paneGapFill READ paneGapFill CONSTANT)
+    Q_PROPERTY(int paneCardBorder READ paneCardBorder CONSTANT)
+    Q_PROPERTY(int paneHeaderFill READ paneHeaderFill CONSTANT)
+    Q_PROPERTY(int paneHeaderText READ paneHeaderText CONSTANT)
+    Q_PROPERTY(int paneHeaderTextDimmed READ paneHeaderTextDimmed CONSTANT)
+    Q_PROPERTY(int paneSplitLine READ paneSplitLine CONSTANT)
+    Q_PROPERTY(int paneGrabber READ paneGrabber CONSTANT)
+    Q_PROPERTY(int paneFooterFill READ paneFooterFill CONSTANT)
+    Q_PROPERTY(int paneFooterText READ paneFooterText CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromePaneRoleNames(QObject* parent);
+
+    /// @return Each role's config::ChromeColorRole as its underlying value.
+    [[nodiscard]] static constexpr int paneGapFill() noexcept
+    {
+        return of(config::ChromeColorRole::PaneGapFill);
+    }
+    [[nodiscard]] static constexpr int paneCardBorder() noexcept
+    {
+        return of(config::ChromeColorRole::PaneCardBorder);
+    }
+    [[nodiscard]] static constexpr int paneHeaderFill() noexcept
+    {
+        return of(config::ChromeColorRole::PaneHeaderFill);
+    }
+    [[nodiscard]] static constexpr int paneHeaderText() noexcept
+    {
+        return of(config::ChromeColorRole::PaneHeaderText);
+    }
+    [[nodiscard]] static constexpr int paneHeaderTextDimmed() noexcept
+    {
+        return of(config::ChromeColorRole::PaneHeaderTextDimmed);
+    }
+    [[nodiscard]] static constexpr int paneSplitLine() noexcept
+    {
+        return of(config::ChromeColorRole::PaneSplitLine);
+    }
+    [[nodiscard]] static constexpr int paneGrabber() noexcept
+    {
+        return of(config::ChromeColorRole::PaneGrabber);
+    }
+    [[nodiscard]] static constexpr int paneFooterFill() noexcept
+    {
+        return of(config::ChromeColorRole::PaneFooterFill);
+    }
+    [[nodiscard]] static constexpr int paneFooterText() noexcept
+    {
+        return of(config::ChromeColorRole::PaneFooterText);
+    }
+
+  private:
+    [[nodiscard]] static constexpr int of(config::ChromeColorRole role) noexcept
+    {
+        return static_cast<int>(role);
+    }
+};
+
+/// The QML names of the tab badge kinds, `chromeStyle.badgeKinds`, for UiStyleProvider::badgeLook().
+class ChromeBadgeKindNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int none READ none CONSTANT)
+    Q_PROPERTY(int output READ output CONSTANT)
+    Q_PROPERTY(int done READ done CONSTANT)
+    Q_PROPERTY(int working READ working CONSTANT)
+    Q_PROPERTY(int error READ error CONSTANT)
+    Q_PROPERTY(int blocked READ blocked CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromeBadgeKindNames(QObject* parent);
+
+    /// @return Each kind's window::TabBadgeKind as its underlying value.
+    [[nodiscard]] static constexpr int none() noexcept { return of(TabBadgeKind::None); }
+    [[nodiscard]] static constexpr int output() noexcept { return of(TabBadgeKind::Output); }
+    [[nodiscard]] static constexpr int done() noexcept { return of(TabBadgeKind::Done); }
+    [[nodiscard]] static constexpr int working() noexcept { return of(TabBadgeKind::Working); }
+    [[nodiscard]] static constexpr int error() noexcept { return of(TabBadgeKind::Error); }
+    [[nodiscard]] static constexpr int blocked() noexcept { return of(TabBadgeKind::Blocked); }
+
+  private:
+    [[nodiscard]] static constexpr int of(TabBadgeKind kind) noexcept { return static_cast<int>(kind); }
 };
 
 } // namespace contour::window
