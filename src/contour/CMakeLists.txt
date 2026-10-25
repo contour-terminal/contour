@@ -283,6 +283,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsWindowRules.hpp
         window/NewDefaultsNotice.hpp
         window/UiStyleProvider.hpp
+        window/WindowActivation.hpp
         window/WindowControlStyleProvider.hpp
         session/SessionInput.hpp
         session/FontControl.hpp

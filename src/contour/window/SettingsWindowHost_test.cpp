@@ -9,6 +9,7 @@
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/SettingsFixtures.hpp>
+#include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/UiStyleProvider.hpp>
@@ -33,6 +34,7 @@
 #include <string_view>
 #include <vector>
 
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 
 using namespace contour;
@@ -88,6 +90,44 @@ struct HostFixture: ControllerFixture
         return *item;
     }
 
+    /// Opens a new profile draft and edits its first scalar field to a value it did not hold.
+    /// @return The key of the edited field.
+    [[nodiscard]] QString draftAProfileField()
+    {
+        auto* newProfile = page().findChild<QObject*>("newProfileButton");
+        REQUIRE(newProfile != nullptr);
+        QMetaObject::invokeMethod(newProfile, "clicked");
+        incubation.settle();
+
+        for (auto const& raw: controller->profileFields())
+        {
+            auto const row = raw.toMap();
+            auto const type = row.value("type").toString();
+            auto value = QVariant {};
+            if (type == "string")
+                value = row.value("value").toString() + QStringLiteral("x");
+            else if (type == "int")
+                value = row.value("value").toInt() + 1;
+            else
+                continue;
+            auto const key = row.value("key").toString();
+            controller->setProfileField(key, value);
+            return key;
+        }
+        FAIL("the profile draft offers no scalar field");
+        return {};
+    }
+
+    /// @param key A field of the profile draft.
+    /// @return Its value in the draft, or a null variant when the draft has no such field.
+    [[nodiscard]] QVariant profileFieldValue(QString const& key) const
+    {
+        for (auto const& raw: controller->profileFields())
+            if (raw.toMap().value("key").toString() == key)
+                return raw.toMap().value("value");
+        return {};
+    }
+
     /// @return The provider the engine publishes as `chromeStyle`.
     [[nodiscard]] window::UiStyleProvider& provider() const
     {
@@ -140,11 +180,20 @@ TEST_CASE("the Settings window comes back in front", "[contour][gui][qml][settin
         CHECK(QTest::qWaitForWindowActive(&settings));
     }
 
-    SECTION("out of the minimised state")
+    SECTION("out of the minimised state, and still maximised")
     {
-        settings.setWindowStates(Qt::WindowMinimized);
+        // Maximised beneath the minimised state, so a show() that went through showNormal() would fail.
+        settings.setWindowStates(Qt::WindowMaximized | Qt::WindowMinimized);
         REQUIRE(fx.host.show(nullptr).has_value());
         CHECK_FALSE(settings.windowStates().testFlag(Qt::WindowMinimized));
+        CHECK(settings.windowStates().testFlag(Qt::WindowMaximized));
+    }
+
+    SECTION("still maximised")
+    {
+        settings.setWindowStates(Qt::WindowMaximized);
+        REQUIRE(fx.host.show(nullptr).has_value());
+        CHECK(settings.windowStates() == Qt::WindowMaximized);
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -255,40 +304,13 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     auto fx = HostFixture {};
     auto& settings = fx.show();
 
-    auto* newProfile = fx.page().findChild<QObject*>("newProfileButton");
-    REQUIRE(newProfile != nullptr);
-    QMetaObject::invokeMethod(newProfile, "clicked");
-    fx.incubation.settle();
-
-    // The first scalar field the draft offers, and a value it does not hold yet.
-    auto key = QString {};
-    auto value = QVariant {};
-    for (auto const& raw: fx.controller->profileFields())
-    {
-        auto const row = raw.toMap();
-        auto const type = row.value("type").toString();
-        if (type == "string")
-            value = row.value("value").toString() + QStringLiteral("x");
-        else if (type == "int")
-            value = row.value("value").toInt() + 1;
-        else
-            continue;
-        key = row.value("key").toString();
-        break;
-    }
-    REQUIRE(!key.isEmpty());
-    fx.controller->setProfileField(key, value);
-
-    auto const fieldValue = [&fx, &key]() {
-        for (auto const& raw: fx.controller->profileFields())
-            if (raw.toMap().value("key").toString() == key)
-                return raw.toMap().value("value");
-        return QVariant {};
-    };
+    auto const key = fx.draftAProfileField();
     auto const editing = fx.controller->editingProfile();
-    auto const drafted = fieldValue();
+    auto const drafted = fx.profileFieldValue(key);
     REQUIRE(fx.page().property("editorMode").toString() == "profile");
 
+    // The state the window reopens in: the one it closed in.
+    auto states = Qt::WindowStates { Qt::WindowNoState };
     SECTION("through the page's Close button and the Close shortcut")
     {
         fx.host.closeSettings();
@@ -298,12 +320,39 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
         REQUIRE(settings.close());
         CHECK(settings.handle() == nullptr);
     }
+    SECTION("while maximised, which it reopens as")
+    {
+        states = Qt::WindowMaximized;
+        settings.setWindowStates(states);
+        REQUIRE(settings.close());
+    }
     REQUIRE_FALSE(settings.isVisible());
     CHECK(&fx.show() == &settings);
+    CHECK(settings.windowStates() == states);
 
     CHECK(fx.page().property("editorMode").toString() == "profile");
     CHECK(fx.controller->editingProfile() == editing);
-    CHECK(fieldValue() == drafted);
+    CHECK(fx.profileFieldValue(key) == drafted);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("asking for the open Settings window keeps what is being edited",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // A config reload refreshes the controller already; a show of the window on screen must not, or the
+    // rows rebuild under the field being typed into.
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto const& settings = fx.show();
+    auto const key = fx.draftAProfileField();
+    auto const drafted = fx.profileFieldValue(key);
+    auto const changes = QSignalSpy(fx.controller.get(), &window::SettingsController::changed);
+
+    REQUIRE(settings.isVisible());
+    REQUIRE(fx.host.show(nullptr).has_value());
+    CHECK(changes.count() == 0);
+    CHECK(fx.profileFieldValue(key) == drafted);
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

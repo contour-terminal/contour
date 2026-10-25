@@ -19,6 +19,7 @@
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
+#include <contour/window/WindowActivation.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/WorkingDirectory.hpp>
@@ -1685,16 +1686,8 @@ void WindowController::trayMessageClicked()
 
 void WindowController::raiseAndActivate()
 {
-    if (_osWindow == nullptr)
-        return;
-
-    // Cleared from the state set rather than via showNormal(): a window minimised from maximised must
-    // come back maximised.
-    auto states = _osWindow->windowStates();
-    states.setFlag(Qt::WindowMinimized, false);
-    _osWindow->setWindowStates(states);
-    _osWindow->raise();
-    _osWindow->requestActivate();
+    if (_osWindow != nullptr)
+        window::raiseAndActivate(*_osWindow);
 }
 
 bool WindowController::resizeWindowForPage(session::DisplaySurface& requester,

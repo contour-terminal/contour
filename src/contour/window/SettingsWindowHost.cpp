@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/WindowActivation.hpp>
 
 #include <core/log/LogStore.hpp>
 
@@ -41,8 +42,6 @@ Qt::WindowFlags SettingsWindowHost::windowFlags() const noexcept
 
 std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* anchor)
 {
-    _controller.refresh();
-
     // Where a window built by an earlier show was left; a window this show builds has no such place.
     auto previous = std::optional<QRect> {};
     if (_window)
@@ -57,12 +56,16 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* ancho
 
     auto& window = *_window;
     if (!window.isVisible())
+    {
+        // Only a window coming on screen reads the configuration afresh and is placed: one already open
+        // may be mid-edit, and a refresh would rebuild the rows under the field being typed into (a
+        // reload refreshes the controller by itself).
+        _controller.refresh();
         place(anchor, previous);
-    if (window.windowStates().testFlag(Qt::WindowMinimized))
-        window.setWindowStates(window.windowStates() & ~Qt::WindowMinimized);
-    window.show();
-    window.raise();
-    window.requestActivate();
+        // Not show(), which is showNormal() on the desktop: a window closed maximised reopens maximised.
+        window.setVisible(true);
+    }
+    raiseAndActivate(window);
     return {};
 }
 

@@ -89,8 +89,10 @@ class SettingsWindowHost final: public QObject
     /// @return settingsWindowFlags() of the conventions' buttons, for SettingsWindow.qml's `flags`.
     [[nodiscard]] Qt::WindowFlags windowFlags() const noexcept;
 
-    /// Refreshes the controller, builds the window on the first call, places a hidden window (R-c),
-    /// clears a minimised state (keeping maximised), shows, raises and activates it.
+    /// Builds the window on the first call; a hidden window then has the controller refreshed, is placed
+    /// (R-c) and shown in the state it closed in, while a visible one is left as it is, mid-edit draft
+    /// included. Either way a minimised state is cleared (keeping maximised), and the window is raised and
+    /// activated.
     /// @param anchor The screen of the window that asked; null for the primary screen.
     /// @return Nothing, or why the window could not be built. A failed build keeps no window, and the next
     ///         call tries again.
