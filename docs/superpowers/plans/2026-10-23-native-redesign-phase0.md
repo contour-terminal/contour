@@ -29,10 +29,9 @@ https://claude.ai/artifact/6cp7tcSnurTSMbhSDePWqH)
 
 ## Status board and handoff
 
-This run is tracked on a private status board. It is a page published from an untracked file at the root of the working tree.
+This run is tracked on a status board, <https://claude.ai/artifact/U8h58rAp7H6yVfnvp4vvEd>, published from an untracked file at the root of the working tree. The plans index says how to keep it current.
 - **Find it** by running `/status-board` in this worktree. The skill reads the remembered URL from
-  the worktree's git dir (`status_page.py --url`). The URL is deliberately not written here,
-  because the board is private and this plan is public.
+  the worktree's git dir (`status_page.py --url`).
 - **Every agent that continues this plan must update the board, using `/status-board update`.** Do
   it in the same turn as each state change: a task started, in review, committed, blocked or
   unblocked, a test count that moved, or a ruling.

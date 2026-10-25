@@ -18,16 +18,35 @@ coherent.
 
 ## Status board and handoff (every step)
 
-This run is tracked on a private status board, a page published from an untracked file at the root of the working tree.
-- **Find it** with `/status-board` in this worktree. The skill reads the remembered URL from the
-  git dir (`status_page.py --url`). The URL is not written here: the board is private and this
-  file is public.
-- **Every agent that continues this work updates the board, using `/status-board update`.** Do it
+This run is tracked on a status board: <https://claude.ai/artifact/U8h58rAp7H6yVfnvp4vvEd>. The
+owner asked for the link to live here so that any agent continuing the work can find the board and
+keep it current. The page is published from an untracked file at the root of the working tree.
+- **Keep it up to date.** In the worktree that owns the board, `/status-board update` edits the
+  file and republishes to the link above (`status_page.py --url` reads the same URL from the git
+  dir). In a fresh checkout, run `python3 <status_page.py> --remember-url <the link above>` once
+  before the first publish, so updates go to the same page rather than a new one.
+- **Every agent that continues this work updates the board.** Do it
   in the same turn as each state change: a step or task started, in review, committed, landed,
   blocked or unblocked, a plan written, or a ruling.
 - A different worktree has a board of its own. Never write to another worktree's board.
   Report to the session that owns the board instead.
 - If this worktree has no board, ask the owner rather than creating a second board.
+
+## Resume here
+
+Read these in order, then pick up the first open task:
+
+1. This index: the step order, and the step table below with each plan's state.
+2. The ledgers in `docs/superpowers/ledgers/`, one per plan. Each holds the plan's pre-flight
+   scan, every ruling (binding on later work), each task's commits and review outcome, and the
+   findings parked for a later step. They are copies of the subagent-driven-development ledgers,
+   which live in the git-ignored `.superpowers/sdd/<plan>/progress.md`. Copy a ledger back there
+   to resume a plan with superpowers:subagent-driven-development, and copy it out again when
+   handing over.
+3. The plan of the step in progress, and its task's brief.
+
+Last handover: 2026-10-25. Step 1b is at Task 11, "The terminal keeps every key except Quit and
+Settings"; Tasks 12 and 13 follow. Then write the Step 4a plan.
 
 ## Rules for every step
 

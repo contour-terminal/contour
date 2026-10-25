@@ -37,10 +37,9 @@ sections it cites: §2.6 (testing strategy) and §2.1 (rows). Visual design reco
 
 ## Status board and handoff (every step)
 
-This run is tracked on a private status board, a page published from an untracked file at the root of the working tree.
+This run is tracked on a status board, <https://claude.ai/artifact/U8h58rAp7H6yVfnvp4vvEd>, published from an untracked file at the root of the working tree. The plans index says how to keep it current.
 - **Find it** with `/status-board` in this worktree. The skill reads the remembered URL from the
-  git dir (`status_page.py --url`). The URL is not written here: the board is private and this
-  file is public.
+  git dir (`status_page.py --url`).
 - **Every agent that continues this work updates the board, using `/status-board update`.** Do it
   in the same turn as each state change: a step or task started, in review, committed, landed,
   blocked or unblocked, a plan written, or a ruling.
