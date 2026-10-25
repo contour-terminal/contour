@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/command/Command.hpp>
 #include <contour/test/MenuFixtures.hpp>
+#include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/MenuRouting.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,6 +9,7 @@
 #include <cstddef>
 #include <optional>
 #include <ranges>
+#include <vector>
 
 using contour::config::MenuPresentation;
 using contour::platform::MenuAnchor;
@@ -94,4 +96,39 @@ TEST_CASE("presentMenu passes the pick callback through", "[menurouting]")
     CHECK(route == MenuRoute::Native);
     presenter.pick(2);
     CHECK(picked == std::size_t { 2 });
+}
+
+TEST_CASE("a native pick runs the action of the menu that was shown, not of a newer one", "[menurouting]")
+{
+    using contour::command::commandId;
+    auto presenter = contour::test::RecordingMenuPresenter {};
+    auto published = contour::window::PublishedContextMenu {};
+
+    // Menu A is published and shown natively.
+    auto const menuA = sampleTree();
+    published.publish(menuA);
+    auto ran = std::vector<contour::actions::Action> {};
+    auto const route = presentMenu(
+        MenuPresentation::Native,
+        presenter,
+        menuA,
+        MenuAnchor {},
+        contour::window::pickFromShown(
+            menuA.actions, [&](contour::actions::Action const& action) { ran.push_back(action); }));
+    REQUIRE(route == MenuRoute::Native);
+
+    // While A tracks, the same surface is reopened: B replaces it, with other actions at the same indices.
+    auto menuB = sampleTree();
+    menuB.actions = { contour::actions::Quit {}, contour::actions::PasteClipboard {} };
+    published.publish(menuB);
+
+    presenter.pick(1);
+
+    REQUIRE(ran.size() == 1);
+    CHECK(commandId(ran.front()) == commandId(menuA.actions[1]));
+    CHECK(commandId(ran.front()) != commandId(published.actionAt(1).value()));
+
+    // An index the shown menu does not hold runs nothing.
+    presenter.pick(menuA.actions.size());
+    CHECK(ran.size() == 1);
 }

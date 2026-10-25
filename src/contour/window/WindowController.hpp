@@ -904,11 +904,27 @@ class WindowController:
     /// @param surface The surface whose QML menu should open.
     void requestInSceneMenu(MenuSurface surface);
 
-    /// Runs the action row @p actionId of @p surface's menu against what that surface acts on.
-    /// Out-of-range ids, and a target that has gone, are ignored.
+    /// What a menu acts on, pinned when it opens: the pane menu's session and the tab menu's tab.
+    struct MenuTarget
+    {
+        QPointer<session::TerminalSession> session {}; ///< The pane menu's session; null once it has died.
+        std::optional<vtworkspace::TabId> tab {};      ///< The tab menu's tab.
+    };
+
+    /// The targets the menus last opened were pinned to.
+    [[nodiscard]] MenuTarget currentMenuTarget() const;
+
+    /// Runs the action row @p actionId of @p surface's published menu against the current targets: the
+    /// in-scene (QML) path. Out-of-range ids, and a target that has gone, are ignored.
     /// @param surface The surface the row belongs to.
     /// @param actionId The row's `actionId`.
     void triggerSurfaceAction(MenuSurface surface, int actionId);
+
+    /// Runs @p action from @p surface's menu against @p target.
+    /// @param surface The surface the action's menu opened from.
+    /// @param target What that menu was opened over; a target that has gone makes this a no-op.
+    /// @param action The action to run.
+    void runSurfaceAction(MenuSurface surface, MenuTarget const& target, actions::Action const& action);
 
     /// Resolves @p entries into a tree with the current key bindings' chords.
     /// @param entries The menu rows.

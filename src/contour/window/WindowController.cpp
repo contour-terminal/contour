@@ -259,25 +259,34 @@ void WindowController::presentSurface(MenuSurface surface,
                            [this,
                             surface,
                             tree = std::move(tree),
+                            target = currentMenuTarget(),
                             window = QPointer<QWindow> { anchor.window },
                             position = anchor.position] {
                                // The presenter blocks until the menu closes, and Qt keeps delivering events
-                               // meanwhile, so the pick is posted again rather than run against state
-                               // captured here: it re-reads the menu and its target when it arrives, and is
-                               // dropped with this window.
+                               // meanwhile -- the same surface may even be reopened. So the pick resolves
+                               // against the menu that was SHOWN and the target it was opened for, both held
+                               // by value here, and this window is held weakly.
+                               auto const self = QPointer<WindowController> { this };
+                               auto onAction = [self, surface, target](actions::Action const& action) {
+                                   if (self)
+                                       platform::postToObject(self.data(), [self, surface, target, action] {
+                                           self->runSurfaceAction(surface, target, action);
+                                       });
+                               };
                                auto const route =
                                    presentMenu(_menuPresentation,
                                                _nativeMenus,
                                                tree,
                                                { .window = window.data(), .position = position },
-                                               [this, surface](std::size_t index) {
-                                                   platform::postToObject(this, [this, surface, index] {
-                                                       triggerSurfaceAction(surface, static_cast<int>(index));
-                                                   });
-                                               });
+                                               pickFromShown(tree.actions, std::move(onAction)));
                                if (route == MenuRoute::InScene)
                                    requestInSceneMenu(surface);
                            });
+}
+
+WindowController::MenuTarget WindowController::currentMenuTarget() const
+{
+    return MenuTarget { .session = _contextMenuSession, .tab = _tabContextMenuTab };
 }
 
 void WindowController::requestInSceneMenu(MenuSurface surface)
@@ -299,10 +308,14 @@ void WindowController::triggerSurfaceAction(MenuSurface surface, int actionId)
 {
     // Copied out of the model before running, for the same reason runCommand() does: an action can
     // rebuild this window (ClosePane, ChangeProfile) and free the vector it was standing in.
-    auto const action = menu(surface).actionAt(actionId);
-    if (!action)
-        return;
+    if (auto const action = menu(surface).actionAt(actionId))
+        runSurfaceAction(surface, currentMenuTarget(), *action);
+}
 
+void WindowController::runSurfaceAction(MenuSurface surface,
+                                        MenuTarget const& target,
+                                        actions::Action const& action)
+{
     // Deliberately NOT recorded in the command history: that list is "commands the user reached for by
     // name", and it exists to float them to the top of the palette. A right-click on "Copy" is not that.
     switch (surface)
@@ -310,19 +323,19 @@ void WindowController::triggerSurfaceAction(MenuSurface surface, int actionId)
         case MenuSurface::Pane:
             // The session the menu was OPENED over, not whichever one is active now. Null when that pane
             // has since died, in which case the row has nothing left to act on.
-            if (auto* session = _contextMenuSession.data())
-                session->executeAction(*action);
+            if (auto* session = target.session.data())
+                session->executeAction(action);
             break;
         case MenuSurface::Tab:
             // The TabId overload does nothing when the pinned tab has gone.
-            if (_tabContextMenuTab)
-                runTabAction(*_tabContextMenuTab, *action);
+            if (target.tab)
+                runTabAction(*target.tab, action);
             break;
         case MenuSurface::TitleBar:
         case MenuSurface::NewTab:
             // Window-scoped rows (a new tab, this window's tab bar): no particular pane was opened over.
             if (auto* session = activeSession())
-                session->executeAction(*action);
+                session->executeAction(action);
             break;
     }
 }
