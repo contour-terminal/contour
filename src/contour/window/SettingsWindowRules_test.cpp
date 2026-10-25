@@ -89,3 +89,31 @@ TEST_CASE("the Settings window is placed", "[contour][settingswindow][rules]")
         CHECK(contour::window::settingsWindowGeometry(c.placement) == c.expected);
     }
 }
+
+TEST_CASE("a maximised or full-screen Settings window keeps its geometry on reopen",
+          "[contour][settingswindow][rules]")
+{
+    using contour::window::SettingsWindowReopen;
+    using contour::window::settingsWindowReopenFor;
+
+    struct Case
+    {
+        std::string_view name;
+        Qt::WindowStates states;
+        SettingsWindowReopen expected = SettingsWindowReopen::Place;
+    };
+    auto const cases = std::vector<Case> {
+        { "normal", Qt::WindowNoState, SettingsWindowReopen::Place },
+        { "minimised", Qt::WindowMinimized, SettingsWindowReopen::Place },
+        { "maximised", Qt::WindowMaximized, SettingsWindowReopen::KeepGeometry },
+        { "full screen", Qt::WindowFullScreen, SettingsWindowReopen::KeepGeometry },
+        { "minimised from maximised",
+          Qt::WindowMaximized | Qt::WindowMinimized,
+          SettingsWindowReopen::KeepGeometry },
+    };
+    for (auto const& c: cases)
+    {
+        INFO(c.name);
+        CHECK(settingsWindowReopenFor(c.states) == c.expected);
+    }
+}

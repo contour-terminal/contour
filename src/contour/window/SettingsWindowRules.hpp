@@ -85,4 +85,23 @@ struct SettingsWindowPlacement
 ///         centred default clamped to the anchor screen.
 [[nodiscard]] QRect settingsWindowGeometry(SettingsWindowPlacement const& placement);
 
+/// What a reopen does with the hidden Settings window's geometry.
+enum class SettingsWindowReopen : uint8_t
+{
+    Place = 0,    ///< Placed by settingsWindowGeometry() before it is shown.
+    KeepGeometry, ///< Left alone: its geometry is the maximised or full-screen frame.
+};
+
+/// Decides whether a reopen places the Settings window. A maximised or full-screen window reports its
+/// maximised frame, and a setGeometry() on it is what a window manager stores as the restore rectangle, so
+/// un-maximising after a reopen would give a screen-sized window.
+/// @param states The hidden window's states.
+/// @return KeepGeometry when @p states holds Maximized or FullScreen, else Place.
+[[nodiscard]] inline SettingsWindowReopen settingsWindowReopenFor(Qt::WindowStates states) noexcept
+{
+    return states.testAnyFlags(Qt::WindowMaximized | Qt::WindowFullScreen)
+               ? SettingsWindowReopen::KeepGeometry
+               : SettingsWindowReopen::Place;
+}
+
 } // namespace contour::window

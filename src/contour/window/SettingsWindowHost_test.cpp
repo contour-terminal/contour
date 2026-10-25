@@ -329,6 +329,28 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a Settings window reopened maximised keeps its restore geometry",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // The offscreen platform pins a maximised window to the screen and keeps no restore rectangle, so
+    // whether a reopen called setGeometry() is invisible here; settingsWindowReopenFor() pins that decision.
+    // What is observable: the window reopens maximised, at its maximised frame.
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    auto& settings = fx.show();
+
+    settings.setWindowStates(Qt::WindowMaximized);
+    auto const maximised = settings.geometry();
+    REQUIRE(settings.close());
+    REQUIRE_FALSE(settings.isVisible());
+
+    CHECK(&fx.show() == &settings);
+    CHECK(settings.windowStates() == Qt::WindowMaximized);
+    CHECK(settings.geometry() == maximised);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("asking for the open Settings window keeps what is being edited",
           "[contour][gui][qml][settingswindow][host]")
 {

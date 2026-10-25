@@ -61,7 +61,9 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* ancho
         // may be mid-edit, and a refresh would rebuild the rows under the field being typed into (a
         // reload refreshes the controller by itself).
         _controller.refresh();
-        place(anchor, previous);
+        // A maximised or full-screen window keeps its geometry, and with it the screen it closed on.
+        if (settingsWindowReopenFor(window.windowStates()) == SettingsWindowReopen::Place)
+            place(anchor, previous);
         // Not show(), which is showNormal() on the desktop: a window closed maximised reopens maximised.
         window.setVisible(true);
     }
