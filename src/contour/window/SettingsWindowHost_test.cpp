@@ -12,6 +12,7 @@
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/UiStyleProvider.hpp>
+#include <contour/window/WindowLiveness.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
@@ -27,8 +28,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <expected>
+#include <format>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include <QtTest/QTest>
 
@@ -209,6 +212,42 @@ TEST_CASE("the Close shortcut closes the Settings window", "[contour][gui][qml][
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("closing Settings after the last terminal window lets the app quit",
+          "[contour][gui][qml][settingswindow][host]")
+{
+    // Ruling D1: Settings keeps the app running after the last terminal window closes, until Settings
+    // closes too. Qt's quit-on-last-window rule runs on a close, never on a hide, so the Close shortcut must
+    // close the window as its title bar would.
+    contour::test::QmlMessageCapture const warnings;
+    auto fx = HostFixture {};
+    // What ContourGuiApp's quitIfWindowless() judges by: is any independent top-level window still shown?
+    auto const appStaysAlive = []() {
+        auto facts = std::vector<window::WindowFacts> {};
+        for (auto const* topLevel: QGuiApplication::topLevelWindows())
+            facts.push_back({ .visibility = topLevel->isVisible() ? window::WindowVisibility::Shown
+                                                                  : window::WindowVisibility::Hidden,
+                              .transience = topLevel->transientParent() != nullptr
+                                                ? window::WindowTransience::Transient
+                                                : window::WindowTransience::Independent });
+        return window::anyWindowKeepsAppAlive(facts);
+    };
+
+    auto terminal = std::make_unique<QQuickWindow>();
+    terminal->show();
+    auto& settings = fx.show();
+    REQUIRE(terminal->close());
+    terminal.reset();
+    CHECK(appStaysAlive());
+
+    settings.requestActivate();
+    REQUIRE(QTest::qWaitForWindowActive(&settings));
+    QTest::keySequence(&settings, QKeySequence::Close);
+    CHECK(settings.handle() == nullptr); // closed, as Qt's quit rule needs; a hidden window keeps its handle
+    CHECK_FALSE(appStaysAlive());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("closing the Settings window keeps the window, its pane and its draft",
           "[contour][gui][qml][settingswindow][host]")
 {
@@ -334,5 +373,6 @@ TEST_CASE("a Settings window factory that fails leaves no window",
     auto const shown = host.show(nullptr);
     REQUIRE_FALSE(shown.has_value());
     CHECK(shown.error() == SettingsWindowError::LoadFailed);
+    CHECK(std::format("{}", shown.error()) == "LoadFailed");
     CHECK(host.window() == nullptr);
 }

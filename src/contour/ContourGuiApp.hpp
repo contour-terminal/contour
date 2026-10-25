@@ -25,7 +25,6 @@
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
-#include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
@@ -120,6 +119,7 @@ namespace session
 
 namespace window
 {
+    class SettingsController;
     class WindowController;
 } // namespace window
 
@@ -319,8 +319,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// Shows, raises and focuses the Settings window (OpenConfiguration's default target), with or without
     /// a terminal window. Logs, and shows nothing, when the window cannot be built.
-    /// @param near The screen of the window that asked; null for the primary screen.
-    void openSettings(QScreen* near);
+    /// @param anchor The screen of the window that asked; null for the primary screen.
+    void openSettings(QScreen* anchor);
 
     /// The app-wide keyboard layout (single instance; see KeyboardLayout.h). The active layout is
     /// process-global ambient state, and the macOS implementation registers an observer for changes

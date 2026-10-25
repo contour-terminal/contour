@@ -370,17 +370,6 @@ namespace
                              "With --latency-probe: how many keys are measured.",
                              "N" };
     }
-
-    /// @return The enumerator's name of @p error, for the log.
-    [[nodiscard]] constexpr std::string_view nameOf(window::SettingsWindowError error) noexcept
-    {
-        switch (error)
-        {
-            case window::SettingsWindowError::Unavailable: return "Unavailable";
-            case window::SettingsWindowError::LoadFailed: return "LoadFailed";
-        }
-        return "Unknown";
-    }
 } // namespace
 
 VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachablePredicate isReachable)
@@ -2846,10 +2835,10 @@ window::SettingsWindowHost& ContourGuiApp::settingsWindow()
     return *_settingsWindow;
 }
 
-void ContourGuiApp::openSettings(QScreen* near)
+void ContourGuiApp::openSettings(QScreen* anchor)
 {
-    if (auto const shown = settingsWindow().show(near); !shown)
-        errorLog()("Cannot open the Settings window. {}", nameOf(shown.error()));
+    if (auto const shown = settingsWindow().show(anchor); !shown)
+        errorLog()("Cannot open the Settings window. {}", shown.error());
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

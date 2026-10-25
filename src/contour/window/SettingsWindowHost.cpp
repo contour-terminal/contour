@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 
 #include <core/log/LogStore.hpp>
@@ -38,7 +39,7 @@ Qt::WindowFlags SettingsWindowHost::windowFlags() const noexcept
     return settingsWindowFlags(_conventions.buttons);
 }
 
-std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* near)
+std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* anchor)
 {
     _controller.refresh();
 
@@ -56,7 +57,7 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* near)
 
     auto& window = *_window;
     if (!window.isVisible())
-        place(near, previous);
+        place(anchor, previous);
     if (window.windowStates().testFlag(Qt::WindowMinimized))
         window.setWindowStates(window.windowStates() & ~Qt::WindowMinimized);
     window.show();
@@ -65,10 +66,10 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* near)
     return {};
 }
 
-void SettingsWindowHost::place(QScreen* near, std::optional<QRect> previous)
+void SettingsWindowHost::place(QScreen* anchor, std::optional<QRect> previous)
 {
     auto& window = *_window;
-    auto* screen = near != nullptr ? near : QGuiApplication::primaryScreen();
+    auto* screen = anchor != nullptr ? anchor : QGuiApplication::primaryScreen();
     if (screen == nullptr)
         return;
 
@@ -110,7 +111,7 @@ void SettingsWindowHost::place(QScreen* near, std::optional<QRect> previous)
 void SettingsWindowHost::closeSettings()
 {
     if (_window)
-        _window->hide();
+        _window->close();
 }
 
 std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> loadSettingsWindow(QQmlEngine& engine,

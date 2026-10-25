@@ -829,10 +829,10 @@ input_mapping:
             targets.push_back(oc->target);
 
     REQUIRE(targets.size() == 2);
-    CHECK(std::ranges::count(targets, ConfigurationTarget::SettingsWindow)
-          == 1); // default -> Settings window
-    CHECK(std::ranges::count(targets, ConfigurationTarget::Editor)
-          == 1); // in_editor: true -> external editor
+    // default -> Settings window
+    CHECK(std::ranges::count(targets, ConfigurationTarget::SettingsWindow) == 1);
+    // in_editor: true -> external editor
+    CHECK(std::ranges::count(targets, ConfigurationTarget::Editor) == 1);
 }
 
 TEST_CASE("Config: an out-of-range or non-numeric ratio is ignored", "[config][layout]")
