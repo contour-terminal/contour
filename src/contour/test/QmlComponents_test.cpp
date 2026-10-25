@@ -22,6 +22,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
@@ -34,6 +35,8 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 
 #include <vtpty/ChannelPty.hpp>
+
+#include <core/Utils.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -98,8 +101,16 @@ class MockTabController: public QAbstractListModel
     // Mirrors TerminalSessionManager::splitHandleThickness; PaneNode.qml's explicit SplitView handle
     // binds its implicit size to it.
     Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
+    // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
+    // Connections-targets.
+    Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
+    Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
 
   public:
+    MockTabController() = default;
+    /// @param count How many tabs the strip lists.
+    explicit MockTabController(int count): _count { count } {}
+
     [[nodiscard]] bool multimediaReady() const noexcept { return false; }
 
     [[nodiscard]] constexpr int splitHandleThickness() const noexcept
@@ -123,6 +134,40 @@ class MockTabController: public QAbstractListModel
     Q_INVOKABLE void triggerContextMenuAction(int actionId) { lastTriggeredActionId = actionId; }
 
     int lastTriggeredActionId = -1;
+
+    [[nodiscard]] QVariantList const& tabContextMenuModel() const noexcept { return _tabContextMenuModel; }
+    [[nodiscard]] QVariantList const& newTabMenuModel() const noexcept { return _newTabMenuModel; }
+
+    /// Mirrors WindowController::openTabContextMenu(): publishes the tab's menu, then asks for it.
+    Q_INVOKABLE void openTabContextMenu(int index, QPointF /*windowPosition*/)
+    {
+        _tabContextMenuModel = contour::test::mockTabContextMenuModel(index, _count);
+        emit tabContextMenuModelChanged();
+        emit tabContextMenuRequested(index);
+    }
+    /// Mirrors WindowController::triggerTabContextMenuAction(), recording the pick.
+    Q_INVOKABLE void triggerTabContextMenuAction(int actionId)
+    {
+        if (onTabMenuPick)
+            onTabMenuPick(actionId);
+        tabMenuPicks.push_back(actionId);
+    }
+    /// Mirrors WindowController::openNewTabMenu(): publishes the menu, then asks for it.
+    Q_INVOKABLE void openNewTabMenu(QPointF /*windowPosition*/)
+    {
+        ++openNewTabMenuCalls;
+        _newTabMenuModel = contour::test::mockNewTabMenuModel();
+        emit newTabMenuModelChanged();
+        emit newTabMenuRequested();
+    }
+    /// Mirrors WindowController::triggerNewTabMenuAction(), recording the pick.
+    Q_INVOKABLE void triggerNewTabMenuAction(int actionId) { newTabMenuPicks.push_back(actionId); }
+
+    std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
+    std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
+    int openNewTabMenuCalls = 0;         ///< How often the new-tab menu was asked for.
+    /// Called with each tab menu pick as it arrives, before it is recorded; empty for none.
+    std::function<void(int)> onTabMenuPick {};
 
     enum class Roles : std::uint16_t
     {
@@ -284,8 +329,14 @@ class MockTabController: public QAbstractListModel
     // test that instantiates a TabItem earns a "no signal of the target matches" QML warning — which the
     // suite's message capture turns into a failure.
     void tabColorPickRequested(int /*index*/);
+    void tabContextMenuModelChanged();
+    void tabContextMenuRequested(int index);
+    void newTabMenuModelChanged();
+    void newTabMenuRequested();
 
   private:
+    QVariantList _tabContextMenuModel {};
+    QVariantList _newTabMenuModel {};
     int _count = 3;
     int _activeTabIndex = 0;
     bool _titleBarVisible = true;
@@ -317,9 +368,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
     // Each component is registered in resources.qrc under qrc:/qt/qml/Contour/Ui/.
     auto const components = std::array {
         QStringLiteral("qrc:/qt/qml/Contour/Ui/TabItem.qml"),
-        QStringLiteral("qrc:/qt/qml/Contour/Ui/TabContextMenu.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/TabColorFlyout.qml"),
-        QStringLiteral("qrc:/qt/qml/Contour/Ui/NewTabMenu.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/TabStrip.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/WindowControls.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ResizeBorder.qml"),
@@ -329,6 +378,7 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
         QStringLiteral("qrc:/qt/qml/Contour/Ui/CommandPalette.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SaveLayoutDialog.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml"),
+        QStringLiteral("qrc:/qt/qml/Contour/Ui/MenuSwatchRow.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsNavItem.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsListItem.qml"),
         QStringLiteral("qrc:/qt/qml/Contour/Ui/ConfirmDialog.qml"),
@@ -346,36 +396,6 @@ TEST_CASE("GUI QML tab components load without errors (offscreen)", "[contour][g
             INFO("  error: " << e.toStdString());
         CHECK(errors.isEmpty());
     }
-}
-
-TEST_CASE("Tab context menu exposes all its actions (offscreen)", "[contour][gui][qml]")
-{
-    // Regression guard for the Windows empty-menu bug: since Qt 6.8 a Controls Menu defaults to a
-    // native OS popup where one exists, and the native Windows menu could not represent this menu's
-    // custom surface, so it came up EMPTY. TabContextMenu forces the in-scene popup (popupType:
-    // Popup.Item); this test asserts the five actionable items are present once instantiated, which the
-    // empty native popup would have failed. (The color flyout that originally provoked the bug now lives
-    // on the TabItem — see the SetTabColor tests — but the in-scene popup is still what gives the menu an
-    // opaque, themed surface, so the pin stays.)
-    QQmlEngine engine;
-    MockTabController controller;
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-
-    contour::test::installChromeStyle(engine);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabContextMenu.qml")));
-    REQUIRE(component.isReady());
-
-    QVariantMap initial;
-    initial.insert("controller", QVariant::fromValue(&controller));
-    initial.insert("tabIndex", 0);
-    std::unique_ptr<QObject> menu(component.createWithInitialProperties(initial));
-    REQUIRE(menu != nullptr);
-
-    // Menu.count reflects the number of menu items ("Choose Color…", "Rename…", "Close",
-    // "Close Other Tabs", "Close Tabs to the Right" — at least five). An empty menu would be zero.
-    auto const count = menu->property("count");
-    REQUIRE(count.isValid());
-    CHECK(count.toInt() >= 5);
 }
 
 namespace
@@ -489,7 +509,8 @@ TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[co
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
-TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)", "[contour][gui][qml]")
+TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)",
+          "[contour][gui][qml][menus]")
 {
     // End-to-end over the real bridge: the pure table (ContextMenu.h) -> the Qt model (ContextMenuModel.h)
     // -> the QML that turns rows into menu entries. Nothing is hand-rolled here except the state, so a row
@@ -535,7 +556,7 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     QSignalSpy const pickedSpy(menu.get(), SIGNAL(picked(int)));
 
     // Every row became an entry: separators and the "Advanced"/"Change Profile" sub-menus included. A
-    // native popup (the Windows trap TabContextMenu documents) would have come up empty.
+    // native popup (the Windows trap ContourMenu documents) would have come up empty.
     auto const count = menu->property("count");
     REQUIRE(count.isValid());
     CHECK(count.toInt() == model.size());
@@ -550,6 +571,9 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     CHECK_FALSE(copyItem->property("enabled").toBool()); // no selection
 
     // MenuItem exposes triggered() as a SIGNAL, and emitting it by name is what a click would do.
+    //
+    // A row triggered on a menu that is not showing is picked AT ONCE: only an open menu defers its pick
+    // until it has closed, and a closed one has no close to wait for.
     REQUIRE(QMetaObject::invokeMethod(copyItem, "triggered"));
     REQUIRE(pickedSpy.count() == 1);
     CHECK(pickedSpy.at(0).at(0).toInt() == 0);
@@ -802,7 +826,7 @@ TEST_CASE("The SetTabColor action opens the tab's color flyout (offscreen)", "[c
 {
     // The keyboard half of the tab-color feature, end to end through the QML: the controller emits
     // tabColorPickRequested(row) and the delegate whose row matches opens the ONE flyout it owns. This
-    // is the reason the flyout was hoisted out of TabContextMenu — there is no menu open here at all.
+    // is the reason the flyout was hoisted out of the tab's menu — there is no menu open here at all.
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
@@ -859,35 +883,258 @@ TEST_CASE("The SetTabColor action opens the tab's color flyout (offscreen)", "[c
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
-TEST_CASE("A context menu actually opens, with its surface (offscreen)", "[contour][gui][qml]")
+namespace
 {
-    // The gap that let a broken menu ship. Every existing menu test INSTANTIATES a menu and counts
-    // its rows; none ever opened one. A menu whose background or margins fail only at popup() time
-    // therefore passed the whole suite while being unusable in the application.
-    contour::test::QmlMessageCapture const warnings;
-    QQmlEngine engine;
-    MockTabController controller;
-
-    auto const host = makeTabItemHost(engine, controller);
+/// Hosts TabStrip.qml at the top of a real Window, which its menus need: a Popup opens into its window's
+/// overlay, and a strip created bare has none.
+///
+/// @param engine     The engine to build in.
+/// @param controller The mock the strip binds to.
+/// @param chrome     The chrome row, font and scheme to install.
+/// @return The host Window; the strip is reachable as its `strip` property.
+[[nodiscard]] QmlHost makeTabStripHost(QQmlEngine& engine,
+                                       MockTabController& controller,
+                                       contour::test::ChromeSetup const& chrome)
+{
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine, chrome);
+    auto const source = QStringLiteral("import QtQuick\n"
+                                       "import QtQuick.Window\n"
+                                       "import Contour.Ui\n"
+                                       "Window {\n"
+                                       "  id: host\n"
+                                       "  width: 800; height: 600; visible: true\n"
+                                       "  property alias strip: strip\n"
+                                       "  TabStrip {\n"
+                                       "    id: strip\n"
+                                       "    height: chromeStyle.tabHeight\n"
+                                       "    controller: terminalSessions\n"
+                                       "    window: host\n"
+                                       "  }\n"
+                                       "}\n");
+    auto host = buildQmlHost(engine, source, QStringLiteral("TabStripTestHost.qml"));
     auto* window = qobject_cast<QQuickWindow*>(host.get());
     REQUIRE(window != nullptr);
-    auto* tab = qobject_cast<QQuickItem*>(host->property("tabItem").value<QObject*>());
-    REQUIRE(tab != nullptr);
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+    return host;
+}
 
-    auto* menu = tab->findChild<QObject*>(QStringLiteral("tabContextMenu"));
+/// Hosts TabStrip.qml under the default chrome; see the overload above.
+[[nodiscard]] QmlHost makeTabStripHost(QQmlEngine& engine, MockTabController& controller)
+{
+    return makeTabStripHost(engine, controller, contour::test::defaultChromeSetup());
+}
+
+/// The item @p menu shows at @p index, or null.
+[[nodiscard]] QQuickItem* menuItemAt(QObject& menu, int index)
+{
+    QQuickItem* item = nullptr;
+    QMetaObject::invokeMethod(&menu, "itemAt", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index));
+    return item;
+}
+
+/// The items @p menu shows, top to bottom; a null slot is left out.
+[[nodiscard]] std::vector<QQuickItem*> menuItems(QObject& menu)
+{
+    auto items = std::vector<QQuickItem*> {};
+    for (auto const index: std::views::iota(0, menu.property("count").toInt()))
+        if (auto* item = menuItemAt(menu, index); item != nullptr)
+            items.push_back(item);
+    return items;
+}
+
+/// The row of @p menu that opens the sub-menu titled @p title, or null.
+[[nodiscard]] QQuickItem* subMenuRow(QObject& menu, QString const& title)
+{
+    for (auto* item: menuItems(menu))
+        if (auto const* sub = item->property("subMenu").value<QObject*>();
+            sub != nullptr && sub->property("title").toString() == title)
+            return item;
+    return nullptr;
+}
+
+/// Every item beneath @p root, in the VISUAL tree, named @p name: a Repeater's delegates (which the
+/// swatches are) have a parent item but no QObject parent, so findChildren() cannot see them.
+void collectNamed(QQuickItem const& root, QString const& name, std::vector<QQuickItem*>& out)
+{
+    for (auto* child: root.childItems())
+    {
+        if (child->objectName() == name)
+            out.push_back(child);
+        collectNamed(*child, name, out);
+    }
+}
+
+/// The tab delegate the strip in @p host shows at @p index, or null.
+[[nodiscard]] QQuickItem* tabDelegate(QObject& host, int index)
+{
+    auto* list = host.findChild<QObject*>(QStringLiteral("tabList"));
+    if (list == nullptr)
+        return nullptr;
+    QQuickItem* item = nullptr;
+    QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index));
+    return item;
+}
+
+/// The strip's one tab menu, opened through the controller over tab @p index.
+[[nodiscard]] QObject* openTabMenu(QObject& host, MockTabController& controller, int index)
+{
+    auto* menu = host.findChild<QObject*>(QStringLiteral("tabContextMenu"));
     REQUIRE(menu != nullptr);
+    controller.openTabContextMenu(index, {});
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+    return menu;
+}
 
-    REQUIRE(QMetaObject::invokeMethod(menu, "open"));
-    QCoreApplication::processEvents();
+/// What the "Tab Color" sub-menu of an open tab @p menu holds, once it is open too.
+struct TabColorMenu
+{
+    QObject* menu = nullptr;              ///< The sub-menu.
+    QQuickItem* row = nullptr;            ///< Its one swatch row.
+    std::vector<QQuickItem*> swatches {}; ///< The row's swatches, in order.
+};
 
+/// Opens the "Tab Color" sub-menu of @p menu as a click on its row would, and finds its swatches.
+[[nodiscard]] TabColorMenu openTabColorMenu(QObject& menu)
+{
+    auto* row = subMenuRow(menu, QStringLiteral("Tab Color"));
+    REQUIRE(row != nullptr);
+    auto* sub = row->property("subMenu").value<QObject*>();
+    REQUIRE(sub != nullptr);
+    REQUIRE(QMetaObject::invokeMethod(row, "triggered"));
+    REQUIRE(QTest::qWaitFor([&] { return sub->property("opened").toBool(); }, 2000));
+
+    auto rows = std::vector<QQuickItem*> {};
+    for (auto* item: menuItems(*sub))
+        if (item->property("swatches").isValid())
+            rows.push_back(item);
+    REQUIRE(rows.size() == 1);
+
+    auto result = TabColorMenu { .menu = sub, .row = rows.front(), .swatches = {} };
+    collectNamed(*result.row, QStringLiteral("menuSwatch"), result.swatches);
+    return result;
+}
+} // namespace
+
+TEST_CASE("the tab menu opens with the table's rows (offscreen)", "[contour][gui][qml][menus]")
+{
+    // The strip's ONE menu, filled from the rows the controller publishes. It replaces two cases: one that
+    // counted the hand-written TabContextMenu.qml's rows, and one that first OPENED a menu, since a menu
+    // whose background or margins fail only at popup() time passed every test that merely built it.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller { 2 };
+    auto const host = makeTabStripHost(engine, controller);
+
+    // Empty until the controller publishes: the rows are the table's, not the QML's.
+    auto const* unopened = host->findChild<QObject*>(QStringLiteral("tabContextMenu"));
+    REQUIRE(unopened != nullptr);
+    CHECK(unopened->property("count").toInt() == 0);
+
+    auto* menu = openTabMenu(*host, controller, 1);
+    CHECK(menu->property("count").toInt() == controller.tabContextMenuModel().size());
     checkMenuOpensAtUsableSize(*menu);
+
+    // Below the right-clicked tab, not at the live pointer.
+    auto const* tab = tabDelegate(*host, 1);
+    REQUIRE(tab != nullptr);
+    auto const tabBottomLeft = tab->mapToScene(QPointF(0, tab->height()));
+    auto const opened = flyoutWindowRect(menu);
+    INFO("menu at " << opened.x() << "," << opened.y() << "; tab 1 bottom-left at " << tabBottomLeft.x()
+                    << "," << tabBottomLeft.y());
+    CHECK(opened.top() >= tabBottomLeft.y() - 1);
+    CHECK(std::abs(opened.left() - tabBottomLeft.x()) <= 1);
 
     QMetaObject::invokeMethod(menu, "close");
     QCoreApplication::processEvents();
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a swatch pick reaches the controller once the menu has closed (offscreen)",
+          "[contour][gui][qml][menus]")
+{
+    // A pick is announced on CLOSE: what it does may open a popup of its own, which a menu still
+    // dismissing would take the grab back from.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller { 2 };
+    auto const host = makeTabStripHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+
+    auto* menu = openTabMenu(*host, controller, 1);
+    auto const colors = openTabColorMenu(*menu);
+    REQUIRE(colors.swatches.size() == contour::test::MockTabPalette.size());
+
+    // Whether the menu was still showing when each pick reached the controller.
+    auto showingAtPick = std::vector<bool> {};
+    controller.onTabMenuPick = [&](int) {
+        showingAtPick.push_back(menu->property("visible").toBool());
+    };
+
+    auto const swatches = colors.row->property("swatches").toList();
+    REQUIRE(swatches.size() == static_cast<qsizetype>(colors.swatches.size()));
+    auto const expected = swatches[1].toMap().value(QStringLiteral("actionId")).toInt();
+
+    auto const* swatch = colors.swatches[1];
+    QTest::mouseClick(window,
+                      Qt::LeftButton,
+                      {},
+                      swatch->mapToScene(QPointF(swatch->width() / 2, swatch->height() / 2)).toPoint());
+    REQUIRE(QTest::qWaitFor([&] { return !menu->property("visible").toBool(); }, 2000));
+
+    CHECK(controller.tabMenuPicks == std::vector { expected });
+    CHECK(showingAtPick == std::vector { false });
+
+    SECTION("a menu dismissed with no pick announces nothing")
+    {
+        QSignalSpy const pickedSpy(menu, SIGNAL(picked(int)));
+        std::ignore = openTabMenu(*host, controller, 1);
+        REQUIRE(QMetaObject::invokeMethod(menu, "dismiss"));
+        REQUIRE(QTest::qWaitFor([&] { return !menu->property("visible").toBool(); }, 2000));
+
+        CHECK(pickedSpy.count() == 0);
+        CHECK(controller.tabMenuPicks.size() == 1);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the new-tab menu lists the profiles (offscreen)", "[contour][gui][qml][menus]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTabStripHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+
+    auto const* button = host->findChild<QQuickItem*>(QStringLiteral("newTabMenuButton"));
+    auto* menu = host->findChild<QObject*>(QStringLiteral("newTabMenu"));
+    REQUIRE(button != nullptr);
+    REQUIRE(menu != nullptr);
+
+    QTest::mouseClick(window,
+                      Qt::LeftButton,
+                      {},
+                      button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+    CHECK(controller.openNewTabMenuCalls == 1);
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+    CHECK(menu->property("count").toInt() == controller.newTabMenuModel().size());
+    // One row per profile, a separator and "Settings".
+    CHECK(menu->property("count").toInt() == static_cast<int>(contour::test::MockProfileNames.size()) + 2);
+
+    // A picked profile reaches the controller, once the menu has closed.
+    auto* first = menuItemAt(*menu, 0);
+    REQUIRE(first != nullptr);
+    REQUIRE(QMetaObject::invokeMethod(first, "triggered"));
+    REQUIRE(QTest::qWaitFor([&] { return !menu->property("visible").toBool(); }, 2000));
+    CHECK(controller.newTabMenuPicks == std::vector { 0 });
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip sits (offscreen)",
           "[contour][gui][qml]")
 {
@@ -6269,6 +6516,98 @@ TEST_CASE("KitDialog: the Terminal row's heading and buttons read on its surface
     auto const* rejectLabel = reject->property("contentItem").value<QQuickItem*>();
     REQUIRE(rejectLabel != nullptr);
     CHECK(contrastOn(rejectLabel, surfaceFill) >= 4.5);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Terminal row draws swatches as two-cell blocks (offscreen)", "[contour][gui][qml][menus]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller { 2 };
+    auto const setup = terminalRowSetup("contour-dark");
+    auto const host = makeTabStripHost(engine, controller, setup);
+    auto const* provider = engine.rootContext()
+                               ->contextProperty(QStringLiteral("chromeStyle"))
+                               .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+
+    auto* menu = openTabMenu(*host, controller, 1);
+    auto const colors = openTabColorMenu(*menu);
+    REQUIRE_FALSE(colors.swatches.empty());
+
+    auto const swatchRows = colors.row->property("swatches").toList();
+    auto const foreground = setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Foreground)];
+    auto checked = 0;
+    for (auto const [index, swatch]: core::views::enumerate(colors.swatches))
+    {
+        INFO("swatch " << index);
+        CHECK(swatch->width() == Catch::Approx(2 * provider->cellWidth()));
+        CHECK(swatch->height() == Catch::Approx(provider->cellHeight()));
+        CHECK(swatch->property("radius").toReal() == 0.0);
+
+        if (!swatchRows[static_cast<qsizetype>(index)].toMap().value(QStringLiteral("checked")).toBool())
+            continue;
+        ++checked;
+        auto const* border = swatch->property("border").value<QObject*>();
+        REQUIRE(border != nullptr);
+        CHECK(border->property("width").toReal() > 0.0);
+        auto const ring = contour::platform::toRGBColor(border->property("color").value<QColor>());
+        CHECK(ring == foreground);
+        // Never the 1:1 the banner once read at: the ring stands off the colour it rings.
+        CHECK(vtbackend::contrastRatio(ring, fillOf(swatch)) > 1.0);
+    }
+    CHECK(checked == 1);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Terminal row's menu rows read on the menu surface (offscreen)", "[contour][gui][qml][menus]")
+{
+    // Every colour a row paints comes from the application palette, never from a style's default: a
+    // KitDialog label that kept one read at under 2:1 on the dark palette.
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark", "contour");
+    INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller { 2 };
+    auto const host = makeTabStripHost(engine, controller, terminalRowSetup(schemeName));
+
+    auto* menu = openTabMenu(*host, controller, 1);
+    auto const* surface = menu->property("background").value<QObject*>();
+    REQUIRE(surface != nullptr);
+    auto const surfaceFill = fillOf(surface);
+
+    auto enabledRows = 0;
+    auto disabledRows = 0;
+    for (auto* item: menuItems(*menu))
+    {
+        auto const title = item->property("text").toString();
+        if (title.isEmpty())
+            continue; // a separator
+        INFO("row: " << title.toStdString());
+        auto const* label = item->property("contentItem").value<QObject*>();
+        REQUIRE(label != nullptr);
+        if (item->isEnabled())
+        {
+            ++enabledRows;
+            CHECK(contrastOn(label, surfaceFill) >= 4.5);
+            if (auto const* arrow = item->property("arrow").value<QQuickItem*>(); arrow && arrow->isVisible())
+                CHECK(contrastOn(arrow, surfaceFill) >= 4.5);
+        }
+        else
+        {
+            // A disabled row is exempt from the ratio, but still the palette's disabled text.
+            ++disabledRows;
+            CHECK(label->property("color").value<QColor>().rgb()
+                  == QGuiApplication::palette().color(QPalette::Disabled, QPalette::WindowText).rgb());
+        }
+    }
+    CHECK(enabledRows > 0);
+    CHECK(disabledRows > 0); // "Close Tabs to the Right" over the last tab
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

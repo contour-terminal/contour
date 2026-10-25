@@ -54,6 +54,7 @@ enum class ChromeColorRole : uint8_t
     BannerGlyph,    //!< Leading glyph of a banner.
     ToastFill,      //!< Background of a toast.
     ToastText,      //!< Text of a toast.
+    SwatchRing,     //!< Ring around the checked colour swatch of a menu.
 };
 
 /// Where a chrome colour comes from.
@@ -85,7 +86,7 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::Warning) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::ToastText) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::SwatchRing) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -112,13 +113,15 @@ struct ChromeSchemeColors
 /// Component extents. Logical pixels for the native rows, character cells for the Terminal row.
 struct SizeTokens
 {
-    int titleBar = 0;    ///< Title bar height.
-    int tabWell = 0;     ///< Height of the tab well below the title bar, 0 when tabs sit in it.
-    int tab = 0;         ///< Tab height.
-    int control = 0;     ///< Height of a button or field.
-    int paneHeader = 0;  ///< Height of a pane header.
-    int toast = 0;       ///< Height of a toast.
-    int dialogWidth = 0; ///< Width of a dialog.
+    int titleBar = 0;     ///< Title bar height.
+    int tabWell = 0;      ///< Height of the tab well below the title bar, 0 when tabs sit in it.
+    int tab = 0;          ///< Tab height.
+    int control = 0;      ///< Height of a button or field.
+    int paneHeader = 0;   ///< Height of a pane header.
+    int toast = 0;        ///< Height of a toast.
+    int dialogWidth = 0;  ///< Width of a dialog.
+    int swatchWidth = 0;  ///< Width of a menu's colour swatch.
+    int swatchHeight = 0; ///< Height of a menu's colour swatch.
 
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
@@ -298,6 +301,11 @@ namespace detail
                             .status = StatusColorRole::Danger,
                             .slot = SchemeSlot::Background,
                             .alphaPercent = 100 },
+        ChromeColorSource { .kind = ColorSourceKind::PaletteWindowText,
+                            .rgb = 0,
+                            .status = StatusColorRole::Danger,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 100 },
     };
 
     constexpr ChromeColorSource schemeColor(SchemeSlot slot) noexcept
@@ -316,7 +324,9 @@ namespace detail
                   .control = 28,
                   .paneHeader = 22,
                   .toast = 36,
-                  .dialogWidth = 280 },
+                  .dialogWidth = 280,
+                  .swatchWidth = 16,
+                  .swatchHeight = 16 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6, .popover = 14, .menu = 10, .paneCard = 10, .toast = 18 },
         .type = { .caption = 10, .footnote = 11, .body = 13, .tab = 12, .title = 15 },
@@ -336,7 +346,9 @@ namespace detail
                   .control = 32,
                   .paneHeader = 28,
                   .toast = 36,
-                  .dialogWidth = 280 },
+                  .dialogWidth = 280,
+                  .swatchWidth = 16,
+                  .swatchHeight = 16 },
         .space = nativeSpace(4, 4),
         .radii = { .control = 4, .popover = 8, .menu = 8, .paneCard = 4, .toast = 18 },
         .type = { .caption = 12, .footnote = 12, .body = 14, .tab = 12, .title = 20 },
@@ -356,7 +368,9 @@ namespace detail
                   .control = 34,
                   .paneHeader = 28,
                   .toast = 36,
-                  .dialogWidth = 280 },
+                  .dialogWidth = 280,
+                  .swatchWidth = 16,
+                  .swatchHeight = 16 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 8, .popover = 12, .menu = 10, .paneCard = 6, .toast = 18 },
         .type = { .caption = 12, .footnote = 12.5, .body = 14, .tab = 13.5, .title = 15 },
@@ -380,7 +394,9 @@ namespace detail
                   .control = 2,
                   .paneHeader = 1,
                   .toast = 1,
-                  .dialogWidth = 32 },
+                  .dialogWidth = 32,
+                  .swatchWidth = 2,
+                  .swatchHeight = 1 },
         .space = { .paneGap = 1, .splitHit = 1, .paneInset = 0, .scale = { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 } },
         .radii = { .control = 0, .popover = 0, .menu = 0, .paneCard = 0, .toast = 0 },
         .type = { .caption = 0, .footnote = 0, .body = 0, .tab = 0, .title = 0 },
@@ -398,7 +414,8 @@ namespace detail
                     schemeColor(SchemeSlot::BarText),
                     schemeColor(SchemeSlot::Warning),
                     schemeColor(SchemeSlot::Foreground),
-                    schemeColor(SchemeSlot::Background) },
+                    schemeColor(SchemeSlot::Background),
+                    schemeColor(SchemeSlot::Foreground) },
     };
 } // namespace detail
 

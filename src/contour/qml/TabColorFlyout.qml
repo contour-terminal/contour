@@ -68,7 +68,7 @@ Popup {
     // NOT named `palette` — that is a Popup property already (and one this file sets below).
     readonly property var swatchColors: root.controller ? root.controller.tabColorPalette() : []
 
-    // Live OS palette handle so the flyout frame adapts to dark/light in realtime (see TabContextMenu).
+    // Live OS palette handle so the flyout frame adapts to dark/light in realtime.
     SystemPalette {
         id: systemPalette
         colorGroup: SystemPalette.Active

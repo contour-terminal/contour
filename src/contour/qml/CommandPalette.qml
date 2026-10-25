@@ -62,7 +62,7 @@ Popup {
     // that opens a keyboard-driven surface of its own (SetTabColor's swatch picker, SetTabTitle's rename
     // field) takes the focus as it opens, and running it any earlier means this restore takes that focus
     // straight back and the surface cannot be typed into at all. Same law, and the same shape, as
-    // TabContextMenu.qml's colorPending: act once the popup is genuinely gone.
+    // ActionContextMenu.qml's _pendingActionId: act once the popup is genuinely gone.
     //
     // Qt.callLater, not a direct call: "genuinely gone" is not yet true INSIDE this handler. Qt emits
     // closed() from within the popup's own exit transition, so a command that re-opens the palette —

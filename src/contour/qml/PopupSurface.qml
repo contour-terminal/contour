@@ -3,7 +3,7 @@
 // with a drop shadow.
 //
 // Why the shadow is DRAWN rather than asked of the compositor. Every menu here forces
-// `popupType: Popup.Item` (see TabContextMenu.qml for why a native platform menu is not an option),
+// `popupType: Popup.Item` (see ContourMenu.qml for why a native platform menu is not an option),
 // which makes it an item inside the window's own scene rather than an OS window of its own -- and a
 // thing that is not a surface cannot have a surface's shadow. That is the opposite of the main
 // window, which publishes a real shadow to the compositor; see platform/WindowShadow.hpp.

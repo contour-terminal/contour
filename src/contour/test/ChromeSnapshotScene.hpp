@@ -171,6 +171,7 @@ class ChromeSnapshotScene
             }
             case ScriptAction::ShowToast: showToast(); break;
             case ScriptAction::OpenKitDialog: openKitDialog(); break;
+            case ScriptAction::OpenTabMenu: openTabMenu(); break;
         }
         _incubation.settle();
         QCoreApplication::processEvents();
@@ -212,6 +213,12 @@ class ChromeSnapshotScene
         QStringLiteral("\u201Ccmake\u201D is still running. Closing the tab will end it.");
     static inline auto const DialogAcceptText = QStringLiteral("Close Tab");
     static inline auto const DialogRejectText = QStringLiteral("Cancel");
+
+    /// The tab whose context menu the tab-menu script opens: the middle of three.
+    static constexpr int SnapshotMenuTab = 1;
+
+    /// The title of the tab menu's colour sub-menu.
+    static inline auto const TabColorTitle = QStringLiteral("Tab Color");
 
     /// What halves a length to centre an item.
     static constexpr qreal HalfDivisor = 2;
@@ -375,6 +382,37 @@ class ChromeSnapshotScene
         auto const* opened = dialog.get();
         REQUIRE(QTest::qWaitFor([&] { return opened->property("opened").toBool(); }, 2000));
         _overlay = std::move(dialog);
+    }
+
+    /// Opens the second tab's context menu below its tab, then its "Tab Color" sub-menu, and waits for both.
+    void openTabMenu()
+    {
+        auto* menu = root().findChild<QObject*>(QStringLiteral("tabContextMenu"));
+        REQUIRE(menu != nullptr);
+        _controller.openTabContextMenu(SnapshotMenuTab, {});
+        REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+
+        auto* colorRow = subMenuRow(*menu, TabColorTitle);
+        REQUIRE(colorRow != nullptr);
+        auto const* colors = colorRow->property("subMenu").value<QObject*>();
+        // Triggering a sub-menu's row is what a click on it does: the menu opens the sub-menu beside it.
+        REQUIRE(QMetaObject::invokeMethod(colorRow, "triggered"));
+        REQUIRE(QTest::qWaitFor([&] { return colors->property("opened").toBool(); }, 2000));
+    }
+
+    /// The row of @p menu that opens the sub-menu titled @p title.
+    /// @return The row, or null when @p menu has no such sub-menu.
+    [[nodiscard]] static QQuickItem* subMenuRow(QObject& menu, QString const& title)
+    {
+        for (auto const index: std::views::iota(0, menu.property("count").toInt()))
+        {
+            QQuickItem* item = nullptr;
+            QMetaObject::invokeMethod(&menu, "itemAt", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index));
+            auto const* subMenu = item != nullptr ? item->property("subMenu").value<QObject*>() : nullptr;
+            if (subMenu != nullptr && subMenu->property("title").toString() == title)
+                return item;
+        }
+        return nullptr;
     }
 
     /// Loads Main.qml against the controller under the variant's chrome row.

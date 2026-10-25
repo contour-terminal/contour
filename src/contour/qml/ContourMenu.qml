@@ -5,7 +5,7 @@
 //
 //   - popupType: an IN-SCENE popup. Since Qt 6.8 a Controls Menu defaults to a native platform menu
 //     where one exists, and a native menu cannot host the sub-menus ActionContextMenu creates at
-//     runtime -- the trap that made TabContextMenu come up EMPTY on Windows.
+//     runtime -- the trap that made the tab menu come up EMPTY on Windows.
 //   - background: the shared popup surface, which is where the drop shadow is drawn. An in-scene
 //     popup has no OS surface for a compositor to shadow, so it has to be painted.
 //   - margins: a minimum distance to the window edge. The window CLIPS an in-scene popup, so a menu
@@ -23,6 +23,38 @@ Menu {
     popupType: Popup.Item
     background: PopupSurface {}
     margins: chromeStyle.shadowMargin
+
+    // Every colour a row paints -- its text, a disabled row's, a sub-menu's arrow, the highlight -- and the
+    // surface beneath them, from the application palette directly, as KitDialog's are. A style's default
+    // is not enough: a popup's inherited palette is taken before it reaches its window, and keeps the
+    // style's (light) default once the window's palette arrives, which on a dark surface reads at under
+    // 2:1. The roles are the ones Fusion's and ContourTui's menu files read; Fusion paints row text in
+    // `text`, ContourTui in `windowText`, so both are the window's text.
+    //
+    // Per colour group rather than through the top-level `palette.text`, which sets every group at once:
+    // a disabled row would then paint in the enabled text colour, and stop looking disabled.
+    readonly property SystemPalette _sys: SystemPalette {
+        colorGroup: SystemPalette.Active
+    }
+    readonly property SystemPalette _sysDisabled: SystemPalette {
+        colorGroup: SystemPalette.Disabled
+    }
+    palette.active.window: control._sys.window
+    palette.active.windowText: control._sys.windowText
+    palette.active.text: control._sys.windowText
+    palette.active.highlight: control._sys.highlight
+    palette.active.highlightedText: control._sys.highlightedText
+    palette.active.mid: control._sys.mid
+    palette.inactive.window: control._sys.window
+    palette.inactive.windowText: control._sys.windowText
+    palette.inactive.text: control._sys.windowText
+    palette.inactive.highlight: control._sys.highlight
+    palette.inactive.highlightedText: control._sys.highlightedText
+    palette.inactive.mid: control._sys.mid
+    palette.disabled.window: control._sysDisabled.window
+    palette.disabled.windowText: control._sysDisabled.windowText
+    palette.disabled.text: control._sysDisabled.windowText
+    palette.disabled.mid: control._sysDisabled.mid
 
     // The width of the widest entry, snapped up to a whole unit.
     //

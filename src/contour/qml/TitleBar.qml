@@ -47,7 +47,7 @@ Item {
     implicitHeight: chromeStyle.chromeHeight
 
     // Live OS palette handle: re-emits paletteChanged on an OS dark/light switch so the bar recolors
-    // in realtime (see TabContextMenu for the same pattern).
+    // in realtime.
     SystemPalette {
         id: systemPalette
         colorGroup: SystemPalette.Active

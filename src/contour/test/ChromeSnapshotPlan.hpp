@@ -44,6 +44,7 @@ enum class SnapshotScript : uint8_t
     KitDialog,
     HostingBanner,
     NewDefaultsBanner,
+    TabMenu,
 };
 
 /// How a script's active tab is divided into panes.
@@ -67,6 +68,7 @@ enum class ScriptAction : uint8_t
     OpenPalette,
     ShowToast,
     OpenKitDialog,
+    OpenTabMenu, //!< The second tab's context menu, with its "Tab Color" sub-menu open.
 };
 
 /// Whether the window is attached to a host, and in which state.
@@ -195,6 +197,15 @@ inline constexpr auto SnapshotScripts = std::array {
                         .connection = HostConnection::Local,
                         .hostLabel = "",
                         .banner = SnapshotBanner::NewDefaults },
+    SnapshotScriptRow { .script = SnapshotScript::TabMenu,
+                        .name = "tab-menu",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .page = ContentPage::Terminal,
+                        .action = ScriptAction::OpenTabMenu,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
@@ -202,7 +213,7 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotSc
                                       return static_cast<std::size_t>(SnapshotScripts[i].script) == i;
                                   }),
               "SnapshotScripts must list one row per SnapshotScript, in enumerator order");
-static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::NewDefaultsBanner) + 1,
+static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScripts.back().script) + 1,
               "every SnapshotScript needs a row");
 
 /// The row describing @p script.

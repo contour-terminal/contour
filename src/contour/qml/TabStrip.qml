@@ -3,8 +3,8 @@
 //
 // The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
 // whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
-// the strip hosts a Qt-layer settings "tab" (shown while the settings page is open) and the new-tab
-// dropdown (NewTabMenu) — neither is a row of the tab model.
+// the strip hosts a Qt-layer settings "tab" (shown while the settings page is open), the tabs' one
+// context menu and the new-tab dropdown — none of them a row of the tab model.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -289,8 +289,9 @@ Row {
         }
     }
 
-    // The new-tab profile dropdown: the "▾" beside "+". Opens NewTabMenu — one entry per configured
-    // profile (open a new tab with it) plus a "Settings" entry — the Windows-Terminal split-button idiom.
+    // The new-tab profile dropdown: the "▾" beside "+". Asks the controller, which publishes one entry per
+    // configured profile (open a new tab with it) plus a "Settings" entry and asks for the menu below —
+    // the Windows-Terminal split-button idiom.
     ToolButton {
         id: newTabMenuButton
         objectName: "newTabMenuButton"
@@ -302,15 +303,51 @@ Row {
         focusPolicy: Qt.NoFocus
         ToolTip.visible: hovered
         ToolTip.text: qsTr("New tab with profile…")
-        onClicked: newTabMenu.popup(newTabMenuButton, 0, newTabMenuButton.height)
+        onClicked: {
+            if (root.controller)
+                root.controller.openNewTabMenu(newTabMenuButton.mapToItem(null, 0, newTabMenuButton.height))
+        }
         background: Rectangle {
             color: newTabMenuButton.hovered ? chromeStyle.wash(newTabMenuButton.palette.highlight)
                                             : "transparent"
         }
 
-        NewTabMenu {
+        ActionContextMenu {
             id: newTabMenu
-            controller: root.controller
+            objectName: "newTabMenu"
+            entries: root.controller ? root.controller.newTabMenuModel : []
+            onPicked: (actionId) => { if (root.controller) root.controller.triggerNewTabMenuAction(actionId) }
+        }
+    }
+
+    // The context menu of every tab: ONE menu for the strip, not one per delegate, rebuilt once per
+    // publish. The controller publishes the right-clicked tab's rows, then asks for the menu with that
+    // tab's index; it opens below that tab's delegate rather than at the live pointer, so where it opens
+    // does not depend on where the mouse happens to be.
+    ActionContextMenu {
+        id: tabContextMenu
+        objectName: "tabContextMenu"
+        entries: root.controller ? root.controller.tabContextMenuModel : []
+        onPicked: (actionId) => { if (root.controller) root.controller.triggerTabContextMenuAction(actionId) }
+    }
+
+    Connections {
+        target: root.controller
+        function onTabContextMenuRequested(index) {
+            // A delegate exists only once the list is laid out, and only while it is in view: lay it out
+            // first, and bring a tab scrolled out of the strip back into view, so the menu still opens
+            // under the tab it names.
+            list.forceLayout()
+            if (!list.itemAtIndex(index))
+                list.positionViewAtIndex(index, ListView.Contain)
+            const item = list.itemAtIndex(index)
+            if (item)
+                tabContextMenu.popup(item, 0, item.height)
+            else
+                tabContextMenu.popup(list, 0, list.height)
+        }
+        function onNewTabMenuRequested() {
+            newTabMenu.popup(newTabMenuButton, 0, newTabMenuButton.height)
         }
     }
 }

@@ -14,6 +14,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtGui/QColor>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
@@ -21,8 +22,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstddef>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -41,6 +44,30 @@ namespace
         if (child->inherits("QQuickAccessibleAttached"))
             return child;
     return nullptr;
+}
+
+/// Every item beneath @p root, in the visual tree, named @p name.
+///
+/// The visual tree rather than findChildren(): a Repeater's delegates have a parent item but no QObject
+/// parent. Empty when @p root is not an item.
+[[nodiscard]] std::vector<QQuickItem*> partsNamed(QObject& root, QString const& name)
+{
+    auto parts = std::vector<QQuickItem*> {};
+    auto pending = std::vector<QQuickItem*> {};
+    if (auto* item = qobject_cast<QQuickItem*>(&root))
+        pending.push_back(item);
+    while (!pending.empty())
+    {
+        auto* item = pending.back();
+        pending.pop_back();
+        for (auto* child: item->childItems())
+        {
+            if (child->objectName() == name)
+                parts.push_back(child);
+            pending.push_back(child);
+        }
+    }
+    return parts;
 }
 
 /// Loads @p qmlUrl with @p initialProperties and returns its root item.
@@ -160,14 +187,27 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
     {
         QString url;
         QVariantMap initialProperties;
+        std::size_t swatches = 0; ///< How many `menuSwatch` parts the primitive shows.
     };
     auto const cases = std::array {
-        Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml"),
-               QVariantMap { { "text", QStringLiteral("Contour has new defaults") } } },
-        Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
-               QVariantMap { { "text", QStringLiteral("Copied 3 lines") } } },
-        Case { QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml"),
-               QVariantMap { { "heading", QStringLiteral("Close this tab?") } } },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml"),
+               .initialProperties = QVariantMap { { "text", QStringLiteral("Contour has new defaults") } },
+               .swatches = 0 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
+               .initialProperties = QVariantMap { { "text", QStringLiteral("Copied 3 lines") } },
+               .swatches = 0 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml"),
+               .initialProperties = QVariantMap { { "heading", QStringLiteral("Close this tab?") } },
+               .swatches = 0 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/MenuSwatchRow.qml"),
+               .initialProperties =
+                   QVariantMap { { "swatches",
+                                   QVariantList { QVariantMap { { "title", QStringLiteral("#EE6666") },
+                                                                { "color", QColor(0xEE, 0x66, 0x66) },
+                                                                { "actionId", 0 },
+                                                                { "enabled", true },
+                                                                { "checked", false } } } } },
+               .swatches = 1 },
     };
 
     for (auto const& testCase: cases)
@@ -182,6 +222,17 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
         REQUIRE(attached != nullptr);
         CHECK(attached->property("role").isValid());
         CHECK_FALSE(attached->property("name").toString().isEmpty());
+
+        // A primitive made of parts names each part as well: a swatch row's every swatch is a button.
+        auto const parts = partsNamed(*root, QStringLiteral("menuSwatch"));
+        CHECK(parts.size() == testCase.swatches);
+        for (auto* part: parts)
+        {
+            auto* partAttached = accessibleAttachedOf(part);
+            REQUIRE(partAttached != nullptr);
+            CHECK(partAttached->property("role").isValid());
+            CHECK(partAttached->property("name").toString() == QStringLiteral("#EE6666"));
+        }
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

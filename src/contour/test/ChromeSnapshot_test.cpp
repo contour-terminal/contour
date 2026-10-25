@@ -39,6 +39,25 @@
 #include <QtQuickControls2/QQuickStyle>
 #include <QtTest/QTest>
 
+namespace
+{
+/// How many items named @p name beneath @p root, in the visual tree, are visible.
+///
+/// The visual tree rather than findChildren(): a Repeater's delegates, which a swatch is, have a parent
+/// item but no QObject parent.
+[[nodiscard]] int visibleItemsNamed(QQuickItem const& root, QString const& name)
+{
+    auto count = 0;
+    for (auto const* child: root.childItems())
+    {
+        if (child->objectName() == name && child->isVisible())
+            ++count;
+        count += visibleItemsNamed(*child, name);
+    }
+    return count;
+}
+} // namespace
+
 TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscreen)",
           "[contour][gui][qml][snapshot]")
 {
@@ -117,6 +136,13 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const* bar = scene.root().findChild<QQuickItem*>(QStringLiteral("newDefaultsBanner"));
                 REQUIRE(bar != nullptr);
                 CHECK(bar->isVisible());
+                break;
+            }
+            case SnapshotScript::TabMenu: {
+                auto const* menu = scene.root().findChild<QObject*>(QStringLiteral("tabContextMenu"));
+                REQUIRE(menu != nullptr);
+                CHECK(menu->property("opened").toBool());
+                CHECK(visibleItemsNamed(*scene.window().contentItem(), QStringLiteral("menuSwatch")) > 0);
                 break;
             }
             case SnapshotScript::SingleTab: break;

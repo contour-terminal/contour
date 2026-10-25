@@ -80,7 +80,7 @@ Item {
                                 / chromeStyle.widthQuantum)
     implicitHeight: chromeStyle.tabHeight
 
-    // Live OS palette handle so the tab adapts to dark/light in realtime (see TabContextMenu).
+    // Live OS palette handle so the tab adapts to dark/light in realtime.
     SystemPalette {
         id: systemPalette
         colorGroup: SystemPalette.Active
@@ -555,26 +555,23 @@ Item {
         }
     }
 
+    // The context menu is the strip's, one for every tab, built from the table the controller publishes:
+    // the right-click asks the controller, which publishes the rows for THIS tab and asks the strip to pop
+    // its menu under it. "Rename…" and "Custom…" come back as the requests the Connections below
+    // already answer, once the menu has closed.
     TapHandler {
         acceptedButtons: Qt.RightButton
-        onTapped: contextMenu.popup()
-    }
-
-    TabContextMenu {
-        id: contextMenu
-        // findChild() handle for the GUI test that opens it.
-        objectName: "tabContextMenu"
-        controller: root.controller
-        tabIndex: root.tabIndex
-        onRenameRequested: renameLoader.start()
-        // The menu only raises this once it has closed, so the mouse path and the keyboard path below
-        // are the same one-liner: ask this tab's flyout to open.
-        onColorRequested: colorFlyout.open()
+        onTapped: (eventPoint, button) => {
+            if (root.controller)
+                root.controller.openTabContextMenu(root.tabIndex,
+                                                   root.mapToItem(null, eventPoint.position.x,
+                                                                  eventPoint.position.y))
+        }
     }
 
     // The swatch-grid color picker (WT-style quick coloring). It lives HERE rather than inside the
-    // context menu because it has two entry points that must share one instance: "Choose Color…" in
-    // the menu, and the SetTabColor action below (which fires with no menu open at all).
+    // context menu because it has two entry points that must share one instance: "Custom…" in the
+    // menu's "Tab Color", and the SetTabColor action below (which fires with no menu open at all).
     //
     // A Popup positions itself against its PARENT, which is now this tab rather than the menu that used
     // to own it. The flyout places itself against that parent (below the tab, or above it when the tab

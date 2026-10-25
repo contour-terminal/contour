@@ -70,7 +70,7 @@ RowLayout {
     // has always looked like.
     spacing: 0
 
-    // Live OS palette so the glyphs adapt to dark/light themes (see TabContextMenu). The window is
+    // Live OS palette so the glyphs adapt to dark/light themes. The window is
     // transparent, so an explicit contentItem with a palette-driven color keeps every control glyph
     // legible in both light and dark modes regardless of the active style or hover state.
     SystemPalette {

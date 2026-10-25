@@ -18,9 +18,38 @@ ContourMenu {
     signal picked(int actionId)
 
     // The menu, as data. One row is
-    //   { kind: "command" | "separator" | "submenu",
-    //     title, enabled, checkable, checked, actionId, children: [rows] }
+    //   { kind: "command" | "separator" | "submenu" | "swatches",
+    //     title, enabled, checkable, checked, actionId, children: [rows], swatches: [swatch] }
+    // and a swatch is { title, color, actionId, enabled, checked }.
     property var entries: []
+
+    // The pick waiting for the menu to close, or -1 when there is none.
+    //
+    // A pick is announced on CLOSE, not when it is made. What a pick does may open a popup of its own
+    // ("Rename…" opens the tab's title editor, "Custom…" its colour flyout), and one that opens while this
+    // menu is still dismissing is handed a grab the menu then takes back -- leaving the editor without
+    // keyboard focus. A menu that was dismissed without a pick announces nothing.
+    property int _pendingActionId: -1
+
+    // Records @p actionId as picked: announced at once when the menu is not showing (a row triggered
+    // programmatically), otherwise once the whole menu hierarchy has closed. `visible` rather than
+    // `opened`: a menu still running its enter transition is not `opened` yet, but it will close, and
+    // the pick has to wait for that like any other.
+    function pick(actionId) {
+        if (!root.visible) {
+            root.picked(actionId);
+            return;
+        }
+        root._pendingActionId = actionId;
+        root.dismiss();
+    }
+
+    onClosed: {
+        const actionId = root._pendingActionId;
+        root._pendingActionId = -1;
+        if (actionId >= 0)
+            root.picked(actionId);
+    }
 
     // Objects this file created, so a rebuild can destroy exactly what it made. A sub-menu owns its own
     // children, so only the top-level ones are tracked here.
@@ -38,13 +67,18 @@ ContourMenu {
         id: commandEntry
         MenuItem {
             property int actionId: -1
-            onTriggered: root.picked(actionId)
+            onTriggered: root.pick(actionId)
         }
     }
 
     Component {
         id: separatorEntry
         MenuSeparator {}
+    }
+
+    Component {
+        id: swatchesEntry
+        MenuSwatchRow {}
     }
 
     Component {
@@ -76,8 +110,15 @@ ContourMenu {
                 const sep = separatorEntry.createObject(menu.contentItem);
                 menu.addItem(sep);
                 created.push(sep);
+            } else if (row.kind === "swatches") {
+                // An Item, created and added the way a separator is; it reports picks rather than
+                // triggering, so the menu's own close-on-trigger never sees it.
+                const swatches = swatchesEntry.createObject(menu.contentItem, { "swatches": row.swatches });
+                swatches.swatchPicked.connect(root.pick);
+                menu.addItem(swatches);
+                created.push(swatches);
             } else if (row.kind === "submenu") {
-                const sub = submenuEntry.createObject(menu, { "title": row.title });
+                const sub = submenuEntry.createObject(menu, { "title": row.title, "enabled": row.enabled });
                 root.fillMenu(sub, row.children);
                 menu.addMenu(sub);
                 created.push(sub);

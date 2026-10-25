@@ -42,6 +42,8 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal paneHeader READ paneHeader CONSTANT)
     Q_PROPERTY(qreal toast READ toast CONSTANT)
     Q_PROPERTY(qreal dialogWidth READ dialogWidth CONSTANT)
+    Q_PROPERTY(qreal swatchWidth READ swatchWidth CONSTANT)
+    Q_PROPERTY(qreal swatchHeight READ swatchHeight CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -63,6 +65,10 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal toast() const noexcept { return _tokens.toast * _units.vertical; }
     /// @return The dialog width in logical pixels.
     [[nodiscard]] qreal dialogWidth() const noexcept { return _tokens.dialogWidth * _units.horizontal; }
+    /// @return The width of a menu's colour swatch in logical pixels.
+    [[nodiscard]] qreal swatchWidth() const noexcept { return _tokens.swatchWidth * _units.horizontal; }
+    /// @return The height of a menu's colour swatch in logical pixels.
+    [[nodiscard]] qreal swatchHeight() const noexcept { return _tokens.swatchHeight * _units.vertical; }
 
   private:
     config::SizeTokens _tokens {};
@@ -405,6 +411,7 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor bannerGlyph READ bannerGlyph NOTIFY changed)
     Q_PROPERTY(QColor toastFill READ toastFill NOTIFY changed)
     Q_PROPERTY(QColor toastText READ toastText NOTIFY changed)
+    Q_PROPERTY(QColor swatchRing READ swatchRing NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -426,6 +433,7 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor bannerGlyph() const { return color(config::ChromeColorRole::BannerGlyph); }
     [[nodiscard]] QColor toastFill() const { return color(config::ChromeColorRole::ToastFill); }
     [[nodiscard]] QColor toastText() const { return color(config::ChromeColorRole::ToastText); }
+    [[nodiscard]] QColor swatchRing() const { return color(config::ChromeColorRole::SwatchRing); }
 
   signals:
     /// Every role may have changed colour.

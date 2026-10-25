@@ -1,13 +1,69 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/command/MenuTree.hpp>
+#include <contour/command/Shortcut.hpp>
+#include <contour/command/TabMenus.hpp>
+#include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/RemoteChrome.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QPointF>
 #include <QtCore/QString>
+#include <QtCore/QVariantList>
+
+#include <array>
+#include <ranges>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace contour::test
 {
+
+/// The colours a mock offers in its tab menu's "Tab Color" sub-menu, in order.
+inline constexpr auto MockTabPalette = std::array {
+    vtbackend::RGBColor { 0xEE6666u }, vtbackend::RGBColor { 0xF0A050u }, vtbackend::RGBColor { 0xE8D05Au },
+    vtbackend::RGBColor { 0x7CC87Cu }, vtbackend::RGBColor { 0x5AB4D8u }, vtbackend::RGBColor { 0x6A8CE8u },
+    vtbackend::RGBColor { 0xB07CE0u }, vtbackend::RGBColor { 0xA0A0A0u },
+};
+
+/// The profiles a mock offers in its new-tab menu, in order.
+inline constexpr auto MockProfileNames =
+    std::array { std::string_view { "dark" }, std::string_view { "light" } };
+
+/// The tab menu a mock publishes, built by the real table: the right-clicked tab wears the palette's
+/// first colour, so its swatch is the checked one.
+/// @param index The right-clicked tab.
+/// @param count The tabs in the window.
+/// @return The menu as QML sees it.
+[[nodiscard]] inline QVariantList mockTabContextMenuModel(int index, int count)
+{
+    auto const state = command::TabContextMenuState {
+        .tabIndex = index,
+        .tabCount = count,
+        .palette = { MockTabPalette.begin(), MockTabPalette.end() },
+        .color = MockTabPalette.front(),
+        .userColor = command::UserColorPresence::Present,
+    };
+    return window::toContextMenuModel(
+        command::buildMenuTree(command::buildTabContextMenu(state), {}, command::ShortcutStyle::Text).nodes);
+}
+
+/// The new-tab menu a mock publishes, built by the real table over @ref MockProfileNames.
+/// @return The menu as QML sees it.
+[[nodiscard]] inline QVariantList mockNewTabMenuModel()
+{
+    return window::toContextMenuModel(
+        command::buildMenuTree(
+            command::buildNewTabMenu(
+                { .profileNames = std::ranges::to<std::vector<std::string>>(MockProfileNames) }),
+            {},
+            command::ShortcutStyle::Text)
+            .nodes);
+}
 
 /// The window-controller surface Main.qml's own Connections bind, shared by every offscreen mock that
 /// loads Main.qml in place of the real WindowController.
@@ -20,6 +76,10 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_OBJECT
     // Mirrors WindowController's remote chrome, which Main.qml's title and the tab strip's badge read.
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
+    // Connections-targets.
+    Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
+    Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
 
   public:
     using QAbstractListModel::QAbstractListModel;
@@ -47,6 +107,36 @@ class MainWindowControllerMock: public QAbstractListModel
 
     int trayClickCount = 0; ///< How many tray message clicks Main.qml passed on to the window.
 
+    /// @return The tab menu last published by openTabContextMenu().
+    [[nodiscard]] QVariantList const& tabContextMenuModel() const noexcept { return _tabContextMenuModel; }
+    /// @return The new-tab menu last published by openNewTabMenu().
+    [[nodiscard]] QVariantList const& newTabMenuModel() const noexcept { return _newTabMenuModel; }
+
+    /// Mirrors WindowController::openTabContextMenu(): publishes the tab's menu, then asks for it.
+    Q_INVOKABLE void openTabContextMenu(int index, QPointF /*windowPosition*/)
+    {
+        _tabContextMenuModel = mockTabContextMenuModel(index, rowCount());
+        emit tabContextMenuModelChanged();
+        emit tabContextMenuRequested(index);
+    }
+
+    /// Mirrors WindowController::triggerTabContextMenuAction(), recording the pick.
+    Q_INVOKABLE void triggerTabContextMenuAction(int actionId) { tabMenuPicks.push_back(actionId); }
+
+    /// Mirrors WindowController::openNewTabMenu(): publishes the menu, then asks for it.
+    Q_INVOKABLE void openNewTabMenu(QPointF /*windowPosition*/)
+    {
+        _newTabMenuModel = mockNewTabMenuModel();
+        emit newTabMenuModelChanged();
+        emit newTabMenuRequested();
+    }
+
+    /// Mirrors WindowController::triggerNewTabMenuAction(), recording the pick.
+    Q_INVOKABLE void triggerNewTabMenuAction(int actionId) { newTabMenuPicks.push_back(actionId); }
+
+    std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
+    std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
+
   signals:
     void commandPaletteRequested();
     void contextMenuRequested();
@@ -56,6 +146,15 @@ class MainWindowControllerMock: public QAbstractListModel
     void notificationRequested(QString const& title, QString const& body);
     void bellRequested(QString const& source, double volume);
     void alertRequested();
+    void tabContextMenuModelChanged();
+    void tabContextMenuRequested(int index);
+    void newTabMenuModelChanged();
+    void newTabMenuRequested();
+    void aboutRequested();
+
+  private:
+    QVariantList _tabContextMenuModel {};
+    QVariantList _newTabMenuModel {};
 };
 
 } // namespace contour::test

@@ -382,15 +382,14 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SessionChrome.qml
         qml/TitleBar.qml
         qml/TabStrip.qml
-        qml/NewTabMenu.qml
         qml/TabItem.qml
-        qml/TabContextMenu.qml
         qml/TabColorFlyout.qml
         qml/WindowControls.qml
         qml/ResizeBorder.qml
         qml/PaneNode.qml
         qml/TerminalPane.qml
         qml/ActionContextMenu.qml
+        qml/MenuSwatchRow.qml
         qml/CommandPalette.qml
         qml/SaveLayoutDialog.qml
         qml/SettingsPage.qml
