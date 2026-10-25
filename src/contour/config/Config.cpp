@@ -1317,7 +1317,10 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
         }
     }
     else
+    {
+        config.guiSettingsFileHealth = GuiSettingsFileHealth::Unparsable;
         configLog()("Failed to load settings.yml: {}", loaded.error());
+    }
 }
 
 /**

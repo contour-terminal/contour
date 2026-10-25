@@ -11,7 +11,9 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace contour::window
@@ -20,9 +22,10 @@ namespace contour::window
 /// What the new-defaults banner shows: whether to offer the newest defaults, and the two answers.
 ///
 /// The decision is config::newDefaultsOffer() over the editions the loaded configuration's documents
-/// stated, minus the offers the user already declined (config::isOfferShown()). "Use New" records the
-/// newest edition in `settings.yml`, which wins over `contour.yml`, and reloads; "Keep Mine" records the
-/// declined offer in the GUI state file, so the same reason is never offered twice.
+/// stated (none while the GUI may not write `settings.yml`), minus the offers the user already declined
+/// (config::isOfferShown()). "Use New" records the newest edition in `settings.yml`, which wins over
+/// `contour.yml`, and reloads; "Keep Mine" records the declined offer in the GUI state file, so the same
+/// reason is never offered twice.
 class NewDefaultsNotice: public QObject
 {
     Q_OBJECT
@@ -47,7 +50,8 @@ class NewDefaultsNotice: public QObject
     [[nodiscard]] bool offered() const noexcept;
 
     /// Switches to the newest defaults: records them in `settings.yml`, then reloads.
-    /// @return Nothing on success, or the write's or the reload's error, with offered() as it was.
+    /// @return Nothing on success, or the write's or the reload's error, with offered() as it was. Refused
+    ///         while the GUI may not write `settings.yml` (see offerFor()).
     [[nodiscard]] std::expected<void, std::string> switchToNewDefaults();
 
     /// The banner's action: switchToNewDefaults(), logging a failure.
@@ -65,6 +69,17 @@ class NewDefaultsNotice: public QObject
     void offeredChanged();
 
   private:
+    /// Why the GUI may not write `settings.yml` under @p loaded.
+    /// @param loaded The configuration in effect.
+    /// @return The reason, or nothing when it may.
+    [[nodiscard]] static std::optional<std::string_view> settingsWriteBlocker(config::Config const& loaded);
+
+    /// The offer @p loaded raises: none while the GUI may not write `settings.yml`, that is under
+    /// `gui_config_locked` or over a `settings.yml` that did not parse; else config::newDefaultsOffer().
+    /// @param loaded The configuration in effect.
+    /// @return The offer.
+    [[nodiscard]] static config::NewDefaultsOffer offerFor(config::Config const& loaded);
+
     /// The dismissals @p store holds.
     /// @param store The GUI state to read.
     /// @param fallback What to answer when @p store cannot be read: the dismissals known so far.

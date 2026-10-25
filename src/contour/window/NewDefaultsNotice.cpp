@@ -3,6 +3,8 @@
 
 #include <core/log/LogStore.hpp>
 
+#include <optional>
+#include <string_view>
 #include <utility>
 
 namespace contour::window
@@ -18,7 +20,7 @@ NewDefaultsNotice::NewDefaultsNotice(std::function<config::Config const&()> curr
     _settings { std::move(settings) },
     _state { std::move(state) },
     _reload { std::move(reload) },
-    _offer { config::newDefaultsOffer(_config().defaultsEditionSources) },
+    _offer { offerFor(_config()) },
     _dismissed { dismissedIn(*_state, {}) }
 {
 }
@@ -30,6 +32,8 @@ bool NewDefaultsNotice::offered() const noexcept
 
 std::expected<void, std::string> NewDefaultsNotice::switchToNewDefaults()
 {
+    if (auto const blocker = settingsWriteBlocker(_config()))
+        return std::unexpected { std::string { *blocker } };
     // A copy of what settings.yml holds now, so the switch keeps every other setting the GUI recorded.
     auto settings = _config().guiManagedSettings;
     settings.globalOverrides[std::string { config::DefaultsEditionKey }] =
@@ -57,7 +61,25 @@ void NewDefaultsNotice::keepMine()
 
 void NewDefaultsNotice::refresh()
 {
-    apply(config::newDefaultsOffer(_config().defaultsEditionSources), dismissedIn(*_state, _dismissed));
+    apply(offerFor(_config()), dismissedIn(*_state, _dismissed));
+}
+
+std::optional<std::string_view> NewDefaultsNotice::settingsWriteBlocker(config::Config const& loaded)
+{
+    // "Use New" writes settings.yml: not over a locked GUI configuration, and not over a settings.yml
+    // that did not parse, which the write would replace with the one key it adds.
+    if (loaded.guiConfigLocked.value())
+        return "gui_config_locked is set";
+    if (loaded.guiSettingsFileHealth == config::GuiSettingsFileHealth::Unparsable)
+        return "settings.yml does not parse; fix it first";
+    return std::nullopt;
+}
+
+config::NewDefaultsOffer NewDefaultsNotice::offerFor(config::Config const& loaded)
+{
+    if (settingsWriteBlocker(loaded))
+        return config::NewDefaultsOffer::None;
+    return config::newDefaultsOffer(loaded.defaultsEditionSources);
 }
 
 std::vector<config::NewDefaultsOffer> NewDefaultsNotice::dismissedIn(

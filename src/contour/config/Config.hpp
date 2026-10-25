@@ -811,6 +811,16 @@ enum class SettingsOrigin : uint8_t
     SideFile,   //!< Stored in a GUI-managed side file (profiles/<name>.yml, colorschemes/<name>.yml).
 };
 
+/// Whether the loader could use the `settings.yml` beside `contour.yml`.
+///
+/// Recorded because a GUI that rewrites `settings.yml` from what the loader found would, over a file
+/// that did not parse, replace everything in it with the few keys it knows.
+enum class GuiSettingsFileHealth : uint8_t
+{
+    Usable = 0, //!< Absent, or parsed and applied.
+    Unparsable, //!< Present, but not YAML the loader could read; nothing from it was applied.
+};
+
 /// GUI-owned global overrides, persisted to the sibling `settings.yml` and merged over the
 /// hand-maintained contour.yml at load (freshest wins, exactly like `layouts.yml`).
 ///
@@ -1857,6 +1867,8 @@ struct Config
     /// Runtime-only mirror of that file; the resolved values have already been applied to the fields
     /// above (e.g. @ref defaultProfileName), this simply records what the GUI had persisted.
     GuiManagedSettings guiManagedSettings {};
+    /// Whether that `settings.yml` could be read at all. Runtime only, like @ref guiManagedSettings.
+    GuiSettingsFileHealth guiSettingsFileHealth = GuiSettingsFileHealth::Usable;
 
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings(
         defaultsEdition) };

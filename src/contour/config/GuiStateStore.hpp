@@ -68,11 +68,16 @@ class GuiStateStore
 /// The GUI state file's name, beside `contour.yml`.
 inline constexpr std::string_view GuiStateFileName = "gui-state.yml";
 
+/// What is appended to GuiStateFileName for the copy of a file that could not be read back.
+inline constexpr std::string_view GuiStateBackupSuffix = ".bak";
+
 /// The production GuiStateStore: GuiStateFileName in the configuration directory, written atomically
 /// (see contour::config::atomicWriteFile) as FileGuiConfigStore writes `settings.yml`.
 ///
 /// The file reads `dismissed_new_defaults: [existing_config]`. A token no offer answers to is skipped,
-/// so a file written by a newer release still loads.
+/// so a file written by a newer release still loads, and a save keeps those tokens and any other keys.
+/// Saving over a file that does not load first copies it to `gui-state.yml.bak` (GuiStateBackupSuffix),
+/// and saves nothing when that copy fails.
 class FileGuiStateStore final: public GuiStateStore
 {
   public:

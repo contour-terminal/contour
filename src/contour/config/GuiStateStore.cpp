@@ -12,6 +12,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace contour::config
 {
@@ -70,17 +71,55 @@ namespace
         }
     }
 
-    /// The document that stores @p state.
-    /// @param state The state to spell.
-    /// @return `dismissed_new_defaults: [token, …]` and a trailing newline.
-    [[nodiscard]] std::string emitGuiState(GuiState const& state)
+    /// The map @p content spells.
+    /// @param content A YAML document.
+    /// @return Its root when that is a map, else an empty map.
+    [[nodiscard]] YAML::Node mapIn(std::string const& content)
     {
-        auto out = YAML::Emitter {};
-        out << YAML::BeginMap << YAML::Key << std::string { DismissedOffersKey } << YAML::Value << YAML::Flow
-            << YAML::BeginSeq;
+        try
+        {
+            if (auto document = YAML::Load(content); document.IsMap())
+                return document;
+        }
+        catch (YAML::Exception const&)
+        {
+            errorLog()("The GUI state changed while it was saved; rewriting it whole.");
+        }
+        return YAML::Node { YAML::NodeType::Map };
+    }
+
+    /// The tokens of @p offers that name no offer this release knows.
+    /// @param offers A `dismissed_new_defaults` node.
+    /// @return Its unknown scalar entries, in order.
+    [[nodiscard]] std::vector<std::string> unknownTokens(YAML::Node const& offers)
+    {
+        auto tokens = std::vector<std::string> {};
+        if (offers.IsSequence())
+            for (auto const& entry: offers)
+                if (entry.IsScalar() && !configEnumFromToken<NewDefaultsOffer>(entry.as<std::string>()))
+                    tokens.push_back(entry.as<std::string>());
+        return tokens;
+    }
+
+    /// The document that stores @p state over @p previous, the document the file held.
+    ///
+    /// What this release does not know survives the rewrite: every other key of @p previous, and the
+    /// tokens of its list that name no offer this release knows, after the known ones.
+    /// @param state The state to spell.
+    /// @param previous The file's current document, a map; an empty node when there is none.
+    /// @return `dismissed_new_defaults: [token, …]`, any other keys, and a trailing newline.
+    [[nodiscard]] std::string emitGuiState(GuiState const& state, YAML::Node previous)
+    {
+        auto const key = std::string { DismissedOffersKey };
+        auto offers = YAML::Node { YAML::NodeType::Sequence };
         for (auto const offer: state.dismissedOffers)
-            out << std::string { configEnumToken(offer) };
-        out << YAML::EndSeq << YAML::EndMap;
+            offers.push_back(std::string { configEnumToken(offer) });
+        for (auto const& token: unknownTokens(previous[key]))
+            offers.push_back(token);
+        offers.SetStyle(YAML::EmitterStyle::Flow);
+        previous[key] = offers;
+        auto out = YAML::Emitter {};
+        out << previous;
         return std::string { out.c_str() } + '\n';
     }
 } // namespace
@@ -101,10 +140,33 @@ std::expected<GuiState, GuiStateError> FileGuiStateStore::load() const
 
 std::expected<void, GuiStateError> FileGuiStateStore::save(GuiState const& state)
 {
-    return atomicWriteFile(_file, emitGuiState(state)).transform_error([this](std::string const& error) {
-        errorLog()("Could not write {}: {}", core::pathToUtf8(_file), error);
-        return GuiStateError::Unwritable;
-    });
+    auto previous = YAML::Node { YAML::NodeType::Map };
+    if (auto ec = std::error_code {}; std::filesystem::exists(_file, ec))
+    {
+        if (load())
+        {
+            // It loaded, so it reads and parses as a map or as nothing.
+            previous = mapIn(readWholeFile(_file).value_or(std::string {}));
+        }
+        else
+        {
+            // A file this release cannot read may still hold what a user or a newer release wrote: keep a
+            // copy before replacing it, and replace nothing when the copy fails.
+            auto backup = _file;
+            backup += GuiStateBackupSuffix;
+            std::filesystem::copy_file(_file, backup, std::filesystem::copy_options::overwrite_existing, ec);
+            if (ec)
+            {
+                errorLog()("Could not back up {}: {}", core::pathToUtf8(_file), ec.message());
+                return std::unexpected { GuiStateError::Unwritable };
+            }
+        }
+    }
+    return atomicWriteFile(_file, emitGuiState(state, std::move(previous)))
+        .transform_error([this](std::string const& error) {
+            errorLog()("Could not write {}: {}", core::pathToUtf8(_file), error);
+            return GuiStateError::Unwritable;
+        });
 }
 
 } // namespace contour::config
