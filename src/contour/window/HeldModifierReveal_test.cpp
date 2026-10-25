@@ -57,3 +57,15 @@ TEST_CASE("heldModifier.aSecondPressRearms", "[heldmodifier]")
     CHECK(reveal.at(T0 + 2s + 500ms) == HeaderReveal::HeldModifier);
     CHECK(reveal.dueAt() == T0 + 2s + 500ms);
 }
+
+TEST_CASE("heldModifier.otherInputWhileReleasedIsIgnored", "[heldmodifier]")
+{
+    auto reveal = HeldModifierReveal { 500ms };
+    reveal.otherInput();
+    CHECK(reveal.at(T0) == HeaderReveal::None);
+    CHECK_FALSE(reveal.dueAt().has_value());
+
+    // A press afterwards is not pre-disarmed by that stray input.
+    reveal.modifierPressed(T0);
+    CHECK(reveal.at(T0 + 500ms) == HeaderReveal::HeldModifier);
+}

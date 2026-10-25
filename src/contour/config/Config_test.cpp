@@ -3723,8 +3723,10 @@ TEST_CASE("Config: chrome_density parses each value (ignore-case)", "[config]")
     SECTION("an unknown token leaves the default")
     {
         QTemporaryDir dir;
-        auto capture = core::log::ScopedCapture { "warning" };
+        auto capture = core::log::ScopedCapture { "error" };
         CHECK(load(dir, "dense").chromeDensity.value() == ChromeDensity::Comfortable);
+        INFO("captured error log:\n" << capture.text());
+        CHECK(capture.contains("dense"));
     }
 }
 
@@ -3754,6 +3756,19 @@ TEST_CASE("Config: chrome_density defaults to comfortable in both editions", "[c
         writeSideFile(dir, "settings.yml", "chrome_density: minimal\n");
         CHECK(contour::config::loadConfigFromFile(path).chromeDensity.value() == ChromeDensity::Minimal);
     }
+}
+
+TEST_CASE("Config: chrome_density survives a YAMLConfigWriter round trip", "[config]")
+{
+    using contour::config::ChromeDensity;
+
+    QTemporaryDir dir;
+    auto const minimal = loadFromYaml(dir, "default_profile: main\nchrome_density: minimal\n");
+    REQUIRE(minimal.chromeDensity.value() == ChromeDensity::Minimal);
+
+    auto const rendered = contour::config::createString<contour::config::YAMLConfigWriter>(minimal);
+    CHECK(rendered.contains("chrome_density: minimal"));
+    CHECK(loadFromYaml(dir, rendered).chromeDensity.value() == ChromeDensity::Minimal);
 }
 
 TEST_CASE("Config: the generated config states chrome_density", "[config]")

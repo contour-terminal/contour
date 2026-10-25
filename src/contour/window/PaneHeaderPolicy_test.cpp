@@ -6,8 +6,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstddef>
 #include <ranges>
 #include <string>
+#include <string_view>
+#include <vector>
 
 using namespace contour::window;
 using contour::config::ChromeDensity;
@@ -19,18 +23,24 @@ constexpr auto Base = PaneHeaderInputs {
     .visiblePanes = 2, .width = 400, .height = 300, .headerHeight = 22, .minimumContentHeight = 17
 };
 
-constexpr auto AllDensities = std::array { ChromeDensity::Comfortable, ChromeDensity::Minimal };
-constexpr auto AllReveals = std::array { HeaderReveal::None, HeaderReveal::HeldModifier };
-constexpr auto AllPointers = std::array { PointerPresence::Away, PointerPresence::Hovering };
-constexpr auto AllFocus = std::array { PaneFocus::Unfocused, PaneFocus::Focused, PaneFocus::KeyboardFocused };
+/// Every enumerator of @p E from zero up to and including @p last, so a loop over it visits them all.
+template <typename E>
+std::vector<E> enumerators(E last)
+{
+    auto result = std::vector<E> {};
+    for (auto const i: std::views::iota(size_t { 0 }, static_cast<size_t>(last) + 1))
+        result.push_back(static_cast<E>(i));
+    return result;
+}
+
 } // namespace
 
 TEST_CASE("paneHeader.singlePaneNeverHasAHeader", "[paneheader]")
 {
-    for (auto const density: AllDensities)
-        for (auto const reveal: AllReveals)
-            for (auto const pointer: AllPointers)
-                for (auto const focus: AllFocus)
+    for (auto const density: enumerators(ChromeDensity::Minimal))
+        for (auto const reveal: enumerators(HeaderReveal::HeldModifier))
+            for (auto const pointer: enumerators(PointerPresence::Hovering))
+                for (auto const focus: enumerators(PaneFocus::KeyboardFocused))
                 {
                     auto inputs = Base;
                     inputs.visiblePanes = 1;
@@ -114,10 +124,22 @@ TEST_CASE("paneHeader.rulesCoverEveryDensity", "[paneheader]")
 
 TEST_CASE("paneHeader.actionsResolve", "[paneheader]")
 {
+    constexpr auto Expected = std::array {
+        PaneHeaderActionRow { PaneHeaderAction::SplitRight, "SplitVertical", "Split right" },
+        PaneHeaderActionRow { PaneHeaderAction::SplitDown, "SplitHorizontal", "Split down" },
+        PaneHeaderActionRow { PaneHeaderAction::Zoom, "TogglePaneZoom", "Zoom pane" },
+        PaneHeaderActionRow { PaneHeaderAction::Close, "ClosePane", "Close pane" },
+    };
+    REQUIRE(PaneHeaderActions.size() == Expected.size());
+    REQUIRE(enumerators(PaneHeaderAction::Close).size() == PaneHeaderActions.size());
+
     for (auto const i: std::views::iota(size_t { 0 }, PaneHeaderActions.size()))
     {
         auto const& row = PaneHeaderActions[i];
-        CHECK(row.action == static_cast<PaneHeaderAction>(i));
+        INFO("row " << i);
+        CHECK(row.action == Expected[i].action);
+        CHECK(row.commandName == Expected[i].commandName);
+        CHECK(row.accessibleName == Expected[i].accessibleName);
         auto const action = contour::actions::fromString(std::string(row.commandName));
         REQUIRE(action.has_value());
         CHECK(contour::actions::name(*action) == row.commandName);
@@ -132,20 +154,38 @@ TEST_CASE("paneHeader.name", "[paneheader]")
 
 TEST_CASE("paneHeader.names", "[paneheader]")
 {
-    CHECK(paneHeaderContentName(PaneHeaderContent::Hidden) == "hidden");
-    CHECK(paneHeaderContentName(PaneHeaderContent::Name) == "name");
-    CHECK(paneHeaderContentName(PaneHeaderContent::NameAndCwd) == "nameAndCwd");
-    CHECK(headerActionsName(HeaderActions::Hidden) == "hidden");
-    CHECK(headerActionsName(HeaderActions::Shown) == "shown");
-    CHECK(headerPlacementName(HeaderPlacement::Inline) == "inline");
-    CHECK(headerPlacementName(HeaderPlacement::Overlay) == "overlay");
-    CHECK(headerEmphasisName(HeaderEmphasis::Secondary) == "secondary");
-    CHECK(headerEmphasisName(HeaderEmphasis::Primary) == "primary");
+    auto const contents = enumerators(PaneHeaderContent::NameAndCwd);
+    constexpr auto ContentNames = std::array<std::string_view, 3> { "hidden", "name", "nameAndCwd" };
+    REQUIRE(contents.size() == ContentNames.size());
+    for (auto const content: contents)
+        CHECK(paneHeaderContentName(content) == ContentNames[static_cast<size_t>(content)]);
 
-    CHECK(contour::config::chromeDensityName(ChromeDensity::Comfortable) == "comfortable");
-    CHECK(contour::config::chromeDensityName(ChromeDensity::Minimal) == "minimal");
+    auto const actions = enumerators(HeaderActions::Shown);
+    constexpr auto ActionNames = std::array<std::string_view, 2> { "hidden", "shown" };
+    REQUIRE(actions.size() == ActionNames.size());
+    for (auto const actionsState: actions)
+        CHECK(headerActionsName(actionsState) == ActionNames[static_cast<size_t>(actionsState)]);
+
+    auto const placements = enumerators(HeaderPlacement::Overlay);
+    constexpr auto PlacementNames = std::array<std::string_view, 2> { "inline", "overlay" };
+    REQUIRE(placements.size() == PlacementNames.size());
+    for (auto const placement: placements)
+        CHECK(headerPlacementName(placement) == PlacementNames[static_cast<size_t>(placement)]);
+
+    auto const emphases = enumerators(HeaderEmphasis::Primary);
+    constexpr auto EmphasisNames = std::array<std::string_view, 2> { "secondary", "primary" };
+    REQUIRE(emphases.size() == EmphasisNames.size());
+    for (auto const emphasis: emphases)
+        CHECK(headerEmphasisName(emphasis) == EmphasisNames[static_cast<size_t>(emphasis)]);
+
+    // Densities are named by their table, so the name function and the table cannot disagree.
     auto const values = contour::config::configEnumValues<ChromeDensity>();
     REQUIRE(values.size() == contour::config::ChromeDensityCount);
-    CHECK(values[0].value == ChromeDensity::Comfortable);
-    CHECK(values[1].value == ChromeDensity::Minimal);
+    REQUIRE(enumerators(ChromeDensity::Minimal).size() == values.size());
+    for (auto const i: std::views::iota(size_t { 0 }, values.size()))
+    {
+        CHECK(values[i].value == enumerators(ChromeDensity::Minimal)[i]);
+        CHECK(contour::config::chromeDensityName(values[i].value) == values[i].token);
+    }
+    CHECK(contour::config::chromeDensityName(ChromeDensity::Minimal) == "minimal");
 }
