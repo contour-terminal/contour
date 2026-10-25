@@ -1,6 +1,6 @@
 # Contour — status
 
-Local-only tracker: excluded via `.git/info/exclude`, never committed. Times are local, from `date`, to the second.
+The status board's source, committed with the branch so another agent can resume; rendered and published to the board linked from PR #2178. Times are local, from `date`, to the second.
 
 **Last updated:** 2026-10-25 12:14:59
 

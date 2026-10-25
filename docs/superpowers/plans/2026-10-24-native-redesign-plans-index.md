@@ -20,7 +20,7 @@ coherent.
 
 This run is tracked on a status board: <https://claude.ai/artifact/U8h58rAp7H6yVfnvp4vvEd>. The
 owner asked for the link to live here so that any agent continuing the work can find the board and
-keep it current. The page is published from an untracked file at the root of the working tree.
+keep it current. The page is published from `STATUS.md` at the root of the repository, which is committed with the branch.
 - **Keep it up to date.** In the worktree that owns the board, `/status-board update` edits the
   file and republishes to the link above (`status_page.py --url` reads the same URL from the git
   dir). In a fresh checkout, run `python3 <status_page.py> --remember-url <the link above>` once
