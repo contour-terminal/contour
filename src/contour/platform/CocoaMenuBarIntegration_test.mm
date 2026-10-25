@@ -244,7 +244,8 @@ void checkApplicationMenuFires(contour::command::MenuBarState const& state)
     REQUIRE(applicationMenu != nil);
     auto const tree = contour::command::buildMenuTree(
         contour::command::buildMenuBar(state), {}, contour::command::ShortcutStyle::Text);
-    auto const& rows = tree.nodes[static_cast<std::size_t>(contour::command::MenuBarMenu::Application)].children;
+    auto const application = static_cast<std::size_t>(contour::command::MenuBarMenu::Application);
+    auto const& rows = tree.nodes[application].children;
     auto commandRows = 0;
     for (auto const& row: rows)
     {
@@ -277,8 +278,9 @@ bool performKeyEquivalent(NSString* key, unsigned short keyCode)
     // row's cached enabled state is the one its validator gives now.
     for (NSMenuItem* const top in NSApp.mainMenu.itemArray)
         [top.submenu update];
-    auto const handled = [NSApp.mainMenu performKeyEquivalent:keyDown(key, keyCode, NSEventModifierFlagCommand)];
-    // Qt queues the item's activation, and the bar posts the run: two turns of the loop.
+    auto const handled =
+        [NSApp.mainMenu performKeyEquivalent:keyDown(key, keyCode, NSEventModifierFlagCommand)];
+    // Qt queues the item's activation, and the bar posts the run: a few turns of the loop.
     for (auto const _: std::views::iota(0, 3))
         QCoreApplication::processEvents();
     return handled;
@@ -324,7 +326,9 @@ TEST_CASE("the application menu fires its rows and keys with no window, and afte
     bar.refreshAll();
     checkApplicationMenuFires(state);
     NSMenu* const windows =
-        bar.menuBar().actions().at(static_cast<qsizetype>(contour::command::MenuBarMenu::Window))->menu()->toNSMenu();
+        bar.menuBar().actions().at(static_cast<qsizetype>(contour::command::MenuBarMenu::Window))
+            ->menu()
+            ->toNSMenu();
     CHECK([NSApp.mainMenu indexOfItemWithSubmenu:windows] >= 0);
     ran.clear();
     CHECK(performKeyEquivalent(@"q", kVK_ANSI_Q));
