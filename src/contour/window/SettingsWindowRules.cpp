@@ -3,6 +3,7 @@
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <algorithm>
+#include <functional>
 
 namespace contour::window
 {
@@ -22,15 +23,12 @@ QRect settingsWindowGeometry(SettingsWindowPlacement const& placement)
     if (placement.previous)
     {
         auto const& previous = *placement.previous;
-        QRect const* best = nullptr;
-        auto bestArea = qint64 { 0 };
-        for (auto const& screen: placement.screens)
-            if (auto const area = intersectionArea(previous, screen); area > bestArea)
-            {
-                best = &screen;
-                bestArea = area;
-            }
-        if (best != nullptr)
+        auto const overlap = [&previous](QRect const& screen) {
+            return intersectionArea(previous, screen);
+        };
+        // The first of the screens it overlaps most, as long as it overlaps one at all.
+        if (auto const best = std::ranges::max_element(placement.screens, std::ranges::less {}, overlap);
+            best != placement.screens.end() && overlap(*best) > 0)
             return { reachableWindowPosition(
                          previous.topLeft() - best->topLeft(), previous.size(), *best, placement.frame),
                      previous.size() };

@@ -285,6 +285,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/UiStyleProvider.hpp
         window/WindowActivation.hpp
         window/WindowControlStyleProvider.hpp
+        window/WindowLivenessQt.hpp
         session/SessionInput.hpp
         session/FontControl.hpp
         session/SpawnCommand.hpp

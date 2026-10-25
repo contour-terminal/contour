@@ -36,7 +36,7 @@
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/WindowController.hpp>
-#include <contour/window/WindowLiveness.hpp>
+#include <contour/window/WindowLivenessQt.hpp>
 
 #include <vtbackend/vt/DesktopNotification.hpp>
 
@@ -285,14 +285,7 @@ namespace
     /// for a daemon restart, and a failed restart must not leave a windowless process behind.
     void quitIfWindowless()
     {
-        auto facts = std::vector<window::WindowFacts> {};
-        for (auto const* topLevel: QGuiApplication::topLevelWindows())
-            facts.push_back({ .visibility = topLevel->isVisible() ? window::WindowVisibility::Shown
-                                                                  : window::WindowVisibility::Hidden,
-                              .transience = topLevel->transientParent() != nullptr
-                                                ? window::WindowTransience::Transient
-                                                : window::WindowTransience::Independent });
-        if (!window::anyWindowKeepsAppAlive(facts))
+        if (!window::anyWindowKeepsAppAlive(window::windowFactsOf(QGuiApplication::topLevelWindows())))
             QCoreApplication::quit();
     }
 
@@ -1853,7 +1846,7 @@ void ContourGuiApp::runMenuBarAction(actions::Action const& action, command::Act
                 controller != nullptr && controller->activeSession() != nullptr)
                 controller->runMenuBarAction(action);
             else
-                runWithoutWindow(action);
+                runWithoutWindow(action, controller != nullptr ? controller->screen() : nullptr);
             return;
     }
 }
@@ -1867,7 +1860,7 @@ void ContourGuiApp::warnOfMenuOwnedBindings() const
             command::shortcutText(chord, command::ShortcutStyle::Text));
 }
 
-void ContourGuiApp::runWithoutWindow(actions::Action const& action)
+void ContourGuiApp::runWithoutWindow(actions::Action const& action, QScreen* anchor)
 {
     if (std::holds_alternative<actions::Quit>(action))
     {
@@ -1887,7 +1880,7 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action)
         configuration != nullptr && configuration->target == actions::ConfigurationTarget::SettingsWindow)
     {
         // The Settings window is the app's own, and opens with no terminal window at all.
-        openSettings(nullptr);
+        openSettings(anchor);
         return;
     }
     // About, Open Configuration File and the rest show in a window, or act on a session's configuration.

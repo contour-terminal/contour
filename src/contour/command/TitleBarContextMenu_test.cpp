@@ -191,7 +191,7 @@ TEST_CASE("titleBarContextMenu: the permanent home for these choices is one clic
     // The rows above are a runtime override for one window. Without this the menu would be a setting
     // that quietly forgets on restart, with nothing saying where to make it stick.
     auto const entries = buildTitleBarContextMenu(populatedState());
-    auto const* settings = find(entries, "Tab Bar Settings…");
+    auto const* settings = find(entries, "Settings…");
     REQUIRE(settings != nullptr);
     CHECK(std::holds_alternative<actions::OpenConfiguration>(settings->action));
 }

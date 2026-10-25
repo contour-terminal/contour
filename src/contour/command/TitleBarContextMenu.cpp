@@ -61,7 +61,7 @@ namespace
 
             // The rows above set a runtime override for THIS window; this is where the choice is made
             // permanent. One click away, rather than a menu that quietly forgets on restart.
-            Table::command(OpenConfiguration {}, "Tab Bar Settings…"),
+            Table::command(OpenConfiguration {}, "Settings…"),
         };
 
         return rows;

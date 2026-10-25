@@ -13,7 +13,7 @@
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/UiStyleProvider.hpp>
-#include <contour/window/WindowLiveness.hpp>
+#include <contour/window/WindowLivenessQt.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QGuiApplication>
@@ -32,7 +32,6 @@
 #include <format>
 #include <memory>
 #include <string_view>
-#include <vector>
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
@@ -271,14 +270,7 @@ TEST_CASE("closing Settings after the last terminal window lets the app quit",
     auto fx = HostFixture {};
     // What ContourGuiApp's quitIfWindowless() judges by: is any independent top-level window still shown?
     auto const appStaysAlive = []() {
-        auto facts = std::vector<window::WindowFacts> {};
-        for (auto const* topLevel: QGuiApplication::topLevelWindows())
-            facts.push_back({ .visibility = topLevel->isVisible() ? window::WindowVisibility::Shown
-                                                                  : window::WindowVisibility::Hidden,
-                              .transience = topLevel->transientParent() != nullptr
-                                                ? window::WindowTransience::Transient
-                                                : window::WindowTransience::Independent });
-        return window::anyWindowKeepsAppAlive(facts);
+        return window::anyWindowKeepsAppAlive(window::windowFactsOf(QGuiApplication::topLevelWindows()));
     };
 
     auto terminal = std::make_unique<QQuickWindow>();

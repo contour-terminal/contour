@@ -598,7 +598,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// Quit, New Window, and Settings… (OpenConfiguration's Settings window target). Any other action,
     /// Open Configuration File included, only logs that it needs a window.
     /// @param action The picked row's action.
-    void runWithoutWindow(actions::Action const& action);
+    /// @param anchor The screen of the terminal window that has no session to run it on, which Settings
+    ///               opens on; null when there is no terminal window, for the primary screen.
+    void runWithoutWindow(actions::Action const& action, QScreen* anchor);
 
     /// The Settings window factory used when none is injected: loads SettingsWindow on the app's own QML
     /// engine, and gives SettingsWindowError::Unavailable while there is none (a headless app).
