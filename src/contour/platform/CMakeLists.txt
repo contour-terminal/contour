@@ -53,6 +53,7 @@ add_library(contour_platform STATIC
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.
     AlphaBlur.hpp
+    CocoaNativeMenu.hpp
     CocoaWindowFrame.hpp
     Dwmapi.hpp
     NativeWindowFrame.cpp NativeWindowFrame.hpp
@@ -85,12 +86,14 @@ if(APPLE)
         OBJCXX_STANDARD_REQUIRED ON)
     target_sources(contour_platform PRIVATE
         CocoaAccessibilityPreferenceSource.mm
+        CocoaNativeMenuPresenter.mm
         CocoaPlatformAppearance.mm
         CocoaTaskbarProgressSink.mm
         CocoaWindowFrame.mm
         CocoaWindowResizeGrid.mm)
     set_source_files_properties(
-        CocoaAccessibilityPreferenceSource.mm CocoaPlatformAppearance.mm CocoaTaskbarProgressSink.mm
+        CocoaAccessibilityPreferenceSource.mm CocoaNativeMenuPresenter.mm CocoaPlatformAppearance.mm
+        CocoaTaskbarProgressSink.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
 endif()

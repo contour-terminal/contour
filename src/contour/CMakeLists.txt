@@ -823,13 +823,15 @@ if(CONTOUR_FRONTEND_GUI)
         if(APPLE)
             target_sources(contour_gui_test PRIVATE
                 platform/CocoaAppearanceSources_test.mm
+                platform/CocoaNativeMenuPresenter_test.mm
                 platform/CocoaTaskbarProgressSink_test.mm
                 platform/CocoaWindowResizeGrid_test.mm)
             set_target_properties(contour_gui_test PROPERTIES
                 OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
                 OBJCXX_STANDARD_REQUIRED ON)
             set_source_files_properties(
-                platform/CocoaAppearanceSources_test.mm platform/CocoaTaskbarProgressSink_test.mm
+                platform/CocoaAppearanceSources_test.mm platform/CocoaNativeMenuPresenter_test.mm
+                platform/CocoaTaskbarProgressSink_test.mm
                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)

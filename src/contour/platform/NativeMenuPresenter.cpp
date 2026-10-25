@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/NativeMenuPresenter.hpp>
 
+// macOS has its own presenter, CocoaNativeMenuPresenter.mm.
+#ifndef __APPLE__
+
 namespace contour::platform
 {
 
@@ -10,3 +13,5 @@ std::unique_ptr<INativeMenuPresenter> makeNativeMenuPresenter()
 }
 
 } // namespace contour::platform
+
+#endif
