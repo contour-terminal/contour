@@ -25,6 +25,9 @@ enum class WindowFrame : uint8_t
     NativeFrame,    ///< @c show_title_bar true: the system frame draws the title.
 };
 
+/// Number of @c WindowFrame enumerators, derived from the last one.
+inline constexpr size_t WindowFrameCount = static_cast<size_t>(WindowFrame::NativeFrame) + 1;
+
 /// Whether the window is in full screen.
 enum class WindowMode : uint8_t
 {
@@ -32,12 +35,18 @@ enum class WindowMode : uint8_t
     FullScreen,   ///< Full screen.
 };
 
+/// Number of @c WindowMode enumerators, derived from the last one.
+inline constexpr size_t WindowModeCount = static_cast<size_t>(WindowMode::FullScreen) + 1;
+
 /// What the tab-bar gate (@c config::isTabBarShown) answers.
 enum class TabStripGate : uint8_t
 {
     Hidden = 0, ///< The tab bar would be hidden (e.g. one tab under @c Multiple).
     Shown,      ///< The tab bar would be shown.
 };
+
+/// Number of @c TabStripGate enumerators, derived from the last one.
+inline constexpr size_t TabStripGateCount = static_cast<size_t>(TabStripGate::Shown) + 1;
 
 /// Whether a bar is on screen.
 enum class BarPresence : uint8_t

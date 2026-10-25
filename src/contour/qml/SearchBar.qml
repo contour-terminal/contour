@@ -79,8 +79,8 @@ Popup {
     readonly property bool _casePinned: root._search ? root._search.searchCasePinned : false
     readonly property string _caseTooltip: root._search ? root._search.searchCaseTooltip : ""
 
-    // The tint a fruitless search takes. From the style's own token row rather than a literal here,
-    // so the two chrome styles can disagree about it like they do about every other colour value.
+    // The tint a fruitless search takes: the Danger status token (UiStyleProvider::errorColor), the
+    // same on every chrome row, rather than a literal here.
     readonly property color errorColor: chromeStyle.errorColor
 
     // Which session was last told this bar is open, which is emphatically NOT "whatever session is

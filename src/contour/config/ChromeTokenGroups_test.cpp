@@ -398,7 +398,8 @@ TEST_CASE("chromeTokens.schemeColours", "[chrometokens]")
     palette.palette[2] = 0x060606_rgb;
     palette.palette[3] = 0x070707_rgb;
     palette.palette[4] = 0x080808_rgb;
-    palette.selection.background = 0x090909_rgb;
+    // Light, so the chrome keeps it: either end of this dark scheme reads on it.
+    palette.selection.background = 0xF9F9F9_rgb;
 
     auto const slotOf = [](ChromeSchemeColors const& colors, SchemeSlot slot) {
         return colors.bySlot[static_cast<size_t>(slot)];
@@ -413,12 +414,14 @@ TEST_CASE("chromeTokens.schemeColours", "[chrometokens]")
     CHECK(slotOf(colors, SchemeSlot::Success) == 0x060606_rgb);
     CHECK(slotOf(colors, SchemeSlot::Warning) == 0x070707_rgb);
     CHECK(slotOf(colors, SchemeSlot::Accent) == 0x080808_rgb);
-    CHECK(slotOf(colors, SchemeSlot::Selection) == 0x090909_rgb);
+    CHECK(slotOf(colors, SchemeSlot::Selection) == 0xF9F9F9_rgb);
 
+    // The scheme's own selection, before the chrome checks it reads: a cell-colour selection is that end.
+    CHECK(schemeSelectionOf(palette) == 0xF9F9F9_rgb);
     palette.selection.background = CellForegroundColor {};
-    CHECK(slotOf(chromeSchemeColorsOf(palette), SchemeSlot::Selection) == 0x020202_rgb);
+    CHECK(schemeSelectionOf(palette) == 0x020202_rgb);
     palette.selection.background = CellBackgroundColor {};
-    CHECK(slotOf(chromeSchemeColorsOf(palette), SchemeSlot::Selection) == 0x010101_rgb);
+    CHECK(schemeSelectionOf(palette) == 0x010101_rgb);
 }
 
 TEST_CASE("chromeTokens.barTextReadsOnTheBar", "[chrometokens]")
@@ -585,6 +588,8 @@ TEST_CASE("chromeTokens.bandColourRoles", "[chrometokens]")
             .role = TabTextActive, .native = label(1), .terminal = schemeColor(SchemeSlot::SelectionText) },
         BandColorRow {
             .role = TabTextDimmed, .native = label(3), .terminal = schemeColor(SchemeSlot::BarText) },
+        BandColorRow {
+            .role = TabTextTinted, .native = label(1), .terminal = schemeColor(SchemeSlot::BarText) },
         BandColorRow { .role = ChipFill, .native = fill(4), .terminal = schemeColor(SchemeSlot::Bar) },
         BandColorRow { .role = ChipText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarText) },
         BandColorRow {
@@ -660,21 +665,46 @@ TEST_CASE("chromeTokens.selectionTextReadsOnTheSelection", "[chrometokens]")
         auto const colors = chromeSchemeColorsOf(palette);
         auto const selection = slotIn(colors, SchemeSlot::Selection);
         auto const text = slotIn(colors, SchemeSlot::SelectionText);
-        CHECK((text == palette.defaultForeground || text == palette.defaultBackground));
-        CHECK(contrastRatio(text, selection)
-              >= std::max(contrastRatio(palette.defaultForeground, selection),
-                          contrastRatio(palette.defaultBackground, selection)));
+        // The active tab reads on every bundled scheme, not only on those that set a selection colour.
+        CHECK(contrastRatio(text, selection) >= MinimumTextContrast);
+
+        // Where the scheme's own selection reads, the chrome keeps it, with its better end on top.
+        auto const own = schemeSelectionOf(palette);
+        auto const bestOnOwn = std::max(contrastRatio(palette.defaultForeground, own),
+                                        contrastRatio(palette.defaultBackground, own));
+        if (bestOnOwn >= MinimumTextContrast)
+        {
+            CHECK(selection == own);
+            CHECK(contrastRatio(text, selection) == bestOnOwn);
+        }
     }
 
+    // The two schemes that set a selection colour keep it.
     for (auto const* name: { "contour-light", "contour-dark" })
     {
         INFO("scheme: " << name);
         auto palette = ColorPalette {};
         REQUIRE(defaultColorPalettes(name, palette));
-        auto const colors = chromeSchemeColorsOf(palette);
-        CHECK(contrastRatio(slotIn(colors, SchemeSlot::SelectionText), slotIn(colors, SchemeSlot::Selection))
-              >= 4.5);
+        CHECK(slotIn(chromeSchemeColorsOf(palette), SchemeSlot::Selection) == schemeSelectionOf(palette));
     }
+
+    // A scheme whose selection fails but whose two ends read on each other takes the inverse pair.
+    auto inverse = ColorPalette {};
+    inverse.defaultBackground = 0x101010_rgb;
+    inverse.defaultForeground = 0xE0E0E0_rgb;
+    inverse.selection.background = 0x707070_rgb; // 3.5:1 on the foreground, 4.0:1 on the background
+    auto const inverseColors = chromeSchemeColorsOf(inverse);
+    CHECK(slotIn(inverseColors, SchemeSlot::Selection) == inverse.defaultForeground);
+    CHECK(slotIn(inverseColors, SchemeSlot::SelectionText) == inverse.defaultBackground);
+
+    // one-dark's ends are too close for any scheme pair (3.47:1 at best), so the active tab is the bar
+    // with a legible ink on it.
+    auto oneDark = ColorPalette {};
+    REQUIRE(defaultColorPalettes("one-dark", oneDark));
+    auto const oneDarkColors = chromeSchemeColorsOf(oneDark);
+    CHECK(slotIn(oneDarkColors, SchemeSlot::Selection) == oneDark.normalColor(0));
+    CHECK(contrastRatio(slotIn(oneDarkColors, SchemeSlot::SelectionText), oneDark.normalColor(0))
+          >= MinimumTextContrast);
 }
 
 TEST_CASE("chromeTokens.statusInkLegibleOnTheBar", "[chrometokens]")

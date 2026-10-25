@@ -85,7 +85,11 @@ enum class ChromeColorRole : uint8_t
     ControlPressedFill, //!< A pressed band control.
     TabText,            //!< An inactive tab's label.
     TabTextActive,      //!< The active tab's label.
-    TabTextDimmed,      //!< A label one level down (an inactive window, a tab icon without a colour).
+    /// A label one level down: the inactive window's labels, and a tab icon without a colour. Below
+    /// 4.5:1 on a light well (about 3.3) by design: WCAG 1.4.3 exempts the text of an inactive
+    /// component, and the icon is a non-text mark, so both are held to 3:1 instead.
+    TabTextDimmed,
+    TabTextTinted, //!< An inactive tab's label on its colour tint: one level up, so it keeps 4.5:1.
 
     // The band's chips.
     ChipFill,       //!< A toolbar or host chip.
@@ -117,12 +121,14 @@ enum class SchemeSlot : uint8_t
     Bar,            //!< ANSI colour 0, the bar fill.
     BarText,        //!< Whichever of the default foreground and background reads better on @c Bar.
     Secondary,      //!< ANSI colour 8.
-    Selection,      //!< The selection background.
-    SelectionText,  //!< Whichever of the default foreground and background reads better on @c Selection.
-    Accent,         //!< ANSI colour 4.
-    Danger,         //!< ANSI colour 1.
-    Success,        //!< ANSI colour 2.
-    Warning,        //!< ANSI colour 3.
+    /// The chrome's selection: the scheme's (@c schemeSelectionOf) where an end of the scheme reads on it
+    /// at 4.5:1, else the first legible pair of @c SelectionFallbacks.
+    Selection,
+    SelectionText, //!< The text on @c Selection, which reaches 4.5:1 wherever any candidate pair does.
+    Accent,        //!< ANSI colour 4.
+    Danger,        //!< ANSI colour 1.
+    Success,       //!< ANSI colour 2.
+    Warning,       //!< ANSI colour 3.
 };
 
 /// Number of @c SchemeSlot enumerators, derived from the last one.
@@ -532,6 +538,7 @@ namespace detail
         label(2),   // TabText
         label(1),   // TabTextActive
         label(3),   // TabTextDimmed
+        label(1),   // TabTextTinted
         fill(4),    // ChipFill
         label(2),   // ChipText
         label(1),   // ChipTextStrong
@@ -781,6 +788,7 @@ namespace detail
                     schemeColor(SchemeSlot::SelectionText), // TabTextActive
                     // Not Secondary: ANSI 8 on a light scheme's dark bar fails 4.5:1, so it does not dim.
                     schemeColor(SchemeSlot::BarText),   // TabTextDimmed
+                    schemeColor(SchemeSlot::BarText),   // TabTextTinted (the row has no tint)
                     schemeColor(SchemeSlot::Bar),       // ChipFill
                     schemeColor(SchemeSlot::BarText),   // ChipText
                     schemeColor(SchemeSlot::BarText) }, // ChipTextStrong
@@ -838,19 +846,41 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
     return tokens;
 }
 
+/// The selection colour a palette paints, with a cell-colour selection resolved to that end of the scheme.
+/// @param palette The terminal colour palette.
+/// @return The selection background, as the terminal draws it.
+[[nodiscard]] inline vtbackend::RGBColor schemeSelectionOf(vtbackend::ColorPalette const& palette)
+{
+    if (auto const* rgb = std::get_if<vtbackend::RGBColor>(&palette.selection.background))
+        return *rgb;
+    if (std::holds_alternative<vtbackend::CellForegroundColor>(palette.selection.background))
+        return palette.defaultForeground;
+    return palette.defaultBackground;
+}
+
+/// Where the chrome's selection comes from, in the order it is tried.
+enum class SelectionSource : uint8_t
+{
+    Scheme = 0, //!< The scheme's own selection, with its better end of the scheme on top.
+    Inverse,    //!< Inverse video: the foreground as the fill, the background as the text.
+    Bar,        //!< The bar and its text.
+    BarBright,  //!< The bar with ANSI 15 (bright white) on it, for a scheme whose own ends are dim.
+    BarMono,    //!< The bar with black or white on it, whichever reads better: always at least 4.58:1.
+};
+
+/// The candidates for the chrome's selection, first legible one wins. Most bundled schemes inherit a
+/// saturated blue selection on which neither end of the scheme reaches 4.5:1 (one-dark, solarized-dark);
+/// the last candidate always reads, so the active tab does on every scheme.
+inline constexpr std::array SelectionFallbacks {
+    SelectionSource::Scheme,    SelectionSource::Inverse, SelectionSource::Bar,
+    SelectionSource::BarBright, SelectionSource::BarMono,
+};
+
 /// Reduces a terminal colour palette to the slots the Terminal chrome paints with.
 /// @param palette The active terminal colour palette.
 /// @return One colour per @c SchemeSlot.
 [[nodiscard]] inline ChromeSchemeColors chromeSchemeColorsOf(vtbackend::ColorPalette const& palette)
 {
-    auto const selection = [&]() -> vtbackend::RGBColor {
-        if (auto const* rgb = std::get_if<vtbackend::RGBColor>(&palette.selection.background))
-            return *rgb;
-        if (std::holds_alternative<vtbackend::CellForegroundColor>(palette.selection.background))
-            return palette.defaultForeground;
-        return palette.defaultBackground;
-    }();
-
     // ANSI colour 0 is black in a light scheme as in a dark one, but a light scheme's foreground is dark
     // too: text on the bar (and on the selection) takes whichever end of the scheme stands off it.
     auto const bar = palette.normalColor(0);
@@ -867,8 +897,49 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
     colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = bar;
     colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)] = readableOn(bar);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Secondary)] = palette.brightColor(0);
-    colors.bySlot[static_cast<size_t>(SchemeSlot::Selection)] = selection;
-    colors.bySlot[static_cast<size_t>(SchemeSlot::SelectionText)] = readableOn(selection);
+    // The first candidate whose text reads at 4.5:1; failing all, the one that reads best.
+    struct Pair
+    {
+        vtbackend::RGBColor fill;
+        vtbackend::RGBColor text;
+    };
+    auto const pairOf = [&](SelectionSource source) -> Pair {
+        switch (source)
+        {
+            case SelectionSource::Scheme: {
+                auto const own = schemeSelectionOf(palette);
+                return { .fill = own, .text = readableOn(own) };
+            }
+            case SelectionSource::Inverse:
+                return { .fill = palette.defaultForeground, .text = palette.defaultBackground };
+            case SelectionSource::Bar: return { .fill = bar, .text = readableOn(bar) };
+            case SelectionSource::BarBright: return { .fill = bar, .text = palette.brightColor(7) };
+            case SelectionSource::BarMono: break;
+        }
+        auto const black = vtbackend::RGBColor { 0, 0, 0 };
+        auto const white = vtbackend::RGBColor { 255, 255, 255 };
+        return { .fill = bar,
+                 .text = vtbackend::contrastRatio(black, bar) >= vtbackend::contrastRatio(white, bar)
+                             ? black
+                             : white };
+    };
+    auto const ratioOf = [](Pair const& pair) {
+        return vtbackend::contrastRatio(pair.text, pair.fill);
+    };
+    auto selection = pairOf(SelectionFallbacks.front());
+    for (auto const source: SelectionFallbacks)
+    {
+        auto const candidate = pairOf(source);
+        if (ratioOf(candidate) >= MinimumTextContrast)
+        {
+            selection = candidate;
+            break;
+        }
+        if (ratioOf(candidate) > ratioOf(selection))
+            selection = candidate;
+    }
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Selection)] = selection.fill;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::SelectionText)] = selection.text;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Accent)] = palette.normalColor(4);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Danger)] = palette.normalColor(1);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Success)] = palette.normalColor(2);

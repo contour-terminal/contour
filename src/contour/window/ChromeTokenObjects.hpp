@@ -562,6 +562,7 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor tabText READ tabText NOTIFY changed)
     Q_PROPERTY(QColor tabTextActive READ tabTextActive NOTIFY changed)
     Q_PROPERTY(QColor tabTextDimmed READ tabTextDimmed NOTIFY changed)
+    Q_PROPERTY(QColor tabTextTinted READ tabTextTinted NOTIFY changed)
     Q_PROPERTY(QColor chipFill READ chipFill NOTIFY changed)
     Q_PROPERTY(QColor chipText READ chipText NOTIFY changed)
     Q_PROPERTY(QColor chipTextStrong READ chipTextStrong NOTIFY changed)
@@ -610,6 +611,7 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor tabText() const { return color(config::ChromeColorRole::TabText); }
     [[nodiscard]] QColor tabTextActive() const { return color(config::ChromeColorRole::TabTextActive); }
     [[nodiscard]] QColor tabTextDimmed() const { return color(config::ChromeColorRole::TabTextDimmed); }
+    [[nodiscard]] QColor tabTextTinted() const { return color(config::ChromeColorRole::TabTextTinted); }
     [[nodiscard]] QColor chipFill() const { return color(config::ChromeColorRole::ChipFill); }
     [[nodiscard]] QColor chipText() const { return color(config::ChromeColorRole::ChipText); }
     [[nodiscard]] QColor chipTextStrong() const { return color(config::ChromeColorRole::ChipTextStrong); }

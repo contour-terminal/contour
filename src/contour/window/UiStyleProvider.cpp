@@ -159,17 +159,11 @@ namespace
         };
     }
 
-    /// Whether @p value names an enumerator of an enum with @p count of them, counted from 0.
+    /// Whether @p value, as QML passes it, indexes a table of @p count rows (an enum of @p count
+    /// enumerators counted from 0).
     [[nodiscard]] constexpr bool inRange(int value, size_t count) noexcept
     {
         return value >= 0 && std::cmp_less(value, count);
-    }
-
-    /// Whether @p value names an enumerator of an enum counted from 0 up to @p last.
-    template <typename Enum>
-    [[nodiscard]] constexpr bool isEnumerator(int value, Enum last) noexcept
-    {
-        return value >= 0 && value <= static_cast<int>(std::to_underlying(last));
     }
 
     /// @return @p name as the QString QML reads it.
@@ -299,9 +293,8 @@ QVariantMap UiStyleProvider::hostChipLook(int state) const
 
 QVariantMap UiStyleProvider::titleBand(int frame, int mode, int strip, int position) const
 {
-    if (!isEnumerator(frame, WindowFrame::NativeFrame) || !isEnumerator(mode, WindowMode::FullScreen)
-        || !isEnumerator(strip, TabStripGate::Shown)
-        || !isEnumerator(position, config::TabBarPosition::Bottom))
+    if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount)
+        || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount))
         return {};
     auto const band =
         resolveTitleBand(TitleBandInputs { .shape = _groups.layout.tabShape,
@@ -348,7 +341,7 @@ qreal UiStyleProvider::bandHeight() const noexcept
 
 QColor UiStyleProvider::statusColor(int role) const
 {
-    if (role < 0 || std::cmp_greater_equal(role, config::StatusColors.size()))
+    if (!inRange(role, config::StatusColors.size()))
         return { Qt::transparent };
 
     auto const& row = config::StatusColors[static_cast<size_t>(role)];

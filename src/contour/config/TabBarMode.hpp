@@ -4,6 +4,7 @@
 #include <contour/config/ConfigEnumInfo.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -18,6 +19,9 @@ enum class TabBarPosition : uint8_t
     Top,    //!< The tab strip sits above the terminal content (default, historical behavior).
     Bottom, //!< The tab strip sits below the terminal content.
 };
+
+/// Number of @c TabBarPosition enumerators, derived from the last one.
+inline constexpr size_t TabBarPositionCount = static_cast<size_t>(TabBarPosition::Bottom) + 1;
 
 /// When the GUI tab strip (tab bar) is shown.
 enum class TabBarVisibility : uint8_t

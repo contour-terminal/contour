@@ -725,14 +725,20 @@ TEST_CASE("UiStyleProvider: the tab text reads at 4.5:1 on every fill it sits on
             CHECK(contrastOf(over(role("tabTextActive"), active), active) >= 4.5);
             CHECK(contrastOf(over(role("tabText"), well), well) >= 4.5);
             CHECK(contrastOf(over(role("chipText"), chip), chip) >= 4.5);
+            // The dimmed label is the inactive window's: WCAG 1.4.3 exempts an inactive component's
+            // text, so it is held to the 3:1 a non-text mark (the uncoloured tab icon) needs.
+            CHECK(contrastOf(over(role("tabTextDimmed"), well), well) >= 3.0);
 
             for (auto const& swatch: model.colorPalette())
             {
                 auto tinted = contour::platform::toQColor(swatch);
                 tinted.setAlphaF(static_cast<float>(tint));
-                auto const pill = over(tinted, active);
-                INFO("swatch: " << pill.name().toStdString());
-                CHECK(contrastOf(over(role("tabTextActive"), pill), pill) >= 4.5);
+                auto const activePill = over(tinted, active);
+                auto const inactivePill = over(tinted, well);
+                INFO("swatch: " << contour::platform::toQColor(swatch).name().toStdString());
+                CHECK(contrastOf(over(role("tabTextActive"), activePill), activePill) >= 4.5);
+                // A coloured inactive tab is still active UI: its label is the tinted one.
+                CHECK(contrastOf(over(role("tabTextTinted"), inactivePill), inactivePill) >= 4.5);
             }
         });
 }
@@ -891,7 +897,19 @@ TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
     CHECK(tokenOf(mac, "layout", "profileMenu").toInt() == tokenOf(mac, "layout", "secondaryClick").toInt());
     CHECK(tokenOf(mac, "layout", "caret").toInt() != tokenOf(mac, "layout", "secondaryClick").toInt());
     // The Pill band is the title bar's own height; a Flat bar keeps today's strip height.
-    CHECK(mac.property("bandHeight").toReal() == 38.0);
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        CAPTURE(static_cast<int>(row));
+        auto const provider = UiStyleProvider(chromeInputsFor(row, font));
+        auto const expected = row == ChromeStyle::MacOS ? 38.0 : 34.0;
+        CHECK(provider.property("bandHeight").toReal() == expected);
+        // A Flat tab's corners are the 1a corner radius (3), not radii.tab (the pill's, 6 or 8 on
+        // Fluent and Linux): binding the Flat strip to the pill's radius would move today's geometry.
+        CHECK(provider.radius() == 3);
+        CHECK(provider.radius() == contour::config::uiStyleTokens(row).cornerRadiusPixels);
+    }
+    CHECK(tokenOf(UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font)), "radii", "tab").toReal()
+          != 3.0);
     CHECK(mac.property("tabColorGlyph").toString().isEmpty());
     CHECK(mac.property("hostDotGlyph").toString().isEmpty());
 
