@@ -45,11 +45,13 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last handover: 2026-10-25, 13:54. The branch is rebased onto master `974feaf1` (every ledger hash
-before that is pre-rebase; the board carries the rebased ones). Step 1b Tasks 1–11 are complete,
-Task 11's test round included (`cbcbb084`). Task 12 (the menu bar) is next, then Task 13 (finish),
-then write the Step 4a plan. Behaviour note for Task 12: on macOS, ⌘H and ⌥⌘H now reach the
-terminal instead of hiding the app.
+Last update: 2026-10-25, Step 1b done (`c8fe3124`). Its ledger, with every ruling, the
+controller-added Task 12a (⌘H, ⌥⌘H and ⌘M stay with the macOS menu; Minimize and Zoom; "Settings…"),
+the final review and its fix wave, and the parked findings, is
+`docs/superpowers/ledgers/2026-10-25-native-redesign-step-1b.md`. Next: write the Step 4a plan.
+Carry into it from that ledger: About and Settings… open on a minimised window after ⌘M (Step 4a's
+Settings window should raise or own its window), and the design canvas's macOS ⌘ chords (⌘N, ⌘T,
+⌘W, ⌥⌘W, ⇧⌘W, ⌘D, …), which no edition binds yet (issue #2175).
 
 ## Rules for every step
 
@@ -77,7 +79,7 @@ terminal instead of hiding the app.
 | 0 | Foundations: ChromeStyle rows, shortcut glyphs, `theme: terminal`, contour-dark/light/classic, no single-pane focus frame, QML colour lint, bundled JetBrains Mono, first-launch defaults behind `DefaultsEdition` | — | 3.0, 2.7 | `2026-10-23-native-redesign-phase0.md` (done) |
 | 1e | Chrome snapshot driver (test-only, `[display]`) | 0 | 2.5 | `2026-10-24-native-redesign-step-1e.md` (done) |
 | 1a | Kit primitives (Toast, Banner, KitDialog), token groups, size-literal lint, accessibility preferences and platform appearance (null + macOS), Reduce Motion for terminal durations, the new-defaults banner, `hostingNoticeBar` → Banner | 1e | 3.1, 2.1, 2.3, 2.4 | `2026-10-25-native-redesign-step-1a.md` (done) |
-| 1b | Menus as data, `NativeMenuPresenter` (macOS), `MenuBarTable` + `AppMenuBar` | 1a | 3.2 | `2026-10-25-native-redesign-step-1b.md` (written) |
+| 1b | Menus as data, `NativeMenuPresenter` (macOS), `MenuBarTable` + `AppMenuBar` | 1a | 3.2 | `2026-10-25-native-redesign-step-1b.md` (done) |
 | 4a | Settings window shell; pseudo-tab and `settingsActive` removed; the `settings` row of the snapshot table (`SnapshotScripts`) changes in the same commit | 1b | 3.3 | to write |
 | 1c | Title band, tab well and pills, badge slot, HostChip, drift chip, tab colour, no-title-bar and full screen | 4a | 3.4 | to write |
 | 1d | macOS title-band material and safe area (spike first) | 1c | 3.5 | to write |
