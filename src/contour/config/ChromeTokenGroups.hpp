@@ -46,6 +46,13 @@ enum class MenuPresentation : uint8_t
     Native,      //!< Handed to the operating system's menu presenter, falling back to the scene.
 };
 
+/// How the tabs are drawn.
+enum class TabShape : uint8_t
+{
+    Flat = 0, //!< Today's strip: the bar is the tab strip, edge to edge.
+    Pill,     //!< A well of pills inside the window's title band.
+};
+
 /// The chrome colours a row describes; enumerator order is the order of @c ChromeTokenRow::colors.
 enum class ChromeColorRole : uint8_t
 {
