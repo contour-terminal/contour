@@ -17,6 +17,8 @@
 using contour::command::buildTitleBarContextMenu;
 using contour::command::ContextMenuEntry;
 using contour::command::ContextMenuEntryKind;
+using contour::command::RowAvailability;
+using contour::command::RowCheck;
 using contour::command::TitleBarContextMenuState;
 namespace actions = contour::actions;
 
@@ -47,7 +49,7 @@ TEST_CASE("titleBarContextMenu: opening a tab is always offered", "[contour][tit
 
     auto const* newTab = find(entries, "New Tab");
     REQUIRE(newTab != nullptr);
-    CHECK(newTab->enabled);
+    CHECK(newTab->availability == RowAvailability::Enabled);
     CHECK(std::holds_alternative<actions::CreateNewTab>(newTab->action));
 }
 
@@ -69,7 +71,7 @@ TEST_CASE("titleBarContextMenu: each profile row opens a tab UNDER that profile"
         REQUIRE(create->profileName.has_value());
         CHECK(*create->profileName == child.title);
         // Nothing is "current" among these, so nothing may claim to be.
-        CHECK_FALSE(child.checkable);
+        CHECK(child.check == RowCheck::None);
     }
 }
 
@@ -93,7 +95,7 @@ TEST_CASE("titleBarContextMenu: closing rows track how many tabs there are", "[c
 
         auto const* closeTab = find(entries, "Close Tab");
         REQUIRE(closeTab != nullptr);
-        CHECK(closeTab->enabled);
+        CHECK(closeTab->availability == RowAvailability::Enabled);
 
         auto const* closeAll = find(entries, "Close All Tabs");
         REQUIRE(closeAll != nullptr);
@@ -118,7 +120,7 @@ TEST_CASE("titleBarContextMenu: closing rows track how many tabs there are", "[c
         auto const entries = buildTitleBarContextMenu(state);
         auto const* closeTab = find(entries, "Close Tab");
         REQUIRE(closeTab != nullptr);
-        CHECK_FALSE(closeTab->enabled);
+        CHECK(closeTab->availability == RowAvailability::Disabled);
     }
 }
 
@@ -141,13 +143,13 @@ TEST_CASE("titleBarContextMenu: the tab bar submenu offers every mode and ticks 
         // Every mode is offered. Asserted against the TABLE rather than a second literal list, which is
         // the point of generating the rows: a mode added there shows up here with neither file touched.
         auto const modeRows =
-            std::ranges::count_if(tabBar->children, [](auto const& e) { return e.checkable; });
+            std::ranges::count_if(tabBar->children, [](auto const& e) { return e.check != RowCheck::None; });
         CHECK(std::cmp_equal(modeRows, contour::config::configEnumValues<TabBarVisibility>().size()));
 
         // Exactly one is ticked, and it is the one in force.
         auto ticked = std::vector<std::string> {};
         for (auto const& child: tabBar->children)
-            if (child.checked)
+            if (child.check == RowCheck::Checked)
                 ticked.push_back(child.title);
         REQUIRE(ticked.size() == 1);
         CHECK(ticked.front() == live.label);
@@ -175,10 +177,10 @@ TEST_CASE("titleBarContextMenu: the tab bar submenu offers every mode and ticks 
 
         auto const* bottom = find(position->children, "Bottom");
         REQUIRE(bottom != nullptr);
-        CHECK(bottom->checked);
+        CHECK(bottom->check == RowCheck::Checked);
         auto const* top = find(position->children, "Top");
         REQUIRE(top != nullptr);
-        CHECK_FALSE(top->checked);
+        CHECK(top->check != RowCheck::Checked);
     }
 }
 

@@ -60,12 +60,13 @@ struct MenuTable
     {
         ContextMenuEntryKind kind = ContextMenuEntryKind::Command;
         actions::Action action {};
-        std::string_view title {};         ///< Empty on a Command row => commandTitle(action).
-        Predicate visible = always;        ///< When false, the row is not in the menu at all.
-        Predicate enabled = always;        ///< When false, the row is in the menu but grayed out.
-        Predicate checked = nullptr;       ///< When set, the row is checkable; checked when it holds.
-        ChildBuilder children = nullptr;   ///< Submenu rows: what is inside.
-        ActionBinder bindAction = nullptr; ///< When set, supplies the action in place of @ref action.
+        std::string_view title {};              ///< Empty on a Command row => commandTitle(action).
+        Predicate visible = always;             ///< When false, the row is not in the menu at all.
+        Predicate enabled = always;             ///< When false, the row is in the menu but grayed out.
+        Predicate checked = nullptr;            ///< When set, the row is checkable; checked when it holds.
+        MenuItemRole role = MenuItemRole::None; ///< The role a native menu gives this row.
+        ChildBuilder children = nullptr;        ///< Submenu rows: what is inside.
+        ActionBinder bindAction = nullptr;      ///< When set, supplies the action in place of @ref action.
 
         /// This row, shown only when @p predicate holds.
         [[nodiscard]] Row shownWhen(Predicate predicate) const
@@ -88,6 +89,14 @@ struct MenuTable
         {
             auto row = *this;
             row.checked = predicate;
+            return row;
+        }
+
+        /// This row, carrying @p newRole for a native menu to place.
+        [[nodiscard]] Row withRole(MenuItemRole newRole) const
+        {
+            auto row = *this;
+            row.role = newRole;
             return row;
         }
 
@@ -114,7 +123,10 @@ struct MenuTable
                      .title = title,
                      .visible = always,
                      .enabled = always,
-                     .children = nullptr };
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = nullptr,
+                     .bindAction = nullptr };
     }
 
     /// A divider between groups of rows.
@@ -125,7 +137,10 @@ struct MenuTable
                      .title = {},
                      .visible = always,
                      .enabled = always,
-                     .children = nullptr };
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = nullptr,
+                     .bindAction = nullptr };
     }
 
     /// A row named @p title that opens onto whatever @p children builds.
@@ -136,7 +151,10 @@ struct MenuTable
                      .title = title,
                      .visible = always,
                      .enabled = always,
-                     .children = children };
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = children,
+                     .bindAction = nullptr };
     }
 
     /// One AttachToHost row per saved host, in `State::hostNames` order.
@@ -154,9 +172,10 @@ struct MenuTable
             entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
                                                     .title = name,
                                                     .action = actions::AttachToHost { .name = name },
-                                                    .enabled = true,
-                                                    .checkable = false,
-                                                    .checked = false,
+                                                    .availability = RowAvailability::Enabled,
+                                                    .check = RowCheck::None,
+                                                    .role = MenuItemRole::None,
+                                                    .swatch = std::nullopt,
                                                     .children = {} });
 
         return entries;
@@ -189,9 +208,10 @@ struct MenuTable
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator,
                                                             .title = {},
                                                             .action = {},
-                                                            .enabled = true,
-                                                            .checkable = false,
-                                                            .checked = false,
+                                                            .availability = RowAvailability::Enabled,
+                                                            .check = RowCheck::None,
+                                                            .role = MenuItemRole::None,
+                                                            .swatch = std::nullopt,
                                                             .children = {} });
                     break;
 
@@ -203,9 +223,10 @@ struct MenuTable
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Submenu,
                                                             .title = std::string(row.title),
                                                             .action = {},
-                                                            .enabled = true,
-                                                            .checkable = false,
-                                                            .checked = false,
+                                                            .availability = RowAvailability::Enabled,
+                                                            .check = RowCheck::None,
+                                                            .role = MenuItemRole::None,
+                                                            .swatch = std::nullopt,
                                                             .children = std::move(children) });
                     break;
                 }
@@ -216,9 +237,13 @@ struct MenuTable
                         .kind = ContextMenuEntryKind::Command,
                         .title = row.title.empty() ? commandTitle(action) : std::string(row.title),
                         .action = std::move(action),
-                        .enabled = row.enabled(state),
-                        .checkable = row.checked != nullptr,
-                        .checked = row.checked != nullptr && row.checked(state),
+                        .availability =
+                            row.enabled(state) ? RowAvailability::Enabled : RowAvailability::Disabled,
+                        .check = row.checked == nullptr ? RowCheck::None
+                                 : row.checked(state)   ? RowCheck::Checked
+                                                        : RowCheck::Unchecked,
+                        .role = row.role,
+                        .swatch = std::nullopt,
                         .children = {} });
                     break;
                 }

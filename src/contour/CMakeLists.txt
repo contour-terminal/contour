@@ -789,6 +789,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/LauncherProgressSink_test.cpp
             platform/NativeWindowFrame_test.cpp
             window/WindowPositionStore_test.cpp
+            window/ContextMenuModel_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
             platform/WindowShadowController_test.cpp

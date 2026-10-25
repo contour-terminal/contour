@@ -44,9 +44,10 @@ namespace
             entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
                                                     .title = name,
                                                     .action = actions::CreateNewTab { .profileName = name },
-                                                    .enabled = true,
-                                                    .checkable = false,
-                                                    .checked = false,
+                                                    .availability = RowAvailability::Enabled,
+                                                    .check = RowCheck::None,
+                                                    .role = MenuItemRole::None,
+                                                    .swatch = std::nullopt,
                                                     .children = {} });
 
         return entries;
@@ -61,14 +62,15 @@ namespace
         auto entries = std::vector<ContextMenuEntry> {};
 
         for (auto const& info: config::configEnumValues<config::TabBarVisibility>())
-            entries.emplace_back(
-                ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                   .title = std::string { info.label },
-                                   .action = actions::SetTabBarVisibility { .mode = info.value },
-                                   .enabled = true,
-                                   .checkable = true,
-                                   .checked = info.value == state.tabBarVisibility,
-                                   .children = {} });
+            entries.emplace_back(ContextMenuEntry {
+                .kind = ContextMenuEntryKind::Command,
+                .title = std::string { info.label },
+                .action = actions::SetTabBarVisibility { .mode = info.value },
+                .availability = RowAvailability::Enabled,
+                .check = (info.value == state.tabBarVisibility) ? RowCheck::Checked : RowCheck::Unchecked,
+                .role = MenuItemRole::None,
+                .swatch = std::nullopt,
+                .children = {} });
 
         return entries;
     }
@@ -79,14 +81,15 @@ namespace
         auto entries = std::vector<ContextMenuEntry> {};
 
         for (auto const& info: config::configEnumValues<config::TabBarPosition>())
-            entries.emplace_back(
-                ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                   .title = std::string { info.label },
-                                   .action = actions::SetTabBarPosition { .position = info.value },
-                                   .enabled = true,
-                                   .checkable = true,
-                                   .checked = info.value == state.tabBarPosition,
-                                   .children = {} });
+            entries.emplace_back(ContextMenuEntry {
+                .kind = ContextMenuEntryKind::Command,
+                .title = std::string { info.label },
+                .action = actions::SetTabBarPosition { .position = info.value },
+                .availability = RowAvailability::Enabled,
+                .check = (info.value == state.tabBarPosition) ? RowCheck::Checked : RowCheck::Unchecked,
+                .role = MenuItemRole::None,
+                .swatch = std::nullopt,
+                .children = {} });
 
         return entries;
     }
@@ -106,9 +109,10 @@ namespace
         entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator,
                                                 .title = {},
                                                 .action = {},
-                                                .enabled = true,
-                                                .checkable = false,
-                                                .checked = false,
+                                                .availability = RowAvailability::Enabled,
+                                                .check = RowCheck::None,
+                                                .role = MenuItemRole::None,
+                                                .swatch = std::nullopt,
                                                 .children = {} });
         auto nested = Table::buildRows(tabBarTemplate(), state);
         entries.insert(entries.end(), nested.begin(), nested.end());

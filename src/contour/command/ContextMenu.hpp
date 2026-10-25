@@ -3,6 +3,7 @@
 
 #include <contour/config/Actions.hpp>
 
+#include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/links/LinkTypes.hpp>
@@ -110,6 +111,30 @@ enum class ContextMenuEntryKind : std::uint8_t
     Submenu,
 };
 
+/// Whether a command row can be picked, or is shown grayed out.
+enum class RowAvailability : std::uint8_t
+{
+    Enabled = 0, ///< The row can be picked.
+    Disabled,    ///< The row is in the menu but grayed out.
+};
+
+/// Whether a command row draws a check column, and if so whether the check is set.
+enum class RowCheck : std::uint8_t
+{
+    None = 0,  ///< No check column.
+    Unchecked, ///< A check column, not ticked.
+    Checked,   ///< A check column, ticked.
+};
+
+/// The role a native menu gives a row, so the platform can move it where its conventions put it.
+enum class MenuItemRole : std::uint8_t
+{
+    None = 0,    ///< An ordinary row.
+    About,       ///< The "About" row.
+    Preferences, ///< The "Preferences" / "Settings" row.
+    Quit,        ///< The "Quit" row.
+};
+
 /// One row of the menu, already resolved against a ContextMenuState.
 ///
 /// This is what the GUI renders. The action travels WITH the row rather than being looked up again by
@@ -119,12 +144,13 @@ enum class ContextMenuEntryKind : std::uint8_t
 struct ContextMenuEntry
 {
     ContextMenuEntryKind kind = ContextMenuEntryKind::Command;
-    std::string title;                      ///< Display text.
-    actions::Action action {};              ///< Command rows: what to run.
-    bool enabled = true;                    ///< Command rows: whether it can be picked.
-    bool checkable = false;                 ///< Command rows: whether it draws a check column.
-    bool checked = false;                   ///< Checkable rows: whether the check is set.
-    std::vector<ContextMenuEntry> children; ///< Submenu rows: what is inside.
+    std::string title;                                       ///< Display text.
+    actions::Action action {};                               ///< Command rows: what to run.
+    RowAvailability availability = RowAvailability::Enabled; ///< Command rows: whether it can be picked.
+    RowCheck check = RowCheck::None;        ///< Command rows: the check column, and whether it is ticked.
+    MenuItemRole role = MenuItemRole::None; ///< Command rows: the role a native menu gives it.
+    std::optional<vtbackend::RGBColor> swatch {}; ///< Command rows drawn as a colour swatch.
+    std::vector<ContextMenuEntry> children;       ///< Submenu rows: what is inside.
 };
 
 /// The context menu for @p state.

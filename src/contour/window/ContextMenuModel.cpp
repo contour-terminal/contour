@@ -34,9 +34,9 @@ QVariantList toContextMenuModel(std::vector<command::ContextMenuEntry> const& en
             case command::ContextMenuEntryKind::Command:
                 row["kind"] = QStringLiteral("command");
                 row["title"] = QString::fromStdString(entry.title);
-                row["enabled"] = entry.enabled;
-                row["checkable"] = entry.checkable;
-                row["checked"] = entry.checked;
+                row["enabled"] = entry.availability == command::RowAvailability::Enabled;
+                row["checkable"] = entry.check != command::RowCheck::None;
+                row["checked"] = entry.check == command::RowCheck::Checked;
                 row["actionId"] = static_cast<int>(actions.size());
                 actions.push_back(entry.action);
                 break;

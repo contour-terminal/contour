@@ -142,13 +142,15 @@ namespace
         entries.reserve(state.profileNames.size());
 
         for (auto const& name: state.profileNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = name,
-                                                    .action = actions::ChangeProfile { .name = name },
-                                                    .enabled = true,
-                                                    .checkable = true,
-                                                    .checked = name == state.activeProfile,
-                                                    .children = {} });
+            entries.emplace_back(ContextMenuEntry {
+                .kind = ContextMenuEntryKind::Command,
+                .title = name,
+                .action = actions::ChangeProfile { .name = name },
+                .availability = RowAvailability::Enabled,
+                .check = (name == state.activeProfile) ? RowCheck::Checked : RowCheck::Unchecked,
+                .role = MenuItemRole::None,
+                .swatch = std::nullopt,
+                .children = {} });
 
         return entries;
     }
