@@ -76,6 +76,32 @@ TEST_CASE("a rebuild keeps the adopted menus", "[display][menubar][cocoa]")
     CHECK(NSApp.windowsMenu == adopted);
 }
 
+TEST_CASE("a rebuild keeps the window list after the rows", "[display][menubar][cocoa]")
+{
+    REQUIRE_COCOA_OR_SKIP();
+    auto const config = contour::config::Config {};
+    auto const integration = contour::platform::makeMenuBarIntegration();
+    auto bar = contour::window::AppMenuBar {
+        contour::window::AppMenuBarSources {
+            .state = [&] { return contour::command::menuBarStateOf(config); },
+            .chords = [&] { return contour::command::chordIndex(config); },
+            .run = [](contour::actions::Action const&) {},
+        },
+        *integration,
+    };
+    NSMenu* const windows = NSApp.windowsMenu;
+    REQUIRE(windows != nil);
+    // What AppKit appends for a listed window: an item of its own, after every row of ours.
+    [windows addItem:[[NSMenuItem alloc] initWithTitle:@"Listed Window" action:nil keyEquivalent:@""]];
+    REQUIRE([windows indexOfItemWithTitle:@"Listed Window"] == windows.numberOfItems - 1);
+
+    bar.rebuild();
+
+    REQUIRE(windows.numberOfItems > 0);
+    CHECK([[windows itemAtIndex:0].title isEqualToString:@"Previous Tab"]);
+    CHECK([windows indexOfItemWithTitle:@"Listed Window"] == windows.numberOfItems - 1);
+}
+
 TEST_CASE("the application menu holds the Contour menu's rows", "[display][menubar][cocoa]")
 {
     REQUIRE_COCOA_OR_SKIP();

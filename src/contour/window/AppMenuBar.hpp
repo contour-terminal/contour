@@ -7,9 +7,9 @@
 #include <contour/config/Actions.hpp>
 #include <contour/platform/MenuBarIntegration.hpp>
 
+#include <QtCore/QKeyCombination>
 #include <QtCore/QList>
 #include <QtGui/QAction>
-#include <QtCore/QKeyCombination>
 
 #include <array>
 #include <functional>
@@ -101,7 +101,8 @@ class AppMenuBar
                          command::MenuTree const& tree,
                          QAction* before);
 
-    /// Refreshes the state of @p which's rows from a fresh tree, as the menu opens.
+    /// Brings @p which's rows up to date from a fresh tree, as the menu opens: refilled when their shape
+    /// changed and the menu may be refilled, refreshed in place otherwise (see MenuOnOpen).
     void refresh(command::MenuBarMenu which);
 
     /// Replaces the Window menu's tab list with the one of @p nodes.
@@ -110,8 +111,10 @@ class AppMenuBar
     AppMenuBarSources _sources;
     std::unique_ptr<QMenuBar> _menuBar;
     std::array<QMenu*, command::MenuBarMenuCount> _menus {}; ///< Owned by _menuBar.
-    QAction* _tabListEnd = nullptr;                          ///< Hidden; the tab list goes ahead of it.
-    QList<QAction*> _tabList {};                             ///< The Window menu's tab rows.
+    /// Hidden, and kept for the bar's life: the Window menu's rows go ahead of it, the window list AppKit
+    /// appends to that menu after it, and no rebuild may move one past the other.
+    QAction* _windowRowsEnd = nullptr;
+    QList<QAction*> _tabList {}; ///< The Window menu's tab rows.
 };
 
 } // namespace contour::window

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -44,6 +45,50 @@ namespace
         RoleRow { .role = MenuItemRole::Preferences, .qtRole = QAction::PreferencesRole },
         RoleRow { .role = MenuItemRole::Quit, .qtRole = QAction::QuitRole },
     };
+
+    /// What opening a menu bar menu may do to its rows.
+    enum class MenuOnOpen : std::uint8_t
+    {
+        Refill = 0,       ///< Only this bar holds its rows: a changed shape refills the menu.
+        RefreshInPlace,   ///< Qt merged its role rows into the macOS application menu: the actions stay.
+        RefreshAndRelist, ///< AppKit adopted it and lists the windows after its rows: the actions stay, and
+                          ///< the tab list is refilled ahead of the marker that ends the rows.
+    };
+
+    /// A menu bar menu and what opening it may do.
+    struct MenuBehaviour
+    {
+        MenuBarMenu menu;
+        MenuOnOpen onOpen;
+    };
+
+    /// One row per menu bar menu, in MenuBarMenu order.
+    constexpr auto MenuBehaviourTable = std::array {
+        MenuBehaviour { .menu = MenuBarMenu::Application, .onOpen = MenuOnOpen::RefreshInPlace },
+        MenuBehaviour { .menu = MenuBarMenu::Shell, .onOpen = MenuOnOpen::Refill },
+        MenuBehaviour { .menu = MenuBarMenu::Edit, .onOpen = MenuOnOpen::Refill },
+        MenuBehaviour { .menu = MenuBarMenu::View, .onOpen = MenuOnOpen::Refill },
+        MenuBehaviour { .menu = MenuBarMenu::Window, .onOpen = MenuOnOpen::RefreshAndRelist },
+        MenuBehaviour { .menu = MenuBarMenu::Help, .onOpen = MenuOnOpen::Refill },
+    };
+    static_assert(MenuBehaviourTable.size() == command::MenuBarMenuCount,
+                  "every menu bar menu needs a row saying what opening it may do");
+    static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, command::MenuBarMenuCount),
+                                      [](std::size_t index) {
+                                          return MenuBehaviourTable[index].menu
+                                                 == static_cast<MenuBarMenu>(index);
+                                      }),
+                  "MenuBehaviourTable must list the menus in MenuBarMenu order");
+    static_assert(std::ranges::count(MenuBehaviourTable, MenuOnOpen::RefreshAndRelist, &MenuBehaviour::onOpen)
+                      == 1,
+                  "the bar keeps one tab list and one end-of-rows marker: those of the menu AppKit lists the "
+                  "windows in");
+
+    /// What opening @p menu may do to its rows.
+    [[nodiscard]] constexpr MenuOnOpen onOpenOf(MenuBarMenu menu) noexcept
+    {
+        return MenuBehaviourTable[static_cast<std::size_t>(menu)].onOpen;
+    }
 
     /// A chord modifier and the Qt modifier it is, under Qt::AA_MacDontSwapCtrlAndMeta: the inverse of
     /// input/KeyMapping.cpp's makeModifiers().
@@ -179,13 +224,53 @@ namespace
         }
     }
 
-    /// Removes every row of @p menu, its submenus with them.
-    void clearMenu(QMenu& menu)
+    /// Whether @p actions are the rows @p nodes would build: the same kinds and titles, submenus alike.
+    [[nodiscard]] bool hasShapeOf(QList<QAction*> const& actions, std::span<MenuNode const> nodes)
     {
-        menu.clear();
-        // clear() deletes the actions the menu owns, but a submenu is a child widget, not an action.
-        for (auto* const submenu: menu.findChildren<QMenu*>(Qt::FindDirectChildrenOnly))
+        if (static_cast<std::size_t>(actions.size()) != nodes.size())
+            return false;
+        return std::ranges::all_of(std::views::zip(actions, nodes), [](auto const& pair) {
+            auto const& [action, node] = pair;
+            auto const* const submenu = action->menu();
+            if (action->isSeparator() != (node.kind == ContextMenuEntryKind::Separator)
+                || (submenu != nullptr) != (node.kind == ContextMenuEntryKind::Submenu)
+                || (!action->isSeparator() && action->text() != actionText(node.title)))
+                return false;
+            return submenu == nullptr || hasShapeOf(submenu->actions(), node.children);
+        });
+    }
+
+    /// Removes every row of @p menu but @p keep, their submenus with them.
+    void clearMenu(QMenu& menu, QAction const* keep = nullptr)
+    {
+        for (auto* const action: menu.actions())
+        {
+            if (action == keep)
+                continue;
+            menu.removeAction(action);
+            // A submenu takes its own menuAction with it; a row the menu made is the menu's to delete.
+            auto* const submenu = action->menu();
+            if (submenu == nullptr && action->parent() == &menu)
+                delete action;
             delete submenu;
+        }
+    }
+
+    /// Adds one empty menu per menu bar menu to @p bar, in MenuBarMenu order.
+    [[nodiscard]] std::array<QMenu*, command::MenuBarMenuCount> addMenus(QMenuBar& bar)
+    {
+        auto menus = std::array<QMenu*, command::MenuBarMenuCount> {};
+        for (auto& menu: menus)
+            menu = bar.addMenu(QString {});
+        return menus;
+    }
+
+    /// Adds a hidden separator to @p menu, to keep a place in it.
+    [[nodiscard]] QAction* addHiddenMarker(QMenu& menu)
+    {
+        auto* const marker = menu.addSeparator();
+        marker->setVisible(false);
+        return marker;
     }
 } // namespace
 
@@ -218,16 +303,18 @@ bool carriesKeyEquivalent(command::ShortcutChord const& chord) noexcept
 }
 
 AppMenuBar::AppMenuBar(AppMenuBarSources sources, platform::IMenuBarIntegration& integration):
-    _sources { std::move(sources) }, _menuBar { std::make_unique<QMenuBar>() }
-{
+    _sources { std::move(sources) },
     // Parentless, so that on macOS it is the one bar every window shares.
+    _menuBar { std::make_unique<QMenuBar>() },
+    _menus { addMenus(*_menuBar) },
+    _windowRowsEnd { addHiddenMarker(*_menus[static_cast<std::size_t>(MenuBarMenu::Window)]) }
+{
     for (auto const index: std::views::iota(std::size_t { 0 }, command::MenuBarMenuCount))
     {
-        auto* const top = _menuBar->addMenu(QString {});
-        _menus[index] = top;
         auto const which = static_cast<MenuBarMenu>(index);
-        // The state as the menu opens; the rows themselves stay, see refresh().
-        QObject::connect(top, &QMenu::aboutToShow, _menuBar.get(), [this, which] { refresh(which); });
+        // Up to date as the menu opens, see refresh().
+        QObject::connect(
+            _menus[index], &QMenu::aboutToShow, _menuBar.get(), [this, which] { refresh(which); });
     }
 
     rebuild();
@@ -261,23 +348,26 @@ void AppMenuBar::rebuild()
         auto const which = static_cast<MenuBarMenu>(index);
         auto& top = menu(which);
         auto const& node = tree.nodes[index];
-        clearMenu(top);
         top.setTitle(actionText(node.title));
-
         auto const rows = std::span<MenuNode const> { node.children };
-        if (which != MenuBarMenu::Window)
-        {
-            fill(top, which, rows, tree, nullptr);
-            continue;
-        }
 
-        // The Window menu's tab list changes as tabs come and go, so it goes ahead of a hidden marker that
-        // keeps its place: past the marker, AppKit lists the application's windows.
-        auto const tabs = tabListStart(rows, tree);
-        fill(top, which, rows.first(tabs), tree, nullptr);
-        _tabListEnd = top.addSeparator();
-        _tabListEnd->setVisible(false);
-        _tabList = fill(top, which, rows.subspan(tabs), tree, _tabListEnd);
+        switch (onOpenOf(which))
+        {
+            case MenuOnOpen::Refill:
+            case MenuOnOpen::RefreshInPlace:
+                clearMenu(top);
+                fill(top, which, rows, tree, nullptr);
+                break;
+            case MenuOnOpen::RefreshAndRelist: {
+                // Every row goes ahead of the marker: Qt appends a row that has nothing to go ahead of
+                // after the window list AppKit appended to this menu.
+                clearMenu(top, _windowRowsEnd);
+                auto const tabs = tabListStart(rows, tree);
+                fill(top, which, rows.first(tabs), tree, _windowRowsEnd);
+                _tabList = fill(top, which, rows.subspan(tabs), tree, _windowRowsEnd);
+                break;
+            }
+        }
     }
 }
 
@@ -334,18 +424,31 @@ void AppMenuBar::refresh(MenuBarMenu which)
 {
     auto const tree = resolve();
     auto const rows = std::span<MenuNode const> { tree.nodes[static_cast<std::size_t>(which)].children };
-    auto actions = menu(which).actions();
-    if (which != MenuBarMenu::Window)
-    {
-        refreshActions(actions, rows);
-        return;
-    }
+    auto& top = menu(which);
+    auto actions = top.actions();
 
-    auto const tabs = tabListStart(rows, tree);
-    auto const firstTabRow = _tabList.isEmpty() ? _tabListEnd : _tabList.front();
-    actions.resize(actions.indexOf(firstTabRow));
-    refreshActions(actions, rows.first(tabs));
-    refillTabList(rows.subspan(tabs), tree);
+    switch (onOpenOf(which))
+    {
+        case MenuOnOpen::Refill:
+            // A row shown only in some states (Edit's Speech) comes and goes here, not on the next reload.
+            if (!hasShapeOf(actions, rows))
+            {
+                clearMenu(top);
+                fill(top, which, rows, tree, nullptr);
+                return;
+            }
+            refreshActions(actions, rows);
+            return;
+        case MenuOnOpen::RefreshInPlace: refreshActions(actions, rows); return;
+        case MenuOnOpen::RefreshAndRelist: {
+            auto const tabs = tabListStart(rows, tree);
+            auto const firstTabRow = _tabList.isEmpty() ? _windowRowsEnd : _tabList.front();
+            actions.resize(actions.indexOf(firstTabRow));
+            refreshActions(actions, rows.first(tabs));
+            refillTabList(rows.subspan(tabs), tree);
+            return;
+        }
+    }
 }
 
 void AppMenuBar::refillTabList(std::span<MenuNode const> nodes, MenuTree const& tree)
@@ -355,7 +458,7 @@ void AppMenuBar::refillTabList(std::span<MenuNode const> nodes, MenuTree const& 
         menu(MenuBarMenu::Window).removeAction(action);
         delete action;
     }
-    _tabList = fill(menu(MenuBarMenu::Window), MenuBarMenu::Window, nodes, tree, _tabListEnd);
+    _tabList = fill(menu(MenuBarMenu::Window), MenuBarMenu::Window, nodes, tree, _windowRowsEnd);
 }
 
 } // namespace contour::window

@@ -322,6 +322,38 @@ TEST_CASE("a menu opens with the current state", "[display][menubar]")
                                   .children));
 }
 
+TEST_CASE("a menu whose rows changed is refilled as it opens", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto fixture = BarFixture {};
+    auto& editMenu = fixture.menu(MenuBarMenu::Edit);
+    REQUIRE(fixture.state.speech == command::SpeechAvailability::Unavailable);
+    CHECK(findAction(editMenu, QStringLiteral("Start Speaking")) == nullptr);
+
+    fixture.state.speech = command::SpeechAvailability::Available;
+    emit editMenu.aboutToShow();
+    CHECK(findAction(editMenu, QStringLiteral("Start Speaking")) != nullptr);
+
+    fixture.state.speech = command::SpeechAvailability::Unavailable;
+    emit editMenu.aboutToShow();
+    CHECK(findAction(editMenu, QStringLiteral("Start Speaking")) == nullptr);
+}
+
+TEST_CASE("an unchanged menu keeps its rows as it opens", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto fixture = BarFixture {};
+    auto& editMenu = fixture.menu(MenuBarMenu::Edit);
+    auto* const copy = &fixture.action(QStringLiteral("Copy"));
+    CHECK_FALSE(copy->isEnabled());
+
+    fixture.state.selection = command::SelectionPresence::Present;
+    emit editMenu.aboutToShow();
+
+    CHECK(&fixture.action(QStringLiteral("Copy")) == copy);
+    CHECK(copy->isEnabled());
+}
+
 #ifdef __APPLE__
 TEST_CASE("Contour appears once", "[display][menubar]")
 {
