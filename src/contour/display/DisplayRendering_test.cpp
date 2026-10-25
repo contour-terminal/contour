@@ -17,6 +17,7 @@
 // window (hence never had a render target), which the offscreen platform supplies perfectly well. See
 // the teardown-lifetimes section there.
 
+#include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/display/LatencyProbeDriver.hpp>
 #include <contour/display/TerminalAccessible.hpp>
@@ -28,6 +29,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/ScopedApplicationAttribute.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
@@ -511,6 +513,65 @@ TEST_CASE("display: the terminal claims a chord no menu owns ahead of any shortc
     event.ignore();
     QCoreApplication::sendEvent(h.display.get(), &event);
     CHECK(event.isAccepted());
+}
+
+TEST_CASE("display: under a global menu bar the terminal refuses Command+Q and keeps the next key",
+          "[display][shortcutoverride]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+#if defined(__APPLE__)
+    // As the app runs: the Control/Meta swap is off, so the Command key arrives as Qt::MetaModifier.
+    auto const unswapped = contour::test::ScopedApplicationAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
+    DisplayHarness h;
+    REQUIRE(h.testApp.app().menuBarPlacement() == contour::command::MenuBarPlacement::Global);
+    h.display->forceActiveFocus();
+    QCoreApplication::processEvents();
+
+    // Command+Q is the menu's: the display leaves the override ignored, so the Quit item may take it.
+    QKeyEvent quit(QEvent::ShortcutOverride, Qt::Key_Q, Qt::MetaModifier);
+    quit.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &quit);
+    CHECK_FALSE(quit.isAccepted());
+
+    // The refusal leaves nothing behind: the next key is the program's, claimed and written to the PTY.
+    QKeyEvent next(QEvent::ShortcutOverride, Qt::Key_Z, Qt::NoModifier, QStringLiteral("z"));
+    next.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &next);
+    CHECK(next.isAccepted());
+    QTest::keyClick(h.window.get(), Qt::Key_Z);
+    CHECK(h.sentInput().contains('z'));
+#else
+    SKIP("only macOS has a global menu bar, and the app's placement cannot be forced on another host");
+#endif
+}
+
+TEST_CASE("display: a chord bound to a terminal action is claimed by the terminal and runs the action",
+          "[display][shortcutoverride]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    // Super+C is the Command+C a global Edit menu lists for Copy. Bound here to an action whose effect the
+    // PTY shows, so the case can tell the binding ran from the chord being lost to a menu or typed as text.
+    DisplayHarness h(HarnessWindow::Shown, [](contour::config::Config& config) {
+        config.inputMappings = contour::test::loadConfigFromYaml(R"(
+default_profile: main
+profiles:
+    main:
+        shell: /bin/sh
+input_mapping:
+    - { mods: [Super], key: 'C', action: SendChars, chars: "bound-action" }
+)")
+                                   .inputMappings;
+    });
+    h.display->forceActiveFocus();
+    QCoreApplication::processEvents();
+
+    QKeyEvent copy(QEvent::ShortcutOverride, Qt::Key_C, Qt::MetaModifier);
+    copy.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &copy);
+    CHECK(copy.isAccepted());
+
+    QTest::keyClick(h.window.get(), Qt::Key_C, Qt::MetaModifier);
+    CHECK(h.sentInput().contains("bound-action"));
 }
 
 TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls through to line scrolling",
