@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <contour/command/MenuTree.hpp>
-
 #ifdef __APPLE__
+
+    #include <contour/command/MenuTree.hpp>
 
     #include <cstdint>
     #include <string>

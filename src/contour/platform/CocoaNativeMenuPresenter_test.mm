@@ -10,6 +10,7 @@
 #include <contour/platform/NativeMenuPresenter.hpp>
 
 #include <QtGui/QGuiApplication>
+#include <QtGui/QWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -124,6 +125,19 @@ TEST_CASE("a position needs a window", "[nativemenu][cocoa]")
     auto const result = presenter->present(tabMenuTree(3), anchor, {});
     REQUIRE_FALSE(result.has_value());
     CHECK(result.error() == MenuPresentError::NoWindow);
+}
+
+TEST_CASE("a position needs a created window", "[nativemenu][cocoa]")
+{
+    // Never create()d, so it has no platform window; present() must not make one through winId().
+    auto window = QWindow {};
+    REQUIRE(window.handle() == nullptr);
+    auto const presenter = contour::platform::makeNativeMenuPresenter();
+    auto const anchor = MenuAnchor { .window = &window, .position = QPointF { 1, 1 } };
+    auto const result = presenter->present(tabMenuTree(3), anchor, {});
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == MenuPresentError::NoWindow);
+    CHECK(window.handle() == nullptr);
 }
 
 TEST_CASE("off the cocoa plugin it is Unsupported", "[nativemenu][cocoa]")

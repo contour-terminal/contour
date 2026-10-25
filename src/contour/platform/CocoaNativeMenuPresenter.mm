@@ -158,7 +158,8 @@ namespace
                                                                     MenuPicked const& onPicked) override
         {
             Require(NSThread.isMainThread);
-            if (anchor.position && anchor.window == nullptr)
+            // A window with no platform window yet has no view to open in, and winId() would create one.
+            if (anchor.position && (anchor.window == nullptr || anchor.window->handle() == nullptr))
                 return std::unexpected(MenuPresentError::NoWindow);
             // winId() is an NSView* only under the cocoa plugin (see CocoaWindowFrame.mm); anywhere else
             // -- offscreen, minimal -- messaging it, or popping a menu at all, would be wrong.

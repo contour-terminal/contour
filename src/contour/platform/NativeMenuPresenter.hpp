@@ -20,7 +20,7 @@ namespace contour::platform
 enum class MenuPresentError : uint8_t
 {
     Unsupported = 0, ///< This platform has no native menu presenter.
-    NoWindow,        ///< The anchor names a position but no window to place it in.
+    NoWindow,        ///< The anchor names a position but no created window to place it in.
 };
 
 /// Where a menu opens: @ref position in @ref window's logical coordinates, or at the pointer when absent.
@@ -44,7 +44,9 @@ class INativeMenuPresenter
     ///      and calls @p onPicked after that loop returns, never inside it.
     /// @param tree The menu to show.
     /// @param anchor Where to open it.
-    /// @param onPicked Called with the picked row's action index; not called on dismissal.
+    /// @param onPicked Called with the picked row's action index; not called on dismissal. Qt still delivers
+    ///        events while AppKit's tracking loop runs, so anything the callback captures may be destroyed
+    ///        before it is called: capture weakly (a QPointer, or ids looked up again), never raw pointers.
     /// @return Nothing when the menu was shown, otherwise why it was not.
     [[nodiscard]] virtual std::expected<void, MenuPresentError> present(command::MenuTree const& tree,
                                                                         MenuAnchor const& anchor,
