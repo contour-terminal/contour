@@ -1162,6 +1162,12 @@ namespace
     }
 } // namespace
 
+void ContourGuiApp::openDaemonSpawnGate() noexcept
+{
+    _daemonSpawnGate->store(DaemonSpawnGate::Open);
+    _daemonSpawnGate->notify_all();
+}
+
 std::expected<void, std::string> ContourGuiApp::startNativeAttach()
 {
     auto const& settings = _config.daemon.value();
@@ -1221,12 +1227,14 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
         // stop() does not wait -- while a spawned daemon comes up; nothing else uses what it captures.
         auto ensureDaemon =
             [start = std::make_shared<LocalDaemonStart>(processEnvironment(), fileSystem(), programPath()),
+             spawnGate = _daemonSpawnGate,
              placement = _processPlacement,
              label,
              controlPath,
              daemonOptions]() -> std::expected<void, vthost::TransportError> {
             if (start->spawner->probe(controlPath) == vthost::DaemonPresence::Serving)
                 return {};
+            spawnGate->wait(DaemonSpawnGate::Closed);
             // A registered service is started before a daemon is spawned on demand.
             auto const starter = start->starter(
                 label, vthost::UnixEndpoint { .socketPath = controlPath }, *placement, daemonOptions);
@@ -1924,6 +1932,8 @@ int ContourGuiApp::terminalGuiAction()
     // runs beside the boot. Whatever it set up is undone on every return -- after `app` below is gone, as the
     // attach engines' ptys outlive the windows.
     auto const releaseHosting = core::Finally { [this] {
+        // A spawn still held back is let go, so that stopping the attach below finds nothing waiting.
+        openDaemonSpawnGate();
         _awaitAttach = nullptr;
         _onGuiBooted = nullptr;
         if (_nativeController || _tmuxController)
@@ -2005,6 +2015,7 @@ int ContourGuiApp::terminalGuiAction()
     // NOTE: Cannot use ScopedTimer here because QApplication must live until end of function.
     auto const qtInitStart = std::chrono::steady_clock::now();
     QApplication const app(qtArgsCount, (char**) qtArgsPtr.data());
+    openDaemonSpawnGate();
     // Every Qt object this app owns goes before QApplication, on every return from here on -- the
     // failed-attach one included, which leaves before the event loop ever runs. Declared right after
     // `app`, so it runs before `app` is destroyed.
