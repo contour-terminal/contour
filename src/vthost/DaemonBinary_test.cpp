@@ -36,7 +36,7 @@
     #include <sys/file.h>
     #include <sys/stat.h>
 
-    #include <charconv>
+    #include <ranges>
     #include <string_view>
 
     #include <fcntl.h>
@@ -562,18 +562,19 @@ TEST_CASE("this process names its own executable", "[vthost][relocate]")
 #ifndef _WIN32
 namespace
 {
+/// The descriptors inheritableDescriptorsOf() asks about: more than a test ever has open.
+constexpr auto DescriptorsScanned = 1024;
+
 /// @return How many of this process's descriptors are @p file and would be inherited across an exec.
 [[nodiscard]] std::size_t inheritableDescriptorsOf(fs::path const& file)
 {
     struct stat named {};
     REQUIRE(::stat(file.c_str(), &named) == 0);
     auto count = std::size_t { 0 };
-    for (auto const& entry: fs::directory_iterator { "/dev/fd" })
+    // Every descriptor asked in turn, not /dev/fd listed: FreeBSD's /dev/fd shows 0 to 2 only, unless
+    // fdescfs is mounted on it.
+    for (auto const fd: std::views::iota(0, DescriptorsScanned))
     {
-        auto const name = entry.path().filename().string();
-        auto fd = -1;
-        if (std::from_chars(name.data(), name.data() + name.size(), fd).ec != std::errc {})
-            continue;
         struct stat opened {};
         auto const flags = ::fcntl(fd, F_GETFD);
         if (flags != -1 && (flags & FD_CLOEXEC) == 0 && ::fstat(fd, &opened) == 0

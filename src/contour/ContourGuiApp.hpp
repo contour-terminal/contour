@@ -39,6 +39,7 @@
 #include <QtGui/QScreen>
 #include <QtQml/QQmlApplicationEngine>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -175,6 +176,13 @@ using ProgramReachablePredicate = bool (*)(std::string_view);
 /// @return What the token names, and where to start the shell if that is what it names.
 [[nodiscard]] VerbatimCommand classifyVerbatimCommand(std::string_view token,
                                                       ProgramReachablePredicate isReachable);
+
+/// Whether a local daemon may be spawned yet. @see ContourGuiApp::_daemonSpawnGate
+enum class DaemonSpawnGate : std::uint8_t
+{
+    Closed = 0, ///< The GUI is still constructing its QApplication.
+    Open,       ///< Spawning is safe.
+};
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public QObject, public cli::ContourApp
@@ -533,6 +541,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return Nothing to continue the launch; the line to print, ending it, otherwise.
     [[nodiscard]] std::expected<void, std::string> establishHosting();
 
+    /// Lets a daemon spawned on demand fork. @see _daemonSpawnGate
+    void openDaemonSpawnGate() noexcept;
+
     /// Starts the native attach establishHosting() decided on: builds the transport and the controller,
     /// wires the controller's signals and starts its connect.
     /// @return Nothing once connecting; the line to print otherwise.
@@ -817,6 +828,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// unless this run attaches to a local daemon, since a remote one is not ours to restart. Runs
     /// on @ref _daemonRestartThread, so it touches nothing the GUI thread owns.
     std::function<std::expected<void, std::string>()> _restartDaemon;
+    /// Whether a daemon spawned on demand may fork yet. The local attach starts beside the boot, but Apple's
+    /// libc deadlocks a fork() made while another thread is inside setlocale(), which QApplication's
+    /// construction calls: its at-fork handler and setlocale() take the locale and malloc locks in opposite
+    /// orders. So the attach's worker waits, before it spawns, until the QApplication is built.
+    std::shared_ptr<std::atomic<DaemonSpawnGate>> _daemonSpawnGate =
+        std::make_shared<std::atomic<DaemonSpawnGate>>(DaemonSpawnGate::Closed);
     /// The thread running @ref _restartDaemon; declared after what it reaches so it is joined first.
     std::jthread _daemonRestartThread;
     ExitStatus _exitStatus;
