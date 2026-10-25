@@ -6,6 +6,7 @@
 #include <contour/display/ImeQueryRect.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/display/RhiRenderer.hpp>
+#include <contour/display/ShortcutOverride.hpp>
 #include <contour/display/TerminalAccessible.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/TerminalRenderNode.hpp>
@@ -1540,6 +1541,20 @@ bool TerminalDisplay::event(QEvent* event)
             assert(_session);
             _session->pty().close();
             emit terminated();
+        }
+
+        // A chord the terminal keeps is accepted here, ahead of every shortcut and menu; only a chord a
+        // global menu bar owns is left ignored for the menu. The placement is read through the session
+        // rather than injected, because QML constructs this item (the framework-constructed carve-out).
+        if (event->type() == QEvent::ShortcutOverride && _session)
+        {
+            auto* const keyEvent = static_cast<QKeyEvent*>(event);
+            if (shortcutOverrideClaim(*keyEvent, _session->app().menuBarPlacement())
+                == ShortcutOverrideClaim::Terminal)
+            {
+                keyEvent->accept();
+                return true;
+            }
         }
 
         return QQuickItem::event(event);

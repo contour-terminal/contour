@@ -4,6 +4,7 @@
 #include <contour/cli/ContourApp.hpp>
 #include <contour/cli/HostTransport.hpp>
 #include <contour/command/CommandHistoryStore.hpp>
+#include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/LayoutStore.hpp>
 #include <contour/display/GpuSelection.hpp>
@@ -537,6 +538,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///         resolves the style.
     [[nodiscard]] config::MenuPresentation menuPresentation() const noexcept;
 
+    /// @return Where this host's menu bar lives, resolved once from the host at construction.
+    [[nodiscard]] command::MenuBarPlacement menuBarPlacement() const noexcept { return _menuBarPlacement; }
+
     /// Rebuilds the `chromeStyle` context property from the current inputs, if any changed.
     ///
     /// Called wherever an input may have moved: a reload (font, scheme), the OS light/dark flip
@@ -977,6 +981,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<platform::IPlatformAppearance> _platformAppearance;
     // The native menu presenter, built from the same services; it holds no callback into this app.
     std::unique_ptr<platform::INativeMenuPresenter> _nativeMenus;
+    // Where the menu bar lives on this host; it decides which chords a menu may take from the terminal.
+    command::MenuBarPlacement _menuBarPlacement = command::MenuBarPlacement::None;
 };
 
 } // namespace contour

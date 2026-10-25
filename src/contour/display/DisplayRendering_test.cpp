@@ -499,6 +499,20 @@ TEST_CASE("display: keyboard, mouse and wheel events reach the PTY through the r
     h.pump();
 }
 
+TEST_CASE("display: the terminal claims a chord no menu owns ahead of any shortcut",
+          "[display][shortcutoverride]")
+{
+    REQUIRE_DISPLAY_OR_SKIP();
+    DisplayHarness h;
+
+    // Ctrl+Alt+K belongs to the program in the terminal on every host: the display accepts the override,
+    // so no QShortcut or menu item may take it, whatever the menu bar lists or enables.
+    QKeyEvent event(QEvent::ShortcutOverride, Qt::Key_K, Qt::ControlModifier | Qt::AltModifier);
+    event.ignore();
+    QCoreApplication::sendEvent(h.display.get(), &event);
+    CHECK(event.isAccepted());
+}
+
 TEST_CASE("display: a phase-less wheel notch that cannot arm a glide falls through to line scrolling",
           "[display][input]")
 {

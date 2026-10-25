@@ -454,7 +454,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
         })),
     _platformAppearance(appearanceServices.appearance(
         [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
-    _nativeMenus(appearanceServices.menus())
+    _nativeMenus(appearanceServices.menus()),
+    _menuBarPlacement(command::menuBarPlacementFor(config::detectHostPlatform(env)))
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
     // services carry the app's.

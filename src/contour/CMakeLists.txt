@@ -287,6 +287,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/Logging.hpp
         Logging.hpp
         display/RenderState.hpp
+        display/ShortcutOverride.hpp
         display/RenderingBackendSelection.hpp
         display/FirstFrameWatchdog.hpp
         display/LatencyProbeDriver.hpp
@@ -772,6 +773,7 @@ if(CONTOUR_FRONTEND_GUI)
             session/HyperlinkTooltip_test.cpp
             input/HorizontalWheelGesture_test.cpp
             display/ImeQueryRect_test.cpp
+            display/ShortcutOverride_test.cpp
             display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
             test/MainWindowQml_test.cpp
