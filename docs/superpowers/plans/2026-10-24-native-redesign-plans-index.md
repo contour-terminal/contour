@@ -84,11 +84,11 @@ Settings window should raise or own its window), and the design canvas's macOS â
 | 1c | Title band, tab well and pills, badge slot, HostChip, drift chip, tab colour, no-title-bar and full screen | 4a | 3.4 | `2026-10-25-native-redesign-step-1c.md` (written) |
 | 1d | macOS title-band material and safe area (spike first) | 1c | 3.5 | `2026-10-25-native-redesign-step-1c.md` (written) |
 | 2 | Pane cards, headers, gap and hit area, densities, pane states | 1d | 3.6 | `2026-10-25-native-redesign-step-1d.md` (written) |
-| 3a | Status line placeholders, flags, role colours, collapse, final template | 2 | 3.7 | to write |
-| 3b | Find bar: regex, whole word, chunked search, placement | 2 | 3.8 | to write |
-| 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | to write |
-| 3d | Command palette grouping and drill-in | 2 | 3.10 | to write |
-| 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | to write |
+| 3a | Status line placeholders, flags, role colours, collapse, final template | 2 | 3.7 | `2026-10-25-native-redesign-step-2.md` (written) |
+| 3b | Find bar: regex, whole word, chunked search, placement | 2 | 3.8 | `2026-10-25-native-redesign-step-2.md` (written) |
+| 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-2.md` (written) |
+| 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-2.md` (written) |
+| 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-2.md` (written) |
 | 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | to write |
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3aâ€“3f | 3.13 | to write |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | to write |
