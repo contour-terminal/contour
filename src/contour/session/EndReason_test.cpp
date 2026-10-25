@@ -26,7 +26,8 @@ TEST_CASE("paneFooter.messageNamesTheDetailWhenThereIsOne", "[panestate]")
           == "The terminal could not be started: no such directory.");
     CHECK(paneFooterMessage(EndReason::StartFailed, "") == "The terminal could not be started.");
     CHECK(paneFooterMessage(EndReason::Disconnected, "")
-          == "Disconnected from the Contour daemon. Its sessions are still running.");
+          == "Disconnected from the Contour daemon. Its sessions are still running; reattach with: contour "
+             "client");
     CHECK(paneFooterMessage(EndReason::None, "").empty());
 }
 

@@ -2948,15 +2948,11 @@ void TerminalSession::sendKeyEvent(Key key,
 {
     input::inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
 
-    // An ended pane waits for its footer's answer: Return is Restart, the input mappings still run (so
-    // the ClosePane binding closes it, through terminate()'s already-closed branch), and nothing reaches
-    // the PTY, whose program is gone. GUI-thread state, read without the lock (see _end).
+    // An ended pane waits for its footer's answer: the input mappings still run first (so the ClosePane
+    // binding closes it, through terminate()'s already-closed branch, and Alt+Enter still toggles full
+    // screen), an unmodified Return they leave alone is Restart, and nothing reaches the PTY, whose
+    // program is gone. GUI-thread state, read without the lock (see _end).
     auto const ended = _end != EndReason::None;
-    if (ended && eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter))
-    {
-        restart();
-        return;
-    }
 
     auto const modifierOnly = vtbackend::isModifierKey(key);
     if (modifierOnly)
@@ -2992,7 +2988,15 @@ void TerminalSession::sendKeyEvent(Key key,
             return;
     }
     if (ended)
+    {
+        // Only a bare Return: a modified one is a chord the user may bind, and a release or repeat is
+        // not a request. The Return's release then reaches the NEW session, whose terminal ignores it:
+        // a fresh terminal has negotiated no keyboard protocol that reports releases.
+        if (eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter)
+            && modifiers.chord.none())
+            restart();
         return;
+    }
     terminal().sendKeyEvent(key, modifiers, eventType, now);
 }
 

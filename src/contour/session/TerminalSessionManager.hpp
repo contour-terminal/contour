@@ -485,7 +485,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// ended session is retired (freed later, since the call that asked is still running on it).
     /// @param ended The session whose pane is restarted; its restartOffer() must be Offered.
     /// @return The new session; or why there is none, in which case nothing changed.
-    std::expected<TerminalSession*, RestartError> restartSession(TerminalSession& ended);
+    [[nodiscard]] std::expected<TerminalSession*, RestartError> restartSession(TerminalSession& ended);
     // }}}
 
     // {{{ Model service used by PaneProxy + WindowController

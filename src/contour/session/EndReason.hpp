@@ -70,9 +70,10 @@ inline constexpr auto PaneFooterRows = std::array {
                     .messageWithDetail = "The terminal could not be started: {}." },
     PaneFooterRow { .end = EndReason::Disconnected,
                     .restart = FooterRestart::Unavailable,
-                    .message = "Disconnected from the Contour daemon. Its sessions are still running.",
-                    .messageWithDetail =
-                        "Disconnected from the Contour daemon. Its sessions are still running." },
+                    .message = "Disconnected from the Contour daemon. Its sessions are still running; "
+                               "reattach with: contour client",
+                    .messageWithDetail = "Disconnected from the Contour daemon. Its sessions are still "
+                                         "running; reattach with: contour client" },
 };
 
 /// Looks up the footer row for @p end.

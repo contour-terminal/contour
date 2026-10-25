@@ -2073,9 +2073,10 @@ constexpr StringLiteral DefaultProfilesWeb {
 
 constexpr StringLiteral EarlyExitThresholdWeb {
     "option determines the early threshold time. If the shell ends earlier than the specified threshold "
-    "without a successful exit status, additional message will be printed that the shell terminated too "
-    "quickly and additional key press is required to close contour. A shell that exits successfully -- "
-    "`exit` or Ctrl+D -- closes the window at once."
+    "without a successful exit status, its pane stays open with the shell's last output and a footer naming "
+    "how it ended (its exit code or signal): Return restarts the shell in the same pane, and the `ClosePane` "
+    "binding (Ctrl+Shift+X by default) closes it. A shell that exits successfully -- `exit` or Ctrl+D -- "
+    "closes the pane at once."
 };
 
 constexpr StringLiteral SpawnNewProcessWeb { "flag determines whether a new process should be spawned when "

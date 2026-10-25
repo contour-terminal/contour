@@ -13,6 +13,7 @@
 #include <contour/platform/FreeDesktopNotifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -1741,6 +1742,14 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
     REQUIRE(ended->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
     auto const ptysBefore = factory->createdPtys.size();
 
+    // The view half: the leaf's proxy is what QML's pane reads its `session` from, so it must re-announce.
+    auto* proxy = window->getProxy(leafId);
+    REQUIRE(proxy != nullptr);
+    REQUIRE(proxy->session() == ended);
+    auto proxyChanges = QSignalSpy(proxy, &contour::session::PaneProxy::changed);
+    auto activeSessionChanges =
+        QSignalSpy(&*window, &contour::window::WindowController::activeSessionChanged);
+
     pressReturn(*ended);
 
     // One new session, under the ended one's profile and in its directory.
@@ -1761,6 +1770,12 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
     CHECK(tab->activePane()->id() == leafId);
     CHECK(window->activeSession() == restarted);
     CHECK(manager.sessionForId(oldId) == nullptr);
+
+    // And the view rebinds: the pane's proxy re-announced once and now names the new session, and the
+    // window's active session, which the restarted pane was, changed with it.
+    CHECK(proxyChanges.count() == 1);
+    CHECK(proxy->session() == restarted);
+    CHECK(activeSessionChanges.count() == 1);
 
     // The ended session is let go once the call that ended it has returned.
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
@@ -1784,6 +1799,43 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
         CHECK(manager.sessionForId(restarted->modelSessionId()) == nullptr);
         CHECK(window->activeSession() == sibling);
     }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a modified Return in an ended pane is left to its bindings",
+          "[manager][paneend]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    auto* ended = manager.createSession(window.id);
+    REQUIRE(ended != nullptr);
+    auto const endedId = ended->modelSessionId();
+    endEarly(*ended);
+    REQUIRE(ended->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+    auto const ptysBefore = factory->createdPtys.size();
+
+    // Alt+Enter is the default ToggleFullscreen binding (a no-op here, with no display), and Shift+Enter
+    // a chord the user may bind: neither is Restart.
+    for (auto const chord: { vtbackend::Modifiers { vtbackend::Modifier::Alt },
+                             vtbackend::Modifiers { vtbackend::Modifier::Shift } })
+        ended->sendKeyEvent(vtbackend::Key::Enter,
+                            chord,
+                            vtbackend::KeyboardEventType::Press,
+                            std::chrono::steady_clock::now());
+
+    CHECK(factory->createdPtys.size() == ptysBefore);
+    CHECK(manager.sessionForId(endedId) == ended);
+    CHECK(ended->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
+
+    // A bare Return still is.
+    pressReturn(*ended);
+    CHECK(factory->createdPtys.size() == ptysBefore + 1);
+    CHECK(manager.sessionForId(endedId) == nullptr);
 
     contour::test::closeAllTabs(*window);
 }
