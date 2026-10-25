@@ -1177,6 +1177,22 @@ class SessionHost final: public vtworkspace::ModelEvents
             (observer->*method)(args...);
     }
 
+    /// Posts a stream event of a session to the loop, fanned out there unless the session ended meanwhile:
+    /// a session's callbacks fire on its pump thread.
+    /// @param session The session the event is of, passed to each observer first.
+    /// @param method A SessionStreamEvents member function pointer.
+    /// @param args The event arguments after the session (copied into the posted task).
+    template <typename Method, typename... Args>
+    void postStreamEvent(vtworkspace::SessionId session, Method method, Args... args)
+    {
+        _loop.post([this, session, method, ... args = std::move(args)] {
+            if (!_sessions.contains(session.value))
+                return;
+            for (auto* observer: _streamSubscribers)
+                (observer->*method)(session, args...);
+        });
+    }
+
     /// Recomputes `_pageSize` from every attached client's reported area under the configured
     /// policy. Called whenever the reported set changes — a report arriving, or a client leaving.
     /// Leaves `_pageSize` alone when no client has reported, since the hosted sessions still need

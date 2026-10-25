@@ -41,8 +41,13 @@ namespace
     template <typename T>
     [[nodiscard]] RawJson schemaOf()
     {
-        auto schema = glz::write_json_schema<T>();
-        return RawJson { .text = schema ? std::move(*schema) : std::string { "{}" } };
+        // Into our own string: the overload returning an expected copies its buffer out, and its extra
+        // frame took glaze's schema walk past the static analyzer's inlining depth, where it took a call
+        // into a system header for one that drops the walk's heap-allocated $defs.
+        auto text = std::string {};
+        if (glz::write_json_schema<T>(text))
+            text = "{}";
+        return RawJson { .text = std::move(text) };
     }
 
     [[nodiscard]] RawJson rawJson(std::string_view text)

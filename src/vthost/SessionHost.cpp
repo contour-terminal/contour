@@ -434,12 +434,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
     // The control-mode byte tap: fires on the session's PUMP thread with a view
     // into the read buffer, so the bytes are copied before crossing to the loop.
     auto tapped = std::make_unique<TappingPty>(std::move(pty), [this, id](std::string_view data) {
-        _loop.post([this, id, copy = std::string { data }] {
-            if (!_sessions.contains(id.value))
-                return;
-            for (auto* observer: _streamSubscribers)
-                observer->sessionOutput(id, copy);
-        });
+        postStreamEvent(id, &SessionStreamEvents::sessionOutput, std::string { data });
     });
 
     // A request's settings are re-normalized rather than taken as given: they can have travelled in
@@ -484,31 +479,15 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
             });
         },
         /*onBell=*/
-        [this, id] {
-            _loop.post([this, id] {
-                if (!_sessions.contains(id.value))
-                    return;
-                for (auto* observer: _streamSubscribers)
-                    observer->sessionBell(id);
-            });
-        },
+        [this, id] { postStreamEvent(id, &SessionStreamEvents::sessionBell); },
         /*onNotify=*/
         [this, id](std::string title, std::string body, std::optional<vtbackend::DisplayOccasion> occasion) {
-            _loop.post([this, id, title = std::move(title), body = std::move(body), occasion] {
-                if (!_sessions.contains(id.value))
-                    return;
-                for (auto* observer: _streamSubscribers)
-                    observer->sessionNotify(id, title, body, occasion);
-            });
+            postStreamEvent(
+                id, &SessionStreamEvents::sessionNotify, std::move(title), std::move(body), occasion);
         },
         /*onCopyToClipboard=*/
         [this, id](std::string data) {
-            _loop.post([this, id, data = std::move(data)] {
-                if (!_sessions.contains(id.value))
-                    return;
-                for (auto* observer: _streamSubscribers)
-                    observer->sessionCopyToClipboard(id, data);
-            });
+            postStreamEvent(id, &SessionStreamEvents::sessionCopyToClipboard, std::move(data));
         },
         /*onClosed=*/
         [this, id] {
@@ -520,12 +499,7 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
         },
         /*onSignal=*/
         [this, id](SessionSignal signal) {
-            _loop.post([this, id, signal = std::move(signal)] {
-                if (!_sessions.contains(id.value))
-                    return;
-                for (auto* observer: _streamSubscribers)
-                    observer->sessionSignal(id, signal);
-            });
+            postStreamEvent(id, &SessionStreamEvents::sessionSignal, std::move(signal));
         },
         makeSessionExtensions(id),
         std::move(profileName),

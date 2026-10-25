@@ -603,6 +603,11 @@ class Renderer
                                                        .pageMargin = _publishedMetrics.pageMargin };
     }
 
+    /// Follows a change of the terminal's total page size that no resize staged, such as the indicator
+    /// status line toggling. Called on the render thread at the start of renderImpl().
+    /// @param totalPageSize The terminal's total page size this frame.
+    void reconcileTotalPageSize(vtbackend::PageSize totalPageSize);
+
     /// Applies any staged reconfiguration. Called on the render thread at the start of renderImpl().
     void applyPendingReconfig();
 
