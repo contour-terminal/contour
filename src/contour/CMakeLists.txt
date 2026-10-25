@@ -1153,6 +1153,7 @@ if(CONTOUR_TESTING)
         command/CommandHistory_test.cpp
         command/ContextMenu_test.cpp
         command/FuzzyFilter_test.cpp
+        command/MenuBarTable_test.cpp
         command/MenuTree_test.cpp
         command/Shortcut_test.cpp
         command/TabMenus_test.cpp

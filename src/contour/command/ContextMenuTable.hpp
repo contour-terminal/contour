@@ -5,6 +5,9 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 
+#include <algorithm>
+#include <cstdint>
+#include <iterator>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -47,6 +50,13 @@ struct MenuTable
     /// different cell. Same reasoning as ContextMenuEntry holding an action rather than a name.
     using ActionBinder = actions::Action (*)(State const&);
 
+    /// Where a Submenu row's built children go: into a submenu of their own, or into the menu itself.
+    enum class ChildPlacement : std::uint8_t
+    {
+        Nested = 0, ///< Under the row's title, as a submenu.
+        Spliced,    ///< In place of the row: the menu's own rows, as a list that grows with the state.
+    };
+
     /// The precondition of a row that has none.
     [[nodiscard]] static bool always(State const& /*state*/) noexcept { return true; }
 
@@ -67,6 +77,7 @@ struct MenuTable
         MenuItemRole role = MenuItemRole::None; ///< The role a native menu gives this row.
         ChildBuilder children = nullptr;        ///< Submenu rows: what is inside.
         ActionBinder bindAction = nullptr;      ///< When set, supplies the action in place of @ref action.
+        ChildPlacement placement = ChildPlacement::Nested; ///< Submenu rows: nested, or spliced in place.
 
         /// This row, shown only when @p predicate holds.
         [[nodiscard]] Row shownWhen(Predicate predicate) const
@@ -126,7 +137,8 @@ struct MenuTable
                      .checked = nullptr,
                      .role = MenuItemRole::None,
                      .children = nullptr,
-                     .bindAction = nullptr };
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Nested };
     }
 
     /// A divider between groups of rows.
@@ -140,7 +152,8 @@ struct MenuTable
                      .checked = nullptr,
                      .role = MenuItemRole::None,
                      .children = nullptr,
-                     .bindAction = nullptr };
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Nested };
     }
 
     /// A row named @p title that opens onto whatever @p children builds.
@@ -154,7 +167,26 @@ struct MenuTable
                      .checked = nullptr,
                      .role = MenuItemRole::None,
                      .children = children,
-                     .bindAction = nullptr };
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Nested };
+    }
+
+    /// A run of rows that @p children builds, spliced into the menu in place of this row.
+    ///
+    /// For a list that grows with the state (the Window menu's tabs), where a submenu would hide what
+    /// the menu exists to show. Honours `shownWhen`; `enabledWhen` has no row to gray and is ignored.
+    [[nodiscard]] static Row rows(ChildBuilder children)
+    {
+        return Row { .kind = ContextMenuEntryKind::Submenu,
+                     .action = {},
+                     .title = {},
+                     .visible = always,
+                     .enabled = always,
+                     .checked = nullptr,
+                     .role = MenuItemRole::None,
+                     .children = children,
+                     .bindAction = nullptr,
+                     .placement = ChildPlacement::Spliced };
     }
 
     /// One AttachToHost row per saved host, in `State::hostNames` order.
@@ -185,6 +217,33 @@ struct MenuTable
     /// is dropped.
     [[nodiscard]] static Row attachToHostSubmenu() { return submenu("Attach to Host", hostRows); }
 
+    /// One ChangeProfile row per configured profile, with the active one check-marked.
+    ///
+    /// Shared by the pane menu and the menu bar's Shell menu, so the two cannot drift apart.
+    /// @param state The world the menu was opened over; reads `profileNames` and `activeProfile`.
+    /// @return The rows, none without profiles.
+    [[nodiscard]] static std::vector<ContextMenuEntry> changeProfileRows(State const& state)
+    {
+        auto entries = std::vector<ContextMenuEntry> {};
+        entries.reserve(state.profileNames.size());
+
+        for (auto const& name: state.profileNames)
+            entries.emplace_back(ContextMenuEntry {
+                .kind = ContextMenuEntryKind::Command,
+                .title = name,
+                .action = actions::ChangeProfile { .name = name },
+                .availability = RowAvailability::Enabled,
+                .check = (name == state.activeProfile) ? RowCheck::Checked : RowCheck::Unchecked,
+                .role = MenuItemRole::None,
+                .swatch = std::nullopt,
+                .children = {} });
+
+        return entries;
+    }
+
+    /// The "Change Profile" submenu, listing changeProfileRows(); absent without profiles.
+    [[nodiscard]] static Row changeProfileSubmenu() { return submenu("Change Profile", changeProfileRows); }
+
     /// Resolves @p rows against @p state: drops the rows whose precondition fails, grays out the ones
     /// merely unsatisfied, and expands the submenus.
     ///
@@ -208,7 +267,9 @@ struct MenuTable
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator,
                                                             .title = {},
                                                             .action = {},
-                                                            .availability = RowAvailability::Enabled,
+                                                            .availability = row.enabled(state)
+                                                                                ? RowAvailability::Enabled
+                                                                                : RowAvailability::Disabled,
                                                             .check = RowCheck::None,
                                                             .role = MenuItemRole::None,
                                                             .swatch = std::nullopt,
@@ -220,10 +281,17 @@ struct MenuTable
                     // An empty submenu is noise: it opens onto nothing.
                     if (children.empty())
                         break;
+                    if (row.placement == ChildPlacement::Spliced)
+                    {
+                        std::ranges::move(children, std::back_inserter(entries));
+                        break;
+                    }
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Submenu,
                                                             .title = std::string(row.title),
                                                             .action = {},
-                                                            .availability = RowAvailability::Enabled,
+                                                            .availability = row.enabled(state)
+                                                                                ? RowAvailability::Enabled
+                                                                                : RowAvailability::Disabled,
                                                             .check = RowCheck::None,
                                                             .role = MenuItemRole::None,
                                                             .swatch = std::nullopt,

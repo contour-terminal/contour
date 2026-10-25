@@ -12,6 +12,7 @@ add_library(contour_command STATIC
     CommandHistoryStore.cpp CommandHistoryStore.hpp
     ContextMenu.cpp ContextMenu.hpp
     ContextMenuTable.hpp
+    MenuBarTable.cpp MenuBarTable.hpp
     MenuTree.cpp MenuTree.hpp
     TabMenus.cpp TabMenus.hpp
     FuzzyFilter.cpp FuzzyFilter.hpp

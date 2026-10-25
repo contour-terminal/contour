@@ -135,26 +135,6 @@ namespace
             });
     }
 
-    /// One ChangeProfile row per configured profile, with the active one check-marked.
-    [[nodiscard]] std::vector<ContextMenuEntry> profileRows(ContextMenuState const& state)
-    {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.profileNames.size());
-
-        for (auto const& name: state.profileNames)
-            entries.emplace_back(ContextMenuEntry {
-                .kind = ContextMenuEntryKind::Command,
-                .title = name,
-                .action = actions::ChangeProfile { .name = name },
-                .availability = RowAvailability::Enabled,
-                .check = (name == state.activeProfile) ? RowCheck::Checked : RowCheck::Unchecked,
-                .role = MenuItemRole::None,
-                .swatch = std::nullopt,
-                .children = {} });
-
-        return entries;
-    }
-
     /// The "Advanced" submenu — itself a table, so it goes through the very same row builder.
     [[nodiscard]] std::span<Row const> advancedTemplate()
     {
@@ -252,7 +232,7 @@ namespace
 
             Table::separator(),
 
-            Table::submenu("Change Profile", profileRows).shownWhen(hasProfiles),
+            Table::changeProfileSubmenu().shownWhen(hasProfiles),
             Table::attachToHostSubmenu(),
             Table::submenu("Advanced", advancedRows),
         };
