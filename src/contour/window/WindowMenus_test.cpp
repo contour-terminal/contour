@@ -11,11 +11,16 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <QtCore/QPointF>
+#include <QtCore/QString>
+#include <QtCore/QVariantList>
+#include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <tuple>
 #include <vector>
@@ -76,6 +81,20 @@ struct SessionTabs
 {
     return controller.data(controller.index(row), static_cast<int>(WindowController::Roles::ColorRole))
         .value<QColor>();
+}
+
+/// The `actionId` of the command row titled @p title in @p rows, searching submenus too.
+[[nodiscard]] std::optional<int> actionIdOf(QVariantList const& rows, QString const& title)
+{
+    for (auto const& value: rows)
+    {
+        auto const row = value.toMap();
+        if (row["kind"].toString() == "command" && row["title"].toString() == title)
+            return row["actionId"].toInt();
+        if (auto const nested = actionIdOf(row["children"].toList(), title))
+            return nested;
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -245,4 +264,85 @@ TEST_CASE("CloseTabsToRight on the last tab closes nothing", "[contour][windowme
         CHECK(app.manager().sessionForId(session) != nullptr);
 
     contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("the tab menu is built for the right-clicked tab", "[contour][windowmenus]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+    auto const ids = createTabs(app.manager(), *window, 3);
+    window->activateTab(0);
+    auto requested = QSignalSpy { window.controller, &WindowController::tabContextMenuRequested };
+
+    window->openTabContextMenu(2, {});
+
+    REQUIRE(requested.count() == 1);
+    CHECK(requested.front().front().toInt() == 2);
+    REQUIRE_FALSE(window->tabContextMenuModel().isEmpty());
+
+    auto const closeOthers = actionIdOf(window->tabContextMenuModel(), QStringLiteral("Close Other Tabs"));
+    REQUIRE(closeOthers.has_value());
+    window->triggerTabContextMenuAction(*closeOthers);
+
+    REQUIRE(window->count() == 1);
+    CHECK(app.manager().model().findTab(ids[2]) != nullptr);
+    CHECK(app.manager().model().findTab(ids[0]) == nullptr);
+}
+
+TEST_CASE("a pick against a tab that has gone is a no-op", "[contour][windowmenus]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+    std::ignore = createTabs(app.manager(), *window, 3);
+
+    window->openTabContextMenu(2, {});
+    window->closeTabsToRight(0);
+    REQUIRE(window->count() == 1);
+
+    auto const closeTab = actionIdOf(window->tabContextMenuModel(), QStringLiteral("Close Tab"));
+    REQUIRE(closeTab.has_value());
+    window->triggerTabContextMenuAction(*closeTab);
+
+    CHECK(window->count() == 1);
+}
+
+TEST_CASE("Rename… names the right-clicked row", "[contour][windowmenus]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+    std::ignore = createTabs(app.manager(), *window, 3);
+    auto titleSpy = QSignalSpy { window.controller, &WindowController::tabTitleEditRequested };
+
+    window->openTabContextMenu(1, {});
+    auto const rename = actionIdOf(window->tabContextMenuModel(), QStringLiteral("Rename…"));
+    REQUIRE(rename.has_value());
+    window->triggerTabContextMenuAction(*rename);
+
+    REQUIRE(titleSpy.count() == 1);
+    CHECK(titleSpy.front().front().toInt() == 1);
+}
+
+TEST_CASE("the new-tab menu lists the profiles", "[contour][windowmenus]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+    auto requested = QSignalSpy { window.controller, &WindowController::newTabMenuRequested };
+
+    window->openNewTabMenu({});
+
+    CHECK(requested.count() == 1);
+    auto const model = window->newTabMenuModel();
+    REQUIRE_FALSE(model.isEmpty());
+    CHECK(model.back().toMap()["title"].toString() == QStringLiteral("Settings"));
+}
+
+TEST_CASE("the pane and title-bar menus still pop in the scene", "[contour][windowmenus]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+    auto requested = QSignalSpy { window.controller, &WindowController::titleBarContextMenuRequested };
+
+    window->openTitleBarContextMenu();
+
+    CHECK(requested.count() == 1);
 }

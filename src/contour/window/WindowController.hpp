@@ -11,6 +11,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/MenuRouting.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
@@ -20,8 +21,12 @@
 #include <QtGui/QColor>
 #include <QtQml/QtQml>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -44,6 +49,19 @@ namespace contour::window
 {
 
 class SettingsController;
+
+/// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
+/// -- or re-targets -- another the user may still have open.
+enum class MenuSurface : uint8_t
+{
+    Pane = 0, ///< The terminal pane's menu; acts on the pane it was opened over.
+    TitleBar, ///< The title bar's menu; acts on the active session.
+    Tab,      ///< A tab's menu; acts on the tab it was opened over.
+    NewTab,   ///< The new-tab button's profile menu; acts on the active session.
+};
+
+/// How many MenuSurface values there are.
+inline constexpr std::size_t MenuSurfaceCount = static_cast<std::size_t>(MenuSurface::NewTab) + 1;
 
 /// Per-OS-window Qt/QML adapter over one vtworkspace::Window.
 ///
@@ -84,6 +102,8 @@ class WindowController:
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
+    Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
+    Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
     Q_PROPERTY(
@@ -348,11 +368,17 @@ class WindowController:
     /// `actionId` indexes into this controller's own action list rather than naming a command, so a click
     /// runs the exact action the row was built with. Nothing has to be looked up by name at click time,
     /// and nothing depends on some other model having been populated first.
-    [[nodiscard]] QVariantList contextMenuModel() const { return _paneContextMenu.model; }
+    [[nodiscard]] QVariantList contextMenuModel() const { return menu(MenuSurface::Pane).model; }
 
     /// The title bar's context menu rows. Its OWN model, not the pane menu's: publishing into that one
     /// would rebuild and re-target a menu the user may still have open.
-    [[nodiscard]] QVariantList titleBarContextMenuModel() const { return _titleBarContextMenu.model; }
+    [[nodiscard]] QVariantList titleBarContextMenuModel() const { return menu(MenuSurface::TitleBar).model; }
+
+    /// The tab menu's rows, built for the tab it was last opened over.
+    [[nodiscard]] QVariantList tabContextMenuModel() const { return menu(MenuSurface::Tab).model; }
+
+    /// The new-tab menu's rows: one per profile, then "Settings".
+    [[nodiscard]] QVariantList newTabMenuModel() const { return menu(MenuSurface::NewTab).model; }
 
     /// Builds and publishes the title bar's context menu, then asks QML to pop it.
     Q_INVOKABLE void openTitleBarContextMenu();
@@ -365,6 +391,30 @@ class WindowController:
     /// Out-of-range ids are ignored.
     /// @param actionId The row's `actionId`.
     Q_INVOKABLE void triggerContextMenuAction(int actionId);
+
+    /// Builds the menu of the tab at row @p index and shows it, natively or in the scene.
+    ///
+    /// The menu is pinned to that tab, not to its row: a pick acts on it wherever it has moved, and does
+    /// nothing once it has closed.
+    /// @param index The right-clicked tab's row.
+    /// @param windowPosition Where the click landed, in window coordinates. Unused: the menu opens at the
+    ///        pointer, which is where the click landed.
+    Q_INVOKABLE void openTabContextMenu(int index, QPointF windowPosition);
+
+    /// Runs the tab-menu action with id @p actionId against the tab the menu was opened over.
+    /// Out-of-range ids, and a tab that has gone, are ignored.
+    /// @param actionId The row's `actionId`.
+    Q_INVOKABLE void triggerTabContextMenuAction(int actionId);
+
+    /// Builds the new-tab menu from the configured profiles and shows it, natively or in the scene.
+    /// @param windowPosition Where the click landed, in window coordinates. Unused: the menu opens at the
+    ///        pointer.
+    Q_INVOKABLE void openNewTabMenu(QPointF windowPosition);
+
+    /// Runs the new-tab menu action with id @p actionId against the active session.
+    /// Out-of-range ids are ignored.
+    /// @param actionId The row's `actionId`.
+    Q_INVOKABLE void triggerNewTabMenuAction(int actionId);
     // }}}
 
     /// The titles of this window's tabs, in tab order (TabTitleProvider, for TabCommandSource).
@@ -705,6 +755,14 @@ class WindowController:
     void contextMenuRequested();
     void titleBarContextMenuModelChanged();
     void titleBarContextMenuRequested();
+    /// The tab menu's rows changed. Emitted before tabContextMenuRequested().
+    void tabContextMenuModelChanged();
+    /// Requests that the tab at @p index pop its context menu in the scene.
+    void tabContextMenuRequested(int index);
+    /// The new-tab menu's rows changed. Emitted before newTabMenuRequested().
+    void newTabMenuModelChanged();
+    /// Requests that this window pop its new-tab menu in the scene.
+    void newTabMenuRequested();
     void multimediaReadyChanged();
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
@@ -827,6 +885,37 @@ class WindowController:
     /// Clamps and records the initial normal placement after the configured size has been calculated.
     void restoreWindowPosition();
 
+    // {{{ Menu routing
+    /// The published menu of @p surface.
+    [[nodiscard]] PublishedContextMenu const& menu(MenuSurface surface) const noexcept
+    {
+        return _menus[static_cast<std::size_t>(surface)];
+    }
+
+    /// Publishes @p tree as @p surface's menu and shows it: natively when the style asks for it and the
+    /// platform can, otherwise in the scene. The native presentation is posted, so it runs once the
+    /// press handler that asked for it has returned.
+    /// @param surface The surface the menu opens from.
+    /// @param tree The resolved menu.
+    /// @param anchor Where to open it natively.
+    void presentSurface(MenuSurface surface, command::MenuTree tree, platform::MenuAnchor anchor);
+
+    /// Emits @p surface's request to pop its menu in the scene.
+    /// @param surface The surface whose QML menu should open.
+    void requestInSceneMenu(MenuSurface surface);
+
+    /// Runs the action row @p actionId of @p surface's menu against what that surface acts on.
+    /// Out-of-range ids, and a target that has gone, are ignored.
+    /// @param surface The surface the row belongs to.
+    /// @param actionId The row's `actionId`.
+    void triggerSurfaceAction(MenuSurface surface, int actionId);
+
+    /// Resolves @p entries into a tree with the current key bindings' chords.
+    /// @param entries The menu rows.
+    /// @return The resolved menu.
+    [[nodiscard]] command::MenuTree resolveMenu(std::span<command::ContextMenuEntry const> entries) const;
+    // }}}
+
     // Wheel state for the tab strip. Separate from the grid's (which lives on TerminalSession) so a
     // gesture over the strip is judged on its own, and so the accumulator does not jump when the
     // pointer crosses between strip and grid mid-scroll.
@@ -848,6 +937,13 @@ class WindowController:
     std::unique_ptr<CommandPaletteModel> _commandPalette;
     // }}}
 
+    // {{{ Menu routing
+    /// Whether menus open natively or in the scene: the style's `layout.menu` token, read once.
+    config::MenuPresentation _menuPresentation = config::MenuPresentation::InScene;
+    /// Shows a menu natively; the app's, which outlives every window.
+    platform::INativeMenuPresenter& _nativeMenus;
+    // }}}
+
     // {{{ Settings page
     /// Whether the content area currently shows the settings page instead of the terminal pane tree.
     bool _settingsActive = false;
@@ -861,12 +957,14 @@ class WindowController:
     mutable TabBadgeCache _badges;
 
     // {{{ Terminal context menu
-    /// The menu as QML sees it, rebuilt on every right-click.
-    PublishedContextMenu _paneContextMenu;
-    PublishedContextMenu _titleBarContextMenu;
+    /// Each surface's menu as QML sees it, rebuilt on every open, indexed by MenuSurface. The rows' actions
+    /// are held here rather than in the QML so a row runs the exact action it was built with -- no lookup
+    /// by name at click time.
+    std::array<PublishedContextMenu, MenuSurfaceCount> _menus {};
 
-    /// The actions those rows run, in the order the rows carry as `actionId`. Held here rather than in
-    /// the QML so a row runs the exact action it was built with — no lookup by name at click time.
+    /// The tab the tab menu was opened over. Pinned by id, so a pick acts on that tab wherever it has
+    /// moved and does nothing once it has closed.
+    std::optional<vtworkspace::TabId> _tabContextMenuTab {};
 
     /// The session the menu was BUILT over — the pane the user right-clicked.
     ///

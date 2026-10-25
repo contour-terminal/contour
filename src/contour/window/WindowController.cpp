@@ -2,6 +2,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/command/ContextMenu.hpp>
 #include <contour/command/Shortcut.hpp>
+#include <contour/command/TabMenus.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/Logging.hpp>
@@ -59,7 +60,9 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _layoutCommands { manager.app().config() },
     _hostCommands { manager.app().config() },
     _boundCommands { manager.app().config().inputMappings.value() },
-    _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) }
+    _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) },
+    _menuPresentation { manager.app().menuPresentation() },
+    _nativeMenus { manager.app().nativeMenuPresenter() }
 {
     _commandPalette->setSources({ &_tabCommands,
                                   &_profileCommands,
@@ -158,37 +161,170 @@ void WindowController::openContextMenu()
     auto const* tab = activeModelTab();
     state.hasSplits = tab != nullptr && tab->hasMultiplePanes();
 
-    auto const entries = command::buildContextMenu(state);
-
-    _paneContextMenu.publish(entries);
-
     // The pane the rows were built for. Held, so that picking one acts on it and not on whichever pane is
     // active by the time the click lands.
     _contextMenuSession = session;
 
-    // Model first, then the request to show: both are synchronous, so the QML has rebuilt the menu's rows
-    // by the time it is told to pop it.
-    emit contextMenuModelChanged();
-    emit contextMenuRequested();
+    presentSurface(MenuSurface::Pane,
+                   resolveMenu(command::buildContextMenu(state)),
+                   { .window = _osWindow, .position = std::nullopt });
 }
 
 void WindowController::triggerContextMenuAction(int actionId)
 {
-    // The session the menu was OPENED over, not whichever one is active now. Null when that pane has since
-    // died — its shell exited while the menu stood open — in which case the row has nothing left to act on.
-    auto* session = _contextMenuSession.data();
-    if (session == nullptr)
+    triggerSurfaceAction(MenuSurface::Pane, actionId);
+}
+
+void WindowController::openTabContextMenu(int index, QPointF /*windowPosition*/)
+{
+    auto const* tab = tabAtRow(index);
+    if (tab == nullptr)
         return;
 
+    auto const palette = _manager.model().colorPalette();
+    auto const state = command::TabContextMenuState {
+        .tabIndex = index,
+        .tabCount = count(),
+        .palette = { palette.begin(), palette.end() },
+        .color = tab->color(),
+        .userColor = tab->color(vtworkspace::TabColorSource::User).has_value()
+                         ? command::UserColorPresence::Present
+                         : command::UserColorPresence::Absent,
+    };
+
+    // Pinned by id: the strip can reorder or close tabs while the menu stands open.
+    _tabContextMenuTab = tab->id();
+
+    presentSurface(MenuSurface::Tab,
+                   resolveMenu(command::buildTabContextMenu(state)),
+                   { .window = _osWindow, .position = std::nullopt });
+}
+
+void WindowController::triggerTabContextMenuAction(int actionId)
+{
+    triggerSurfaceAction(MenuSurface::Tab, actionId);
+}
+
+void WindowController::openNewTabMenu(QPointF /*windowPosition*/)
+{
+    auto state = command::NewTabMenuState {
+        .profileNames =
+            std::ranges::to<std::vector>(_manager.app().config().profiles.value() | std::views::keys),
+    };
+    std::ranges::sort(state.profileNames);
+
+    presentSurface(MenuSurface::NewTab,
+                   resolveMenu(command::buildNewTabMenu(state)),
+                   { .window = _osWindow, .position = std::nullopt });
+}
+
+void WindowController::triggerNewTabMenuAction(int actionId)
+{
+    triggerSurfaceAction(MenuSurface::NewTab, actionId);
+}
+
+command::MenuTree WindowController::resolveMenu(std::span<command::ContextMenuEntry const> entries) const
+{
+    // Re-read on every open: a ReloadConfig can have rebound a key since the last one.
+    return command::buildMenuTree(
+        entries, command::chordIndex(_manager.app().config()), command::platformShortcutStyle());
+}
+
+void WindowController::presentSurface(MenuSurface surface,
+                                      command::MenuTree tree,
+                                      platform::MenuAnchor anchor)
+{
+    _menus[static_cast<std::size_t>(surface)].publish(tree);
+
+    // Model first, then the request to show, so the QML has rebuilt the rows by the time it pops them.
+    switch (surface)
+    {
+        case MenuSurface::Pane: emit contextMenuModelChanged(); break;
+        case MenuSurface::TitleBar: emit titleBarContextMenuModelChanged(); break;
+        case MenuSurface::Tab: emit tabContextMenuModelChanged(); break;
+        case MenuSurface::NewTab: emit newTabMenuModelChanged(); break;
+    }
+
+    if (_menuPresentation == config::MenuPresentation::InScene)
+    {
+        requestInSceneMenu(surface);
+        return;
+    }
+
+    // Posted, not run here: this is called from inside a press handler, and AppKit's tracking loop would
+    // swallow the release and run Qt events that may destroy the item under that handler's frame. Posted
+    // to `this`, the call is dropped if this window goes first; the OS window is held weakly for the same
+    // reason.
+    platform::postToObject(this,
+                           [this,
+                            surface,
+                            tree = std::move(tree),
+                            window = QPointer<QWindow> { anchor.window },
+                            position = anchor.position] {
+                               // The presenter blocks until the menu closes, and Qt keeps delivering events
+                               // meanwhile, so the pick is posted again rather than run against state
+                               // captured here: it re-reads the menu and its target when it arrives, and is
+                               // dropped with this window.
+                               auto const route =
+                                   presentMenu(_menuPresentation,
+                                               _nativeMenus,
+                                               tree,
+                                               { .window = window.data(), .position = position },
+                                               [this, surface](std::size_t index) {
+                                                   platform::postToObject(this, [this, surface, index] {
+                                                       triggerSurfaceAction(surface, static_cast<int>(index));
+                                                   });
+                                               });
+                               if (route == MenuRoute::InScene)
+                                   requestInSceneMenu(surface);
+                           });
+}
+
+void WindowController::requestInSceneMenu(MenuSurface surface)
+{
+    switch (surface)
+    {
+        case MenuSurface::Pane: emit contextMenuRequested(); break;
+        case MenuSurface::TitleBar: emit titleBarContextMenuRequested(); break;
+        case MenuSurface::Tab:
+            if (_tabContextMenuTab)
+                if (auto const row = rowOfTab(*_tabContextMenuTab); row >= 0)
+                    emit tabContextMenuRequested(row);
+            break;
+        case MenuSurface::NewTab: emit newTabMenuRequested(); break;
+    }
+}
+
+void WindowController::triggerSurfaceAction(MenuSurface surface, int actionId)
+{
     // Copied out of the model before running, for the same reason runCommand() does: an action can
     // rebuild this window (ClosePane, ChangeProfile) and free the vector it was standing in.
-    auto const action = _paneContextMenu.actionAt(actionId);
+    auto const action = menu(surface).actionAt(actionId);
     if (!action)
         return;
 
     // Deliberately NOT recorded in the command history: that list is "commands the user reached for by
     // name", and it exists to float them to the top of the palette. A right-click on "Copy" is not that.
-    session->executeAction(*action);
+    switch (surface)
+    {
+        case MenuSurface::Pane:
+            // The session the menu was OPENED over, not whichever one is active now. Null when that pane
+            // has since died, in which case the row has nothing left to act on.
+            if (auto* session = _contextMenuSession.data())
+                session->executeAction(*action);
+            break;
+        case MenuSurface::Tab:
+            // The TabId overload does nothing when the pinned tab has gone.
+            if (_tabContextMenuTab)
+                runTabAction(*_tabContextMenuTab, *action);
+            break;
+        case MenuSurface::TitleBar:
+        case MenuSurface::NewTab:
+            // Window-scoped rows (a new tab, this window's tab bar): no particular pane was opened over.
+            if (auto* session = activeSession())
+                session->executeAction(*action);
+            break;
+    }
 }
 
 QString WindowController::hostLabel() const
@@ -223,24 +359,14 @@ void WindowController::openTitleBarContextMenu()
         state.profileNames.push_back(name);
     std::ranges::sort(state.profileNames);
 
-    _titleBarContextMenu.publish(command::buildTitleBarContextMenu(state));
-
-    // Model first, then the request to show: both are synchronous, so QML has rebuilt the rows by the
-    // time it is told to pop them.
-    emit titleBarContextMenuModelChanged();
-    emit titleBarContextMenuRequested();
+    presentSurface(MenuSurface::TitleBar,
+                   resolveMenu(command::buildTitleBarContextMenu(state)),
+                   { .window = _osWindow, .position = std::nullopt });
 }
 
 void WindowController::triggerTitleBarContextMenuAction(int actionId)
 {
-    auto const action = _titleBarContextMenu.actionAt(actionId);
-    if (!action)
-        return;
-
-    // Runs against the window's ACTIVE session, unlike the pane menu: every row here is window-scoped
-    // (a new tab, this window's tab bar), so there is no particular pane it was opened over.
-    if (auto* session = activeSession())
-        session->executeAction(*action);
+    triggerSurfaceAction(MenuSurface::TitleBar, actionId);
 }
 
 void WindowController::runCommand(QString const& id)

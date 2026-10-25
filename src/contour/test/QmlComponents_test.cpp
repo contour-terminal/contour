@@ -11,6 +11,7 @@
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistory.hpp>
 #include <contour/command/ContextMenu.hpp>
+#include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/display/TerminalDisplay.hpp>
@@ -437,9 +438,9 @@ TEST_CASE("The terminal context menu opens, sub-menus and all (offscreen)", "[co
         .activeProfile = "dark",
         .profileNames = { "dark", "light" },
     };
-    auto actions = std::vector<contour::actions::Action> {};
-    auto const model =
-        contour::window::toContextMenuModel(contour::command::buildContextMenu(state), actions);
+    auto const tree = contour::command::buildMenuTree(
+        contour::command::buildContextMenu(state), {}, contour::command::ShortcutStyle::Text);
+    auto const model = contour::window::toContextMenuModel(tree.nodes);
     REQUIRE_FALSE(model.isEmpty());
 
     QQmlComponent hostComponent(&engine);
@@ -515,9 +516,9 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
         .profileNames = { "dark", "light" },
     };
 
-    auto actions = std::vector<contour::actions::Action> {};
-    auto const model =
-        contour::window::toContextMenuModel(contour::command::buildContextMenu(state), actions);
+    auto const tree = contour::command::buildMenuTree(
+        contour::command::buildContextMenu(state), {}, contour::command::ShortcutStyle::Text);
+    auto const model = contour::window::toContextMenuModel(tree.nodes);
     REQUIRE_FALSE(model.isEmpty());
 
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/ActionContextMenu.qml")));
@@ -552,8 +553,8 @@ TEST_CASE("Terminal context menu builds its rows from the C++ model (offscreen)"
     REQUIRE(QMetaObject::invokeMethod(copyItem, "triggered"));
     REQUIRE(pickedSpy.count() == 1);
     CHECK(pickedSpy.at(0).at(0).toInt() == 0);
-    REQUIRE_FALSE(actions.empty());
-    CHECK(contour::command::commandId(actions[0]) == "CopySelection");
+    REQUIRE_FALSE(tree.actions.empty());
+    CHECK(contour::command::commandId(tree.actions[0]) == "CopySelection");
 
     SECTION("rebuilding it, as every right-click does, leaks nothing")
     {
