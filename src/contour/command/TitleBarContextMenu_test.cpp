@@ -4,6 +4,7 @@
 // rule about when a row is shown, greyed or ticked is decided — and asserted — with no window, no
 // terminal and no Qt behind it.
 
+#include <contour/command/Command.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -261,4 +262,31 @@ TEST_CASE("no hosts, no Attach to Host submenu", "[menu][hosts]")
 {
     auto const menu = buildTitleBarContextMenu(populatedState());
     CHECK(find(menu, "Attach to Host") == nullptr);
+}
+
+TEST_CASE("the tab bar submenu is buildTabBarMenu", "[contour][titlebar][menu]")
+{
+    using contour::command::buildTabBarMenu;
+    using contour::command::commandId;
+    using contour::command::TabBarMenuState;
+    namespace config = contour::config;
+
+    auto state = populatedState();
+    state.tabBarVisibility = config::TabBarVisibility::Always;
+    state.tabBarPosition = config::TabBarPosition::Bottom;
+
+    auto const menu = buildTitleBarContextMenu(state);
+    auto const* tabBar = find(menu, "Tab Bar");
+    REQUIRE(tabBar != nullptr);
+
+    auto const expected = buildTabBarMenu(
+        TabBarMenuState { .visibility = state.tabBarVisibility, .position = state.tabBarPosition });
+    REQUIRE(tabBar->children.size() == expected.size());
+    for (auto const& [actual, wanted]: std::views::zip(tabBar->children, expected))
+    {
+        CHECK(actual.kind == wanted.kind);
+        CHECK(actual.title == wanted.title);
+        CHECK(commandId(actual.action) == commandId(wanted.action));
+        CHECK(actual.check == wanted.check);
+    }
 }

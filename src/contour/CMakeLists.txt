@@ -1151,6 +1151,7 @@ if(CONTOUR_TESTING)
         command/ContextMenu_test.cpp
         command/FuzzyFilter_test.cpp
         command/Shortcut_test.cpp
+        command/TabMenus_test.cpp
         command/TitleBarContextMenu_test.cpp
         cli/AgentSkill_test.cpp
         cli/CaptureScreen_test.cpp
