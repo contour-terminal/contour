@@ -1,0 +1,57 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-10-25-native-redesign-step-4a.md
+
+Spec: `docs/superpowers/specs/2026-10-24-native-redesign-implementation-design.md` §3.3 (binds). Plan written 2026-10-25 by a plan-writer subagent at HEAD 9811812d.
+
+## Owner decisions (ruled by the controller under the owner's goal "native redesign specs and plans fully implemented"; the run does not pause for them)
+- Ruling D1: Settings keeps the app running after the last terminal window closes, until Settings itself closes — the writer's default; a Settings window that vanishes with a pending edit would lose work — cost if wrong: one quit-on-last-window condition.
+- Ruling D2: Settings' position is not remembered across restarts in 4a — the writer's default; window-state persistence belongs with 4b's save model — cost if wrong: a small follow-up.
+- Ruling D3: the new-tab menu's Settings row goes on every OS, as §3.3 says; Linux and Windows reach Settings through the palette, Ctrl+Shift+, and the title-bar menu — cost if wrong: one table row back.
+
+## Spec gaps noted by the writer
+- §3.3 says Ctrl+, but the defaults bind Ctrl+Shift+,: left to issue #2175 (macOS/Ctrl default chords), not this step.
+- "The tab model no longer has a settings row": the pseudo-tab is a pinned QML item plus code that marks no terminal tab active while it shows; the test pins that instead.
+- About after ⌘M: a non-goal of 4a.
+- Minimum window size not on the canvas: the writer chose 720×480 (90×24 cells on the Terminal row).
+
+## Pre-flight scan
+
+Full scan (cross-task pairs, per-task rows, references): preflight.md in this workspace (opus, 2026-10-25, HEAD 9811812d). 16 findings: F1 blocking, F2–F16 non-blocking.
+
+## Rulings
+- Ruling P1: all 16 pre-flight findings accepted with their proposed resolutions; carried into each task's dispatch instead of rewriting the plan text (Task 1: F2, F10; Task 2: F1, F3, F5 settings fixture, F6, F7; Task 3: F5 menu helpers, F9, F10, F13, F14, F16, F15; Task 4: F4, F8, F10, F15; Task 5: F11, F12, F15) — the plan stays the record of intent and preflight.md the record of corrections — cost if wrong: an implementer misses a correction, which the task review catches.
+- Ruling P2 (tiered review): Tasks 1 and 2 share one review; Tasks 3 and 4 get their own; the step keeps its final review.
+- Ruling P3 (F11): Settings appearing in AppKit's Window menu is recorded at Task 5's check; excluding it is a follow-up, not 4a.
+- Task 1: BASE 8a8aa716. Implementer dispatched (sonnet).
+- Task 1: implementer DONE 56d36049 ([chrometokens] 10 cases/542; [contour][uistyle],[contour][settingswindow][rules] 18/243). F2 applied (.host column, HostPlatformCount). Review deferred to the joint Tasks 1+2 review (P2).
+- Task 2: BASE 56d36049. Implementer dispatched (opus).
+- Ruling: push only at review milestones (a reviewed task or task pair, a step's finish), not after every commit — the Build workflow cancels the previous run per branch, so frequent pushes left no full CI run finishing (9811812d and 97e661ac were cancelled) — cost if wrong: CI feedback a little later.
+- Task 2: implementer DONE 41b99e0b (4 filters 52 cases; ContourTui 33; lint 10/10). Dropped color: palette.window (binding loop on ApplicationWindow), tested; narrowing fixed with a commented cast. Joint Tasks 1+2 review dispatched (opus); Task 3 dispatched in parallel (opus), BASE 41b99e0b — Ruling: the review is read-only, so Task 3 needn't wait; a fix round on Tasks 1–2 then lands after Task 3 — cost if wrong: a fix round that touches Task 3's files.
+- Tasks 1+2: joint review Spec ✅ ✅, Quality Needs fixes. I1: three real clang-tidy errors (SettingsWindowRules.cpp:34,:46 modernize-return-braced-init-list; SettingsPageQml_test.cpp:171 readability-make-member-function-const); the implementer's "false positives" came from a broken local run without the SDK sysroot. I2: first show on a secondary screen creates the native window on the primary (setPosition before create(), per restoreWindowPosition). Minors: m1 place(QScreen*, bool existed) → optional<QRect> previous; m2 false comment on flag bits; m3 empty errorString on wrong-type object; m4 test checks its own table; m5 no test of QWindow::close() + reshow; m6 show() while visible refreshes and drops typed text (pre-existing).
+- Ruling: local clang-tidy runs as `/opt/homebrew/opt/llvm@22/bin/clang-tidy -p out/appleclang-debug --extra-arg=-isysroot$(xcrun --show-sdk-path)`, for every implementer from now on — the bare invocation cannot parse on this Mac — cost if wrong: none.
+- Ruling: the Tasks 1+2 fix round (I1, I2, m1–m5) runs after Task 3 commits, since two agents must not build in one tree at once; m6 is pre-existing and parked for Step 4b's save model — cost if wrong: a later fix.
+- Task 3 told the corrected clang-tidy command.
+- Step 1d Task 1 (spike) complete; rulings S1–S4 in the 1d ledger.
+- Owner: this session is the only one working on contour; removed the three other worktrees (.claude/worktrees/crash-flushinput-length-error, fix+2089-capture-buffer-permission, pr-2119; no uncommitted tracked changes; their branches kept). 36 GB free.
+- Task 3: implementer DONE bcfac1f0 (contour_test 37, gui filters 432; whole contour_gui_test 1536 passed, 36 display skipped; clang-tidy with sysroot clean on new lines). F5 helpers are templates in MenuFixtures.hpp; D1 needed no code (Settings is parentless, so Qt keeps the app alive). Review dispatched (opus). Tasks 1+2 fix round 1/5 dispatched (resume the Task 2 implementer): I1, I2, m1–m5. FIX_BASE bcfac1f0.
+- Task 3: review Spec ✅ except D1 (plan-mandated), Quality Needs fixes. Important: closeSettings() hide()s, so ⌘W / Close button never trigger Qt's last-window quit — after the last terminal window closed, closing Settings leaves a windowless process. Minors: double controller refresh per save (pre-existing); SettingsController.hpp included in ContourGuiApp.hpp; F5 helpers as templates in MenuFixtures.hpp; local switch for the error name; Config_test comment layout; `near` parameter vs <windows.h>.
+- Ruling: Task 3's fix (close() instead of hide(), D1 test) and minors 2–5 (formatter beside the enum, `near` → `anchor`, forward declaration, Config_test comments) go to the Tasks 1–2 fix-round implementer as a second commit, since they touch the same files — one builder per tree. Parked: the double refresh (pre-existing; Step 4b's save model) and the F5 template helpers (step's /simplify).
+- Tasks 1–2: fix round 1/5 committed 483e5e82 (I1 clang-tidy, I2 setPosition before create, m1–m5); Task 3: fix round 1/5 committed 98193c60 (close() not hide(), D1 test red→green; formatter beside the enum; near → anchor; forward declaration; Config_test comments). Filters: 60 + ContourTui 34 + [config] 306 + Task 3 51; lint 10/10; clang-tidy (sysroot) clean on new lines. No two-screen test (offscreen screens fixed at startup). Scoped re-review dispatched (sonnet). Task 4: BASE 98193c60, implementer dispatched (opus).
+- Fix rounds re-review (sonnet): 12/12 addressed, no new Critical/Important breakage.
+- Task 4a minor (deferred): Q_MOC_INCLUDE(<contour / window / SettingsController.hpp>) spaced by clang-format — use the quoted form.
+- Task 4a minor (deferred): SettingsWindow.qml header comment still says "hidden, never destroyed".
+- Task 4a minor (deferred): the D1 test's appStaysAlive() duplicates quitIfWindowless()'s loop.
+- Task 1: complete (56d36049, 483e5e82). Task 2: complete (41b99e0b, 483e5e82). Task 3: complete (bcfac1f0, 98193c60).
+- Task 4: implementer DONE 16273d5d (brief filters 26 + 266; ContourTui 14; full contour_test 379; full contour_gui_test 1538 + 36 skipped; lint 10/10; clang-tidy clean on changed lines). F4, F8 applied. Review dispatched (sonnet). Step 1c pre-flight dispatched (opus) at HEAD 16273d5d, in parallel.
+- Task 4: review Approved (no Critical/Important). Task 4a minor (deferred): ChromeSnapshotScene subject() could assert its @pre show(); SettingsPage's `windowController` property now holds a SettingsWindowHost (rename in 4b).
+- Task 4: complete (16273d5d, review clean).
+- Task 5: BASE 16273d5d. Implementer dispatched (opus): simplify over the step's src diff, every filter, snapshots (offscreen + display + ContourTui), lint, release notes, the deferred minors' triage; F11/F12 recorded; the owner's manual check is batched per phase (ruling).
+- Task 5: implementer DONE 0004f856 (simplify: helpers beside TestApp, quoted Q_MOC_INCLUDE, QML comment, subject() check) + 00f860e1 (release notes). Full contour_test 379; full contour_gui_test 1538 + 36 skipped; ContourTui; lint 10/10; display snapshot passes; 192 PNGs = 12×4×2×2. F11: Settings is listed in AppKit's Window menu (follow-up per P3). F12: CloseOnly stays resizable (min 720×480, minimize/zoom dimmed). Owner's check list in task-5-report.md §6 (batched per phase); cosmetic: settings.terminal.* has a ~20 px band below the page.
+- Task 5: complete (0004f856, 00f860e1). Final whole-step review dispatched (fable).
+- Final review (fable): Ready to merge — With fixes. Important: (1) SettingsWindowHost::show() calls window.show() on a visible window, i.e. showNormal(), un-maximising Settings on Windows/Linux (WindowController::raiseAndActivate already avoids this); (2) _controller.refresh() on every show() drops a mid-edit field — m6, now reachable, must-fix. Minors: (3) runWithoutWindow passes a null anchor when a window exists with no active session; (4) best-overlap hand loop → ranges::max_element; (5) assert a maximised window reopens maximised; (6) "Tab Bar Settings…" title now opens the whole Settings window; (7) windowFactsOf(QList<QWindow*>) beside anyWindowKeepsAppAlive, used by the app and the D1 test. Triage: m6 must-fix; the rest of the deferred list can wait or is closed.
+- Ruling: the one final fix dispatch takes Important 1–2 and Minors 3–7 (6: retitle the row "Settings…"); it waits for Step 1c Tasks 1–2's commit, since one builder per tree — cost if wrong: a short delay.
+- Final fix wave dispatched (opus), FIX_BASE 30cdc3f0.
+- Final fix wave: d726fc05 (1, 2, 5 — finding 5 was a real bug: show() on a hidden window un-maximised it too; shared window::raiseAndActivate in WindowActivation.hpp) + b4be789b (3, 4, 6, 7; WindowLivenessQt.hpp). Full contour_test 390; full contour_gui_test 1539 + 36 skipped; lint 10/10. Concern for the owner's check: a window closed maximised still runs place()/setGeometry() on reopen. Scoped re-review dispatched (sonnet).
+- Final fix wave re-review: 7/7 addressed; one new Important introduced by the wave: reopening a Settings window closed maximised setGeometry()s the hidden, still-maximised window with its maximised frame, which a real WM keeps as the restore rectangle.
+- Ruling (no second fix wave, per the process): the residual is real and load-bearing (user-visible on Windows/X11), and its fix is one condition — skip place() while windowStates() has Maximized or FullScreen. Carried as one extra commit by the Step 1c Task 3 implementer (who owns the tree's build), reviewed with Task 3; a real-WM check goes on the owner's phase list — cost if wrong: a later fix to the reopen path.
+- Step 4a: complete pending that commit (tasks 56d36049..00f860e1, final fixes d726fc05, b4be789b).
+- Residual 07d3fbbe reviewed with 1c Task 3: Approved. Step 4a: COMPLETE (56d36049, 41b99e0b, bcfac1f0, 483e5e82, 98193c60, 16273d5d, 0004f856, 00f860e1, d726fc05, b4be789b, 07d3fbbe).
