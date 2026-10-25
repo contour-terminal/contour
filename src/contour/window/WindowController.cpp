@@ -1912,6 +1912,20 @@ void WindowController::rebuildActiveTabPaneProxies()
     refreshActiveTabLayoutRoot();
 }
 
+void WindowController::notifyPaneSessionReplaced(vtworkspace::TabId tab, vtworkspace::PaneId leaf)
+{
+    // The proxies are the active tab's alone: another tab's leaf is read afresh when that tab is shown.
+    auto const* active = activeModelTab();
+    if (active != nullptr && active->id() == tab)
+    {
+        if (auto const it = _paneProxies.find(leaf.value); it != _paneProxies.end())
+            it->second->notifyChanged();
+        if (active->activePane() != nullptr && active->activePane()->id() == leaf)
+            emit activeSessionChanged();
+    }
+    notifyTabRowChanged(tab, { Roles::SessionIdRole, Roles::TitleRole });
+}
+
 void WindowController::refreshActiveTabLayoutRoot()
 {
     // Render the tab's LAYOUT root, which is the tree root normally and the zoomed leaf while zoomed.

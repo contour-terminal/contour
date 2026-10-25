@@ -691,6 +691,11 @@ class WindowController:
     void refreshAllTabTitles();
     void refreshActiveTabHighlight();
     void rebuildActiveTabPaneProxies();
+    /// The leaf @p leaf of @p tab carries a new session (a restart in the same pane): re-announces that
+    /// pane's proxy, so QML rebinds its display, and the tab row and active session that read it.
+    /// @param tab  The tab holding the leaf.
+    /// @param leaf The leaf whose session was replaced.
+    void notifyPaneSessionReplaced(vtworkspace::TabId tab, vtworkspace::PaneId leaf);
     /// Re-points activeTabRootPane at the active tab's layout root (vtworkspace::Tab::layoutRoot), which zoom
     /// moves without reshaping the tree. O(1): the proxies stay valid, so no walk or rebuild is needed.
     void refreshActiveTabLayoutRoot();

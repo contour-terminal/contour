@@ -2,6 +2,7 @@
 #include <vtworkspace/Pane.hpp>
 
 #include <cassert>
+#include <utility>
 
 namespace vtworkspace
 {
@@ -71,6 +72,12 @@ void Pane::swapLeafPayload(Pane* other) noexcept
     // Only the sessions trade places; the PaneIds — the stable identity hosts address a node by —
     // stay put. So the two terminals swap slots without any node being renamed or re-parented.
     std::swap(_session, other->_session);
+}
+
+SessionId Pane::replaceSession(SessionId session) noexcept
+{
+    assert(isLeaf() && "replaceSession() must be called on a leaf");
+    return std::exchange(_session, session);
 }
 
 void Pane::swapChildren() noexcept

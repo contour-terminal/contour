@@ -95,6 +95,28 @@ enum class CommandPaneError : uint8_t
     return "unknown error";
 }
 
+/// Why restartSession() started no new session.
+enum class RestartError : uint8_t
+{
+    NotOffered = 0, ///< The session has not ended, its end offers no Restart, or the remote end hosts it.
+    NotHosted,      ///< No pane of this manager carries the session.
+    NoSession,      ///< The session factory made no new session.
+};
+
+/// A short reason for @p error, for logs.
+/// @param error The failure.
+/// @return A lower-case phrase without a trailing period.
+[[nodiscard]] constexpr std::string_view describe(RestartError error) noexcept
+{
+    switch (error)
+    {
+        case RestartError::NotOffered: return "the ended session offers no restart";
+        case RestartError::NotHosted: return "no pane carries the session";
+        case RestartError::NoSession: return "no new session could be made";
+    }
+    return "unknown error";
+}
+
 /**
  * Session-lifetime service, SessionModel host, and per-window ModelEvents router.
  *
@@ -457,6 +479,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// vtworkspace::SessionModel::toggleActivePaneZoom).
     /// @param acting The session that received the keybinding; its hosting tab is the target.
     void toggleActivePaneZoom(TerminalSession* acting);
+    /// Starts an ended session again in the pane it leaves: a new session under the same profile,
+    /// launched command and page size, in the ended one's spawn directory, takes the leaf's place (its
+    /// PaneId, the active pane and a zoom unchanged), takes the focus if the ended one had it, and the
+    /// ended session is retired (freed later, since the call that asked is still running on it).
+    /// @param ended The session whose pane is restarted; its restartOffer() must be Offered.
+    /// @return The new session; or why there is none, in which case nothing changed.
+    std::expected<TerminalSession*, RestartError> restartSession(TerminalSession& ended);
     // }}}
 
     // {{{ Model service used by PaneProxy + WindowController
@@ -881,6 +910,7 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
                                 vtworkspace::PaneId splitNode,
                                 vtworkspace::SplitState newState) override;
     void paneSwapped(vtworkspace::TabId tab, vtworkspace::PaneId a, vtworkspace::PaneId b) override;
+    void paneSessionReplaced(vtworkspace::TabId tab, vtworkspace::PaneId leaf) override;
     void paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId> zoomedLeaf) override;
     void paneTreeRestructured(vtworkspace::TabId tab) override;
     void tabTitleChanged(vtworkspace::TabId tab) override;

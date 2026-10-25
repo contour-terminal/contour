@@ -1195,11 +1195,13 @@ if(CONTOUR_TESTING)
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp
         session/LocalFileAction_test.cpp
+        session/EndReason_test.cpp
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
         platform/SessionVisibility_test.cpp
         window/HeldModifierReveal_test.cpp
         window/PaneHeaderPolicy_test.cpp
+        window/PaneState_test.cpp
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
         window/HostChipState_test.cpp

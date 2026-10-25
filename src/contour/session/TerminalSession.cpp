@@ -29,6 +29,7 @@
 #include <contour/session/ScreenshotFile.hpp>
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
@@ -726,21 +727,20 @@ void TerminalSession::reportDeviceStartFailure(vtpty::StartFailure const& failur
 {
     sessionLog()("Failed to start terminal device: {}", failure);
 
-    // Where the user is looking, and carrying the platform's own reason rather than a bare "it
-    // failed" — this is the parent-side equivalent of the diagnostic the POSIX child writes onto the
-    // pty before it exits (see Process_unix.cpp).
-    writeNotice(std::array {
-        std::format("{}", failure), "The terminal could not be started."s, "Press any key to close."s });
-
     // Close the device so the session is coherently dead rather than idling on a device that never
-    // came up, and arm the early-exit notice so the pane is dismissed by the paths that already
-    // handle a shell that died right after starting: the acknowledging key press in sendKeyEvent(),
-    // or terminate()'s already-closed branch when the user closes the tab instead. Without this the
-    // pane would be a zombie — nothing to prune it, since the exit watcher never started.
+    // came up, and record the end so the pane waits the way it does for a shell that died right after
+    // starting: the footer names the platform's own reason rather than a bare "it failed" (the
+    // parent-side equivalent of the diagnostic the POSIX child writes onto the pty before it exits, see
+    // Process_unix.cpp), and Restart, Close or terminate()'s already-closed branch end the wait. Without
+    // this the pane would be a zombie -- nothing to prune it, since the exit watcher never started.
     if (!_terminal.device().isClosed())
         _terminal.device().close();
-    auto const _ = std::scoped_lock { _onClosedMutex };
-    _terminatedAndWaitingForKeyPress = true;
+    {
+        auto const _ = std::scoped_lock { _onClosedMutex };
+        recordEndLocked(EndReason::StartFailed, std::format("{}", failure));
+    }
+    // start() runs on the GUI thread, so the end is announced there, and outside the lock.
+    emit sessionEndChanged();
 }
 
 void TerminalSession::mainLoop()
@@ -793,21 +793,13 @@ void TerminalSession::terminate()
     _terminationRequested = true;
     if (!_terminal.device().isClosed())
         _terminal.device().close();
-    else
+    else if (core::locked(_onClosedMutex, [this] { return _end; }) != EndReason::None)
     {
-        // The device is already closed: if onClosed() already showed the early-exit notice, this
-        // deliberate close is the acknowledgement — prune the pane now, mirroring sendKeyEvent()'s
-        // acknowledge path; otherwise closing a notice-showing tab/pane would be a silent no-op.
-        // _onClosedMutex serializes with an in-flight onClosed() so the notice cannot be armed after
-        // the check.
-        auto const armed = [this]() {
-            auto const _ = std::scoped_lock { _onClosedMutex };
-            auto const value = _terminatedAndWaitingForKeyPress;
-            _terminatedAndWaitingForKeyPress = false;
-            return value;
-        }();
-        if (armed)
-            emit sessionClosed(*this);
+        // The device is already closed and the pane waits on its recorded end: this deliberate close
+        // (the ClosePane binding, a tab close) is the Close -- prune the pane now, as the footer's
+        // Close does; otherwise closing a waiting pane would be a silent no-op.
+        dismiss();
+        return;
     }
 
     // If a display is attached, also let the GUI tear its view down. Not the session-removal trigger
@@ -1749,18 +1741,74 @@ void TerminalSession::focusTerminalWindow()
     });
 }
 
+void TerminalSession::recordEndLocked(EndReason reason, std::string detail)
+{
+    sessionLog()("Session ended ({}): {}", static_cast<int>(reason), detail);
+    _end = reason;
+    _endDetail = std::move(detail);
+}
+
+QString TerminalSession::getEndMessage() const
+{
+    return QString::fromStdString(paneFooterMessage(_end, _endDetail));
+}
+
+FooterRestart TerminalSession::restartOffer() const noexcept
+{
+    return restartOf(
+        _end, _hosting == SessionHosting::Local ? RestartSupport::Supported : RestartSupport::Unsupported);
+}
+
+void TerminalSession::restart()
+{
+    if (restartOffer() != FooterRestart::Offered || _manager == nullptr)
+        return;
+    // The manager puts a new session into this pane and lets this one go, freed later (deleteLater): the
+    // key press or click that asked for it is still running on it.
+    if (auto const restarted = _manager->restartSession(*this); !restarted)
+        sessionLog()("Not restarted: {}.", describe(restarted.error()));
+}
+
+void TerminalSession::dismiss()
+{
+    if (core::locked(_onClosedMutex, [this] { return _end; }) == EndReason::None)
+        return;
+    sessionLog()("Ended session dismissed. Closing pane.");
+    // Prune-then-terminate, mirroring onClosed()'s normal path: remove this pane from the model first so
+    // canCloseWindow() can approve closing the window, then let the QML side act on terminated(). Once
+    // only: _onClosedHandled is what onClosed()'s normal path claims too. _display re-checked: the prune
+    // may tear the display down with the pane.
+    if (!_onClosedHandled.exchange(true))
+        emit sessionClosed(*this);
+    if (_display)
+        _display->closeDisplay();
+}
+
 void TerminalSession::onClosed()
 {
-    auto const _ = std::scoped_lock { _onClosedMutex };
+    // The end is announced outside the lock, so a QML binding re-reading it cannot meet a held mutex.
+    // onClosed() always runs on the GUI thread (posted by the exit watcher and by TerminalDisplay), so
+    // the signal needs no queued hop.
+    auto const endBefore = _end;
+    {
+        auto const _ = std::scoped_lock { _onClosedMutex };
+        handleDeviceClosedLocked();
+    }
+    if (_end != endBefore)
+        emit sessionEndChanged();
+}
+
+void TerminalSession::handleDeviceClosedLocked()
+{
     sessionLog()("Terminal device closed (thread {})", core::threadName());
 
     // One exit reaches here twice: from the exit watcher, and from TerminalDisplay's "the device was
     // already closed when the first frame was about to be drawn" check -- which is the norm for a
     // command that exits immediately (`contour terminal echo hello`). The _onClosedHandled guard
-    // further down sits BELOW the notice branches' `return` and so cannot speak for them; an armed
-    // notice is what says this exit has already been reported (#2102). It also covers a start
-    // failure, whose own notice reportDeviceStartFailure() has already written.
-    if (_terminatedAndWaitingForKeyPress)
+    // further down sits BELOW the waiting branches' `return` and so cannot speak for them; a recorded
+    // end is what says this exit has already been reported (#2102). It also covers a start failure,
+    // whose end reportDeviceStartFailure() has already recorded.
+    if (_end != EndReason::None)
         return;
 
     if (!_terminal.device().isClosed())
@@ -1790,12 +1838,9 @@ void TerminalSession::onClosed()
     {
         sessionLog()("Daemon connection lost after {} seconds; the hosted shell is unaffected.",
                      diff.count());
-        // Like the early-exit notice below, this deliberately does not emit sessionClosed: pruning
-        // the pane would destroy the very screen the message is shown on. The pane stays alive until
-        // the acknowledging key press.
-        writeNotice(array { "Disconnected from the Contour daemon."s,
-                            "Your sessions are still running — reattach with: contour client"s });
-        _terminatedAndWaitingForKeyPress = true;
+        // Like the early exit below, this deliberately does not emit sessionClosed: pruning the pane
+        // would destroy the screen the footer is shown under. The pane stays alive until its Close.
+        recordEndLocked(EndReason::Disconnected, {});
         return;
     }
 
@@ -1806,12 +1851,11 @@ void TerminalSession::onClosed()
         && quickExitNoticeFor(exitStatus) == QuickExitNotice::Show)
     {
         // Deliberately do NOT emit sessionClosed here: removeSession() would prune this pane from the
-        // model and tear down its QML item, destroying the very screen the message below is shown on
-        // (and leaving an empty window behind that nothing can close). The pane stays fully alive until
-        // the acknowledging key press (see sendKeyEvent/sendCharEvent), which prunes and closes then.
-        writeNotice(
-            array { "Shell terminated too quickly."s, "The window will not be closed automatically."s });
-        _terminatedAndWaitingForKeyPress = true;
+        // model and tear down its QML item, destroying the very screen -- the shell's last words -- the
+        // footer is shown under (and leaving an empty window behind that nothing can close). The pane
+        // stays fully alive until its Restart (Return) or Close (see dismiss, terminate).
+        auto report = endOf(exitStatus);
+        recordEndLocked(report.reason, std::move(report.detail));
         return;
     }
 
@@ -2904,15 +2948,13 @@ void TerminalSession::sendKeyEvent(Key key,
 {
     input::inputLog()("Key {} event received: {} {}", eventType, modifiers, key);
 
-    if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
+    // An ended pane waits for its footer's answer: Return is Restart, the input mappings still run (so
+    // the ClosePane binding closes it, through terminate()'s already-closed branch), and nothing reaches
+    // the PTY, whose program is gone. GUI-thread state, read without the lock (see _end).
+    auto const ended = _end != EndReason::None;
+    if (ended && eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter))
     {
-        sessionLog()("Terminated and waiting for key press. Closing pane.");
-        // Prune-then-terminate, mirroring onClosed()'s normal path: remove this pane from the model
-        // first so canCloseWindow() can approve closing the window, then let the QML side act on
-        // terminated(). _display re-checked: the prune may tear the display down with the pane.
-        emit sessionClosed(*this);
-        if (_display)
-            _display->closeDisplay();
+        restart();
         return;
     }
 
@@ -2949,6 +2991,8 @@ void TerminalSession::sendKeyEvent(Key key,
             == BindingOutcome::Claimed)
             return;
     }
+    if (ended)
+        return;
     terminal().sendKeyEvent(key, modifiers, eventType, now);
 }
 
@@ -2963,19 +3007,8 @@ void TerminalSession::sendCharEvent(char32_t value,
                       modifiers,
                       core::escape(unicode::convert_to<char>(value)));
 
-    // The early-exit-notice acknowledge must run whether or not a display is attached, exactly like
-    // sendKeyEvent above: the notice can be showing on a background/display-less pane, and a
-    // character key must dismiss it too (previously this was nested under `if (_display)`, so a
-    // character press never closed a display-less notice while a key press did — an inconsistency).
-    if (_terminatedAndWaitingForKeyPress && eventType == KeyboardEventType::Press)
-    {
-        sessionLog()("Terminated and waiting for key press. Closing pane.");
-        // Prune-then-terminate; see sendKeyEvent() for the rationale.
-        emit sessionClosed(*this);
-        if (_display)
-            _display->closeDisplay();
-        return;
-    }
+    // As in sendKeyEvent: an ended pane runs the input mappings, and passes no text to the PTY.
+    auto const ended = _end != EndReason::None;
 
     if (_profile.mouse.value().hideWhileTyping && _display != nullptr)
         _display->setMouseCursorShape(input::MouseCursorShape::Hidden);
@@ -3023,6 +3056,8 @@ void TerminalSession::sendCharEvent(char32_t value,
         if (runFallbackRow(row, eventType, execute) == BindingOutcome::Claimed)
             return;
     }
+    if (ended)
+        return;
     terminal().sendCharEvent(value, keyIdentity, modifiers, eventType, now);
 }
 

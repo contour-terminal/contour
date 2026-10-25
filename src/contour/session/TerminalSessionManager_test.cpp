@@ -12,6 +12,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/platform/FreeDesktopNotifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
@@ -21,10 +22,15 @@
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/MockPty.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
+
+#include <core/platform/FileUri.hpp>
+#include <core/platform/PathUtils.hpp>
+#include <core/testing/ScopedTempDir.hpp>
 
 #include <QtCore/QPointer>
 #include <QtCore/QTemporaryDir>
@@ -36,6 +42,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -1666,3 +1673,178 @@ TEST_CASE("TerminalSessionManager: an OSC 11 that keeps the chrome's scheme does
 
     CHECK(QGuiApplication::palette().color(QPalette::Window) == sentinel.color(QPalette::Window));
 }
+
+// {{{ An ended pane: Restart in the same pane, Close, and what a remote pane offers
+
+namespace
+{
+/// Ends @p session the way a shell that died right after starting does: its device closes, and the exit
+/// watcher reports it -- called here in the watcher's stead.
+void endEarly(contour::session::TerminalSession& session)
+{
+    session.terminal().device().close();
+    session.onClosed();
+}
+
+/// Presses Return in @p session.
+void pressReturn(contour::session::TerminalSession& session)
+{
+    session.sendKeyEvent(vtbackend::Key::Enter,
+                         vtbackend::Modifiers {},
+                         vtbackend::KeyboardEventType::Press,
+                         std::chrono::steady_clock::now());
+}
+
+/// The leaf of @p window's active tab that carries @p session.
+[[nodiscard]] vtworkspace::Pane* leafOf(contour::session::TerminalSessionManager& manager,
+                                        vtworkspace::WindowId window,
+                                        contour::session::TerminalSession const& session)
+{
+    return manager.model().window(window)->activeTab()->rootPane()->findLeaf(session.modelSessionId());
+}
+} // namespace
+
+TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[manager][paneend]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    auto& profiles = app.app().config().profiles.value();
+    profiles["work"] = profiles.at(app.app().profileName());
+
+    // A split whose left pane runs the "work" profile in a directory its shell reported, and is focused.
+    auto* ended = manager.createSession(window.id, "work");
+    REQUIRE(ended != nullptr);
+    manager.splitActivePane(/*vertical*/ true, ended);
+    auto* sibling = window->activeSession();
+    REQUIRE(sibling != ended);
+    manager.focusPane(vtworkspace::FocusDirection::Left, sibling);
+    REQUIRE(window->activeSession() == ended);
+
+    auto const temp = core::testing::ScopedTempDir { "contour-restart" };
+    ended->terminal().setCurrentWorkingDirectory(
+        core::platform::fileUri(core::platform::normalizePath(temp.path()), "localhost"));
+    auto const spawnCwd = ended->resolveWorkingDirectory(vtbackend::CwdPurpose::Spawn);
+    REQUIRE(spawnCwd.has_value());
+
+    auto const oldId = ended->modelSessionId();
+    auto const* leaf = leafOf(manager, window.id, *ended);
+    REQUIRE(leaf != nullptr);
+    auto const leafId = leaf->id();
+    auto const watched = QPointer<contour::session::TerminalSession> { ended };
+
+    endEarly(*ended);
+    REQUIRE(ended->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
+    REQUIRE(ended->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+    auto const ptysBefore = factory->createdPtys.size();
+
+    pressReturn(*ended);
+
+    // One new session, under the ended one's profile and in its directory.
+    REQUIRE(factory->createdPtys.size() == ptysBefore + 1);
+    REQUIRE(factory->requestedProfileNames.back().has_value());
+    CHECK(*factory->requestedProfileNames.back() == "work");
+    CHECK(factory->requestedCwds.back() == std::optional { spawnCwd->path });
+
+    // In the same pane: the leaf keeps its id and now carries a new session, which is live and active.
+    auto* tab = manager.model().window(window.id)->activeTab();
+    REQUIRE(tab->paneCount() == 2);
+    auto const* sameLeaf = tab->rootPane()->findPane(leafId);
+    REQUIRE(sameLeaf != nullptr);
+    CHECK(sameLeaf->session() != oldId);
+    auto* restarted = manager.sessionForId(sameLeaf->session());
+    REQUIRE(restarted != nullptr);
+    CHECK(restarted->getSessionEnd() == static_cast<int>(contour::session::EndReason::None));
+    CHECK(tab->activePane()->id() == leafId);
+    CHECK(window->activeSession() == restarted);
+    CHECK(manager.sessionForId(oldId) == nullptr);
+
+    // The ended session is let go once the call that ended it has returned.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(watched.isNull());
+
+    SECTION("the next split mints a fresh id rather than the restarted one")
+    {
+        manager.splitActivePane(/*vertical*/ false, restarted);
+        auto* third = window->activeSession();
+        REQUIRE(third != nullptr);
+        CHECK(third != restarted);
+        CHECK(third->modelSessionId() != restarted->modelSessionId());
+        CHECK(tab->paneCount() == 3);
+    }
+
+    SECTION("a restarted pane closes normally: its end prunes the leaf")
+    {
+        restarted->terminate();
+        restarted->onClosed();
+        CHECK(tab->paneCount() == 1);
+        CHECK(manager.sessionForId(restarted->modelSessionId()) == nullptr);
+        CHECK(window->activeSession() == sibling);
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: ClosePane closes an ended pane", "[manager][paneend]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    window->createNewTab();
+    auto* const survivor = window->activeSession();
+    REQUIRE(survivor != nullptr);
+    manager.splitActivePane(/*vertical*/ true, survivor);
+    auto* const ended = window->activeSession();
+    REQUIRE(ended != survivor);
+    auto const endedId = ended->modelSessionId();
+
+    endEarly(*ended);
+    REQUIRE(ended->getSessionEnd() != static_cast<int>(contour::session::EndReason::None));
+
+    // The default ClosePane chord: the input mappings still run while the pane waits, though text does not.
+    auto const ctrlShift = vtbackend::Modifiers { vtbackend::Modifier::Control, vtbackend::Modifier::Shift };
+    ended->sendCharEvent(U'X',
+                         vtbackend::KeyIdentity { .unshiftedKey = U'X' },
+                         ctrlShift,
+                         vtbackend::KeyboardEventType::Press,
+                         std::chrono::steady_clock::now());
+
+    CHECK(manager.model().window(window.id)->activeTab()->paneCount() == 1);
+    CHECK(manager.sessionForId(endedId) == nullptr);
+    CHECK(window->activeSession() == survivor);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a remote-hosted pane offers no Restart", "[manager][paneend]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* factory = factoryOwned.get();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::test::TestApp app { std::move(factoryOwned) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+
+    auto* ended = manager.createSession(window.id);
+    REQUIRE(ended != nullptr);
+    auto const endedId = ended->modelSessionId();
+    endEarly(*ended);
+
+    // The daemon owns the session: only it may start one again.
+    CHECK(ended->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
+    CHECK(ended->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Unavailable));
+
+    auto const ptysBefore = factory->createdPtys.size();
+    pressReturn(*ended);
+    CHECK(factory->createdPtys.size() == ptysBefore);
+    CHECK(manager.sessionForId(endedId) == ended);
+    CHECK_FALSE(manager.restartSession(*ended).has_value());
+
+    contour::test::closeAllTabs(*window);
+}
+
+// }}}

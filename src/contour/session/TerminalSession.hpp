@@ -13,6 +13,7 @@
 #include <contour/platform/Notifier.hpp>
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/session/DisplaySurface.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/SearchStatus.hpp>
@@ -250,6 +251,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // Whether the daemon connection this pane mirrors through is being sought again: a QML-facing property,
     // the documented bool exception (AGENT.md), read by TerminalPane.qml's reconnecting overlay.
     Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
+    // How the session ended while its pane waits (an EndReason's value; 0 while it runs), what the pane's
+    // footer says about it, and whether the footer offers Restart (a FooterRestart's value). Ints, not
+    // the enums, until they are registered with the meta-object system (AGENT.md, QML-facing exception).
+    Q_PROPERTY(int sessionEnd READ getSessionEnd NOTIFY sessionEndChanged)
+    Q_PROPERTY(QString endMessage READ getEndMessage NOTIFY sessionEndChanged)
+    Q_PROPERTY(int restartOffer READ getRestartOffer NOTIFY sessionEndChanged)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -704,6 +711,27 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// ignores it.
     /// @param state Where the connection stands now.
     void setHostConnection(vthost::client::ConnectionState state);
+
+    /// How the session ended, while its pane waits for Restart or Close, as an EndReason's value for QML;
+    /// 0 (None) while it runs. GUI thread only (see _end).
+    [[nodiscard]] int getSessionEnd() const noexcept { return static_cast<int>(_end); }
+
+    /// @return The ended pane's footer text; empty while the session runs.
+    [[nodiscard]] QString getEndMessage() const;
+
+    /// Whether the ended pane offers Restart: its end allows one and this session is hosted locally.
+    [[nodiscard]] FooterRestart restartOffer() const noexcept;
+
+    /// @return restartOffer() as its enumerator value, for QML.
+    [[nodiscard]] int getRestartOffer() const noexcept { return static_cast<int>(restartOffer()); }
+
+    /// Starts this ended session again in the same pane (the footer's Restart, or Return), through the
+    /// manager. A no-op unless restartOffer() is Offered and a manager hosts the session.
+    Q_INVOKABLE void restart();
+
+    /// Closes this ended pane (the footer's Close): prunes it from the model, then lets the display go. A
+    /// no-op while the session runs; idempotent once it has ended.
+    Q_INVOKABLE void dismiss();
 
     /// @return Whether this pane's connection to its host is lost and being sought again.
     [[nodiscard]] bool isReconnecting() const noexcept
@@ -1309,6 +1337,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void searchStateChanged();
     /// isReconnecting() changed.
     void reconnectingChanged();
+    /// The session ended and its pane now waits (sessionEnd, endMessage and restartOffer changed). Raised
+    /// once per end, on the GUI thread, after _onClosedMutex is released.
+    void sessionEndChanged();
     void sessionClosed(TerminalSession&);
     void profileNameChanged(QString newValue);
     void lineCountChanged(int newValue);
@@ -1416,10 +1447,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// notice is, so the user reads them where the shell's output would have been.
     void writeNotice(std::span<std::string const> lines);
 
-    /// Reports a PTY device that failed to start, and leaves the pane in the state the early-exit
-    /// notice already defines: the reason on screen, the device closed, and the pane pruned by the
-    /// next key press (see sendKeyEvent) or by closing the tab (see terminate).
+    /// Reports a PTY device that failed to start, and leaves the pane in the state an early exit
+    /// defines: the end recorded as StartFailed with the reason, the device closed, and the pane waiting
+    /// for Restart or Close (see dismiss, terminate).
     void reportDeviceStartFailure(vtpty::StartFailure const& failure);
+
+    /// Handles the device's close; onClosed() with _onClosedMutex held.
+    void handleDeviceClosedLocked();
+
+    /// Records how the session ended, so its pane waits rather than closes. Caller holds _onClosedMutex.
+    /// @param reason How it ended (not None).
+    /// @param detail What the footer names: an exit code, a signal, a failure; empty for none.
+    void recordEndLocked(EndReason reason, std::string detail);
 
     /// Ends a gutter hover, if one is in effect.
     ///
@@ -1857,11 +1896,18 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     ExtensionStatePtr _extensionState;
 
     vtbackend::Terminal _terminal;
-    /// A notice is on screen and the pane is alive only to be dismissed: the shell exited too early,
-    /// the device never started, or the daemon connection went away. It is also what makes
-    /// onClosed() idempotent for those exits, which arrive from two callers (see onClosed()), so it
-    /// is written and read under _onClosedMutex wherever more than the GUI thread can see it.
-    bool _terminatedAndWaitingForKeyPress = false;
+    /// How the session ended while its pane stays, waiting for Restart or Close: the shell exited too
+    /// early, the device never started, or the daemon connection went away; None while it runs (and for
+    /// every other end, which closes the pane). It is also what makes onClosed() idempotent for those
+    /// exits, which arrive from two callers (see onClosed()).
+    ///
+    /// Written on the GUI thread only -- onClosed() is always posted there, and start() runs there --
+    /// under _onClosedMutex, which serializes onClosed() with terminate()/dismiss(). Read on the GUI
+    /// thread WITHOUT the lock by the QML getters: a binding may re-read them from inside onClosed()'s
+    /// locked prune, and the mutex is not recursive.
+    EndReason _end = EndReason::None;
+    /// What the footer names about _end: an exit code, a signal, a start failure. Guarded as _end is.
+    std::string _endDetail;
     DisplaySurface* _display = nullptr;
 
     std::atomic<bool> _terminating { false };

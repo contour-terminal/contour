@@ -114,6 +114,14 @@ class Pane
     /// @param other The other leaf to trade sessions with (must be a leaf, and not this node).
     void swapLeafPayload(Pane* other) noexcept;
 
+    /// Puts @p session into this leaf in place of the one it carries, keeping the PaneId.
+    ///
+    /// What a restart needs: the pane (the slot hosts address by its id) stays, and a new terminal
+    /// takes the place of one that ended. @pre isLeaf().
+    /// @param session The session the leaf carries from now on.
+    /// @return The session it carried before.
+    SessionId replaceSession(SessionId session) noexcept;
+
     /// Swaps the two children of this split node (their whole subtrees, ids and sessions intact).
     ///
     /// Flips which child occupies the first vs. second slot without renaming anything — used to place

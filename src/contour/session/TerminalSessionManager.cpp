@@ -3,6 +3,7 @@
 #include <contour/config/LayoutBuilder.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/QtPath.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/Logging.hpp>
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
@@ -12,6 +13,7 @@
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
 
 #include <vtpty/Process.hpp>
 #ifdef VTPTY_LIBSSH2
@@ -1420,6 +1422,14 @@ void TerminalSessionManager::paneSwapped(vtworkspace::TabId tab, vtworkspace::Pa
     markVisibleSessionsSeen(_model->windowOfTab(tab));
 }
 
+void TerminalSessionManager::paneSessionReplaced(vtworkspace::TabId tab, vtworkspace::PaneId leaf)
+{
+    // A restart: one leaf carries a new session under the same id. Re-reading that leaf's `session` is
+    // all the view needs -- QML rebinds the pane's display to it -- so this is no proxy rebuild.
+    if (auto* c = controllerFor(_model->windowOfTab(tab)))
+        c->notifyPaneSessionReplaced(tab, leaf);
+}
+
 void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId>)
 {
     // Zoom moves the tab's layout ROOT without reshaping its TREE, so this re-points the rendered root
@@ -1933,6 +1943,58 @@ TerminalSession* TerminalSessionManager::splitPane(TerminalSession* acting,
 
     // The new leaf joins the same tab as the pane it split from.
     _tabBySession[newSessionId.value] = tab->id();
+    return session;
+}
+
+std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSession(TerminalSession& ended)
+{
+    if (ended.restartOffer() != FooterRestart::Offered)
+        return std::unexpected(RestartError::NotOffered);
+
+    auto const endedId = ended.modelSessionId();
+    auto* tab = sessionForId(endedId) == &ended ? findTabHostingSession(endedId) : nullptr;
+    auto const* leaf = tab != nullptr ? tab->rootPane()->findLeaf(endedId) : nullptr;
+    if (leaf == nullptr)
+        return std::unexpected(RestartError::NotHosted);
+    auto const tabId = tab->id();
+    auto const leafId = leaf->id();
+
+    // Where its shell said it was (OSC 3008/7, filtered for spawning here), else where it was started.
+    auto cwd =
+        ended.resolveWorkingDirectory(vtbackend::CwdPurpose::Spawn)
+            .transform([](vtbackend::ResolvedWorkingDirectory const& resolved) { return resolved.path; })
+            .value_or(ended.workingDirectory());
+
+    // The id is minted here and handed to the model explicitly, so the allocator never consumes the
+    // _pendingSessionId createBackingSession stages: clear it, or the next model-made session would be
+    // handed this live id a second time.
+    auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
+    auto* session = createBackingSession(sessionId,
+                                         std::move(cwd),
+                                         ended.terminal().totalPageSize(),
+                                         ended.launchedCommand(),
+                                         ended.profileOverride(),
+                                         ended.role());
+    _pendingSessionId.reset();
+    if (session == nullptr)
+        return std::unexpected(RestartError::NoSession);
+
+    // Indexed before the model raises paneSessionReplaced, so whatever the view resolves from it finds
+    // the new session's tab -- and so the new session's own end later prunes this leaf.
+    _tabBySession[sessionId.value] = tabId;
+    (void) _model->replaceLeafSession(tabId, leafId, sessionId);
+
+    // The focus follows the pane, not the dead session; dropped first, so no focus-out reaches the
+    // ended one's closed device.
+    if (_focusedSession == &ended)
+    {
+        _focusedSession = nullptr;
+        setFocusedSession(session);
+    }
+
+    // No leaf carries the ended session any more, so removeSession() drops only its bookkeeping and
+    // frees it later, leaving the leaf to the new one.
+    removeSession(ended);
     return session;
 }
 

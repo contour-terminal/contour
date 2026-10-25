@@ -81,6 +81,10 @@ struct RecordingEvents: ModelEvents
     {
         log.push_back(std::format("swapped:{}:{}:{}", t.value, a.value, b.value));
     }
+    void paneSessionReplaced(TabId t, PaneId leaf) override
+    {
+        log.push_back(std::format("replaced:{}:{}", t.value, leaf.value));
+    }
     void paneZoomChanged(TabId t, std::optional<PaneId> zoomedLeaf) override
     {
         // Log the leaf, not just "on/off": zoom follows focus, so it can move between leaves while
@@ -1568,6 +1572,67 @@ TEST_CASE("SessionModel: swapActivePane swaps sessions and fires paneSwapped + a
         f.events.log.clear();
         f.model.swapActivePane(tab, FocusDirection::Right); // right pane, nothing further right
         CHECK_FALSE(f.events.sawPrefix("swapped:"));
+    }
+}
+
+TEST_CASE("SessionModel: replacing a leaf's session keeps its pane", "[vtworkspace][model][replace]")
+{
+    // Restart puts a new session into the pane an ended one leaves: the slot (its PaneId, which hosts
+    // address it by), the focus and the zoom all stay where they were, and only the session changes.
+    Fixture f;
+    auto const [win, tab, rootLeaf] = makeTab(f.model);
+    auto* right = f.model.splitActivePane(tab, SplitState::Vertical);
+    REQUIRE(right != nullptr);
+    auto const rightId = right->id();
+    auto const oldSession = right->session();
+    auto const newSession = SessionId { 4242 };
+
+    SECTION("the PaneId, the active leaf and the old session's return")
+    {
+        f.events.log.clear();
+        auto const replaced = f.model.replaceLeafSession(tab, rightId, newSession);
+        CHECK(replaced == oldSession);
+        auto const* leaf = f.model.findPane(tab, rightId);
+        REQUIRE(leaf != nullptr);
+        CHECK(leaf->session() == newSession);
+        CHECK(f.model.findTab(tab)->activePane()->id() == rightId);
+        CHECK(f.model.findTab(tab)->paneCount() == 2);
+        CHECK(f.events.countPrefix("replaced:") == 1);
+        CHECK(f.events.sawPrefix(std::format("replaced:{}:{}", tab.value, rightId.value)));
+        // A replacement is neither a split, a close nor a restructuring.
+        CHECK_FALSE(f.events.sawPrefix("paneSplit:"));
+        CHECK_FALSE(f.events.sawPrefix("paneClosed:"));
+        CHECK_FALSE(f.events.sawPrefix("restructured:"));
+    }
+
+    SECTION("a zoomed leaf stays zoomed")
+    {
+        f.model.toggleActivePaneZoom(tab);
+        REQUIRE(f.model.findTab(tab)->zoomedLeafId() == std::optional { rightId });
+        f.events.log.clear();
+        (void) f.model.replaceLeafSession(tab, rightId, newSession);
+        CHECK(f.model.findTab(tab)->zoomedLeafId() == std::optional { rightId });
+        CHECK_FALSE(f.events.sawPrefix("zoom:"));
+        CHECK(f.events.countPrefix("replaced:") == 1);
+    }
+
+    SECTION("an inactive leaf keeps the active one where it was")
+    {
+        f.model.setActivePane(tab, f.model.findTab(tab)->rootPane()->first()->id());
+        auto const activeBefore = f.model.findTab(tab)->activePane()->id();
+        (void) f.model.replaceLeafSession(tab, rightId, newSession);
+        CHECK(f.model.findTab(tab)->activePane()->id() == activeBefore);
+    }
+
+    SECTION("an unknown tab, an unknown pane and a split node change nothing")
+    {
+        auto const splitNode = f.model.findTab(tab)->rootPane()->id();
+        f.events.log.clear();
+        CHECK(f.model.replaceLeafSession(TabId { 9999 }, rightId, newSession) == SessionId {});
+        CHECK(f.model.replaceLeafSession(tab, PaneId { 9999 }, newSession) == SessionId {});
+        CHECK(f.model.replaceLeafSession(tab, splitNode, newSession) == SessionId {});
+        CHECK(f.model.findPane(tab, rightId)->session() == oldSession);
+        CHECK_FALSE(f.events.sawPrefix("replaced:"));
     }
 }
 

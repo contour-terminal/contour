@@ -197,6 +197,16 @@ class SessionModel
     /// zoom block). No-op on a single-pane tab.
     void toggleActivePaneZoom(TabId tab);
 
+    /// Puts @p session into @p tab's leaf @p leaf in place of the one it carries (a restart in the same
+    /// pane). The leaf keeps its PaneId, so the active pane and a zoom on it are unchanged; raises
+    /// ModelEvents::paneSessionReplaced once.
+    /// @param tab     The tab holding the leaf.
+    /// @param leaf    The leaf whose session is replaced.
+    /// @param session The session the leaf carries from now on.
+    /// @return The session the leaf carried before, or an empty id (and no event) when @p tab has no
+    ///         leaf @p leaf.
+    SessionId replaceLeafSession(TabId tab, PaneId leaf, SessionId session);
+
     // }}}
     // {{{ Title & color (authoritative state lives here, below the GUI)
 

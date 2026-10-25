@@ -561,6 +561,19 @@ void SessionModel::toggleActivePaneZoom(TabId tabId)
     announceZoomChange(*tab, zoomBefore);
 }
 
+SessionId SessionModel::replaceLeafSession(TabId tabId, PaneId leafId, SessionId session)
+{
+    auto* leaf = findPane(tabId, leafId);
+    if (leaf == nullptr || !leaf->isLeaf())
+        return SessionId {};
+
+    // The leaf object itself stays, so the tab's active-leaf pointer and its zoom (which names that
+    // leaf) are untouched by construction: nothing but the session changes.
+    auto const replaced = leaf->replaceSession(session);
+    _events.paneSessionReplaced(tabId, leafId);
+    return replaced;
+}
+
 bool SessionModel::announceZoomChange(Tab& tab, std::optional<PaneId> zoomedLeafBefore)
 {
     auto const after = tab.zoomedLeafId();

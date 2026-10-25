@@ -18,6 +18,7 @@
 #include <contour/config/Actions.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/FinishNotification.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/SessionInput.hpp>
@@ -356,17 +357,22 @@ TEST_CASE("TerminalSession::start reports a device that fails to start instead o
     // The headline: whatever the device does, start() must not take the process down with it.
     CHECK_NOTHROW(session->start());
 
-    // Reported where the user is looking, carrying the reason rather than a bare "it failed".
-    auto const screen = session->terminal().primaryScreen().renderMainPageText();
-    CHECK(screen.contains(contour::test::ConfigurableStartPty::FailureText));
+    // Reported where the user is looking -- the pane's footer, not the grid -- carrying the reason rather
+    // than a bare "it failed".
+    using contour::session::EndReason;
+    CHECK(session->getSessionEnd() == static_cast<int>(EndReason::StartFailed));
+    CHECK(session->getEndMessage().contains(
+        QString::fromUtf8(contour::test::ConfigurableStartPty::FailureText.data(),
+                          static_cast<qsizetype>(contour::test::ConfigurableStartPty::FailureText.size()))));
+    CHECK_FALSE(session->terminal().primaryScreen().renderMainPageText().contains(
+        contour::test::ConfigurableStartPty::FailureText));
 
-    // The device never came up, so it is left closed — which is what makes the pane dismissible
-    // through the paths that already exist (terminate()'s already-closed branch, and the
-    // acknowledging key press below).
+    // The device never came up, so it is left closed -- which is what makes the pane dismissible
+    // through the paths that already exist (terminate()'s already-closed branch, and dismiss()).
     CHECK(session->terminal().device().isClosed());
 
-    // The pane is not a zombie: the next key press prunes it, exactly as the early-exit notice does
-    // for a shell that dies right after starting.
+    // The pane is not a zombie, but neither does a stray key close it: Return asks for a restart, which a
+    // session no manager hosts cannot have, so it is swallowed; the footer's Close is what dismisses it.
     auto closed = 0;
     QObject::connect(session.get(),
                      &contour::session::TerminalSession::sessionClosed,
@@ -375,6 +381,8 @@ TEST_CASE("TerminalSession::start reports a device that fails to start instead o
                           vtbackend::Modifiers {},
                           vtbackend::KeyboardEventType::Press,
                           std::chrono::steady_clock::now());
+    CHECK(closed == 0);
+    session->dismiss();
     CHECK(closed == 1);
 }
 
@@ -389,13 +397,24 @@ TEST_CASE("TerminalSession::start surfaces a reported start failure", "[contour]
                         std::make_unique<contour::test::ConfigurableStartPty>(
                             TestPageSize, contour::test::ConfigurableStartPty::StartBehavior::Fail));
 
+    auto ends = QSignalSpy(session.get(), &contour::session::TerminalSession::sessionEndChanged);
     CHECK_NOTHROW(session->start());
 
-    // The platform's own reason reaches the user — a bare "could not start" would leave them with no
+    // The platform's own reason reaches the user -- a bare "could not start" would leave them with no
     // idea that it was the directory, which is exactly what they need to fix.
-    auto const screen = session->terminal().primaryScreen().renderMainPageText();
-    CHECK(screen.contains(contour::test::ConfigurableStartPty::FailureText));
+    CHECK(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::StartFailed));
+    CHECK(session->getEndMessage().contains(
+        QString::fromUtf8(contour::test::ConfigurableStartPty::FailureText.data(),
+                          static_cast<qsizetype>(contour::test::ConfigurableStartPty::FailureText.size()))));
+    CHECK(ends.count() == 1);
     CHECK(session->terminal().device().isClosed());
+
+    // A local session that failed to start may be tried again.
+    CHECK(session->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+
+    // And the second report of the same end (onClosed() after the failure) does not repeat it.
+    session->onClosed();
+    CHECK(ends.count() == 1);
 }
 
 TEST_CASE("TerminalSession::start runs a session that started with a diagnostic", "[contour][session][start]")
@@ -3663,53 +3682,110 @@ TEST_CASE("TerminalSession: inputModeChanged configures the cursor for each Vi m
     CHECK(seen == 7);
 }
 
-TEST_CASE("TerminalSession: a spontaneous early exit shows the notice and a key press closes it",
+TEST_CASE("TerminalSession: a spontaneous early exit ends the session; typing does not close it",
           "[contour][session][close]")
 {
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto& pty = mockPtyOf(*session);
 
-    bool closed = false;
+    auto closed = 0;
     QObject::connect(session.get(),
                      &contour::session::TerminalSession::sessionClosed,
-                     [&closed](contour::session::TerminalSession&) { closed = true; });
+                     [&closed](contour::session::TerminalSession&) { ++closed; });
 
-    // The shell "dies" moments after startup: onClosed() must route through the early-exit notice
-    // (deliberately NOT emitting sessionClosed) because the default early-exit threshold is 5s.
+    // The shell "dies" moments after startup: onClosed() must keep the pane (deliberately NOT emitting
+    // sessionClosed) because the default early-exit threshold is 5s -- and say so in the footer, not by
+    // writing into the grid the shell's own last words are on.
     pty.close();
     session->onClosed();
-    CHECK_FALSE(closed);
+    CHECK(closed == 0);
+    CHECK(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
+    CHECK(session->getEndMessage() == QStringLiteral("Process exited."));
+    CHECK(session->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Offered));
+    CHECK(countOnScreen(*session, "Shell terminated too quickly.") == 0);
 
-    // The acknowledging key press prunes the pane: sessionClosed fires now.
+    // A typed character is neither an acknowledgement nor input for a shell that is gone.
+    auto const written = pty.stdinBuffer();
     session->sendCharEvent(U'x',
                            vtbackend::KeyIdentity { .unshiftedKey = U'x' },
                            vtbackend::Modifiers {},
                            vtbackend::KeyboardEventType::Press,
                            std::chrono::steady_clock::now());
-    CHECK(closed);
+    CHECK(closed == 0);
+    CHECK(pty.stdinBuffer() == written);
+
+    // Nor is a key other than Return.
+    session->sendKeyEvent(vtbackend::Key::Escape,
+                          vtbackend::Modifiers {},
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+    CHECK(closed == 0);
+    CHECK(pty.stdinBuffer() == written);
+
+    // The footer's Close is.
+    session->dismiss();
+    CHECK(closed == 1);
 }
 
-TEST_CASE("TerminalSession: a second onClosed() does not repeat the early-exit notice",
-          "[contour][session][close]")
+TEST_CASE("TerminalSession: a second onClosed() reports the end once", "[contour][session][close]")
 {
     // Regression (#2102, "the message about terminating too quickly appears twice"): ONE exit
     // reaches onClosed() twice -- from the session's own exit watcher, and from
     // TerminalDisplay::onBeforeSynchronize(), which fires it when the device is already closed by
     // the time the first frame is about to be drawn. That is the norm, not a corner case, for a
     // command that exits immediately (`contour terminal echo hello`). The de-duplication further
-    // down onClosed() is below the early-exit branch's `return`, so only the armed notice itself can
+    // down onClosed() is below the early-exit branch's `return`, so only the recorded end itself can
     // say that this exit has already been reported.
     TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     auto& pty = mockPtyOf(*session);
+    auto ends = QSignalSpy(session.get(), &contour::session::TerminalSession::sessionEndChanged);
 
     pty.close();
     session->onClosed();
     session->onClosed();
 
-    CHECK(countOnScreen(*session, "Shell terminated too quickly.") == 1);
-    CHECK(countOnScreen(*session, "The window will not be closed automatically.") == 1);
+    CHECK(ends.count() == 1);
+    CHECK(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::Exited));
+}
+
+TEST_CASE("TerminalSession: a lost daemon connection ends as Disconnected, with no Restart",
+          "[contour][session][close]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& pty = mockPtyOf(*session);
+
+    auto closed = 0;
+    QObject::connect(session.get(),
+                     &contour::session::TerminalSession::sessionClosed,
+                     [&closed](contour::session::TerminalSession&) { ++closed; });
+
+    session->noteTransportLost();
+    pty.close();
+    session->onClosed();
+
+    CHECK(closed == 0);
+    CHECK(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::Disconnected));
+    CHECK(session->getRestartOffer() == static_cast<int>(contour::session::FooterRestart::Unavailable));
+    CHECK(session->getEndMessage().startsWith(QStringLiteral("Disconnected from the Contour daemon.")));
+    CHECK(countOnScreen(*session, "Disconnected from the Contour daemon.") == 0);
+
+    // The shell runs on in the daemon, so there is nothing here to restart: Return does nothing.
+    auto const written = pty.stdinBuffer();
+    session->sendKeyEvent(vtbackend::Key::Enter,
+                          vtbackend::Modifiers {},
+                          vtbackend::KeyboardEventType::Press,
+                          std::chrono::steady_clock::now());
+    session->restart();
+    CHECK(closed == 0);
+    CHECK(pty.stdinBuffer() == written);
+    CHECK(session->getSessionEnd() == static_cast<int>(contour::session::EndReason::Disconnected));
+
+    // And closing it the way a user closes any pane still works.
+    session->terminate();
+    CHECK(closed == 1);
 }
 
 // ============================================================================================
