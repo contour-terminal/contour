@@ -32,6 +32,55 @@ TEST_CASE("tabBadge.priority", "[tabbadge]")
     CHECK(resolveTabBadge({}) == TabBadge {});
 }
 
+TEST_CASE("tabBadge.everyAdjacentPairResolvesToTheHigher", "[tabbadge]")
+{
+    struct Pair
+    {
+        TabBadgeKind higher = TabBadgeKind::None; ///< The rule that must win.
+        TabBadgeKind lower = TabBadgeKind::None;  ///< The rule right below it.
+        TabBadgeInputs inputs;                    ///< An input both rules match.
+    };
+    constexpr auto Unseen = TabActivity::UnseenOutput;
+    // One row per adjacent pair of TabBadgeRules, each input selecting both rules through different fields.
+    auto const pairs = std::array {
+        Pair { TabBadgeKind::Blocked,
+               TabBadgeKind::Error,
+               { .programStatus = BadgeKind::Blocked, .finishedBlock = FinishedBlockBadge::Failed } },
+        Pair { TabBadgeKind::Error,
+               TabBadgeKind::Working,
+               { .programStatus = BadgeKind::Working, .finishedBlock = FinishedBlockBadge::Failed } },
+        Pair { TabBadgeKind::Working,
+               TabBadgeKind::Done,
+               { .programStatus = BadgeKind::Working, .finishedBlock = FinishedBlockBadge::Succeeded } },
+        Pair { TabBadgeKind::Done,
+               TabBadgeKind::Output,
+               { .finishedBlock = FinishedBlockBadge::Succeeded, .activity = Unseen } },
+    };
+    REQUIRE(pairs.size() + 1 == TabBadgeRules.size());
+    for (auto const i: std::views::iota(size_t { 0 }, pairs.size()))
+    {
+        auto const& pair = pairs[i];
+        CHECK(pair.higher == TabBadgeRules[i].kind);
+        CHECK(pair.lower == TabBadgeRules[i + 1].kind);
+        CHECK(tabBadgeRuleMatches(TabBadgeRules[i], pair.inputs));
+        CHECK(tabBadgeRuleMatches(TabBadgeRules[i + 1], pair.inputs));
+        CHECK(resolveTabBadge(pair.inputs).kind == pair.higher);
+    }
+    CHECK(resolveTabBadge({ BadgeKind::Working, 40, FinishedBlockBadge::Succeeded, TabActivity::None })
+          == TabBadge { TabBadgeKind::Working, 40 });
+    CHECK(resolveTabBadge({ BadgeKind::Done, std::nullopt, FinishedBlockBadge::None, Unseen })
+          == TabBadge { TabBadgeKind::Done });
+}
+
+TEST_CASE("tabBadge.singleSources", "[tabbadge]")
+{
+    CHECK(resolveTabBadge({ .programStatus = BadgeKind::Error }) == TabBadge { TabBadgeKind::Error });
+    CHECK(resolveTabBadge({ .finishedBlock = FinishedBlockBadge::Succeeded })
+          == TabBadge { TabBadgeKind::Done });
+    CHECK(resolveTabBadge({ .finishedBlock = FinishedBlockBadge::Failed })
+          == TabBadge { TabBadgeKind::Error });
+}
+
 TEST_CASE("tabBadge.progressOnlyForWorking", "[tabbadge]")
 {
     CHECK(resolveTabBadge({ BadgeKind::Done, 40 }).progressPercent == std::nullopt);
@@ -59,6 +108,15 @@ TEST_CASE("tabBadge.everyKindHasALook", "[tabbadge]")
     CHECK(tabBadgeLook(TabBadgeKind::Blocked).ink == StatusColorRole::Warning);
     CHECK(tabBadgeLook(TabBadgeKind::Error).ink == StatusColorRole::Danger);
     CHECK(tabBadgeLook(TabBadgeKind::Done).ink == StatusColorRole::Success);
+
+    CHECK(tabBadgeLook(TabBadgeKind::Done).glyph == "✓");
+    CHECK(tabBadgeLook(TabBadgeKind::Error).glyph == "✕");
+    CHECK(tabBadgeLook(TabBadgeKind::Blocked).glyph == "!");
+    CHECK(tabBadgeLook(TabBadgeKind::Done).accessibleName == "Done");
+    CHECK(tabBadgeLook(TabBadgeKind::Error).accessibleName == "Failed");
+    CHECK(tabBadgeLook(TabBadgeKind::Working).accessibleName == "Working");
+    CHECK(tabBadgeLook(TabBadgeKind::Output).accessibleName == "New output");
+    CHECK(tabBadgeLook(TabBadgeKind::Blocked).accessibleName == "Waiting for you");
 }
 
 TEST_CASE("tabBadge.badgeMarkName", "[tabbadge]")

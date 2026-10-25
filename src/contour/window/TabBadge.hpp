@@ -30,6 +30,7 @@ enum class TabActivity : uint8_t
 };
 
 /// What a finished command in a tab says, once the tab is out of sight.
+/// @note @c strongerFinishedBlock relies on the enumerator order None < Succeeded < Failed.
 enum class FinishedBlockBadge : uint8_t
 {
     None = 0, ///< No verdict worth showing.
