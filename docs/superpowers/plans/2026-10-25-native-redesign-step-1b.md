@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+Amended after its pre-flight scan (findings F1–F24).
+
 **Goal:** Turn every menu the chrome shows into a `ContextMenuEntry` table in `command/`, present those
 tables natively on macOS (an `NSMenu` for context menus, a global `QMenuBar` with six menus) and in-scene
 everywhere else, with zero restyling on Linux and Windows.
@@ -19,9 +21,9 @@ everywhere else, with zero restyling on Linux and Windows.
   `window/AppMenuBar` realises them as a parentless `QMenuBar` once per app on a macOS host, maps
   `MenuItemRole` to `QAction::MenuRole`, refreshes a menu's rows when it opens, and rebuilds on reload.
   `platform::IMenuBarIntegration` (null inline, Cocoa `.mm`) hands the Window and Help menus to AppKit.
-- **The terminal stays the key dispatcher.** The menu bar's chords become NSMenu key equivalents, so
-  `TerminalDisplay` claims every `ShortcutOverride` except Quit and Preferences on a host with a global
-  menu bar; a binding keeps its mode conditions.
+- **The terminal stays the key dispatcher.** The menu bar's ⌃/⌘ chords become NSMenu key equivalents, so
+  `TerminalDisplay` claims every `ShortcutOverride` on every host; only under a global menu bar do Quit and
+  Preferences go to the menu. A binding keeps its mode conditions.
 
 **Tech Stack:** C++23, Qt 6.11 (Quick, Quick Controls, Widgets for `QMenuBar` only), Objective-C++ (AppKit)
 on Apple, Catch2 v3, Python 3 (lint), CMake preset tree `out/appleclang-debug`.
@@ -55,8 +57,9 @@ This run is tracked on a private status board, a page published from an untracke
     exemptions from the reachability rule and the keys the menu bar keeps are tables too.
   - **Dependency injection.** Native menu presentation and the menu bar's AppKit hand-over are reached
     only through `platform::INativeMenuPresenter` and `platform::IMenuBarIntegration`, each with a null
-    implementation defined inline in its header (so it exists on Apple too), a Cocoa `.mm` added inside the
-    `if(APPLE)` block of `src/contour/platform/CMakeLists.txt:78-92`, and a non-Apple factory in a `.cpp`
+    implementation defined inline in its header (so it exists on Apple too; every new `platform/` header is
+    listed in `add_library(contour_platform …)`, `:15-69`, as `CocoaWindowFrame.hpp` is), a Cocoa `.mm` added inside the
+    `if(APPLE)` block of `src/contour/platform/CMakeLists.txt:81-95`, and a non-Apple factory in a `.cpp`
     wholly inside `#ifndef __APPLE__` (the `PlatformAppearance.cpp` shape). Both are built through the
     `platform::AppearanceServices` factories, so every `TestApp` gets the null ones.
   - **Configuration at construction.** `AppMenuBar`, the presenters, and every new member of
@@ -104,7 +107,8 @@ This run is tracked on a private status board, a page published from an untracke
 1. **A test that pops a real NSMenu hangs the suite.** `-[NSMenu popUpMenuPositioningItem:atLocation:inView:]`
    runs a modal tracking loop until the menu is dismissed. Every `TestApp` must get the null presenter, and
    `appearanceServicesWith()` must name `.menus` and `.menuBar` (their defaults are the native factories).
-   Pinned in Task 5 (both null factories report `Unsupported` / record nothing) and Task 7 (the controller
+   Pinned in Task 5 (`nullAppearanceServices()` and `appearanceServicesWith(…)` both give a presenter that
+   reports `Unsupported`), Task 12 (both give the null menu-bar integration) and Task 7 (the controller
    cases run in a `TestApp` and assert the in-scene route).
 2. **A pick that closes what the menu was opened over.** "Close Tab" or "Close Other Tabs" picked from a
    tab menu, native or in-scene, deletes the tab, and a pane menu's "Close Pane" its pane. The pick must run
@@ -114,17 +118,21 @@ This run is tracked on a private status board, a page published from an untracke
 3. **The menu bar steals keys from the terminal.** A chord shown in the menu bar is an NSMenu key equivalent.
    If the terminal does not claim it, AppKit fires the menu row, which ignores the binding's mode conditions
    (`Ctrl+C` copies only in Select|Insert; `Ctrl+Alt+K` scrolls only outside the alternate screen, so vim
-   gets it). Expected: every key goes to the terminal except Quit and Preferences, and only on a host with a
-   global menu bar. Pinned in Task 11.
+   gets it). Expected: the terminal claims every key on every host, and only under a global menu bar do
+   Quit and Preferences go to the menu. Only a chord with ⌃ or ⌘ becomes a key equivalent at all, so
+   Escape and ⇧↓ still reach the palette's and Settings' text fields. Pinned in Tasks 11 and 12.
 4. **The tab menu acts on the active tab.** "Close Other Tabs" from a background tab's menu must keep the
    right-clicked tab, and "Rename…" must open that tab's editor. Pinned in Task 7.
 5. **Linux and Windows change.** The pane and title-bar menus must offer exactly today's rows, no menu bar is
-   created, and the `ShortcutOverride` claim does nothing there. Pinned in Task 1 (the existing
+   created, and the `ShortcutOverride` claim takes every key there, which changes nothing because nothing
+   off macOS consumes shortcuts (no `QShortcut`, no QML `Shortcut`); only under `Global` does any key go to
+   the menu. Pinned in Task 1 (the existing
    `[contextmenu]` and title-bar cases pass unedited apart from the field renames), Task 10
    (`menuBarPlacementFor` is `None` off macOS) and Task 11 (`None` never yields `Menu`).
 
 Also pinned, beyond the five: a menu-bar menu opened after a tab was added shows the new state (Task 12,
-refresh on `aboutToShow`); a chord Qt cannot parse is dropped rather than shown wrong (Task 12).
+refresh on `aboutToShow`); a chord Qt has no key for (Hyper, Meta) is dropped rather than shown wrong
+(Task 12).
 
 ---
 
@@ -136,13 +144,16 @@ These settle where the spec is silent or the code disagrees with it. Implementer
 - **R-a. The native presenter builds an `NSMenu` itself (owner).** §3.2 says the presenter "realises the tree
   as a `QMenu`, which on macOS is an NSMenu". Qt documents no such guarantee for `QMenu::popup()`, and
   `QMenu::toNSMenu()` (`QtWidgets/qmenu.h:170-171`) returns a menu only where Qt already backs one. A `QMenu`
-  also needs a `QApplication`, which `contour_gui_test` does not have (`test_main.cpp:96`). So the `.mm`
+  also needs a `QApplication`, which `contour_gui_test` does not have (`test_main.cpp:110`). So the `.mm`
   builds the `NSMenu` from the `MenuTree` and pops it with `popUpMenuPositioningItem:atLocation:inView:`.
   Nativeness is then a fact the `[cocoa]` test asserts. The pure `MenuTree` stays, as §3.2 requires.
 - **R-b. Where the pieces live.** §3.2 names `window/NativeMenuPresenter`. Principle 4 puts what asks the
   OS in `platform/`, and `platform/` sits below `window/`. So `MenuTree` lives in `command/` (Qt-free, beside
   the entries it is built from), the presenter interface and its Cocoa backend in `platform/`, and the
   routing decision in `window/MenuRouting.hpp`. `contour_platform` links `contour_command`.
+  `display/ShortcutOverride.hpp` (Task 11) is a pure decision outside §1.3's list (`window/`, `command/`,
+  `vtbackend/`), accepted as 1a's F10 accepted `config/`: it decides about a `QKeyEvent`, and sits beside
+  its consumer `TerminalDisplay`, which may not include `window/`.
 - **R-c. "Zero visual change on Linux and Windows" (owner).** It is read as "no restyle": menus keep
   `ContourMenu`/`PopupSurface` and the in-scene path. The tab menu's content is §3.2's table on every OS, so
   Linux and Windows gain the Tab Color swatch row and "Move Tab to New Window". The pane and title-bar menus
@@ -154,9 +165,9 @@ These settle where the spec is silent or the code disagrees with it. Implementer
   from the palette.
 - **R-e. The tab menu acts on the right-clicked tab.** Today's `TabContextMenu.qml` calls the controller with
   its `tabIndex`. The table's rows carry tab actions, and `WindowController::runTabAction(row, action)` is the
-  one place that maps a tab action to that row. The menu pins the tab's `TabId` and resolves it to a row at
-  pick time. The session handlers of the three new tab actions go through the same function with the acting
-  session's row.
+  one place that maps a tab action to that row. A public `runTabAction(TabId, action)` resolves a tab to its
+  row and does nothing for a tab that has gone. The menu pins the tab's `TabId` and picks through it, and so
+  do the session handlers of the three new tab actions, with the acting session's tab.
 - **R-f. About is an in-scene dialog (owner).** The catalogue has no About action, and none of `src/contour`
   shows one. `ShowAbout` opens a `KitDialog` ("Contour", the version, one OK button) on every row, one
   implementation. AppKit's standard About panel would be the macOS-native alternative.
@@ -173,13 +184,19 @@ These settle where the spec is silent or the code disagrees with it. Implementer
   The `[menubar]` test checks this over both editions' defaults and a crafted collision.
 - **R-i. Chords appear only in the menu bar.** In-scene menus have never shown chords, so none appear there
   (R-c). Native context menus show none either: macOS context menus rarely do, and this keeps key
-  equivalents out of popups. The `MenuTree` carries the chord for the menu bar.
+  equivalents out of popups. The `MenuTree` carries the chord for the menu bar. There, only a chord holding
+  ⌃ or ⌘ becomes a key equivalent; a row whose chord has neither (e.g. "Clear Selection ⎋", "⇧↓") shows
+  none, so AppKit cannot fire it from a text field that does not claim the key.
 - **R-j. The terminal keeps its keys (Review Focus 3).** On macOS, Qt fills an NSMenu item's key equivalent
   from its `QAction` shortcut. Its menu delegate offers the key to the focus object as a `ShortcutOverride`
-  first, and does not fire the item if the focus object accepts. So on a host with a global menu bar,
-  `TerminalDisplay` accepts every `ShortcutOverride` except those matching `QKeySequence::Quit` and
-  `QKeySequence::Preferences`. A binding then keeps its mode conditions, ⌘Q still quits through the app
-  menu (as Qt's default app menu does today), and ⌘, opens Settings.
+  first, and does not fire the item if the focus object accepts. So `TerminalDisplay` accepts every
+  `ShortcutOverride`, on every host, except, under a global menu bar, those matching
+  `QKeySequence::Quit` and `QKeySequence::Preferences`. The role is the authority for those two keys: the
+  Quit and Settings… rows carry `QKeySequence::Quit`/`Preferences`, never the binding's chord (the
+  defaults bind Ctrl+Shift+Q and Ctrl+Shift+,, which would make them ⌃⇧Q and ⌃⇧,). One table,
+  `MenuOwnedKeys` (Task 11), names the keys both the claim and the menu bar read. A binding then keeps its
+  mode conditions, ⌘Q still quits through the app menu (as Qt's default app menu does today), and ⌘,
+  opens Settings.
 - **R-k. The application menu.** Qt merges a `QAction` with a menu role into the application menu. The
   Contour table menu's rows with `MenuItemRole::None` get `QAction::ApplicationSpecificRole`, and the Contour
   `QMenu`'s own title is hidden (`menuAction()->setVisible(false)`), so "Contour" appears once.
@@ -189,7 +206,10 @@ These settle where the spec is silent or the code disagrees with it. Implementer
 - **R-m. A pick runs once its menu has closed.** In-scene, `ActionContextMenu` emits `picked` on `closed`, or
   at once when the menu was not open (offscreen tests trigger rows directly). This replaces the special case
   in `TabContextMenu.qml:20-33` (opening the colour flyout from a closing menu lost its keyboard grab).
-  Natively, the controller posts the pick to its own event queue after `present()` returns.
+  Natively, the controller posts the presentation itself, so `present()` runs on a clean stack once the
+  press handler that asked for the menu has returned (AppKit's tracking loop swallows the mouse-up, and runs
+  Qt events that may destroy the TabItem under a QML handler's frame), and it posts the pick to its own
+  event queue after `present()` returns.
 - **R-n. Where the menu bar exists.** Only on a macOS host (`menuBarPlacementFor(HostPlatform::MacOS) ==
   Global`), under `ui_style: terminal` too: "the macOS menu bar stays native" (§3.2 TUI row). The
   `layout.menu` token governs context menus only.
@@ -223,8 +243,10 @@ These settle where the spec is silent or the code disagrees with it. Implementer
   - `ContextMenuEntry` loses `bool enabled, checkable, checked` and gains
     `RowAvailability availability = RowAvailability::Enabled;`, `RowCheck check = RowCheck::None;`,
     `MenuItemRole role = MenuItemRole::None;`, `std::optional<vtbackend::RGBColor> swatch {};` (a command row
-    drawn as a colour swatch; `#include <vtbackend/core/Color.hpp>`, Qt-free).
-  - `detail::MenuTable<State>::Row` gains `MenuItemRole role = MenuItemRole::None;` and
+    drawn as a colour swatch; `#include <vtbackend/core/Color.hpp>`, Qt-free). Every construction site is a
+    designated initializer, which must follow declaration order, so the members are declared in the order
+    `kind, title, action, availability, check, role, swatch, children`.
+  - `detail::MenuTable<State>::Row` gains `MenuItemRole role = MenuItemRole::None;`, declared after `checked`, and
     `[[nodiscard]] Row withRole(MenuItemRole role) const`; `buildRows` copies it onto the entry, and maps
     `enabled`/`checked` predicates to `availability`/`check` (`checked == nullptr` → `RowCheck::None`).
 - `toContextMenuModel` keeps its signature in this task. It writes `enabled = availability == Enabled`,
@@ -282,8 +304,9 @@ git commit -m "command: menu rows say enabled, checked and their role with enums
 - Modify: `src/contour/session/TerminalSessionManager.hpp/.cpp` (beside `beginTabTitleEdit`, `:968`) —
   `runTabAction(actions::Action const&, TerminalSession* acting)` and `showAbout(TerminalSession* acting)`.
 - Modify: `src/contour/window/WindowController.hpp/.cpp` — `runTabAction`, `showAbout`, `aboutRequested`.
-- Test: `src/contour/config/Actions_test.cpp`; new `src/contour/window/WindowMenus_test.cpp` (add to
-  `contour_gui_test`).
+- Test: `src/contour/config/Actions_test.cpp`; new `src/contour/window/WindowMenus_test.cpp`. It builds a
+  `TestApp`, as `MultiWindow_test.cpp` does, so it goes in `contour_gui_test_heavy_sources`
+  (`src/contour/CMakeLists.txt:848-870`), not in the suite's own sources.
 
 **Interfaces:**
 - Produces (namespace `contour::actions`): `struct CloseOtherTabs {};`, `struct CloseTabsToRight {};`,
@@ -301,11 +324,14 @@ git commit -m "command: menu rows say enabled, checked and their role with enums
     `CloseOtherTabs` → `closeOtherTabs(row)`; `CloseTabsToRight` → `closeTabsToRight(row)`. Any other action
     goes to `activeSession()->executeAction(action)`. One `std::visit` with these overloads is the only
     mapping from a tab action to a tab.
+  - `void runTabAction(vtworkspace::TabId tab, actions::Action const& action);` resolves @p tab to its row
+    with the private `rowOfTab` (`WindowController.hpp:729`) and calls the row overload. It does nothing when
+    the tab has no row (`rowOfTab` gives -1 for a tab that has gone).
   - `void showAbout();` → `emit aboutRequested();`, with the new signal `void aboutRequested();`.
 - Produces (`session::TerminalSessionManager`): `void runTabAction(actions::Action const& action, TerminalSession* acting);`
-  finds the acting session's tab (`tabHostingSession`) and its row (`rowOfTab`) and calls the hosting
-  controller's `runTabAction`; `void showAbout(TerminalSession* acting);` calls the hosting controller's
-  `showAbout()`.
+  finds the acting session's tab (`tabHostingSession`) and calls the hosting controller's
+  `runTabAction(tabHostingSession(acting)->id(), action)`; the manager never sees a row, since `rowOfTab`
+  is private. `void showAbout(TerminalSession* acting);` calls the hosting controller's `showAbout()`.
 - `TerminalSession::operator()` for the three tab actions calls `_manager->runTabAction(action, this)`; for
   `ShowAbout`, `_manager->showAbout(this)`. Each returns `true`.
 
@@ -327,6 +353,9 @@ git commit -m "command: menu rows say enabled, checked and their role with enums
       (read through `Roles::ColorRole`);
     - two tabs; `runTabAction(1, MoveTabToNewWindow {})`, then a second `ScopedController b`:
       `manager.consumePendingTransplant(b.controller)` is `true`, and `b->count() == 1`;
+    - three tabs; `runTabAction(id, CloseTab {})` with the `TabId` of the third model tab (read from
+      `manager.model()`, as the survivor check above is) leaves `count() == 2`, and the same call again, with
+      that tab gone, changes nothing;
     - `showAbout()` emits `aboutRequested()` once.
 
 - [ ] **Step 2: Run them and see them fail.**
@@ -555,9 +584,10 @@ git commit -m "command: resolve a menu into one tree of rows, chords and actions
 - Modify: `src/contour/platform/AppearanceServices.hpp` — a `menus` factory, named in
   `nullAppearanceServices()`.
 - Modify: `src/contour/test/AppearanceFixtures.hpp:99-114` — `appearanceServicesWith` names `.menus` (null).
-- Modify: `src/contour/platform/CMakeLists.txt:15-66` (the pair), `:101-109` (link `contour_command`).
+- Modify: `src/contour/platform/CMakeLists.txt:15-69` (the pair, in `add_library(contour_platform …)`),
+  `:99-108` (link `contour_command`).
 - Create: `src/contour/window/MenuRouting.hpp` (header-only); list it in `src/contour/CMakeLists.txt`'s
-  `_header_files` (`:266-…`).
+  `_header_files` (`:264-…`).
 - Create: `src/contour/test/MenuFixtures.hpp` — `RecordingMenuPresenter`.
 - Modify: `src/contour/ContourGuiApp.hpp/.cpp` — `_nativeMenus`, `nativeMenuPresenter()`, `menuPresentation()`.
 - Test: `src/contour/config/ChromeTokenGroups_test.cpp` (the row pin `chromeTokens.everyRowMatchesTheDesignKit`,
@@ -636,11 +666,15 @@ class NullNativeMenuPresenter final: public INativeMenuPresenter { /* present() 
     `[chrometokens]`: for every row and every combination of the three accessibility preferences,
     `resolveChromeTokens(row, prefs).layout.menu == ChromeTokenRows[row].layout.menu`.
   - `AppearanceSources_test.cpp`, `[appearance-source]`: `nullAppearanceServices().menus()->present(…)`
-    returns `std::unexpected(MenuPresentError::Unsupported)` and never calls `onPicked`.
+    returns `std::unexpected(MenuPresentError::Unsupported)` and never calls `onPicked`. The same holds for
+    `appearanceServicesWith(accessibility, appearance).menus()` (`AppearanceFixtures.hpp`), so the fixture
+    cannot reach the native factory.
   - `MenuRouting_test.cpp`, `[menurouting]`, with a `RecordingMenuPresenter`:
     - `InScene` → `MenuRoute::InScene`, and `trees.empty()`;
-    - `Native` with `result = {}` → `MenuRoute::Native`, one recorded tree equal to the one passed, and the
-      anchor passed through;
+    - `Native` with `result = {}` → `MenuRoute::Native`, one recorded tree, and the anchor passed through.
+      `MenuTree` has no `operator==` (most `actions::Action` alternatives have none, and adding them is out
+      of scope), so the check is `trees.front().nodes == tree.nodes` (`MenuNode` defaults `==`) plus the
+      actions compared element-wise by `commandId`;
     - `Native` with `result = std::unexpected(Unsupported)` → `InScene`;
     - `Native`, `pick(2)` → the callback handed to `presentMenu` receives 2.
 
@@ -676,10 +710,11 @@ git commit -m "contour: a token chooses native or in-scene menus, behind a prese
 - Create: `src/contour/platform/CocoaNativeMenuPresenter.mm` (ARC). It defines the Apple
   `makeNativeMenuPresenter()`; `NativeMenuPresenter.cpp`'s factory moves inside `#ifndef __APPLE__`.
 - Create: `src/contour/platform/CocoaNativeMenu.hpp` — an Apple-only inspection seam with no Objective-C
-  types in its signatures, so a `.mm` test can read back what `present()` would show.
+  types in its signatures, so a `.mm` test can read back what `present()` would show. List it in
+  `add_library(contour_platform …)` (`src/contour/platform/CMakeLists.txt:15-69`), as `CocoaWindowFrame.hpp` is.
 - Create: `src/contour/platform/CocoaNativeMenuPresenter_test.mm`; add it to `contour_gui_test`'s `if(APPLE)`
   block (`src/contour/CMakeLists.txt:820-831`) with `-fobjc-arc`.
-- Modify: `src/contour/platform/CMakeLists.txt:78-92` — the `.mm` in `target_sources` and in the
+- Modify: `src/contour/platform/CMakeLists.txt:81-95` — the `.mm` in `target_sources` and in the
   `-fobjc-arc` list.
 
 **Interfaces:**
@@ -691,15 +726,21 @@ git commit -m "contour: a token chooses native or in-scene menus, behind a prese
     `NSMenu` exactly as `present()` does and reads each `NSMenuItem` back. `@pre` main thread.
 - **The realisation** (one function shared by `present()` and `outlineNativeMenu`):
   - `autoenablesItems = NO`. A separator is `NSMenuItem.separatorItem`. A submenu item gets `submenu` set to
-    the recursively built `NSMenu`, titled the same.
+    the recursively built `NSMenu`, titled the same, and `enabled = availability == Enabled` (Task 10's
+    submenus can be greyed).
   - A command item has `title`, `enabled = availability == Enabled`, and `state = NSControlStateValueOn` for
     `Checked` (`NSControlStateValueOff` for `Unchecked` and `None`). Its `tag` is `actionIndex`, and its
     target/action is one Objective-C object of a class prefixed `ContourMenuPick`, which stores the picked tag.
   - A swatch row gets an `image`: an `NSImage imageWithSize:flipped:drawingHandler:` square of the system
     menu font's line height, filled with the swatch colour.
   - No key equivalents (R-i).
-- **`present()`:** with a position and no window → `std::unexpected(NoWindow)`. With a window and position:
-  `inView` is `reinterpret_cast<NSView*>(window->winId())` and the location is `NSMakePoint(x, y)`, since
+- **`present()`:** with a position and no window → `std::unexpected(NoWindow)`. Next, off the cocoa
+  platform plugin (`QGuiApplication::platformName() != "cocoa"`) → `std::unexpected(Unsupported)`:
+  `winId()` is an `NSView*` only there (`CocoaWindowFrame.mm:102-106`), and an offscreen app run that opens a
+  context menu would otherwise message garbage. The factory stays unconditional. With a window and position:
+  `inView` is `(__bridge NSView*)reinterpret_cast<void*>(window->winId())`, since ARC rejects a direct
+  integer-to-object-pointer cast (the existing casts are in non-ARC files), and the location is
+  `NSMakePoint(x, y)`, since
   Qt's view is flipped, so window-logical coordinates are view coordinates. Without a position: `inView:nil`
   at `NSEvent.mouseLocation`. After `popUpMenuPositioningItem:nil atLocation:inView:` returns, a stored tag
   `>= 0` calls `onPicked(static_cast<std::size_t>(tag))`. `@pre` main thread, documented on the class and
@@ -716,6 +757,9 @@ git commit -m "contour: a token chooses native or in-scene menus, behind a prese
     (`dynamic_cast` yields null).
   - "a position needs a window": `present(tree, { .window = nullptr, .position = QPointF { 1, 1 } }, {})` is
     `std::unexpected(MenuPresentError::NoWindow)`, and no menu is shown, since the check runs first.
+  - "off the cocoa plugin it is Unsupported": skipped when `platformName() == "cocoa"` (it would pop).
+    Otherwise (the offscreen suite) `present(tree, { .window = nullptr, .position = std::nullopt }, {})` is
+    `std::unexpected(MenuPresentError::Unsupported)`.
 
 - [ ] **Step 2: Run them and see them fail.**
 
@@ -760,7 +804,7 @@ git commit -m "platform: present a menu tree as a native NSMenu on macOS"
   - `[[nodiscard]] QVariantList toContextMenuModel(std::span<command::MenuNode const> nodes);` keeps today's
     keys and adds `"swatches"`. A run of consecutive command nodes with a `swatch` becomes one row
     `{ kind: "swatches", swatches: [ { title, color (QColor), actionId, enabled, checked } ] }`.
-    `actionId` is the node's `actionIndex`.
+    `actionId` is the node's `actionIndex`. A submenu row carries `enabled` from its availability too.
   - `PublishedContextMenu::publish(command::MenuTree tree)` stores `tree.actions` and the model.
     `actionAt` is unchanged.
 - Produces (`WindowController`):
@@ -783,15 +827,24 @@ git commit -m "platform: present a menu tree as a native NSMenu on macOS"
   - Signals: `void tabContextMenuModelChanged();`, `void tabContextMenuRequested(int index);`,
     `void newTabMenuModelChanged();`, `void newTabMenuRequested();`.
   - The private `void presentSurface(MenuSurface surface, command::MenuTree tree, platform::MenuAnchor anchor);`
-    publishes into `_menus[surface]` and emits that surface's model-changed signal. Then it calls
-    `presentMenu(_menuPresentation, _nativeMenus, …)`. The `Native` route's `onPicked` is
-    `platform::postToObject(this, [this, surface, index] { triggerSurfaceAction(surface, int(index)); })`.
-    The `InScene` route emits the surface's request signal: `contextMenuRequested()`,
-    `titleBarContextMenuRequested()`, `tabContextMenuRequested(row)` or `newTabMenuRequested()`.
+    publishes into `_menus[surface]` and emits that surface's model-changed signal. With
+    `_menuPresentation == InScene` it then emits the surface's request signal at once:
+    `contextMenuRequested()`, `titleBarContextMenuRequested()`, `tabContextMenuRequested(row)` or
+    `newTabMenuRequested()`. With `Native` it posts the presentation,
+    `platform::postToObject(this, …)`, so `present()` runs on a clean stack after the press handler that
+    asked for it has returned: `openContextMenu` runs inside the right-press handler
+    (`TerminalSession.cpp:3925-3934`), and `openTabContextMenu` inside a QML `TapHandler`. AppKit's tracking
+    loop swallows the mouse-up (Qt's own `QCocoaMenu::showPopup` resets the view's buttons afterwards, which
+    R-a bypasses), and it runs Qt events that could destroy the TabItem under the handler's frame. Posted,
+    the release reaches Qt first, and AppKit keeps a menu opened after mouse-up in click-click mode. The
+    posted call runs `presentMenu(_menuPresentation, _nativeMenus, …)`. Its `onPicked` is
+    `platform::postToObject(this, [this, surface, index] { triggerSurfaceAction(surface, int(index)); })`,
+    and an `InScene` result (the presenter declined) emits the surface's request signal as above.
   - The private `void triggerSurfaceAction(MenuSurface surface, int actionId);` copies the action out of
     `_menus[surface]`. `Pane` runs it on `_contextMenuSession` (`:173-190`); `TitleBar` and `NewTab` on
-    `activeSession()`; `Tab` calls `runTabAction(rowOfTab(*_tabContextMenuTab), action)`, but only when the
-    pinned tab still has a row. The four `Q_INVOKABLE trigger*` functions delegate to it.
+    `activeSession()`; `Tab` calls `runTabAction(*_tabContextMenuTab, action)`, the `TabId` overload of
+    Task 2, which does nothing when the pinned tab has gone. The four `Q_INVOKABLE trigger*` functions
+    delegate to it.
   - The four `open*` functions build their state as today. `openContextMenu` and `openTitleBarContextMenu`
     keep their bodies and pass `{ .window = _osWindow, .position = std::nullopt }`, which opens at the pointer.
     `openTabContextMenu` fills a `TabContextMenuState` from `tabAtRow(index)`, `count()` and
@@ -852,52 +905,75 @@ git commit -m "contour: route every context menu through the native-or-in-scene 
 - Create: `src/contour/qml/MenuSwatchRow.qml`; list it in `src/contour/CMakeLists.txt:370-416`.
 - Delete: `src/contour/qml/TabContextMenu.qml`, `src/contour/qml/NewTabMenu.qml`; remove them from
   `src/contour/CMakeLists.txt:384`, `:386`.
-- Modify: `src/contour/qml/ActionContextMenu.qml:37-98` — a `swatches` row kind, and the pick is deferred (R-m).
-- Modify: `src/contour/qml/TabItem.qml:558-574` — the right-click calls the controller, and an `ActionContextMenu`
-  named `tabContextMenu` is bound to `tabContextMenuModel`; the `Connections` block (`:595-605`) gains
-  `onTabContextMenuRequested`.
-- Modify: `src/contour/qml/TabStrip.qml:292-316` — the "▾" button calls `openNewTabMenu`, and an
-  `ActionContextMenu` named `newTabMenu` is bound to `newTabMenuModel`.
-- Modify: `src/contour/config/ChromeTokenGroups.hpp:106-116` (`SizeTokens`) and the four rows;
-  `src/contour/window/ChromeTokenObjects.hpp:36-70` (`ChromeSizeTokens`).
+- Modify: `src/contour/qml/ActionContextMenu.qml:37-98` — a `swatches` row kind, submenus honour `enabled`,
+  and the pick is deferred (R-m).
+- Modify: `src/contour/qml/TabItem.qml:558-574` — the right-click calls the controller, and the per-tab
+  `TabContextMenu` goes. Rename and Custom… stay per TabItem, through the existing `tabTitleEditRequested`/
+  `tabColorPickRequested` handlers of the `Connections` block (`:595-605`).
+- Modify: `src/contour/qml/TabStrip.qml:89-110`, `:292-316` — one `ActionContextMenu` named `tabContextMenu`
+  for the whole strip, bound to `tabContextMenuModel` and popped below the requested tab's delegate; the "▾"
+  button calls `openNewTabMenu`, and an `ActionContextMenu` named `newTabMenu` is bound to `newTabMenuModel`.
+  One menu, not one per TabItem: §3.2's "one in-scene `ActionContextMenu.qml`", one object `findChild` can
+  name, and one rebuild per publish rather than N.
+- Modify: `src/contour/config/ChromeTokenGroups.hpp:106-116` (`SizeTokens`), `:43-50` and `:81`
+  (`ChromeColorRole` and its count), `:271-…` (`NativeColors`), `:389-393` (the Terminal row's `.colors`) and
+  the four rows; `src/contour/window/ChromeTokenObjects.hpp:36-70` (`ChromeSizeTokens`), `:400-…`
+  (`ChromeColorTokens`).
 - Modify: `src/contour/test/MainWindowControllerMock.hpp` (the shared surface: the two models, the four
-  invokables, the three signals including `aboutRequested`); `src/contour/test/MockMainController.hpp`
-  (models from the real builders); `src/contour/test/QmlComponents_test.cpp:87-140` (`MockTabController`: the
-  same surface).
+  invokables, and five signals: the two models' NOTIFY signals, `tabContextMenuRequested(int)`,
+  `newTabMenuRequested()` and `aboutRequested()`). They go in this shared base so that
+  `RoutingMockController` (`session/KeyboardRouting_test.cpp:200`), which inherits it, has them too: a
+  `Connections` handler without its signal is a QML warning, which fails the run-wide gate.
+  `src/contour/test/MockMainController.hpp` (models from the real builders);
+  `src/contour/test/QmlComponents_test.cpp:87-292` (`MockTabController`, which does not inherit the base:
+  the same surface).
 - Modify: `src/contour/test/ChromeSnapshotPlan.hpp:35-47`, `:64-70`, `:107-206` (the script `TabMenu`, the
-  action `OpenTabMenu`, the `tab-menu` row, the count `static_assert`), `ChromeSnapshotScene.hpp:158-175`
-  (`show()`).
-- Test: `QmlComponents_test.cpp` (`:308-348` the load list, `:350-375` rewritten, new cases),
-  `Accessibility_qml_test.cpp:164-171` (one row), `ChromeTokenGroups_test.cpp`, `UiStyleProvider_test.cpp`
-  (the two size properties), `ChromeSnapshotPlan_test.cpp:17-29`, `:58-75`, `ChromeSnapshot_test.cpp:60-123`.
+  action `OpenTabMenu`, the `tab-menu` row, and the count `static_assert` at `:205`, which pins
+  `NewDefaultsBanner` as the last enumerator), `ChromeSnapshotScene.hpp:158-175` (`show()`).
+- Test: `QmlComponents_test.cpp` (`:308-348` the load list, `:350-375` rewritten, `:861-888` folded into the
+  rewritten case and deleted, new cases), `Accessibility_qml_test.cpp:164-171` (one row),
+  `ChromeTokenGroups_test.cpp`, `UiStyleProvider_test.cpp` (the two size properties),
+  `ChromeSnapshotPlan_test.cpp:17-29`, `:58-75`, `ChromeSnapshot_test.cpp:60-123`.
 
 **Interfaces:**
 - Consumes: the model rows of Task 7; `tabContextMenuRequested(int)`, `newTabMenuRequested()`.
 - Produces (tokens): `SizeTokens::swatchWidth = 0`, `swatchHeight = 0`. MacOS, Fluent and ContourLinux use
   16 × 16 px; Terminal uses 2 × 1 cells, a two-cell block per swatch. They are published as
   `chromeStyle.size.swatchWidth` (× `units.horizontal`) and `swatchHeight` (× `units.vertical`).
-- Produces — `MenuSwatchRow` (a `MenuItem`):
+- Produces (tokens): `ChromeColorRole::SwatchRing`, appended after `ToastText` (`ChromeColorRoleCount` is then
+  derived from `SwatchRing`). `NativeColors` gives it `PaletteWindowText`; the Terminal row gives it
+  `schemeColor(SchemeSlot::Foreground)`, the scheme's colour rather than Qt's palette, whose mismatch was
+  the root of 1a's 1:1 banner defect (159b47dc). Published as `chromeStyle.colors.swatchRing`.
+- Produces — `MenuSwatchRow` (a non-triggering `Control`, not a `MenuItem`: a `MenuItem`'s own `triggered`,
+  which keyboard Enter fires too, would close the menu with no pick, and the order of the item's click and
+  the swatch's tap is unspecified):
   - `property var swatches: []` (the model's array) and `signal swatchPicked(int actionId)`;
   - `contentItem: Row { spacing: chromeStyle.space.s2 }` holds one `Rectangle` per swatch:
     `width: chromeStyle.size.swatchWidth`, `height: chromeStyle.size.swatchHeight`,
     `radius: chromeStyle.radii.control`, `color: modelData.color`. A checked swatch has
-    `border.width: chromeStyle.borderWidth` in `sys.windowText`, a `SystemPalette` read as `KitDialog.qml:51-54`
-    does. A `TapHandler` emits `swatchPicked(modelData.actionId)`. Each swatch carries
-    `objectName: "menuSwatch"`, `Accessible.role: Accessible.Button` and `Accessible.name: modelData.title`.
+    `border.width: chromeStyle.borderWidth` in `chromeStyle.colors.swatchRing`. A `TapHandler` emits
+    `swatchPicked(modelData.actionId)`. Each swatch carries `objectName: "menuSwatch"`,
+    `Accessible.role: Accessible.Button` and `Accessible.name: modelData.title`.
   - The row's own `Accessible.role: Accessible.MenuItem` and `Accessible.name: qsTr("Tab colours")`.
-  - No literals in any size property; colours come from the model or `SystemPalette`.
+  - The row takes no keyboard focus: "Custom…" is the keyboard path to a tab colour.
+  - No literals in any size property; colours come from the model or the tokens.
 - Produces — `ActionContextMenu` (it keeps `signal picked(int actionId)`):
-  - `fillMenu` creates a `MenuSwatchRow` for a `swatches` row, under `menu.contentItem`, as the command
-    entries are, and connects its `swatchPicked` to the deferred pick.
+  - `fillMenu` creates a `MenuSwatchRow` for a `swatches` row, under `menu.contentItem`, and adds it with
+    `menu.addItem`, as `MenuSeparator` is. It connects its `swatchPicked` to the deferred pick. A submenu is
+    created with `enabled: row.enabled`.
   - The deferred pick: `property int _pendingActionId: -1`. A command row's `onTriggered` or a swatch pick
     sets `_pendingActionId` and calls `root.dismiss()` when `root.opened`, or emits `picked` at once when the
-    menu is not open. `onClosed` emits `picked(_pendingActionId)` and resets it to -1. A dismissed menu
-    emits nothing.
+    menu is not open. `onClosed` emits `picked(_pendingActionId)` only when `_pendingActionId >= 0`, then
+    resets it to -1. A dismissed menu emits nothing.
 - `TabItem.qml`: the right-button `TapHandler` calls
   `root.controller.openTabContextMenu(root.tabIndex, root.mapToItem(null, eventPoint.position.x, eventPoint.position.y))`.
-  `ActionContextMenu { id: contextMenu; objectName: "tabContextMenu"; entries: root.controller ? root.controller.tabContextMenuModel : []; onPicked: (id) => root.controller.triggerTabContextMenuAction(id) }`
-  pops on `onTabContextMenuRequested(index)` when `index === root.tabIndex`. "Custom…" opens the flyout
-  through the existing `onTabColorPickRequested`, now after the menu has closed (R-m).
+  The TabItem holds no menu. "Rename…" and "Custom…" reach it through the existing
+  `onTabTitleEditRequested`/`onTabColorPickRequested`, now after the menu has closed (R-m).
+- `TabStrip.qml`: `ActionContextMenu { id: tabContextMenu; objectName: "tabContextMenu"; entries: root.controller ? root.controller.tabContextMenuModel : []; onPicked: (id) => root.controller.triggerTabContextMenuAction(id) }`.
+  A `Connections` on the controller handles `onTabContextMenuRequested(index)`: it reads that tab's
+  delegate through the strip's list, `const item = list.itemAtIndex(index)`, and calls
+  `tabContextMenu.popup(item, 0, item.height)`, as the new-tab menu does at `:305`. A popup without
+  arguments would open at the live pointer, which places the snapshot wherever the mouse happens to be.
 - `TabStrip.qml`: `onClicked: if (root.controller) root.controller.openNewTabMenu(newTabMenuButton.mapToItem(null, 0, newTabMenuButton.height))`.
   `onNewTabMenuRequested` pops `newTabMenu` at `(newTabMenuButton, 0, newTabMenuButton.height)`, as `:305`
   does today.
@@ -912,22 +988,30 @@ git commit -m "contour: route every context menu through the native-or-in-scene 
   one row high with radius 0, and the checked one is ringed in the foreground.
 
 - [ ] **Step 1: Write the failing tests.**
-  - `ChromeTokenGroups_test.cpp` (`everyRowMatchesTheDesignKit`) pins `swatchWidth`/`swatchHeight` per row.
+  - `ChromeTokenGroups_test.cpp` (`everyRowMatchesTheDesignKit`) pins `swatchWidth`/`swatchHeight` per row,
+    and `SwatchRing` per row (`PaletteWindowText` on the native rows, `Scheme`/`Foreground` on Terminal).
     `UiStyleProvider_test.cpp`: under Terminal, `size.swatchWidth == 2 * cellWidth` and
     `swatchHeight == cellHeight` (the test computes its own expectation; the gate does not scan C++).
   - `QmlComponents_test.cpp`, `[contour][gui][qml][menus]`:
-    - "the tab menu opens with the table's rows (offscreen)", replacing `:350-375`: a TabItem host with
-      `MockTabController`. `controller.openTabContextMenu(0, {})`, then `tabContextMenu`'s `count` equals the
-      top-level size of the model the mock published, and `checkMenuOpensAtUsableSize` passes after
-      `open()`.
+    - "the tab menu opens with the table's rows (offscreen)", replacing `:350-375` and absorbing `:861-888`
+      ("A context menu actually opens, with its surface"), which is deleted: that case finds
+      `tabContextMenu` on a TabItem host and opens it, and after this task the TabItem has no menu, while
+      the strip's would be empty until the controller publishes. A TabStrip host with `MockTabController`
+      and two tabs, under a `QmlMessageCapture`. `controller.openTabContextMenu(1, {})` (the mock publishes
+      and requests), then the strip's one `tabContextMenu` is `opened`, its `count` equals the top-level size
+      of the model the mock published, and `checkMenuOpensAtUsableSize` passes. Its `y` is below tab 1's
+      delegate. After `close()`, no `TypeError` was logged.
     - "a swatch pick reaches the controller once the menu has closed (offscreen)": the "Tab Color" sub-menu
       holds one `MenuSwatchRow` with `palette.size()` children named `menuSwatch`. Tapping swatch 1
       (`QTest::mouseClick` at its centre in the window) records nothing while the menu is open. After
-      `closed`, the controller has recorded swatch 1's `actionId`.
+      `closed`, the controller has recorded swatch 1's `actionId`, once. Opening and dismissing the menu
+      with no pick records nothing (no `picked(-1)`).
     - "a row triggered on a closed menu is picked at once (offscreen)": the existing end-to-end case
       (`:491-580`) still sees `pickedSpy.count() == 1` right after `triggered`.
     - "the Terminal row draws swatches as two-cell blocks (offscreen)": under `ChromeStyle::Terminal`, a
-      swatch's `width == 2 * cellWidth`, `height == cellHeight`, and `radius == 0`.
+      swatch's `width == 2 * cellWidth`, `height == cellHeight`, and `radius == 0`. The checked swatch's
+      `border.color` is the scheme's foreground, and its `vtbackend::contrastRatio` against
+      `modelData.color` is above 1.0, so the ring never reads at 1:1 as 1a's banner did.
     - "the new-tab menu lists the profiles (offscreen)": a TabStrip host. Clicking `newTabMenuButton`
       records `openNewTabMenu`, and `newTabMenu`'s `count` equals the model's size.
   - `QmlComponents_test.cpp:308-348`: the load list drops the two deleted files and adds `MenuSwatchRow.qml`.
@@ -935,9 +1019,14 @@ git commit -m "contour: route every context menu through the native-or-in-scene 
     `{ title: "#EE6666", color: "#EE6666", actionId: 0, enabled: true, checked: false }`. The row and the
     swatch both declare a role and a name.
   - `ChromeSnapshotPlan_test.cpp`: drop the literal counts at `:21`, `:68`, `:74`, keeping the derived checks
-    beside them. Add `CHECK(scriptRow(SnapshotScript::TabMenu).tabCount == 3)`.
-  - `ChromeSnapshot_test.cpp`: `case SnapshotScript::TabMenu:` finds `tabContextMenu` opened, and at least
-    one `menuSwatch` visible.
+    beside them. The last-enumerator pin at `:20` (`size() == NewDefaultsBanner + 1`) would fail once
+    `TabMenu` is appended, so it becomes
+    `CHECK(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScripts.back().script) + 1)`, and the
+    `static_assert` at `ChromeSnapshotPlan.hpp:205` the same. The enumerator-order `static_assert` at
+    `:200-204` already ties each row to its index, so later scripts need no edit here. Add
+    `CHECK(scriptRow(SnapshotScript::TabMenu).tabCount == 3)`.
+  - `ChromeSnapshot_test.cpp`: `case SnapshotScript::TabMenu:` finds the one `tabContextMenu` opened, and at
+    least one `menuSwatch` visible.
 
 - [ ] **Step 2: Run them and see them fail.**
 
@@ -970,12 +1059,18 @@ git commit -m "contour: the tab and new-tab menus render their tables, with an i
 **Files:**
 - Modify: `src/contour/qml/KitDialog.qml:94-102` — the reject button hides when `rejectText` is empty.
 - Modify: `src/contour/qml/Main.qml:304-331` — a `KitDialog` named `aboutDialog` and `onAboutRequested`.
-- Modify: `src/contour/window/WindowController.hpp` —
-  `Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)`, returning
-  `QStringLiteral(CONTOUR_VERSION_STRING)` (a build constant, not an ambient read).
+- Modify: `src/contour/ContourGuiApp.hpp/.cpp` — `[[nodiscard]] QString applicationVersion() const`, defined
+  in `ContourGuiApp.cpp` as `QStringLiteral(CONTOUR_VERSION_STRING)`. The macro is defined only for
+  `Config.cpp`, `ContourApp.cpp`, `ContourGuiApp.cpp` and two tests (`src/contour/CMakeLists.txt:179-199`,
+  deliberately, to keep the compile cache valid across worktrees), so it cannot appear in a header.
+- Modify: `src/contour/window/WindowController.hpp/.cpp` —
+  `Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)`; `applicationVersion()` is
+  defined in `WindowController.cpp` and returns `_manager.app().applicationVersion()`. The value is still a
+  build constant, reached through the composition root (§1.4), not an ambient read.
 - Modify: `src/contour/test/MainWindowControllerMock.hpp` (the `applicationVersion` property, value
   `"0.0.0-test"`, and `Q_INVOKABLE void showAbout()` emitting `aboutRequested`); `ChromeSnapshotPlan.hpp`
-  (the script `About`, the action `OpenAbout`, the `about` row); `ChromeSnapshotScene.hpp` (`show()`).
+  (the script `About`, the action `OpenAbout`, the `about` row; the count pins Task 8 derived from
+  `SnapshotScripts.back()` need no edit); `ChromeSnapshotScene.hpp` (`show()`).
 - Test: `QmlComponents_test.cpp`, `ChromeSnapshot_test.cpp`, `ChromeSnapshotPlan_test.cpp`.
 
 **Interfaces:**
@@ -1015,9 +1110,9 @@ Expected: PASS.
 - [ ] **Step 5: Format and commit.**
 
 ```bash
-/opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/window/WindowController.hpp src/contour/test/*.hpp src/contour/test/QmlComponents_test.cpp src/contour/test/ChromeSnapshot*_test.cpp
+/opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/window/WindowController.{hpp,cpp} src/contour/ContourGuiApp.{hpp,cpp} src/contour/test/*.hpp src/contour/test/QmlComponents_test.cpp src/contour/test/ChromeSnapshot*_test.cpp
 editorconfig-checker src/contour/qml/KitDialog.qml src/contour/qml/Main.qml
-git add src/contour/qml src/contour/window/WindowController.hpp src/contour/test
+git add src/contour/qml src/contour/window/WindowController.* src/contour/ContourGuiApp.* src/contour/test
 git commit -m "contour: an About dialog, opened by the ShowAbout action"
 ```
 
@@ -1030,7 +1125,13 @@ git commit -m "contour: an About dialog, opened by the ShowAbout action"
   `src/contour/command/CMakeLists.txt`.
 - Modify: `src/contour/command/ContextMenuTable.hpp:142-167` — `MenuTable::changeProfileRows` and
   `changeProfileSubmenu()`, moved from `ContextMenu.cpp:139-153`, sit beside `hostRows`, so the pane menu and
-  the Shell menu share them.
+  the Shell menu share them. `MenuTable` gains the two things this table needs and lacks today:
+  - `Table::rows(ChildBuilder)`, a template-only row kind whose built rows are spliced in place (the Window
+    menu's tab list). `MenuTable` otherwise expands builders only for `Submenu` rows.
+  - Submenus honour their `enabled` predicate through `RowAvailability`. `buildRows` writes
+    `.enabled = true` on every submenu today (`ContextMenuTable.hpp:198-210`), which would silently drop the
+    "(window)" and `paneCount > 1` rules below. The presenters already read the column for submenus
+    (`NSMenuItem.enabled`, Task 6; QML `Menu.enabled`, Task 8; `menuAction()->setEnabled`, Task 12).
 - Test: new `src/contour/command/MenuBarTable_test.cpp` (add to `contour_test`).
 
 **Interfaces:**
@@ -1098,8 +1199,8 @@ An empty title means the action's catalogue title (`commandTitle`).
   separator, "Move Left/Right/Up/Down" `MovePane*`, separator, "Grow Left/Right/Up/Down"
   `ResizePane { .direction = Direction::Left/Right/Up/Down }`, separator, "" `ToggleSplitOrientation`, "Zoom
   Pane" `TogglePaneZoom` (the whole submenu `paneCount > 1`) · separator · one row per tab, titled with its
-  title, running `SwitchToTab { .position = i + 1 }`, checked when `i == activeTab` (a `ChildBuilder` rows
-  function, not a submenu). Every Window row before the tab list is "window".
+  title, running `SwitchToTab { .position = i + 1 }`, checked when `i == activeTab` (a `Table::rows`
+  splice, not a submenu). Every Window row before the tab list is "window".
 - **Help:** "Contour Documentation" `FollowHyperlink { .uri = "https://contour-terminal.org/" }` · "Report an
   Issue" `FollowHyperlink { .uri = "https://github.com/contour-terminal/contour/issues" }` · separator ·
   "Debug" › "" `CreateDebugDump`, separator, "" for each of `TraceEnter`, `TraceLeave`, `TraceStep`,
@@ -1131,7 +1232,9 @@ An empty title means the action's catalogue title (`commandTitle`).
   - `menuBar.tabBarMirrorsTheTitleBar` (R-l): View › "Tab Bar" equals the title bar menu's "Tab Bar" for the
     same modes, compared by kind, title, `commandId` and `check`.
   - `menuBar.windowRowsNeedAWindow`: with `MenuBarState {}`, "Split Vertically", "Close Tab" and "Rename Tab…"
-    are `Disabled`, while "New Window" and "Quit Contour" are `Enabled`.
+    are `Disabled`, while "New Window" and "Quit Contour" are `Enabled`. The View › "Tab Bar" and Window ›
+    "Pane" submenus are `Disabled` too, and with a full state but `paneCount = 1`, "Pane" alone of the two
+    is `Disabled`.
   - `menuBar.tabList`: three titles give three `SwitchToTab` rows at the end of Window, with positions 1–3.
     Only the active one is `Checked`.
   - `menuBar.placement`: `menuBarPlacementFor(MacOS) == Global`; `Windows`, `KdePlasma` and `Other` → `None`
@@ -1145,9 +1248,9 @@ Run: `cmake --build out/appleclang-debug -j 3 --target contour_test`
 
 Expected: compile failure, because `MenuBarTable.hpp` does not exist.
 
-- [ ] **Step 3: Implement** the table over `detail::MenuTable<MenuBarState>`, one template function per menu.
-  Use the `withRole` and `changeProfileSubmenu` helpers, and move the pane menu onto the shared
-  `changeProfileRows`.
+- [ ] **Step 3: Implement** `Table::rows` and the submenu availability, then the table over
+  `detail::MenuTable<MenuBarState>`, one template function per menu. Use the `withRole` and
+  `changeProfileSubmenu` helpers, and move the pane menu onto the shared `changeProfileRows`.
 
 - [ ] **Step 4: Run them and see them pass.**
 
@@ -1172,9 +1275,12 @@ git commit -m "command: the macOS menu bar's six menus as one table over the act
 **Files:**
 - Create: `src/contour/display/ShortcutOverride.hpp` (header-only); list it in `src/contour/CMakeLists.txt`'s
   `_header_files`.
-- Modify: `src/contour/display/TerminalDisplay.cpp:1534-1555` (`TerminalDisplay::event`).
+- Modify: `src/contour/display/TerminalDisplay.cpp:1534-1555` (`TerminalDisplay::event`). The display reads
+  the placement as `_session->app().menuBarPlacement()`; the session already reaches `app()`
+  (`TerminalDisplay.cpp:1823`). `TerminalDisplay` is constructed by QML, so it cannot take the placement in
+  its constructor: the framework-constructed carve-out, documented at the read.
 - Modify: `src/contour/ContourGuiApp.hpp/.cpp` — `command::MenuBarPlacement _menuBarPlacement = command::MenuBarPlacement::None;`,
-  set in the constructor's initialiser list (`ContourGuiApp.cpp:411-…`) from
+  set in the constructor's initialiser list (`ContourGuiApp.cpp:414-…`; the signature ends at `:413`) from
   `command::menuBarPlacementFor(config::detectHostPlatform(env))`, and its accessor `menuBarPlacement()`.
 - Test: new `src/contour/display/ShortcutOverride_test.cpp` (add to `contour_gui_test`; it needs `QKeyEvent`
   but no display); `src/contour/display/DisplayRendering_test.cpp` (one `[display]` case).
@@ -1183,13 +1289,20 @@ git commit -m "command: the macOS menu bar's six menus as one table over the act
 - Consumes: `command::MenuBarPlacement` (Task 10).
 - Produces (namespace `contour::display`, `ShortcutOverride.hpp`):
   - `enum class ShortcutOverrideClaim : uint8_t { Terminal = 0, Menu };`
-  - `inline constexpr std::array MenuOwnedStandardKeys { QKeySequence::Quit, QKeySequence::Preferences };`
+  - `struct MenuOwnedKey { command::MenuItemRole role; QKeySequence::StandardKey key; };` and
+    `inline constexpr std::array MenuOwnedKeys { MenuOwnedKey { command::MenuItemRole::Preferences, QKeySequence::Preferences }, MenuOwnedKey { command::MenuItemRole::Quit, QKeySequence::Quit } };`
+    (About has no key). This is the one role-to-key table (R-j): the claim reads its keys, and Task 12's
+    menu bar gives a role row its key from it, so the two cannot drift. It lives here, not in
+    `window/AppMenuBar`, because `display/` may not include `window/`.
+  - `[[nodiscard]] inline std::optional<QKeySequence::StandardKey> standardKeyFor(command::MenuItemRole role) noexcept;`
+    — the table's lookup.
   - `[[nodiscard]] inline ShortcutOverrideClaim shortcutOverrideClaim(QKeyEvent const& event, command::MenuBarPlacement placement);`
-    It returns `Menu` only when `placement == Global` and `event.matches(k)` for some `k` in the table, and
-    `Terminal` otherwise.
+    It returns `Menu` only when `placement == Global` and `event.matches(row.key)` for some row of
+    `MenuOwnedKeys`, and `Terminal` otherwise.
 - `TerminalDisplay::event`: on `QEvent::ShortcutOverride` with a session, a `Terminal` claim calls
-  `accept()` on the key event and returns `true`. A `Menu` claim falls through to `QQuickItem::event`, which
-  leaves the event ignored.
+  `accept()` on the key event and returns `true`, on every host. A `Menu` claim falls through to
+  `QQuickItem::event`, which leaves the event ignored. Nothing off macOS consumes shortcuts (no `QShortcut`,
+  no QML `Shortcut`), so the claim changes nothing there; only under `Global` does any key go to the menu.
 - `ContourGuiApp::menuBarPlacement() const noexcept`.
 
 - [ ] **Step 1: Write the failing tests.**
@@ -1197,6 +1310,8 @@ git commit -m "command: the macOS menu bar's six menus as one table over the act
     nothing is platform-hard-coded:
     `auto const combo = QKeySequence(QKeySequence::Quit)[0]; QKeyEvent event(QEvent::ShortcutOverride, combo.key(), combo.keyboardModifiers());`
     - Quit and Preferences under `Global` → `Menu`; both under `None` → `Terminal`.
+    - `standardKeyFor(Quit) == QKeySequence::Quit`, `standardKeyFor(Preferences) == QKeySequence::Preferences`,
+      and `About` and `None` give `std::nullopt`.
     - `QKeySequence::Copy`'s key, `Ctrl+Alt+K` and a plain `A`, each under `Global` → `Terminal`.
     - The test skips a standard key whose binding is empty on this platform (`QKeySequence(k).isEmpty()`;
       Windows may define neither). On Apple it first `REQUIRE`s both to be non-empty, so the `Menu` cases
@@ -1234,11 +1349,12 @@ git commit -m "display: the terminal keeps every key but Quit and Settings under
 
 **Files:**
 - Create: `src/contour/window/AppMenuBar.hpp`, `src/contour/window/AppMenuBar.cpp` (Qt Widgets); list them in
-  `src/contour/CMakeLists.txt:266-345` (`_header_files`, `_core_source_files`).
+  `src/contour/CMakeLists.txt`'s `_header_files` (`:264-…`) and `_core_source_files` (`:307-…`).
 - Create: `src/contour/platform/MenuBarIntegration.hpp` (the interface, with `NullMenuBarIntegration` inline)
-  and `.cpp` (the non-Apple factory inside `#ifndef __APPLE__`). Create
-  `src/contour/platform/CocoaMenuBarIntegration.mm` (ARC). Add them to `src/contour/platform/CMakeLists.txt`,
-  and link `Qt6::Widgets` `PRIVATE` inside its `if(APPLE)` block.
+  and `.cpp` (the non-Apple factory inside `#ifndef __APPLE__`); list both in `add_library(contour_platform …)`
+  (`src/contour/platform/CMakeLists.txt:15-69`). Create `src/contour/platform/CocoaMenuBarIntegration.mm`
+  (ARC), added in the `if(APPLE)` block (`:81-95`) with `-fobjc-arc`, and link `Qt6::Widgets` `PRIVATE`
+  inside that block.
 - Modify: `src/contour/platform/AppearanceServices.hpp` — the `menuBar` factory, named in
   `nullAppearanceServices()`; `src/contour/test/AppearanceFixtures.hpp` names it in `appearanceServicesWith`.
 - Modify: `src/contour/window/WindowController.hpp/.cpp` — `menuBarState()`, `runMenuBarAction()`.
@@ -1246,14 +1362,15 @@ git commit -m "display: the terminal keeps every key but Quit and Settings under
   `_appMenuBar`, created after the QML engine block (`ContourGuiApp.cpp:2335`) when
   `_menuBarPlacement == Global`; reset in `releaseQtObjects` (`:2133-2144`) before `_qmlEngine`; rebuilt from
   `onConfigurationReloaded()` (`:1787-1794`), guarded as the notice is.
-- Modify: `src/contour/test/test_main.cpp:96` — a `QApplication` when `displayTestsEnabled()` (R-o).
+- Modify: `src/contour/test/test_main.cpp:110` — a `QApplication` when `displayTestsEnabled()` (R-o).
 - Create: `src/contour/window/AppMenuBar_test.cpp` (add to `contour_gui_test`), and
   `src/contour/platform/CocoaMenuBarIntegration_test.mm` (add to the `if(APPLE)` test block, `-fobjc-arc`).
-- Modify: `src/contour/test/MenuFixtures.hpp` — `RecordingMenuBarIntegration`.
+- Modify: `src/contour/test/MenuFixtures.hpp` — `RecordingMenuBarIntegration`;
+  `src/contour/platform/AppearanceSources_test.cpp` (one case).
 
 **Interfaces:**
 - Consumes: `buildMenuBar`, `MenuBarState`, `menuBarStateOf`, `MenuBarMenu`, `MenuBarMenuCount` (Task 10);
-  `buildMenuTree`, `chordIndex` (Task 4); `menuBarPlacement()` (Task 11).
+  `buildMenuTree`, `chordIndex` (Task 4); `menuBarPlacement()`, `standardKeyFor` (Task 11).
 - Produces (namespace `contour::platform`, `MenuBarIntegration.hpp`; `class QMenu;` forward-declared):
 
 ```cpp
@@ -1272,16 +1389,26 @@ class NullMenuBarIntegration final: public IMenuBarIntegration { /* adopt() does
 ```
 
   The Cocoa `adopt` sets `NSApp.windowsMenu = windows.toNSMenu()` and `NSApp.helpMenu = help.toNSMenu()`,
-  skipping a nil menu. `AppearanceServices` gains
+  skipping a nil menu. It is `@pre` main thread, documented and asserted with `NSThread.isMainThread`, as
+  the Task 6 presenter is (AppKit is main-thread only). `AppearanceServices` gains
   `std::function<std::unique_ptr<IMenuBarIntegration>()> menuBar = makeMenuBarIntegration;`.
 - Produces (namespace `contour::window`, `AppMenuBar.hpp`):
   - `[[nodiscard]] QAction::MenuRole qtMenuRoleFor(command::MenuItemRole role, command::MenuBarMenu menu) noexcept;`
     is a table lookup: `About` → `AboutRole`, `Preferences` → `PreferencesRole`, `Quit` → `QuitRole`. `None`
     gives `ApplicationSpecificRole` in `MenuBarMenu::Application` and `NoRole` elsewhere (R-k). `QAction` is
     in QtGui in Qt 6, so this needs no `QApplication`.
-  - `[[nodiscard]] QKeySequence qtShortcutFor(std::string_view shortcut);` gives
-    `QKeySequence::fromString(…, QKeySequence::NativeText)` when its `toString(NativeText)` gives back
-    @p shortcut, and an empty sequence otherwise, so a chord Qt cannot read is not shown wrong.
+  - `[[nodiscard]] std::optional<QKeyCombination> qtKeyFor(command::ShortcutChord const& chord);` maps the
+    `MenuNode`'s `chord`, never its display text: the defaults bind ViNormalMode to Ctrl+Shift+Space
+    (`Config.hpp:1606-1615`), whose text is "⌃⇧ " while Qt's native text says "Space", so parsing the text
+    would fail on a default chord. It is a table lookup. Modifiers go through the inverse of
+    `input/KeyMapping.cpp:62-72` (Control → `Qt::ControlModifier`, Super → `Qt::MetaModifier`, under
+    `AA_MacDontSwapCtrlAndMeta`; Alt and Shift as named). Keys go through a `vtbackend::Key` → `Qt::Key`
+    table (the inverse of `KeyMappings`, `session/SessionInput.cpp:388-…`), and chars through `QChar`. A
+    chord with Hyper or Meta gives `std::nullopt`, so a chord Qt has no key for is not shown wrong.
+  - `[[nodiscard]] bool carriesKeyEquivalent(command::ShortcutChord const& chord) noexcept;` — true when the
+    chord holds Control or Super (⌃ or ⌘). Only such a chord becomes a row's key equivalent (R-i); a row
+    whose chord fails it gets no shortcut, so AppKit cannot fire "Clear Selection" on Escape or scroll on ⇧↓
+    from the palette's or Settings' text fields.
   - `struct AppMenuBarSources { std::function<command::MenuBarState()> state {}; std::function<command::ChordIndex()> chords {}; std::function<void(actions::Action const&)> run {}; };`
   - `class AppMenuBar` with
     `AppMenuBar(AppMenuBarSources sources, platform::IMenuBarIntegration& integration);`,
@@ -1292,11 +1419,19 @@ class NullMenuBarIntegration final: public IMenuBarIntegration { /* adopt() does
       `integration.adopt(window, help)` once, and hides the Application menu's `menuAction()` (R-k).
     - `rebuild()` builds one tree,
       `buildMenuTree(buildMenuBar(state()), chords(), command::platformShortcutStyle())`, and refills every
-      menu: `QAction` text, `setEnabled`, `setCheckable`/`setChecked`, `setMenuRole(qtMenuRoleFor(…))`,
-      `setShortcut(qtShortcutFor(node.shortcut))`, separators and sub-menus. `triggered` posts `run` with
-      a copy of `tree.actions[node.actionIndex]`, captured when the row is built, via
-      `platform::postToObject` on the bar. A rebuild while a post is queued then cannot change what runs.
-    - Each top-level `QMenu`'s `aboutToShow` calls `rebuild()`, so a menu opens with the current state.
+      menu's actions in the `QMenu`s it keeps: `QAction` text, `setEnabled`, `setCheckable`/`setChecked`,
+      `setMenuRole(qtMenuRoleFor(…))`, separators and sub-menus (a sub-menu's `menuAction()->setEnabled`
+      from its availability). The shortcut is data too: a role row with `standardKeyFor(node.role)` gets
+      `QKeySequence(*key)`, never the binding's chord (R-j), so "Quit Contour" shows ⌘Q and "Settings…" ⌘,.
+      Any other row gets `QKeySequence(*qtKeyFor(*node.chord))` when it has a chord that maps and
+      `carriesKeyEquivalent`, and no shortcut otherwise. `triggered` posts `run` with a copy of
+      `tree.actions[node.actionIndex]`, captured when the row is built, via `platform::postToObject` on the
+      bar. A rebuild while a post is queued then cannot change what runs. The full refill runs at
+      construction and on reload only.
+    - Each top-level `QMenu`'s `aboutToShow` refreshes only that menu's state: `setEnabled`/`setChecked`
+      over its existing actions from a fresh tree, plus the Window menu's tab list. It re-creates no other
+      action, so the Window menu AppKit adopted (and appended its window list to) and the role actions Qt
+      merged into the app menu stay the objects they were.
 - Produces (`WindowController`):
   - `[[nodiscard]] command::MenuBarState menuBarState() const;` starts from `menuBarStateOf(config)` and adds
     this window: `Present`, the active session's selection, `canSpeak` and input protection (as its
@@ -1315,26 +1450,44 @@ class NullMenuBarIntegration final: public IMenuBarIntegration { /* adopt() does
   - `AppMenuBar_test.cpp`, `[menubar][keys]` (offscreen, QtGui only):
     - "every role maps": `qtMenuRoleFor` for each `MenuItemRole` × {`Application`, `Edit`} matches the table
       above.
-    - "a glyph chord round-trips" (Apple only, `#ifdef __APPLE__`): for every node with a `shortcut` in
-      `buildMenuTree(buildMenuBar(fullState), chordIndex(config), MacGlyphs)`, for both editions' defaults,
-      `qtShortcutFor(node.shortcut)` is non-empty and its `toString(QKeySequence::NativeText)` equals
-      `node.shortcut`. If a default chord fails, record it in the ledger and stop for a ruling.
-    - "an unreadable chord is dropped": `qtShortcutFor(shortcutText({ .modifiers = Modifiers { Modifier::Hyper }, .input = U'é' }, MacGlyphs))`
-      is empty. Hyper has no glyph, so the text is "Hyper+é", which Qt cannot parse.
+    - "every default chord maps": for both editions' defaults, every chord in `chordIndex(config)` gives an
+      engaged `qtKeyFor`, Ctrl+Shift+Space (ViNormalMode) included, as `Qt::Key_Space` with Control and
+      Shift. If a default chord does not map, record it in the ledger and stop for a ruling.
+    - "a chord Qt has no key for is dropped": `qtKeyFor({ .modifiers = Modifiers { Modifier::Hyper }, .input = U'é' })`
+      is `std::nullopt`, and so is the same chord with `Modifier::Meta`.
+    - "only ⌃ and ⌘ chords are key equivalents": `carriesKeyEquivalent` holds for Ctrl+C and for a
+      Super chord, and not for Escape or Shift+Down.
   - `AppMenuBar_test.cpp`, `[display][menubar]`, skipped unless
     `qobject_cast<QApplication*>(QCoreApplication::instance())`, with a `RecordingMenuBarIntegration`:
     - "the bar holds the six menus": `menuBar().actions().size() == MenuBarMenuCount`, with the table's titles
       in order. `adopt` was called once, with the Window and Help menus.
     - "the rows are the tree's": in each menu, the non-separator actions, counted recursively, equal the
       tree's command nodes, and the About/Settings…/Quit actions carry their roles.
+    - "the Quit and Settings… actions carry the standard keys": their shortcuts are
+      `QKeySequence(QKeySequence::Quit)` and `QKeySequence(QKeySequence::Preferences)`, not the defaults'
+      Ctrl+Shift+Q and Ctrl+Shift+,.
+    - "a chord without ⌃ or ⌘ is no key equivalent": "Clear Selection" has an empty shortcut, and "Copy"
+      has one.
+    - "the role rows survive a rebuild": after `rebuild()`, the About, Settings… and Quit actions are still
+      present, with their roles.
     - "a triggered row runs its action": triggering "New Tab", then `processEvents()`, makes `run` receive a
       `CreateNewTab` (`commandId == "CreateNewTab"`).
     - "a menu opens with the current state": with `state()` returning `tabCount = 1`, "Close Other Tabs" is
       disabled. Change the stub to `tabCount = 2` and emit the Window menu's `aboutToShow`: it is enabled.
     - On Apple, "Contour appears once": the Application menu's `menuAction()->isVisible()` is false.
-  - `CocoaMenuBarIntegration_test.mm`, `[display][menubar][cocoa]` (needs a `QApplication`): after
-    `makeMenuBarIntegration()->adopt(window, help)` on two `QMenu`s of a native `QMenuBar`,
-    `NSApp.windowsMenu == window.toNSMenu()` and `NSApp.helpMenu == help.toNSMenu()`.
+  - `CocoaMenuBarIntegration_test.mm`, `[display][menubar][cocoa]`. Each case skips unless
+    `qobject_cast<QApplication*>(QCoreApplication::instance())`, as `AppMenuBar_test` does, and unless
+    `contour::test::displayTestsEnabled(core::LiveEnvironment {})`, as `REQUIRE_DISPLAY_OR_SKIP()` does
+    (`DisplayRendering_test.cpp:88-97`; the macro is local to that file). `contour_gui_test` runs offscreen
+    under a `QGuiApplication` (`test_main.cpp:96-110`), where constructing a `QMenu` is fatal and would
+    abort the whole macOS suite in CI, and `toNSMenu()` is nil off the cocoa plugin.
+    - After `makeMenuBarIntegration()->adopt(window, help)` on two `QMenu`s of a native `QMenuBar`,
+      `NSApp.windowsMenu == window.toNSMenu()` and `NSApp.helpMenu == help.toNSMenu()`.
+    - "a rebuild keeps the adopted menus": an `AppMenuBar` over the real integration; after `rebuild()`,
+      `NSApp.windowsMenu` is the same `NSMenu` as before it.
+  - `AppearanceSources_test.cpp`, `[appearance-source]`: `nullAppearanceServices().menuBar()` and
+    `appearanceServicesWith(…).menuBar()` are `NullMenuBarIntegration`s (`dynamic_cast` is non-null), so no
+    test can reach the Cocoa integration.
 
 - [ ] **Step 2: Run them and see them fail.**
 
@@ -1354,7 +1507,7 @@ Expected: PASS. The display run also exercises the Cocoa integration on this Mac
 - [ ] **Step 5: Format and commit.**
 
 ```bash
-/opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/window/AppMenuBar*.{hpp,cpp} src/contour/platform/MenuBarIntegration.{hpp,cpp} src/contour/platform/CocoaMenuBarIntegration*.mm src/contour/platform/AppearanceServices.hpp src/contour/test/AppearanceFixtures.hpp src/contour/test/MenuFixtures.hpp src/contour/test/test_main.cpp src/contour/window/WindowController.{hpp,cpp} src/contour/ContourGuiApp.{hpp,cpp}
+/opt/homebrew/opt/llvm@22/bin/clang-format -i src/contour/window/AppMenuBar*.{hpp,cpp} src/contour/platform/MenuBarIntegration.{hpp,cpp} src/contour/platform/CocoaMenuBarIntegration*.mm src/contour/platform/AppearanceServices.hpp src/contour/platform/AppearanceSources_test.cpp src/contour/test/AppearanceFixtures.hpp src/contour/test/MenuFixtures.hpp src/contour/test/test_main.cpp src/contour/window/WindowController.{hpp,cpp} src/contour/ContourGuiApp.{hpp,cpp}
 editorconfig-checker src/contour/platform/CMakeLists.txt src/contour/CMakeLists.txt
 git add src/contour/window src/contour/platform src/contour/test src/contour/ContourGuiApp.* src/contour/CMakeLists.txt
 git commit -m "contour: a native macOS menu bar of six menus, built from the table"
@@ -1393,10 +1546,15 @@ ls "$CONTOUR_SNAPSHOT_DIR"/*.png | wc -l
 - [ ] **Step 4: Manual check of the app on this Mac** (`out/appleclang-debug/src/contour/contour.app`), with the
   results recorded in the ledger:
   - Right-click a tab: an NSMenu with swatch images opens. "Close Other Tabs" keeps the right-clicked tab.
+  - After a right-click menu over the terminal is dismissed, a left-drag selects (the press's grabber saw
+    its release, R-m).
   - The menu bar shows Contour (About, Settings…, Quit), Shell, Edit, View, Window and Help. The Window menu
     lists the open windows, and Help has the search field.
-  - ⌘Q quits and ⌘, opens Settings. A bound chord shown in the menu (e.g. Classic's Ctrl+Shift+T) reaches
-    the terminal's binding: vi mode's `Ctrl+C` does not copy.
+  - ⌘Q quits and ⌘, opens Settings, and the app menu shows them as ⌘Q and ⌘,. A bound chord shown in the
+    menu (e.g. Classic's Ctrl+Shift+T) reaches the terminal's binding: vi mode's `Ctrl+C` does not copy.
+  - AppKit's own key equivalents still work with the terminal focused: Hide (⌘H), Hide Others (⌥⌘H) and
+    Minimize. If any fails, record it in the ledger; the fix is a row of `MenuOwnedKeys` (Task 11), data,
+    not code.
   - Under `ui_style: terminal`, a tab right-click opens the in-scene menu and the menu bar is unchanged.
 - [ ] **Step 5: Release notes** with `/add-release-note` in `metainfo.xml`, under the open `0.9.0` release at `:107`
   (the `x.y.z` block at `:97-105` is a commented-out template): a native macOS menu bar; native context
