@@ -2441,7 +2441,18 @@ int ContourGuiApp::terminalGuiAction()
     // The application's menu bar, where the host has one apart from its windows. It reads the focused
     // window, or the configuration alone without one, and runs its rows on that window's active session.
     if (_menuBarPlacement == command::MenuBarPlacement::Global)
+    {
         _appMenuBar = make_unique<window::AppMenuBar>(appMenuBarSources(), *_menuBarIntegration);
+        // Built before any window, so its window rows start disabled; a menu-owned key (⌘M) fires its row
+        // with no menu ever opened, so the rows follow the focused window as it changes. Posted, so the
+        // window controllers have taken the change first (WindowController::onOSWindowActiveChanged).
+        connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, [this] {
+            platform::postToObject(this, [this] {
+                if (_appMenuBar)
+                    _appMenuBar->refreshAll();
+            });
+        });
+    }
     _startupTimeline.mark(vthost::latency::StartupMark::QmlEngineReady);
 
     // Attach mode's connect has run beside everything above; the first window needs it done, and decides

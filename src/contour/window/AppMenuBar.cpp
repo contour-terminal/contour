@@ -376,11 +376,11 @@ AppMenuBar::AppMenuBar(AppMenuBarSources sources, platform::IMenuBarIntegration&
     rebuild();
     integration.adopt(menu(MenuBarMenu::Window), menu(MenuBarMenu::Help));
 
-#ifdef __APPLE__
-    // Its rows all carry a role, so Qt moves every one into the application menu macOS names after the
-    // app; the menu itself would be a second, empty "Contour" beside it.
-    menu(MenuBarMenu::Application).menuAction()->setVisible(false);
-#endif
+    // The Application menu is deliberately NOT hidden, though on macOS Qt moves every row of it into the
+    // application menu: a hidden QAction is a disabled one, Qt disables the menu's platform menu with it,
+    // and every row it merged would then validate as disabled -- Quit, Settings… and About alike, so that
+    // ⌘Q and ⌘, fell through to the terminal. Qt hides the native menu itself once nothing visible is left
+    // in it (QCocoaMenuBar::syncMenu_helper, Qt 6.11.1), so no second, empty "Contour" shows.
 }
 
 AppMenuBar::~AppMenuBar() = default;
@@ -475,6 +475,12 @@ QList<QAction*> AppMenuBar::fill(
         }
     }
     return added;
+}
+
+void AppMenuBar::refreshAll()
+{
+    for (auto const index: std::views::iota(std::size_t { 0 }, command::MenuBarMenuCount))
+        refresh(static_cast<MenuBarMenu>(index));
 }
 
 void AppMenuBar::refresh(MenuBarMenu which)

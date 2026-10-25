@@ -85,6 +85,11 @@ class AppMenuBar
     /// keeps the ones it adopted. For a reload of the configuration.
     void rebuild();
 
+    /// Brings every menu's rows up to date with the sources' state, as each would be on opening. For a
+    /// change of the focused window: a menu-owned key (⌘M) fires its row with no menu ever opened, so the
+    /// row must already be enabled for the window that is there now.
+    void refreshAll();
+
     /// @return The bar.
     [[nodiscard]] QMenuBar& menuBar() noexcept { return *_menuBar; }
 

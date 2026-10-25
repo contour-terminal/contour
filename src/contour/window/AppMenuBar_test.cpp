@@ -369,6 +369,77 @@ TEST_CASE("a triggered row runs in its row's scope", "[display][menubar]")
     CHECK(fixture.scopes[1] == command::ActionScope::Window);
 }
 
+/// Checks that every command row of the Application menu that @p state enables is enabled in @p bar, and
+/// that the menu holding them is too: Qt hands a disabled menu's state to every row it merges on macOS.
+void checkApplicationRowsEnabled(window::AppMenuBar& bar, command::MenuBarState const& state)
+{
+    auto* const application = bar.menuBar().actions().at(static_cast<qsizetype>(MenuBarMenu::Application));
+    CHECK(application->isEnabled());
+    auto const tree = command::buildMenuTree(command::buildMenuBar(state), {}, command::ShortcutStyle::Text);
+    auto const& rows = tree.nodes[static_cast<std::size_t>(MenuBarMenu::Application)].children;
+    REQUIRE(commandNodeCount(rows) == commandActionCount(*application->menu()));
+    for (auto const& row: rows)
+    {
+        if (row.kind != command::ContextMenuEntryKind::Command)
+            continue;
+        INFO(row.title);
+        REQUIRE(row.availability == command::RowAvailability::Enabled);
+        auto const* const action = findAction(*application->menu(), QString::fromStdString(row.title));
+        REQUIRE(action != nullptr);
+        CHECK(action->isEnabled());
+    }
+}
+
+TEST_CASE("the Application menu's rows are enabled with no window, and after one gains focus",
+          "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto const config = config::Config {};
+    auto state = command::MenuBarState {}; // as at startup: no window yet
+    auto integration = test::RecordingMenuBarIntegration {};
+    auto bar = window::AppMenuBar {
+        window::AppMenuBarSources {
+            .state = [&] { return state; },
+            .chords = [&] { return command::chordIndex(config); },
+            .run = [](actions::Action const&, command::ActionScope) {},
+        },
+        integration,
+    };
+
+    checkApplicationRowsEnabled(bar, state);
+
+    state = windowWithTabs({ "one" });
+    bar.refreshAll();
+    checkApplicationRowsEnabled(bar, state);
+}
+
+TEST_CASE("Minimize follows the focused window with its menu never opened", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto const config = config::Config {};
+    auto state = command::MenuBarState {};
+    auto integration = test::RecordingMenuBarIntegration {};
+    auto bar = window::AppMenuBar {
+        window::AppMenuBarSources {
+            .state = [&] { return state; },
+            .chords = [&] { return command::chordIndex(config); },
+            .run = [](actions::Action const&, command::ActionScope) {},
+        },
+        integration,
+    };
+    auto& windows = *bar.menuBar().actions().at(static_cast<qsizetype>(MenuBarMenu::Window))->menu();
+    REQUIRE(findAction(windows, QStringLiteral("Minimize")) != nullptr);
+    CHECK_FALSE(findAction(windows, QStringLiteral("Minimize"))->isEnabled());
+
+    state = windowWithTabs({ "one" });
+    bar.refreshAll();
+    CHECK(findAction(windows, QStringLiteral("Minimize"))->isEnabled());
+
+    state = command::MenuBarState {};
+    bar.refreshAll();
+    CHECK_FALSE(findAction(windows, QStringLiteral("Minimize"))->isEnabled());
+}
+
 TEST_CASE("a menu opens with the current state", "[display][menubar]")
 {
     REQUIRE_WIDGETS_OR_SKIP();
@@ -426,13 +497,15 @@ TEST_CASE("an unchanged menu keeps its rows as it opens", "[display][menubar]")
     CHECK(copy->isEnabled());
 }
 
-#ifdef __APPLE__
-TEST_CASE("Contour appears once", "[display][menubar]")
+TEST_CASE("the Application menu is never hidden", "[display][menubar]")
 {
     REQUIRE_WIDGETS_OR_SKIP();
     auto fixture = BarFixture {};
 
-    CHECK_FALSE(fixture.menu(MenuBarMenu::Application).menuAction()->isVisible());
+    // A hidden QAction is a disabled one, and on macOS every row Qt merged from the menu would follow it.
+    // That the native menu does not show twice is the cocoa suite's to check ("Contour appears once").
+    auto const* const application = fixture.menu(MenuBarMenu::Application).menuAction();
+    CHECK(application->isVisible());
+    CHECK(application->isEnabled());
 }
-#endif
 // }}}

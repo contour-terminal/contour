@@ -388,6 +388,18 @@ TEST_CASE("menuBar.scopes", "[menubar]")
         CHECK(find(bar, title)->scope == ActionScope::Window);
     }
 
+    // An application row needs no window, so none waits for one to be enabled: at startup, with none yet,
+    // a key equivalent of a disabled row would fall through to the terminal.
+    auto bareApplication = std::vector<ContextMenuEntry const*> {};
+    auto const bare = buildMenuBar(MenuBarState {});
+    collectCommands(bare, bareApplication);
+    for (auto const* row: bareApplication)
+    {
+        INFO(row->title);
+        if (row->scope == ActionScope::Application)
+            CHECK(row->availability == RowAvailability::Enabled);
+    }
+
     // And the scope reaches the tree every presenter draws.
     auto const tree = buildMenuTree(bar, ChordIndex {}, ShortcutStyle::Text);
     REQUIRE(findNode(tree.nodes, "Quit Contour") != nullptr);
