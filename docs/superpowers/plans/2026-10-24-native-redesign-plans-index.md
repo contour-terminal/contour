@@ -90,9 +90,9 @@ Settings window should raise or own its window), and the design canvas's macOS �
 | 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-2.md` (written) |
 | 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-2.md` (written) |
 | 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (written) |
-| 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | to write |
-| 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | to write |
-| 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | to write |
+| 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (written) |
+| 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-4b.md` (written) |
+| 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-4b.md` (written) |
 | 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | to write |
 
 Steps 3a to 3e may run in any order, or in parallel worktrees, each with its own board.
