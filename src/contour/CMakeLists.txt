@@ -882,6 +882,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/MultiWindow_test.cpp
             window/SettingsController_test.cpp
             window/SettingsWindowHost_test.cpp
+            window/SettingsWindowRouting_test.cpp
             window/TabListModel_test.cpp
             window/UiStyleProvider_test.cpp
             window/WindowMenus_test.cpp

@@ -40,6 +40,9 @@
 namespace
 {
 
+using contour::test::createSessionTabs;
+using contour::test::nodeTitled;
+using contour::test::runMenuBarRow;
 using contour::test::ScopedController;
 using contour::test::TestApp;
 namespace actions = contour::actions;
@@ -60,30 +63,6 @@ using contour::window::WindowController;
     return ids;
 }
 
-/// Tabs that each have a real (mock-PTY) session: their ids and session ids in row order.
-struct SessionTabs
-{
-    std::vector<vtworkspace::TabId> tabs {};
-    std::vector<vtworkspace::SessionId> sessions {};
-};
-
-[[nodiscard]] SessionTabs createSessionTabs(contour::session::TerminalSessionManager& manager,
-                                            WindowController& controller,
-                                            int n)
-{
-    auto result = SessionTabs {};
-    for (auto const _: std::views::iota(0, n))
-    {
-        controller.createNewTab();
-        auto const* tab = manager.model().window(controller.windowId())->activeTab();
-        REQUIRE(tab != nullptr);
-        REQUIRE(controller.activeSession() != nullptr);
-        result.tabs.push_back(tab->id());
-        result.sessions.push_back(controller.activeSession()->modelSessionId());
-    }
-    return result;
-}
-
 [[nodiscard]] QColor colorAt(WindowController const& controller, int row)
 {
     return controller.data(controller.index(row), static_cast<int>(WindowController::Roles::ColorRole))
@@ -102,28 +81,6 @@ struct SessionTabs
             return nested;
     }
     return std::nullopt;
-}
-
-/// The node titled @p title in @p nodes, searching submenus too; nullptr if there is none.
-[[nodiscard]] contour::command::MenuNode const* nodeTitled(std::span<contour::command::MenuNode const> nodes,
-                                                           std::string_view title)
-{
-    for (auto const& node: nodes)
-    {
-        if (node.title == title)
-            return &node;
-        if (auto const* nested = nodeTitled(node.children, title))
-            return nested;
-    }
-    return nullptr;
-}
-
-/// Runs the menu bar row titled @p title of @p tree through the app's own menu bar path.
-void runMenuBarRow(TestApp& app, contour::command::MenuTree const& tree, std::string_view title)
-{
-    auto const* row = nodeTitled(tree.nodes, title);
-    REQUIRE(row != nullptr);
-    app.app().runMenuBarAction(tree.actions[row->actionIndex], row->scope);
 }
 
 /// A test app whose native menus go to a RecordingMenuPresenter, which the test picks rows from.

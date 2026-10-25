@@ -4753,10 +4753,10 @@ bool TerminalSession::operator()(actions::NoSearchHighlight)
 
 bool TerminalSession::operator()(actions::OpenConfiguration event)
 {
-    // By default open the in-app settings page over this session's window (routed through the manager
+    // By default open the app's Settings window, near this session's window (routed through the manager
     // like every window-scoped op). The explicit `in_editor: true` opt-in instead opens the raw
     // configuration file in the OS's external editor — the historical behavior.
-    if (!event.inEditor)
+    if (event.target == actions::ConfigurationTarget::SettingsWindow)
     {
         _manager->openSettings(/*acting*/ this);
         return true;

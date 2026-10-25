@@ -16,6 +16,8 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/CoreFixtures.hpp>
 #include <contour/test/LauncherFixtures.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
@@ -36,6 +38,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 #include <QtCore/QTemporaryDir>
+#include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -506,7 +509,9 @@ class TestApp
              linkServices(),
              std::move(taskbarProgress),
              std::make_unique<InMemoryWindowPositionStore>(),
-             appearance)
+             appearance,
+             core::platform::defaultSteadyClock().now(),
+             settingsWindowFactory())
     {
         parseTerminalVerb();
     }
@@ -537,7 +542,9 @@ class TestApp
              linkServices(),
              nullptr,
              std::make_unique<InMemoryWindowPositionStore>(),
-             contour::platform::nullAppearanceServices())
+             contour::platform::nullAppearanceServices(),
+             core::platform::defaultSteadyClock().now(),
+             settingsWindowFactory())
     {
         parseTerminalVerb();
     }
@@ -585,7 +592,9 @@ class TestApp
              linkServices(),
              nullptr,
              std::make_unique<InMemoryWindowPositionStore>(),
-             contour::platform::nullAppearanceServices())
+             contour::platform::nullAppearanceServices(),
+             core::platform::defaultSteadyClock().now(),
+             settingsWindowFactory())
     {
         std::vector<char const*> argv;
         argv.reserve(args.size() + 1);
@@ -732,6 +741,21 @@ class TestApp
         return launcher;
     }
 
+    /// Builds the app's Settings window offscreen, on an engine of the fixture's own: the app never builds
+    /// its own engine in a test. The engine is made on the first show, with the chrome tokens installed.
+    /// Runs in the member-initializer list; what it returns is called only once _app exists.
+    [[nodiscard]] contour::window::SettingsWindowFactory settingsWindowFactory()
+    {
+        return [this](contour::window::SettingsWindowHost& host) {
+            if (!_settingsEngine)
+            {
+                _settingsEngine = std::make_unique<QQmlEngine>();
+                installChromeStyle(*_settingsEngine);
+            }
+            return contour::window::loadSettingsWindow(*_settingsEngine, host);
+        };
+    }
+
     RecordingExternalLauncher* _launcher = nullptr;
     /// The process's own environment: what the fixture exercises is the GUI, not what any variable
     /// reads as. A test that cares sets the names it needs (TestApp(SessionFiles,
@@ -755,6 +779,9 @@ class TestApp
     /// Where the app's sessions look up paths, its link detection too: _fileSystem unless the test chose
     /// another. Declared before _app, which borrows it.
     core::platform::FileSystem const* _sessionFiles = nullptr;
+    /// The engine the app's Settings window is built on; see settingsWindowFactory(). Declared before _app,
+    /// so the window the app owns goes before the engine it was built on.
+    std::unique_ptr<QQmlEngine> _settingsEngine;
     contour::ContourGuiApp _app;
 };
 

@@ -1720,6 +1720,11 @@ bool WindowController::isMinimized() const noexcept
     return _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowMinimized);
 }
 
+QScreen* WindowController::screen() const noexcept
+{
+    return _osWindow != nullptr ? _osWindow->screen() : nullptr;
+}
+
 void WindowController::requestNotification(QString const& title,
                                            QString const& body,
                                            std::function<void()> onClicked)

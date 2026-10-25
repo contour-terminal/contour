@@ -822,14 +822,17 @@ input_mapping:
 )"sv);
 
     // The defaults bind OpenConfiguration as CHAR mappings, so the two custom KEY mappings are ours.
-    auto flags = std::vector<bool> {};
+    using contour::actions::ConfigurationTarget;
+    auto targets = std::vector<ConfigurationTarget> {};
     for (auto const& mapping: config.inputMappings.value().keyMappings)
         if (auto const* oc = std::get_if<contour::actions::OpenConfiguration>(&mapping.binding.at(0)))
-            flags.push_back(oc->inEditor);
+            targets.push_back(oc->target);
 
-    REQUIRE(flags.size() == 2);
-    CHECK(std::ranges::count(flags, false) == 1); // default -> in-app settings dialog
-    CHECK(std::ranges::count(flags, true) == 1);  // in_editor: true -> external editor
+    REQUIRE(targets.size() == 2);
+    CHECK(std::ranges::count(targets, ConfigurationTarget::SettingsWindow)
+          == 1); // default -> Settings window
+    CHECK(std::ranges::count(targets, ConfigurationTarget::Editor)
+          == 1); // in_editor: true -> external editor
 }
 
 TEST_CASE("Config: an out-of-range or non-numeric ratio is ignored", "[config][layout]")

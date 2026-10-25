@@ -34,6 +34,8 @@
 
 #include <vtworkspace/Primitives.hpp>
 
+class QScreen;
+
 namespace vtworkspace
 {
 class Tab;
@@ -580,6 +582,10 @@ class WindowController:
     /// Read from QWindow::windowStates(), which the platform keeps current. (Wayland compositors do not
     /// report minimising, so there a minimised window reads as shown.)
     [[nodiscard]] bool isMinimized() const noexcept;
+
+    /// The screen this window's OS window is on: where the Settings window opens when this window asks.
+    /// @return The bound window's screen, or nullptr before a window is bound.
+    [[nodiscard]] QScreen* screen() const noexcept;
 
     /// Brings this window to the front: un-minimises it, keeping a maximised or full-screen state,
     /// raises it, and asks the window manager to activate it. What clicking a finish notification

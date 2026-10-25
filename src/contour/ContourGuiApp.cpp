@@ -33,6 +33,8 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/WindowController.hpp>
 #include <contour/window/WindowLiveness.hpp>
 
@@ -368,6 +370,17 @@ namespace
                              "With --latency-probe: how many keys are measured.",
                              "N" };
     }
+
+    /// @return The enumerator's name of @p error, for the log.
+    [[nodiscard]] constexpr std::string_view nameOf(window::SettingsWindowError error) noexcept
+    {
+        switch (error)
+        {
+            case window::SettingsWindowError::Unavailable: return "Unavailable";
+            case window::SettingsWindowError::LoadFailed: return "LoadFailed";
+        }
+        return "Unknown";
+    }
 } // namespace
 
 VerbatimCommand classifyVerbatimCommand(std::string_view token, ProgramReachablePredicate isReachable)
@@ -413,7 +426,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                              std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress,
                              std::unique_ptr<window::WindowPositionStore> windowPositionStore,
                              platform::AppearanceServices const& appearanceServices,
-                             core::platform::SteadyTimePoint processStart):
+                             core::platform::SteadyTimePoint processStart,
+                             window::SettingsWindowFactory settingsWindowFactory):
     ContourApp { env },
     _startupTimeline { core::platform::defaultSteadyClock(), processStart },
     _sshSearchPath { vtpty::execSearchPath(env.get("PATH")) },
@@ -450,6 +464,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     QDir::homePath().toStdString(),
                     *_taskbarProgressSink),
     _gpuInventory { display::makePlatformGpuInventory() },
+    _settingsWindowFactory { settingsWindowFactory ? std::move(settingsWindowFactory)
+                                                   : engineSettingsWindowFactory() },
     _accessibilitySource(
         appearanceServices.accessibility([this](config::AccessibilityPreferences preferences) {
             onAccessibilityPreferencesChanged(preferences);
@@ -457,7 +473,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _platformAppearance(appearanceServices.appearance(
         [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
     _nativeMenus(appearanceServices.menus()),
-    _menuBarPlacement(command::menuBarPlacementFor(config::detectHostPlatform(env))),
+    _hostPlatform(config::detectHostPlatform(env)),
+    _menuBarPlacement(command::menuBarPlacementFor(_hostPlatform)),
     _menuBarIntegration(appearanceServices.menuBar())
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
@@ -1755,7 +1772,7 @@ config::WindowControlStyle ContourGuiApp::resolvedWindowControlStyle(
     //
     // One place does it, so the style the first frame draws and the style every later reload applies
     // cannot come to different answers about what this host is.
-    return config::resolveWindowControlStyle(configured, config::detectHostPlatform(processEnvironment()));
+    return config::resolveWindowControlStyle(configured, _hostPlatform);
 }
 
 void ContourGuiApp::applyWindowControlStyle(config::WindowControlStyle style)
@@ -1877,13 +1894,23 @@ void ContourGuiApp::runWithoutWindow(actions::Action const& action)
             newWindow();
         return;
     }
-    // Settings, About and the rest show in a window, or act on a session's configuration.
+    if (auto const* const configuration = std::get_if<actions::OpenConfiguration>(&action);
+        configuration != nullptr && configuration->target == actions::ConfigurationTarget::SettingsWindow)
+    {
+        // The Settings window is the app's own, and opens with no terminal window at all.
+        openSettings(nullptr);
+        return;
+    }
+    // About, Open Configuration File and the rest show in a window, or act on a session's configuration.
     errorLog()("Menu bar action \"{}\" needs a window, and none is open.", actions::name(action));
 }
 
 void ContourGuiApp::onConfigurationReloaded()
 {
     refreshChromeStyle();
+    // The app's Settings reads the configuration the reload replaced; built on first use, so maybe not yet.
+    if (_settingsController)
+        _settingsController->refresh();
     // Guarded as refreshChromeStyle() is: the notice is built with the QML engine, which a headless
     // app never creates.
     if (_newDefaultsNotice)
@@ -2240,6 +2267,9 @@ int ContourGuiApp::terminalGuiAction()
     auto const releaseQtObjects = core::Finally { [this] {
         // The menu bar first of all: its sources read the windows the engine owns, and it is Qt Widgets.
         _appMenuBar.reset();
+        // The Settings window next, built on the engine, and then the controller its host borrowed.
+        _settingsWindow.reset();
+        _settingsController.reset();
         // The QML engine next: its context properties point at the style providers, and the windows
         // the helpers below served are gone with it.
         _qmlEngine.reset();
@@ -2315,8 +2345,7 @@ int ContourGuiApp::terminalGuiAction()
     //
     // This is why `ui_style` takes effect on the next start rather than live: the style is resolved
     // once, here, before the first control exists, and Qt offers no way to re-resolve it afterwards.
-    _chromeStyle =
-        config::resolveChromeStyle(_config.uiStyle.value(), config::detectHostPlatform(processEnvironment()));
+    _chromeStyle = config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform);
     QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
     QQuickStyle::setStyle(QString::fromUtf8(config::uiStyleTokens(_chromeStyle).quickControlsStyle));
 
@@ -2380,12 +2409,14 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<session::PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
     qmlRegisterUncreatableType<window::WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
     qmlRegisterUncreatableType<window::CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
-    qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the window controller.");
+    qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the application.");
+    qmlRegisterUncreatableType<window::SettingsWindowHost>("Contour.Terminal", 1, 0, "SettingsWindowHost", "Created by the application.");
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<window::WindowController*>("WindowController*");
     qRegisterMetaType<window::CommandPaletteModel*>("CommandPaletteModel*");
     qRegisterMetaType<window::SettingsController*>("SettingsController*");
+    qRegisterMetaType<window::SettingsWindowHost*>("SettingsWindowHost*");
     // clang-format on
 
     // Constructed with the resolved style rather than default-constructed and then applied: a
@@ -2772,6 +2803,53 @@ void ContourGuiApp::bindDaemonWindow(std::uint64_t daemonWindow, vtworkspace::Wi
     _attachBoot = AttachBoot::Adopted;
     _attachWindowMap.emplace(daemonWindow, osWindow);
     contour::remote::applyRemoteLayout(_sessionManager, osWindow, *_nativeController, daemonWindow);
+}
+
+window::SettingsController& ContourGuiApp::settingsController()
+{
+    // The collaborators WindowController gives its own today (Task 4 removes that one): the app's live
+    // configuration, a side-file store rooted at the configuration directory, and an apply step that
+    // reloads every session after a save.
+    if (!_settingsController)
+        _settingsController = std::make_unique<window::SettingsController>(
+            [this]() -> config::Config const& { return _config; },
+            std::make_shared<config::FileGuiConfigStore>(_config.configFile.parent_path()),
+            [this]() {
+                if (auto const reloaded = _sessionManager.reloadAllSessions(); !reloaded)
+                    errorLog()("Failed to reload configuration. {}", reloaded.error());
+                // The GUI chrome theme is re-applied by reloadAllSessions() itself. The window controls
+                // are QML bindings on their provider, so re-applying their style makes every window follow.
+                applyWindowControlStyle(_config.windowControlStyle.value());
+            },
+            _gpuInventory);
+    return *_settingsController;
+}
+
+window::SettingsWindowFactory ContourGuiApp::engineSettingsWindowFactory()
+{
+    return [this](window::SettingsWindowHost& host)
+               -> std::expected<std::unique_ptr<QQuickWindow>, window::SettingsWindowError> {
+        // A headless app builds no engine, so it has nothing to build on.
+        if (!_qmlEngine)
+            return std::unexpected { window::SettingsWindowError::Unavailable };
+        return window::loadSettingsWindow(*_qmlEngine, host);
+    };
+}
+
+window::SettingsWindowHost& ContourGuiApp::settingsWindow()
+{
+    if (!_settingsWindow)
+        _settingsWindow =
+            std::make_unique<window::SettingsWindowHost>(settingsController(),
+                                                         window::settingsWindowConventionsFor(_hostPlatform),
+                                                         _settingsWindowFactory);
+    return *_settingsWindow;
+}
+
+void ContourGuiApp::openSettings(QScreen* near)
+{
+    if (auto const shown = settingsWindow().show(near); !shown)
+        errorLog()("Cannot open the Settings window. {}", nameOf(shown.error()));
 }
 
 display::ForcedFontDpiProvider* ContourGuiApp::forcedFontDpiProvider()

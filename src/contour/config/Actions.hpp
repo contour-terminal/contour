@@ -38,6 +38,15 @@ enum class Direction : uint8_t
     Down,
 };
 
+/// Where OpenConfiguration shows the configuration.
+///
+/// The `in_editor` key of a binding, converted at the YAML boundary: `in_editor: true` is Editor.
+enum class ConfigurationTarget : uint8_t
+{
+    SettingsWindow = 0, ///< The app's Settings window: the default.
+    Editor,             ///< The configuration file, in the OS's external editor.
+};
+
 // clang-format off
 struct CancelSelection{};
 struct ChangeProfile{ std::string name; };
@@ -57,7 +66,7 @@ struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
 struct NoSearchHighlight{};
 struct OpenCommandPalette{};
-struct OpenConfiguration{ bool inEditor = false; }; // GUI settings page by default; in_editor opens the file
+struct OpenConfiguration{ ConfigurationTarget target = ConfigurationTarget::SettingsWindow; };
 struct OpenFileManager{};
 struct OpenSelection{};
 struct PasteClipboard{ bool strip = false; };
@@ -474,8 +483,8 @@ namespace documentation
         "alphabetically."
     };
     constexpr inline std::string_view OpenConfiguration {
-        "Opens the in-app settings page (profiles, color schemes, global settings). Set `in_editor: true` "
-        "on the binding to instead open the configuration file in an external editor."
+        "Opens the Settings window (profiles, color schemes, global settings). Set `in_editor: true` on the "
+        "binding to instead open the configuration file in an external editor."
     };
     constexpr inline std::string_view OpenFileManager {
         "Opens the current working directory in a system file manager."
@@ -1080,6 +1089,15 @@ template <contour::actions::CommandBlockActionConcept BlockAction>
                 return std::format(", position: {}", contour::config::configEnumToken(a.position));
             },
             [](CommandBlockActionConcept auto const& a) { return formatCommandBlockArguments(a); },
+            [](OpenConfiguration const& a) {
+                // The Settings window is the default, so only the editor target has an argument to write.
+                switch (a.target)
+                {
+                    case ConfigurationTarget::SettingsWindow: return std::string {};
+                    case ConfigurationTarget::Editor: return std::string { ", in_editor: true" };
+                }
+                return std::string {};
+            },
             [](SetTabColor const& a) {
                 // A colorless SetTabColor opens the picker, so it has no argument to write. The color
                 // needs no hand-quoting: std::formatter<RGBColor> already renders it as '#RRGGBB', and

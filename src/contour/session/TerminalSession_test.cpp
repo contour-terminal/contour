@@ -1194,15 +1194,15 @@ TEST_CASE("TerminalSession: opener, paste and reload actions run without a displ
         "file://" + std::string { contour::test::TestApp::HostName } + "/tmp");
 
     // The document/URL openers route through the injected ExternalLauncher (no desktop touched).
-    CHECK((*session)(actions::OpenConfiguration { .inEditor = true }));
+    CHECK((*session)(actions::OpenConfiguration { .target = actions::ConfigurationTarget::Editor }));
     CHECK((*session)(actions::OpenFileManager {}));
     CHECK((*session)(actions::OpenSelection {}));
     // OpenConfiguration{in_editor} opens the config file URL, OpenFileManager the local cwd, and
     // OpenSelection the (empty) selection.
     CHECK(launcher.openedUrls.size() == 3);
 
-    // OpenConfiguration WITHOUT in_editor opens the in-app settings page instead — no URL is launched
-    // (headless, no hosting window, so it is a safe no-op that still returns true).
+    // OpenConfiguration WITHOUT in_editor opens the app's Settings window instead, hosting window or none:
+    // no URL is launched.
     CHECK((*session)(actions::OpenConfiguration {}));
     CHECK(launcher.openedUrls.size() == 3);
 
@@ -4204,7 +4204,7 @@ TEST_CASE("TerminalSession: open and paste-shell actions run headlessly without 
     auto session = makeDisplaylessSession(testApp.app());
     namespace actions = contour::actions;
 
-    CHECK((*session)(actions::OpenConfiguration { .inEditor = true }));
+    CHECK((*session)(actions::OpenConfiguration { .target = actions::ConfigurationTarget::Editor }));
     CHECK((*session)(actions::OpenFileManager {}));
     CHECK((*session)(actions::OpenSelection {}));
     CHECK((*session)(actions::PasteSelection { .evaluateInShell = true }));
@@ -5126,7 +5126,7 @@ TEST_CASE("TerminalSession: the opener actions log (do not crash) when the launc
         "file://" + std::string { contour::test::TestApp::HostName } + "/tmp");
 
     // in_editor so OpenConfiguration takes the openUrl() (file-open) path rather than the settings page.
-    CHECK((*session)(actions::OpenConfiguration { .inEditor = true }));
+    CHECK((*session)(actions::OpenConfiguration { .target = actions::ConfigurationTarget::Editor }));
     CHECK((*session)(actions::OpenFileManager {}));
     CHECK((*session)(actions::OpenSelection {}));
     CHECK(testApp.launcher().openedUrls.size() == 3); // all attempted despite the failure

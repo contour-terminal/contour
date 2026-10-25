@@ -317,6 +317,15 @@ TEST_CASE("actions: the block copy actions write their arguments as config token
           == "CopyCommandLine, target: cursor, block: 2");
 }
 
+TEST_CASE("actions: OpenConfiguration writes in_editor for the editor target alone", "[actions]")
+{
+    CHECK(std::format("{}", actions::Action { actions::OpenConfiguration {} }) == "OpenConfiguration");
+    CHECK(std::format("{}",
+                      actions::Action {
+                          actions::OpenConfiguration { .target = actions::ConfigurationTarget::Editor } })
+          == "OpenConfiguration, in_editor: true");
+}
+
 TEST_CASE("actions: CopySelection writes the arguments it carries", "[actions][semanticblocks]")
 {
     CHECK(std::format("{}", actions::Action { actions::CopySelection {} }) == "CopySelection");

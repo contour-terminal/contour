@@ -7,6 +7,7 @@
 #include <contour/command/MenuBarTable.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/LayoutStore.hpp>
+#include <contour/config/WindowControlStyle.hpp>
 #include <contour/display/GpuSelection.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
@@ -24,6 +25,8 @@
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
+#include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -247,6 +250,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     ///                     so they never read the host's settings.
     /// @param processStart When the process began, sampled first thing in main(): the origin of the
     ///                     startup timeline. The default is the moment of construction, for tests.
+    /// @param settingsWindowFactory Builds the Settings window on its first show. Null (the default) loads
+    ///                     SettingsWindow on the app's own QML engine, and gives Unavailable while there
+    ///                     is none; tests pass one over an offscreen engine of their own.
     explicit ContourGuiApp(
         core::Environment const& env,
         std::unique_ptr<session::SessionFactory> sessionFactory = nullptr,
@@ -263,7 +269,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         std::unique_ptr<platform::TaskbarProgressSink> taskbarProgress = nullptr,
         std::unique_ptr<window::WindowPositionStore> windowPositionStore = nullptr,
         platform::AppearanceServices const& appearanceServices = {},
-        core::platform::SteadyTimePoint processStart = core::platform::defaultSteadyClock().now());
+        core::platform::SteadyTimePoint processStart = core::platform::defaultSteadyClock().now(),
+        window::SettingsWindowFactory settingsWindowFactory = nullptr);
     ~ContourGuiApp() override;
 
     /// The shared persistence service for normal-window locations.
@@ -299,6 +306,21 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// lazily on first use (requires a constructed QGuiApplication for platform detection).
     /// @return The provider; never nullptr once a Qt application exists.
     [[nodiscard]] display::ForcedFontDpiProvider* forcedFontDpiProvider();
+
+    /// The app's one settings bridge, created on first use: it edits the app's live configuration,
+    /// writes the side files beside the configuration file, and applies a save by reloading every session.
+    /// @return The controller; it lives as long as the app's Qt objects.
+    [[nodiscard]] window::SettingsController& settingsController();
+
+    /// The app's one Settings window host, created on first use over settingsController() and this
+    /// host's conventions. The window itself is built on its first show.
+    /// @return The host; it lives as long as the app's Qt objects.
+    [[nodiscard]] window::SettingsWindowHost& settingsWindow();
+
+    /// Shows, raises and focuses the Settings window (OpenConfiguration's default target), with or without
+    /// a terminal window. Logs, and shows nothing, when the window cannot be built.
+    /// @param near The screen of the window that asked; null for the primary screen.
+    void openSettings(QScreen* near);
 
     /// The app-wide keyboard layout (single instance; see KeyboardLayout.h). The active layout is
     /// process-global ambient state, and the macOS implementation registers an observer for changes
@@ -560,7 +582,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// A Window-scoped row runs on the focused window's active session, and does nothing without one. An
     /// Application-scoped row runs on the active session of applicationController()'s window, so it
     /// still works with every window minimised or another application in front; with no window left,
-    /// the rows that need none (Quit, New Window) run on the application itself, and the rest do nothing.
+    /// the rows that need none (Quit, New Window, Settings…) run on the application itself, and the rest
+    /// do nothing -- Open Configuration File among them, which only logs.
     /// @param action The picked row's action.
     /// @param scope What the row acts on.
     void runMenuBarAction(actions::Action const& action, command::ActionScope scope);
@@ -571,9 +594,16 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// and a reload of the configuration, under a global menu bar.
     void warnOfMenuOwnedBindings() const;
 
-    /// Runs @p action with no session to run it on: the Application-scoped rows that need no window.
+    /// Runs @p action with no session to run it on: the Application-scoped rows that need no window --
+    /// Quit, New Window, and Settings… (OpenConfiguration's Settings window target). Any other action,
+    /// Open Configuration File included, only logs that it needs a window.
     /// @param action The picked row's action.
     void runWithoutWindow(actions::Action const& action);
+
+    /// The Settings window factory used when none is injected: loads SettingsWindow on the app's own QML
+    /// engine, and gives SettingsWindowError::Unavailable while there is none (a headless app).
+    /// @return The factory; it borrows this app.
+    [[nodiscard]] window::SettingsWindowFactory engineSettingsWindowFactory();
 
     /// @return The focused window's controller, or nullptr when no window is focused.
     [[nodiscard]] window::WindowController* focusedController() const noexcept;
@@ -1000,6 +1030,15 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 
+    /// Builds the Settings window on its first show: the injected factory, or one over _qmlEngine.
+    window::SettingsWindowFactory _settingsWindowFactory;
+    /// The app's one settings bridge, created on first use. Declared after _qmlEngine, so the Settings
+    /// window goes before the engine it was built on, and before _settingsWindow, so it outlives the host
+    /// that borrows it.
+    std::unique_ptr<window::SettingsController> _settingsController;
+    /// The app's one Settings window host, created on first use; it owns the window.
+    std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
+
     // The OS appearance sources the chrome follows. Declared LAST -- after _sessionManager,
     // _chromeStyleHost and _qmlEngine -- so they are destroyed FIRST: a source stops reporting once
     // destroyed, so no late change can reach a destroyed host, its engine's QQmlContext, or the
@@ -1009,6 +1048,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<platform::IPlatformAppearance> _platformAppearance;
     // The native menu presenter, built from the same services; it holds no callback into this app.
     std::unique_ptr<platform::INativeMenuPresenter> _nativeMenus;
+    // The host this process runs on, detected once from the environment at construction.
+    config::HostPlatform _hostPlatform = config::HostPlatform::Other;
     // Where the menu bar lives on this host; it decides which chords a menu may take from the terminal.
     command::MenuBarPlacement _menuBarPlacement = command::MenuBarPlacement::None;
     // Hands the menu bar's Window and Help menus to the OS, built from the same services. Declared before

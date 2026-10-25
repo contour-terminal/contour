@@ -748,11 +748,8 @@ void TerminalSessionManager::openCommandPalette(TerminalSession* acting)
 
 void TerminalSessionManager::openSettings(TerminalSession* acting)
 {
-    auto* controller = controllerHostingSession(acting);
-    if (controller == nullptr)
-        return;
-
-    controller->openSettings();
+    auto const* const controller = controllerHostingSession(acting);
+    _app.openSettings(controller != nullptr ? controller->screen() : nullptr);
 }
 
 std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()

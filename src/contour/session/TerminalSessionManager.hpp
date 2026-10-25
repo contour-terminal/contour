@@ -253,9 +253,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param acting The session that triggered the action; its hosting window shows the palette.
     void openCommandPalette(TerminalSession* acting);
 
-    /// Shows the in-app settings page over the window hosting @p acting (the OpenConfiguration action's
-    /// default, and the tab-strip gear). No-ops if @p acting has no hosting window.
-    /// @param acting The session that triggered the action; its hosting window shows the settings page.
+    /// Shows the app's one Settings window (the OpenConfiguration action's default), in whatever state that
+    /// window is in: built on first use, else as it was left. Even with no hosting window, Settings opens.
+    /// @param acting The session that triggered the action; Settings opens on its hosting window's screen,
+    ///               or on the primary screen when it has none.
     void openSettings(TerminalSession* acting);
 
     /// Re-reads the master configuration from disk once (picking up any GUI side-file changes) into

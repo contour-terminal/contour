@@ -4644,9 +4644,12 @@ std::optional<actions::Action> YAMLConfigReader::parseAction(YAML::Node const& n
 
         if (holds_alternative<actions::OpenConfiguration>(action))
         {
-            // Default opens the in-app settings page; `in_editor: true` opens the config file instead.
+            // Default opens the Settings window; `in_editor: true` opens the config file instead.
             if (auto inEditor = node["in_editor"]; inEditor && inEditor.IsScalar())
-                return actions::OpenConfiguration { inEditor.as<bool>() };
+                return actions::OpenConfiguration { .target =
+                                                        inEditor.as<bool>()
+                                                            ? actions::ConfigurationTarget::Editor
+                                                            : actions::ConfigurationTarget::SettingsWindow };
             return action;
         }
 
