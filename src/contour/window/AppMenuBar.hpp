@@ -78,6 +78,10 @@ struct AppMenuBarSources
 /// display::MenuOwnedKeys are the menu's to take from the terminal: the role rows' keys (⌘, ⌘Q and ⌘M) and
 /// the application menu's own Hide (⌘H) and Hide Others (⌥⌘H). Every other chord a row shows stays the
 /// terminal's.
+///
+/// For its whole life it installs an application-wide QTranslator (which retitles the Preferences-role row
+/// "Settings…"), so constructing and destroying one each posts a QEvent::LanguageChange to every widget and
+/// window of the application.
 class AppMenuBar
 {
   public:

@@ -110,6 +110,7 @@
           <li>Adds a native macOS menu bar of six menus: Contour, Shell, Edit, View, Window and Help. The Window menu lists the open windows, and Help carries the system's search field</li>
           <li>Adds native context menus on macOS: with the default <code>ui_style: native</code>, the terminal, title bar, tab and new-tab menus open as system menus; <code>ui_style: terminal</code> keeps the in-window menus</li>
           <li>Adds a row of color swatches and Move Tab to New Window to the tab's context menu</li>
+          <li>Changes the in-window tab menu (on Linux and Windows, and under <code>ui_style: terminal</code>) to open below the tab instead of at the pointer</li>
           <li>Adds the actions <code>CloseOtherTabs</code>, <code>CloseTabsToRight</code>, <code>MoveTabToNewWindow</code>, <code>ShowAbout</code>, <code>MinimizeWindow</code> and <code>ZoomWindow</code></li>
           <li>Changes key handling under the macOS menu bar: the terminal now receives every key chord except the menu's own (⌘Q, ⌘,, ⌘H, ⌥⌘H and ⌘M), including chords a menu item shows</li>
           <li>Fixes a configuration with separate light and dark color schemes being saved as YAML that did not load back</li>

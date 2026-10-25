@@ -61,6 +61,19 @@ TEST_CASE("tabMenu.rowsInOrder", "[tabmenu]")
     CHECK(menu[3].kind == ContextMenuEntryKind::Separator);
 }
 
+TEST_CASE("tabMenu.emptyPaletteLeavesNoLeadingSeparator", "[tabmenu]")
+{
+    auto state = threeTabs();
+    state.palette.clear();
+
+    auto const menu = buildTabContextMenu(state);
+    auto const& color = row(menu, "Tab Color");
+
+    REQUIRE_FALSE(color.children.empty());
+    CHECK(color.children.front().kind != ContextMenuEntryKind::Separator);
+    CHECK(titles(color.children) == std::vector<std::string> { "Custom…", "Reset" });
+}
+
 TEST_CASE("tabMenu.swatchesFollowThePalette", "[tabmenu]")
 {
     auto state = threeTabs();

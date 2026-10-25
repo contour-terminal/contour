@@ -3,6 +3,8 @@
 #include <contour/platform/QtInvoke.hpp>
 #include <contour/window/AppMenuBar.hpp>
 
+#include <core/Assert.hpp>
+
 #include <QtCore/QChar>
 #include <QtCore/QCoreApplication>
 #include <QtCore/QString>
@@ -530,7 +532,10 @@ void AppMenuBar::refresh(MenuBarMenu which)
         case MenuOnOpen::RefreshAndRelist: {
             auto const tabs = tabListStart(rows, tree);
             auto const firstTabRow = _tabList.isEmpty() ? _windowRowsEnd : _tabList.front();
-            actions.resize(actions.indexOf(firstTabRow));
+            // The tab list and the marker after it are this bar's own, and nothing but a refill removes them.
+            auto const tabListAt = actions.indexOf(firstTabRow);
+            Require(tabListAt >= 0);
+            actions.resize(tabListAt);
             refreshActions(actions, rows.first(tabs));
             refillTabList(rows.subspan(tabs), tree);
             return;

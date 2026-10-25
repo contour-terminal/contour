@@ -58,7 +58,10 @@ namespace
 
     [[nodiscard]] std::vector<ContextMenuEntry> tabColorRows(TabContextMenuState const& state)
     {
-        return Table::buildRows(tabColorTemplate(), state);
+        // Tidied as a menu bar submenu is: an empty palette must not open the submenu on a divider.
+        auto entries = Table::buildRows(tabColorTemplate(), state);
+        detail::dropRedundantSeparators(entries);
+        return entries;
     }
 
     /// The tab menu, as data.

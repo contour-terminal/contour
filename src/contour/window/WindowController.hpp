@@ -915,16 +915,17 @@ class WindowController:
         return _menus[static_cast<std::size_t>(surface)];
     }
 
-    /// Publishes @p tree as @p surface's menu and shows it: natively at the pointer, over this window,
-    /// when the style asks for it and the platform can, otherwise in the scene. The native presentation is
-    /// posted, so it runs once the press handler that asked for it has returned.
+    /// Shows @p tree as @p surface's menu: natively at the pointer, over this window, when the style asks
+    /// for it and the platform can, otherwise in the scene, where alone it is published as the model. The
+    /// native presentation is posted, so it runs once the press handler that asked for it has returned.
     /// @param surface The surface the menu opens from.
     /// @param tree The resolved menu.
     void presentSurface(MenuSurface surface, command::MenuTree tree);
 
-    /// Emits @p surface's request to pop its menu in the scene.
+    /// Publishes @p tree as @p surface's in-scene menu model, and asks the QML to pop it.
     /// @param surface The surface whose QML menu should open.
-    void requestInSceneMenu(MenuSurface surface);
+    /// @param tree The resolved menu.
+    void showInScene(MenuSurface surface, command::MenuTree tree);
 
     /// What a menu acts on, pinned when it opens: the pane menu's session and the tab menu's tab.
     struct MenuTarget

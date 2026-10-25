@@ -556,6 +556,8 @@ TEST_CASE("a native pick runs on the menu it was shown for, though another has o
     window->openTabContextMenu(2, {});
     QCoreApplication::sendPostedEvents();
     REQUIRE(native.presenter->trees.size() == 2);
+    // Shown natively, the menus never became the in-scene model.
+    CHECK(window->tabContextMenuModel().isEmpty());
 
     first(actionIndexOf(firstTree, "Close Other Tabs"));
     QCoreApplication::sendPostedEvents();

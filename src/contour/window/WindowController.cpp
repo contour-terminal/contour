@@ -228,20 +228,9 @@ command::MenuTree WindowController::resolveMenu(std::span<command::ContextMenuEn
 
 void WindowController::presentSurface(MenuSurface surface, command::MenuTree tree)
 {
-    _menus[static_cast<std::size_t>(surface)].publish(tree);
-
-    // Model first, then the request to show, so the QML has rebuilt the rows by the time it pops them.
-    switch (surface)
-    {
-        case MenuSurface::Pane: emit contextMenuModelChanged(); break;
-        case MenuSurface::TitleBar: emit titleBarContextMenuModelChanged(); break;
-        case MenuSurface::Tab: emit tabContextMenuModelChanged(); break;
-        case MenuSurface::NewTab: emit newTabMenuModelChanged(); break;
-    }
-
     if (_menuPresentation == config::MenuPresentation::InScene)
     {
-        requestInSceneMenu(surface);
+        showInScene(surface, std::move(tree));
         return;
     }
 
@@ -273,7 +262,7 @@ void WindowController::presentSurface(MenuSurface surface, command::MenuTree tre
                                                { .window = window.data(), .position = std::nullopt },
                                                pickFromShown(tree.actions, std::move(onAction)));
                                if (route == MenuRoute::InScene)
-                                   requestInSceneMenu(surface);
+                                   showInScene(surface, tree);
                            });
 }
 
@@ -282,8 +271,20 @@ WindowController::MenuTarget WindowController::currentMenuTarget() const
     return MenuTarget { .session = _contextMenuSession, .tab = _tabContextMenuTab };
 }
 
-void WindowController::requestInSceneMenu(MenuSurface surface)
+void WindowController::showInScene(MenuSurface surface, command::MenuTree tree)
 {
+    // Published for the scene alone: a native pick resolves against the tree it showed, never the model.
+    _menus[static_cast<std::size_t>(surface)].publish(std::move(tree));
+
+    // Model first, then the request to show, so the QML has rebuilt the rows by the time it pops them.
+    switch (surface)
+    {
+        case MenuSurface::Pane: emit contextMenuModelChanged(); break;
+        case MenuSurface::TitleBar: emit titleBarContextMenuModelChanged(); break;
+        case MenuSurface::Tab: emit tabContextMenuModelChanged(); break;
+        case MenuSurface::NewTab: emit newTabMenuModelChanged(); break;
+    }
+
     switch (surface)
     {
         case MenuSurface::Pane: emit contextMenuRequested(); break;

@@ -21,7 +21,8 @@ namespace
     /// QCocoaMenuBar::insertWindowMenu()) when NSApp has none. AppKit answers NSApp.windowsMenu with the
     /// first menu of the main menu named as the Windows menu, so while the placeholder stays, it goes on
     /// listing the windows, and the menu handed over never does. Only a hidden item of @p next's own bar is
-    /// taken out: a Windows menu some other bar shows is left where it is.
+    /// taken out: a Windows menu some other bar shows is left where it is. The placeholder, its name and its
+    /// being hidden were verified against Qt 6.11.1's cocoa plugin.
     /// @param previous The Windows menu in force.
     /// @param next The menu that is to be it.
     void retirePlaceholder(NSMenu* previous, NSMenu* next)

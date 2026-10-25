@@ -116,7 +116,9 @@ namespace
 
 std::vector<ContextMenuEntry> buildTabBarMenu(TabBarMenuState const& state)
 {
-    return TabBarTable::buildRows(tabBarTemplate(), state);
+    auto entries = TabBarTable::buildRows(tabBarTemplate(), state);
+    detail::dropRedundantSeparators(entries);
+    return entries;
 }
 
 std::vector<ContextMenuEntry> buildTitleBarContextMenu(TitleBarContextMenuState const& state)
