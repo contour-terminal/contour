@@ -2313,8 +2313,10 @@ class Terminal: public IStatusLinePublishTarget
         return _savedColorPalettes;
     }
 
-    void setColorPalette(ColorPalette const& palette) noexcept;
-    void resetColorPalette() noexcept { setColorPalette(defaultColorPalette()); }
+    /// Replaces the palette in effect, announcing the default background when it changes. Not
+    /// @c noexcept: the announcement reaches the frontend, which may allocate to post it on.
+    void setColorPalette(ColorPalette const& palette);
+    void resetColorPalette() { setColorPalette(defaultColorPalette()); }
 
     /// Re-seeds the palette, and the defaults a reset returns to, from @p colors.
     ///

@@ -8776,7 +8776,7 @@ void Terminal::setHighlightRange(HighlightRange highlightRange)
 
 constexpr auto MagicStackTopId = size_t { 0 };
 
-void Terminal::setColorPalette(ColorPalette const& palette) noexcept
+void Terminal::setColorPalette(ColorPalette const& palette)
 {
     auto const previousBackground = _colorPalette.defaultBackground;
     _colorPalette = palette;

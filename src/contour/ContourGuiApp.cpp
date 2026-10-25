@@ -1688,22 +1688,20 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme,
     if (scheme)
     {
         // Capture the OS palette once, before the first override, so System can later restore it.
-        if (!_guiPaletteOverridden)
-        {
+        if (!_appliedGuiScheme.has_value())
             _guiSystemPalette = QGuiApplication::palette();
-            _guiPaletteOverridden = true;
-        }
+        _appliedGuiScheme = scheme;
         display::displayLog()("Applying GUI theme override: {}", theme);
         QGuiApplication::setPalette(platform::buildThemePalette(*scheme));
     }
-    else if (_guiPaletteOverridden)
+    else if (_appliedGuiScheme.has_value())
     {
         // Returning to System after a prior dark/light override: restore the captured OS palette.
         // Note: once an explicit palette has been set, Qt no longer auto-tracks live OS theme
         // switches for the chrome until the next restart (the documented System-mode tradeoff).
         display::displayLog()("Applying GUI theme: system (restore OS palette)");
         QGuiApplication::setPalette(_guiSystemPalette);
-        _guiPaletteOverridden = false;
+        _appliedGuiScheme = std::nullopt;
     }
     else
         display::displayLog()("Applying GUI theme: system (follow OS color scheme)");
@@ -1714,12 +1712,25 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme,
     // it. On the palette-owning Linux platform themes this is inert on its own — hence the explicit
     // setPalette above. Setting the scheme emits no colorSchemeChanged to the terminal grid unless the
     // reported scheme actually changes, and the grid handler tracks the OS whenever the chrome is not pinned
-    // (_guiPaletteOverridden false).
+    // (_appliedGuiScheme empty).
     if (scheme)
         QGuiApplication::styleHints()->setColorScheme(*scheme);
     else
         QGuiApplication::styleHints()->unsetColorScheme();
 #endif
+}
+
+void ContourGuiApp::followLiveBackground(vtbackend::RGBColor liveBackground)
+{
+    // Only `theme: terminal` follows the terminal's background; any other theme would only repaint the
+    // whole application for the scheme it already shows. Likewise when the background moved without
+    // crossing the light/dark threshold.
+    auto const theme = _config.theme.value();
+    if (theme != config::GuiTheme::Terminal)
+        return;
+    if (platform::qtColorSchemeFor(theme, defaultProfileColors(), liveBackground) == _appliedGuiScheme)
+        return;
+    applyGuiTheme(theme, defaultProfileColors(), liveBackground);
 }
 
 config::WindowControlStyle ContourGuiApp::resolvedWindowControlStyle(
@@ -2160,7 +2171,7 @@ int ContourGuiApp::terminalGuiAction()
             // system (theme: system, or terminal over a dual color config). When the GUI theme is
             // force-pinned, colorScheme() reflects our own override, which must not move the terminal
             // palette.
-            if (_guiPaletteOverridden)
+            if (_appliedGuiScheme.has_value())
                 return;
 
             auto const newValue = newScheme == Qt::ColorScheme::Dark ? vtbackend::ColorPreference::Dark

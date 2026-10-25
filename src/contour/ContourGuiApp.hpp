@@ -487,6 +487,19 @@ class ContourGuiApp: public QObject, public cli::ContourApp
         applyGuiTheme(theme, colors, std::nullopt);
     }
 
+    /// Re-applies the chrome theme over the focused session's live background (OSC 11), but only under
+    /// @c GuiTheme::Terminal and only when the resolved scheme differs from the one last applied.
+    /// GUI thread only.
+    /// @param liveBackground The focused session's current default background.
+    void followLiveBackground(vtbackend::RGBColor liveBackground);
+
+    /// The scheme the chrome was last forced to, or @c std::nullopt while it follows the OS.
+    /// @return The applied scheme. The native window frame reads it, so it agrees with the chrome.
+    [[nodiscard]] std::optional<Qt::ColorScheme> appliedGuiScheme() const noexcept
+    {
+        return _appliedGuiScheme;
+    }
+
     /// The color configuration of the default profile, which @c GuiTheme::Terminal follows.
     [[nodiscard]] config::ColorConfig const& defaultProfileColors() const noexcept
     {
@@ -903,12 +916,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// The OS-provided application palette captured just before the first forced (dark/light) GUI
     /// theme is applied, so @c GuiTheme::System can restore it. Only meaningful while
-    /// @c _guiPaletteOverridden is @c true (see @c applyGuiTheme).
+    /// @c _appliedGuiScheme holds a scheme (see @c applyGuiTheme).
     QPalette _guiSystemPalette;
 
-    /// Whether a forced (dark/light) GUI theme currently overrides the OS application palette. Guards
-    /// the one-time capture of @c _guiSystemPalette and its restoration when returning to System.
-    bool _guiPaletteOverridden = false;
+    /// The scheme the last @c applyGuiTheme forced onto the chrome, or @c std::nullopt while the chrome
+    /// follows the OS palette. Guards the one-time capture of @c _guiSystemPalette and its restoration
+    /// when returning to System, and lets @c followLiveBackground skip a repaint that changes nothing.
+    std::optional<Qt::ColorScheme> _appliedGuiScheme = std::nullopt;
 
     /// The chrome token row, resolved once at startup from `ui_style` and the host platform.
     config::ChromeStyle _chromeStyle = config::ChromeStyle::ContourLinux;

@@ -24,6 +24,7 @@
 
 #include <QtCore/QPointer>
 #include <QtCore/QTemporaryDir>
+#include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
 #include <QtQuick/QQuickWindow>
@@ -1094,15 +1095,31 @@ namespace
     return QGuiApplication::palette().color(QPalette::Window).lightness();
 }
 
-/// Loads `theme: terminal` over the default (Classic, so simple and black) colours, which darkens the chrome.
+/// Loads @p theme over the default (Classic, so simple and black) colours, which darkens the chrome
+/// under both `terminal` and `dark`.
+void loadTheme(contour::test::ConfiguredTestApp& testApp,
+               std::string_view themeYaml,
+               contour::config::GuiTheme expected)
+{
+    contour::test::writeConfigFile(testApp.configFile(),
+                                   contour::test::profileConfigYaml(testApp.app().profileName(), themeYaml));
+    REQUIRE(testApp.manager().reloadAllSessions());
+    REQUIRE(testApp.app().config().theme.value() == expected);
+    REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(testApp.app().defaultProfileColors()));
+}
+
+/// Loads `theme: terminal`. @see loadTheme.
 void loadTerminalTheme(contour::test::ConfiguredTestApp& testApp)
 {
-    contour::test::writeConfigFile(
-        testApp.configFile(),
-        contour::test::profileConfigYaml(testApp.app().profileName(), "theme: terminal\n"));
-    REQUIRE(testApp.manager().reloadAllSessions());
-    REQUIRE(testApp.app().config().theme.value() == contour::config::GuiTheme::Terminal);
-    REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(testApp.app().defaultProfileColors()));
+    loadTheme(testApp, "theme: terminal\n", contour::config::GuiTheme::Terminal);
+}
+
+/// A palette no theme produces, so a test can tell whether the chrome theme was re-applied over it.
+[[nodiscard]] QPalette sentinelPalette()
+{
+    auto palette = QGuiApplication::palette();
+    palette.setColor(QPalette::Window, QColor::fromRgb(0x123456));
+    return palette;
 }
 
 constexpr auto LightBackgroundSequence = std::string_view { "\033]11;rgb:fafa/fafa/f8f8\033\\" };
@@ -1151,4 +1168,48 @@ TEST_CASE("TerminalSessionManager: OSC 11 in an unfocused session leaves the chr
 
     testApp.manager().setFocusedSession(first);
     CHECK(chromeWindowLightness() > darkChrome);
+}
+
+TEST_CASE("TerminalSessionManager: OSC 11 under a forced theme leaves the chrome and its palette alone",
+          "[manager][theme][chromefollow]")
+{
+    // Only `theme: terminal` follows the background: under `dark`, re-applying would repaint the whole
+    // application for the scheme it already shows. Qt skips a palette equal to the current one, so a
+    // sentinel palette stands in for the applied one: any re-apply overwrites it.
+    contour::test::ConfiguredTestApp testApp;
+    loadTheme(testApp, "theme: dark\n", contour::config::GuiTheme::Dark);
+    contour::test::ScopedController const win { testApp.manager() };
+
+    auto* session = testApp.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    testApp.manager().setFocusedSession(session);
+    QCoreApplication::processEvents();
+    REQUIRE(chromeWindowLightness() < 128);
+    auto const sentinel = sentinelPalette();
+    QGuiApplication::setPalette(sentinel);
+
+    session->terminal().writeToScreen(LightBackgroundSequence);
+    QCoreApplication::processEvents();
+
+    CHECK(QGuiApplication::palette().color(QPalette::Window) == sentinel.color(QPalette::Window));
+}
+
+TEST_CASE("TerminalSessionManager: an OSC 11 that keeps the chrome's scheme does not repaint it",
+          "[manager][theme][chromefollow]")
+{
+    contour::test::ConfiguredTestApp testApp;
+    loadTerminalTheme(testApp);
+    contour::test::ScopedController const win { testApp.manager() };
+
+    auto* session = testApp.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    testApp.manager().setFocusedSession(session);
+    QCoreApplication::processEvents();
+    auto const sentinel = sentinelPalette();
+    QGuiApplication::setPalette(sentinel);
+
+    session->terminal().writeToScreen("\033]11;rgb:2020/2020/2020\033\\"); // still dark
+    QCoreApplication::processEvents();
+
+    CHECK(QGuiApplication::palette().color(QPalette::Window) == sentinel.color(QPalette::Window));
 }

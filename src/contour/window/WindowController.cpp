@@ -71,9 +71,9 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     // which is the answer Win32 needs for the border DWM draws around the rounded corners, and the
     // reason this is injected rather than read from a global at the point of use.
     _nativeFrame = platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme {
-        if (auto const configured = platform::qtColorSchemeFor(_manager.app().config().theme.value(),
-                                                               _manager.app().defaultProfileColors()))
-            return *configured;
+        // The scheme last forced onto the chrome, so the frame agrees with it after an OSC 11 too.
+        if (auto const applied = _manager.app().appliedGuiScheme())
+            return *applied;
         return QGuiApplication::styleHints()->colorScheme();
     });
 

@@ -376,20 +376,19 @@ void TerminalSessionManager::setFocusedSession(TerminalSession* next)
 {
     if (next == _focusedSession)
         return;
-    // The chrome follows the focused session's live background, so a focus move between two sessions of
-    // different backgrounds re-evaluates it. Each read takes that session's terminal lock, on this (the
-    // GUI) thread.
-    auto const nextBackground = next != nullptr ? std::optional { next->liveBackground() } : std::nullopt;
-    auto const backgroundMoved =
-        nextBackground.has_value()
-        && (_focusedSession == nullptr || _focusedSession->liveBackground() != *nextBackground);
+    // With `theme: terminal` the chrome follows the focused session's live background. Read before the
+    // focus moves, under that session's terminal lock, on this (the GUI) thread; under any other theme
+    // it is not read at all.
+    auto const nextBackground = next != nullptr && _app.config().theme.value() == config::GuiTheme::Terminal
+                                    ? std::optional { next->liveBackground() }
+                                    : std::nullopt;
     if (_focusedSession != nullptr)
         _focusedSession->sendFocusOutEvent();
     _focusedSession = next;
     if (_focusedSession != nullptr)
         _focusedSession->sendFocusInEvent();
-    if (backgroundMoved)
-        _app.applyGuiTheme(_app.config().theme.value(), _app.defaultProfileColors(), nextBackground);
+    if (nextBackground.has_value())
+        _app.followLiveBackground(*nextBackground);
 }
 
 void TerminalSessionManager::sessionBackgroundChanged(vtworkspace::SessionId id, vtbackend::RGBColor color)
@@ -398,7 +397,7 @@ void TerminalSessionManager::sessionBackgroundChanged(vtworkspace::SessionId id,
     if (_focusedSession == nullptr || id == vtworkspace::SessionId {}
         || _focusedSession->modelSessionId() != id)
         return;
-    _app.applyGuiTheme(_app.config().theme.value(), _app.defaultProfileColors(), color);
+    _app.followLiveBackground(color);
 }
 
 void TerminalSessionManager::clearFocusIfCurrent(TerminalSession* session)
@@ -756,7 +755,11 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
 
     // Once per reload, not per session: with `theme: terminal` the chrome's light/dark follows the
     // terminal background, so a hand-edited colour change must re-evaluate it as well as the terminals.
-    _app.applyGuiTheme(_app.config().theme.value(), _app.defaultProfileColors());
+    // Over the focused session's live background, which an OSC 11 may have moved off the configured one.
+    _app.applyGuiTheme(_app.config().theme.value(),
+                       _app.defaultProfileColors(),
+                       _focusedSession != nullptr ? std::optional { _focusedSession->liveBackground() }
+                                                  : std::nullopt);
     // And the chrome tokens: a reload may change the chrome font and the scheme the Terminal row paints with.
     _app.refreshChromeStyle();
 
