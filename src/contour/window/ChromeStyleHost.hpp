@@ -38,6 +38,9 @@ class ChromeStyleHost
     /// @return The provider currently published.
     [[nodiscard]] UiStyleProvider& provider() noexcept { return *_provider; }
 
+    /// @return The provider currently published, read-only.
+    [[nodiscard]] UiStyleProvider const& provider() const noexcept { return *_provider; }
+
     /// @return What the current provider was built from.
     [[nodiscard]] ChromeInputs const& inputs() const noexcept { return _provider->inputs(); }
 

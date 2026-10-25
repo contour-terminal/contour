@@ -2263,6 +2263,24 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
     CHECK(controller.resizeWindowForContentPixels(
         *h.display, vtbackend::ImageSize { vtbackend::Width(640), vtbackend::Height(480) }));
     h.pump();
+
+    // Split side by side at one half, the harness session staying in the FIRST card: the window must now
+    // hold twice the leaf's width, its header, and the cards' inset on every edge. The single-pane answer
+    // for the same page is the leaf's own extent (the identity case above), so it is the yardstick.
+    auto const page = vtbackend::PageSize { vtbackend::LineCount(30), vtbackend::ColumnCount(100) };
+    REQUIRE(controller.resizeWindowForPage(*h.display, page));
+    h.pump();
+    auto const leafExtent = h.window->size();
+
+    REQUIRE(model.splitActivePane(tab->id(), vtworkspace::SplitState::Vertical, 0.5) != nullptr);
+    REQUIRE(tab->rootPane()->first()->session() == h.session->modelSessionId());
+    h.pump();
+
+    auto const chrome = h.testApp.app().splitChrome();
+    REQUIRE(controller.resizeWindowForPage(*h.display, page));
+    h.pump();
+    CHECK(h.window->width() == (2 * leafExtent.width()) + (2 * chrome.rootInset));
+    CHECK(h.window->height() == leafExtent.height() + chrome.leafHeader + (2 * chrome.rootInset));
 }
 
 TEST_CASE("display: releaseSession detaches the live session and clears the back-pointer",

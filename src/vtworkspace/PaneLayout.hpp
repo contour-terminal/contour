@@ -27,14 +27,31 @@ struct LayoutSize
 
 /// Default thickness of a split divider handle in logical pixels.
 ///
-/// The single source for every consumer of the handle's extent: the GUI's explicit SplitView
-/// `handle:` delegate binds its implicit size to this value (surfaced through the session manager),
-/// and window-size solving passes it as @p handleThickness to contentSizeForLeaf().
+/// What a SplitChrome assumes when nobody names a gap: the divider before pane cards, and the extent a
+/// headless host (no chrome tokens) solves with.
 ///
-/// Solver contract: the value handed to the solver must be an UPPER bound of the rendered handle.
+/// Solver contract: the gap handed to the solver must be an UPPER bound of the rendered handle.
 /// The solver may only ever overshoot (surplus becomes leaf padding); undershooting would silently
 /// shrink a requested grid.
 inline constexpr int DefaultSplitHandleThickness = 6;
+
+/// What a split tree spends around its leaves, in the host's unit: the extents contentSizeForLeaf() adds
+/// to a leaf's requirement on its way up to the content area.
+///
+/// Every field must be an upper bound of what the host draws (see DefaultSplitHandleThickness).
+struct SplitChrome
+{
+    /// The divider between two side-by-side panes (a SplitState::Vertical split), along the width.
+    int sideBySideGap = DefaultSplitHandleThickness;
+    /// The divider between two stacked panes (a SplitState::Horizontal split), along the height.
+    int stackedGap = DefaultSplitHandleThickness;
+    /// The height each leaf of a split spends on its header, above its grid.
+    int leafHeader = 0;
+    /// How far a split tree's cards sit in from each edge of the content area.
+    int rootInset = 0;
+
+    [[nodiscard]] constexpr bool operator==(SplitChrome const&) const noexcept = default;
+};
 
 /// Thickness, in CELLS, of the divider a split spends between its children.
 ///
@@ -48,10 +65,16 @@ inline constexpr int CellDividerThickness = 1;
 /// keeping every split ratio fixed.
 ///
 /// Host layout contract (mirrors PaneNode.qml's SplitView): along a split's axis the FIRST child gets
-/// exactly `parentExtent * ratio`; the divider handle (@p handleThickness) and the remainder go to the
-/// SECOND child, i.e. `second = parentExtent * (1 - ratio) - handle`. The cross axis passes through
-/// unchanged. SplitState::Vertical places children side-by-side (splits the width axis);
-/// SplitState::Horizontal stacks them (splits the height axis).
+/// exactly `parentExtent * ratio`; the divider handle and the remainder go to the SECOND child, i.e.
+/// `second = parentExtent * (1 - ratio) - gap`, where the gap is the axis's own (@p chrome's
+/// `sideBySideGap` on a SplitState::Vertical split, `stackedGap` on a SplitState::Horizontal one). The
+/// cross axis passes through unchanged. SplitState::Vertical places children side-by-side (splits the
+/// width axis); SplitState::Horizontal stacks them (splits the height axis).
+///
+/// A leaf inside a split is a card: its header (`leafHeader`) sits above its grid, and the whole tree is
+/// inset by `rootInset` from every content edge. So the walk first adds the header to the height, then
+/// solves each level, then adds twice the inset to both axes. A leaf that is its own layout root is
+/// drawn edge to edge, with neither.
 ///
 /// Each upward step CEILS, so the leaf ends up with at least the requested extent — exact in the common
 /// case; any surplus is absorbed by the consumer's floor-to-grid semantics as padding. Never undershoots:
@@ -63,20 +86,23 @@ inline constexpr int CellDividerThickness = 1;
 /// no ratio applies and the answer is the identity; a tiled tab roots at the tree and solves the lot.
 /// @param leaf             The target leaf pane (its parent chain supplies the ratios).
 /// @param requiredLeafSize The extent the leaf must receive.
-/// @param handleThickness  The divider handle's thickness along a split axis, in the same unit.
+/// @param chrome           What the split tree spends around its leaves, in the same unit.
 /// @param layoutRoot       The node occupying the whole content area (Tab::layoutRoot).
 /// @pre @p layoutRoot must be an ancestor of @p leaf, or @p leaf itself — otherwise the leaf is not on
 ///      screen at all and there is no content size to solve for.
 /// @return The required content-area extent; equals @p requiredLeafSize when @p leaf is the layout root.
 [[nodiscard]] inline LayoutSize contentSizeForLeaf(Pane const& leaf,
                                                    LayoutSize requiredLeafSize,
-                                                   int handleThickness,
+                                                   SplitChrome const& chrome,
                                                    Pane const& layoutRoot) noexcept
 {
     Require(layoutRoot.contains(&leaf) && "the leaf must lie inside the layout root it is solved against");
 
+    if (&leaf == &layoutRoot)
+        return requiredLeafSize;
+
     auto width = static_cast<double>(requiredLeafSize.width);
-    auto height = static_cast<double>(requiredLeafSize.height);
+    auto height = static_cast<double>(requiredLeafSize.height) + chrome.leafHeader;
 
     for (auto const* node = &leaf; node != &layoutRoot; node = node->parent())
     {
@@ -84,13 +110,19 @@ inline constexpr int CellDividerThickness = 1;
         auto const isFirst = parent->first() == node;
         // Pane::setRatio clamps into (0, 1); the max() below merely guards a hand-built tree.
         auto const share = std::max(isFirst ? parent->ratio() : 1.0 - parent->ratio(), 0.01);
-        auto const handle = isFirst ? 0.0 : static_cast<double>(handleThickness);
+        auto const gapOf = [isFirst](int gap) noexcept {
+            return isFirst ? 0.0 : static_cast<double>(gap);
+        };
 
         if (parent->splitState() == SplitState::Vertical)
-            width = std::ceil((width + handle) / share);
+            width = std::ceil((width + gapOf(chrome.sideBySideGap)) / share);
         else if (parent->splitState() == SplitState::Horizontal)
-            height = std::ceil((height + handle) / share);
+            height = std::ceil((height + gapOf(chrome.stackedGap)) / share);
     }
+
+    auto const inset = 2.0 * chrome.rootInset;
+    width += inset;
+    height += inset;
 
     // Saturate before narrowing. Each upward step divides by a share floored at Pane::MinimumRatio,
     // so a handful of nested splits with the dividers dragged to their limits multiplies the required

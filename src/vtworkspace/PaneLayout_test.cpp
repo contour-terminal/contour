@@ -4,8 +4,12 @@
 // content area must be so a given leaf receives its requested extent (grid) with all ratios fixed.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <ranges>
 #include <vector>
@@ -19,12 +23,16 @@ using vtpty::LineCount;
 namespace
 {
 
-constexpr int Handle = DefaultSplitHandleThickness;
+/// The solver's behaviour before pane cards: a 6-unit divider on both axes, no header, no inset.
+constexpr auto Legacy = SplitChrome { .sideBySideGap = 6, .stackedGap = 6, .leafHeader = 0, .rootInset = 0 };
 
 /// Mirrors the host layout (PaneNode.qml SplitView) downward: allocates @p content along the path from
 /// @p root to @p leaf and returns the extent the leaf actually receives. The solver must never make this
 /// smaller than what was requested.
-LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content)
+///
+/// A split tree's cards sit @c rootInset in from every content edge, the divider a split spends is its
+/// axis's gap, and a split leaf's header comes off its card's height.
+LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content, SplitChrome const& chrome)
 {
     // Collect the root->leaf path (the solver walks leaf->root; the allocation goes the other way).
     std::vector<Pane const*> path;
@@ -33,18 +41,21 @@ LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content)
     std::ranges::reverse(path);
     REQUIRE(path.front() == &root);
 
-    auto width = static_cast<double>(content.width);
-    auto height = static_cast<double>(content.height);
+    auto const isSplit = &leaf != &root;
+    auto const inset = isSplit ? 2.0 * chrome.rootInset : 0.0;
+    auto width = static_cast<double>(content.width) - inset;
+    auto height = static_cast<double>(content.height) - inset;
     for (auto const [parent, child]: std::views::zip(path, path | std::views::drop(1)))
     {
         auto const isFirst = parent->first() == child;
         auto const share = isFirst ? parent->ratio() : 1.0 - parent->ratio();
-        auto const handle = isFirst ? 0.0 : static_cast<double>(Handle);
         if (parent->splitState() == SplitState::Vertical)
-            width = (width * share) - handle;
+            width = (width * share) - (isFirst ? 0.0 : static_cast<double>(chrome.sideBySideGap));
         else
-            height = (height * share) - handle;
+            height = (height * share) - (isFirst ? 0.0 : static_cast<double>(chrome.stackedGap));
     }
+    if (isSplit)
+        height -= chrome.leafHeader;
     return { .width = static_cast<int>(width), .height = static_cast<int>(height) };
 }
 
@@ -53,7 +64,7 @@ LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content)
 TEST_CASE("PaneLayout: unsplit leaf passes the requirement through", "[vtworkspace][layout]")
 {
     auto root = Pane { PaneId { 1 }, SessionId { 1 } };
-    CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, Handle, root)
+    CHECK(contentSizeForLeaf(root, { .width = 640, .height = 480 }, Legacy, root)
           == LayoutSize { .width = 640, .height = 480 });
 }
 
@@ -64,11 +75,11 @@ TEST_CASE("PaneLayout: side-by-side split solves the width axis only", "[vtworks
         root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
 
     // First child: exactly parent * ratio, no handle involvement.
-    CHECK(contentSizeForLeaf(*first, { .width = 400, .height = 300 }, Handle, root)
+    CHECK(contentSizeForLeaf(*first, { .width = 400, .height = 300 }, Legacy, root)
           == LayoutSize { .width = 800, .height = 300 });
 
     // Second child: parent * (1-ratio) - handle => parent = ceil((400 + 6) / 0.5).
-    CHECK(contentSizeForLeaf(*second, { .width = 400, .height = 300 }, Handle, root)
+    CHECK(contentSizeForLeaf(*second, { .width = 400, .height = 300 }, Legacy, root)
           == LayoutSize { .width = 812, .height = 300 });
 }
 
@@ -78,11 +89,11 @@ TEST_CASE("PaneLayout: stacked split solves the height axis only", "[vtworkspace
     auto const [first, second] =
         root.split(SplitState::Horizontal, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.25);
 
-    CHECK(contentSizeForLeaf(*first, { .width = 640, .height = 100 }, Handle, root)
+    CHECK(contentSizeForLeaf(*first, { .width = 640, .height = 100 }, Legacy, root)
           == LayoutSize { .width = 640, .height = 400 });
 
     // share = 0.75: ceil((100 + 6) / 0.75) = ceil(141.33) = 142.
-    CHECK(contentSizeForLeaf(*second, { .width = 640, .height = 100 }, Handle, root)
+    CHECK(contentSizeForLeaf(*second, { .width = 640, .height = 100 }, Legacy, root)
           == LayoutSize { .width = 640, .height = 142 });
 }
 
@@ -98,7 +109,7 @@ TEST_CASE("PaneLayout: nested splits compose per traversed level", "[vtworkspace
 
     // bottom: height share 0.7 with handle -> ceil((140+6)/0.7) = 209; then width as the RIGHT child of
     // the vertical root (share 0.5, handle) -> ceil((200+6)/0.5) = 412.
-    CHECK(contentSizeForLeaf(*bottom, { .width = 200, .height = 140 }, Handle, root)
+    CHECK(contentSizeForLeaf(*bottom, { .width = 200, .height = 140 }, Legacy, root)
           == LayoutSize { .width = 412, .height = 209 });
 }
 
@@ -119,8 +130,8 @@ TEST_CASE("PaneLayout: solved content never allocates the leaf below its require
     auto const required = LayoutSize { .width = 331, .height = 173 };
     for (auto const* leaf: { l3a, l3b })
     {
-        auto const content = contentSizeForLeaf(*leaf, required, Handle, root);
-        auto const got = simulateAllocation(root, *leaf, content);
+        auto const content = contentSizeForLeaf(*leaf, required, Legacy, root);
+        auto const got = simulateAllocation(root, *leaf, content, Legacy);
         CAPTURE(leaf->id().value, content.width, content.height, got.width, got.height);
         CHECK(got.width >= required.width);
         CHECK(got.height >= required.height);
@@ -140,11 +151,11 @@ TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtworkspace][la
     SECTION("rooting at the tree root solves the whole parent chain")
     {
         // Both splits shrink the leaf, so the content area must be bigger than the leaf on both axes.
-        auto const content = contentSizeForLeaf(*rightBottom, required, Handle, root);
+        auto const content = contentSizeForLeaf(*rightBottom, required, Legacy, root);
         CHECK(content.width > required.width);
         CHECK(content.height > required.height);
         // ...and the host allocation gives the leaf at least what was asked for (never undershoot).
-        auto const got = simulateAllocation(root, *rightBottom, content);
+        auto const got = simulateAllocation(root, *rightBottom, content, Legacy);
         CHECK(got.width >= required.width);
         CHECK(got.height >= required.height);
     }
@@ -153,16 +164,149 @@ TEST_CASE("PaneLayout: the layout root bounds the ratio walk", "[vtworkspace][la
     {
         // This is what makes a content-driven resize correct while zoomed: the leaf fills the tab, so
         // no split ratio above it applies and the answer is the identity.
-        CHECK(contentSizeForLeaf(*rightBottom, required, Handle, /*layoutRoot*/ *rightBottom) == required);
+        CHECK(contentSizeForLeaf(*rightBottom, required, Legacy, /*layoutRoot*/ *rightBottom) == required);
     }
 
     SECTION("an intermediate layout root stops the walk there")
     {
         // Solving only up to `right` accounts for the top/bottom split but NOT the outer side-by-side
         // one, so the height grows while the width passes through untouched.
-        auto const content = contentSizeForLeaf(*rightBottom, required, Handle, /*layoutRoot*/ *right);
+        auto const content = contentSizeForLeaf(*rightBottom, required, Legacy, /*layoutRoot*/ *right);
         CHECK(content.width == required.width);
         CHECK(content.height > required.height);
+    }
+}
+
+TEST_CASE("PaneLayout: a split leaf adds the header and the root inset", "[vtworkspace][layout]")
+{
+    // The macOS row's comfortable cards: a 6 pt gap both ways, a 22 pt header, a 6 pt inset.
+    constexpr auto Cards =
+        SplitChrome { .sideBySideGap = 6, .stackedGap = 6, .leafHeader = 22, .rootInset = 6 };
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto const [first, second] =
+        root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
+    auto const required = LayoutSize { .width = 400, .height = 300 };
+
+    // First: 2 * 400 wide, the header on the height, twice the inset on both.
+    CHECK(contentSizeForLeaf(*first, required, Cards, root)
+          == LayoutSize { .width = (2 * 400) + 12, .height = 300 + 22 + 12 });
+    // Second: the gap is the second child's, ceil((400 + 6) / 0.5) before the inset.
+    CHECK(contentSizeForLeaf(*second, required, Cards, root)
+          == LayoutSize { .width = 812 + 12, .height = 300 + 22 + 12 });
+}
+
+TEST_CASE("PaneLayout: the stacked gap is the stacked axis's", "[vtworkspace][layout]")
+{
+    // The Terminal row at an 8 x 17 cell: a one-cell gap is 8 wide side by side and 17 high stacked.
+    constexpr auto Cells =
+        SplitChrome { .sideBySideGap = 8, .stackedGap = 17, .leafHeader = 17, .rootInset = 0 };
+    auto const required = LayoutSize { .width = 400, .height = 300 };
+
+    SECTION("side by side spends the side-by-side gap on the width")
+    {
+        auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+        auto* second =
+            root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5).second;
+        CHECK(contentSizeForLeaf(*second, required, Cells, root)
+              == LayoutSize { .width = (400 + 8) * 2, .height = 300 + 17 });
+    }
+
+    SECTION("stacked spends the stacked gap on the height")
+    {
+        auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+        auto* second =
+            root.split(SplitState::Horizontal, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5).second;
+        CHECK(contentSizeForLeaf(*second, required, Cells, root)
+              == LayoutSize { .width = 400, .height = (300 + 17 + 17) * 2 });
+    }
+}
+
+TEST_CASE("PaneLayout: an unsplit or zoomed leaf is the identity", "[vtworkspace][layout][zoom]")
+{
+    constexpr auto Cards =
+        SplitChrome { .sideBySideGap = 6, .stackedGap = 6, .leafHeader = 22, .rootInset = 6 };
+    auto const required = LayoutSize { .width = 640, .height = 480 };
+
+    SECTION("an unsplit tab has no card to pay for")
+    {
+        auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+        CHECK(contentSizeForLeaf(root, required, Cards, root) == required);
+    }
+
+    SECTION("a zoomed leaf of a split tree fills the content edge to edge")
+    {
+        auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+        auto* second =
+            root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5).second;
+        CHECK(contentSizeForLeaf(*second, required, Cards, /*layoutRoot*/ *second) == required);
+    }
+}
+
+TEST_CASE("PaneLayout: a deep tree counts a gap per level and the header and inset once",
+          "[vtworkspace][layout]")
+{
+    auto const chrome =
+        GENERATE(SplitChrome { .sideBySideGap = 6, .stackedGap = 6, .leafHeader = 22, .rootInset = 6 },
+                 SplitChrome { .sideBySideGap = 8, .stackedGap = 17, .leafHeader = 17, .rootInset = 0 },
+                 SplitChrome { .sideBySideGap = 1, .stackedGap = 1, .leafHeader = 0, .rootInset = 0 });
+    CAPTURE(chrome.sideBySideGap, chrome.stackedGap, chrome.leafHeader, chrome.rootInset);
+
+    /// One level of the path from the root down to the deepest leaf, recorded as the tree is built.
+    struct Step
+    {
+        SplitState axis = SplitState::None;
+        double share = 0.0;
+        bool isFirst = false;
+    };
+    constexpr auto Ratios = std::array { 0.5, 0.3, 0.7, 0.45, 0.6, 0.35, 0.55, 0.4 };
+
+    // Eight nested splits alternating the axis, descending into the second child on even levels and the
+    // first on odd ones, so both handle positions and both axes are crossed.
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto* node = &root;
+    auto path = std::vector<Step> {};
+    for (auto const [level, ratio]: std::views::zip(std::views::iota(std::uint64_t { 0 }), Ratios))
+    {
+        auto const id = 2 + (2 * level);
+        auto const axis = level % 2 == 0 ? SplitState::Vertical : SplitState::Horizontal;
+        auto const [first, second] =
+            node->split(axis, PaneId { id }, PaneId { id + 1 }, SessionId { id }, ratio);
+        auto const intoFirst = level % 2 != 0;
+        path.push_back({ .axis = axis, .share = intoFirst ? ratio : 1.0 - ratio, .isFirst = intoFirst });
+        node = intoFirst ? first : second;
+    }
+
+    auto const required = LayoutSize { .width = 331, .height = 173 };
+
+    // The hand fold: the header once at the leaf, a gap per level on the second-child side of its own axis,
+    // the inset once around the whole tree.
+    auto width = static_cast<double>(required.width);
+    auto height = static_cast<double>(required.height + chrome.leafHeader);
+    for (auto const& step: path | std::views::reverse)
+    {
+        if (step.axis == SplitState::Vertical)
+            width = std::ceil((width + (step.isFirst ? 0 : chrome.sideBySideGap)) / step.share);
+        else
+            height = std::ceil((height + (step.isFirst ? 0 : chrome.stackedGap)) / step.share);
+    }
+    auto const folded = LayoutSize { .width = static_cast<int>(width) + (2 * chrome.rootInset),
+                                     .height = static_cast<int>(height) + (2 * chrome.rootInset) };
+    CHECK(contentSizeForLeaf(*node, required, chrome, root) == folded);
+
+    // Whatever leaf asks, the allocation never gives it less than it asked for.
+    auto leaves = std::vector<Pane*> {};
+    root.walkTree([&leaves](Pane& pane) {
+        if (pane.isLeaf())
+            leaves.push_back(&pane);
+    });
+    REQUIRE(leaves.size() == Ratios.size() + 1);
+    for (auto const* leaf: leaves)
+    {
+        auto const content = contentSizeForLeaf(*leaf, required, chrome, root);
+        auto const got = simulateAllocation(root, *leaf, content, chrome);
+        CAPTURE(leaf->id().value, content.width, content.height, got.width, got.height);
+        CHECK(got.width >= required.width);
+        CHECK(got.height >= required.height);
     }
 }
 
@@ -290,7 +434,7 @@ TEST_CASE("contentSizeForLeaf saturates instead of overflowing the int cast",
                    .second;
     }
 
-    auto const content = contentSizeForLeaf(*node, { .width = 700, .height = 480 }, Handle, root);
+    auto const content = contentSizeForLeaf(*node, { .width = 700, .height = 480 }, Legacy, root);
     CHECK(content.width == std::numeric_limits<int>::max());
     CHECK(content.height == 480); // the cross axis is untouched by a side-by-side split
 }

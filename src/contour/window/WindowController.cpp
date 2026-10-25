@@ -1797,14 +1797,13 @@ bool WindowController::applyContentDrivenResize(session::DisplaySurface& request
         return false;
     }
 
-    // PaneNode.qml's explicit `handle:` binds its thickness to the same constant (via the session
-    // manager's splitHandleThickness property), so solver and rendered handle cannot diverge. The
-    // layout root bounds the ratio walk: while zoomed it IS the leaf, so the leaf owns the whole
-    // content area and no split ratio above it applies.
+    // The gap, header and inset come from the same chrome tokens PaneNode.qml draws with, so solver and
+    // canvas cannot diverge. The layout root bounds the ratio walk: while zoomed it IS the leaf, so the
+    // leaf owns the whole content area edge to edge and no split ratio, card or inset applies.
     auto const content = vtworkspace::contentSizeForLeaf(
         *leaf,
         vtworkspace::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
-        vtworkspace::DefaultSplitHandleThickness,
+        _manager.app().splitChrome(),
         *layoutRoot);
 
     display::displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",

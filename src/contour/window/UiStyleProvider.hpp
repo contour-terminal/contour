@@ -261,6 +261,13 @@ class UiStyleProvider: public QObject
     /// @return What this provider was built from.
     [[nodiscard]] ChromeInputs const& inputs() const noexcept { return _inputs; }
 
+    /// The token row this provider publishes: its style's row with the density and the accessibility
+    /// preferences applied. For C++ consumers that need the same numbers the QML reads.
+    [[nodiscard]] config::ChromeTokenRow const& resolvedRow() const noexcept { return _groups; }
+
+    /// What one token unit is, in logical pixels: a chrome cell on the Terminal row, one pixel elsewhere.
+    [[nodiscard]] ChromeUnits const& units() const noexcept { return _units; }
+
     /// How many times the application palette has changed since this provider was built.
     /// @see paletteRevisionChanged
     [[nodiscard]] int paletteRevision() const noexcept { return _paletteRevision; }

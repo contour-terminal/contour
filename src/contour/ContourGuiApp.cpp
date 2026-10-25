@@ -1805,6 +1805,20 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
     };
 }
 
+vtworkspace::SplitChrome ContourGuiApp::splitChrome() const
+{
+    if (_chromeStyleHost)
+    {
+        auto const& provider = _chromeStyleHost->provider();
+        return window::splitChromeOf(
+            provider.resolvedRow(), provider.units().horizontal, provider.units().vertical);
+    }
+    return window::splitChromeOf(
+        config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), _config.chromeDensity.value()),
+        1.0,
+        1.0);
+}
+
 void ContourGuiApp::refreshChromeStyle()
 {
     // Guarded as applyWindowControlStyle() is: the host is built partway through terminalGuiAction(),

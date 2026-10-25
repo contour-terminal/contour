@@ -26,6 +26,7 @@
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/SplitChrome.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -551,6 +552,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// @return The OS accessibility preferences as the injected source reports them now.
     [[nodiscard]] config::AccessibilityPreferences accessibilityPreferences() const;
+
+    /// What a split tree spends around its leaves, for the window-size solver: the published provider's
+    /// resolved tokens in its own units, or -- before the GUI exists, or headless -- the configured row
+    /// resolved against the density and the accessibility preferences, one logical pixel per unit.
+    /// @return The gaps per axis, the pane header and the cards' inset, in logical pixels.
+    [[nodiscard]] vtworkspace::SplitChrome splitChrome() const;
 
     /// @return The OS appearance as the injected source reports it now.
     [[nodiscard]] platform::PlatformAppearance platformAppearance() const;

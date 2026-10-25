@@ -436,3 +436,21 @@ TEST_CASE("A default TestApp never reads the host's accessibility settings", "[c
     CHECK(app.app().accessibilityPreferences() == contour::config::AccessibilityPreferences {});
     CHECK(app.app().platformAppearance() == contour::platform::PlatformAppearance {});
 }
+
+TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixel per unit",
+          "[contour][app][splitchrome]")
+{
+    // Before the GUI publishes a provider there is no cell to measure: the solver gets the row the app
+    // holds (ContourLinux until the GUI resolves the configured style) at the configured density.
+    auto app = TestApp {};
+    auto const expected = contour::window::splitChromeOf(
+        contour::config::resolveChromeTokens(contour::config::ChromeStyle::ContourLinux,
+                                             app.app().accessibilityPreferences(),
+                                             app.app().config().chromeDensity.value()),
+        1.0,
+        1.0);
+    CHECK(app.app().splitChrome() == expected);
+    // A card's header and inset are part of it, so a split leaf's window grows by more than the gap.
+    CHECK(expected.leafHeader > 0);
+    CHECK(expected.rootInset > 0);
+}
