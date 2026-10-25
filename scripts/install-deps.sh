@@ -378,11 +378,13 @@ install_deps_FreeBSD() {
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # NB: catch2 (as name "catch") is available in pkg, but it's not version >= 3.0.0.
+    # git: CPM clones WAMR (and termbench-pro) at configure time, and the VM image carries no git.
     su root -c "pkg install $SYSDEP_ASSUME_YES \
         cairo \
         cmake \
         fontconfig \
         freetype2 \
+        git \
         harfbuzz \
         libssh2 \
         microsoft-gsl \

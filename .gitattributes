@@ -9,3 +9,7 @@ vendor/core-cpp/** -text
 # is normalized on its own (EmbedShellIntegration.cmake); this covers the installed and directly-run ones.
 *.sh text eol=lf
 src/contour/cli/shell-integration/shell-integration.* text eol=lf
+
+# The control package's world.wit is rendered from the method catalog and its README is read for the verbs'
+# permissions, and vtcontrol_test compares both byte for byte. A CRLF checkout fails every comparison.
+wit/** text eol=lf
