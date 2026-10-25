@@ -273,6 +273,9 @@ enum class CommandEnding : uint8_t
     Interrupted, ///< OSC 3008 `exit=interrupt` without a signal name.
 };
 
+/// Number of @c CommandEnding enumerators, derived from the last one; tables indexed by ending pin to it.
+inline constexpr size_t CommandEndingCount = static_cast<size_t>(CommandEnding::Interrupted) + 1;
+
 /// Classifies how a command ended. A command failed if either source says so: an explicit OSC 3008
 /// `exit=success` does not outweigh a non-zero exit code.
 ///

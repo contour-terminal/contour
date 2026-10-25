@@ -1196,6 +1196,7 @@ if(CONTOUR_TESTING)
         platform/SessionVisibility_test.cpp
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
+        window/TabBadge_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
     # ScreenshotFile one over its Screen, and FinishNotification one over its CommandBlockSummary; testing
