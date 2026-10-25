@@ -5933,25 +5933,50 @@ TEST_CASE("Banner: the Terminal row is the content's height in the scheme's pale
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Banner: the Terminal row's text and button labels read on its fill (offscreen)",
-          "[contour][gui][qml][kit][banner]")
+namespace
 {
-    using vtbackend::ColorPreference;
-    auto const appearance = GENERATE(ColorPreference::Light, ColorPreference::Dark);
-    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark", "contour");
-    INFO("Qt palette: " << (appearance == ColorPreference::Light ? "light" : "dark"));
-    INFO("scheme: " << schemeName);
-
+/// The Terminal row painted with the built-in color scheme @p schemeName.
+[[nodiscard]] contour::test::ChromeSetup terminalRowSetup(std::string_view schemeName)
+{
     auto palette = vtbackend::ColorPalette {};
     REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
-
-    contour::test::ScopedChromeAppearance const forced { appearance };
-    QQmlEngine engine;
-    contour::test::QmlMessageCapture const warnings;
     auto setup = contour::test::defaultChromeSetup();
     setup.row = contour::config::ChromeStyle::Terminal;
     setup.scheme = contour::config::chromeSchemeColorsOf(palette);
-    contour::test::installChromeStyle(engine, setup);
+    return setup;
+}
+
+/// The contrast ratio of @p label's text colour on @p fill.
+[[nodiscard]] double contrastOn(QObject const* label, vtbackend::RGBColor fill)
+{
+    return vtbackend::contrastRatio(contour::platform::toRGBColor(label->property("color").value<QColor>()),
+                                    fill);
+}
+
+/// The colour an item paints as, read from its `color` property.
+[[nodiscard]] vtbackend::RGBColor fillOf(QObject const* item)
+{
+    return contour::platform::toRGBColor(item->property("color").value<QColor>());
+}
+
+/// The light/dark name of @p appearance, for a test's INFO.
+[[nodiscard]] std::string_view appearanceName(vtbackend::ColorPreference appearance) noexcept
+{
+    return appearance == vtbackend::ColorPreference::Light ? "light" : "dark";
+}
+} // namespace
+
+TEST_CASE("Banner: the Terminal row's text and button labels read on its fill (offscreen)",
+          "[contour][gui][qml][kit][banner]")
+{
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark", "contour");
+    INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, terminalRowSetup(schemeName));
 
     auto banner = createBanner(engine,
                                QVariantMap { { "text", QStringLiteral("Contour has new defaults") },
@@ -5963,13 +5988,8 @@ TEST_CASE("Banner: the Terminal row's text and button labels read on its fill (o
     REQUIRE(background != nullptr);
     REQUIRE(text != nullptr);
 
-    auto const fill = contour::platform::toRGBColor(background->property("color").value<QColor>());
-    auto const readsOnFill = [&](QObject const* label) {
-        return vtbackend::contrastRatio(
-            contour::platform::toRGBColor(label->property("color").value<QColor>()), fill);
-    };
-
-    CHECK(readsOnFill(text) >= 4.5);
+    auto const fill = fillOf(background);
+    CHECK(contrastOn(text, fill) >= 4.5);
     for (auto const* name: { "bannerAction", "bannerDismiss" })
     {
         INFO("button: " << name);
@@ -5977,7 +5997,7 @@ TEST_CASE("Banner: the Terminal row's text and button labels read on its fill (o
         REQUIRE(button != nullptr);
         auto* label = button->property("contentItem").value<QQuickItem*>();
         REQUIRE(label != nullptr);
-        CHECK(readsOnFill(label) >= 4.5);
+        CHECK(contrastOn(label, fill) >= 4.5);
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -6053,6 +6073,28 @@ TEST_CASE("Toast: the Terminal row is a one-row inverse strip (offscreen)", "[co
     CHECK(background->property("radius").toReal() == 0.0);
     CHECK(background->property("color").value<QColor>() == QColor(0xD9, 0xDC, 0xE3));
     CHECK(text->property("color").value<QColor>() == QColor(0x1C, 0x1E, 0x24));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Toast: the Terminal row's text reads on its fill (offscreen)", "[contour][gui][qml][kit][toast]")
+{
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark", "contour");
+    INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, terminalRowSetup(schemeName));
+
+    auto toast = createToast(engine, QVariantMap { { "text", QStringLiteral("Copied 3 lines") } });
+    auto const* item = qobject_cast<QQuickItem*>(toast.get());
+    REQUIRE(item != nullptr);
+    auto const* background = item->property("background").value<QQuickItem*>();
+    auto const* text = item->findChild<QObject*>(QStringLiteral("toastText"));
+    REQUIRE(background != nullptr);
+    REQUIRE(text != nullptr);
+    CHECK(contrastOn(text, fillOf(background)) >= 4.5);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -6186,6 +6228,47 @@ TEST_CASE("KitDialog: a destructive accept is painted in the danger colour (offs
     auto const* background = accept->property("background").value<QQuickItem*>();
     REQUIRE(background != nullptr);
     CHECK(background->property("color").value<QColor>() == provider->statusColor(provider->statusDanger()));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("KitDialog: the Terminal row's heading and buttons read on its surface (offscreen)",
+          "[contour][gui][qml][kit][dialog]")
+{
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark", "contour");
+    INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    contour::test::installChromeStyle(engine, terminalRowSetup(schemeName));
+
+    DialogHost host;
+    auto dialog = openKitDialog(engine,
+                                host.window.contentItem(),
+                                QVariantMap { { "heading", QStringLiteral("Close this tab?") },
+                                              { "acceptText", QStringLiteral("Close Tab") } });
+    auto const* surface = dialog->property("background").value<QQuickItem*>();
+    auto const* heading = dialog->findChild<QObject*>(QStringLiteral("kitDialogHeading"));
+    auto const* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    auto const* reject = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogReject"));
+    REQUIRE(surface != nullptr);
+    REQUIRE(heading != nullptr);
+    REQUIRE(accept != nullptr);
+    REQUIRE(reject != nullptr);
+    auto const surfaceFill = fillOf(surface);
+    CHECK(contrastOn(heading, surfaceFill) >= 4.5);
+
+    // The accept button carries a fill of its own, and labels on it; the reject button labels on the surface.
+    auto const* acceptLabel = accept->property("contentItem").value<QQuickItem*>();
+    auto const* acceptFill = accept->property("background").value<QQuickItem*>();
+    REQUIRE(acceptLabel != nullptr);
+    REQUIRE(acceptFill != nullptr);
+    CHECK(contrastOn(acceptLabel, fillOf(acceptFill)) >= 4.5);
+    auto const* rejectLabel = reject->property("contentItem").value<QQuickItem*>();
+    REQUIRE(rejectLabel != nullptr);
+    CHECK(contrastOn(rejectLabel, surfaceFill) >= 4.5);
+
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

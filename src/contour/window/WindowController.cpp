@@ -1269,6 +1269,14 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 emit nativeControlsInsetChanged();
                 break;
 
+            case QEvent::ApplicationPaletteChange:
+                // Every chrome recolor lands here -- applyGuiTheme() forces the palette on a reload and
+                // on an OSC 11 that crosses the light/dark threshold, and the OS's own theme switch
+                // regenerates it -- so the frame re-reads the scheme it tints the OS border for. Cheap:
+                // the adapter only touches what the new scheme actually changed.
+                _nativeFrame->apply(*_osWindow, decoration());
+                break;
+
             default: break;
         }
     }

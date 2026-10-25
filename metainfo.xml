@@ -109,7 +109,7 @@
         <ul>
           <li>Fixes a configuration with separate light and dark color schemes being saved as YAML that did not load back</li>
           <li>Changes the notice shown while a window runs its shells itself, because the daemon could not be reached, into a banner that pushes the terminal down instead of covering its first line</li>
-          <li>Changes the window chrome under <code>theme: terminal</code> to follow a background a program sets with OSC 11 in the focused terminal</li>
+          <li>Changes the window chrome under <code>theme: terminal</code> with a single color scheme to follow the focused terminal's background, including one a program sets with OSC 11</li>
           <li>Adds Reduce Motion support on macOS: with it on, the cursor glide and the screen transition are skipped, and turning it off restores the configured durations</li>
           <li>Adds a one-time offer of the new defaults to a configuration that states no <code>defaults_edition</code>, and after Reset Config; it is never shown for an explicit <code>classic</code>, a locked configuration or a <code>settings.yml</code> that does not parse</li>
           <li>Changes the first-launch defaults, for a newly generated configuration only (<code>defaults_edition: native2026</code>): JetBrains Mono (Cascadia Mono on Windows) at 13 pt on macOS and 12 pt elsewhere, a 100×30 window with small margins, the contour-light and contour-dark color schemes following the system appearance, the indicator status line, the tab bar once there is a second tab, a silent bell, 10000 lines of scrollback, a steady block cursor and Command+click to follow links on macOS. An existing configuration without the key keeps every previous default</li>

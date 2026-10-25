@@ -180,10 +180,18 @@ namespace
             if (hwnd == nullptr)
                 return;
 
-            if (!needsFrameApplied(window, decoration))
-                return;
-
             auto const policy = framePolicyFor(FramePlatform::Windows, decoration);
+            if (!needsFrameApplied(window, decoration))
+            {
+                // The decoration stands, but the scheme its border was tinted for need not: a reload or
+                // an OSC 11 flips the chrome without touching the decoration, and WindowController
+                // re-applies on the palette change that follows.
+                if (policy.shadow == FrameShadowStrategy::NativeFrameKept
+                    && window.property(BorderSchemeKey).toInt() != schemeRecord(_colorScheme()))
+                    tintBorder(window, hwnd);
+                return;
+            }
+
             if (policy.shadow != FrameShadowStrategy::NativeFrameKept)
             {
                 // The native title bar: Qt's own frame is exactly right, so stop intercepting.
@@ -237,13 +245,7 @@ namespace
 
             Win32FrameEventFilter::extendFrame(hwnd);
 
-            // The border DWM draws around the rounded corners is tinted by this. Driven from the
-            // CONFIGURED theme: it used to be forced on in BlurBehind.cpp regardless, which put a
-            // dark border on a light-themed window.
-            // sizeof yields size_t and the attribute size is a DWORD; spelled out rather than left
-            // to an implicit narrowing, which -Werror rejects on the Windows toolchains.
-            auto dark = static_cast<BOOL>(_colorScheme() == Qt::ColorScheme::Dark);
-            api.setWindowAttribute(hwnd, DwmwaUseImmersiveDarkMode, &dark, static_cast<DWORD>(sizeof(dark)));
+            tintBorder(window, hwnd);
 
             auto corner = DwmwcpRound;
             api.setWindowAttribute(
@@ -259,6 +261,32 @@ namespace
         [[nodiscard]] qreal nativeControlsInset(QWindow& /*window*/) const override { return 0.0; }
 
       private:
+        /// The window property recording the scheme the border was last tinted for, on the window for
+        /// the reason @ref needsFrameApplied keeps its record there.
+        static constexpr auto BorderSchemeKey = "contour_applied_frame_scheme";
+
+        /// @p scheme as recorded under @ref BorderSchemeKey: +1, so "never tinted" (an absent
+        /// property, which converts to 0) is distinct from every scheme.
+        [[nodiscard]] static int schemeRecord(Qt::ColorScheme scheme) noexcept
+        {
+            return static_cast<int>(scheme) + 1;
+        }
+
+        /// Tints the border DWM draws around the rounded corners for the effective scheme.
+        ///
+        /// Driven from the CONFIGURED theme: it used to be forced on in BlurBehind.cpp regardless,
+        /// which put a dark border on a light-themed window.
+        void tintBorder(QWindow& window, HWND hwnd) const
+        {
+            auto const scheme = _colorScheme();
+            window.setProperty(BorderSchemeKey, schemeRecord(scheme));
+            // sizeof yields size_t and the attribute size is a DWORD; spelled out rather than left
+            // to an implicit narrowing, which -Werror rejects on the Windows toolchains.
+            auto dark = static_cast<BOOL>(scheme == Qt::ColorScheme::Dark);
+            dwmApi().setWindowAttribute(
+                hwnd, DwmwaUseImmersiveDarkMode, &dark, static_cast<DWORD>(sizeof(dark)));
+        }
+
         std::function<Qt::ColorScheme()> _colorScheme;
     };
 } // namespace

@@ -126,7 +126,10 @@ ApplicationWindow
         // programmatic window sizing, the initial size) uses this DECLARED value; measuring
         // window-minus-item instead is transiently wrong during relayout and structurally wrong in
         // splits.
-        win.chromeHeight = Qt.binding(function() { return titleBar.effectiveHeight })
+        // The banner stack counts too: it takes rows from the terminal just as the strip does. A change
+        // only refreshes the size hints -- it resizes no window, and no banner's height depends on the
+        // window's -- so a banner coming or going cannot feed back into its own height.
+        win.chromeHeight = Qt.binding(function() { return titleBar.effectiveHeight + bannerStack.height })
         // If this window was spawned to receive a torn-off tab (drag a tab onto the desktop),
         // adopt that tab as our sole tab instead of creating a fresh one — the dragged terminal
         // keeps running, no placeholder flash. Otherwise create the usual first tab. Either path
@@ -185,14 +188,17 @@ ApplicationWindow
         anchors.right: parent.right
         y: appWindow.tabBarPosition === 0 ? titleBar.height : 0
         // The banners' own extent, taken at once: the Column's implicit height follows only when the
-        // window next polishes, and the content below is anchored to this edge.
-        height: childrenRect.height
+        // window next polishes, and the content below is anchored to this edge. Summed rather than
+        // childrenRect, which keeps a collapsed banner's stale y -- dismiss the lower banner first and
+        // the upper one second, and the stack would keep the upper one's height.
+        height: hostingNoticeBar.height + newDefaultsBanner.height
         z: 1
 
         // Shown while this window runs its shells itself because the daemon the launch wanted could not be
         // had (WindowController.hostingNotice): they end when the window closes, which a daemon-hosted
         // window's do not.
         Banner {
+            id: hostingNoticeBar
             objectName: "hostingNoticeBar" // so offscreen tests can findChild() it
             width: parent.width
             // `|| ""` for the reason the gates above use `!!`: a lightweight mock `win` lacks the property.

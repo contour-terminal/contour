@@ -44,6 +44,15 @@ Dialog {
         return heading;
     }
 
+    // The text colours come from the application palette directly, as ConfirmDialog's do. The popup's
+    // inherited palette is not enough: a binding to `root.palette.windowText` is taken before the popup
+    // reaches its window and keeps the style's default (black) once the window's palette arrives, which on
+    // a dark surface reads at under 2:1.
+    SystemPalette {
+        id: sys
+        colorGroup: SystemPalette.Active
+    }
+
     background: PopupSurface {}
 
     // A Popup is not an Item and cannot carry the Accessible or Keys attached properties, so the content does.
@@ -62,7 +71,7 @@ Dialog {
             Layout.fillWidth: true
             text: root.heading
             font: root._headingFont
-            color: root.palette.windowText
+            color: sys.windowText
             wrapMode: Text.Wrap
         }
 
@@ -71,7 +80,7 @@ Dialog {
             Layout.fillWidth: true
             text: root.message
             font: chromeStyle.type.footnote
-            color: root.palette.windowText
+            color: sys.windowText
             wrapMode: Text.Wrap
         }
 
@@ -84,6 +93,8 @@ Dialog {
 
             Button {
                 objectName: "kitDialogReject"
+                // Labelled from the application palette for the reason the heading is (see `sys`).
+                palette.buttonText: sys.buttonText
                 text: root.rejectText
                 font: chromeStyle.type.footnote
                 Accessible.name: text

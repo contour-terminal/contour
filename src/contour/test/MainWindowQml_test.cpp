@@ -490,6 +490,65 @@ TEST_CASE("Main.qml hosting notice: the Terminal row's banner is the scheme's pa
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("Main.qml banner stack: dismissing the lower banner, then the upper, gives back all the room "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][hosting][newdefaults]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::MockNewDefaultsNotice notice { contour::config::NewDefaultsOffer::ExistingConfig };
+    notice.setOffered(false);
+    engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &notice);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto const* stack = root->findChild<QQuickItem*>(QStringLiteral("bannerStack"));
+    auto const* hosting = root->findChild<QQuickItem*>(QStringLiteral("hostingNoticeBar"));
+    auto const* newDefaults = root->findChild<QQuickItem*>(QStringLiteral("newDefaultsBanner"));
+    auto const* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
+    REQUIRE(stack != nullptr);
+    REQUIRE(hosting != nullptr);
+    REQUIRE(newDefaults != nullptr);
+    REQUIRE(content != nullptr);
+    CHECK(stack->height() == 0);
+    auto const contentY = content->y();
+    auto const contentHeight = content->height();
+    auto const chromeHeight = controller.chromeHeight();
+
+    controller.setHostingNotice(HostingNotice);
+    notice.setOffered(true);
+    QCoreApplication::processEvents();
+    REQUIRE(hosting->isVisible());
+    REQUIRE(newDefaults->isVisible());
+    CHECK(stack->height() == hosting->height() + newDefaults->height());
+    CHECK(content->y() == contentY + stack->height());
+    // The window's geometry counts the banners as chrome, as it does the tab strip.
+    CHECK(controller.chromeHeight() == chromeHeight + static_cast<int>(stack->height()));
+
+    // Keep Mine first: the notice withdraws its offer, as the real one does once remembered.
+    auto* keepMine = newDefaults->findChild<QObject*>(QStringLiteral("bannerDismiss"));
+    REQUIRE(keepMine != nullptr);
+    REQUIRE(QMetaObject::invokeMethod(keepMine, "clicked"));
+    notice.setOffered(false);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(newDefaults->isVisible());
+    CHECK(stack->height() == hosting->height());
+
+    // Then the hosting banner: the stack collapses entirely, rather than keeping the height of the
+    // banner that stood above the one already gone.
+    auto* dismiss = hosting->findChild<QObject*>(QStringLiteral("bannerDismiss"));
+    REQUIRE(dismiss != nullptr);
+    REQUIRE(QMetaObject::invokeMethod(dismiss, "clicked"));
+    QCoreApplication::processEvents();
+    CHECK_FALSE(hosting->isVisible());
+    CHECK(stack->height() == 0);
+    CHECK(content->y() == contentY);
+    CHECK(content->height() == contentHeight);
+    CHECK(controller.chromeHeight() == chromeHeight);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("Main.qml new-defaults banner: offered, with its copy, answering the notice (offscreen)",
           "[contour][gui][qml][mainwindow][newdefaults]")
 {
