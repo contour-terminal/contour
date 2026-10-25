@@ -45,8 +45,10 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last handover: 2026-10-25. Step 1b is at Task 11, "The terminal keeps every key except Quit and
-Settings"; Tasks 12 and 13 follow. Then write the Step 4a plan.
+Last handover: 2026-10-25. Step 1b Tasks 1–11 are committed. Task 11 (`0952516f`) passed review;
+its test-only fix round (three extra key-routing tests) may still be open, so check the Step 1b
+ledger. Tasks 12 (the menu bar) and 13 (finish) follow, then write the Step 4a plan. Behaviour
+note for Task 12: on macOS, ⌘H and ⌥⌘H now reach the terminal instead of hiding the app.
 
 ## Rules for every step
 

@@ -293,3 +293,6 @@ Blocking (a task's own steps, the build, or CI fail as written): **F1–F9**. Th
 - Task 10: complete (f3ea8308).
 - Task 11: BASE f3ea8308.
 - Task 11: implementer dispatched (opus).
+- Owner instruction (2026-10-25): commit and push everything for hand-over, with the status board link in the PR and plans. Done 59726671: ledgers copied to docs/superpowers/ledgers, 'Resume here' in the plans index, board link in every plan and the PR body. Task 11 WIP left to its implementer's commit.
+- Task 11: implementer DONE 0952516f ([shortcutoverride] incl. live display; [input] 60+1skip; [keyboard]; [menubar] 10). Review dispatched.
+- Task 11: review Spec ✅ Quality Approved (key delivery, platforms, AA_MacDontSwapCtrlAndMeta, single table verified). Test-only fix round dispatched (Meta+Q under the swap attribute; live ⌘Q refused and KeyPress reaches PTY; bound terminal action). Note for Task 12: Qt's default ⌘H / ⌥⌘H now reach the terminal (spec-intended) — call it out in the menu bar task and release notes.
