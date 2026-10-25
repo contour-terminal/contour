@@ -4196,6 +4196,22 @@ TEST_CASE("Config.firstLaunchDefaults", "[config]")
     }
 }
 
+TEST_CASE("Config: the path overload records what each document states as its edition",
+          "[config][newdefaults]")
+{
+    using contour::config::DefaultsEdition;
+    using contour::config::DefaultsEditionSources;
+    QTemporaryDir dir;
+    auto const path =
+        writeConfig(dir, "defaults_edition: native2026\nprofiles:\n    main:\n        shell: /bin/sh\n"sv);
+    writeSideFile(dir, "settings.yml", "defaults_edition: classic\n");
+    auto const config = contour::config::loadConfigFromFile(path);
+    CHECK(config.defaultsEditionSources
+          == DefaultsEditionSources { .mainFile = DefaultsEdition::Native2026,
+                                      .settingsFile = DefaultsEdition::Classic });
+    CHECK(config.defaultsEdition == DefaultsEdition::Classic);
+}
+
 TEST_CASE("Config: defaultConfigFilePath and the documentation generators produce content", "[config]")
 {
     // These are the pure string-producing entry points used by the `contour generate`/`documentation`

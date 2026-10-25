@@ -199,6 +199,20 @@ ApplicationWindow
             text: (appWindow.win && appWindow.win.hostingNotice) || ""
             onDismissed: appWindow.win.dismissHostingNotice()
         }
+
+        // Offers the newest defaults to a configuration that predates them (window::NewDefaultsNotice).
+        // Guarded with typeof, as DaemonDriftBadge is: the test harnesses set no such context property.
+        Banner {
+            id: newDefaultsBanner
+            objectName: "newDefaultsBanner" // so offscreen tests can findChild() it
+            readonly property var notice: typeof newDefaults !== "undefined" ? newDefaults : null
+            width: parent.width
+            text: notice !== null && notice.offered ? qsTr("Contour has new defaults") : ""
+            actionText: qsTr("Use New")
+            dismissText: qsTr("Keep Mine")
+            onActionTriggered: newDefaultsBanner.notice.useNew()
+            onDismissed: newDefaultsBanner.notice.keepMine()
+        }
     }
 
     // Content area: the active tab's pane tree is the SOLE renderer for every case — a single unsplit

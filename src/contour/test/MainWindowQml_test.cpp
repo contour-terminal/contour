@@ -15,12 +15,14 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
+#include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/QmlMocks.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -479,6 +481,83 @@ TEST_CASE("Main.qml hosting notice: the Terminal row's banner is the scheme's pa
     controller.setHostingNotice(HostingNotice);
     QCoreApplication::processEvents();
     auto const* bar = root->findChild<QQuickItem*>(QStringLiteral("hostingNoticeBar"));
+    REQUIRE(bar != nullptr);
+    REQUIRE(bar->isVisible());
+    auto const* background = bar->property("background").value<QQuickItem*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("color").value<QColor>() == QColor(0x2A, 0x2D, 0x35));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml new-defaults banner: offered, with its copy, answering the notice (offscreen)",
+          "[contour][gui][qml][mainwindow][newdefaults]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::MockNewDefaultsNotice notice { contour::config::NewDefaultsOffer::ExistingConfig };
+    engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &notice);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto const* bar = root->findChild<QQuickItem*>(QStringLiteral("newDefaultsBanner"));
+    REQUIRE(bar != nullptr);
+    CHECK(bar->isVisible());
+    auto const* text = bar->findChild<QObject*>(QStringLiteral("bannerText"));
+    auto* action = bar->findChild<QObject*>(QStringLiteral("bannerAction"));
+    auto* dismiss = bar->findChild<QObject*>(QStringLiteral("bannerDismiss"));
+    REQUIRE(text != nullptr);
+    REQUIRE(action != nullptr);
+    REQUIRE(dismiss != nullptr);
+    CHECK(text->property("text").toString() == QStringLiteral("Contour has new defaults"));
+    CHECK(action->property("text").toString() == QStringLiteral("Use New"));
+    CHECK(dismiss->property("text").toString() == QStringLiteral("Keep Mine"));
+
+    REQUIRE(QMetaObject::invokeMethod(action, "clicked"));
+    REQUIRE(QMetaObject::invokeMethod(dismiss, "clicked"));
+    QCoreApplication::processEvents();
+    CHECK(notice.calls == QStringList { QStringLiteral("useNew"), QStringLiteral("keepMine") });
+
+    // The notice withdrawing its offer takes the banner away.
+    notice.setOffered(false);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(bar->isVisible());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml new-defaults banner: hidden without a notice (offscreen)",
+          "[contour][gui][qml][mainwindow][newdefaults]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    auto const* bar = root->findChild<QQuickItem*>(QStringLiteral("newDefaultsBanner"));
+    REQUIRE(bar != nullptr);
+    CHECK_FALSE(bar->isVisible());
+    for (auto const& w: warnings.messages())
+        UNSCOPED_INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml new-defaults banner: the Terminal row's banner is the scheme's Bar (offscreen)",
+          "[contour][gui][qml][mainwindow][newdefaults]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::MockNewDefaultsNotice notice { contour::config::NewDefaultsOffer::SettingsOverride };
+    engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &notice);
+    contour::test::QmlMessageCapture warnings;
+
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Bar)] =
+        vtbackend::RGBColor { 0x2A2D35u };
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+
+    auto const* bar = root->findChild<QQuickItem*>(QStringLiteral("newDefaultsBanner"));
     REQUIRE(bar != nullptr);
     REQUIRE(bar->isVisible());
     auto const* background = bar->property("background").value<QQuickItem*>();

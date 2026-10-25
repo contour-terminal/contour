@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <contour/config/NewDefaultsOffer.hpp>
+
 #include <QtCore/QObject>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 #include <QtCore/QVariant>
 #include <QtGui/QColor>
 #include <QtQuick/QQuickItem>
@@ -343,6 +346,48 @@ class StubContourTerminal: public QQuickItem
 
   private:
     QObject* _session = nullptr;
+};
+
+/// A stand-in for window::NewDefaultsNotice, the `newDefaults` context property Main.qml's banner reads.
+/// It records the answers instead of acting on them.
+class MockNewDefaultsNotice: public QObject
+{
+    Q_OBJECT
+    /// A plain `bool`, as the real notice's: a QML-facing Q_PROPERTY read as a predicate.
+    Q_PROPERTY(bool offered READ offered WRITE setOffered NOTIFY offeredChanged)
+
+  public:
+    /// @param offer The offer the banner shows; NewDefaultsOffer::None shows none.
+    explicit MockNewDefaultsNotice(config::NewDefaultsOffer offer):
+        _isOffered { offer != config::NewDefaultsOffer::None }
+    {
+    }
+
+    /// @return Whether the banner is shown.
+    [[nodiscard]] bool offered() const noexcept { return _isOffered; }
+
+    /// The "parameter is the property" setter carve-out: it only assigns the predicate QML reads.
+    /// @param offered Whether the banner is shown.
+    void setOffered(bool offered)
+    {
+        if (_isOffered == offered)
+            return;
+        _isOffered = offered;
+        emit offeredChanged();
+    }
+
+    /// Records the banner's action.
+    Q_INVOKABLE void useNew() { calls << QStringLiteral("useNew"); }
+    /// Records the banner's dismissal.
+    Q_INVOKABLE void keepMine() { calls << QStringLiteral("keepMine"); }
+
+    QStringList calls; ///< The answers given, in order.
+
+  signals:
+    void offeredChanged();
+
+  private:
+    bool _isOffered = false;
 };
 
 } // namespace contour::test

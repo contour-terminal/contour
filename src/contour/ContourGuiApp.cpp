@@ -3,6 +3,8 @@
 #include <contour/Logging.hpp>
 #include <contour/cli/Hosting.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/GuiStateStore.hpp>
 #include <contour/display/ContentScale.hpp>
 #include <contour/display/FirstFrameWatchdog.hpp>
 #include <contour/display/GpuInventory.hpp>
@@ -1790,6 +1792,15 @@ void ContourGuiApp::refreshChromeStyle()
         _chromeStyleHost->update(chromeInputs());
 }
 
+void ContourGuiApp::onConfigurationReloaded()
+{
+    refreshChromeStyle();
+    // Guarded as refreshChromeStyle() is: the notice is built with the QML engine, which a headless
+    // app never creates.
+    if (_newDefaultsNotice)
+        _newDefaultsNotice->refresh();
+}
+
 void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPreferences preferences)
 {
     refreshChromeStyle();
@@ -2313,6 +2324,15 @@ int ContourGuiApp::terminalGuiAction()
         QQmlContext* context = _qmlEngine->rootContext();
         context->setContextProperty("terminalSessions", &_sessionManager);
         context->setContextProperty("daemonDrift", &_daemonDrift);
+        // The new-defaults banner's decision, over the files beside contour.yml: "Use New" writes
+        // settings.yml and reloads, "Keep Mine" remembers the answer in the GUI state file.
+        auto const configDir = _config.configFile.parent_path();
+        _newDefaultsNotice =
+            make_unique<window::NewDefaultsNotice>([this]() -> config::Config const& { return _config; },
+                                                   std::make_shared<config::FileGuiConfigStore>(configDir),
+                                                   std::make_shared<config::FileGuiStateStore>(configDir),
+                                                   [this] { return _sessionManager.reloadAllSessions(); });
+        context->setContextProperty("newDefaults", _newDefaultsNotice.get());
         // A context property rather than a registered QML singleton: two separate modules read these
         // tokens -- Contour.Ui and the ContourTui Quick Controls style -- and a singleton would make
         // the style module import this application's own C++ URI, which a style that Qt resolves by

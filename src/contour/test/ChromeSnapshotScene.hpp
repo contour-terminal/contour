@@ -6,6 +6,7 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
+#include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -179,6 +180,7 @@ class ChromeSnapshotScene
             .hostingNotice = hostingNoticeFor(scriptRow(variant.script).banner),
             .tabBarVisibility = _look.tabBarVisibility,
         } },
+        _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _root { load() }
     {
     }
@@ -336,8 +338,23 @@ class ChromeSnapshotScene
         {
             case SnapshotBanner::None: break;
             case SnapshotBanner::Hosting: return QString::fromUtf8(SnapshotHostingNotice);
+            case SnapshotBanner::NewDefaults: break;
         }
         return {};
+    }
+
+    /// The offer the new-defaults banner shows for a script's banner column.
+    /// @param banner The script's banner.
+    /// @return NewDefaultsOffer::ExistingConfig for SnapshotBanner::NewDefaults, None otherwise.
+    [[nodiscard]] static config::NewDefaultsOffer newDefaultsOfferFor(SnapshotBanner banner) noexcept
+    {
+        switch (banner)
+        {
+            case SnapshotBanner::None:
+            case SnapshotBanner::Hosting: break;
+            case SnapshotBanner::NewDefaults: return config::NewDefaultsOffer::ExistingConfig;
+        }
+        return config::NewDefaultsOffer::None;
     }
 
     /// The settings page's controller over a store in a temporary directory, or null unless @p page
@@ -414,6 +431,7 @@ class ChromeSnapshotScene
             .scheme = config::chromeSchemeColorsOf(
                 *config::preferredColorPalette(config::defaultColors(_variant.edition), _variant.appearance)),
         };
+        _engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &_newDefaults);
         auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
         REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
         _incubation.settle();
@@ -434,6 +452,7 @@ class ChromeSnapshotScene
     QTemporaryDir _settingsDir;
     std::unique_ptr<window::SettingsController> _settings;
     MockMainController _controller;
+    MockNewDefaultsNotice _newDefaults;
     QQmlEngine _engine;
     IncubationDriver _incubation;
     std::unique_ptr<QObject> _root;    ///< The QML tree dies before everything it borrows.

@@ -113,6 +113,12 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(bar->isVisible());
                 break;
             }
+            case SnapshotScript::NewDefaultsBanner: {
+                auto const* bar = scene.root().findChild<QQuickItem*>(QStringLiteral("newDefaultsBanner"));
+                REQUIRE(bar != nullptr);
+                CHECK(bar->isVisible());
+                break;
+            }
             case SnapshotScript::SingleTab: break;
         }
     }

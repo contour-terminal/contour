@@ -277,6 +277,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
         window/ChromeTokenObjects.hpp
+        window/NewDefaultsNotice.hpp
         window/UiStyleProvider.hpp
         window/WindowControlStyleProvider.hpp
         session/SessionInput.hpp
@@ -307,6 +308,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
         window/DaemonDriftModel.cpp
+        window/NewDefaultsNotice.cpp
         ContourGuiApp.cpp
         session/PaneProxy.cpp
         config/LayoutBuilder.cpp
@@ -809,6 +811,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/WindowControlStyleProvider_test.cpp
             window/TabLabel_test.cpp
             window/DaemonDriftModel_test.cpp
+            window/NewDefaultsNotice_test.cpp
             geometry/CellRectangle_test.cpp
             geometry/WindowGeometry_test.cpp
             platform/WindowResizeGrid_test.cpp
@@ -1132,8 +1135,10 @@ if(CONTOUR_TESTING)
         config/FileOpenerTemplate_test.cpp
         config/DaemonSettings_test.cpp
         config/GlobalOverrides_test.cpp
+        config/GuiStateStore_test.cpp
         config/HostUrl_test.cpp
         config/LayoutBuilder_test.cpp
+        config/NewDefaultsOffer_test.cpp
         config/PtyReadBufferSize_test.cpp
         config/TabBarMode_test.cpp
         config/UiStyle_test.cpp

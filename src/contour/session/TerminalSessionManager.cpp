@@ -760,8 +760,9 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
                        _app.defaultProfileColors(),
                        _focusedSession != nullptr ? std::optional { _focusedSession->liveBackground() }
                                                   : std::nullopt);
-    // And the chrome tokens: a reload may change the chrome font and the scheme the Terminal row paints with.
-    _app.refreshChromeStyle();
+    // And what else derives from the configuration: the chrome tokens (a reload may change the chrome font
+    // and the scheme the Terminal row paints with) and the new-defaults banner (it may change the edition).
+    _app.onConfigurationReloaded();
 
     // The settings page reads through the app config just reloaded above, but each OS window owns its
     // own SettingsController with model caches rebuilt only by refresh(). The controller that triggered

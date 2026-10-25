@@ -1735,6 +1735,10 @@ struct Config
     /// loadConfigFromFile(path) scans `defaults_edition` before it constructs the Config.
     /// Fixed at construction: changing it afterwards changes no default already taken.
     DefaultsEdition defaultsEdition { DefaultsEdition::Native2026 };
+    /// What `contour.yml` and `settings.yml` each stated as their edition, as the scan found them. Set by
+    /// loadConfigFromFile(path) beside @ref defaultsEdition, and empty for a Config built in code. Runtime
+    /// only: the GUI reads it to decide whether to offer the newest defaults (see NewDefaultsOffer).
+    DefaultsEditionSources defaultsEditionSources {};
     std::filesystem::path configFile {};
     ConfigEntry<std::string, documentation::PlatformPlugin> platformPlugin { "auto" };
     ConfigEntry<RendererConfig, documentation::Renderer> renderer {};
@@ -3140,13 +3144,19 @@ std::optional<std::string> readConfigFile(std::string const& filename);
 /// The key a configuration states its DefaultsEdition under, in contour.yml or settings.yml.
 inline constexpr std::string_view DefaultsEditionKey = "defaults_edition";
 
+/// What the configuration at @p configFile and the `settings.yml` beside it each state as their
+/// `defaults_edition`.
+/// @param configFile The contour.yml to scan.
+/// @return Each document's statement; nothing for a document that is absent, unreadable or states none.
+[[nodiscard]] DefaultsEditionSources scanDefaultsEditionSources(std::filesystem::path const& configFile);
+
 /// The edition of defaults the configuration at @p configFile is written against.
 ///
 /// Read before the configuration is, because the edition decides the defaults it is read onto: the
 /// `defaults_edition` of @p configFile, then that of the `settings.yml` beside it, which wins. Neither
 /// stating one is a file from before the key existed, and so DefaultsEdition::Classic.
 /// @param configFile The contour.yml to scan.
-/// @return The edition that applies.
+/// @return The edition that applies, `effectiveEdition(scanDefaultsEditionSources(configFile))`.
 [[nodiscard]] DefaultsEdition scanDefaultsEdition(std::filesystem::path const& configFile);
 
 /// Loads @p fileName into @p config, whose defaults (and so its edition) are already fixed.

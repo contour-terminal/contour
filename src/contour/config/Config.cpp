@@ -689,15 +689,19 @@ namespace
     }
 } // namespace
 
+DefaultsEditionSources scanDefaultsEditionSources(fs::path const& configFile)
+{
+    return DefaultsEditionSources {
+        .mainFile = statedDefaultsEdition(configFile),
+        .settingsFile = statedDefaultsEdition(configFile.parent_path() / "settings.yml"),
+    };
+}
+
 DefaultsEdition scanDefaultsEdition(fs::path const& configFile)
 {
-    // settings.yml is read second so that it wins: it is where the GUI records a switch to new
-    // defaults, and the hand-maintained contour.yml is never rewritten for it.
-    auto edition = DefaultsEdition::Classic;
-    for (auto const& path: { configFile, configFile.parent_path() / "settings.yml" })
-        if (auto const stated = statedDefaultsEdition(path))
-            edition = *stated;
-    return edition;
+    // settings.yml wins (see effectiveEdition): it is where the GUI records a switch to new defaults, and
+    // the hand-maintained contour.yml is never rewritten for it.
+    return effectiveEdition(scanDefaultsEditionSources(configFile));
 }
 
 Config loadConfigFromFile(fs::path const& fileName)
@@ -706,7 +710,8 @@ Config loadConfigFromFile(fs::path const& fileName)
     // states the newest edition, and a file that predates the key states none and so stays Classic.
     createFileIfNotExists(fileName);
 
-    auto config = Config { .defaultsEdition = scanDefaultsEdition(fileName) };
+    auto const sources = scanDefaultsEditionSources(fileName);
+    auto config = Config { .defaultsEdition = effectiveEdition(sources), .defaultsEditionSources = sources };
 
     loadConfigFromFile(config, fileName);
 

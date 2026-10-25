@@ -19,6 +19,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -530,6 +531,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// applyWindowControlStyle(): there is nothing to rebuild yet.
     void refreshChromeStyle();
 
+    /// Brings everything derived from the configuration up to date after a reload replaced it: the
+    /// chrome tokens (refreshChromeStyle()) and the new-defaults banner. Safe before the GUI exists, as
+    /// refreshChromeStyle() is: an engine-less app (a headless test) reloads too.
+    void onConfigurationReloaded();
+
   private:
     /// @return What the chrome is built from now: the row, the resolved chrome font, both OS sources'
     ///         current values, and the scheme of the terminal palette in effect.
@@ -932,6 +938,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// property is a borrowed pointer the engine keeps dereferencing, and members are destroyed in
     /// reverse declaration order.
     std::unique_ptr<window::ChromeStyleHost> _chromeStyleHost;
+
+    /// Whether to offer the newest defaults, handed to QML as the `newDefaults` context property. Built
+    /// with the engine, and declared before it for the same borrowed-pointer reason as above.
+    std::unique_ptr<window::NewDefaultsNotice> _newDefaultsNotice;
 
     /// What the window controls are and where they go, handed to QML as the `windowControls` context
     /// property. Declared before the engine for the same borrowed-pointer reason as above.

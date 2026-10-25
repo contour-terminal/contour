@@ -17,11 +17,14 @@ using vtbackend::operator""_rgb;
 TEST_CASE("snapshot.scriptTable", "[snapshot]")
 {
     using namespace contour::test::snapshot;
-    CHECK(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::HostingBanner) + 1);
+    CHECK(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScript::NewDefaultsBanner) + 1);
+    CHECK(SnapshotScripts.size() == 10);
     CHECK(scriptRow(SnapshotScript::ThreeTabs).tabCount == 3);
     CHECK(scriptRow(SnapshotScript::RemoteReconnecting).connection == HostConnection::Reconnecting);
     CHECK(scriptRow(SnapshotScript::Settings).page == ContentPage::Settings);
     CHECK(scriptRow(SnapshotScript::HostingBanner).banner == SnapshotBanner::Hosting);
+    CHECK(scriptRow(SnapshotScript::NewDefaultsBanner).banner == SnapshotBanner::NewDefaults);
+    CHECK(scriptRow(SnapshotScript::NewDefaultsBanner).name == "new-defaults-banner");
     CHECK(scriptRow(SnapshotScript::SingleTab).banner == SnapshotBanner::None);
 }
 
@@ -62,11 +65,13 @@ TEST_CASE("snapshot.matrixAndNames", "[snapshot]")
     auto const matrix = snapshotMatrix(all);
     CHECK(matrix.size()
           == SnapshotScripts.size() * all.size() * SnapshotEditions.size() * SnapshotAppearances.size());
+    CHECK(matrix.size() == 160);
     CHECK(snapshotFileName(matrix.front()) == "single-tab.macos.classic.dark.png");
     CHECK(snapshotFileName(matrix.back())
           == std::format("{}.terminal.native2026.light.png", SnapshotScripts.back().name));
     CHECK(snapshotMatrix(rowsRenderableUnder("ContourTui")).size()
           == SnapshotScripts.size() * SnapshotEditions.size() * SnapshotAppearances.size());
+    CHECK(snapshotMatrix(rowsRenderableUnder("ContourTui")).size() == 40);
 }
 
 TEST_CASE("snapshot.lookPerEdition", "[snapshot]")

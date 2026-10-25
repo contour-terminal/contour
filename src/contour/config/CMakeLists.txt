@@ -21,10 +21,12 @@ add_library(contour_config STATIC
     GlobalOverrides.cpp GlobalOverrides.hpp
     GpuSelector.cpp GpuSelector.hpp
     GuiConfigStore.cpp GuiConfigStore.hpp
+    GuiStateStore.cpp GuiStateStore.hpp
     HostUrl.cpp HostUrl.hpp
     LayoutBuilder.cpp LayoutBuilder.hpp
     LayoutStore.cpp LayoutStore.hpp
     ModifierNames.hpp
+    NewDefaultsOffer.hpp
     SingleQuoted.hpp
     TabBarMode.hpp
     UiStyle.hpp
