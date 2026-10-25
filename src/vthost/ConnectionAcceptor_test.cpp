@@ -128,7 +128,8 @@ Task<void> clientRoundTrip(EventLoop* loop, std::string socketPath, std::string 
     auto const wire = line + "\n";
     auto const bytes =
         std::span<std::byte const> { reinterpret_cast<std::byte const*>(wire.data()), wire.size() };
-    REQUIRE((co_await sock->write(bytes)).has_value());
+    auto const written = co_await sock->write(bytes);
+    REQUIRE(written.has_value());
 
     auto reader = core::net::AsyncBufferedReader { sock.get() };
     auto const echo = co_await reader.readLine();

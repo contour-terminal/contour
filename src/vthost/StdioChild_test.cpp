@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ProgramLookup.hpp>
 
+#include <core/Environment.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -32,7 +33,7 @@ namespace
 /// A loop and the system spawner, searching this process's PATH.
 struct SpawnFixture
 {
-    std::string searchPath = vtpty::execSearchPath(std::nullopt);
+    std::string searchPath = vtpty::execSearchPath(core::defaultEnvironment().get("PATH"));
     core::platform::NativeFileSystem nativeFileSystem { core::platform::nativeRename() };
     std::unique_ptr<vthost::IStdioSpawner> spawner = vthost::makeSystemStdioSpawner(
         vtpty::ProgramSearch { .path = searchPath, .workingDirectory = {}, .fileSystem = nativeFileSystem });
@@ -53,8 +54,12 @@ struct SpawnFixture
 core::async::Task<std::vector<std::byte>> exchange(core::net::ISocket* socket, std::vector<std::byte> input)
 {
     if (!input.empty())
-        REQUIRE((co_await socket->write(input)).has_value());
-    REQUIRE((co_await socket->shutdownWrite()).has_value());
+    {
+        auto const written = co_await socket->write(input);
+        REQUIRE(written.has_value());
+    }
+    auto const shut = co_await socket->shutdownWrite();
+    REQUIRE(shut.has_value());
     auto received = std::vector<std::byte> {};
     auto buffer = std::vector<std::byte>(4096);
     while (true)
@@ -88,11 +93,15 @@ core::async::Task<std::vector<std::byte>> exchange(core::net::ISocket* socket, s
     return bytes;
 }
 
+/// What the echo cases send. Words, not single letters: Windows' sort reads "b\na\n" as UTF-16, its bytes
+/// alike enough every other one for IsTextUnicode() to take them for it, and prints two unknown characters.
+constexpr auto EchoInput = std::string_view { "bravo\nalpha\n" };
+
 /// The platform's commands for the cases both platforms run.
 struct Commands
 {
     std::vector<std::string> echo;     ///< Copies stdin to stdout, in some order.
-    std::string echoed;                ///< What echo makes of "b\na\n".
+    std::string echoed;                ///< What echo makes of EchoInput.
     std::vector<std::string> failing;  ///< Writes "oops" to stderr and exits 3.
     std::vector<std::string> sleeping; ///< Runs for 30 seconds.
 };
@@ -101,12 +110,12 @@ struct Commands
 {
 #ifdef _WIN32
     return Commands { .echo = { "cmd.exe", "/d", "/c", "sort" },
-                      .echoed = "a\r\nb\r\n",
+                      .echoed = "alpha\r\nbravo\r\n",
                       .failing = { "cmd.exe", "/d", "/c", "echo oops 1>&2 & exit /b 3" },
                       .sleeping = { "cmd.exe", "/d", "/c", "ping -n 30 127.0.0.1 > nul" } };
 #else
     return Commands { .echo = { "cat" },
-                      .echoed = "b\na\n",
+                      .echoed = "bravo\nalpha\n",
                       .failing = { "sh", "-c", "echo oops >&2; exit 3" },
                       .sleeping = { "sleep", "30" } };
 #endif
@@ -118,7 +127,7 @@ TEST_CASE("a spawned child echoes its stdin", "[vthost][spawn][stdio]")
 {
     auto fixture = SpawnFixture {};
     auto child = fixture.spawn(platformCommands().echo);
-    auto const received = fixture.loop.blockOn(exchange(child.transport.get(), bytesOf("b\na\n")));
+    auto const received = fixture.loop.blockOn(exchange(child.transport.get(), bytesOf(EchoInput)));
     CHECK(textOf(received) == platformCommands().echoed);
 }
 

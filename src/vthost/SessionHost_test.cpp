@@ -2581,6 +2581,18 @@ TEST_CASE("SessionHost reports why each session ended", "[vthost][snapshot]")
 }
 
 #ifndef _WIN32
+namespace
+{
+    #ifdef __APPLE__
+// How a shell that closed its terminal and lives on ends. macOS detaches a terminal from its session at the
+// terminal's last close, so the host's close of the master later hangs nobody up: the shell sleeps on, and
+// how it will end is not known yet when the pump asks.
+constexpr auto ClosedTerminalEnd = vthost::SessionEnd::Exited;
+    #else
+constexpr auto ClosedTerminalEnd = vthost::SessionEnd::Killed;
+    #endif
+} // namespace
+
 TEST_CASE("a hosted shell killed by a signal ends Killed, one that exits ends Exited",
           "[vthost][snapshot][threading]")
 {
@@ -2594,8 +2606,9 @@ TEST_CASE("a hosted shell killed by a signal ends Killed, one that exits ends Ex
     for (auto const& row: {
              Row { "kill -9 $$", vthost::SessionEnd::Killed },
              // Closing its terminal while it lives on makes the pump see the hangup first, and the host's
-             // close then hangs the shell up: there is no status yet when the pump asks, only a moment later.
-             Row { "exec 0<&- 1>&- 2>&-; sleep 5", vthost::SessionEnd::Killed },
+             // close then hangs the shell up (where it does: @see ClosedTerminalEnd): there is no status yet
+             // when the pump asks, only a moment later.
+             Row { "exec 0<&- 1>&- 2>&-; sleep 5", ClosedTerminalEnd },
              Row { "exit 3", vthost::SessionEnd::Exited },
          })
     {

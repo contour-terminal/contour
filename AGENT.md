@@ -389,6 +389,9 @@ variable is unset, clone the trees first (they are not vendored into this repo).
 
 - Run the suite: `ctest --preset=clang-asan` (for a release tree: `ctest --test-dir out/clang-release`).
 - Framework is **Catch2** for the libraries; the GUI tests use `Qt6::Test`.
+- Never `co_await` inside a Catch2 assertion (`REQUIRE(co_await f())`): on GCC, Catch2 also passes the
+  expression to `__builtin_constant_p` for its warnings, and the `co_await` runs twice. Await into a
+  local, then assert on it.
 - Run a single test: `<module>_test "TestName"` with an optional `-c "section name"`
   (e.g. `out/clang-asan/src/vtbackend/vtbackend_test "TestName" -c "section"`).
 - Data races: `ctest --preset=clang-tsan`. Tests that drive terminal state from a second thread

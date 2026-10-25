@@ -207,7 +207,7 @@ TransportError sshTransportError(SshFailure failure,
                                  std::string_view detail,
                                  std::optional<int> exitCode)
 {
-    auto const* const row = std::ranges::find(SshFailureMessages, failure, &SshFailureMessage::failure);
+    auto const row = std::ranges::find(SshFailureMessages, failure, &SshFailureMessage::failure);
     // Every SshFailure has a row; a missing one is a programming error the table test catches.
     if (row == SshFailureMessages.end())
         return TransportError { .kind = TransportErrorKind::Refused,

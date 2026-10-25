@@ -218,6 +218,7 @@ TEST_CASE("stop() times out against a daemon that keeps accepting", "[vthost][cl
     auto port = client::SocketDaemonControl { h.loop, h.connector(), 100ms };
     auto const stopped = port.stop(proto::StopReason::UpgradeRestart);
     REQUIRE_FALSE(stopped.has_value());
+    INFO(stopped.error().detail);
     CHECK(stopped.error().code == client::ControlErrorCode::Timeout);
     // The stop connection plus reconnects: the timeout came out of the reconnect loop, not the EOF wait.
     CHECK(h.connections >= 3);
@@ -275,9 +276,16 @@ TEST_CASE("a refused TCP connection reads as not running", "[vthost][client][con
         REQUIRE(listener.has_value());
         port = (*listener)->boundPort();
     }
-    auto control = client::makeDaemonControl(std::make_shared<vthost::TlsTransportFactory>(
-        vthost::TcpEndpoint { .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} }));
-    CHECK(control->status().error().code == client::ControlErrorCode::NotRunning);
+    // Windows takes about two seconds to give up on a refused connection, retrying it first: the call's
+    // timeout must outlast that, or what this reads is the timeout.
+    auto control =
+        client::makeDaemonControl(std::make_shared<vthost::TlsTransportFactory>(vthost::TcpEndpoint {
+                                      .host = "127.0.0.1", .port = port, .token = {}, .caPem = {} }),
+                                  std::chrono::seconds { 10 });
+    auto const status = control->status();
+    REQUIRE_FALSE(status.has_value());
+    INFO(status.error().toString());
+    CHECK(status.error().code == client::ControlErrorCode::NotRunning);
 }
 
 TEST_CASE("a TLS setup failure is a transport error, not an absent daemon", "[vthost][client][control]")

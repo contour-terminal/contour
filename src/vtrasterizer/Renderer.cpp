@@ -674,6 +674,33 @@ bool Renderer::render(vtbackend::Terminal& terminal, bool pressure)
     return false;
 }
 
+void Renderer::reconcileTotalPageSize(vtbackend::PageSize totalPageSize)
+{
+    // Reconciles the page size with the terminal's *total* page size. Most page-size changes flow
+    // through setPageSize()/applyResize() (which publish synchronously), but the terminal can also
+    // change its total page size on its own thread without those — notably toggling the indicator
+    // status line on/off (setStatusDisplay() -> resizeScreen()), which adds/removes a line.
+    //
+    // Only reconcile on a terminal-driven *edge*: the terminal total changed since the previous frame.
+    // A bare `_gridMetrics.pageSize != totalPageSize` check would also fire mid-resize, when applyResize()
+    // (GUI thread) has already published+staged the new page size — so the render thread applied it into
+    // _gridMetrics — but terminal.resizeScreen() (the second half of applyResize(), still on the GUI
+    // thread) has not run yet. There the terminal total is the *stale* old value, and reconciling toward
+    // it would revert the just-published new size for a frame. By keying on the change of
+    // terminal.totalPageSize() itself, an in-flight UI resize is invisible (the terminal total has not
+    // moved yet), and when resizeScreen() later lands, _gridMetrics already equals it so the edge is a
+    // no-op. A status-line toggle, by contrast, moves the terminal total without any renderer staging, so
+    // it registers as an edge and is reconciled.
+    if (_lastObservedTotalPageSize && *_lastObservedTotalPageSize != totalPageSize
+        && _gridMetrics.pageSize != totalPageSize)
+    {
+        _gridMetrics.pageSize = totalPageSize;
+        auto const l = std::scoped_lock { _reconfigMutex };
+        _publishedMetrics.pageSize = totalPageSize;
+    }
+    _lastObservedTotalPageSize = totalPageSize;
+}
+
 bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 {
     ZoneScoped;
@@ -692,30 +719,7 @@ bool Renderer::renderImpl(vtbackend::Terminal& terminal, bool pressure)
 
     auto const statusLineHeight = terminal.statusLineHeight();
 
-    // Reconcile the page size with the terminal's *total* page size. Most page-size changes flow
-    // through setPageSize()/applyResize() (which publish synchronously), but the terminal can also
-    // change its total page size on its own thread without those — notably toggling the indicator
-    // status line on/off (setStatusDisplay() -> resizeScreen()), which adds/removes a line.
-    //
-    // Only reconcile on a terminal-driven *edge*: the terminal total changed since the previous frame.
-    // A bare `_gridMetrics.pageSize != totalPageSize` check would also fire mid-resize, when applyResize()
-    // (GUI thread) has already published+staged the new page size — so the render thread applied it into
-    // _gridMetrics — but terminal.resizeScreen() (the second half of applyResize(), still on the GUI
-    // thread) has not run yet. There the terminal total is the *stale* old value, and reconciling toward
-    // it would revert the just-published new size for a frame. By keying on the change of
-    // terminal.totalPageSize() itself, an in-flight UI resize is invisible (the terminal total has not
-    // moved yet), and when resizeScreen() later lands, _gridMetrics already equals it so the edge is a
-    // no-op. A status-line toggle, by contrast, moves the terminal total without any renderer staging, so
-    // it registers as an edge and is reconciled.
-    auto const totalPageSize = terminal.totalPageSize();
-    if (_lastObservedTotalPageSize && *_lastObservedTotalPageSize != totalPageSize
-        && _gridMetrics.pageSize != totalPageSize)
-    {
-        _gridMetrics.pageSize = totalPageSize;
-        auto const l = std::scoped_lock { _reconfigMutex };
-        _publishedMetrics.pageSize = totalPageSize;
-    }
-    _lastObservedTotalPageSize = totalPageSize;
+    reconcileTotalPageSize(terminal.totalPageSize());
 
     // The renderer survives tab changes; snapshot the active terminal palette before taking a render buffer.
     _backgroundRenderer.setDefaultColor(

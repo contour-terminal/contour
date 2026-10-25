@@ -1766,7 +1766,14 @@ jobs:
         # ~[guest]: the extension cases read the spawner guest from the build tree of the job that
         # built them, which this artifact does not carry, and measure a command's teardown against its
         # timeout. The Linux matrix runs them natively and asserts they ran.
-        run: valgrind --error-exitcode=64 ./out/gcc-debug/src/vthost/vthost_test '~[oracle]' '~[guest]'
+        #
+        # ~[vfork]: posix_spawn reports a failed exec through memory shared with its vfork'd child,
+        # which valgrind runs as a fork; the spawn then succeeds, and the child exits 127.
+        #
+        # --fair-sched=yes: valgrind runs one thread at a time, and its default lock lets the thread
+        # that holds it take it straight back. A test driving the loop on its own thread then starved a
+        # session's pump thread past the test's 10 s budget.
+        run: valgrind --error-exitcode=64 --fair-sched=yes ./out/gcc-debug/src/vthost/vthost_test '~[oracle]' '~[guest]' '~[vfork]'
   # }}}
   # {{{ Ubuntu 24.04: VT conformance (esctest gates, vttest is advisory)
   test_ubuntu2404_conformance:
@@ -1998,9 +2005,11 @@ jobs:
           fi
         env:
           VCPKG_ROOT: "${{ runner.workspace }}/vcpkg"
+      # pwsh, not bash: Git Bash puts its own /usr/bin/link ahead of MSVC's link.exe on PATH, and cargo,
+      # linking the bundled extensions' build scripts, would run that coreutils link instead.
       - name: "Build contour and bench-latency"
-        shell: bash
-        run: cmake --build --preset "$CMAKE_PRESET" --target contour bench-latency
+        shell: pwsh
+        run: cmake --build --preset "$env:CMAKE_PRESET" --target contour bench-latency
       - name: "Locate the binaries"
         id: binaries
         shell: bash

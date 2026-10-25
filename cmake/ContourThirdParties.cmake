@@ -284,6 +284,10 @@ if(CONTOUR_EXTENSIONS)
                 "WAMR_DISABLE_HW_BOUND_CHECK 1"
                 "WAMR_DISABLE_STACK_HW_BOUND_CHECK 1"
                 "WAMR_DISABLE_WAKEUP_BLOCKING_OP 1"
+                # WAMR writes the linear memory's base to GS on every call, for the AOT code's sake ("segue");
+                # the interpreter never reads it back. valgrind cannot decode wrgsbase, and the daemon's
+                # suites run under it.
+                "WAMR_DISABLE_WRITE_GS_BASE 1"
                 "BUILD_SHARED_LIBS OFF"
             EXCLUDE_FROM_ALL YES
             SYSTEM YES
