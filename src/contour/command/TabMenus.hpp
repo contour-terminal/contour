@@ -44,7 +44,7 @@ struct NewTabMenuState
     std::vector<std::string> profileNames {}; ///< Every configured profile, in a stable order.
 };
 
-/// The new-tab menu for @p state: one row per profile, then "Settings".
+/// The new-tab menu for @p state: one row per profile, and nothing else.
 /// @param state The configured profiles.
 /// @return The menu, top to bottom.
 [[nodiscard]] std::vector<ContextMenuEntry> buildNewTabMenu(NewTabMenuState const& state);

@@ -135,16 +135,13 @@ TEST_CASE("tabMenu.lastTab", "[tabmenu]")
     CHECK(row(menu, "Close Tab").availability == RowAvailability::Enabled);
 }
 
-TEST_CASE("newTabMenu.profilesThenSettings", "[newtabmenu]")
+TEST_CASE("newTabMenu.profilesOnly", "[newtabmenu]")
 {
     auto const menu = buildNewTabMenu({ .profileNames = { "dark", "light" } });
-    REQUIRE(menu.size() == 4);
-    CHECK(titles(menu) == std::vector<std::string> { "New tab — dark", "New tab — light", "", "Settings" });
-    CHECK(std::get<actions::CreateNewTab>(menu[0].action).profileName == "dark");
-    CHECK(std::get<actions::CreateNewTab>(menu[1].action).profileName == "light");
-    CHECK(menu[2].kind == ContextMenuEntryKind::Separator);
-    CHECK(std::holds_alternative<actions::OpenConfiguration>(menu[3].action));
+    CHECK(titles(menu) == std::vector<std::string> { "New tab — dark", "New tab — light" });
+    CHECK(std::ranges::none_of(menu, [](auto const& entry) {
+        return std::holds_alternative<actions::OpenConfiguration>(entry.action);
+    }));
 
-    auto const bare = buildNewTabMenu({});
-    CHECK(titles(bare) == std::vector<std::string> { "Settings" });
+    CHECK(buildNewTabMenu({}).empty());
 }

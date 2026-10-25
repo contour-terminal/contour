@@ -208,31 +208,14 @@ ThemedWindow
         // `<img src=...>` fetched on hover. Set here, on an Item, as the attached property requires.
         Component.onCompleted: ToolTip.toolTip.contentItem.textFormat = Text.PlainText
 
-        // The terminal content. Kept ACTIVE (so the pane tree and its PTYs keep running) even while the
-        // settings page is shown, just hidden — flipping back is instant and nothing is torn down.
+        // The terminal content: the active tab's pane tree. Settings is a window of its own
+        // (SettingsWindow.qml), so nothing else ever takes this area's place.
         Loader {
             id: paneContentLoader
             anchors.fill: parent
             active: appWindow.win !== null && appWindow.win.activeTabRootPane !== null
-            // `=== true` coerces a missing/undefined property (lightweight mock `win` in tests) to a bool.
-            visible: !(appWindow.win !== null && appWindow.win.settingsActive === true)
             sourceComponent: PaneNode {
                 node: appWindow.win ? appWindow.win.activeTabRootPane : null
-            }
-        }
-
-        // The in-app settings page, shown in place of the terminal when the WindowController's
-        // settingsActive flag is set (the tab-strip gear, or the OpenConfiguration action). A peer of the
-        // pane-tree Loader, honoring the "single renderer" architecture — settings is not a pane.
-        Loader {
-            id: settingsPageLoader
-            objectName: "settingsPageLoader" // so offscreen tests can findChild() it
-            anchors.fill: parent
-            active: appWindow.win !== null && appWindow.win.settingsActive === true
-            visible: active
-            sourceComponent: SettingsPage {
-                controller: appWindow.win ? appWindow.win.settingsController : null
-                windowController: appWindow.win
             }
         }
 

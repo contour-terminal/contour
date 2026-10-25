@@ -343,6 +343,19 @@ TEST_CASE("Main.qml tooltips: every attached tooltip shows its text as written (
     CHECK(textFormat.toInt() == Qt::PlainText);
 }
 
+TEST_CASE("Main.qml has no settings page or settings tab (offscreen)", "[contour][gui][qml][mainwindow]")
+{
+    // Settings is a window of its own (SettingsWindow.qml): the terminal window neither swaps its
+    // content area for the page nor pins a tab for it in the strip.
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+
+    CHECK(root->findChild<QObject*>(QStringLiteral("settingsPageLoader")) == nullptr);
+    CHECK(root->findChild<QObject*>(QStringLiteral("settingsTab")) == nullptr);
+}
+
 TEST_CASE("Main.qml remote chrome: a window attached to a host names it (offscreen)",
           "[contour][gui][qml][mainwindow][window][hosts]")
 {

@@ -1,8 +1,7 @@
 // vim:syntax=qml
-// The in-app settings page, shown in the content area in place of the terminal when the
-// WindowController's settingsActive flag is set (see Main.qml). It binds entirely to a
-// SettingsController (the editable bridge over the configuration) and a WindowController (to close the
-// page). It never edits contour.yml: it creates/edits GUI-owned side files, and shows contour.yml /
+// The settings page, the content of the app's one Settings window (see SettingsWindow.qml). It binds
+// entirely to a SettingsController (the editable bridge over the configuration) and its host, passed as
+// `windowController` (the SettingsWindowHost, to close the window). It never edits contour.yml: it creates/edits GUI-owned side files, and shows contour.yml /
 // builtin entities read-only.
 //
 // Layout (Windows-Terminal style): a title bar, a left navigation rail with accent "pill" selection

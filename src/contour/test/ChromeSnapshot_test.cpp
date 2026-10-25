@@ -94,12 +94,12 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(palette->property("opened").toBool());
                 break;
             }
-            case SnapshotScript::Settings: {
-                auto const* loader = scene.root().findChild<QObject*>(QStringLiteral("settingsPageLoader"));
-                REQUIRE(loader != nullptr);
-                CHECK(loader->property("item").value<QObject*>() != nullptr);
+            case SnapshotScript::Settings:
+                CHECK(scene.subject().objectName() == QStringLiteral("settingsWindow"));
+                CHECK(scene.subject().isVisible());
+                CHECK(scene.subject().findChild<QQuickItem*>(QStringLiteral("settingsPage")) != nullptr);
+                CHECK(scene.root().findChild<QObject*>(QStringLiteral("settingsPageLoader")) == nullptr);
                 break;
-            }
             case SnapshotScript::RemoteReconnecting: {
                 auto const* overlay =
                     scene.root().findChild<QQuickItem*>(QStringLiteral("reconnectingOverlay"));
@@ -267,14 +267,14 @@ TEST_CASE("Chrome snapshots: every script on every row this process draws", "[di
         INFO(snapshotFileName(variant));
         auto scene = ChromeSnapshotScene { variant };
         scene.show();
-        REQUIRE(QTest::qWaitForWindowExposed(&scene.window(), 3000));
+        REQUIRE(QTest::qWaitForWindowExposed(&scene.subject(), 3000));
         auto const image = scene.grab();
         CHECK(scene.diagnostics().isEmpty());
         REQUIRE_FALSE(image.isNull());
-        CHECK(image.size() == SnapshotWindowSize * scene.window().devicePixelRatio());
+        CHECK(image.size() == scene.subject().size() * scene.subject().devicePixelRatio());
         auto const facts = SnapshotFacts {
             .platform = QGuiApplication::platformName().toStdString(),
-            .devicePixelRatio = scene.window().devicePixelRatio(),
+            .devicePixelRatio = scene.subject().devicePixelRatio(),
             .chromeFontFamily = QFontInfo(scene.chromeFont()).family().toStdString(),
             .controlsStyle = controls,
             .qtVersion = qVersion(),

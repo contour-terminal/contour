@@ -18,6 +18,8 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <core/platform/FileSystem.hpp>
@@ -130,17 +132,17 @@ class ChromeSnapshotScene
         _history { PaletteHistoryCapacity },
         _paletteModel { makePaletteModel(
             _history, _actionCommands, _config, command::shortcutStyleFor(rowHost(variant.row).host)) },
-        _settings { makeSettings(scriptRow(variant.script).page) },
+        _settings { makeSettings(scriptRow(variant.script).surface) },
         _controller { MainWindowScene {
             .tabCount = scriptRow(variant.script).tabCount,
             .rootPane = _rootPane.get(),
             .commandPalette = _paletteModel.get(),
-            .settingsController = _settings.get(),
             .hostLabel = QString::fromUtf8(scriptRow(variant.script).hostLabel),
             .hostingNotice = hostingNoticeFor(scriptRow(variant.script).banner),
             .tabBarVisibility = _look.tabBarVisibility,
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
+        _settingsWindow { makeSettingsWindow() },
         _root { load() }
     {
     }
@@ -154,11 +156,14 @@ class ChromeSnapshotScene
     /// @return The object the script's action created over the window, or null when it created none.
     [[nodiscard]] QObject const* overlay() const noexcept { return _overlay.get(); }
 
-    /// Shows the window at SnapshotWindowSize, performs the script's action, and lets the scene settle.
+    /// Shows the window at SnapshotWindowSize, opens the Settings window over it when the script's surface
+    /// is that one, performs the script's action, and lets the scene settle.
     void show()
     {
         window().resize(SnapshotWindowSize);
         window().show();
+        if (_settingsWindow != nullptr)
+            REQUIRE(_settingsWindow->show(nullptr).has_value());
         switch (scriptRow(_variant.script).action)
         {
             case ScriptAction::None: break;
@@ -179,9 +184,18 @@ class ChromeSnapshotScene
         QCoreApplication::processEvents();
     }
 
-    /// The window as rendered. Needs a display: the offscreen platform grabs nothing worth keeping.
-    /// @return The grabbed frame.
-    [[nodiscard]] QImage grab() const { return window().grabWindow(); }
+    /// The window the picture is of, as rendered. Needs a display: the offscreen platform grabs nothing
+    /// worth keeping.
+    /// @return The grabbed frame of subject().
+    [[nodiscard]] QImage grab() const { return subject().grabWindow(); }
+
+    /// The window the picture is of: the Settings window for SnapshotSurface::SettingsWindow, else window().
+    /// @return That window.
+    /// @pre show() ran.
+    [[nodiscard]] QQuickWindow& subject() const
+    {
+        return _settingsWindow != nullptr ? *_settingsWindow->window() : window();
+    }
 
     /// @return Main.qml's ApplicationWindow.
     [[nodiscard]] QQuickWindow& window() const { return *qobject_cast<QQuickWindow*>(_root.get()); }
@@ -325,14 +339,14 @@ class ChromeSnapshotScene
         return config::NewDefaultsOffer::None;
     }
 
-    /// The settings page's controller over a store in a temporary directory, or null unless @p page
-    /// shows it.
-    [[nodiscard]] std::unique_ptr<window::SettingsController> makeSettings(ContentPage page) const
+    /// The settings page's controller over a store in a temporary directory, or null unless @p surface
+    /// is the Settings window.
+    [[nodiscard]] std::unique_ptr<window::SettingsController> makeSettings(SnapshotSurface surface) const
     {
-        switch (page)
+        switch (surface)
         {
-            case ContentPage::Terminal: break;
-            case ContentPage::Settings:
+            case SnapshotSurface::MainWindow: break;
+            case SnapshotSurface::SettingsWindow:
                 REQUIRE(_settingsDir.isValid());
                 return std::make_unique<window::SettingsController>(
                     [this]() -> config::Config const& { return _config; },
@@ -342,6 +356,18 @@ class ChromeSnapshotScene
                     nullptr);
         }
         return nullptr;
+    }
+
+    /// The Settings window's host over the settings controller, under the variant's row's conventions;
+    /// null when the script has no controller, because its surface is the terminal window.
+    [[nodiscard]] std::unique_ptr<window::SettingsWindowHost> makeSettingsWindow()
+    {
+        if (_settings == nullptr)
+            return nullptr;
+        return std::make_unique<window::SettingsWindowHost>(
+            *_settings,
+            window::settingsWindowConventionsFor(rowHost(_variant.row).host),
+            [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); });
     }
 
     /// Creates the toast over the content, centred horizontally at its top, and shows it.
@@ -462,6 +488,8 @@ class ChromeSnapshotScene
     MockMainController _controller;
     MockNewDefaultsNotice _newDefaults;
     QQmlEngine _engine;
+    /// The Settings window over *_settings, on _engine; null unless the script's surface is that window.
+    std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
     IncubationDriver _incubation;
     std::unique_ptr<QObject> _root;    ///< The QML tree dies before everything it borrows.
     std::unique_ptr<QObject> _overlay; ///< Last: the toast, parented into _root's tree, dies first.

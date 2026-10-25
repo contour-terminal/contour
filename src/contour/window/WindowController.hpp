@@ -51,8 +51,6 @@ class TerminalSession;
 namespace contour::window
 {
 
-class SettingsController;
-
 /// A place a context menu opens from. Each holds its own published menu, so opening one never rebuilds
 /// -- or re-targets -- another the user may still have open.
 enum class MenuSurface : uint8_t
@@ -128,12 +126,10 @@ class WindowController:
     Q_PROPERTY(int tabBarVisibility READ tabBarVisibility NOTIFY tabBarVisibilityChanged)
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
-    Q_PROPERTY(bool settingsActive READ settingsActive NOTIFY settingsActiveChanged)
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
     // CONSTANT: a process attaches to one host for its life, and has done so before its first window.
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
-    Q_PROPERTY(contour::window::SettingsController* settingsController READ settingsController CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
 
@@ -338,30 +334,6 @@ class WindowController:
     Q_INVOKABLE void runCommand(QString const& id);
     // }}}
 
-    // {{{ Settings page
-    /// Whether this window's content area currently shows the in-app settings page instead of the
-    /// active tab's terminal pane tree. The content Loader in Main.qml switches on this, so the settings
-    /// page and the terminal are mutually-exclusive views of the same region (Windows-Terminal style).
-    [[nodiscard]] bool settingsActive() const noexcept { return _settingsActive; }
-
-    /// This window's editable settings bridge (never null; owned by this controller). The QML settings
-    /// page binds to it for the profile/color-scheme/default-profile models and the save/delete actions.
-    [[nodiscard]] SettingsController* settingsController() const noexcept
-    {
-        return _settingsController.get();
-    }
-
-    /// Shows the settings page over this window (the OpenConfiguration action's default, and the
-    /// new-tab dropdown's "Settings" entry). Idempotent: showing it while already shown does nothing.
-    Q_INVOKABLE void openSettings();
-
-    /// Returns from the settings page to the active tab's terminal content. A no-op if not showing it.
-    Q_INVOKABLE void closeSettings();
-
-    /// Toggles between the settings page and the terminal content.
-    Q_INVOKABLE void toggleSettings();
-    // }}}
-
     // {{{ Terminal context menu
     /// Rebuilds the context menu against the CURRENT state of the active pane and asks the QML to pop it.
     ///
@@ -384,7 +356,7 @@ class WindowController:
     /// The tab menu's rows, built for the tab it was last opened over.
     [[nodiscard]] QVariantList tabContextMenuModel() const { return menu(MenuSurface::Tab).model; }
 
-    /// The new-tab menu's rows: one per profile, then "Settings".
+    /// The new-tab menu's rows: one per profile.
     [[nodiscard]] QVariantList newTabMenuModel() const { return menu(MenuSurface::NewTab).model; }
 
     /// Builds and publishes the title bar's context menu, then asks QML to pop it.
@@ -801,8 +773,6 @@ class WindowController:
     void tabBarShouldShowChanged();
     void activeSessionChanged();
     void chromeHeightChanged();
-    /// The content area switched between the settings page and the terminal (settingsActive changed).
-    void settingsActiveChanged();
     /// @see hostingNotice
     void hostingNoticeChanged();
     /// @see requestNotification.
@@ -813,12 +783,6 @@ class WindowController:
     void alertRequested();
 
   private:
-    /// Sets whether the settings page is shown, emitting settingsActiveChanged only on a real change.
-    /// Centralizes the notify so every entry point (openSettings/closeSettings/toggleSettings and the
-    /// tab-activation reset) stays consistent.
-    /// @param active The new settings-page visibility.
-    void setSettingsActive(bool active);
-
     /// The backing vtworkspace::Window, or nullptr if it has been removed.
     [[nodiscard]] vtworkspace::Window* window() const noexcept;
     /// The active tab of this window's vtworkspace::Window, or nullptr.
@@ -987,13 +951,6 @@ class WindowController:
     config::MenuPresentation _menuPresentation = config::MenuPresentation::InScene;
     /// Shows a menu natively; the app's, which outlives every window.
     platform::INativeMenuPresenter& _nativeMenus;
-    // }}}
-
-    // {{{ Settings page
-    /// Whether the content area currently shows the settings page instead of the terminal pane tree.
-    bool _settingsActive = false;
-    /// The editable settings bridge for this window (created in the constructor; never null).
-    std::unique_ptr<SettingsController> _settingsController;
     // }}}
 
     QString _hostingNotice; ///< @see hostingNotice

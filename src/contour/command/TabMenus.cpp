@@ -94,13 +94,11 @@ namespace
                                             }));
     }
 
-    /// One row per profile, a divider, and "Settings" (to go once the settings live elsewhere).
+    /// One row per profile, and nothing else: Settings opens from the menu bar's Settings… row.
     [[nodiscard]] std::span<NewTabTable::Row const> newTabMenuTemplate()
     {
         static auto const rows = std::array {
             NewTabTable::rows(newTabProfileRows),
-            NewTabTable::separator(),
-            NewTabTable::command(actions::OpenConfiguration {}, "Settings"),
         };
         return rows;
     }

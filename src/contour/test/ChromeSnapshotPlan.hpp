@@ -55,11 +55,11 @@ enum class PaneShape : uint8_t
     SplitThree,     //!< `[ a | split(b, c) ]`, with `a` active.
 };
 
-/// What fills the window's content area.
-enum class ContentPage : uint8_t
+/// Which window a script's picture is of.
+enum class SnapshotSurface : uint8_t
 {
-    Terminal = 0,
-    Settings,
+    MainWindow = 0, //!< The terminal window, Main.qml.
+    SettingsWindow, //!< The app's one Settings window, opened over the terminal window.
 };
 
 /// An interaction performed after the window is shown.
@@ -96,15 +96,15 @@ inline constexpr std::string_view SnapshotHostingNotice =
 /// One row of the script table.
 struct SnapshotScriptRow
 {
-    SnapshotScript script = SnapshotScript::SingleTab; ///< The script this row describes.
-    std::string_view name {};                          ///< Its name in file names and the manifest.
-    int tabCount = 1;                                  ///< How many tabs the window holds.
-    PaneShape panes = PaneShape::SingleLeaf;           ///< The active tab's pane layout.
-    ContentPage page = ContentPage::Terminal;          ///< What the content area shows.
-    ScriptAction action = ScriptAction::None;          ///< What is done after showing the window.
-    HostConnection connection = HostConnection::Local; ///< The attached host's state.
-    std::string_view hostLabel {};                     ///< The attached host's label; empty when local.
-    SnapshotBanner banner = SnapshotBanner::None;      ///< The banner shown above the content.
+    SnapshotScript script = SnapshotScript::SingleTab;     ///< The script this row describes.
+    std::string_view name {};                              ///< Its name in file names and the manifest.
+    int tabCount = 1;                                      ///< How many tabs the window holds.
+    PaneShape panes = PaneShape::SingleLeaf;               ///< The active tab's pane layout.
+    SnapshotSurface surface = SnapshotSurface::MainWindow; ///< The window the picture is of.
+    ScriptAction action = ScriptAction::None;              ///< What is done after showing the window.
+    HostConnection connection = HostConnection::Local;     ///< The attached host's state.
+    std::string_view hostLabel {};                         ///< The attached host's label; empty when local.
+    SnapshotBanner banner = SnapshotBanner::None;          ///< The banner shown above the content.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -113,7 +113,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "single-tab",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -122,7 +122,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "three-tabs",
                         .tabCount = 3,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -131,7 +131,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "split-three",
                         .tabCount = 1,
                         .panes = PaneShape::SplitThree,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -140,7 +140,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "palette",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::OpenPalette,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -149,7 +149,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "settings",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Settings,
+                        .surface = SnapshotSurface::SettingsWindow,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -158,7 +158,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "remote-reconnecting",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Reconnecting,
                         .hostLabel = "build-01",
@@ -167,7 +167,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "toast",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::ShowToast,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -176,7 +176,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "kit-dialog",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::OpenKitDialog,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -185,7 +185,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "hosting-banner",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -194,7 +194,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "new-defaults-banner",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -203,7 +203,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "tab-menu",
                         .tabCount = 3,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::OpenTabMenu,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
@@ -212,7 +212,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .name = "about",
                         .tabCount = 1,
                         .panes = PaneShape::SingleLeaf,
-                        .page = ContentPage::Terminal,
+                        .surface = SnapshotSurface::MainWindow,
                         .action = ScriptAction::OpenAbout,
                         .connection = HostConnection::Local,
                         .hostLabel = "",

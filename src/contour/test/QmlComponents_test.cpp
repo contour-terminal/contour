@@ -1124,8 +1124,8 @@ TEST_CASE("the new-tab menu lists the profiles (offscreen)", "[contour][gui][qml
     CHECK(controller.openNewTabMenuCalls == 1);
     REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
     CHECK(menu->property("count").toInt() == controller.newTabMenuModel().size());
-    // One row per profile, a separator and "Settings".
-    CHECK(menu->property("count").toInt() == static_cast<int>(contour::test::MockProfileNames.size()) + 2);
+    // One row per profile.
+    CHECK(menu->property("count").toInt() == static_cast<int>(contour::test::MockProfileNames.size()));
 
     // A picked profile reaches the controller, once the menu has closed.
     auto* first = menuItemAt(*menu, 0);

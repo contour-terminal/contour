@@ -29,17 +29,14 @@ namespace contour::test
 /// The shape a MockMainController is built in: what its window holds, fixed for its lifetime.
 ///
 /// The defaults are the mock every Main.qml load case has always seen: two local tabs, a strip that is
-/// always shown, and no pane tree, palette model or settings controller.
+/// always shown, and no pane tree or palette model.
 struct MainWindowScene
 {
     int tabCount = 2;                  ///< How many tabs the strip lists.
     QObject* rootPane = nullptr;       ///< The active tab's pane tree; borrowed, may be null.
     QObject* commandPalette = nullptr; ///< The command palette's model; borrowed, may be null.
-    /// The settings page's controller; borrowed, may be null. The content area shows the settings
-    /// page exactly when it is set.
-    QObject* settingsController = nullptr;
-    QString hostLabel;        ///< The attached host; empty for a local window.
-    QString hostingNotice {}; ///< The hosting notice the window starts with; empty for none.
+    QString hostLabel;                 ///< The attached host; empty for a local window.
+    QString hostingNotice {};          ///< The hosting notice the window starts with; empty for none.
     /// When the tab strip is shown, resolved against @c tabCount into the initial tabBarShouldShow.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
 };
@@ -78,10 +75,6 @@ class MockMainController: public MainWindowControllerMock
                    titleBarContextMenuModelChanged)
     // Mirrors WindowController's hosting notice; writable here so a test can raise it before the load.
     Q_PROPERTY(QString hostingNotice READ hostingNotice WRITE setHostingNotice NOTIFY hostingNoticeChanged)
-    // Mirrors WindowController's settings surface: the content area shows the settings page while
-    // settingsActive holds, bound to settingsController.
-    Q_PROPERTY(bool settingsActive READ settingsActive CONSTANT)
-    Q_PROPERTY(QObject* settingsController READ settingsController CONSTANT)
 
   public:
     enum class Roles : std::uint16_t
@@ -167,12 +160,6 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] QObject* activeTabRootPane() const noexcept { return _scene.rootPane; }
     [[nodiscard]] QObject* activeSession() const noexcept { return nullptr; }
     [[nodiscard]] QObject* commandPalette() const noexcept { return _scene.commandPalette; }
-    /// Mirrors WindowController::settingsActive(): whether the content area shows the settings page.
-    [[nodiscard]] bool settingsActive() const noexcept { return _scene.settingsController != nullptr; }
-    [[nodiscard]] QObject* settingsController() const noexcept { return _scene.settingsController; }
-    /// Mirrors WindowController::closeSettings(): what the settings page's close button calls. The
-    /// page is part of the scene, so it stays.
-    Q_INVOKABLE void closeSettings() {}
     Q_INVOKABLE void runCommand(QString const&) {}
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
     /// OpenCommandPalette action, and what makes Main.qml's popup appear.

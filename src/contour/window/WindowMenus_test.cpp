@@ -347,7 +347,10 @@ TEST_CASE("the new-tab menu lists the profiles", "[contour][windowmenus]")
     CHECK(requested.count() == 1);
     auto const model = window->newTabMenuModel();
     REQUIRE_FALSE(model.isEmpty());
-    CHECK(model.back().toMap()["title"].toString() == QStringLiteral("Settings"));
+    CHECK(model.back().toMap()["title"].toString().startsWith(QStringLiteral("New tab — ")));
+    CHECK(std::ranges::none_of(model, [](QVariant const& row) {
+        return row.toMap()["title"].toString() == QStringLiteral("Settings");
+    }));
 }
 
 TEST_CASE("the pane and title-bar menus still pop in the scene", "[contour][windowmenus]")

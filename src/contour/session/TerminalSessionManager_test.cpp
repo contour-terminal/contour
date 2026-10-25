@@ -843,15 +843,13 @@ TEST_CASE("TerminalSessionManager: a session's visibility follows focus, tabs, z
         CHECK(manager.sessionVisibility(*second) == SessionVisibility::Hidden);
     }
 
-    SECTION("the settings page covers every pane of its window, until it closes")
+    SECTION("the Settings window covers no pane")
     {
-        window->openSettings();
-        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Hidden);
-        CHECK(manager.sessionVisibility(*first) == SessionVisibility::Hidden);
-
-        window->closeSettings();
-        CHECK(manager.sessionVisibility(*second) == SessionVisibility::Focused);
-        CHECK(manager.sessionVisibility(*first) == SessionVisibility::VisibleUnfocused);
+        // Settings is a window of its own, so opening it takes neither pane off screen. Which one holds
+        // focus is the OS window's activation to decide, which this unbound window never sees.
+        app.app().openSettings(nullptr);
+        CHECK(manager.sessionVisibility(*second) != SessionVisibility::Hidden);
+        CHECK(manager.sessionVisibility(*first) != SessionVisibility::Hidden);
     }
 
     SECTION("a minimised window hides even its focused pane")
@@ -902,13 +900,6 @@ TEST_CASE("TerminalSessionManager: revealing a session brings its tab and pane f
     SECTION("from another tab")
     {
         manager.revealSession(*first);
-    }
-
-    SECTION("from behind the settings page")
-    {
-        window->openSettings();
-        manager.revealSession(*first);
-        CHECK_FALSE(window->settingsActive());
     }
 
     CHECK(window->activeTabIndex() == 0);

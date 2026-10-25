@@ -438,18 +438,19 @@ TEST_CASE("tab strip Always/Never gates ignore the tab count", "[contour][multiw
     }
 }
 
-TEST_CASE("settings tab: no terminal tab reads active while the settings page is open",
-          "[contour][multiwindow][settings]")
+TEST_CASE("the active tab stays active while Settings is open", "[contour][multiwindow][settings]")
 {
-    // The settings page is shown as a pinned "tab" in the strip (TabStrip.qml); while it is the active
-    // view, IsActiveRole must report false for every terminal tab so the strip does not highlight two
-    // tabs at once. Closing settings re-highlights the previously active terminal tab.
+    // Settings is a window of its own: opening it covers no tab, so the strip keeps highlighting the
+    // active one.
+    constexpr auto Tabs = 2;
     TestApp app;
     auto& manager = app.manager();
     ScopedController window { manager };
     REQUIRE(window.controller != nullptr);
-    createTabs(manager, *window, 2);
+    createTabs(manager, *window, Tabs);
     window->activateTab(1);
+
+    app.app().openSettings(nullptr);
 
     auto const isActive = [&](int row) {
         return window
@@ -457,21 +458,10 @@ TEST_CASE("settings tab: no terminal tab reads active while the settings page is
                    static_cast<int>(contour::window::WindowController::Roles::IsActiveRole))
             .toBool();
     };
-
-    // A terminal tab is active to begin with.
-    REQUIRE_FALSE(window->settingsActive());
-    CHECK(isActive(window->activeTabIndex()));
-
-    // Opening settings de-highlights every terminal tab.
-    window->openSettings();
-    CHECK(window->settingsActive());
+    CHECK(isActive(1));
     CHECK_FALSE(isActive(0));
-    CHECK_FALSE(isActive(1));
-
-    // Closing settings restores the active terminal tab's highlight.
-    window->closeSettings();
-    CHECK_FALSE(window->settingsActive());
-    CHECK(isActive(window->activeTabIndex()));
+    CHECK(window->rowCount() == window->count());
+    CHECK(window->count() == Tabs);
 }
 
 TEST_CASE("REGRESSION: tab operations from a second window target that window, not the first",

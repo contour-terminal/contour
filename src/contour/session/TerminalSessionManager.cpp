@@ -7,7 +7,6 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
-#include <contour/window/SettingsController.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -477,16 +476,11 @@ platform::SessionVisibility TerminalSessionManager::sessionVisibility(TerminalSe
     auto const paneShown =
         tab != nullptr && (!tab->isZoomed() || tab->activePane()->session() == session.modelSessionId());
 
-    // The settings page replaces the window's whole content area, so while it shows, no tab is the one
-    // on screen and no terminal is what the user is typing into -- the rule the strip's IsActiveRole
-    // applies too. A session no window hosts has no settings page to be covered by.
-    auto const contentShown = controller == nullptr || !controller->settingsActive();
-
     return platform::sessionVisibilityFor(platform::SessionPlacement {
-        .focus = contentShown && &session == _focusedSession ? platform::SessionFocus::Here
-                                                             : platform::SessionFocus::Elsewhere,
-        .tab = contentShown && win != nullptr && win->activeTab() == tab ? platform::TabSelection::Active
-                                                                         : platform::TabSelection::Background,
+        .focus =
+            &session == _focusedSession ? platform::SessionFocus::Here : platform::SessionFocus::Elsewhere,
+        .tab = win != nullptr && win->activeTab() == tab ? platform::TabSelection::Active
+                                                         : platform::TabSelection::Background,
         .pane = paneShown ? platform::PaneExposure::Shown : platform::PaneExposure::Covered,
         .window = controller != nullptr && controller->isMinimized() ? platform::WindowPresence::Minimized
                                                                      : platform::WindowPresence::Shown,
@@ -511,11 +505,6 @@ void TerminalSessionManager::revealSession(TerminalSession const& session)
     // previously active pane on the way, and a DECSET 1004 application there would read a CSI I and then
     // a CSI O for a pane the user never looked at.
     activateSessionPane(*tab, session);
-
-    // The settings page covers every tab, so it closes before the tab becomes the one on screen -- as
-    // the strip's own activateTab does.
-    if (controller != nullptr)
-        controller->closeSettings();
 
     _model->activateTab(win->id(), tab->id());
 
@@ -780,16 +769,9 @@ std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
     // and the scheme the Terminal row paints with) and the new-defaults banner (it may change the edition).
     _app.onConfigurationReloaded();
 
-    // The settings page reads through the app config just reloaded above, but each OS window owns its
-    // own SettingsController with model caches rebuilt only by refresh(). The controller that triggered
-    // the save refreshes itself; refresh every OTHER window's too, so a settings page open in a second
-    // window reflects the change immediately instead of serving stale caches until it is reopened.
     for (auto& [windowId, controller]: _controllersByWindow)
         if (controller != nullptr)
         {
-            if (auto* settings = controller->settingsController(); settings != nullptr)
-                settings->refresh();
-
             // The tab bar is window state, seeded first-write-wins so a session rebind cannot reset a
             // runtime override. That latch also swallowed a reload, so changing tab_bar_visibility did
             // nothing until restart. A reload is the one moment the configured value must win.

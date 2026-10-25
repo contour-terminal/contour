@@ -5,7 +5,6 @@
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
-#include <contour/config/GuiConfigStore.hpp>
 #include <contour/display/Logging.hpp>
 #include <contour/input/MouseMapping.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -18,7 +17,6 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/RemoteChrome.hpp>
-#include <contour/window/SettingsController.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp>
@@ -83,25 +81,6 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
             return *applied;
         return QGuiApplication::styleHints()->colorScheme();
     });
-
-    // The editable settings bridge. Its collaborators are injected so the whole workflow is testable:
-    // a config accessor into the app's live (reload-in-place) Config, a file-backed side-file store
-    // rooted at the config directory, and an apply step that reloads every session after a save.
-    _settingsController = std::make_unique<SettingsController>(
-        [this]() -> config::Config const& { return _manager.app().config(); },
-        std::make_shared<config::FileGuiConfigStore>(_manager.app().config().configFile.parent_path()),
-        [this]() {
-            if (auto const reloaded = _manager.reloadAllSessions(); !reloaded)
-                errorLog()("Failed to reload configuration. {}", reloaded.error());
-            // The GUI chrome theme is re-applied by reloadAllSessions() itself, so a settings-page
-            // change to `theme` recolors the chrome without a restart.
-            // Likewise for `window_control_style`: which corner the min/max/close buttons sit in,
-            // and what shape they take, are QML bindings on the provider, so they re-evaluate the
-            // moment it says so. Application-wide, so every open window follows.
-            _manager.app().applyWindowControlStyle(_manager.app().config().windowControlStyle.value());
-        },
-        _manager.app().gpuInventory(),
-        this);
 }
 
 WindowController::~WindowController() = default;
@@ -118,35 +97,6 @@ void WindowController::openCommandPalette()
     _commandPalette->refresh();
 
     emit commandPaletteRequested();
-}
-
-void WindowController::openSettings()
-{
-    // Rebuild the models against the current config on every open, so a config reload since the last
-    // visit is reflected — the same freshness discipline openCommandPalette() uses.
-    _settingsController->refresh();
-    setSettingsActive(true);
-}
-
-void WindowController::closeSettings()
-{
-    setSettingsActive(false);
-}
-
-void WindowController::toggleSettings()
-{
-    setSettingsActive(!_settingsActive);
-}
-
-void WindowController::setSettingsActive(bool active)
-{
-    if (_settingsActive == active)
-        return;
-    _settingsActive = active;
-    emit settingsActiveChanged();
-    // Toggling the settings view flips whether a terminal tab reads as active (see IsActiveRole), so
-    // repaint the strip: the active tab de-highlights on open and re-highlights on close.
-    refreshActiveTabHighlight();
 }
 
 void WindowController::openContextMenu()
@@ -529,9 +479,7 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
             auto const color = tab != nullptr ? tab->color() : std::nullopt;
             return color.has_value() ? platform::toQColor(*color) : QColor(Qt::transparent);
         }
-        // No terminal tab reads as active while the settings "tab" is showing — the settings tab is the
-        // active view then, so the strip must not highlight two tabs at once.
-        case Roles::IsActiveRole: return !_settingsActive && row == activeTabIndex();
+        case Roles::IsActiveRole: return row == activeTabIndex();
         case Roles::PaneCountRole: return tab != nullptr ? tab->paneCount() : 1;
         case Roles::ZoomedRole: return tab != nullptr && tab->isZoomed();
         // resolvedProgress() rather than progress(): this runs on the GUI thread, and _progress is
@@ -587,9 +535,8 @@ int WindowController::activeTabIndex() const noexcept
 
 ProgramStatusBadge WindowController::programStatusBadge(vtworkspace::Tab const& tab, int row) const
 {
-    // In front exactly when the strip highlights it: the settings view hides every terminal tab.
-    auto const focus =
-        !_settingsActive && row == activeTabIndex() ? TabFocus::Foreground : TabFocus::Background;
+    // In front exactly when the strip highlights it.
+    auto const focus = row == activeTabIndex() ? TabFocus::Foreground : TabFocus::Background;
     return badgeForTab(tab, focus, [this](vtworkspace::SessionId id) {
         auto const* session = _manager.sessionForId(id);
         if (session == nullptr)
@@ -638,8 +585,6 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
 // Pure per-tab attributes (title, color) resolve the tab locally and write the model directly.
 void WindowController::createNewTab(QString const& profileName)
 {
-    // A new terminal tab is a terminal view: leave the settings page so the content area shows it.
-    setSettingsActive(false);
     auto profile = profileName.isEmpty() ? std::optional<std::string> { std::nullopt }
                                          : std::optional<std::string> { profileName.toStdString() };
     _manager.createNewTab(_windowId, profile);
@@ -647,9 +592,6 @@ void WindowController::createNewTab(QString const& profileName)
 
 void WindowController::activateTab(int index)
 {
-    // Selecting a tab returns to the terminal content — the settings page and the tabs are mutually
-    // exclusive views of the same region, so activating any tab dismisses the settings page.
-    setSettingsActive(false);
     _manager.activateTab(_windowId, index);
 }
 

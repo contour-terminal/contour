@@ -3,8 +3,7 @@
 //
 // The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
 // whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
-// the strip hosts a Qt-layer settings "tab" (shown while the settings page is open), the tabs' one
-// context menu and the new-tab dropdown — none of them a row of the tab model.
+// the strip hosts the tabs' one context menu and the new-tab dropdown — neither a row of the tab model.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -208,67 +207,6 @@ Row {
         }
     }
 
-    // The settings "tab": shown in the strip while the settings page is open (settingsActive), reading
-    // and behaving like a tab — highlighted as the active view, with a close button that leaves settings.
-    // It is a Qt-layer affordance (vtworkspace untouched), so it is a pinned item here rather than a model row.
-    Item {
-        id: settingsTab
-        objectName: "settingsTab"
-        height: root.height
-        // `=== true` coerces a missing/undefined property (a lightweight mock controller in the offscreen
-        // tests) to a real bool, so the binding never assigns undefined.
-        visible: root.controller !== null && root.controller.settingsActive === true
-        width: visible ? settingsTabRow.implicitWidth + (2 * chromeStyle.labelPadding) : 0
-
-        SystemPalette {
-            id: settingsTabPalette
-            colorGroup: SystemPalette.Active
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            // It exists only while active, so it always wears the active (OS highlight) fill.
-            color: settingsTabPalette.highlight
-        }
-
-        Row {
-            id: settingsTabRow
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: chromeStyle.labelPadding
-            spacing: chromeStyle.labelGap
-
-            Label {
-                text: qsTr("⚙ Settings")
-                font: chromeStyle.font
-                color: settingsTabPalette.highlightedText
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            ToolButton {
-                id: settingsTabClose
-                objectName: "settingsTabClose"
-                width: chromeStyle.controlWidth
-                height: chromeStyle.controlHeight
-                anchors.verticalCenter: parent.verticalCenter
-                focusPolicy: Qt.NoFocus
-                onClicked: if (root.controller) root.controller.closeSettings()
-                contentItem: Label {
-                    text: chromeStyle.closeGlyph
-                    font: chromeStyle.closeFont
-                    Accessible.name: qsTr("Close settings")
-                    color: settingsTabPalette.highlightedText
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    radius: chromeStyle.radius
-                    color: settingsTabClose.hovered ? chromeStyle.wash(settingsTabPalette.highlightedText)
-                                                    : "transparent"
-                }
-            }
-        }
-    }
-
     ToolButton {
         id: newTabButton
         objectName: "newTabButton"
@@ -290,8 +228,8 @@ Row {
     }
 
     // The new-tab profile dropdown: the "▾" beside "+". Asks the controller, which publishes one entry per
-    // configured profile (open a new tab with it) plus a "Settings" entry and asks for the menu below —
-    // the Windows-Terminal split-button idiom.
+    // configured profile (open a new tab with it) and asks for the menu below — the Windows-Terminal
+    // split-button idiom.
     ToolButton {
         id: newTabMenuButton
         objectName: "newTabMenuButton"

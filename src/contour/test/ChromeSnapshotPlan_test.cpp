@@ -23,7 +23,7 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::TabMenu).action == ScriptAction::OpenTabMenu);
     CHECK(scriptRow(SnapshotScript::About).action == ScriptAction::OpenAbout);
     CHECK(scriptRow(SnapshotScript::RemoteReconnecting).connection == HostConnection::Reconnecting);
-    CHECK(scriptRow(SnapshotScript::Settings).page == ContentPage::Settings);
+    CHECK(scriptRow(SnapshotScript::Settings).surface == SnapshotSurface::SettingsWindow);
     CHECK(scriptRow(SnapshotScript::HostingBanner).banner == SnapshotBanner::Hosting);
     CHECK(scriptRow(SnapshotScript::NewDefaultsBanner).banner == SnapshotBanner::NewDefaults);
     CHECK(scriptRow(SnapshotScript::NewDefaultsBanner).name == "new-defaults-banner");

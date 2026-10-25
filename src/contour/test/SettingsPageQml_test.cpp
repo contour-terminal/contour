@@ -1156,8 +1156,8 @@ TEST_CASE("SettingRow's text field follows its value once an edit is committed",
 
 TEST_CASE("SettingsPage follows a configuration reload while it is open", "[contour][gui][qml][settings]")
 {
-    // A reload -- live_config noticing contour.yml change, or ReloadConfig -- refreshes the settings page of
-    // every window. A row left on the value from before the reload would take typing that value back as no
+    // A reload -- live_config noticing contour.yml change, or ReloadConfig -- refreshes the app's settings
+    // page. A row left on the value from before the reload would take typing that value back as no
     // change, and drop it.
     contour::test::QmlMessageCapture const warnings;
 
@@ -1174,10 +1174,7 @@ TEST_CASE("SettingsPage follows a configuration reload while it is open", "[cont
     };
     writeConfig(6);
     REQUIRE(testApp.manager().reloadAllSessions().has_value());
-    auto const windowController = contour::test::ScopedController { testApp.manager() };
-    windowController->openSettings();
-    auto* settings = windowController->settingsController();
-    REQUIRE(settings != nullptr);
+    auto* settings = &testApp.app().settingsController();
 
     auto view = SettingsPageView { settings };
     auto* page = view.item();

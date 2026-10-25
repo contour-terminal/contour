@@ -24,7 +24,7 @@ src/contour/qml/StatusLinePreviewItem.qml 1
 src/contour/qml/StatusLineSegmentRow.qml 23
 src/contour/qml/TabColorFlyout.qml 12
 src/contour/qml/TabItem.qml 5
-src/contour/qml/TabStrip.qml 3
+src/contour/qml/TabStrip.qml 2
 src/contour/qml/TerminalPane.qml 3
 src/contour/qml/TitleBar.qml 1
 src/contour/qml/WindowControls.qml 5
