@@ -3,8 +3,9 @@
 #include <contour/command/TitleBarContextMenu.hpp>
 
 #include <array>
-#include <iterator>
+#include <ranges>
 #include <span>
+#include <string>
 
 namespace contour::command
 {
@@ -31,29 +32,6 @@ namespace
     }
     // }}}
 
-    /// One "New Tab" row per configured profile.
-    ///
-    /// Deliberately NOT the pane menu's profileRows(): that one switches the CURRENT pane's profile and
-    /// check-marks the active one. Here each row opens a NEW tab under its profile, so nothing is
-    /// "current" and nothing is checked — a tick would claim a state this menu does not describe.
-    [[nodiscard]] std::vector<ContextMenuEntry> newTabProfileRows(TitleBarContextMenuState const& state)
-    {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.profileNames.size());
-
-        for (auto const& name: state.profileNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = name,
-                                                    .action = actions::CreateNewTab { .profileName = name },
-                                                    .availability = RowAvailability::Enabled,
-                                                    .check = RowCheck::None,
-                                                    .role = MenuItemRole::None,
-                                                    .swatch = std::nullopt,
-                                                    .children = {} });
-
-        return entries;
-    }
-
     /// The title bar's context menu, as data.
     [[nodiscard]] std::span<Row const> titleBarContextMenuTemplate()
     {
@@ -61,7 +39,7 @@ namespace
 
         static auto const rows = std::array {
             Table::command(CreateNewTab {}, "New Tab"),
-            Table::submenu("New Tab with Profile", newTabProfileRows).shownWhen(hasProfiles),
+            Table::submenu("New Tab with Profile", Table::newTabProfileRows).shownWhen(hasProfiles),
             Table::attachToHostSubmenu(),
 
             Table::separator(),
@@ -101,44 +79,34 @@ namespace
     /// untouched, and the row reads the words a human should see rather than the configuration token.
     [[nodiscard]] std::vector<ContextMenuEntry> tabBarVisibilityRows(TabBarMenuState const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-
-        for (auto const& info: config::configEnumValues<config::TabBarVisibility>())
-            entries.emplace_back(ContextMenuEntry {
-                .kind = ContextMenuEntryKind::Command,
-                .title = std::string { info.label },
-                .action = actions::SetTabBarVisibility { .mode = info.value },
-                .availability = RowAvailability::Enabled,
-                .check = (info.value == state.visibility) ? RowCheck::Checked : RowCheck::Unchecked,
-                .role = MenuItemRole::None,
-                .swatch = std::nullopt,
-                .children = {} });
-
-        return entries;
+        return std::ranges::to<std::vector>(config::configEnumValues<config::TabBarVisibility>()
+                                            | std::views::transform([&](auto const& info) {
+                                                  return detail::commandEntry(
+                                                      std::string { info.label },
+                                                      actions::SetTabBarVisibility { .mode = info.value },
+                                                      info.value == state.visibility ? RowCheck::Checked
+                                                                                     : RowCheck::Unchecked);
+                                              }));
     }
 
     /// One row per tab bar placement. @see tabBarVisibilityRows.
     [[nodiscard]] std::vector<ContextMenuEntry> tabBarPositionRows(TabBarMenuState const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-
-        for (auto const& info: config::configEnumValues<config::TabBarPosition>())
-            entries.emplace_back(ContextMenuEntry {
-                .kind = ContextMenuEntryKind::Command,
-                .title = std::string { info.label },
-                .action = actions::SetTabBarPosition { .position = info.value },
-                .availability = RowAvailability::Enabled,
-                .check = (info.value == state.position) ? RowCheck::Checked : RowCheck::Unchecked,
-                .role = MenuItemRole::None,
-                .swatch = std::nullopt,
-                .children = {} });
-
-        return entries;
+        return std::ranges::to<std::vector>(
+            config::configEnumValues<config::TabBarPosition>() | std::views::transform([&](auto const& info) {
+                return detail::commandEntry(std::string { info.label },
+                                            actions::SetTabBarPosition { .position = info.value },
+                                            info.value == state.position ? RowCheck::Checked
+                                                                         : RowCheck::Unchecked);
+            }));
     }
 
+    /// The tab bar menu: the visibility modes, then placement behind one more level.
     [[nodiscard]] std::span<TabBarTable::Row const> tabBarTemplate()
     {
         static auto const rows = std::array {
+            TabBarTable::rows(tabBarVisibilityRows),
+            TabBarTable::separator(),
             TabBarTable::submenu("Position", tabBarPositionRows),
         };
         return rows;
@@ -148,19 +116,7 @@ namespace
 
 std::vector<ContextMenuEntry> buildTabBarMenu(TabBarMenuState const& state)
 {
-    auto entries = tabBarVisibilityRows(state);
-    entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator,
-                                            .title = {},
-                                            .action = {},
-                                            .availability = RowAvailability::Enabled,
-                                            .check = RowCheck::None,
-                                            .role = MenuItemRole::None,
-                                            .swatch = std::nullopt,
-                                            .children = {} });
-    auto nested = TabBarTable::buildRows(tabBarTemplate(), state);
-    entries.insert(
-        entries.end(), std::make_move_iterator(nested.begin()), std::make_move_iterator(nested.end()));
-    return entries;
+    return TabBarTable::buildRows(tabBarTemplate(), state);
 }
 
 std::vector<ContextMenuEntry> buildTitleBarContextMenu(TitleBarContextMenuState const& state)

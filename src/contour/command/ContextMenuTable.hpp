@@ -5,16 +5,42 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/config/Actions.hpp>
 
+#include <vtbackend/core/Color.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <optional>
+#include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace contour::command::detail
 {
+
+/// A resolved, enabled command row: what a menu's dynamic rows (one per profile, host, tab, …) are made of.
+/// @param title  The row's display text.
+/// @param action What the row runs.
+/// @param check  The row's check column, if any.
+/// @param swatch The colour the row is drawn as, if it is a swatch.
+/// @return The row.
+[[nodiscard]] inline ContextMenuEntry commandEntry(std::string title,
+                                                   actions::Action action,
+                                                   RowCheck check = RowCheck::None,
+                                                   std::optional<vtbackend::RGBColor> swatch = std::nullopt)
+{
+    return ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
+                              .title = std::move(title),
+                              .action = std::move(action),
+                              .availability = RowAvailability::Enabled,
+                              .check = check,
+                              .role = MenuItemRole::None,
+                              .swatch = std::move(swatch),
+                              .children = {} };
+}
 
 /// The machinery a context menu is described with, parameterized on the state that menu reads.
 ///
@@ -119,6 +145,12 @@ struct MenuTable
             return row;
         }
 
+        /// Whether this row can be picked, against @p state.
+        [[nodiscard]] RowAvailability availabilityFor(State const& state) const
+        {
+            return enabled(state) ? RowAvailability::Enabled : RowAvailability::Disabled;
+        }
+
         /// What this row runs, against @p state.
         [[nodiscard]] actions::Action actionFor(State const& state) const
         {
@@ -197,20 +229,10 @@ struct MenuTable
     /// @return The rows, none without saved hosts.
     [[nodiscard]] static std::vector<ContextMenuEntry> hostRows(State const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.hostNames.size());
-
-        for (auto const& name: state.hostNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = name,
-                                                    .action = actions::AttachToHost { .name = name },
-                                                    .availability = RowAvailability::Enabled,
-                                                    .check = RowCheck::None,
-                                                    .role = MenuItemRole::None,
-                                                    .swatch = std::nullopt,
-                                                    .children = {} });
-
-        return entries;
+        return std::ranges::to<std::vector>(state.hostNames | std::views::transform([](auto const& name) {
+                                                return commandEntry(name,
+                                                                    actions::AttachToHost { .name = name });
+                                            }));
     }
 
     /// The "Attach to Host" submenu, listing hostRows(); absent without saved hosts, as an empty submenu
@@ -224,25 +246,32 @@ struct MenuTable
     /// @return The rows, none without profiles.
     [[nodiscard]] static std::vector<ContextMenuEntry> changeProfileRows(State const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.profileNames.size());
-
-        for (auto const& name: state.profileNames)
-            entries.emplace_back(ContextMenuEntry {
-                .kind = ContextMenuEntryKind::Command,
-                .title = name,
-                .action = actions::ChangeProfile { .name = name },
-                .availability = RowAvailability::Enabled,
-                .check = (name == state.activeProfile) ? RowCheck::Checked : RowCheck::Unchecked,
-                .role = MenuItemRole::None,
-                .swatch = std::nullopt,
-                .children = {} });
-
-        return entries;
+        return std::ranges::to<std::vector>(
+            state.profileNames | std::views::transform([&](auto const& name) {
+                return commandEntry(name,
+                                    actions::ChangeProfile { .name = name },
+                                    name == state.activeProfile ? RowCheck::Checked : RowCheck::Unchecked);
+            }));
     }
 
     /// The "Change Profile" submenu, listing changeProfileRows(); absent without profiles.
     [[nodiscard]] static Row changeProfileSubmenu() { return submenu("Change Profile", changeProfileRows); }
+
+    /// One CreateNewTab row per configured profile, titled with the profile's name.
+    ///
+    /// Shared by the title bar's and the menu bar's "New Tab with Profile". Deliberately NOT
+    /// changeProfileRows(): that one switches the CURRENT pane's profile and check-marks the active one.
+    /// Here each row opens a NEW tab under its profile, so nothing is "current" and nothing is checked -- a
+    /// tick would claim a state this menu does not describe.
+    /// @param state The world the menu was opened over; reads its `profileNames`.
+    /// @return The rows, none without profiles.
+    [[nodiscard]] static std::vector<ContextMenuEntry> newTabProfileRows(State const& state)
+    {
+        return std::ranges::to<std::vector>(state.profileNames | std::views::transform([](auto const& name) {
+                                                return commandEntry(
+                                                    name, actions::CreateNewTab { .profileName = name });
+                                            }));
+    }
 
     /// Resolves @p rows against @p state: drops the rows whose precondition fails, grays out the ones
     /// merely unsatisfied, and expands the submenus.
@@ -267,9 +296,7 @@ struct MenuTable
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator,
                                                             .title = {},
                                                             .action = {},
-                                                            .availability = row.enabled(state)
-                                                                                ? RowAvailability::Enabled
-                                                                                : RowAvailability::Disabled,
+                                                            .availability = row.availabilityFor(state),
                                                             .check = RowCheck::None,
                                                             .role = MenuItemRole::None,
                                                             .swatch = std::nullopt,
@@ -289,9 +316,7 @@ struct MenuTable
                     entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Submenu,
                                                             .title = std::string(row.title),
                                                             .action = {},
-                                                            .availability = row.enabled(state)
-                                                                                ? RowAvailability::Enabled
-                                                                                : RowAvailability::Disabled,
+                                                            .availability = row.availabilityFor(state),
                                                             .check = RowCheck::None,
                                                             .role = MenuItemRole::None,
                                                             .swatch = std::nullopt,
@@ -305,8 +330,7 @@ struct MenuTable
                         .kind = ContextMenuEntryKind::Command,
                         .title = row.title.empty() ? commandTitle(action) : std::string(row.title),
                         .action = std::move(action),
-                        .availability =
-                            row.enabled(state) ? RowAvailability::Enabled : RowAvailability::Disabled,
+                        .availability = row.availabilityFor(state),
                         .check = row.checked == nullptr ? RowCheck::None
                                  : row.checked(state)   ? RowCheck::Checked
                                                         : RowCheck::Unchecked,

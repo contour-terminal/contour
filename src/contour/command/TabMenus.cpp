@@ -4,7 +4,7 @@
 
 #include <array>
 #include <format>
-#include <iterator>
+#include <ranges>
 #include <span>
 
 namespace contour::command
@@ -32,10 +32,23 @@ namespace
     }
     // }}}
 
-    /// What follows the swatches in "Tab Color".
-    [[nodiscard]] std::span<Row const> tabColorTail()
+    /// One swatch per palette colour, ticked on the tab's colour.
+    [[nodiscard]] std::vector<ContextMenuEntry> swatchRows(TabContextMenuState const& state)
+    {
+        return std::ranges::to<std::vector>(
+            state.palette | std::views::transform([&](auto const& color) {
+                return detail::commandEntry(vtbackend::formatColor(color),
+                                            actions::SetTabColor { .color = color },
+                                            state.color == color ? RowCheck::Checked : RowCheck::Unchecked,
+                                            color);
+            }));
+    }
+
+    /// The "Tab Color" submenu: the swatches, then a custom colour and a reset.
+    [[nodiscard]] std::span<Row const> tabColorTemplate()
     {
         static auto const rows = std::array {
+            Table::rows(swatchRows),
             Table::separator(),
             Table::command(actions::SetTabColor {}, "Custom…"),
             Table::command(actions::ResetTabColor {}, "Reset").enabledWhen(hasUserColor),
@@ -43,27 +56,9 @@ namespace
         return rows;
     }
 
-    /// The "Tab Color" submenu: one swatch per palette colour, ticked on the tab's colour, then the tail.
     [[nodiscard]] std::vector<ContextMenuEntry> tabColorRows(TabContextMenuState const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.palette.size() + tabColorTail().size());
-
-        for (auto const& color: state.palette)
-            entries.emplace_back(
-                ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                   .title = vtbackend::formatColor(color),
-                                   .action = actions::SetTabColor { .color = color },
-                                   .availability = RowAvailability::Enabled,
-                                   .check = (state.color == color) ? RowCheck::Checked : RowCheck::Unchecked,
-                                   .role = MenuItemRole::None,
-                                   .swatch = color,
-                                   .children = {} });
-
-        auto tail = Table::buildRows(tabColorTail(), state);
-        entries.insert(
-            entries.end(), std::make_move_iterator(tail.begin()), std::make_move_iterator(tail.end()));
-        return entries;
+        return Table::buildRows(tabColorTemplate(), state);
     }
 
     /// The tab menu, as data.
@@ -89,39 +84,19 @@ namespace
 
     [[nodiscard]] std::vector<ContextMenuEntry> newTabProfileRows(NewTabMenuState const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.profileNames.size());
-
-        for (auto const& name: state.profileNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = std::format("New tab — {}", name),
-                                                    .action = actions::CreateNewTab { .profileName = name },
-                                                    .availability = RowAvailability::Enabled,
-                                                    .check = RowCheck::None,
-                                                    .role = MenuItemRole::None,
-                                                    .swatch = std::nullopt,
-                                                    .children = {} });
-        return entries;
+        return std::ranges::to<std::vector>(state.profileNames | std::views::transform([](auto const& name) {
+                                                return detail::commandEntry(
+                                                    std::format("New tab — {}", name),
+                                                    actions::CreateNewTab { .profileName = name });
+                                            }));
     }
 
     /// One row per profile, a divider, and "Settings" (to go once the settings live elsewhere).
-    [[nodiscard]] std::vector<ContextMenuEntry> newTabMenuRows(NewTabMenuState const& state)
-    {
-        auto entries = newTabProfileRows(state);
-        entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Separator,
-                                                .title = {},
-                                                .action = {},
-                                                .availability = RowAvailability::Enabled,
-                                                .check = RowCheck::None,
-                                                .role = MenuItemRole::None,
-                                                .swatch = std::nullopt,
-                                                .children = {} });
-        return entries;
-    }
-
-    [[nodiscard]] std::span<NewTabTable::Row const> newTabSettingsTemplate()
+    [[nodiscard]] std::span<NewTabTable::Row const> newTabMenuTemplate()
     {
         static auto const rows = std::array {
+            NewTabTable::rows(newTabProfileRows),
+            NewTabTable::separator(),
             NewTabTable::command(actions::OpenConfiguration {}, "Settings"),
         };
         return rows;
@@ -138,10 +113,7 @@ std::vector<ContextMenuEntry> buildTabContextMenu(TabContextMenuState const& sta
 
 std::vector<ContextMenuEntry> buildNewTabMenu(NewTabMenuState const& state)
 {
-    auto entries = newTabMenuRows(state);
-    auto settings = NewTabTable::buildRows(newTabSettingsTemplate(), state);
-    entries.insert(
-        entries.end(), std::make_move_iterator(settings.begin()), std::make_move_iterator(settings.end()));
+    auto entries = NewTabTable::buildRows(newTabMenuTemplate(), state);
     detail::dropRedundantSeparators(entries);
     return entries;
 }

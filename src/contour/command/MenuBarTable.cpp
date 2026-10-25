@@ -75,60 +75,25 @@ namespace
     }
 
     // {{{ Dynamic rows
-    [[nodiscard]] std::vector<ContextMenuEntry> newTabProfileRows(MenuBarState const& state)
-    {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.profileNames.size());
-
-        for (auto const& name: state.profileNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = name,
-                                                    .action = actions::CreateNewTab { .profileName = name },
-                                                    .availability = RowAvailability::Enabled,
-                                                    .check = RowCheck::None,
-                                                    .role = MenuItemRole::None,
-                                                    .swatch = std::nullopt,
-                                                    .children = {} });
-
-        return entries;
-    }
-
     [[nodiscard]] std::vector<ContextMenuEntry> layoutRows(MenuBarState const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.layoutNames.size());
-
-        for (auto const& name: state.layoutNames)
-            entries.emplace_back(ContextMenuEntry { .kind = ContextMenuEntryKind::Command,
-                                                    .title = name,
-                                                    .action = actions::LaunchLayout { .name = name },
-                                                    .availability = RowAvailability::Enabled,
-                                                    .check = RowCheck::None,
-                                                    .role = MenuItemRole::None,
-                                                    .swatch = std::nullopt,
-                                                    .children = {} });
-
-        return entries;
+        return std::ranges::to<std::vector>(state.layoutNames | std::views::transform([](auto const& name) {
+                                                return detail::commandEntry(
+                                                    name, actions::LaunchLayout { .name = name });
+                                            }));
     }
 
     /// One row per tab, the active one check-marked.
     [[nodiscard]] std::vector<ContextMenuEntry> tabListRows(MenuBarState const& state)
     {
-        auto entries = std::vector<ContextMenuEntry> {};
-        entries.reserve(state.tabTitles.size());
-
-        for (auto const index: std::views::iota(std::size_t { 0 }, state.tabTitles.size()))
-            entries.emplace_back(ContextMenuEntry {
-                .kind = ContextMenuEntryKind::Command,
-                .title = state.tabTitles[index],
-                .action = actions::SwitchToTab { .position = static_cast<int>(index) + 1 },
-                .availability = RowAvailability::Enabled,
-                .check = static_cast<int>(index) == state.activeTab ? RowCheck::Checked : RowCheck::Unchecked,
-                .role = MenuItemRole::None,
-                .swatch = std::nullopt,
-                .children = {} });
-
-        return entries;
+        return std::ranges::to<std::vector>(std::views::iota(0, static_cast<int>(state.tabTitles.size()))
+                                            | std::views::transform([&](int index) {
+                                                  return detail::commandEntry(
+                                                      state.tabTitles[static_cast<std::size_t>(index)],
+                                                      actions::SwitchToTab { .position = index + 1 },
+                                                      index == state.activeTab ? RowCheck::Checked
+                                                                               : RowCheck::Unchecked);
+                                              }));
     }
 
     [[nodiscard]] std::vector<ContextMenuEntry> tabBarRows(MenuBarState const& state)
@@ -183,7 +148,7 @@ namespace
         static auto const rows = std::array {
             Table::command(NewTerminal {}, "New Window"),
             Table::command(CreateNewTab {}, "New Tab"),
-            Table::submenu("New Tab with Profile", newTabProfileRows),
+            Table::submenu("New Tab with Profile", Table::newTabProfileRows),
             Table::attachToHostSubmenu(),
             Table::submenu("Launch Layout", layoutRows),
             Table::command(SaveLayout {}, "Save Layout…"),

@@ -166,9 +166,7 @@ void WindowController::openContextMenu()
     // active by the time the click lands.
     _contextMenuSession = session;
 
-    presentSurface(MenuSurface::Pane,
-                   resolveMenu(command::buildContextMenu(state)),
-                   { .window = _osWindow, .position = std::nullopt });
+    presentSurface(MenuSurface::Pane, resolveMenu(command::buildContextMenu(state)));
 }
 
 void WindowController::triggerContextMenuAction(int actionId)
@@ -196,9 +194,7 @@ void WindowController::openTabContextMenu(int index, QPointF /*windowPosition*/)
     // Pinned by id: the strip can reorder or close tabs while the menu stands open.
     _tabContextMenuTab = tab->id();
 
-    presentSurface(MenuSurface::Tab,
-                   resolveMenu(command::buildTabContextMenu(state)),
-                   { .window = _osWindow, .position = std::nullopt });
+    presentSurface(MenuSurface::Tab, resolveMenu(command::buildTabContextMenu(state)));
 }
 
 void WindowController::triggerTabContextMenuAction(int actionId)
@@ -214,9 +210,7 @@ void WindowController::openNewTabMenu(QPointF /*windowPosition*/)
     };
     std::ranges::sort(state.profileNames);
 
-    presentSurface(MenuSurface::NewTab,
-                   resolveMenu(command::buildNewTabMenu(state)),
-                   { .window = _osWindow, .position = std::nullopt });
+    presentSurface(MenuSurface::NewTab, resolveMenu(command::buildNewTabMenu(state)));
 }
 
 void WindowController::triggerNewTabMenuAction(int actionId)
@@ -231,9 +225,7 @@ command::MenuTree WindowController::resolveMenu(std::span<command::ContextMenuEn
         entries, command::chordIndex(_manager.app().config()), command::platformShortcutStyle());
 }
 
-void WindowController::presentSurface(MenuSurface surface,
-                                      command::MenuTree tree,
-                                      platform::MenuAnchor anchor)
+void WindowController::presentSurface(MenuSurface surface, command::MenuTree tree)
 {
     _menus[static_cast<std::size_t>(surface)].publish(tree);
 
@@ -261,8 +253,7 @@ void WindowController::presentSurface(MenuSurface surface,
                             surface,
                             tree = std::move(tree),
                             target = currentMenuTarget(),
-                            window = QPointer<QWindow> { anchor.window },
-                            position = anchor.position] {
+                            window = QPointer<QWindow> { _osWindow }] {
                                // The presenter blocks until the menu closes, and Qt keeps delivering events
                                // meanwhile -- the same surface may even be reopened. So the pick resolves
                                // against the menu that was SHOWN and the target it was opened for, both held
@@ -278,7 +269,7 @@ void WindowController::presentSurface(MenuSurface surface,
                                    presentMenu(_menuPresentation,
                                                _nativeMenus,
                                                tree,
-                                               { .window = window.data(), .position = position },
+                                               { .window = window.data(), .position = std::nullopt },
                                                pickFromShown(tree.actions, std::move(onAction)));
                                if (route == MenuRoute::InScene)
                                    requestInSceneMenu(surface);
@@ -378,9 +369,7 @@ void WindowController::openTitleBarContextMenu()
         state.profileNames.push_back(name);
     std::ranges::sort(state.profileNames);
 
-    presentSurface(MenuSurface::TitleBar,
-                   resolveMenu(command::buildTitleBarContextMenu(state)),
-                   { .window = _osWindow, .position = std::nullopt });
+    presentSurface(MenuSurface::TitleBar, resolveMenu(command::buildTitleBarContextMenu(state)));
 }
 
 command::MenuBarState WindowController::menuBarState() const

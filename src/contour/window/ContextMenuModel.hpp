@@ -16,11 +16,11 @@ namespace contour::window
 
 /// A resolved menu, as QML consumes it.
 ///
-/// Turns the tree into nested QVariantMaps -- { kind, title, enabled, checkable, checked, actionId, children
-/// }
-/// -- where `actionId` is the node's MenuNode::actionIndex into MenuTree::actions. Carrying the index rather
-/// than a command NAME is what lets a click run the exact action the row was built with: nothing is looked
-/// up by name at click time, and nothing depends on some other registry having been populated first.
+/// Turns the tree into nested QVariantMaps -- { kind, title, enabled, checkable, checked, actionId,
+/// children } -- where `actionId` is the node's MenuNode::actionIndex into MenuTree::actions. Carrying the
+/// index rather than a command NAME is what lets a click run the exact action the row was built with:
+/// nothing is looked up by name at click time, and nothing depends on some other registry having been
+/// populated first.
 ///
 /// A run of consecutive command nodes that carry a swatch becomes one row
 /// { kind: "swatches", swatches: [ { title, color, actionId, enabled, checked } ] }, so QML can lay the
