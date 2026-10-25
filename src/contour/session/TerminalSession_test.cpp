@@ -11056,11 +11056,14 @@ TEST_CASE("TerminalSession: turning Reduce Motion on and off follows live", "[co
         .motion = MotionPreference::Reduced, .transparency = {}, .contrast = {} });
     CHECK(settings.screenTransitionDuration == 0ms);
     CHECK(settings.cursorMotionAnimationDuration == 0ms);
+    // The factory settings follow, so a RIS keeps what the preference allows.
+    CHECK(session->terminal().factorySettings().cursorMotionAnimationDuration == 0ms);
 
     accessibility.set(contour::config::AccessibilityPreferences {
         .motion = MotionPreference::Full, .transparency = {}, .contrast = {} });
     CHECK(settings.screenTransitionDuration == 250ms);
     CHECK(settings.cursorMotionAnimationDuration == 80ms);
+    CHECK(session->terminal().factorySettings().cursorMotionAnimationDuration == 80ms);
 }
 
 TEST_CASE("TerminalSession: a configuration reload keeps Reduce Motion", "[contour][session][motion]")

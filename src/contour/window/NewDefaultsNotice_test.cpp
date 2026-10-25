@@ -4,6 +4,8 @@
 #include <contour/config/GuiStateStore.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
 
+#include <core/Utils.hpp>
+
 #include <QtCore/QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -12,7 +14,6 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <sstream>
 #include <string>
 
 #include <QtTest/QSignalSpy>
@@ -54,10 +55,7 @@ struct NoticeFixture
     /// @return What settings.yml holds.
     [[nodiscard]] std::string settingsFile() const
     {
-        auto in = std::ifstream { configDir / "settings.yml" };
-        auto content = std::ostringstream {};
-        content << in.rdbuf();
-        return std::move(content).str();
+        return core::readFileAsString(configDir / "settings.yml");
     }
 };
 } // namespace

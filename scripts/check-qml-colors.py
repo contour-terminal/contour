@@ -26,9 +26,8 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from qml_lint import code_lines  # noqa: E402
+# Python puts this script's directory first on sys.path, so the shared helper imports as a sibling.
+from qml_lint import code_lines
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCAN_ROOTS = (Path("src/contour/qml"), Path("src/contour/styles"))

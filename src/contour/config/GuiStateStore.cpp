@@ -37,14 +37,28 @@ namespace
         return std::move(content).str();
     }
 
-    /// The state @p content spells.
-    /// @param content A GUI state document.
-    /// @return The state, or GuiStateError::Malformed when it is not YAML, or its offers are not a list.
-    [[nodiscard]] std::expected<GuiState, GuiStateError> parseGuiState(std::string const& content)
+    /// The YAML document @p content spells.
+    /// @param content The bytes of a GUI state file.
+    /// @return Its root node, or GuiStateError::Malformed when it is not YAML.
+    [[nodiscard]] std::expected<YAML::Node, GuiStateError> parseDocument(std::string const& content)
     {
         try
         {
-            auto const document = YAML::Load(content);
+            return YAML::Load(content);
+        }
+        catch (YAML::Exception const&)
+        {
+            return std::unexpected { GuiStateError::Malformed };
+        }
+    }
+
+    /// The state @p document holds.
+    /// @param document A parsed GUI state document.
+    /// @return The state, or GuiStateError::Malformed when it is not a map, or its offers are not a list.
+    [[nodiscard]] std::expected<GuiState, GuiStateError> guiStateOf(YAML::Node const& document)
+    {
+        try
+        {
             if (document.IsNull())
                 return GuiState {}; // An empty file: nothing stored.
             if (!document.IsMap())
@@ -69,23 +83,6 @@ namespace
         {
             return std::unexpected { GuiStateError::Malformed };
         }
-    }
-
-    /// The map @p content spells.
-    /// @param content A YAML document.
-    /// @return Its root when that is a map, else an empty map.
-    [[nodiscard]] YAML::Node mapIn(std::string const& content)
-    {
-        try
-        {
-            if (auto document = YAML::Load(content); document.IsMap())
-                return document;
-        }
-        catch (YAML::Exception const&)
-        {
-            errorLog()("The GUI state changed while it was saved; rewriting it whole.");
-        }
-        return YAML::Node { YAML::NodeType::Map };
     }
 
     /// The tokens of @p offers that name no offer this release knows.
@@ -135,7 +132,7 @@ std::expected<GuiState, GuiStateError> FileGuiStateStore::load() const
     if (!std::filesystem::exists(_file, ec))
         return ec ? std::expected<GuiState, GuiStateError> { std::unexpected { GuiStateError::Unreadable } }
                   : GuiState {};
-    return readWholeFile(_file).and_then(parseGuiState);
+    return readWholeFile(_file).and_then(parseDocument).and_then(guiStateOf);
 }
 
 std::expected<void, GuiStateError> FileGuiStateStore::save(GuiState const& state)
@@ -143,10 +140,13 @@ std::expected<void, GuiStateError> FileGuiStateStore::save(GuiState const& state
     auto previous = YAML::Node { YAML::NodeType::Map };
     if (auto ec = std::error_code {}; std::filesystem::exists(_file, ec))
     {
-        if (load())
+        // Read and parsed once: the document that loads is the one the rewrite keeps.
+        auto const document = readWholeFile(_file).and_then(parseDocument);
+        if (document && guiStateOf(*document))
         {
-            // It loaded, so it reads and parses as a map or as nothing.
-            previous = mapIn(readWholeFile(_file).value_or(std::string {}));
+            // It loaded, so it is a map or nothing; nothing leaves the empty map.
+            if (document->IsMap())
+                previous = *document;
         }
         else
         {

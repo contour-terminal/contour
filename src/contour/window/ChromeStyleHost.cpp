@@ -18,9 +18,7 @@ namespace
 } // namespace
 
 ChromeStyleHost::ChromeStyleHost(QQmlContext& context, ChromeInputs inputs):
-    _context { context },
-    _inputs { std::move(inputs) },
-    _provider { std::make_unique<UiStyleProvider>(_inputs) }
+    _context { context }, _provider { std::make_unique<UiStyleProvider>(std::move(inputs)) }
 {
     _context.setContextProperty(chromeStylePropertyName(), _provider.get());
 }
@@ -29,16 +27,15 @@ ChromeStyleHost::~ChromeStyleHost() = default;
 
 void ChromeStyleHost::update(ChromeInputs inputs)
 {
-    if (inputs == _inputs)
+    if (inputs == _provider->inputs())
         return;
 
-    auto next = std::make_unique<UiStyleProvider>(inputs);
+    auto next = std::make_unique<UiStyleProvider>(std::move(inputs));
     _context.setContextProperty(chromeStylePropertyName(), next.get());
 
     // Deferred: the change that got us here may be on a stack that still reads the old provider.
     _provider.release()->deleteLater();
     _provider = std::move(next);
-    _inputs = std::move(inputs);
 }
 
 } // namespace contour::window

@@ -222,6 +222,9 @@ class UiStyleProvider: public QObject
     /// @param parent     Qt ownership.
     UiStyleProvider(config::ChromeStyle row, QFont const& chromeFont, QObject* parent = nullptr);
 
+    /// @return What this provider was built from.
+    [[nodiscard]] ChromeInputs const& inputs() const noexcept { return _inputs; }
+
     /// How many times the application palette has changed since this provider was built.
     /// @see paletteRevisionChanged
     [[nodiscard]] int paletteRevision() const noexcept { return _paletteRevision; }
@@ -418,7 +421,6 @@ class UiStyleProvider: public QObject
     // By value rather than by reference: the rows have static storage duration, but a reference member
     // would delete move-assignment for no gain -- the row is a handful of ints and string_views.
     ChromeInputs _inputs; ///< What this provider was built from.
-    config::ChromeStyle _row;
     config::UiStyleTokens _tokens;
     ChromeFonts _fonts;
     ChromeMetrics _metrics;

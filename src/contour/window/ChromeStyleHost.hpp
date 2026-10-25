@@ -39,11 +39,10 @@ class ChromeStyleHost
     [[nodiscard]] UiStyleProvider& provider() noexcept { return *_provider; }
 
     /// @return What the current provider was built from.
-    [[nodiscard]] ChromeInputs const& inputs() const noexcept { return _inputs; }
+    [[nodiscard]] ChromeInputs const& inputs() const noexcept { return _provider->inputs(); }
 
   private:
     QQmlContext& _context;
-    ChromeInputs _inputs;
     std::unique_ptr<UiStyleProvider> _provider;
 };
 

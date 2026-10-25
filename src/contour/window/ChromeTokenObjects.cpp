@@ -117,9 +117,7 @@ QColor ChromeColorTokens::color(config::ChromeColorRole role) const
         return { Qt::transparent };
     }();
 
-    auto result = base;
-    result.setAlphaF(static_cast<float>(source.alphaPercent) / 100.0F);
-    return result;
+    return platform::atOpacity(base, source.alphaPercent);
 }
 
 } // namespace contour::window

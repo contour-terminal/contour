@@ -134,18 +134,6 @@ namespace
         };
     }
 
-    /// @p base at @p percent opacity.
-    ///
-    /// Every translucent overlay the chrome paints -- the hover wash, the two popup scrims -- is a
-    /// palette color taken down to an alpha the token row states, so the one arithmetic step lives
-    /// here rather than once per caller.
-    [[nodiscard]] QColor atOpacity(QColor const& base, int percent)
-    {
-        auto faded = base;
-        faded.setAlphaF(static_cast<float>(percent) / 100.0F);
-        return faded;
-    }
-
     /// Converts @p tokens' glyphs to the strings QML draws.
     [[nodiscard]] ChromeGlyphs chromeGlyphsFor(config::UiStyleTokens const& tokens)
     {
@@ -175,12 +163,11 @@ ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
 UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     QObject { parent },
     _inputs { std::move(inputs) },
-    _row { _inputs.row },
-    _tokens { config::uiStyleTokens(_row) },
+    _tokens { config::uiStyleTokens(_inputs.row) },
     _fonts { chromeFontsFor(_tokens, _inputs.font) },
     _metrics { chromeMetricsFor(_tokens, _inputs.font) },
     _glyphs { chromeGlyphsFor(_tokens) },
-    _groups { config::resolveChromeTokens(_row, _inputs.accessibility) },
+    _groups { config::resolveChromeTokens(_inputs.row, _inputs.accessibility) },
     // The same pair chromeMetricsFor() resolves every other extent with, so a group token and a
     // legacy one land on the same grid.
     _units { .horizontal = _metrics.widthQuantum,
@@ -218,27 +205,27 @@ bool UiStyleProvider::eventFilter(QObject* watched, QEvent* event)
 
 QString UiStyleProvider::chromeStyleName() const
 {
-    return QString::fromLatin1(config::chromeStyleName(_row));
+    return QString::fromLatin1(config::chromeStyleName(_inputs.row));
 }
 
 QColor UiStyleProvider::wash(QColor const& base) const
 {
-    return atOpacity(base, _tokens.hoverWashPercent);
+    return platform::atOpacity(base, _tokens.hoverWashPercent);
 }
 
 QColor UiStyleProvider::modalScrim(QColor const& base) const
 {
-    return atOpacity(base, _tokens.modalScrimPercent);
+    return platform::atOpacity(base, _tokens.modalScrimPercent);
 }
 
 QColor UiStyleProvider::modelessScrim(QColor const& base) const
 {
-    return atOpacity(base, _tokens.modelessScrimPercent);
+    return platform::atOpacity(base, _tokens.modelessScrimPercent);
 }
 
 QColor UiStyleProvider::shadowTint(QColor const& base) const
 {
-    return atOpacity(base, _tokens.shadowOpacityPercent);
+    return platform::atOpacity(base, _tokens.shadowOpacityPercent);
 }
 
 QColor UiStyleProvider::progressColor(int state) const
@@ -299,12 +286,12 @@ QColor UiStyleProvider::paneDimTextColor() const
 
 QColor UiStyleProvider::paneDimColor() const
 {
-    return atOpacity(QColor(Qt::black), config::ChromeTokens::PaneDimPercent);
+    return platform::atOpacity(QColor(Qt::black), config::ChromeTokens::PaneDimPercent);
 }
 
 QColor UiStyleProvider::dotGlyphColor() const
 {
-    return atOpacity(QColor(Qt::black), config::ChromeTokens::DotGlyphPercent);
+    return platform::atOpacity(QColor(Qt::black), config::ChromeTokens::DotGlyphPercent);
 }
 
 QColor UiStyleProvider::errorColor() const

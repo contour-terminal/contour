@@ -5,7 +5,9 @@ A size in the chrome comes from the design tokens `chromeStyle` publishes (UiSty
 or a scale change reaches it. A bare number in a size property is a size no token can reach. This gate
 counts numeric literals other than 0 in the assigned value of the size properties (SIZE_PROPERTIES), in
 src/contour/qml/**/*.qml and src/contour/styles/**/*.qml, outside comments. It counts literals, not
-lines: `Math.max(a, 8) + 8` is two. `property <type> <name>: N` declarations are not looked at.
+lines: `Math.max(a, 8) + 8` is two. `property <type> <name>: N` declarations are not looked at. A value
+that wraps onto the next line is counted on its first line only: literals on the continuation lines
+are not seen.
 
 scripts/qml-size-literal-baseline.txt holds `path count` lines (repository-relative, `/` separators). A
 file must have exactly its baseline count: more fails, fewer also fails, so the baseline only shrinks. A
@@ -24,9 +26,8 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from qml_lint import code_lines  # noqa: E402
+# Python puts this script's directory first on sys.path, so the shared helper imports as a sibling.
+from qml_lint import code_lines
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCAN_ROOTS = (Path("src/contour/qml"), Path("src/contour/styles"))
@@ -49,14 +50,11 @@ SIZE_PROPERTIES = frozenset(
     }
 )  # fmt: skip
 
-# The grouped forms: the block's name -> the names that are size properties inside it.
+# The grouped forms, derived from the dotted names above: the block's name -> the names that are size
+# properties inside it.
 GROUPED_PROPERTIES = {
-    "anchors": frozenset({"margins", "leftMargin", "rightMargin", "topMargin", "bottomMargin"}),
-    "Layout": frozenset(
-        name.removeprefix("Layout.") for name in SIZE_PROPERTIES if name.startswith("Layout.")
-    ),
-    "font": frozenset({"pixelSize", "pointSize"}),
-    "border": frozenset({"width"}),
+    group: frozenset(name.partition(".")[2] for name in SIZE_PROPERTIES if name.startswith(group + "."))
+    for group in {name.partition(".")[0] for name in SIZE_PROPERTIES if "." in name}
 }
 
 _STATEMENT = re.compile(r"\s*([A-Za-z_][\w.]*)\s*:(?!:)")
