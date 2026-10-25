@@ -635,9 +635,6 @@ if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour_core PUBLIC CONTOUR_PERF_STATS)
 endif()
 
-if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-    target_compile_definitions(contour_core PUBLIC CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-endif()
 # }}}
 
 # {{{ platform specific target set_target_properties
@@ -894,6 +891,8 @@ if(CONTOUR_FRONTEND_GUI)
             list(APPEND contour_gui_test_heavy_sources session/TerminalSessionExtensions_test.cpp)
         endif()
         add_library(contour_gui_test_heavy OBJECT ${contour_gui_test_heavy_sources})
+        # The chrome snapshots load the bundled fonts from the source tree, in every build type.
+        target_compile_definitions(contour_gui_test_heavy PRIVATE CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
         # The end-to-end permission test runs a guest that runs a command; it exists where guests are built.
         if(CONTOUR_EXTENSIONS AND TARGET spawner_wasm)
             target_compile_definitions(contour_gui_test_heavy PRIVATE

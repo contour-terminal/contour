@@ -94,10 +94,15 @@ void SettingsWindowHost::place(QScreen* anchor, std::optional<QRect> previous)
         window.create();
     }
 
-    auto const screens =
-        QGuiApplication::screens()
-        | std::views::transform([](QScreen const* each) { return each->availableGeometry(); })
-        | std::ranges::to<std::vector>();
+    // A loop, not views::transform | ranges::to: clang 22 on libstdc++ 14 rejects that pipeline here.
+    auto const screens = [] {
+        auto const all = QGuiApplication::screens();
+        auto geometries = std::vector<QRect> {};
+        geometries.reserve(static_cast<size_t>(all.size()));
+        for (auto const* each: all)
+            geometries.push_back(each->availableGeometry());
+        return geometries;
+    }();
     auto const geometry = settingsWindowGeometry({
         .preferred = window.property("preferredSize").toSizeF().toSize(),
         .minimum = window.minimumSize(),

@@ -27,9 +27,9 @@ struct TitleBarContextMenuState
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
     config::TabBarPosition tabBarPosition = config::TabBarPosition::Top;
 
-    std::string activeProfile;             ///< The profile the active session runs under.
-    std::vector<std::string> profileNames; ///< Every configured profile, in a stable order.
-    std::vector<std::string> hostNames {}; ///< Saved hosts (`hosts:`), sorted.
+    std::string activeProfile {};             ///< The profile the active session runs under.
+    std::vector<std::string> profileNames {}; ///< Every configured profile, in a stable order.
+    std::vector<std::string> hostNames {};    ///< Saved hosts (`hosts:`), sorted.
 };
 
 /// The world, as the tab bar menu needs to see it: the window's live mode and placement.

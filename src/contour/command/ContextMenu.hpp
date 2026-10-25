@@ -155,13 +155,13 @@ enum class ActionScope : std::uint8_t
 struct ContextMenuEntry
 {
     ContextMenuEntryKind kind = ContextMenuEntryKind::Command;
-    std::string title;                                       ///< Display text.
+    std::string title {};                                    ///< Display text.
     actions::Action action {};                               ///< Command rows: what to run.
     RowAvailability availability = RowAvailability::Enabled; ///< Command rows: whether it can be picked.
     RowCheck check = RowCheck::None;        ///< Command rows: the check column, and whether it is ticked.
     MenuItemRole role = MenuItemRole::None; ///< Command rows: the role a native menu gives it.
     std::optional<vtbackend::RGBColor> swatch {}; ///< Command rows drawn as a color swatch.
-    std::vector<ContextMenuEntry> children;       ///< Submenu rows: what is inside.
+    std::vector<ContextMenuEntry> children {};    ///< Submenu rows: what is inside.
     ActionScope scope = ActionScope::Window;      ///< Command rows: what the row acts on.
 };
 

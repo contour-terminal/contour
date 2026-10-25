@@ -121,8 +121,8 @@ namespace
     }
 } // namespace
 
-FileGuiStateStore::FileGuiStateStore(std::filesystem::path configDir):
-    _file { std::move(configDir) / GuiStateFileName }
+FileGuiStateStore::FileGuiStateStore(std::filesystem::path const& configDir):
+    _file { configDir / GuiStateFileName }
 {
 }
 
@@ -162,7 +162,7 @@ std::expected<void, GuiStateError> FileGuiStateStore::save(GuiState const& state
             }
         }
     }
-    return atomicWriteFile(_file, emitGuiState(state, std::move(previous)))
+    return atomicWriteFile(_file, emitGuiState(state, previous))
         .transform_error([this](std::string const& error) {
             errorLog()("Could not write {}: {}", core::pathToUtf8(_file), error);
             return GuiStateError::Unwritable;

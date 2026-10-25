@@ -82,7 +82,7 @@ class FileGuiStateStore final: public GuiStateStore
 {
   public:
     /// @param configDir The directory holding `contour.yml`.
-    explicit FileGuiStateStore(std::filesystem::path configDir);
+    explicit FileGuiStateStore(std::filesystem::path const& configDir);
 
     [[nodiscard]] std::expected<GuiState, GuiStateError> load() const override;
     [[nodiscard]] std::expected<void, GuiStateError> save(GuiState const& state) override;

@@ -1063,7 +1063,7 @@ namespace detail
     inline constexpr std::string_view ClassicFontFamily = "monospace";
 #endif
 
-#if defined(_WIN32)
+#ifdef _WIN32
     inline constexpr std::string_view Native2026FontFamily = "Cascadia Mono";
 #else
     // Bundled with Contour on macOS and Linux and registered before the first font lookup, so the
@@ -3009,7 +3009,7 @@ struct YAMLConfigWriter: Writer
     /// @param doc The entry's documentation, with one placeholder for the value.
     /// @param v The color configuration.
     /// @return @p doc filled in.
-    [[nodiscard]] std::string format(std::string_view doc, ColorConfig const& v)
+    [[nodiscard]] std::string formatColorConfig(std::string_view doc, ColorConfig const& v)
     {
         auto const* dual = std::get_if<DualColorConfig>(&v);
         if (dual == nullptr)
@@ -3021,12 +3021,25 @@ struct YAMLConfigWriter: Writer
                 "\n{0}light: {1}\n{0}dark: {2}", indent, dual->colorSchemeLight, dual->colorSchemeDark));
     }
 
+    /// Fills @p doc with @p val: the Writer's own formatting, except for a colour configuration.
+    template <typename... T>
+    std::string formatValue(std::string_view doc, T const&... val)
+    {
+        return format(doc, val...);
+    }
+
+    /// A colour configuration's dark/light pair needs this writer's indentation. @see formatColorConfig
+    std::string formatValue(std::string_view doc, ColorConfig const& val)
+    {
+        return formatColorConfig(doc, val);
+    }
+
     template <typename... T>
     std::string process(std::string_view doc, T const&... val)
     {
-        return format(addOffset(replaceCommentPlaceholder(std::string { doc }),
-                                static_cast<size_t>(Offset::Levels) * OneOffset),
-                      val...);
+        return formatValue(addOffset(replaceCommentPlaceholder(std::string { doc }),
+                                     static_cast<size_t>(Offset::Levels) * OneOffset),
+                           val...);
     }
 
     /// Writes the configuration entry a reflection walk reached under @p name, which is dropped: @p doc

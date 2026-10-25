@@ -66,7 +66,7 @@ constexpr std::span<ConfigEnumInfo<NewDefaultsOffer> const> configEnumValues() n
 /// @return The matching rule's offer, or NewDefaultsOffer::None.
 [[nodiscard]] constexpr NewDefaultsOffer newDefaultsOffer(DefaultsEditionSources sources) noexcept
 {
-    auto const* const rule = std::ranges::find_if(
+    auto const rule = std::ranges::find_if(
         detail::NewDefaultsOfferRules, [&](detail::NewDefaultsOfferRule const& candidate) {
             return candidate.mainFile == sources.mainFile && candidate.settingsFile == sources.settingsFile;
         });
