@@ -274,6 +274,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/ScreenshotFile.hpp
         session/SessionFactory.hpp
         window/SettingsController.hpp
+        window/SettingsWindowHost.hpp
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
@@ -320,6 +321,7 @@ if(CONTOUR_FRONTEND_GUI)
         config/LayoutStore.cpp
         session/SessionFactory.cpp
         window/SettingsController.cpp
+        window/SettingsWindowHost.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
@@ -380,6 +382,7 @@ if(CONTOUR_FRONTEND_GUI)
     # the window is Main.qml rather than the historical main.qml.
     set(_qml_files
         qml/Main.qml
+        qml/ThemedWindow.qml
         qml/BellSound.qml
         qml/DeferredBell.qml
         qml/RequestPermission.qml
@@ -398,6 +401,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/CommandPalette.qml
         qml/SaveLayoutDialog.qml
         qml/SettingsPage.qml
+        qml/SettingsWindow.qml
         qml/SettingsNavItem.qml
         qml/SettingsListItem.qml
         qml/ConfirmDialog.qml
@@ -877,6 +881,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/CommandPaletteModel_test.cpp
             window/MultiWindow_test.cpp
             window/SettingsController_test.cpp
+            window/SettingsWindowHost_test.cpp
             window/TabListModel_test.cpp
             window/UiStyleProvider_test.cpp
             window/WindowMenus_test.cpp

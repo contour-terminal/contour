@@ -13,7 +13,10 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/SettingsFixtures.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/SettingsWindowHost.hpp>
+#include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <core/Utils.hpp>
@@ -46,6 +49,7 @@
 #include <QtTest/QTest>
 
 using namespace contour;
+using contour::test::ControllerFixture;
 using contour::test::IncubationDriver;
 
 namespace
@@ -59,26 +63,101 @@ void clickButton(QObject* object)
     QMetaObject::invokeMethod(object, "clicked");
 }
 
-/// The real SettingsPage.qml over a SettingsController, with every delegate it makes incubated.
+/// An active window that shows a settings page, or one row of it, as the user sees it, and that takes the
+/// keyboard focus elsewhere when asked.
+class TestWindow
+{
+  public:
+    /// Opens an active window of @p width by @p height pixels.
+    TestWindow(int width, int height): _owned { std::make_unique<QQuickWindow>() }, _window { _owned.get() }
+    {
+        _window->resize(width, height);
+        activate();
+    }
+
+    /// Borrows @p window, resizes it to @p size, and shows and activates it.
+    /// @param window The window to drive; it must outlive this one.
+    /// @param size   The size to give it.
+    TestWindow(QQuickWindow& window, QSize size): _window { &window }
+    {
+        _window->resize(size);
+        activate();
+    }
+
+    /// Shows @p item, as wide and as high as the window.
+    void show(QQuickItem& item)
+    {
+        item.setParentItem(_window->contentItem());
+        item.setSize(QSizeF(_window->size()));
+    }
+
+    /// Gives @p item the keyboard focus, as clicking it would.
+    static void focus(QQuickItem& item)
+    {
+        item.forceActiveFocus();
+        REQUIRE(item.hasActiveFocus());
+    }
+
+    /// Sends @p key to whatever holds the keyboard focus.
+    void press(Qt::Key key) { QTest::keyClick(_window, key); }
+
+    /// Types @p text key by key, as the user would, without committing it.
+    void type(std::string_view text)
+    {
+        for (auto const ch: text)
+            QTest::keyClick(_window, ch);
+    }
+
+    /// Types @p text over what @p field shows, and commits it with Return.
+    void typeOver(QQuickItem& field, std::string_view text)
+    {
+        focus(field);
+        QMetaObject::invokeMethod(&field, "selectAll");
+        type(text);
+        press(Qt::Key_Return);
+    }
+
+    /// Takes the keyboard focus out of the field holding it, as clicking elsewhere would.
+    ///
+    /// Not onto the window's content item: that is a focus scope, so focusing it hands the focus straight
+    /// back to the field inside it.
+    void dropFocus() { focus(_focusSink); }
+
+  private:
+    /// Parents the focus sink into the window, then shows and activates it.
+    void activate()
+    {
+        _focusSink.setParentItem(_window->contentItem());
+        _window->show();
+        _window->requestActivate();
+        REQUIRE(QTest::qWaitForWindowActive(_window));
+    }
+
+    std::unique_ptr<QQuickWindow> _owned; ///< The window, when this one opened it; null when it borrows one.
+    QQuickWindow* _window;                ///< The window driven.
+    QQuickItem _focusSink;
+};
+
+/// The real SettingsPage.qml inside the real Settings window, over a SettingsController, with every delegate
+/// it makes incubated.
 struct SettingsPageView
 {
     QQmlEngine engine;
     IncubationDriver incubation;
-    std::unique_ptr<QQmlComponent> component;
-    std::unique_ptr<QObject> page;
+    window::SettingsWindowHost host;
+    QPointer<QObject> page;
 
     /// @param controller The controller the page binds to. It must outlive the page, which holds a bare
     ///                   pointer to it.
-    explicit SettingsPageView(window::SettingsController* controller)
+    explicit SettingsPageView(window::SettingsController* controller):
+        host { *controller,
+               window::settingsWindowConventionsFor(config::HostPlatform::Other),
+               [this](window::SettingsWindowHost& self) { return window::loadSettingsWindow(engine, self); } }
     {
         contour::test::installChromeStyle(engine);
         engine.setIncubationController(&incubation);
-        component = std::make_unique<QQmlComponent>(
-            &engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SettingsPage.qml")));
-        REQUIRE(component->isReady());
-        auto initial = QVariantMap {};
-        initial.insert("controller", QVariant::fromValue(controller));
-        page.reset(component->createWithInitialProperties(initial));
+        REQUIRE(host.show(nullptr).has_value());
+        page = host.window()->findChild<QObject*>(QStringLiteral("settingsPage"));
         REQUIRE(page != nullptr);
         settle();
     }
@@ -87,44 +166,9 @@ struct SettingsPageView
     void settle() { incubation.settle(); }
 
     [[nodiscard]] QQuickItem* item() const { return qobject_cast<QQuickItem*>(page.get()); }
-};
 
-/// A SettingsController over a contour.yml of its own, wired as production wires it: side files are written
-/// beside that contour.yml, and a saved change reloads it.
-struct ControllerFixture
-{
-    QTemporaryDir dir;
-    config::Config cfg;
-    std::filesystem::path configDir;
-    std::filesystem::path configPath;
-    std::shared_ptr<config::GuiConfigStore> store;
-    std::unique_ptr<window::SettingsController> controller;
-    QStringList errors; ///< What the controller reported through errorOccurred, in order.
-
-    /// @param yaml       The contour.yml the controller edits.
-    /// @param writeStore Where the controller writes; null writes the side files beside that contour.yml.
-    ControllerFixture(std::string_view yaml, std::shared_ptr<config::GuiConfigStore> writeStore)
-    {
-        configDir = std::filesystem::path(dir.path().toStdU16String());
-        configPath = configDir / "contour.yml";
-        {
-            auto out = std::ofstream(configPath);
-            out << yaml;
-        }
-        config::loadConfigFromFile(cfg, configPath);
-        store = writeStore ? std::move(writeStore) : std::make_shared<config::FileGuiConfigStore>(configDir);
-        controller =
-            std::make_unique<window::SettingsController>([this]() -> config::Config const& { return cfg; },
-                                                         store,
-                                                         [this]() {
-                                                             cfg = config::Config {};
-                                                             config::loadConfigFromFile(cfg, configPath);
-                                                         },
-                                                         nullptr);
-        QObject::connect(controller.get(),
-                         &window::SettingsController::errorOccurred,
-                         [this](QString const& message) { errors.push_back(message); });
-    }
+    /// @return The Settings window, resized to @p size, shown and active.
+    [[nodiscard]] TestWindow activeWindow(QSize size) { return TestWindow { *host.window(), size }; }
 };
 
 /// A settings page over a contour.yml of its own, ready to drive. The controller outlives the page.
@@ -167,65 +211,6 @@ struct SettingRowFactory
         REQUIRE(row != nullptr);
         return row;
     }
-};
-
-/// An active window that shows a settings page, or one row of it, as the user sees it, and that takes the
-/// keyboard focus elsewhere when asked.
-class TestWindow
-{
-  public:
-    /// Opens an active window of @p width by @p height pixels.
-    TestWindow(int width, int height)
-    {
-        _window.resize(width, height);
-        _focusSink.setParentItem(_window.contentItem());
-        _window.show();
-        _window.requestActivate();
-        REQUIRE(QTest::qWaitForWindowActive(&_window));
-    }
-
-    /// Shows @p item, as wide and as high as the window.
-    void show(QQuickItem& item)
-    {
-        item.setParentItem(_window.contentItem());
-        item.setSize(QSizeF(_window.size()));
-    }
-
-    /// Gives @p item the keyboard focus, as clicking it would.
-    static void focus(QQuickItem& item)
-    {
-        item.forceActiveFocus();
-        REQUIRE(item.hasActiveFocus());
-    }
-
-    /// Sends @p key to whatever holds the keyboard focus.
-    void press(Qt::Key key) { QTest::keyClick(&_window, key); }
-
-    /// Types @p text key by key, as the user would, without committing it.
-    void type(std::string_view text)
-    {
-        for (auto const ch: text)
-            QTest::keyClick(&_window, ch);
-    }
-
-    /// Types @p text over what @p field shows, and commits it with Return.
-    void typeOver(QQuickItem& field, std::string_view text)
-    {
-        focus(field);
-        QMetaObject::invokeMethod(&field, "selectAll");
-        type(text);
-        press(Qt::Key_Return);
-    }
-
-    /// Takes the keyboard focus out of the field holding it, as clicking elsewhere would.
-    ///
-    /// Not onto the window's content item: that is a focus scope, so focusing it hands the focus straight
-    /// back to the field inside it.
-    void dropFocus() { focus(_focusSink); }
-
-  private:
-    QQuickWindow _window;
-    QQuickItem _focusSink;
 };
 
 /// Finds the first descendant of @p root satisfying @p predicate, in the VISUAL tree: a Repeater's delegate
@@ -781,8 +766,7 @@ TEST_CASE("SettingsPage's link pattern list takes what is typed, one field after
     clickButton(page->findChild<QObject*>("saveProfileAsButton"));
     REQUIRE(!fx.controller->editingReadOnly());
     fx.page->setProperty("editorMode", "profile");
-    auto window = TestWindow(1000, 800);
-    window.show(*page);
+    auto window = fx.activeWindow(QSize(1000, 800));
     fx.settle();
 
     clickButton(page->findChild<QObject*>("addLinkPatternButton"));
@@ -940,8 +924,7 @@ TEST_CASE("SettingsPage shows the stored value again when it refuses a typed one
     auto fx = PageFixture(OneProfile);
     auto* page = fx.item();
     REQUIRE(page != nullptr);
-    auto window = TestWindow(1000, 800);
-    window.show(*page);
+    auto window = fx.activeWindow(QSize(1000, 800));
     fx.settle();
 
     // Looked up again each time: a model that changed rebuilds the rows.
@@ -1025,8 +1008,7 @@ TEST_CASE("SettingsPage says why it refused a value until the next change it sav
     auto fx = PageFixture(OneProfile);
     auto* page = fx.item();
     REQUIRE(page != nullptr);
-    auto window = TestWindow(1000, 800);
-    window.show(*page);
+    auto window = fx.activeWindow(QSize(1000, 800));
     fx.settle();
 
     auto* banner = page->findChild<QQuickItem*>("settingsErrorBanner");
@@ -1069,8 +1051,7 @@ TEST_CASE("SettingsPage puts a switch or a combo box back when it cannot save th
     auto fx = PageFixture(OneProfile, std::make_shared<UnwritableStore>());
     auto* page = fx.item();
     REQUIRE(page != nullptr);
-    auto window = TestWindow(1000, 800);
-    window.show(*page);
+    auto window = fx.activeWindow(QSize(1000, 800));
     fx.settle();
 
     // Looked up again each time, as a rebuilt row would be.
@@ -1201,8 +1182,7 @@ TEST_CASE("SettingsPage follows a configuration reload while it is open", "[cont
     auto view = SettingsPageView { settings };
     auto* page = view.item();
     REQUIRE(page != nullptr);
-    auto window = TestWindow(1000, 800);
-    window.show(*page);
+    auto window = view.activeWindow(QSize(1000, 800));
     view.settle();
 
     auto const key = QStringLiteral("gutter.line_number_width");
@@ -1360,8 +1340,7 @@ TEST_CASE("SettingsPage announces each refusal, and drops it with the pane or dr
     auto fx = PageFixture(OneProfile);
     auto* page = fx.item();
     REQUIRE(page != nullptr);
-    auto window = TestWindow(1000, 800);
-    window.show(*page);
+    auto window = fx.activeWindow(QSize(1000, 800));
     fx.settle();
 
     auto* banner = page->findChild<QQuickItem*>("settingsErrorBanner");
@@ -1423,8 +1402,7 @@ TEST_CASE("ColorSchemeEditor pins a derived colour on Return only, and lets it f
     auto fx = PageFixture(OneProfile);
     auto* page = fx.item();
     REQUIRE(page != nullptr);
-    auto window = TestWindow(1000, 800);
-    window.show(*page);
+    auto window = fx.activeWindow(QSize(1000, 800));
     clickButton(page->findChild<QObject*>("newSchemeButton"));
     fx.settle();
 
