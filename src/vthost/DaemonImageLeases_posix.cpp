@@ -8,13 +8,12 @@
     #include <sys/file.h>
     #include <sys/stat.h>
 
+    #include <algorithm>
     #include <cerrno>
-    #include <charconv>
     #include <filesystem>
     #include <format>
     #include <ranges>
     #include <system_error>
-    #include <vector>
 
     #include <fcntl.h>
     #include <unistd.h>
@@ -28,6 +27,10 @@ namespace
     /// unlinks a lease file only after removing its image, so one retry suffices unless prunes keep
     /// racing it; the bound stops a pathological loop, not a plausible one.
     constexpr auto HoldAttempts = 8;
+
+    /// How many descriptor numbers adoptInherited() asks about. Numbers are handed out lowest first, so an
+    /// inherited lease, opened early by the image before the exec, lies far below this.
+    constexpr auto DescriptorsScanned = 65536L;
 
     /// A lease file held open; the descriptor's flock() is the lease.
     class FileLease final: public ImageLease
@@ -130,22 +133,14 @@ namespace
         [[nodiscard]] std::unique_ptr<ImageLease> adoptInherited(
             std::filesystem::path const& leaseFile) override
         {
-            // Whatever number the descriptor had before the exec, it has now: /dev/fd lists them all.
-            // Only one without FD_CLOEXEC can have been inherited; every lease of this process's own
-            // is opened with it.
-            auto ec = std::error_code {};
-            auto descriptors = std::filesystem::directory_iterator { "/dev/fd", ec };
-            if (ec)
-                return nullptr;
-            auto candidates = std::vector<int> {};
-            for (auto const& entry: descriptors)
-            {
-                auto const name = entry.path().filename().string();
-                auto fd = -1;
-                if (std::from_chars(name.data(), name.data() + name.size(), fd).ec == std::errc {})
-                    candidates.push_back(fd);
-            }
-            for (auto const fd: candidates)
+            // Whatever number the descriptor had before the exec, it has now. Each number is asked in turn,
+            // rather than /dev/fd listed: FreeBSD's shows 0 to 2 only, unless fdescfs is mounted on it.
+            // Only one without FD_CLOEXEC can have been inherited; every lease of this process's own is
+            // opened with it.
+            auto const openMax = ::sysconf(_SC_OPEN_MAX);
+            auto const limit =
+                static_cast<int>(openMax > 0 ? std::min(openMax, DescriptorsScanned) : DescriptorsScanned);
+            for (auto const fd: std::views::iota(0, limit))
             {
                 auto const flags = ::fcntl(fd, F_GETFD);
                 if (flags == -1 || (flags & FD_CLOEXEC) != 0 || !isFileAt(fd, leaseFile))

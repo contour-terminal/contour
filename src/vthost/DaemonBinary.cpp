@@ -34,6 +34,16 @@ namespace
         std::unique_ptr<NativeDaemonImages> _images;
         StagedDaemonBinary _staged;
     };
+
+    /// @return The AppImage this process runs from, as `$APPIMAGE` names it; nullopt when it names none.
+    [[nodiscard]] std::optional<fs::path> appImageOf(core::Environment const& env)
+    {
+        return env.get("APPIMAGE").and_then([](std::string const& value) -> std::optional<fs::path> {
+            if (value.empty())
+                return std::nullopt;
+            return core::pathFromUtf8(value).value_or(fs::path {});
+        });
+    }
 } // namespace
 
 StagedDaemonBinary::StagedDaemonBinary(DaemonImageStore& store, fs::path installed):
@@ -80,11 +90,7 @@ ImagePlacement imagePlacementOf(DaemonImageStore const& store, StagingInputs con
 
 DaemonImageStoreConfig ownImageStoreConfig(core::Environment const& env, OwnProcess process)
 {
-    auto appImage = env.get("APPIMAGE").and_then([](std::string const& value) -> std::optional<fs::path> {
-        if (value.empty())
-            return std::nullopt;
-        return core::pathFromUtf8(value).value_or(fs::path {});
-    });
+    auto appImage = appImageOf(env);
     return DaemonImageStoreConfig { .imagesRoot = daemonStateDirectory(env) / "bin",
                                     .releaseVersion = std::move(process.releaseVersion),
                                     .inputs = { .platform = NativeHostPlatform,
@@ -176,7 +182,8 @@ std::unique_ptr<DaemonBinarySource> makeOwnDaemonBinary(core::Environment const&
         errorLog()("cannot locate the running executable ({}); the daemon runs from {}",
                    images.error().message(),
                    core::pathToUtf8(argv0));
-        return std::make_unique<InstalledDaemonBinary>(std::move(argv0));
+        // An AppImage is still started as the AppImage, never from its mount, which goes with this process.
+        return std::make_unique<InstalledDaemonBinary>(appImageOf(env).value_or(std::move(argv0)));
     }
     auto installed = (*images)->inputs().appImage.value_or(std::move(argv0));
     return std::make_unique<OwnDaemonBinary>(std::move(*images), std::move(installed));
