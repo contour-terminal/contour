@@ -376,11 +376,29 @@ void TerminalSessionManager::setFocusedSession(TerminalSession* next)
 {
     if (next == _focusedSession)
         return;
+    // The chrome follows the focused session's live background, so a focus move between two sessions of
+    // different backgrounds re-evaluates it. Each read takes that session's terminal lock, on this (the
+    // GUI) thread.
+    auto const nextBackground = next != nullptr ? std::optional { next->liveBackground() } : std::nullopt;
+    auto const backgroundMoved =
+        nextBackground.has_value()
+        && (_focusedSession == nullptr || _focusedSession->liveBackground() != *nextBackground);
     if (_focusedSession != nullptr)
         _focusedSession->sendFocusOutEvent();
     _focusedSession = next;
     if (_focusedSession != nullptr)
         _focusedSession->sendFocusInEvent();
+    if (backgroundMoved)
+        _app.applyGuiTheme(_app.config().theme.value(), _app.defaultProfileColors(), nextBackground);
+}
+
+void TerminalSessionManager::sessionBackgroundChanged(vtworkspace::SessionId id, vtbackend::RGBColor color)
+{
+    // An unregistered session carries the empty id, which must not match a focused one that also does.
+    if (_focusedSession == nullptr || id == vtworkspace::SessionId {}
+        || _focusedSession->modelSessionId() != id)
+        return;
+    _app.applyGuiTheme(_app.config().theme.value(), _app.defaultProfileColors(), color);
 }
 
 void TerminalSessionManager::clearFocusIfCurrent(TerminalSession* session)

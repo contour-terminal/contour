@@ -49,3 +49,12 @@ TEST_CASE("GuiTheme.terminalFollowsBackground", "[platform]")
     CHECK(qtColorSchemeFor(GuiTheme::System, simpleWithBackground(0x000000_rgb)) == std::nullopt);
     CHECK(contour::config::Config {}.theme.value() == GuiTheme::Terminal);
 }
+
+TEST_CASE("GuiTheme.liveBackgroundOutranksTheConfiguredOne", "[guitheme][chromefollow]")
+{
+    auto const simpleBlack = simpleWithBackground(0x000000_rgb);
+    auto const dual = ColorConfig { DualColorConfig {} };
+    CHECK(qtColorSchemeFor(GuiTheme::Terminal, simpleBlack, 0xFAFAF8_rgb) == Qt::ColorScheme::Light);
+    CHECK(qtColorSchemeFor(GuiTheme::Terminal, dual, 0xFAFAF8_rgb) == std::nullopt);
+    CHECK(qtColorSchemeFor(GuiTheme::Dark, simpleBlack, 0xFAFAF8_rgb) == Qt::ColorScheme::Dark);
+}

@@ -37,11 +37,16 @@ inline constexpr double DarkBackgroundLuminance = 0.18;
 ///
 /// @param theme The configured GUI theme.
 /// @param colors The default profile's color configuration, consulted for @c GuiTheme::Terminal.
+/// @param liveBackground The focused session's default background as a program set it at runtime
+///        (OSC 11), if known. Over a simple color configuration it outranks the configured background;
+///        over a dual one it is ignored, since the chrome then follows the OS.
 /// @return The Qt color scheme to force, or @c std::nullopt to defer to the operating system's color
 ///         scheme (i.e. @c unsetColorScheme): for @c GuiTheme::System, and for @c GuiTheme::Terminal
 ///         over a dual (dark/light) color configuration, which already follows the OS.
 [[nodiscard]] inline std::optional<Qt::ColorScheme> qtColorSchemeFor(
-    config::GuiTheme theme, config::ColorConfig const& colors) noexcept
+    config::GuiTheme theme,
+    config::ColorConfig const& colors,
+    std::optional<vtbackend::RGBColor> liveBackground) noexcept
 {
     switch (theme)
     {
@@ -50,10 +55,20 @@ inline constexpr double DarkBackgroundLuminance = 0.18;
         case config::GuiTheme::Light: return Qt::ColorScheme::Light;
         case config::GuiTheme::Terminal:
             if (auto const* simple = std::get_if<config::SimpleColorConfig>(&colors))
-                return colorSchemeOfBackground(simple->colors.defaultBackground);
+                return colorSchemeOfBackground(liveBackground.value_or(simple->colors.defaultBackground));
             return std::nullopt;
     }
     return std::nullopt;
+}
+
+/// The color scheme for @p theme over the configured background alone, with no live background.
+/// @param theme The configured GUI theme.
+/// @param colors The default profile's color configuration.
+/// @return As the three-argument form with @c std::nullopt for the live background.
+[[nodiscard]] inline std::optional<Qt::ColorScheme> qtColorSchemeFor(
+    config::GuiTheme theme, config::ColorConfig const& colors) noexcept
+{
+    return qtColorSchemeFor(theme, colors, std::nullopt);
 }
 
 namespace detail

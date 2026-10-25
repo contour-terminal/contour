@@ -940,6 +940,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void setTabName(std::string_view name) override;
     void setWindowFrameColor(vtbackend::RGBColor color) override;
     void resetWindowFrameColor() override;
+    /// Runs on whichever thread holds the terminal lock (the parser thread, or the GUI thread for a
+    /// re-seed); posts the change to the manager on the GUI thread either way.
+    void defaultBackgroundColorChanged(vtbackend::RGBColor color) override;
+
+    /// The terminal's current default background, OSC 11 included. Takes the terminal lock, so it
+    /// must not be called while holding it.
+    /// @return The live default background.
+    [[nodiscard]] vtbackend::RGBColor liveBackground() const;
     void progressChanged(vtbackend::Progress progress) override;
     /// OSC 7501: posted to the GUI thread as progressChanged() is, where the tab strip reads the records
     /// back.

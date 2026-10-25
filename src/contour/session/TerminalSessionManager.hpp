@@ -490,8 +490,17 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Single authority for terminal (VT) focus: sends a focus-OUT to the previously focused session
     /// and a focus-IN to @p next (nullptr = nothing focused), so exactly one session is ever focused.
     /// Every focus source (Qt focus events, model tab/pane changes, cross-window moves) routes here.
+    /// With `theme: terminal`, focusing a session whose live background differs from the previous one's
+    /// (or focusing one after none) re-evaluates the chrome's light/dark; focusing nothing changes nothing.
     /// @param next The session that should now hold terminal focus, or nullptr for none.
     void setFocusedSession(TerminalSession* next);
+
+    /// A session's default background changed at runtime (OSC 11, a reset, a palette re-seed). When that
+    /// session holds terminal focus, the chrome theme is re-applied over @p color; otherwise nothing
+    /// happens, and the chrome catches up when the session is focused. MUST be called on the GUI thread.
+    /// @param id The session (by model id) whose background changed.
+    /// @param color Its new default background.
+    void sessionBackgroundChanged(vtworkspace::SessionId id, vtbackend::RGBColor color);
 
     /// Clears terminal focus iff @p session currently holds it (a display losing Qt focus). A no-op
     /// when @p session is not the focused one, so an outgoing pane's focus-out cannot cancel the

@@ -712,6 +712,13 @@ class Terminal: public IStatusLinePublishTarget
         /// hard reset). The frontend falls back to a user-chosen color, if any, else its own default.
         /// It never clears a color the user picked.
         virtual void resetWindowFrameColor() {}
+        /// The palette's default background changed: by OSC 11 or 111, DECAC item 1, a reset (DECSTR, RIS),
+        /// XTPOPCOLORS, or the frontend re-seeding the palette. Reported only on an actual change.
+        ///
+        /// Invoked by whichever thread holds the terminal lock -- the parser thread, or the GUI thread for a
+        /// re-seed -- so an implementation must not touch GUI state here: defer to the GUI thread instead.
+        /// @param color The new default background.
+        virtual void defaultBackgroundColorChanged(RGBColor /*color*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
@@ -784,6 +791,7 @@ class Terminal: public IStatusLinePublishTarget
         void setTabName(std::string_view /*title*/) override {}
         void setWindowFrameColor(RGBColor /*color*/) override {}
         void resetWindowFrameColor() override {}
+        void defaultBackgroundColorChanged(RGBColor /*color*/) override {}
         void setTerminalProfile(std::string const& /*configProfileName*/) override {}
         void discardImage(Image const&) override {}
         void inputModeChanged(ViMode /*mode*/) override {}
@@ -1672,6 +1680,12 @@ class Terminal: public IStatusLinePublishTarget
     void setWindowFrameColor(RGBColor color) { _eventListener.setWindowFrameColor(color); }
     /// Notifies the frontend that the window-frame (tab) color was reset to the host default.
     void resetWindowFrameColor() { _eventListener.resetWindowFrameColor(); }
+    /// Notifies the frontend of the palette's current default background.
+    /// The caller holds the terminal lock and calls this only when the default background changed.
+    void notifyDefaultBackgroundColorChanged()
+    {
+        _eventListener.defaultBackgroundColorChanged(_colorPalette.defaultBackground);
+    }
 
     bool applicationCursorKeys() const noexcept { return _inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _inputGenerator.applicationKeypad(); }

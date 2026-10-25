@@ -470,9 +470,22 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @c GuiTheme::Terminal forces the scheme the terminal background's luminance calls for.
     /// @param theme The GUI theme to apply.
     /// @param colors The default profile's color configuration, which @c GuiTheme::Terminal reads.
+    /// @param liveBackground The focused session's runtime default background (OSC 11), which
+    ///        @c GuiTheme::Terminal over a simple color configuration follows instead of @p colors'
+    ///        background; @c std::nullopt for the configured one.
     /// @note On Qt older than 6.8 (no @c QStyleHints::setColorScheme) this is a no-op and the GUI
     ///       follows the OS unconditionally.
-    void applyGuiTheme(config::GuiTheme theme, config::ColorConfig const& colors);
+    void applyGuiTheme(config::GuiTheme theme,
+                       config::ColorConfig const& colors,
+                       std::optional<vtbackend::RGBColor> liveBackground);
+
+    /// Applies @p theme over the configured background alone. @see applyGuiTheme above.
+    /// @param theme The GUI theme to apply.
+    /// @param colors The default profile's color configuration.
+    void applyGuiTheme(config::GuiTheme theme, config::ColorConfig const& colors)
+    {
+        applyGuiTheme(theme, colors, std::nullopt);
+    }
 
     /// The color configuration of the default profile, which @c GuiTheme::Terminal follows.
     [[nodiscard]] config::ColorConfig const& defaultProfileColors() const noexcept

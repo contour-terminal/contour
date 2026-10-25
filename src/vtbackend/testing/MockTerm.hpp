@@ -291,6 +291,12 @@ class MockTerm: public Terminal::NullEvents
     /// Number of setWindowFrameColor()/resetWindowFrameColor() notifications received.
     int windowFrameColorChangeCount = 0;
 
+    /// The most recent default background announced, or std::nullopt if none was. @see
+    /// defaultBackgroundColorChanged.
+    std::optional<RGBColor> defaultBackground;
+    /// Number of defaultBackgroundColorChanged() notifications received.
+    int defaultBackgroundChangeCount = 0;
+
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
 
@@ -329,6 +335,12 @@ class MockTerm: public Terminal::NullEvents
     {
         windowFrameColor = std::nullopt;
         ++windowFrameColorChangeCount;
+    }
+
+    void defaultBackgroundColorChanged(RGBColor color) override
+    {
+        defaultBackground = color;
+        ++defaultBackgroundChangeCount;
     }
 
     /// Every desktop notification raised, as (title, body), in order. Recorded so a test can assert

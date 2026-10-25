@@ -2150,6 +2150,21 @@ void TerminalSession::resetWindowFrameColor()
         [id = modelSessionId()](TerminalSessionManager& manager) { manager.resetTabColorForSession(id); });
 }
 
+void TerminalSession::defaultBackgroundColorChanged(vtbackend::RGBColor color)
+{
+    // OSC 11 and its kin. Same threading constraint as setWindowFrameColor() above: the caller holds the
+    // terminal lock, so applying the chrome theme happens on the GUI thread, through the manager.
+    postToManager([color, id = modelSessionId()](TerminalSessionManager& manager) {
+        manager.sessionBackgroundChanged(id, color);
+    });
+}
+
+vtbackend::RGBColor TerminalSession::liveBackground() const
+{
+    auto const _ = std::scoped_lock { _terminal };
+    return _terminal.colorPalette().defaultBackground;
+}
+
 void TerminalSession::progressChanged(vtbackend::Progress /*progress*/)
 {
     // OSC 9;4. Same threading constraint as setWindowFrameColor() above: this runs on the parser

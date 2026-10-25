@@ -8778,7 +8778,10 @@ constexpr auto MagicStackTopId = size_t { 0 };
 
 void Terminal::setColorPalette(ColorPalette const& palette) noexcept
 {
+    auto const previousBackground = _colorPalette.defaultBackground;
     _colorPalette = palette;
+    if (_colorPalette.defaultBackground != previousBackground)
+        notifyDefaultBackgroundColorChanged();
 }
 
 void Terminal::resetColorPalette(ColorPalette const& colors)
@@ -8787,6 +8790,7 @@ void Terminal::resetColorPalette(ColorPalette const& colors)
     // subscribed to the report has seen. It answers each report by querying its colours again and redrawing,
     // so a re-seed that changes nothing -- every reload re-seeds -- must not send one.
     auto const changed = _colorPalette != colors;
+    auto const backgroundChanged = _colorPalette.defaultBackground != colors.defaultBackground;
 
     _colorPalette = colors;
     _defaultColorPalette = colors;
@@ -8795,6 +8799,8 @@ void Terminal::resetColorPalette(ColorPalette const& colors)
 
     if (changed && isModeEnabled(DECMode::ReportColorPaletteUpdated))
         _currentScreen->reportColorPaletteUpdate();
+    if (backgroundChanged)
+        notifyDefaultBackgroundColorChanged();
 }
 
 void Terminal::reconfigureFactorySettings(Settings configured)

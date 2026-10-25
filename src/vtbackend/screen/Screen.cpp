@@ -3428,7 +3428,8 @@ void Screen::resetDynamicColor(DynamicColorName name)
             _terminal->colorPalette().defaultForeground = _terminal->defaultColorPalette().defaultForeground;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            _terminal->colorPalette().defaultBackground = _terminal->defaultColorPalette().defaultBackground;
+            // Through setDynamicColor(), which announces the background when it actually changes.
+            setDynamicColor(name, _terminal->defaultColorPalette().defaultBackground);
             break;
         case DynamicColorName::TextCursorColor:
             _terminal->colorPalette().cursor = _terminal->defaultColorPalette().cursor;
@@ -3458,7 +3459,11 @@ void Screen::setDynamicColor(DynamicColorName name, RGBColor color)
             _terminal->colorPalette().defaultForeground = color;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            _terminal->colorPalette().defaultBackground = color;
+            if (_terminal->colorPalette().defaultBackground != color)
+            {
+                _terminal->colorPalette().defaultBackground = color;
+                _terminal->notifyDefaultBackgroundColorChanged();
+            }
             break;
         case DynamicColorName::TextCursorColor: _terminal->colorPalette().cursor.color = color; break;
         case DynamicColorName::MouseForegroundColor: _terminal->colorPalette().mouseForeground = color; break;

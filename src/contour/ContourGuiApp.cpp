@@ -1672,11 +1672,13 @@ void ContourGuiApp::onExit(session::TerminalSession& session)
 #endif
 }
 
-void ContourGuiApp::applyGuiTheme(config::GuiTheme theme, config::ColorConfig const& colors)
+void ContourGuiApp::applyGuiTheme(config::GuiTheme theme,
+                                  config::ColorConfig const& colors,
+                                  std::optional<vtbackend::RGBColor> liveBackground)
 {
-    // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.h): a forced scheme for dark/light,
+    // platform::qtColorSchemeFor() is the pure decision (see GuiTheme.hpp): a forced scheme for dark/light,
     // std::nullopt for system.
-    auto const scheme = platform::qtColorSchemeFor(theme, colors);
+    auto const scheme = platform::qtColorSchemeFor(theme, colors, liveBackground);
 
     // Force the chrome palette explicitly. This is the load-bearing step: QStyleHints::setColorScheme
     // does NOT regenerate QGuiApplication::palette() on platforms whose platform-theme plugin owns the

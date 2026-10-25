@@ -40,6 +40,8 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <variant>
 #include <vector>
 
 #include <QtTest/QSignalSpy>
@@ -1082,4 +1084,71 @@ TEST_CASE("TerminalSessionManager: a configuration reload re-applies the GUI chr
 
     CHECK(testApp.app().config().theme.value() == contour::config::GuiTheme::Dark);
     CHECK(windowLightness() < lightChrome);
+}
+
+namespace
+{
+/// The lightness of the application palette's Window role: how dark or light the chrome is.
+[[nodiscard]] int chromeWindowLightness()
+{
+    return QGuiApplication::palette().color(QPalette::Window).lightness();
+}
+
+/// Loads `theme: terminal` over the default (Classic, so simple and black) colours, which darkens the chrome.
+void loadTerminalTheme(contour::test::ConfiguredTestApp& testApp)
+{
+    contour::test::writeConfigFile(
+        testApp.configFile(),
+        contour::test::profileConfigYaml(testApp.app().profileName(), "theme: terminal\n"));
+    REQUIRE(testApp.manager().reloadAllSessions());
+    REQUIRE(testApp.app().config().theme.value() == contour::config::GuiTheme::Terminal);
+    REQUIRE(std::holds_alternative<contour::config::SimpleColorConfig>(testApp.app().defaultProfileColors()));
+}
+
+constexpr auto LightBackgroundSequence = std::string_view { "\033]11;rgb:fafa/fafa/f8f8\033\\" };
+} // namespace
+
+TEST_CASE("TerminalSessionManager: OSC 11 in the focused session recolours a terminal-themed chrome",
+          "[manager][theme][chromefollow]")
+{
+    contour::test::ConfiguredTestApp testApp;
+    loadTerminalTheme(testApp);
+    contour::test::ScopedController const win { testApp.manager() };
+
+    auto* session = testApp.manager().createSession(win.id);
+    REQUIRE(session != nullptr);
+    testApp.manager().setFocusedSession(session);
+    QCoreApplication::processEvents();
+    auto const darkChrome = chromeWindowLightness();
+    REQUIRE(darkChrome < 128);
+
+    session->terminal().writeToScreen(LightBackgroundSequence);
+    QCoreApplication::processEvents();
+
+    CHECK(chromeWindowLightness() > darkChrome);
+}
+
+TEST_CASE("TerminalSessionManager: OSC 11 in an unfocused session leaves the chrome alone",
+          "[manager][theme][chromefollow]")
+{
+    contour::test::ConfiguredTestApp testApp;
+    loadTerminalTheme(testApp);
+    contour::test::ScopedController const win { testApp.manager() };
+
+    auto* first = testApp.manager().createSession(win.id);
+    auto* second = testApp.manager().createSession(win.id);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+    REQUIRE(first->modelSessionId() != second->modelSessionId());
+    testApp.manager().setFocusedSession(second);
+    QCoreApplication::processEvents();
+    auto const darkChrome = chromeWindowLightness();
+    REQUIRE(darkChrome < 128);
+
+    first->terminal().writeToScreen(LightBackgroundSequence);
+    QCoreApplication::processEvents();
+    CHECK(chromeWindowLightness() == darkChrome);
+
+    testApp.manager().setFocusedSession(first);
+    CHECK(chromeWindowLightness() > darkChrome);
 }
