@@ -55,7 +55,7 @@ This run is tracked on a private status board, a page published from an untracke
 | 0 | Foundations: ChromeStyle rows, shortcut glyphs, `theme: terminal`, contour-dark/light/classic, no single-pane focus frame, QML colour lint, bundled JetBrains Mono, first-launch defaults behind `DefaultsEdition` | — | 3.0, 2.7 | `2026-10-23-native-redesign-phase0.md` (done) |
 | 1e | Chrome snapshot driver (test-only, `[display]`) | 0 | 2.5 | `2026-10-24-native-redesign-step-1e.md` (done) |
 | 1a | Kit primitives (Toast, Banner, KitDialog), token groups, size-literal lint, accessibility preferences and platform appearance (null + macOS), Reduce Motion for terminal durations, the new-defaults banner, `hostingNoticeBar` → Banner | 1e | 3.1, 2.1, 2.3, 2.4 | `2026-10-25-native-redesign-step-1a.md` (done) |
-| 1b | Menus as data, `NativeMenuPresenter` (macOS), `MenuBarTable` + `AppMenuBar` | 1a | 3.2 | to write |
+| 1b | Menus as data, `NativeMenuPresenter` (macOS), `MenuBarTable` + `AppMenuBar` | 1a | 3.2 | `2026-10-25-native-redesign-step-1b.md` (written) |
 | 4a | Settings window shell; pseudo-tab and `settingsActive` removed; the `settings` row of the snapshot table (`SnapshotScripts`) changes in the same commit | 1b | 3.3 | to write |
 | 1c | Title band, tab well and pills, badge slot, HostChip, drift chip, tab colour, no-title-bar and full screen | 4a | 3.4 | to write |
 | 1d | macOS title-band material and safe area (spike first) | 1c | 3.5 | to write |
