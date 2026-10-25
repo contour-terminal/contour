@@ -1599,6 +1599,7 @@ void YAMLConfigReader::load(Config& c)
         loadFromEntry("theme", c.theme);
         loadFromEntry("ui_style", c.uiStyle);
         loadFromEntry("window_control_style", c.windowControlStyle);
+        loadFromEntry("chrome_density", c.chromeDensity);
         loadFromEntry("ui_font_family", c.uiFontFamily);
         loadFromEntry("ui_font_size", c.uiFontSize);
         loadFromEntry("experimental", c.experimentalFeatures);

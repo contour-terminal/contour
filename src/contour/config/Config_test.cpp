@@ -3688,6 +3688,83 @@ TEST_CASE("Config: window_control_style parses each value (ignore-case)", "[conf
     }
 }
 
+TEST_CASE("Config: chrome_density parses each value (ignore-case)", "[config]")
+{
+    using contour::config::ChromeDensity;
+
+    auto const load = [](QTemporaryDir& dir, std::string_view value) {
+        return loadFromYaml(dir,
+                            std::string { "default_profile: main\nchrome_density: " } + std::string { value }
+                                + "\nprofiles:\n    main:\n        shell: /bin/sh\n");
+    };
+
+    SECTION("every token the table carries round-trips")
+    {
+        for (auto const& info: contour::config::configEnumValues<ChromeDensity>())
+        {
+            QTemporaryDir dir;
+            INFO("token: " << info.token);
+            CHECK(load(dir, info.token).chromeDensity.value() == info.value);
+        }
+    }
+
+    SECTION("the match ignores case")
+    {
+        {
+            QTemporaryDir dir;
+            CHECK(load(dir, "Minimal").chromeDensity.value() == ChromeDensity::Minimal);
+        }
+        {
+            QTemporaryDir dir;
+            CHECK(load(dir, "MINIMAL").chromeDensity.value() == ChromeDensity::Minimal);
+        }
+    }
+
+    SECTION("an unknown token leaves the default")
+    {
+        QTemporaryDir dir;
+        auto capture = core::log::ScopedCapture { "warning" };
+        CHECK(load(dir, "dense").chromeDensity.value() == ChromeDensity::Comfortable);
+    }
+}
+
+TEST_CASE("Config: chrome_density defaults to comfortable in both editions", "[config]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::DefaultsEdition;
+
+    CHECK(contour::config::editionDefaults(DefaultsEdition::Classic).chromeDensity
+          == ChromeDensity::Comfortable);
+    CHECK(contour::config::editionDefaults(DefaultsEdition::Native2026).chromeDensity
+          == ChromeDensity::Comfortable);
+
+    constexpr auto Partial = "profiles:\n    main:\n        shell: /bin/sh\n"sv;
+
+    SECTION("a partial contour.yml gets comfortable")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(dir, Partial);
+        CHECK(contour::config::loadConfigFromFile(path).chromeDensity.value() == ChromeDensity::Comfortable);
+    }
+
+    SECTION("a settings.yml stating minimal overrides it")
+    {
+        QTemporaryDir dir;
+        auto const path = writeConfig(dir, Partial);
+        writeSideFile(dir, "settings.yml", "chrome_density: minimal\n");
+        CHECK(contour::config::loadConfigFromFile(path).chromeDensity.value() == ChromeDensity::Minimal);
+    }
+}
+
+TEST_CASE("Config: the generated config states chrome_density", "[config]")
+{
+    auto const generated = contour::config::defaultConfigString();
+    auto const needle = std::string_view { "chrome_density: comfortable" };
+    auto const first = generated.find(needle);
+    REQUIRE(first != std::string::npos);
+    CHECK(generated.find(needle, first + needle.size()) == std::string::npos);
+}
+
 TEST_CASE("Config: git-drawings, arc and braille styles parse from YAML", "[config]")
 {
     QTemporaryDir dir;

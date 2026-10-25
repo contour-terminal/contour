@@ -832,6 +832,33 @@ TEST_CASE("SettingsController: the window control style is a global field offeri
     CHECK(fx.cfg.windowControlStyle.value() == config::WindowControlStyle::Auto);
 }
 
+TEST_CASE("SettingsController: chrome_density offers both densities and round-trips", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+
+    auto expected = QStringList {};
+    for (auto const& info: config::configEnumValues<config::ChromeDensity>())
+        expected.push_back(QString::fromUtf8(info.token.data(), static_cast<qsizetype>(info.token.size())));
+
+    auto options = QStringList {};
+    auto type = QString {};
+    for (auto const& row: fx.controller->globalFields())
+        if (row.toMap().value("key").toString() == "chrome_density")
+        {
+            type = row.toMap().value("type").toString();
+            options = row.toMap().value("options").toStringList();
+        }
+
+    CHECK(type == "enum");
+    CHECK(options == expected);
+
+    REQUIRE(fx.controller->setGlobalField("chrome_density", "minimal"));
+    CHECK(fx.cfg.chromeDensity.value() == config::ChromeDensity::Minimal);
+
+    fx.controller->resetGlobalField("chrome_density");
+    CHECK(fx.cfg.chromeDensity.value() == config::ChromeDensity::Comfortable);
+}
+
 TEST_CASE("SettingsController: every global field's override survives save and reload", "[settings]")
 {
     // A global row is two halves in two files: the descriptor here, which writes the override, and a

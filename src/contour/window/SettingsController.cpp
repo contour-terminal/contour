@@ -1656,6 +1656,12 @@ namespace
                 "How the minimize/maximize/close buttons are drawn, and which side they sit on. Only "
                 "applies while the native title bar is hidden.",
                 [](config::Config const& c) { return c.windowControlStyle.value(); }),
+            // No restart note either: the chrome style provider is rebuilt on reload.
+            globalEnumFieldFromTable<config::ChromeDensity>(
+                "chrome_density",
+                "Density",
+                "How much room the window chrome takes: pane cards with headers, or bare split lines.",
+                [](config::Config const& c) { return c.chromeDensity.value(); }),
             // Same restart note as ui_style above, and for the same reason: the chrome's design
             // tokens are resolved from this font once, when the provider is built (ContourGuiApp),
             // and every property of it is CONSTANT. Saying so here is the whole difference between

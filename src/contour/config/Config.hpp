@@ -4,6 +4,7 @@
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/Actions.hpp>
 #include <contour/config/BlockActionEnums.hpp>
+#include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ConfigDocumentation.hpp>
 #include <contour/config/ConfigEnum.hpp>
 #include <contour/config/ConfigEnumReader.hpp>
@@ -1053,6 +1054,7 @@ struct EditionDefaults
     TabBarVisibility tabBarVisibility;           ///< When the window's tab strip is shown.
     vtbackend::Modifier followHyperlinkModifier; ///< The modifier a click opens a link with.
     GuiTheme theme;                              ///< Which palette the window chrome follows.
+    ChromeDensity chromeDensity;                 ///< How much room the window chrome takes.
 };
 
 namespace detail
@@ -1101,6 +1103,7 @@ namespace detail
             .tabBarVisibility = TabBarVisibility::Always,
             .followHyperlinkModifier = vtbackend::Modifier::Control,
             .theme = GuiTheme::System,
+            .chromeDensity = ChromeDensity::Comfortable,
         },
         EditionDefaults {
             .edition = DefaultsEdition::Native2026,
@@ -1120,6 +1123,7 @@ namespace detail
             .tabBarVisibility = TabBarVisibility::Multiple,
             .followHyperlinkModifier = Native2026FollowHyperlinkModifier,
             .theme = GuiTheme::Terminal,
+            .chromeDensity = ChromeDensity::Comfortable,
         },
     };
 
@@ -1813,6 +1817,11 @@ struct Config
     // shipped configuration follows whatever host it is opened on.
     ConfigEntry<WindowControlStyle, documentation::WindowControlStyle> windowControlStyle {
         WindowControlStyle::Auto
+    };
+    // Application-wide like windowControlStyle: a window has one chrome, so the density cannot be a
+    // per-profile answer. Comfortable in both editions, so a column keeps a third edition a row.
+    ConfigEntry<ChromeDensity, documentation::ChromeDensity> chromeDensity {
+        editionDefaults(defaultsEdition).chromeDensity
     };
     // Empty / 0 mean "inherit the default profile's regular font", which is what makes the
     // terminal-style chrome match the grid below it. Resolved in UiStyleProvider, not here, because

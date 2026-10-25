@@ -303,6 +303,16 @@ constexpr StringLiteral UiStyleConfig {
     "\n"
 };
 
+constexpr StringLiteral ChromeDensityConfig {
+    "{comment} How much room the window chrome takes (ignore-case).\n"
+    "{comment}   comfortable = once a tab is split, pane cards with headers and a 6 pt gap (default).\n"
+    "{comment}   minimal     = 1 pt split lines and no pane headers; hold Alt (Option) for half a\n"
+    "{comment}                 second to show them. On macOS a single tab gets a bare 28 pt band.\n"
+    "{comment} Applied live.\n"
+    "chrome_density: {}\n"
+    "\n"
+};
+
 constexpr StringLiteral WindowControlStyleConfig {
     "{comment} How the window's own minimize/maximize/close controls are drawn, and which side of\n"
     "{comment} the tab bar they sit on (ignore-case). Only applies while the native title bar is\n"
@@ -2474,6 +2484,19 @@ constexpr StringLiteral UiStyleWeb {
     "\n"
 };
 
+constexpr StringLiteral ChromeDensityWeb {
+    "\n"
+    "Selects how much room the window chrome takes. Valid values (ignore-case):\n"
+    "\n"
+    "- `comfortable` — once a tab is split, its panes are cards with a header each and a 6 pt gap "
+    "between them. This is the default.\n"
+    "- `minimal` — panes are separated by 1 pt lines and carry no header; hold Alt (Option on macOS) "
+    "for half a second to show the headers. On macOS a tab that is not split gets a bare 28 pt band.\n"
+    "\n"
+    "A change is applied live.\n"
+    "\n"
+};
+
 constexpr StringLiteral WindowControlStyleWeb {
     "\n"
     "Selects how the window's own minimize/maximize/close controls are drawn, and which side of the tab "
@@ -3401,6 +3424,7 @@ using NotificationCloseTimeout =
 using TabBarPosition = DocumentationEntry<TabBarPositionConfig, TabBarPositionWeb>;
 using TabBarVisibility = DocumentationEntry<TabBarVisibilityConfig, TabBarVisibilityWeb>;
 using UiStyle = DocumentationEntry<UiStyleConfig, UiStyleWeb>;
+using ChromeDensity = DocumentationEntry<ChromeDensityConfig, ChromeDensityWeb>;
 using WindowControlStyle = DocumentationEntry<WindowControlStyleConfig, WindowControlStyleWeb>;
 using UiFontFamily = DocumentationEntry<UiFontFamilyConfig, UiFontFamilyWeb>;
 using UiFontSize = DocumentationEntry<UiFontSizeConfig, UiFontSizeWeb>;
