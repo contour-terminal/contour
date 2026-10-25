@@ -11,6 +11,7 @@
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
 #include <contour/platform/TaskbarProgressSink.hpp>
@@ -524,6 +525,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The OS appearance as the injected source reports it now.
     [[nodiscard]] platform::PlatformAppearance platformAppearance() const;
 
+    /// @return The injected native menu presenter; the null one where the platform has none.
+    [[nodiscard]] platform::INativeMenuPresenter& nativeMenuPresenter() noexcept;
+
+    /// @return How the resolved chrome style presents menus; @c InScene until terminalGuiAction()
+    ///         resolves the style.
+    [[nodiscard]] config::MenuPresentation menuPresentation() const noexcept;
+
     /// Rebuilds the `chromeStyle` context property from the current inputs, if any changed.
     ///
     /// Called wherever an input may have moved: a reload (font, scheme), the OS light/dark flip
@@ -962,6 +970,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // provider the host deleteLater()s then is never deleted, because no DeferredDelete pass runs.
     std::unique_ptr<platform::IAccessibilityPreferenceSource> _accessibilitySource;
     std::unique_ptr<platform::IPlatformAppearance> _platformAppearance;
+    // The native menu presenter, built from the same services; it holds no callback into this app.
+    std::unique_ptr<platform::INativeMenuPresenter> _nativeMenus;
 };
 
 } // namespace contour

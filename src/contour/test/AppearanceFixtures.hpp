@@ -7,6 +7,7 @@
 
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
+#include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 
 #include <memory>
@@ -92,7 +93,7 @@ class SwitchedPlatformAppearance final: public platform::IPlatformAppearance
 };
 
 /// Services whose factories attach to the given switches: each stores the callback it is handed into
-/// its switch and returns a source that reads that switch.
+/// its switch and returns a source that reads that switch. Menus get the null presenter.
 /// @param accessibility The accessibility switch; it must outlive the services and their sources.
 /// @param appearance The appearance switch; it must outlive the services and their sources.
 /// @return The services.
@@ -109,6 +110,10 @@ class SwitchedPlatformAppearance final: public platform::IPlatformAppearance
             -> std::unique_ptr<platform::IPlatformAppearance> {
             appearance.notify = std::move(onChange);
             return std::make_unique<SwitchedPlatformAppearance>(appearance);
+        },
+        // The null presenter, so a fixture-built app never reaches the native factory.
+        .menus = []() -> std::unique_ptr<platform::INativeMenuPresenter> {
+            return std::make_unique<platform::NullNativeMenuPresenter>();
         },
     };
 }

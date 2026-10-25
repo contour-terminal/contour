@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
+#include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <vector>
 
 using contour::config::AccessibilityPreferences;
@@ -99,4 +101,23 @@ TEST_CASE("A switch with no source attached only stores", "[appearance-source]")
                               .transparency = TransparencyPreference::Reduced,
                               .contrast = ContrastPreference::Increased });
     CHECK(accessibilitySwitch.preferences.contrast == ContrastPreference::Increased);
+}
+
+TEST_CASE("Both service sets build a null menu presenter", "[appearance-source]")
+{
+    using contour::platform::MenuPresentError;
+    auto accessibilitySwitch = contour::test::AccessibilitySwitch {};
+    auto appearanceSwitch = contour::test::AppearanceSwitch {};
+    for (auto const& services:
+         { contour::platform::nullAppearanceServices(),
+           contour::test::appearanceServicesWith(accessibilitySwitch, appearanceSwitch) })
+    {
+        auto const presenter = services.menus();
+        REQUIRE(presenter != nullptr);
+        auto picks = 0;
+        auto const result = presenter->present(
+            contour::command::MenuTree {}, contour::platform::MenuAnchor {}, [&](std::size_t) { ++picks; });
+        CHECK(result == std::unexpected(MenuPresentError::Unsupported));
+        CHECK(picks == 0);
+    }
 }

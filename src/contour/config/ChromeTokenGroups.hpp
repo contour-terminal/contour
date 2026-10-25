@@ -39,6 +39,13 @@ enum class DialogPlacement : uint8_t
     Sheet,        //!< Attached to the window's title bar.
 };
 
+/// How a menu is presented.
+enum class MenuPresentation : uint8_t
+{
+    InScene = 0, //!< Drawn by the chrome inside the window's scene.
+    Native,      //!< Handed to the operating system's menu presenter, falling back to the scene.
+};
+
 /// The chrome colours a row describes; enumerator order is the order of @c ChromeTokenRow::colors.
 enum class ChromeColorRole : uint8_t
 {
@@ -213,6 +220,7 @@ struct TuiTokens
 struct LayoutTokens
 {
     DialogPlacement dialog = DialogPlacement::Centered; ///< Where dialogs appear.
+    MenuPresentation menu = MenuPresentation::InScene;  ///< How menus are presented; read by C++ only.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -317,7 +325,7 @@ namespace detail
         .material = { .titleBand = Material::Glass, .popover = Material::Glass },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
-        .layout = { .dialog = DialogPlacement::Sheet },
+        .layout = { .dialog = DialogPlacement::Sheet, .menu = MenuPresentation::Native },
         .colors = NativeColors,
     };
 
@@ -337,7 +345,7 @@ namespace detail
         .material = { .titleBand = Material::Mica, .popover = Material::Solid },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
-        .layout = { .dialog = DialogPlacement::Centered },
+        .layout = { .dialog = DialogPlacement::Centered, .menu = MenuPresentation::InScene },
         .colors = NativeColors,
     };
 
@@ -357,7 +365,7 @@ namespace detail
         .material = { .titleBand = Material::Solid, .popover = Material::Solid },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
-        .layout = { .dialog = DialogPlacement::Centered },
+        .layout = { .dialog = DialogPlacement::Centered, .menu = MenuPresentation::InScene },
         .colors = NativeColors,
     };
 
@@ -385,7 +393,7 @@ namespace detail
         .material = { .titleBand = Material::None, .popover = Material::None },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 0.62, .toastStyle = ToastStyle::Inverse },
-        .layout = { .dialog = DialogPlacement::Centered },
+        .layout = { .dialog = DialogPlacement::Centered, .menu = MenuPresentation::InScene },
         .colors = { schemeColor(SchemeSlot::Bar),
                     schemeColor(SchemeSlot::BarText),
                     schemeColor(SchemeSlot::Warning),

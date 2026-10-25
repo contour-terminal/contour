@@ -19,6 +19,7 @@ add_library(contour_platform STATIC
     Audio.cpp Audio.hpp
     AudioNote.hpp
     MultimediaEnvironment.hpp
+    NativeMenuPresenter.cpp NativeMenuPresenter.hpp
     BlurBehind.cpp BlurBehind.hpp
     Clipboard.cpp Clipboard.hpp
     ColorConversion.hpp
@@ -95,8 +96,10 @@ if(APPLE)
 endif()
 
 # contour_config, because GuiTheme.hpp resolves a configured theme and ColorConversion.hpp converts the
-# palette the configuration model owns.
+# palette the configuration model owns; contour_command, because NativeMenuPresenter.hpp shows its
+# resolved MenuTree.
 target_link_libraries(contour_platform PUBLIC
+    contour_command
     contour_config
     core::base
     core::log

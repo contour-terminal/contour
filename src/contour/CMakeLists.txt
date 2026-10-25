@@ -277,6 +277,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
         window/ChromeTokenObjects.hpp
+        window/MenuRouting.hpp
         window/NewDefaultsNotice.hpp
         window/UiStyleProvider.hpp
         window/WindowControlStyleProvider.hpp
@@ -790,6 +791,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/NativeWindowFrame_test.cpp
             window/WindowPositionStore_test.cpp
             window/ContextMenuModel_test.cpp
+            window/MenuRouting_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
             platform/WindowShadowController_test.cpp

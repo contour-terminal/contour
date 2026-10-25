@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
+#include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 
 #include <functional>
@@ -20,9 +21,12 @@ struct AppearanceServices
     /// Builds the platform appearance source.
     std::function<std::unique_ptr<IPlatformAppearance>(PlatformAppearanceChanged)> appearance =
         makePlatformAppearance;
+    /// Builds the native menu presenter.
+    std::function<std::unique_ptr<INativeMenuPresenter>()> menus = makeNativeMenuPresenter;
 };
 
-/// @return Factories that build the null sources on every platform; neither ever calls back.
+/// @return Factories that build the null sources and the null menu presenter on every platform; no
+///         source ever calls back.
 [[nodiscard]] inline AppearanceServices nullAppearanceServices()
 {
     return AppearanceServices {
@@ -32,6 +36,9 @@ struct AppearanceServices
         },
         .appearance = [](PlatformAppearanceChanged const&) -> std::unique_ptr<IPlatformAppearance> {
             return std::make_unique<NullPlatformAppearance>();
+        },
+        .menus = []() -> std::unique_ptr<INativeMenuPresenter> {
+            return std::make_unique<NullNativeMenuPresenter>();
         },
     };
 }

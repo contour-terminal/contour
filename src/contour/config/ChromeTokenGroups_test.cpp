@@ -79,6 +79,7 @@ struct ExpectedRow
     contour::config::Material popover = contour::config::Material::None;
     contour::config::ToastStyle toast = contour::config::ToastStyle::Floating;
     contour::config::DialogPlacement dialog = contour::config::DialogPlacement::Centered;
+    contour::config::MenuPresentation menu = contour::config::MenuPresentation::InScene;
 };
 } // namespace
 
@@ -107,7 +108,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           Material::Glass,
           Material::Glass,
           ToastStyle::Floating,
-          DialogPlacement::Sheet },
+          DialogPlacement::Sheet,
+          MenuPresentation::Native },
         { ChromeStyle::Fluent,
           join({ 40, 0, 34, 32, 28, 36, 280, 4, 10, 4 },
                native,
@@ -116,7 +118,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
-          DialogPlacement::Centered },
+          DialogPlacement::Centered,
+          MenuPresentation::InScene },
         { ChromeStyle::ContourLinux,
           join({ 46, 0, 34, 34, 28, 36, 280, 6, 10, 6 },
                native,
@@ -125,7 +128,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
-          DialogPlacement::Centered },
+          DialogPlacement::Centered,
+          MenuPresentation::InScene },
         { ChromeStyle::Terminal,
           join({ 1, 1, 1, 2, 1, 1, 32, 1, 1, 0 },
                { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
@@ -134,7 +138,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           Material::None,
           Material::None,
           ToastStyle::Inverse,
-          DialogPlacement::Centered },
+          DialogPlacement::Centered,
+          MenuPresentation::InScene },
     };
 
     for (auto const& expected: rows)
@@ -152,6 +157,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
         CHECK(row.material.popover == expected.popover);
         CHECK(row.tui.toastStyle == expected.toast);
         CHECK(row.layout.dialog == expected.dialog);
+        CHECK(row.layout.menu == expected.menu);
 
         auto const& fill = row.colors[static_cast<size_t>(ChromeColorRole::BannerFill)];
         auto const& text = row.colors[static_cast<size_t>(ChromeColorRole::BannerText)];
@@ -352,4 +358,25 @@ TEST_CASE("chromeTokens.barTextReadsOnTheBar", "[chrometokens]")
     auto dark = ColorPalette {};
     REQUIRE(defaultColorPalettes("contour-dark", dark));
     CHECK(slotOf(chromeSchemeColorsOf(dark), SchemeSlot::BarText) == dark.defaultForeground);
+}
+
+TEST_CASE("chromeTokens.menuPresentationIgnoresPreferences", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        for (auto const motion: { MotionPreference::Full, MotionPreference::Reduced })
+            for (auto const transparency:
+                 { TransparencyPreference::Allowed, TransparencyPreference::Reduced })
+                for (auto const contrast: { ContrastPreference::Standard, ContrastPreference::Increased })
+                {
+                    auto const preferences = AccessibilityPreferences { .motion = motion,
+                                                                        .transparency = transparency,
+                                                                        .contrast = contrast };
+                    CHECK(resolveChromeTokens(style, preferences).layout.menu
+                          == ChromeTokenRows[index].layout.menu);
+                }
+    }
 }

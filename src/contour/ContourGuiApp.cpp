@@ -2,6 +2,7 @@
 #include <contour/ContourGuiApp.hpp>
 #include <contour/Logging.hpp>
 #include <contour/cli/Hosting.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
 #include <contour/config/GuiStateStore.hpp>
@@ -452,7 +453,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
             onAccessibilityPreferencesChanged(preferences);
         })),
     _platformAppearance(appearanceServices.appearance(
-        [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); }))
+        [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
+    _nativeMenus(appearanceServices.menus())
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
     // services carry the app's.
@@ -1770,6 +1772,16 @@ config::AccessibilityPreferences ContourGuiApp::accessibilityPreferences() const
 platform::PlatformAppearance ContourGuiApp::platformAppearance() const
 {
     return _platformAppearance->current();
+}
+
+platform::INativeMenuPresenter& ContourGuiApp::nativeMenuPresenter() noexcept
+{
+    return *_nativeMenus;
+}
+
+config::MenuPresentation ContourGuiApp::menuPresentation() const noexcept
+{
+    return config::ChromeTokenRows[static_cast<size_t>(_chromeStyle)].layout.menu;
 }
 
 window::ChromeInputs ContourGuiApp::chromeInputs() const
