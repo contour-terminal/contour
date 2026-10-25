@@ -12,6 +12,7 @@
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
 #include <contour/platform/ExternalLauncher.hpp>
+#include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/SpeechSynthesizer.hpp>
@@ -19,6 +20,7 @@
 #include <contour/session/CommandOutputFiles.hpp>
 #include <contour/session/ExitCode.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/AppMenuBar.hpp>
 #include <contour/window/ChromeStyleHost.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/NewDefaultsNotice.hpp>
@@ -549,11 +551,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     void refreshChromeStyle();
 
     /// Brings everything derived from the configuration up to date after a reload replaced it: the
-    /// chrome tokens (refreshChromeStyle()) and the new-defaults banner. Safe before the GUI exists, as
-    /// refreshChromeStyle() is: an engine-less app (a headless test) reloads too.
+    /// chrome tokens (refreshChromeStyle()), the new-defaults banner and the menu bar. Safe before the
+    /// GUI exists, as refreshChromeStyle() is: an engine-less app (a headless test) reloads too.
     void onConfigurationReloaded();
 
   private:
+    /// @return The focused window's controller, or nullptr when no window is focused.
+    [[nodiscard]] window::WindowController* focusedController() const noexcept;
+
+    /// @return What the menu bar reads and runs through: the focused window's state, or the configuration's
+    ///         alone without one; the configured chords; and that window's active session to run on.
+    [[nodiscard]] window::AppMenuBarSources appMenuBarSources();
+
     /// @return What the chrome is built from now: the row, the resolved chrome font, both OS sources'
     ///         current values, and the scheme of the terminal palette in effect.
     [[nodiscard]] window::ChromeInputs chromeInputs() const;
@@ -983,6 +992,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<platform::INativeMenuPresenter> _nativeMenus;
     // Where the menu bar lives on this host; it decides which chords a menu may take from the terminal.
     command::MenuBarPlacement _menuBarPlacement = command::MenuBarPlacement::None;
+    // Hands the menu bar's Window and Help menus to the OS, built from the same services. Declared before
+    // the bar, which borrows it.
+    std::unique_ptr<platform::IMenuBarIntegration> _menuBarIntegration;
+    // The application's menu bar, under a global placement alone. Built with the QML engine, once a
+    // QApplication exists, and released with it.
+    std::unique_ptr<window::AppMenuBar> _appMenuBar;
 };
 
 } // namespace contour

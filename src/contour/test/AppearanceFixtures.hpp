@@ -7,6 +7,7 @@
 
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
+#include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 
@@ -93,7 +94,8 @@ class SwitchedPlatformAppearance final: public platform::IPlatformAppearance
 };
 
 /// Services whose factories attach to the given switches: each stores the callback it is handed into
-/// its switch and returns a source that reads that switch. Menus get the null presenter.
+/// its switch and returns a source that reads that switch. Menus get the null presenter, and the menu
+/// bar the null integration.
 /// @param accessibility The accessibility switch; it must outlive the services and their sources.
 /// @param appearance The appearance switch; it must outlive the services and their sources.
 /// @return The services.
@@ -114,6 +116,10 @@ class SwitchedPlatformAppearance final: public platform::IPlatformAppearance
         // The null presenter, so a fixture-built app never reaches the native factory.
         .menus = []() -> std::unique_ptr<platform::INativeMenuPresenter> {
             return std::make_unique<platform::NullNativeMenuPresenter>();
+        },
+        // The null integration, so a fixture-built app never hands a menu to AppKit.
+        .menuBar = []() -> std::unique_ptr<platform::IMenuBarIntegration> {
+            return std::make_unique<platform::NullMenuBarIntegration>();
         },
     };
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
 #include <contour/command/ContextMenu.hpp>
+#include <contour/command/MenuBarTable.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
 #include <contour/command/TitleBarContextMenu.hpp>
@@ -380,6 +381,39 @@ void WindowController::openTitleBarContextMenu()
     presentSurface(MenuSurface::TitleBar,
                    resolveMenu(command::buildTitleBarContextMenu(state)),
                    { .window = _osWindow, .position = std::nullopt });
+}
+
+command::MenuBarState WindowController::menuBarState() const
+{
+    auto state = command::menuBarStateOf(_manager.app().config());
+    state.window = command::WindowPresence::Present;
+    state.tabCount = count();
+    state.activeTab = activeTabIndex();
+    auto const* tab = activeModelTab();
+    state.paneCount = tab != nullptr ? tab->paneCount() : 0;
+    state.tabTitles = tabTitles();
+    // The WINDOW's live modes, as the title-bar menu shows them.
+    state.tabBarVisibility = _tabBarVisibility;
+    state.tabBarPosition = _tabBarPosition;
+
+    if (auto* session = activeSession())
+    {
+        auto const pane = session->contextMenuState();
+        state.selection =
+            pane.hasSelection ? command::SelectionPresence::Present : command::SelectionPresence::Absent;
+        state.speech =
+            pane.canSpeak ? command::SpeechAvailability::Available : command::SpeechAvailability::Unavailable;
+        state.inputProtection =
+            pane.inputProtected ? command::InputProtection::On : command::InputProtection::Off;
+        state.activeProfile = session->profileName();
+    }
+    return state;
+}
+
+void WindowController::runMenuBarAction(actions::Action const& action) const
+{
+    if (auto* session = activeSession())
+        session->executeAction(action);
 }
 
 void WindowController::triggerTitleBarContextMenuAction(int actionId)

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
+#include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 
@@ -23,10 +24,12 @@ struct AppearanceServices
         makePlatformAppearance;
     /// Builds the native menu presenter.
     std::function<std::unique_ptr<INativeMenuPresenter>()> menus = makeNativeMenuPresenter;
+    /// Builds the integration that hands the menu bar's Window and Help menus to the OS.
+    std::function<std::unique_ptr<IMenuBarIntegration>()> menuBar = makeMenuBarIntegration;
 };
 
-/// @return Factories that build the null sources and the null menu presenter on every platform; no
-///         source ever calls back.
+/// @return Factories that build the null sources, the null menu presenter and the null menu bar
+///         integration on every platform; no source ever calls back.
 [[nodiscard]] inline AppearanceServices nullAppearanceServices()
 {
     return AppearanceServices {
@@ -39,6 +42,9 @@ struct AppearanceServices
         },
         .menus = []() -> std::unique_ptr<INativeMenuPresenter> {
             return std::make_unique<NullNativeMenuPresenter>();
+        },
+        .menuBar = []() -> std::unique_ptr<IMenuBarIntegration> {
+            return std::make_unique<NullMenuBarIntegration>();
         },
     };
 }

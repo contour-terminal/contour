@@ -263,6 +263,7 @@ set(_main_source_files
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND _header_files
         window/CommandPaletteModel.hpp
+        window/AppMenuBar.hpp
         window/ContextMenuModel.hpp
         ContourGuiApp.hpp
         session/ExitCode.hpp
@@ -307,6 +308,7 @@ if(CONTOUR_FRONTEND_GUI)
         remote/TmuxController.hpp
     )
     list(APPEND _core_source_files
+        window/AppMenuBar.cpp
         window/CommandPaletteModel.cpp
         window/ContextMenuModel.cpp
         window/DaemonDriftModel.cpp
@@ -791,6 +793,7 @@ if(CONTOUR_FRONTEND_GUI)
             platform/LauncherProgressSink_test.cpp
             platform/NativeWindowFrame_test.cpp
             window/WindowPositionStore_test.cpp
+            window/AppMenuBar_test.cpp
             window/ContextMenuModel_test.cpp
             window/MenuRouting_test.cpp
             platform/PopupShadow_test.cpp
@@ -824,6 +827,7 @@ if(CONTOUR_FRONTEND_GUI)
         if(APPLE)
             target_sources(contour_gui_test PRIVATE
                 platform/CocoaAppearanceSources_test.mm
+                platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm
                 platform/CocoaTaskbarProgressSink_test.mm
                 platform/CocoaWindowResizeGrid_test.mm)
@@ -831,8 +835,8 @@ if(CONTOUR_FRONTEND_GUI)
                 OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
                 OBJCXX_STANDARD_REQUIRED ON)
             set_source_files_properties(
-                platform/CocoaAppearanceSources_test.mm platform/CocoaNativeMenuPresenter_test.mm
-                platform/CocoaTaskbarProgressSink_test.mm
+                platform/CocoaAppearanceSources_test.mm platform/CocoaMenuBarIntegration_test.mm
+                platform/CocoaNativeMenuPresenter_test.mm platform/CocoaTaskbarProgressSink_test.mm
                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)

@@ -15,11 +15,13 @@
 #include <QtCore/QEvent>
 #include <QtCore/QStringList>
 #include <QtGui/QGuiApplication>
+#include <QtWidgets/QApplication>
 
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <system_error>
 
@@ -107,7 +109,11 @@ int main(int argc, char* argv[])
         qputenv("QT_QPA_PLATFORM", "xcb");
 #endif
 
-    QGuiApplication const app(argc, argv);
+    // A display run stands up Qt Widgets as well, for the native menu bar (window/AppMenuBar_test.cpp);
+    // offscreen, a QGuiApplication keeps the suite free of the widget stack.
+    auto const app = contour::test::displayTestsEnabled(core::LiveEnvironment {})
+                         ? std::unique_ptr<QGuiApplication> { std::make_unique<QApplication>(argc, argv) }
+                         : std::make_unique<QGuiApplication>(argc, argv);
 
     // Pin a Qt Quick Controls style the way the app itself does (ContourGuiApp: a Fusion fallback, then
     // the row's style). The tests instantiate real Controls (SessionChrome's customized ScrollBar, the

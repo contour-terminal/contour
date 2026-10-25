@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/command/CommandCatalog.hpp>
+#include <contour/command/MenuBarTable.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
@@ -416,6 +417,20 @@ class WindowController:
     /// Out-of-range ids are ignored.
     /// @param actionId The row's `actionId`.
     Q_INVOKABLE void triggerNewTabMenuAction(int actionId);
+    // }}}
+
+    // {{{ Menu bar
+    /// The world as the application's menu bar sees it while this window is focused.
+    ///
+    /// The configuration's part (menuBarStateOf()), then this window: its tabs, the active tab's pane
+    /// count, the live tab bar modes, and the active session's selection, speech, read-only lock and
+    /// profile, as its contextMenuState() reports them.
+    /// @return The state.
+    [[nodiscard]] command::MenuBarState menuBarState() const;
+
+    /// Runs a menu bar row's @p action on the active session; does nothing when there is none.
+    /// @param action The row's action.
+    void runMenuBarAction(actions::Action const& action) const;
     // }}}
 
     /// The titles of this window's tabs, in tab order (TabTitleProvider, for TabCommandSource).

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/AccessibilityPreferenceSource.hpp>
 #include <contour/platform/AppearanceServices.hpp>
+#include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
@@ -119,5 +120,19 @@ TEST_CASE("Both service sets build a null menu presenter", "[appearance-source]"
             contour::command::MenuTree {}, contour::platform::MenuAnchor {}, [&](std::size_t) { ++picks; });
         CHECK(result == std::unexpected(MenuPresentError::Unsupported));
         CHECK(picks == 0);
+    }
+}
+
+TEST_CASE("Both service sets build a null menu bar integration", "[appearance-source]")
+{
+    auto accessibilitySwitch = contour::test::AccessibilitySwitch {};
+    auto appearanceSwitch = contour::test::AppearanceSwitch {};
+    for (auto const& services:
+         { contour::platform::nullAppearanceServices(),
+           contour::test::appearanceServicesWith(accessibilitySwitch, appearanceSwitch) })
+    {
+        auto const integration = services.menuBar();
+        REQUIRE(integration != nullptr);
+        CHECK(dynamic_cast<contour::platform::NullMenuBarIntegration const*>(integration.get()) != nullptr);
     }
 }

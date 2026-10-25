@@ -18,6 +18,7 @@ add_library(contour_platform STATIC
     AppearanceServices.hpp
     Audio.cpp Audio.hpp
     AudioNote.hpp
+    MenuBarIntegration.cpp MenuBarIntegration.hpp
     MultimediaEnvironment.hpp
     NativeMenuPresenter.cpp NativeMenuPresenter.hpp
     BlurBehind.cpp BlurBehind.hpp
@@ -86,16 +87,19 @@ if(APPLE)
         OBJCXX_STANDARD_REQUIRED ON)
     target_sources(contour_platform PRIVATE
         CocoaAccessibilityPreferenceSource.mm
+        CocoaMenuBarIntegration.mm
         CocoaNativeMenuPresenter.mm
         CocoaPlatformAppearance.mm
         CocoaTaskbarProgressSink.mm
         CocoaWindowFrame.mm
         CocoaWindowResizeGrid.mm)
     set_source_files_properties(
-        CocoaAccessibilityPreferenceSource.mm CocoaNativeMenuPresenter.mm CocoaPlatformAppearance.mm
-        CocoaTaskbarProgressSink.mm
+        CocoaAccessibilityPreferenceSource.mm CocoaMenuBarIntegration.mm CocoaNativeMenuPresenter.mm
+        CocoaPlatformAppearance.mm CocoaTaskbarProgressSink.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
+    # QMenu::toNSMenu(), for the menu bar integration alone; the interface only forward-declares QMenu.
+    target_link_libraries(contour_platform PRIVATE Qt6::Widgets)
 endif()
 
 # contour_config, because GuiTheme.hpp resolves a configured theme and ColorConversion.hpp converts the

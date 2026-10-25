@@ -455,7 +455,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _platformAppearance(appearanceServices.appearance(
         [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
     _nativeMenus(appearanceServices.menus()),
-    _menuBarPlacement(command::menuBarPlacementFor(config::detectHostPlatform(env)))
+    _menuBarPlacement(command::menuBarPlacementFor(config::detectHostPlatform(env))),
+    _menuBarIntegration(appearanceServices.menuBar())
 {
     // One filesystem for the paths a session shows, opens and detects (Terminal's contract): injected link
     // services carry the app's.
@@ -1810,6 +1811,30 @@ void ContourGuiApp::refreshChromeStyle()
         _chromeStyleHost->update(chromeInputs());
 }
 
+window::WindowController* ContourGuiApp::focusedController() const noexcept
+{
+    auto const window = _sessionManager.focusedWindow();
+    return window ? _sessionManager.controllerFor(*window) : nullptr;
+}
+
+window::AppMenuBarSources ContourGuiApp::appMenuBarSources()
+{
+    return window::AppMenuBarSources {
+        .state =
+            [this] {
+                if (auto const* const controller = focusedController())
+                    return controller->menuBarState();
+                return command::menuBarStateOf(_config);
+            },
+        .chords = [this] { return command::chordIndex(_config); },
+        .run =
+            [this](actions::Action const& action) {
+                if (auto* const controller = focusedController())
+                    controller->runMenuBarAction(action);
+            },
+    };
+}
+
 void ContourGuiApp::onConfigurationReloaded()
 {
     refreshChromeStyle();
@@ -1817,6 +1842,10 @@ void ContourGuiApp::onConfigurationReloaded()
     // app never creates.
     if (_newDefaultsNotice)
         _newDefaultsNotice->refresh();
+    // Guarded likewise: the bar is built with the engine, under a global placement alone. Its rows carry
+    // the profiles, hosts, layouts and chords the reload may have changed.
+    if (_appMenuBar)
+        _appMenuBar->rebuild();
 }
 
 void ContourGuiApp::onAccessibilityPreferencesChanged(config::AccessibilityPreferences preferences)
@@ -2160,7 +2189,9 @@ int ContourGuiApp::terminalGuiAction()
     // failed-attach one included, which leaves before the event loop ever runs. Declared right after
     // `app`, so it runs before `app` is destroyed.
     auto const releaseQtObjects = core::Finally { [this] {
-        // The QML engine first: its context properties point at the style providers, and the windows
+        // The menu bar first of all: its sources read the windows the engine owns, and it is Qt Widgets.
+        _appMenuBar.reset();
+        // The QML engine next: its context properties point at the style providers, and the windows
         // the helpers below served are gone with it.
         _qmlEngine.reset();
         // The GPU-selection helpers hold Qt objects (a timer, a D-Bus notifier, a Vulkan instance).
@@ -2369,6 +2400,11 @@ int ContourGuiApp::terminalGuiAction()
         // QML primitives without banding, and the engine takes ownership of this.
         _qmlEngine->addImageProvider(QStringLiteral("popupshadow"), new window::PopupShadowImageProvider());
     }
+
+    // The application's menu bar, where the host has one apart from its windows. It reads the focused
+    // window, or the configuration alone without one, and runs its rows on that window's active session.
+    if (_menuBarPlacement == command::MenuBarPlacement::Global)
+        _appMenuBar = make_unique<window::AppMenuBar>(appMenuBarSources(), *_menuBarIntegration);
     _startupTimeline.mark(vthost::latency::StartupMark::QmlEngineReady);
 
     // Attach mode's connect has run beside everything above; the first window needs it done, and decides

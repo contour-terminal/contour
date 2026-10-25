@@ -346,3 +346,32 @@ TEST_CASE("the pane and title-bar menus still pop in the scene", "[contour][wind
 
     CHECK(requested.count() == 1);
 }
+
+TEST_CASE("the menu bar sees this window's tabs", "[contour][windowmenus][menubar]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+    std::ignore = createTabs(app.manager(), *window, 3);
+
+    auto const state = window->menuBarState();
+
+    CHECK(state.window == contour::command::WindowPresence::Present);
+    CHECK(state.tabCount == 3);
+    CHECK(state.activeTab == window->activeTabIndex());
+    CHECK(state.tabTitles == window->tabTitles());
+    auto const* tab = app.manager().model().window(window->windowId())->activeTab();
+    REQUIRE(tab != nullptr);
+    CHECK(state.paneCount == tab->paneCount());
+}
+
+TEST_CASE("a menu bar action without a session does nothing", "[contour][windowmenus][menubar]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+    std::ignore = createTabs(app.manager(), *window, 2);
+    REQUIRE(window->activeSession() == nullptr);
+
+    window->runMenuBarAction(actions::Action { actions::CloseTab {} });
+
+    CHECK(window->count() == 2);
+}
