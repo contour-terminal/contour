@@ -7,6 +7,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -23,6 +24,31 @@ enum class Material : uint8_t
     Glass,    //!< Vibrancy / blur-behind.
     Mica,     //!< Wallpaper-tinted backdrop.
     Solid,    //!< An opaque fill.
+};
+
+/// Number of @c Material enumerators, derived from the last one.
+inline constexpr size_t MaterialCount = static_cast<size_t>(Material::Solid) + 1;
+
+/// What the operating system draws behind the title band.
+enum class BandBackdrop : uint8_t
+{
+    Client = 0,     //!< Nothing: the band is the client area's own paint.
+    NativeMaterial, //!< The platform's title-bar material (macOS vibrancy) shows through the band.
+};
+
+/// What the title band paints.
+enum class BandFill : uint8_t
+{
+    Palette = 0, //!< Today's palette window colour.
+    Clear,       //!< Nothing, so the backdrop shows as it is.
+    Tint,        //!< The terminal background, tinted (see window::bandTintOf).
+};
+
+/// What the native title bar is grown with.
+enum class TitleBarGrowth : uint8_t
+{
+    None = 0,       //!< The bare title bar.
+    CompactToolbar, //!< An empty compact toolbar, which makes the title bar as tall as the band (40 pt).
 };
 
 /// How a toast is painted.
@@ -382,6 +408,52 @@ struct ChromeTokenRow
 
 /// The WCAG AA ratio chrome text must reach against what it sits on.
 inline constexpr double MinimumTextContrast = 4.5;
+
+namespace detail
+{
+    /// A colour's HSL hue, saturation and lightness, each normalized to [0, 1].
+    struct Hsl
+    {
+        double hue = 0.0;        ///< Hue.
+        double saturation = 0.0; ///< Saturation.
+        double lightness = 0.0;  ///< Lightness.
+    };
+
+    /// @param color An sRGB colour.
+    /// @return Its HSL coordinates, the inverse of vtbackend::hslToRgb.
+    [[nodiscard]] constexpr Hsl hslOf(vtbackend::RGBColor color) noexcept
+    {
+        auto const r = color.red / 255.0;
+        auto const g = color.green / 255.0;
+        auto const b = color.blue / 255.0;
+        auto const high = std::max({ r, g, b });
+        auto const low = std::min({ r, g, b });
+        auto const lightness = (high + low) / 2;
+        if (high == low)
+            return Hsl { .hue = 0.0, .saturation = 0.0, .lightness = lightness };
+        auto const delta = high - low;
+        auto const saturation = lightness > 0.5 ? delta / (2 - high - low) : delta / (high + low);
+        auto const sector = [&] {
+            if (high == r)
+                return ((g - b) / delta) + (g < b ? 6 : 0);
+            if (high == g)
+                return ((b - r) / delta) + 2;
+            return ((r - g) / delta) + 4;
+        }();
+        return Hsl { .hue = sector / 6, .saturation = saturation, .lightness = lightness };
+    }
+} // namespace detail
+
+/// @p color with its HSL lightness moved by @p points (out of 100) and clamped, hue and saturation kept.
+/// @param color  The colour to move.
+/// @param points The lightness points to move it by; negative darkens.
+/// @return The moved colour, converted back by vtbackend::hslToRgb (which truncates each channel).
+[[nodiscard]] constexpr vtbackend::RGBColor shiftLightness(vtbackend::RGBColor color, int points) noexcept
+{
+    auto const hsl = detail::hslOf(color);
+    return vtbackend::hslToRgb(
+        hsl.hue, hsl.saturation, std::clamp(hsl.lightness + (points / 100.0), 0.0, 1.0));
+}
 
 /// Duration every transition collapses to under @c MotionPreference::Reduced.
 inline constexpr int ReducedMotionCrossFadeMs = 100;

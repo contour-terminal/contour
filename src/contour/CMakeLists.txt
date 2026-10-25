@@ -1202,6 +1202,8 @@ if(CONTOUR_TESTING)
         window/TabBadge_test.cpp
         window/TabWellLayout_test.cpp
         window/TitleBandLayout_test.cpp
+        window/TitleBandSurface_test.cpp
+        window/TitleBandGeometry_test.cpp
     )
     # vtbackend, deliberately: SearchStatus is a pure decision over vtbackend's SearchMatchTally,
     # ScreenshotFile one over its Screen, and FinishNotification one over its CommandBlockSummary; testing
