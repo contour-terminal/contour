@@ -167,11 +167,29 @@ namespace
                      (char const*) file);
     }
 
+    /// Initializes fontconfig and returns a new reference to its process-wide configuration, logging
+    /// how long that took.
+    ///
+    /// The configuration is shared rather than built privately, so fonts registered through
+    /// registerBundledFonts() (which adds them to that configuration) are visible to the locator.
+    FcConfig* referenceSharedConfig()
+    {
+        auto const start = std::chrono::steady_clock::now();
+        FcInit();
+        auto* const config = FcConfigReference(nullptr);
+
+        auto const elapsed = std::chrono::steady_clock::now() - start;
+        auto const ms =
+            static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
+            / 1000.0;
+        locatorLog()("FcInit: {:.1f} ms", ms);
+        return config;
+    }
+
 } // namespace
 
 struct FontconfigLocator::PrivateTag
 {
-    // currently empty, maybe later something (such as caching)?
     FcConfig* ftConfig = nullptr;
 
     /// Union of every installed font's charset, built once on first use.
@@ -230,20 +248,7 @@ struct FontconfigLocator::PrivateTag
         return installedCoverage.get();
     }
 
-    PrivateTag()
-    {
-        auto const start = std::chrono::steady_clock::now();
-        // Share the process-wide configuration rather than building a private one, so fonts registered
-        // through registerBundledFonts() (which adds them to that configuration) are visible here.
-        FcInit();
-        ftConfig = FcConfigReference(nullptr);
-
-        auto const elapsed = std::chrono::steady_clock::now() - start;
-        auto const ms =
-            static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count())
-            / 1000.0;
-        locatorLog()("FcInit: {:.1f} ms", ms);
-    }
+    PrivateTag(): ftConfig { referenceSharedConfig() } {}
 
     ~PrivateTag()
     {
