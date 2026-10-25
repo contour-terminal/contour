@@ -29,7 +29,7 @@ https://claude.ai/artifact/12ASSTRD5ua5SwarsMJXwm)
 
 ## Status board and handoff
 
-This run is tracked on a status board, <https://claude.ai/artifact/YZUVcC1vdaWaLGJLsdS2AX>, published from `STATUS.md` at the root of the branch. The plans index says how to keep it current.
+This run is tracked on a status board, <https://claude.ai/artifact/YZUVcC1vdaWaLGJLsdS2AX>, kept current with `/status-board` on the machine doing the work. The plans index says how to keep it current.
 - **Find it** by running `/status-board` in this worktree. The skill reads the remembered URL from
   the worktree's git dir (`status_page.py --url`).
 - **Every agent that continues this plan must update the board, using `/status-board update`.** Do

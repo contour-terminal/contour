@@ -41,7 +41,7 @@ components*, *Terminal (TUI) style*, *Daemon & remote hosts*). Plans index:
 
 ## Status board and handoff (every step)
 
-This run is tracked on a status board, <https://claude.ai/artifact/YZUVcC1vdaWaLGJLsdS2AX>, published from `STATUS.md` at the root of the branch. The plans index says how to keep it current.
+This run is tracked on a status board, <https://claude.ai/artifact/YZUVcC1vdaWaLGJLsdS2AX>, kept current with `/status-board` on the machine doing the work. The plans index says how to keep it current.
 - **Find it** with `/status-board` in this worktree. The skill reads the remembered URL from the
   git dir (`status_page.py --url`).
 - **Every agent that continues this work updates the board, using `/status-board update`.** Do it

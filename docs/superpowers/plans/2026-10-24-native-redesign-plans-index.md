@@ -20,9 +20,9 @@ coherent.
 
 This run is tracked on a status board: <https://claude.ai/artifact/YZUVcC1vdaWaLGJLsdS2AX>. The
 owner asked for the link to live here so that any agent continuing the work can find the board and
-keep it current. The page is published from `STATUS.md` at the root of the repository, which is committed with the branch.
-- **Keep it up to date.** Edit `STATUS.md`, then republish the board's page to the link above
-  with the Artifact tool (`url` set to that link). The board belongs to the owner's account, so a
+keep it current. The page is kept with `/status-board` (the `contour-workflows` plugin) on the machine doing the work; its source is local to that working tree and never committed.
+- **Keep it up to date** with `/status-board update`, which republishes to the link above
+  (`/status-board` remembers the link per working tree). The board belongs to the owner's account, so a
   session signed in as the owner can read and publish it; the design canvas, the owner's copy of
   Yaraslau's, is in the same account.
 - **Every agent that continues this work updates the board.** Do it
@@ -46,7 +46,7 @@ Read these in order, then pick up the first open task:
 3. The plan of the step in progress, and its task's brief.
 
 Last handover: 2026-10-25, 13:54. The branch is rebased onto master `974feaf1` (every ledger hash
-before that is pre-rebase; `STATUS.md` carries the rebased ones). Step 1b Tasks 1–11 are complete,
+before that is pre-rebase; the board carries the rebased ones). Step 1b Tasks 1–11 are complete,
 Task 11's test round included (`cbcbb084`). Task 12 (the menu bar) is next, then Task 13 (finish),
 then write the Step 4a plan. Behaviour note for Task 12: on macOS, ⌘H and ⌥⌘H now reach the
 terminal instead of hiding the app.
