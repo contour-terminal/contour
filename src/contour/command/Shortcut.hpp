@@ -145,6 +145,35 @@ constexpr inline auto ShortcutKeyGlyphTable = std::array {
                                        ShortcutInput input,
                                        ShortcutStyle style);
 
+/// A key chord: the modifiers held and the key or character it ends on.
+struct ShortcutChord
+{
+    vtbackend::Modifiers modifiers {}; ///< The modifiers held.
+    ShortcutInput input {};            ///< The key or character the chord ends on.
+    [[nodiscard]] bool operator==(ShortcutChord const&) const = default;
+};
+
+/// Command id (see commandId()) -> the chord that runs it.
+using ChordIndex = std::unordered_map<std::string, ShortcutChord>;
+
+/// Renders @p chord the way shortcutText(modifiers, input, style) does.
+/// @param chord The chord.
+/// @param style How to spell it.
+/// @return The rendered shortcut.
+[[nodiscard]] std::string shortcutText(ShortcutChord const& chord, ShortcutStyle style);
+
+/// Indexes every single-action key/char binding in @p mappings by the id of the command it runs; the
+/// first binding of a command wins. This is the primitive shortcutIndex() renders.
+/// @param mappings The configured input mappings.
+/// @return Command id -> chord.
+[[nodiscard]] ChordIndex chordIndex(config::InputMappings const& mappings);
+
+/// @copydoc chordIndex(config::InputMappings const&)
+///
+/// Then the enabled built-in fallback rows @p config leaves unbound, as shortcutIndex(config, style) does.
+/// @param config The configuration.
+[[nodiscard]] ChordIndex chordIndex(config::Config const& config);
+
 /// Indexes every key/char binding in @p mappings by the id of the command it runs, so a view can ask
 /// "what is the shortcut for this command?" in one lookup rather than re-scanning the bindings.
 ///

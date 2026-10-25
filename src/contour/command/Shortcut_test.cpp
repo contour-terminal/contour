@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <utility>
 
 using namespace contour;
@@ -222,4 +223,26 @@ TEST_CASE("Shortcut.indexAndLinkGestureFollowStyle", "[command]")
     CHECK(describeLinkGesture(config::Config {}, ShortcutStyle::MacGlyphs)
           == "⌘Click (⇧⌘Click inside applications that use the mouse)");
 #endif
+}
+
+TEST_CASE("shortcutIndex is the chord index rendered", "[contour][palette]")
+{
+    auto const configs = std::array {
+        config::Config {},
+        config::Config { .defaultsEdition = config::DefaultsEdition::Classic },
+    };
+    for (auto const& cfg: configs)
+    {
+        auto const chords = chordIndex(cfg);
+        for (auto const style: { ShortcutStyle::Text, ShortcutStyle::MacGlyphs })
+        {
+            auto const rendered = shortcutIndex(cfg, style);
+            REQUIRE(rendered.size() == chords.size());
+            for (auto const& [id, text]: rendered)
+            {
+                REQUIRE(chords.contains(id));
+                CHECK(text == shortcutText(chords.at(id), style));
+            }
+        }
+    }
 }

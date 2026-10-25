@@ -41,9 +41,7 @@ namespace
     /// restating it — the only thing that differs between them is which member of ShortcutInput the
     /// binding's `input` lands in, and the variant absorbs that.
     template <typename Input>
-    void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding,
-                      ShortcutStyle style,
-                      std::unordered_map<std::string, std::string>& target)
+    void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding, ChordIndex& target)
     {
         // A chord that fires several actions is not "the" shortcut for any one of them: pressing it
         // would do all of the others too, so advertising it next to a single command would be a lie.
@@ -52,17 +50,17 @@ namespace
 
         // First binding wins, so a command bound twice renders under its first (config-order)
         // shortcut rather than flip-flopping between them.
-        target.try_emplace(commandId(binding.binding.front()),
-                           shortcutText(binding.modifiers, ShortcutInput { binding.input }, style));
+        target.try_emplace(
+            commandId(binding.binding.front()),
+            ShortcutChord { .modifiers = binding.modifiers, .input = ShortcutInput { binding.input } });
     }
 
     template <typename Input>
     void indexBindings(std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& bindings,
-                       ShortcutStyle style,
-                       std::unordered_map<std::string, std::string>& target)
+                       ChordIndex& target)
     {
         for (auto const& binding: bindings)
-            indexBinding(binding, style, target);
+            indexBinding(binding, target);
     }
 
     /// Indexes the enabled built-in rows of one table whose chord @p userBindings leaves unbound.
@@ -70,8 +68,7 @@ namespace
     void indexFallbacks(std::vector<config::FallbackMapping<Input>> const& rows,
                         std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& userBindings,
                         config::Config const& config,
-                        ShortcutStyle style,
-                        std::unordered_map<std::string, std::string>& target)
+                        ChordIndex& target)
     {
         for (auto const& row: rows)
         {
@@ -79,7 +76,7 @@ namespace
                 return binding.modifiers == row.mapping.modifiers && binding.input == row.mapping.input;
             });
             if (row.enabled(config) && !shadowed)
-                indexBinding(row.mapping, style, target);
+                indexBinding(row.mapping, target);
         }
     }
 } // namespace
@@ -108,26 +105,53 @@ std::string shortcutText(vtbackend::Modifiers modifiers, ShortcutInput input, Sh
     return modifiersText(modifiers, style) + inputText(input, style);
 }
 
-std::unordered_map<std::string, std::string> shortcutIndex(config::InputMappings const& mappings,
-                                                           ShortcutStyle style)
+std::string shortcutText(ShortcutChord const& chord, ShortcutStyle style)
 {
-    auto result = std::unordered_map<std::string, std::string> {};
+    return shortcutText(chord.modifiers, chord.input, style);
+}
+
+ChordIndex chordIndex(config::InputMappings const& mappings)
+{
+    auto result = ChordIndex {};
 
     // Mouse bindings are deliberately not indexed: the palette's shortcut column teaches the user what
     // to TYPE, and "Ctrl+Left-click" is not that.
-    indexBindings(mappings.keyMappings, style, result);
-    indexBindings(mappings.charMappings, style, result);
+    indexBindings(mappings.keyMappings, result);
+    indexBindings(mappings.charMappings, result);
 
     return result;
 }
 
-std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config, ShortcutStyle style)
+ChordIndex chordIndex(config::Config const& config)
 {
     auto const& mappings = config.inputMappings.value();
-    auto result = shortcutIndex(mappings, style);
-    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, style, result);
-    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, style, result);
+    auto result = chordIndex(mappings);
+    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, result);
+    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, result);
     return result;
+}
+
+namespace
+{
+    [[nodiscard]] std::unordered_map<std::string, std::string> renderChords(ChordIndex const& chords,
+                                                                            ShortcutStyle style)
+    {
+        auto result = std::unordered_map<std::string, std::string> {};
+        for (auto const& [id, chord]: chords)
+            result.emplace(id, shortcutText(chord, style));
+        return result;
+    }
+} // namespace
+
+std::unordered_map<std::string, std::string> shortcutIndex(config::InputMappings const& mappings,
+                                                           ShortcutStyle style)
+{
+    return renderChords(chordIndex(mappings), style);
+}
+
+std::unordered_map<std::string, std::string> shortcutIndex(config::Config const& config, ShortcutStyle style)
+{
+    return renderChords(chordIndex(config), style);
 }
 
 std::string describeLinkGesture(config::Config const& config, ShortcutStyle style)
