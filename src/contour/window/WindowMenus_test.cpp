@@ -48,6 +48,30 @@ using contour::window::WindowController;
     return ids;
 }
 
+/// Tabs that each have a real (mock-PTY) session: their ids and session ids in row order.
+struct SessionTabs
+{
+    std::vector<vtworkspace::TabId> tabs {};
+    std::vector<vtworkspace::SessionId> sessions {};
+};
+
+[[nodiscard]] SessionTabs createSessionTabs(contour::session::TerminalSessionManager& manager,
+                                            WindowController& controller,
+                                            int n)
+{
+    auto result = SessionTabs {};
+    for (auto const _: std::views::iota(0, n))
+    {
+        controller.createNewTab();
+        auto const* tab = manager.model().window(controller.windowId())->activeTab();
+        REQUIRE(tab != nullptr);
+        REQUIRE(controller.activeSession() != nullptr);
+        result.tabs.push_back(tab->id());
+        result.sessions.push_back(controller.activeSession()->modelSessionId());
+    }
+    return result;
+}
+
 [[nodiscard]] QColor colorAt(WindowController const& controller, int row)
 {
     return controller.data(controller.index(row), static_cast<int>(WindowController::Roles::ColorRole))
@@ -164,4 +188,61 @@ TEST_CASE("showAbout asks the window to show it", "[contour][windowmenus][tabact
     window->showAbout();
 
     CHECK(spy.count() == 1);
+}
+
+TEST_CASE("CloseOtherTabs ends the other tabs' sessions and keeps the anchor's",
+          "[contour][windowmenus][tabaction]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    ScopedController const window { app.manager() };
+    auto const made = createSessionTabs(app.manager(), *window, 3);
+    REQUIRE(window->count() == 3);
+
+    window->runTabAction(1, actions::Action { actions::CloseOtherTabs {} });
+
+    QTRY_COMPARE_WITH_TIMEOUT(window->count(), 1, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[0]) == nullptr, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[2]) == nullptr, 5000);
+    CHECK(app.manager().sessionForId(made.sessions[1]) != nullptr);
+    CHECK(app.manager().model().findTab(made.tabs[1]) != nullptr);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("CloseOtherTabs keeps the anchor when it is not the active tab",
+          "[contour][windowmenus][tabaction]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    ScopedController const window { app.manager() };
+    auto const made = createSessionTabs(app.manager(), *window, 3);
+
+    // Make the active tab one that is NOT the anchor, whatever order the tabs were created in.
+    window->activateTab(2);
+    REQUIRE(app.manager().model().window(window.id)->activeTab()->id() == made.tabs[2]);
+
+    window->runTabAction(0, actions::Action { actions::CloseOtherTabs {} });
+
+    QTRY_COMPARE_WITH_TIMEOUT(window->count(), 1, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[2]) == nullptr, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(app.manager().sessionForId(made.sessions[1]) == nullptr, 5000);
+    CHECK(app.manager().sessionForId(made.sessions[0]) != nullptr);
+    CHECK(app.manager().model().findTab(made.tabs[0]) != nullptr);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("CloseTabsToRight on the last tab closes nothing", "[contour][windowmenus][tabaction]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    ScopedController const window { app.manager() };
+    auto const made = createSessionTabs(app.manager(), *window, 3);
+
+    window->runTabAction(2, actions::Action { actions::CloseTabsToRight {} });
+    QTest::qWait(200);
+
+    CHECK(window->count() == 3);
+    for (auto const session: made.sessions)
+        CHECK(app.manager().sessionForId(session) != nullptr);
+
+    contour::test::closeAllTabs(*window);
 }
