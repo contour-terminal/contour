@@ -107,6 +107,8 @@
     <release version="0.9.0" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Changes Settings to open in a window of its own, one per app, from Settings… in the Contour menu (⌘, on macOS, Ctrl+Shift+, elsewhere), the command palette or the <code>OpenConfiguration</code> binding. It opens with or without a terminal window, is brought forward when asked for again, and keeps its place and unsaved edits when closed</li>
+          <li>Removes the Settings tab from the tab strip and the Settings entry from the new-tab menu</li>
           <li>Adds a native macOS menu bar of six menus: Contour, Shell, Edit, View, Window and Help. The Window menu lists the open windows, and Help carries the system's search field</li>
           <li>Adds native context menus on macOS: with the default <code>ui_style: native</code>, the terminal, title bar, tab and new-tab menus open as system menus; <code>ui_style: terminal</code> keeps the in-window menus</li>
           <li>Adds a row of color swatches and Move Tab to New Window to the tab's context menu</li>
