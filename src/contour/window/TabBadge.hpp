@@ -115,6 +115,17 @@ inline constexpr auto TabBadgeRules = std::array {
     return { rule->kind, std::nullopt };
 }
 
+/// Whether the program status is what put a badge of @p kind on the tab, so that its text is the tooltip.
+/// @param kind          The badge the tab shows (resolveTabBadge()).
+/// @param programStatus The tab's OSC 7501 badge kind.
+/// @return True when @p kind's rule is selected by @p programStatus.
+[[nodiscard]] constexpr bool isProgramStatusBadge(TabBadgeKind kind, BadgeKind programStatus) noexcept
+{
+    auto const rule = std::ranges::find(TabBadgeRules, kind, &TabBadgeRule::kind);
+    return rule != TabBadgeRules.end() && programStatus != BadgeKind::None
+           && rule->programStatus == programStatus;
+}
+
 /// How the Pill shape draws a badge kind. The Flat shape always draws the glyph.
 enum class BadgeMark : uint8_t
 {

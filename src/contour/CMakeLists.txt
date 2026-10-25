@@ -1199,6 +1199,7 @@ if(CONTOUR_TESTING)
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp
         window/HostChipState_test.cpp
+        window/TabAttention_test.cpp
         window/TabBadge_test.cpp
         window/TabWellLayout_test.cpp
         window/TitleBandLayout_test.cpp

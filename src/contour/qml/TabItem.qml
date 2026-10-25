@@ -31,32 +31,24 @@ Item {
     // painted), 1 normal, 2 error, 3 indeterminate, 4 paused.
     required property int tabProgressState
     required property int tabProgressPercentage
-    // The tab's OSC 7501 program-status badge, pooled from all its panes (WindowController's
-    // ProgramStatusRole): contour::window::BadgeKind's value -- 0 none, 1 working, 2 blocked, 3 done,
-    // 4 error -- its disarmed tooltip text, and a working badge's progress (-1 for none). Not required, so
-    // a TabItem built on its own shows no badge.
-    property int tabProgramStatus: 0
-    property string tabProgramStatusText: ""
-    property int tabProgramStatusProgress: -1
+    // The tab's badge slot (WindowController's BadgeRole): contour::window::TabBadgeKind's value, the
+    // winner among its panes' OSC 7501 records, unseen finished commands and unseen output; the program's
+    // disarmed tooltip text when its status won; and a working badge's progress (-1 for none). Not
+    // required, so a TabItem built on its own shows no badge.
+    property int tabBadge: 0
+    property string tabBadgeText: ""
+    property int tabBadgeProgress: -1
 
-    // How each badge kind is drawn: its glyph, and the progress state whose colour it borrows, so it reads
-    // in the same palette as the progress bar (UiStyleProvider::progressColor) -- running green, waiting
-    // amber, failed red. Indexed by BadgeKind; a kind past the end draws nothing.
-    readonly property var programBadgeLooks: [
-        { glyph: "", colorState: 0 },        // None
-        { glyph: "\u25D0", colorState: 1 },  // Working: a spinner
-        { glyph: "!", colorState: 4 },       // Blocked
-        { glyph: "\u2713", colorState: 1 },  // Done
-        { glyph: "\u2715", colorState: 2 },  // Error
-    ]
+    // How the kind is drawn -- { glyph, mark, ink, name } -- from the style's look table
+    // (UiStyleProvider::badgeLook); empty for a kind it does not know, which draws nothing. Reads
+    // paletteRevision so the ink re-evaluates on a light/dark flip or an accent change.
+    readonly property var badgeLook: chromeStyle.paletteRevision < 0 ? ({}) : chromeStyle.badgeLook(root.tabBadge)
     // Whether the window holding the tab is on screen; what the badge's spinner runs on.
     readonly property bool windowShown: Window.visibility !== Window.Hidden
                                         && Window.visibility !== Window.Minimized
-    readonly property bool hasProgramBadge: root.tabProgramStatus > 0
-                                            && root.tabProgramStatus < root.programBadgeLooks.length
-    readonly property var programBadgeLook: root.hasProgramBadge
-                                            ? root.programBadgeLooks[root.tabProgramStatus]
-                                            : root.programBadgeLooks[0]
+    // Whether the chrome animates at all: under Reduce Motion nothing spins or pulses.
+    readonly property bool fullMotion: chromeStyle.motion.style === chromeStyle.motion.full
+    readonly property bool hasBadge: root.tabBadge > 0 && root.badgeLook.glyph !== undefined
 
     // The tab's natural size, in whatever unit the chrome style counts in: logical pixels natively,
     // whole character cells in the terminal style. `widthQuantum` is what expresses that difference
@@ -73,7 +65,7 @@ Item {
                                          + chromeStyle.trailingPadding
                                          + separator.width + chromeStyle.tabSlack
                                          + zoomBadge.width + zoomBadge.anchors.rightMargin
-                                         + programBadge.width + programBadge.anchors.rightMargin
+                                         + badgeSlot.width + badgeSlot.anchors.rightMargin
     implicitWidth: chromeStyle.widthQuantum
                    * Math.round(Math.min(chromeStyle.maxTabWidth,
                                          Math.max(chromeStyle.minTabWidth, root.naturalWidth))
@@ -199,14 +191,14 @@ Item {
             color: chromeStyle.progressColor(root.tabProgressState)
 
             SequentialAnimation on opacity {
-                running: root.tabProgressState === 3
+                running: root.tabProgressState === 3 && root.fullMotion
                 loops: Animation.Infinite
                 // Restores full opacity when the state leaves Indeterminate mid-cycle; without it the
                 // bar would keep whatever opacity the animation was stopped at. Addressed by id: an
                 // animation attached with `on opacity` is not a visual child, so `parent` is null here.
                 onRunningChanged: if (!running) progressFill.opacity = 1.0
-                NumberAnimation { from: 1.0; to: 0.35; duration: 700; easing.type: Easing.InOutQuad }
-                NumberAnimation { from: 0.35; to: 1.0; duration: 700; easing.type: Easing.InOutQuad }
+                NumberAnimation { from: 1.0; to: 0.35; duration: chromeStyle.motion.pulse; easing.type: Easing.InOutQuad }
+                NumberAnimation { from: 0.35; to: 1.0; duration: chromeStyle.motion.pulse; easing.type: Easing.InOutQuad }
             }
         }
     }
@@ -234,8 +226,8 @@ Item {
     function buildHoverTooltip() {
         var lines = []
         // What the badge says, first: it is the reason to hover over a badged tab.
-        if (root.hasProgramBadge && root.tabProgramStatusText !== "")
-            lines.push(root.tabProgramStatusText)
+        if (root.hasBadge && root.tabBadgeText !== "")
+            lines.push(root.tabBadgeText)
         // A title the tab already shows in full adds nothing; repeating it is just noise.
         if (label.truncated)
             lines.push(root.tabTitle)
@@ -338,7 +330,7 @@ Item {
         objectName: "tabLabel"   // findChild() handle for the GUI test
         anchors.left: parent.left
         anchors.leftMargin: chromeStyle.labelPadding
-        anchors.right: programBadge.left
+        anchors.right: badgeSlot.left
         anchors.rightMargin: chromeStyle.labelGap
         anchors.verticalCenter: parent.verticalCenter
         // The chrome font: the platform UI font natively, the terminal's monospace font in the
@@ -350,50 +342,50 @@ Item {
         visible: !renameLoader.active
     }
 
-    // Program-status badge (OSC 7501), between the label and the zoom badge, collapsing to nothing the way
-    // the zoom badge does when there is none. Text drawn as text, never markup: it is what a program sent.
+    // The badge slot, between the label and the zoom badge, collapsing to nothing the way the zoom badge
+    // does when there is none. Its text is drawn as text, never markup: the tooltip is what a program sent.
     Item {
-        id: programBadge
-        objectName: "programStatusBadge"   // findChild() handle for the GUI test
+        id: badgeSlot
+        objectName: "tabBadgeSlot"   // findChild() handle for the GUI test
         anchors.right: zoomBadge.left
-        anchors.rightMargin: root.hasProgramBadge ? chromeStyle.labelGap : 0
+        anchors.rightMargin: root.hasBadge ? chromeStyle.labelGap : 0
         anchors.verticalCenter: parent.verticalCenter
-        width: root.hasProgramBadge ? chromeStyle.badgeHeight : 0
+        width: root.hasBadge ? chromeStyle.badgeHeight : 0
         height: chromeStyle.badgeHeight
-        visible: root.hasProgramBadge
+        visible: root.hasBadge
 
         // Spins a working badge while the program gave no progress. Its own item, so that the glyph's
         // rotation stays a binding the animation never writes over.
         Item {
-            id: programBadgeSpinner
+            id: badgeSpinner
             anchors.fill: parent
             RotationAnimation on rotation {
-                objectName: "programStatusSpinner"   // findChild() handle for the GUI test
-                // Only while someone can see it: a program may work for hours in a minimized window.
-                running: programBadgeGlyph.spinning && root.windowShown
+                objectName: "tabBadgeSpinner"   // findChild() handle for the GUI test
+                // Only while someone can see it -- a program may work for hours in a minimized window --
+                // and only where the chrome animates at all.
+                running: badgeGlyph.spinning && root.windowShown && root.fullMotion
                 loops: Animation.Infinite
                 from: 0
                 to: 360
-                duration: 1200
+                duration: chromeStyle.motion.spinner
                 // Back upright when it stops, as the progress bar restores its opacity.
-                onRunningChanged: if (!running) programBadgeSpinner.rotation = 0
+                onRunningChanged: if (!running) badgeSpinner.rotation = 0
             }
 
             Text {
-                id: programBadgeGlyph
-                objectName: "programStatusGlyph"
+                id: badgeGlyph
+                objectName: "tabBadgeGlyph"
                 anchors.centerIn: parent
                 textFormat: Text.PlainText
-                text: root.programBadgeLook.glyph
+                text: root.hasBadge ? root.badgeLook.glyph : ""
                 font: chromeStyle.badgeFont
-                color: chromeStyle.progressColor(root.programBadgeLook.colorState)
+                color: root.hasBadge ? root.badgeLook.ink : "transparent"
 
-                // With a progress, a working badge stands still at the angle its percentage names, so it
-                // reads as a dial.
-                readonly property bool spinning: root.tabProgramStatus === 1 && root.tabProgramStatusProgress < 0
-                rotation: root.tabProgramStatus === 1 && root.tabProgramStatusProgress >= 0
-                          ? 360 * root.tabProgramStatusProgress / 100.0
-                          : 0
+                // The ring is Working's mark: with a progress it stands still at the angle its percentage
+                // names, so it reads as a dial.
+                readonly property bool working: root.hasBadge && root.badgeLook.mark === "ring"
+                readonly property bool spinning: working && root.tabBadgeProgress < 0
+                rotation: working && root.tabBadgeProgress >= 0 ? 360 * root.tabBadgeProgress / 100.0 : 0
             }
         }
     }
@@ -432,7 +424,7 @@ Item {
         active: false
         anchors.left: parent.left
         anchors.leftMargin: chromeStyle.labelPadding
-        anchors.right: programBadge.left
+        anchors.right: badgeSlot.left
         anchors.rightMargin: chromeStyle.labelGap
         anchors.verticalCenter: parent.verticalCenter
         function start() { active = true }

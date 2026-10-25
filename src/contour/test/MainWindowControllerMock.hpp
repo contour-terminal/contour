@@ -76,6 +76,8 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_OBJECT
     // Mirrors WindowController's remote chrome, which Main.qml's title and the tab strip's badge read.
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    // Mirrors WindowController's host chip state (a window::HostChipState); a test sets it to drive the chip.
+    Q_PROPERTY(int hostChipState READ hostChipState WRITE setHostChipState NOTIFY hostChipStateChanged)
     // Mirrors WindowController's version string, which the About dialog shows.
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
@@ -88,6 +90,19 @@ class MainWindowControllerMock: public QAbstractListModel
 
     /// Mirrors WindowController::hostLabel(): the attached host, set by a test before Main.qml loads.
     [[nodiscard]] QString const& hostLabel() const noexcept { return attachedHost; }
+
+    /// Mirrors WindowController::hostChipState().
+    [[nodiscard]] int hostChipState() const noexcept { return _hostChipState; }
+
+    /// What the connection reports, as WindowController::notifyHostConnectionChanged() would tell it.
+    /// @param state A window::HostChipState as its underlying value.
+    void setHostChipState(int state)
+    {
+        if (_hostChipState == state)
+            return;
+        _hostChipState = state;
+        emit hostChipStateChanged();
+    }
 
     /// Mirrors WindowController::applicationVersion() with a fixed test value.
     [[nodiscard]] QString applicationVersion() const { return QStringLiteral("0.0.0-test"); }
@@ -146,6 +161,7 @@ class MainWindowControllerMock: public QAbstractListModel
     std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
 
   signals:
+    void hostChipStateChanged();
     void commandPaletteRequested();
     void contextMenuRequested();
     void titleBarContextMenuRequested();
@@ -163,6 +179,7 @@ class MainWindowControllerMock: public QAbstractListModel
   private:
     QVariantList _tabContextMenuModel {};
     QVariantList _newTabMenuModel {};
+    int _hostChipState = 0; ///< @see hostChipState; 0 = HostChipState::Connected.
 };
 
 } // namespace contour::test

@@ -15,6 +15,9 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/TabAttention.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
@@ -42,6 +45,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <variant>
 #include <vector>
 
@@ -876,6 +880,280 @@ TEST_CASE("TerminalSessionManager: a session's visibility follows focus, tabs, z
 
     contour::test::closeAllTabs(*window);
 }
+
+// {{{ The tab badge slot: unseen output, finished commands and OSC 7501, and the host chip
+
+namespace
+{
+
+/// The badge tab @p row of @p window shows, as the strip reads it.
+[[nodiscard]] contour::window::TabBadgeKind badgeAt(contour::window::WindowController& window, int row)
+{
+    return static_cast<contour::window::TabBadgeKind>(
+        window.data(window.index(row), static_cast<int>(contour::window::WindowController::Roles::BadgeRole))
+            .toInt());
+}
+
+/// Runs every queued call, as the GUI thread's next turn would: what a session posts from its parser.
+void drainPosted()
+{
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+}
+
+/// The session behind tab @p row's active pane.
+[[nodiscard]] contour::session::TerminalSession* sessionAtRow(
+    contour::session::TerminalSessionManager& manager, contour::window::WindowController& window, int row)
+{
+    auto const* tab = manager.model().window(window.windowId())->tabAt(row);
+    return tab != nullptr ? manager.sessionForId(tab->activePane()->session()) : nullptr;
+}
+
+/// What a program waiting for the user reports (OSC 7501).
+constexpr auto BlockedStatus = std::string_view { "\033]7501;state=blocked:msg=QXBwcm92ZT8\033\\" };
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, its commands and OSC 7501",
+          "[manager][tabbadge]")
+{
+    using contour::window::TabBadgeKind;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+
+    window->createNewTab();
+    window->createNewTab();
+    REQUIRE(window->activeTabIndex() == 1);
+    auto* const background = sessionAtRow(manager, *window, 0);
+    auto* const active = sessionAtRow(manager, *window, 1);
+    REQUIRE(background != nullptr);
+    REQUIRE(active != nullptr);
+    drainPosted();
+    REQUIRE(badgeAt(*window, 0) == TabBadgeKind::None);
+
+    SECTION("output in a background tab shows the dot, and seeing it clears it")
+    {
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Output);
+
+        window->activateTab(0);
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+    }
+
+    SECTION("output in the active tab shows nothing")
+    {
+        active->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 1) == TabBadgeKind::None);
+    }
+
+    SECTION("a command that fails in a background tab shows its cross until seen")
+    {
+        background->terminal().writeToScreen("\033]133;C\007");
+        background->terminal().writeToScreen("\033]133;D;1\007");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Error);
+
+        window->activateTab(0);
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+    }
+
+    SECTION("a command that succeeds in a background tab shows its tick")
+    {
+        background->terminal().writeToScreen("\033]133;C\007");
+        background->terminal().writeToScreen("\033]133;D;0\007");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Done);
+    }
+
+    SECTION("Blocked outranks output, and its text is the tooltip")
+    {
+        background->terminal().writeToScreen(BlockedStatus);
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Blocked);
+        CHECK(window
+                  ->data(window->index(0),
+                         static_cast<int>(contour::window::WindowController::Roles::BadgeTextRole))
+                  .toString()
+              == QStringLiteral("Approve?"));
+    }
+
+    SECTION("the OSC 7501 path repaints the badge and marks no output")
+    {
+        background->terminal().writeToScreen("\033]7501;state=working:app=cargo\033\\");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Working);
+
+        // Seen, then sent to the back again: the report's bytes are forgotten.
+        window->activateTab(0);
+        window->activateTab(1);
+        REQUIRE(manager.tabAttention().of(background->modelSessionId())
+                == contour::window::SessionAttention {});
+
+        // The program-status path alone, as Step 2's pane properties call it.
+        manager.refreshTabBadgeForSession(background->modelSessionId());
+        CHECK(manager.tabAttention().of(background->modelSessionId())
+              == contour::window::SessionAttention {});
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Working);
+    }
+
+    SECTION("a minimised window's active tab is not seen")
+    {
+        window.osWindow->setWindowStates(Qt::WindowMinimized);
+        active->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 1) == TabBadgeKind::Output);
+
+        window.osWindow->setWindowStates(Qt::WindowNoState);
+        CHECK(badgeAt(*window, 1) == TabBadgeKind::None);
+    }
+
+    SECTION("unzooming clears a covered sibling's dot")
+    {
+        manager.splitActivePane(/*vertical*/ true, active);
+        auto* const sibling = window->activeSession();
+        REQUIRE(sibling != nullptr);
+        REQUIRE(sibling != active);
+        manager.toggleActivePaneZoom(sibling);
+
+        active->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 1) == TabBadgeKind::Output);
+
+        manager.toggleActivePaneZoom(sibling);
+        CHECK(badgeAt(*window, 1) == TabBadgeKind::None);
+    }
+
+    SECTION("a closed session's marks go with it")
+    {
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        auto const id = background->modelSessionId();
+        REQUIRE(manager.tabAttention().of(id).activity == contour::window::TabActivity::UnseenOutput);
+        // Mock PTYs are not started: drive the sessionClosed endpoint rather than waiting for an exit
+        // watcher.
+        manager.removeSession(*background);
+        CHECK(manager.tabAttention().of(id) == contour::window::SessionAttention {});
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: output written from the parser's thread reaches the badge once posted",
+          "[manager][tabbadge][threading]")
+{
+    using contour::window::TabBadgeKind;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const background = sessionAtRow(manager, *window, 0);
+    REQUIRE(background != nullptr);
+    drainPosted();
+
+    // A stream of output, as the parser applies it chunk by chunk, off the GUI thread.
+    auto writer = std::thread { [background] {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 200))
+            background->terminal().writeToScreen("chunk\r\n");
+    } };
+    writer.join();
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::None); // nothing lands before the GUI thread's turn
+
+    drainPosted();
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::Output);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][tabbadge]")
+{
+    using contour::window::TabBadgeKind;
+    using vthost::client::ConnectionState;
+
+    auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::test::TestApp app { std::move(factory) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const background = sessionAtRow(manager, *window, 0);
+    REQUIRE(background != nullptr);
+    drainPosted();
+
+    SECTION("the mirror's repaint around a reconnect is not news")
+    {
+        manager.setHostConnection(ConnectionState::Reconnecting);
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+
+        manager.setHostConnection(ConnectionState::Connected);
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+
+        // Once the grace is over, output is news again.
+        app.steadyClock().advance(contour::window::ResyncGracePeriod);
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Output);
+    }
+
+    SECTION("a Blocked status set before the drop still reads Blocked after it")
+    {
+        background->terminal().writeToScreen(BlockedStatus);
+        drainPosted();
+        REQUIRE(badgeAt(*window, 0) == TabBadgeKind::Blocked);
+
+        manager.setHostConnection(ConnectionState::Reconnecting);
+        manager.setHostConnection(ConnectionState::Connected);
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Blocked);
+    }
+
+    manager.setHostConnection(ConnectionState::Connected);
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: the host chip follows the connection", "[manager][hostchip]")
+{
+    using contour::window::HostChipState;
+    using vthost::client::ConnectionState;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    CHECK(manager.hostConnection() == ConnectionState::Connected);
+    CHECK(window->hostChipState() == static_cast<int>(HostChipState::Connected));
+
+    auto spy = QSignalSpy { &*window, &contour::window::WindowController::hostChipStateChanged };
+
+    manager.setHostConnection(ConnectionState::Reconnecting);
+    CHECK(window->hostChipState() == static_cast<int>(HostChipState::Reconnecting));
+    CHECK(spy.count() == 1);
+
+    // Connecting folds onto the same chip state, so the chip is not told twice.
+    manager.setHostConnection(ConnectionState::Connecting);
+    CHECK(spy.count() == 1);
+
+    manager.setHostConnection(ConnectionState::Refused);
+    CHECK(window->hostChipState() == static_cast<int>(HostChipState::Disconnected));
+    CHECK(spy.count() == 2);
+
+    manager.setHostConnection(ConnectionState::Connected);
+    CHECK(window->hostChipState() == static_cast<int>(HostChipState::Connected));
+    CHECK(spy.count() == 3);
+}
+
+// }}}
 
 TEST_CASE("TerminalSessionManager: revealing a session brings its tab and pane forward",
           "[manager][notification]")

@@ -4,6 +4,7 @@
 #include <crispy/InterpolatedString.hpp>
 
 #include <format>
+#include <utility>
 #include <variant>
 
 namespace contour::window
@@ -35,6 +36,11 @@ std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx)
     }
 
     return result;
+}
+
+std::string tabLabelWithFallback(std::string expanded, std::string_view processName)
+{
+    return expanded.empty() ? std::string { processName } : std::move(expanded);
 }
 
 } // namespace contour::window

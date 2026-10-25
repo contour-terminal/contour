@@ -39,4 +39,11 @@ struct TabLabelContext
 /// @return The expanded label.
 [[nodiscard]] std::string expandTabLabel(std::string_view tmpl, TabLabelContext const& ctx);
 
+/// The label a tab shows: an expanded label left empty names the program in front instead, since a
+/// blank tab names nothing. Applies to every edition (an empty label is a defect, not a look).
+/// @param expanded    The expanded label (expandTabLabel()).
+/// @param processName The session's foreground process name; empty when unknown, as for a remote session.
+/// @return @p expanded unless it is empty, else @p processName.
+[[nodiscard]] std::string tabLabelWithFallback(std::string expanded, std::string_view processName);
+
 } // namespace contour::window

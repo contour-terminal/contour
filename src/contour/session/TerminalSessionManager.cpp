@@ -7,6 +7,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -429,6 +430,8 @@ void TerminalSessionManager::windowStateChanged(vtworkspace::WindowId window)
 {
     if (_focusedWindow == window)
         focusedSessionSeen();
+    // A restore puts the window's sessions back on screen, which is the tab badges' "seen" too.
+    markVisibleSessionsSeen(window);
 }
 
 void TerminalSessionManager::focusedSessionSeen()
@@ -1168,6 +1171,7 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
             _model->closePane(_model->windowOfTab(tab->id()), tab->id(), leaf->id());
     _sessionsById.erase(sessionId.value);
     _tabBySession.erase(sessionId.value);
+    _attention.forget(sessionId);
     scheduleTaskbarProgress();
 
     // Session->display ownership is the pane tree's; there is no per-display map to scrub. The pane's
@@ -1292,6 +1296,8 @@ void TerminalSessionManager::activeTabChanged(vtworkspace::WindowId window, vtwo
         // also covers cross-window moves, which route through activeTabChanged on the destination.
         syncFocusForWindow(c);
     }
+    // The tab now in front is seen, which clears its badge's marks.
+    markVisibleSessionsSeen(window);
     reportTabPresentation(tab);
 }
 
@@ -1422,6 +1428,8 @@ void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::option
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::ZoomedRole });
         c->refreshActiveTabLayoutRoot();
     }
+    // A zoom that ends uncovers the siblings it hid: they are seen now.
+    markVisibleSessionsSeen(_model->windowOfTab(tab));
     reportTabPresentation(tab);
 }
 
@@ -1497,17 +1505,72 @@ void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId
         recordProgress(session, s->terminal().resolvedProgress(), _app.terminalClocks().steady.now());
 }
 
-void TerminalSessionManager::refreshTabProgramStatusForSession(vtworkspace::SessionId session)
+void TerminalSessionManager::refreshTabBadgeForSession(vtworkspace::SessionId session)
 {
     // Only the badge's roles, for the reason refreshTabProgressForSession gives.
-    auto* tab = findTabHostingSession(session);
-    if (tab == nullptr)
+    if (auto* tab = findTabHostingSession(session))
+        refreshTabBadge(*tab);
+}
+
+void TerminalSessionManager::refreshTabBadge(vtworkspace::Tab const& tab)
+{
+    if (auto* c = controllerFor(_model->windowOfTab(tab.id())))
+        c->notifyTabRowChanged(tab.id(),
+                               { window::WindowController::Roles::BadgeRole,
+                                 window::WindowController::Roles::BadgeTextRole,
+                                 window::WindowController::Roles::BadgeProgressRole });
+}
+
+void TerminalSessionManager::noteSessionOutput(vtworkspace::SessionId session, window::OutputOrigin origin)
+{
+    auto const* s = sessionForId(session);
+    if (s == nullptr)
         return;
-    if (auto* c = controllerFor(_model->windowOfTab(tab->id())))
-        c->notifyTabRowChanged(tab->id(),
-                               { window::WindowController::Roles::ProgramStatusRole,
-                                 window::WindowController::Roles::ProgramStatusTextRole,
-                                 window::WindowController::Roles::ProgramStatusProgressRole });
+    // Asked of the ledger first: a session that is on screen, or already marked, repaints nothing.
+    if (_attention.noteOutput(session, sessionVisibility(*s), origin) == window::AttentionChange::Changed)
+        refreshTabBadgeForSession(session);
+}
+
+void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
+                                                 vtbackend::CommandEnding ending)
+{
+    if (_attention.noteFinished(session.modelSessionId(), sessionVisibility(session), ending)
+        == window::AttentionChange::Changed)
+        refreshTabBadgeForSession(session.modelSessionId());
+}
+
+void TerminalSessionManager::markVisibleSessionsSeen(vtworkspace::WindowId window)
+{
+    auto const* win = _model->window(window);
+    if (win == nullptr)
+        return;
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto const* tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        auto changed = window::AttentionChange::Unchanged;
+        tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            auto const* s = pane.isLeaf() ? sessionForId(pane.session()) : nullptr;
+            if (s != nullptr && sessionVisibility(*s) != platform::SessionVisibility::Hidden
+                && _attention.noteSeen(pane.session()) == window::AttentionChange::Changed)
+                changed = window::AttentionChange::Changed;
+        });
+        if (changed == window::AttentionChange::Changed)
+            refreshTabBadge(*tab);
+    }
+}
+
+void TerminalSessionManager::setHostConnection(vthost::client::ConnectionState state)
+{
+    auto const chipChanged = window::hostChipStateOf(state) != window::hostChipStateOf(_hostConnection);
+    _hostConnection = state;
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr)
+            session->setHostConnection(state);
+    if (chipChanged)
+        for (auto* controller: _controllersByWindow | std::views::values)
+            controller->notifyHostConnectionChanged();
 }
 
 platform::TaskbarProgress TerminalSessionManager::taskbarProgress(

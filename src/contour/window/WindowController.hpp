@@ -14,6 +14,7 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/MenuRouting.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -129,6 +130,8 @@ class WindowController:
     Q_PROPERTY(QString hostingNotice READ hostingNotice NOTIFY hostingNoticeChanged)
     // CONSTANT: a process attaches to one host for its life, and has done so before its first window.
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+    // A window::HostChipState as its underlying value: where the connection to that host stands.
+    Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -151,12 +154,13 @@ class WindowController:
         //!< value (0 = inactive, i.e. nothing to paint). @see vtbackend::ProgressState.
         ProgressStateRole = Qt::UserRole + 8,
         ProgressPercentageRole = Qt::UserRole + 9, //!< The active pane's progress percentage, 0..100.
-        //!< The tab's OSC 7501 program-status badge, as the BadgeKind enumerator's value (0 = none), from the
-        //!< records of all its panes. @see ProgramStatusBadge.hpp.
-        ProgramStatusRole = Qt::UserRole + 10,
-        ProgramStatusTextRole = Qt::UserRole + 11, //!< The badge's tooltip, disarmed; empty for none.
+        //!< The tab's badge, as the TabBadgeKind enumerator's value (0 = none): the winner among its panes'
+        //!< OSC 7501 records, their unseen finished commands and unseen output. @see TabBadge.hpp.
+        BadgeRole = Qt::UserRole + 10,
+        //!< The OSC 7501 tooltip, disarmed, when the program status is what the badge shows; else empty.
+        BadgeTextRole = Qt::UserRole + 11,
         //!< The progress of a Working badge, 0..100, or -1 when the program gave none (a plain spinner).
-        ProgramStatusProgressRole = Qt::UserRole + 12,
+        BadgeProgressRole = Qt::UserRole + 12,
     };
 
     /// @param manager  The session-lifetime service + model host (must outlive this controller).
@@ -720,6 +724,13 @@ class WindowController:
     /// @return The host's label; empty for a local window.
     [[nodiscard]] QString hostLabel() const;
 
+    /// What the host chip shows: the manager's host connection, folded onto the chip's three states.
+    /// @return A window::HostChipState as its underlying value; Connected for a local window.
+    [[nodiscard]] int hostChipState() const noexcept;
+
+    /// The manager's host connection changed what the chip shows. @see hostChipState
+    void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
+
     /// The application's version string, shown by the About dialog.
     /// @return The build constant, reached through the composition root.
     [[nodiscard]] QString applicationVersion() const;
@@ -775,6 +786,8 @@ class WindowController:
     void chromeHeightChanged();
     /// @see hostingNotice
     void hostingNoticeChanged();
+    /// @see hostChipState
+    void hostChipStateChanged();
     /// @see requestNotification.
     void notificationRequested(QString const& title, QString const& body);
     /// @see requestBell.
@@ -798,6 +811,15 @@ class WindowController:
     [[nodiscard]] ProgramStatusBadge programStatusBadge(vtworkspace::Tab const& tab, int row) const;
     /// programStatusBadge(), computed once until the row or the tab in front changes (@ref _badges).
     [[nodiscard]] ProgramStatusBadge cachedProgramStatusBadge(vtworkspace::Tab const& tab, int row) const;
+    /// The badge @p row's tab shows: its program status against its panes' unseen output and finished
+    /// commands (the manager's TabAttention), resolved by resolveTabBadge().
+    /// @param tab The tab.
+    /// @param row Its row, which says whether it is in front.
+    /// @return The badge, with a Working one's progress.
+    [[nodiscard]] TabBadge tabBadge(vtworkspace::Tab const& tab, int row) const;
+    /// @p session's foreground process name, asked once until the next TitleRole refresh (@ref
+    /// _processNames).
+    [[nodiscard]] std::string const& cachedProcessName(session::TerminalSession const& session) const;
     /// Resolves the label shown on @p row's tab.
     [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab,
                                            session::TerminalSession* session,
@@ -957,6 +979,12 @@ class WindowController:
 
     /// Each tab's badge, computed once for the three roles that show it. Mutable: data() fills it.
     mutable TabBadgeCache _badges;
+
+    /// The foreground process name of each session whose tab label fell back to it, by session id: asking
+    /// costs a process-table query, and the strip reads TitleRole on every repaint. Dropped whenever a
+    /// TitleRole refresh is emitted, so it is as fresh as the label; nothing tells of a new foreground
+    /// process yet. Mutable: data() fills it.
+    mutable std::unordered_map<uint64_t, std::string> _processNames;
 
     // {{{ Terminal context menu
     /// Each surface's menu as QML sees it, rebuilt on every open, indexed by MenuSurface. The rows' actions

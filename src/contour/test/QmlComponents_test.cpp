@@ -30,6 +30,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/TabColorScheme.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
@@ -69,6 +70,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -186,10 +188,10 @@ class MockTabController: public QAbstractListModel
         //!< Ditto: both drive TabItem's OSC 9;4 progress bar.
         ProgressStateRole = Qt::UserRole + 8,
         ProgressPercentageRole = Qt::UserRole + 9,
-        //!< Ditto: the three drive TabItem's OSC 7501 program-status badge.
-        ProgramStatusRole = Qt::UserRole + 10,
-        ProgramStatusTextRole = Qt::UserRole + 11,
-        ProgramStatusProgressRole = Qt::UserRole + 12,
+        //!< Ditto: the three drive TabItem's badge slot.
+        BadgeRole = Qt::UserRole + 10,
+        BadgeTextRole = Qt::UserRole + 11,
+        BadgeProgressRole = Qt::UserRole + 12,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -212,10 +214,10 @@ class MockTabController: public QAbstractListModel
             // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
             case Roles::ProgressStateRole:
             case Roles::ProgressPercentageRole: return 0;
-            // 0 = BadgeKind::None: no program status, so TabItem paints no badge.
-            case Roles::ProgramStatusRole: return 0;
-            case Roles::ProgramStatusTextRole: return QString {};
-            case Roles::ProgramStatusProgressRole: return -1;
+            // 0 = TabBadgeKind::None: nothing competes for the slot, so TabItem paints no badge.
+            case Roles::BadgeRole: return 0;
+            case Roles::BadgeTextRole: return QString {};
+            case Roles::BadgeProgressRole: return -1;
             default: return index.row();
         }
     }
@@ -234,9 +236,9 @@ class MockTabController: public QAbstractListModel
                  { static_cast<int>(Roles::ZoomedRole), "zoomed" },
                  { static_cast<int>(Roles::ProgressStateRole), "progressState" },
                  { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
-                 { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
-                 { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" },
-                 { static_cast<int>(Roles::ProgramStatusProgressRole), "programStatusProgress" } };
+                 { static_cast<int>(Roles::BadgeRole), "badge" },
+                 { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
+                 { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" } };
     }
 
     Q_INVOKABLE [[nodiscard]] QObject* createSession() { return nullptr; }
@@ -775,15 +777,18 @@ constexpr auto TabItemBindings = "    controller: terminalSessions\n"
 /// @param controller The mock the TabItem binds to.
 /// @param stripAt    Where in the window to put the tab (mirrors the `tab_bar_position` option).
 /// @param windowWidth The host window's width; a narrow one is what makes a right-edge overflow testable.
+/// @param chrome     The chrome tokens to install; today's default row unless a test names one.
 /// @return The host Window; the TabItem is reachable as its `tabItem` property.
-[[nodiscard]] QmlHost makeTabItemHost(QQmlEngine& engine,
-                                      MockTabController& controller,
-                                      TabStripAt stripAt = TabStripAt::Top,
-                                      int windowWidth = 800)
+[[nodiscard]] QmlHost makeTabItemHost(
+    QQmlEngine& engine,
+    MockTabController& controller,
+    TabStripAt stripAt = TabStripAt::Top,
+    int windowWidth = 800,
+    contour::test::ChromeSetup const& chrome = contour::test::defaultChromeSetup())
 {
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
 
-    contour::test::installChromeStyle(engine);
+    contour::test::installChromeStyle(engine, chrome);
     // `y` mirrors Main.qml, which anchors the TitleBar to the bottom edge under `tab_bar_position: Bottom`
     // (`y: parent.height - titleBar.height`). `x` puts the tab at the window's RIGHT edge in that case
     // too, so one host covers both axes a popup can overflow on.
@@ -1539,11 +1544,11 @@ TEST_CASE("A zoomed TabItem shows the zoom badge and gives it back its width whe
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
-TEST_CASE("A TabItem shows the OSC 7501 badge and gives it back its width when there is none",
-          "[contour][gui][qml][programstatus]")
+TEST_CASE("A TabItem shows its badge and gives it back its width when there is none",
+          "[contour][gui][qml][tabbadge]")
 {
     // The badge sits between the label and the zoom badge, so like the zoom badge it must cost the label
-    // nothing while there is no program status.
+    // nothing while nothing competes for the slot.
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockTabController controller;
@@ -1568,9 +1573,9 @@ TEST_CASE("A TabItem shows the OSC 7501 badge and gives it back its width when t
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
 
-    auto* badge = tab->findChild<QQuickItem*>(QStringLiteral("programStatusBadge"));
+    auto* badge = tab->findChild<QQuickItem*>(QStringLiteral("tabBadgeSlot"));
     REQUIRE(badge != nullptr);
-    auto* glyph = tab->findChild<QQuickItem*>(QStringLiteral("programStatusGlyph"));
+    auto* glyph = tab->findChild<QQuickItem*>(QStringLiteral("tabBadgeGlyph"));
     REQUIRE(glyph != nullptr);
     auto* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
     REQUIRE(label != nullptr);
@@ -1579,26 +1584,32 @@ TEST_CASE("A TabItem shows the OSC 7501 badge and gives it back its width when t
     CHECK(badge->width() == 0.0);
     auto const bareLabelRight = label->x() + label->width();
 
-    // 2 = BadgeKind::Blocked.
-    tab->setProperty("tabProgramStatus", 2);
-    tab->setProperty("tabProgramStatusText", QStringLiteral("Approve?"));
+    using contour::window::TabBadgeKind;
+    tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::Blocked));
+    tab->setProperty("tabBadgeText", QStringLiteral("Approve?"));
     CHECK(badge->isVisible());
     CHECK(badge->width() > 0.0);
     CHECK(glyph->property("text").toString() == QStringLiteral("!"));
     CHECK(label->x() + label->width() < bareLabelRight);
 
-    // 1 = Working: spins without a progress, stands at the angle of one.
-    tab->setProperty("tabProgramStatus", 1);
+    // Working (3): spins without a progress, stands at the angle of one.
+    tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::Working));
     CHECK(glyph->property("spinning").toBool());
-    tab->setProperty("tabProgramStatusProgress", 50);
+    tab->setProperty("tabBadgeProgress", 50);
     CHECK_FALSE(glyph->property("spinning").toBool());
     CHECK(glyph->rotation() == 180.0);
 
     // A kind this build does not know draws nothing.
-    tab->setProperty("tabProgramStatus", 9);
+    tab->setProperty("tabBadge", static_cast<int>(contour::window::TabBadgeKindCount + 3));
     CHECK_FALSE(badge->isVisible());
 
-    tab->setProperty("tabProgramStatus", 0);
+    // The rest draw their glyph from the look table.
+    tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::Output));
+    CHECK(glyph->property("text").toString() == QStringLiteral("\u2022"));
+    tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::Error));
+    CHECK(glyph->property("text").toString() == QStringLiteral("\u2715"));
+
+    tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::None));
     CHECK_FALSE(badge->isVisible());
     CHECK(badge->width() == 0.0);
     CHECK(label->x() + label->width() == bareLabelRight);
@@ -1607,7 +1618,7 @@ TEST_CASE("A TabItem shows the OSC 7501 badge and gives it back its width when t
 }
 
 TEST_CASE("A working TabItem's spinner runs only while its window is on screen (offscreen)",
-          "[contour][gui][qml][programstatus]")
+          "[contour][gui][qml][tabbadge]")
 {
     // A program may work for hours in a minimized window; an infinite animation there is CPU for nothing.
     contour::test::QmlMessageCapture const warnings;
@@ -1618,11 +1629,11 @@ TEST_CASE("A working TabItem's spinner runs only while its window is on screen (
     REQUIRE(window != nullptr);
     auto* tab = host->property("tabItem").value<QQuickItem*>();
     REQUIRE(tab != nullptr);
-    auto* spinner = tab->findChild<QObject*>(QStringLiteral("programStatusSpinner"));
+    auto* spinner = tab->findChild<QObject*>(QStringLiteral("tabBadgeSpinner"));
     REQUIRE(spinner != nullptr);
 
-    // 1 = BadgeKind::Working, with no progress: it spins.
-    tab->setProperty("tabProgramStatus", 1);
+    // Working, with no progress: it spins.
+    tab->setProperty("tabBadge", static_cast<int>(contour::window::TabBadgeKind::Working));
     QCoreApplication::processEvents();
     CHECK(spinner->property("running").toBool());
 
@@ -1641,8 +1652,63 @@ TEST_CASE("A working TabItem's spinner runs only while its window is on screen (
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
+TEST_CASE("A working TabItem's spinner stands still under Reduce Motion (offscreen)",
+          "[contour][gui][qml][tabbadge]")
+{
+    // Reduce Motion turns every motion into a cross-fade; an endless spin has none to become.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.accessibility.motion = contour::config::MotionPreference::Reduced;
+    auto const host = makeTabItemHost(engine, controller, TabStripAt::Top, 800, setup);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+    auto* spinner = tab->findChild<QObject*>(QStringLiteral("tabBadgeSpinner"));
+    REQUIRE(spinner != nullptr);
+
+    tab->setProperty("tabBadge", static_cast<int>(contour::window::TabBadgeKind::Working));
+    QCoreApplication::processEvents();
+    REQUIRE(window->isVisible());
+    CHECK_FALSE(spinner->property("running").toBool());
+
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("A palette change recolours a TabItem's badge (offscreen)", "[contour][gui][qml][tabbadge]")
+{
+    // The ink is a status colour, which follows light and dark: the binding over the invokable must
+    // re-evaluate when the palette does.
+    contour::test::QmlMessageCapture const warnings;
+    auto appearance =
+        std::optional<contour::test::ScopedChromeAppearance> { std::in_place,
+                                                               vtbackend::ColorPreference::Light };
+    QQmlEngine engine;
+    MockTabController controller;
+    auto const host = makeTabItemHost(engine, controller);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+    auto* glyph = tab->findChild<QQuickItem*>(QStringLiteral("tabBadgeGlyph"));
+    REQUIRE(glyph != nullptr);
+
+    tab->setProperty("tabBadge", static_cast<int>(contour::window::TabBadgeKind::Blocked));
+    QCoreApplication::processEvents();
+    auto const onLight = glyph->property("color").value<QColor>();
+
+    appearance.reset();
+    appearance.emplace(vtbackend::ColorPreference::Dark);
+    QCoreApplication::processEvents();
+    auto const onDark = glyph->property("color").value<QColor>();
+
+    CHECK(onLight != onDark);
+    CHECK(onDark != QColor(Qt::transparent));
+    CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
 TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as markup",
-          "[contour][gui][qml][programstatus]")
+          "[contour][gui][qml][tabbadge]")
 {
     // The message is what a program sent. Rendered as AutoText, `<font>` would colour it and `<img>` would
     // have the engine load whatever it names.
@@ -1667,8 +1733,8 @@ TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as
     initial.insert("tabZoomed", false);
     initial.insert("tabProgressState", 0);
     initial.insert("tabProgressPercentage", 0);
-    // 2 = BadgeKind::Blocked: the text reaches the tooltip only beside a badge.
-    initial.insert("tabProgramStatus", 2);
+    // The text reaches the tooltip only beside a badge.
+    initial.insert("tabBadge", static_cast<int>(contour::window::TabBadgeKind::Blocked));
     std::unique_ptr<QObject> tab(component.createWithInitialProperties(initial));
     REQUIRE(tab != nullptr);
 
@@ -1684,7 +1750,7 @@ TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as
     };
     for (auto const& text: hostile)
     {
-        tab->setProperty("tabProgramStatusText", text);
+        tab->setProperty("tabBadgeText", text);
         // What HoverHandler does when the pointer arrives.
         QVariant composed;
         REQUIRE(QMetaObject::invokeMethod(tab.get(), "buildHoverTooltip", Q_RETURN_ARG(QVariant, composed)));

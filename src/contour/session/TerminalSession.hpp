@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <concepts>
 #include <cstdint>
 #include <deque>
@@ -708,6 +709,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         return _hostConnection == vthost::client::ConnectionState::Reconnecting;
     }
+
+    /// The name of the program in front of this session's shell, which a tab with an empty label shows.
+    /// GUI thread. One query of the process table per call, so a caller asking often caches it.
+    /// @return The name; empty when the device is not a vtpty::Process (a mirrored pane) or it is unknown.
+    [[nodiscard]] std::string foregroundProcessName() const;
 
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept { return _profile; }
@@ -1572,6 +1578,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Decides on, and delivers, the finish notification for @p summary. GUI thread.
     /// @param summary The finished block.
     void handleCommandBlockFinished(vtbackend::CommandBlockSummary const& summary);
+    /// Tells the manager, on the GUI thread, that output arrived, for the tab badge's unseen-output dot.
+    /// Called on the parser thread by screenUpdated(); at most one call is queued at a time.
+    void noteOutputForTab();
 
     /// Handles every block event gathered since the last call, in the order they were raised: each finish,
     /// then what the changes ask -- the hovered block's tooltip re-read, a `clear_on: next` notice
@@ -1736,6 +1745,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     SessionHosting _hosting;
     /// Where the connection to the host stands, for a mirrored pane. @see setHostConnection
     vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
+    /// When the resync grace armed by the connection's last return to Connected ends: output before then
+    /// repaints the mirror and is not news (window::outputOriginOf). Runtime state, GUI thread.
+    std::optional<std::chrono::steady_clock::time_point> _resyncGraceEnd;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
     vtbackend::ColorPreference _currentColorPreference;
@@ -2026,6 +2038,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Whether a tab-strip refresh for this session's program status is queued on the GUI thread, so that
     /// a program reporting in a loop queues one. Set on the parser thread, cleared on the GUI thread.
     std::atomic<bool> _isProgramStatusRefreshPending = false;
+    /// Whether an output notice for the tab badge is queued on the GUI thread (@see noteOutputForTab). Set on
+    /// the parser thread, cleared on the GUI thread.
+    std::atomic<bool> _isOutputNoticePending = false;
 
     /// @see noteTransportLost.
     std::atomic<bool> _transportLost = false;

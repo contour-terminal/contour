@@ -29,6 +29,7 @@
 #include <contour/session/ScreenshotFile.hpp>
 #include <contour/session/SpawnCommand.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/input/HeldModifiers.hpp>
@@ -444,6 +445,10 @@ void TerminalSession::setHostConnection(vthost::client::ConnectionState state)
     if (_hosting != SessionHosting::Remote)
         return;
     auto const wasReconnecting = isReconnecting();
+    // A return to Connected repaints the mirror, which is not news to the tab badge.
+    if (auto const grace =
+            window::resyncGraceAfter(_hostConnection, state, _app.terminalClocks().steady.now()))
+        _resyncGraceEnd = grace;
     _hostConnection = state;
     if (isReconnecting() != wasReconnecting)
         emit reconnectingChanged();
@@ -852,6 +857,10 @@ void TerminalSession::bufferChanged(vtbackend::ScreenType type)
 void TerminalSession::screenUpdated()
 {
     ZoneScoped;
+    // Ahead of the display check: the tab badge's unseen-output dot is for the sessions that have no
+    // display -- a background tab's panes are not loaded at all.
+    noteOutputForTab();
+
     if (!_display)
         return;
 
@@ -898,6 +907,27 @@ void TerminalSession::screenUpdated()
     requestScrollbarMarksRefresh();
 
     scheduleRedraw();
+}
+
+void TerminalSession::noteOutputForTab()
+{
+    // On the parser thread, possibly with the state mutex held (see screenUpdated): where the session sits,
+    // and where its output comes from, are the GUI thread's to read, so this only posts. Coalesced as
+    // programStatusChanged() is: one queued call at a time, so a stream of output costs one call per turn
+    // of the GUI thread's loop, not one per chunk. postToObject targets `this`, so Qt drops the call if the
+    // session goes first.
+    if (_isOutputNoticePending.exchange(true, std::memory_order_acq_rel))
+        return;
+    platform::postToObject(this, [this]() {
+        _isOutputNoticePending.store(false, std::memory_order_release);
+        if (_manager == nullptr)
+            return;
+        auto const origin =
+            _hosting == SessionHosting::Remote
+                ? window::outputOriginOf(_hostConnection, _app.terminalClocks().steady.now(), _resyncGraceEnd)
+                : window::OutputOrigin::Live;
+        _manager->noteSessionOutput(modelSessionId(), origin);
+    });
 }
 
 void TerminalSession::pageResized()
@@ -1258,6 +1288,13 @@ void TerminalSession::pollForegroundProcess()
     state.foregroundProcessName = std::move(*name);
     auto const lock = scoped_lock { _terminal };
     _terminal.foregroundProcessChanged(state.foregroundProcessName);
+}
+
+std::string TerminalSession::foregroundProcessName() const
+{
+    // Only a pty this process spawned has a process group to ask; a mirrored pane's runs elsewhere.
+    auto const* const process = dynamic_cast<vtpty::Process const*>(&_terminal.device());
+    return process != nullptr ? process->foregroundProcessName().value_or(std::string {}) : std::string {};
 }
 
 void TerminalSession::scheduleRetiredRelease()
@@ -2190,7 +2227,7 @@ void TerminalSession::programStatusChanged(vtbackend::ProgramStatusChange const&
     platform::postToObject(this, [this]() {
         _isProgramStatusRefreshPending = false;
         if (_manager != nullptr)
-            _manager->refreshTabProgramStatusForSession(modelSessionId());
+            _manager->refreshTabBadgeForSession(modelSessionId());
     });
 }
 
@@ -2268,6 +2305,9 @@ void TerminalSession::handleCommandBlockFinished(vtbackend::CommandBlockSummary 
     // A standalone session has no manager to place it on screen, and no window to tell.
     if (_manager == nullptr)
         return;
+
+    // The tab hears of every ending first, whatever the notice policy below makes of it.
+    _manager->noteCommandFinished(*this, vtbackend::commandEndingOf(summary.exitCode, summary.outcome));
 
     auto const& policy = _profile.notifyOnCommandFinish.value();
 

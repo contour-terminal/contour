@@ -235,9 +235,9 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
         ZoomedRole = Qt::UserRole + 7,
         ProgressStateRole = Qt::UserRole + 8,
         ProgressPercentageRole = Qt::UserRole + 9,
-        ProgramStatusRole = Qt::UserRole + 10,
-        ProgramStatusTextRole = Qt::UserRole + 11,
-        ProgramStatusProgressRole = Qt::UserRole + 12,
+        BadgeRole = Qt::UserRole + 10,
+        BadgeTextRole = Qt::UserRole + 11,
+        BadgeProgressRole = Qt::UserRole + 12,
     };
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _activeTabIndex; }
@@ -338,10 +338,10 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
             // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
             case Roles::ProgressStateRole:
             case Roles::ProgressPercentageRole: return 0;
-            // 0 = BadgeKind::None: no program status, so TabItem paints no badge.
-            case Roles::ProgramStatusRole: return 0;
-            case Roles::ProgramStatusTextRole: return QString {};
-            case Roles::ProgramStatusProgressRole: return -1;
+            // 0 = TabBadgeKind::None: nothing competes for the slot, so TabItem paints no badge.
+            case Roles::BadgeRole: return 0;
+            case Roles::BadgeTextRole: return QString {};
+            case Roles::BadgeProgressRole: return -1;
             default: return {};
         }
     }
@@ -358,9 +358,9 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
             { static_cast<int>(Roles::ZoomedRole), "zoomed" },
             { static_cast<int>(Roles::ProgressStateRole), "progressState" },
             { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
-            { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
-            { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" },
-            { static_cast<int>(Roles::ProgramStatusProgressRole), "programStatusProgress" },
+            { static_cast<int>(Roles::BadgeRole), "badge" },
+            { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
+            { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
         };
     }
     // }}}

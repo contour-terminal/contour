@@ -170,3 +170,17 @@ TEST_CASE("tabBadge.finishedBlockOfEveryEnding", "[tabbadge]")
     CHECK(strongerFinishedBlock(FinishedBlockBadge::None, FinishedBlockBadge::None)
           == FinishedBlockBadge::None);
 }
+
+TEST_CASE("tabBadge.programStatusWon", "[tabbadge]")
+{
+    // The tooltip carries the program's text only when its status is what the tab shows.
+    CHECK(isProgramStatusBadge(TabBadgeKind::Blocked, BadgeKind::Blocked));
+    CHECK(isProgramStatusBadge(TabBadgeKind::Working, BadgeKind::Working));
+    CHECK(isProgramStatusBadge(TabBadgeKind::Error, BadgeKind::Error));
+    CHECK(isProgramStatusBadge(TabBadgeKind::Done, BadgeKind::Done));
+    // A failed command outranks the program's Done, whose text then says nothing about the badge.
+    CHECK_FALSE(isProgramStatusBadge(TabBadgeKind::Error, BadgeKind::Done));
+    CHECK_FALSE(isProgramStatusBadge(TabBadgeKind::Output, BadgeKind::None));
+    CHECK_FALSE(isProgramStatusBadge(TabBadgeKind::Done, BadgeKind::None));
+    CHECK_FALSE(isProgramStatusBadge(TabBadgeKind::None, BadgeKind::None));
+}

@@ -106,3 +106,11 @@ TEST_CASE("expandTabLabel: unknown placeholders echo verbatim", "[contour][tabla
         CHECK(expandTabLabel("[{TabPosition}]", ctx) == "[5]");
     }
 }
+
+TEST_CASE("tabLabelWithFallback: an empty label falls back to the process name", "[contour][tablabel]")
+{
+    using contour::window::tabLabelWithFallback;
+    CHECK(tabLabelWithFallback("", "vim") == "vim");
+    CHECK(tabLabelWithFallback("zsh", "vim") == "zsh");
+    CHECK(tabLabelWithFallback("", "").empty());
+}

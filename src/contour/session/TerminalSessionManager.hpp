@@ -9,6 +9,7 @@
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/window/TabAttention.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <QtCore/QFileSystemWatcher>
@@ -623,10 +624,30 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose hosting tab should refresh its progress indicator.
     void refreshTabProgressForSession(vtworkspace::SessionId session);
 
-    /// Repaints the program-status badge (OSC 7501) of the tab hosting @p session, which pools the records
-    /// of all its panes. No-op if no tab hosts @p session. MUST be called on the GUI thread.
+    /// The program-status path (OSC 7501): repaints the badge of the tab hosting @p session, which pools the
+    /// records of all its panes. Marks no output. No-op if no tab hosts @p session. GUI thread.
     /// @param session The session whose records changed.
-    void refreshTabProgramStatusForSession(vtworkspace::SessionId session);
+    void refreshTabBadgeForSession(vtworkspace::SessionId session);
+
+    /// The output path: @p session wrote something. While it is off screen, and the output is live, its
+    /// tab's badge shows the unseen-output dot; the badge is repainted only when that changed. GUI thread.
+    /// @param session The session written to.
+    /// @param origin  Where the output came from; a mirror's resync is not news.
+    void noteSessionOutput(vtworkspace::SessionId session, window::OutputOrigin origin);
+
+    /// A command in @p session finished: while it is off screen, its tab's badge shows how it ended until
+    /// the tab is seen. GUI thread.
+    /// @param session The session it ran in.
+    /// @param ending  How it ended.
+    void noteCommandFinished(TerminalSession const& session, vtbackend::CommandEnding ending);
+
+    /// Every session of @p window that is on screen now has been seen: its marks clear. Called whenever what
+    /// is on screen may have grown -- the active tab changed, the window was restored, a zoom ended.
+    /// @param window The window whose sessions to look at.
+    void markVisibleSessionsSeen(vtworkspace::WindowId window);
+
+    /// @return Every session's unseen output and finished commands, which the tab strips' badges pool.
+    [[nodiscard]] window::TabAttention const& tabAttention() const noexcept { return _attention; }
 
     /// What the OS taskbar should show right now, aggregated across every reporting session.
     ///
@@ -809,13 +830,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Tells every session where the connection to the daemon (or tmux server) its pane mirrors stands: each
     /// whose factory hosts it remotely shows that it is reconnecting while the connection is sought again;
     /// a local one ignores it. @see TerminalSession::setHostConnection
+    ///
+    /// Also what every window's host chip shows: each controller is told when the chip's state changes.
     /// @param state Where the connection stands now.
-    void setHostConnection(vthost::client::ConnectionState state)
-    {
-        for (auto* session: _sessionsById | std::views::values)
-            if (session != nullptr)
-                session->setHostConnection(state);
-    }
+    void setHostConnection(vthost::client::ConnectionState state);
+
+    /// @return Where the connection to the host stands, as setHostConnection() was last told; Connected
+    ///         until it is told otherwise (a local application has no connection to lose).
+    [[nodiscard]] vthost::client::ConnectionState hostConnection() const noexcept { return _hostConnection; }
 
     /// Returns whether the Qt multimedia backend has been initialized.
     [[nodiscard]] bool isMultimediaReady() const noexcept { return _multimediaReady; }
@@ -915,6 +937,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param splitNode The split node whose ratio changed.
     /// @param ratio     Its new first-child share.
     void reportSplitRatio(vtworkspace::TabId tab, vtworkspace::PaneId splitNode, double ratio);
+
+    /// Repaints @p tab's badge roles on its window's strip.
+    /// @param tab The tab whose badge inputs changed.
+    void refreshTabBadge(vtworkspace::Tab const& tab);
 
     /// Tells the session factory how @p tab is presented now (@see SessionFactory::reportTabPresentation):
     /// what activePaneChanged, paneZoomChanged, tabTitleChanged, tabColorChanged and activeTabChanged call,
@@ -1164,6 +1190,13 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     std::optional<vtworkspace::WindowId> _lastFocusedWindow;
 
     bool _multimediaReady = false;
+
+    /// Where the connection to the host stands. @see setHostConnection
+    vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
+
+    /// Every session's unseen output and finished commands. Keyed by session, so the marks follow a session
+    /// from window to window. @see noteSessionOutput
+    window::TabAttention _attention;
 
     // {{{ vtworkspace model integration
     // The Qt-free layout model: the authoritative window/tab/pane tree. The model owns the

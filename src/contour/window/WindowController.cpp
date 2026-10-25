@@ -16,7 +16,9 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/RemoteChrome.hpp>
+#include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowActivation.hpp>
@@ -290,6 +292,11 @@ QString WindowController::hostLabel() const
     return QString::fromStdString(_manager.app().attachedHostLabel());
 }
 
+int WindowController::hostChipState() const noexcept
+{
+    return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection())));
+}
+
 QString WindowController::applicationVersion() const
 {
     return _manager.app().applicationVersion();
@@ -453,9 +460,9 @@ QHash<int, QByteArray> WindowController::roleNames() const
         { static_cast<int>(Roles::ZoomedRole), "zoomed" },
         { static_cast<int>(Roles::ProgressStateRole), "progressState" },
         { static_cast<int>(Roles::ProgressPercentageRole), "progressPercentage" },
-        { static_cast<int>(Roles::ProgramStatusRole), "programStatus" },
-        { static_cast<int>(Roles::ProgramStatusTextRole), "programStatusText" },
-        { static_cast<int>(Roles::ProgramStatusProgressRole), "programStatusProgress" },
+        { static_cast<int>(Roles::BadgeRole), "badge" },
+        { static_cast<int>(Roles::BadgeTextRole), "badgeText" },
+        { static_cast<int>(Roles::BadgeProgressRole), "badgeProgress" },
     };
 }
 
@@ -497,19 +504,20 @@ QVariant WindowController::data(QModelIndex const& index, int role) const
                        ? static_cast<int>(std::to_underlying(progress.state))
                        : static_cast<int>(progress.percentage);
         }
-        // The three badge roles share one computation per tab, which takes every pane's terminal lock.
-        case Roles::ProgramStatusRole:
-            return tab != nullptr
-                       ? static_cast<int>(std::to_underlying(cachedProgramStatusBadge(*tab, row).kind))
-                       : 0;
-        case Roles::ProgramStatusTextRole:
-            return tab != nullptr ? QString::fromStdString(cachedProgramStatusBadge(*tab, row).text)
-                                  : QString {};
-        case Roles::ProgramStatusProgressRole: {
-            auto const progress =
-                tab != nullptr ? cachedProgramStatusBadge(*tab, row).progress : std::nullopt;
-            return progress ? static_cast<int>(*progress) : -1;
+        // The three badge roles share one program-status computation per tab, which takes every pane's
+        // terminal lock; the attention they weigh it against is the manager's, and takes none.
+        case Roles::BadgeRole:
+            return tab != nullptr ? static_cast<int>(std::to_underlying(tabBadge(*tab, row).kind)) : 0;
+        case Roles::BadgeTextRole: {
+            if (tab == nullptr)
+                return QString {};
+            auto const& program = cachedProgramStatusBadge(*tab, row);
+            return isProgramStatusBadge(tabBadge(*tab, row).kind, program.kind)
+                       ? QString::fromStdString(program.text)
+                       : QString {};
         }
+        case Roles::BadgeProgressRole:
+            return tab != nullptr ? tabBadge(*tab, row).progressPercent.value_or(-1) : -1;
         default: return {};
     }
 }
@@ -554,6 +562,27 @@ ProgramStatusBadge WindowController::cachedProgramStatusBadge(vtworkspace::Tab c
     return _badges.get(tab.id(), [&] { return programStatusBadge(tab, row); });
 }
 
+TabBadge WindowController::tabBadge(vtworkspace::Tab const& tab, int row) const
+{
+    auto const program = cachedProgramStatusBadge(tab, row);
+    auto const pooled = pooledAttention(tab, _manager.tabAttention());
+    // The model holds a percentage as uint8_t; the badge decision speaks int (§3.4), widened here.
+    return resolveTabBadge({
+        .programStatus = program.kind,
+        .progressPercent = program.progress.transform([](uint8_t percent) { return int { percent }; }),
+        .finishedBlock = pooled.finished,
+        .activity = pooled.activity,
+    });
+}
+
+std::string const& WindowController::cachedProcessName(session::TerminalSession const& session) const
+{
+    auto const [entry, inserted] = _processNames.try_emplace(session.modelSessionId().value);
+    if (inserted)
+        entry->second = session.foregroundProcessName();
+    return entry->second;
+}
+
 QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
                                            session::TerminalSession* session,
                                            int row) const
@@ -577,8 +606,12 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
     else
         return QString::fromStdString(windowTitle);
 
-    return QString::fromStdString(
-        expandTabLabel(templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle }));
+    auto expanded =
+        expandTabLabel(templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle });
+    // The process is asked only for a label that came out empty: a blank tab names nothing.
+    if (expanded.empty() && session != nullptr)
+        expanded = tabLabelWithFallback(std::move(expanded), cachedProcessName(*session));
+    return QString::fromStdString(expanded);
 }
 
 // {{{ Tab-strip invokables — structural/session-lifetime ops delegate to the manager, tagged with
@@ -1970,6 +2003,9 @@ void WindowController::notifyTabRowChanged(vtworkspace::TabId tab, QList<Roles> 
 {
     // Whatever changed -- its records, its panes -- may change its badge.
     _badges.drop(tab);
+    // And a relabel asks the process in front afresh.
+    if (roles.contains(Roles::TitleRole))
+        _processNames.clear();
     auto const row = rowOfTab(tab);
     if (row < 0)
         return;
@@ -1989,13 +2025,14 @@ void WindowController::refreshActiveTabHighlight()
         emit dataChanged(index(0),
                          index(rows - 1),
                          { static_cast<int>(Roles::IsActiveRole),
-                           static_cast<int>(Roles::ProgramStatusRole),
-                           static_cast<int>(Roles::ProgramStatusTextRole),
-                           static_cast<int>(Roles::ProgramStatusProgressRole) });
+                           static_cast<int>(Roles::BadgeRole),
+                           static_cast<int>(Roles::BadgeTextRole),
+                           static_cast<int>(Roles::BadgeProgressRole) });
 }
 
 void WindowController::refreshAllTabTitles()
 {
+    _processNames.clear();
     if (auto const rows = rowCount(); rows > 0)
         emit dataChanged(index(0), index(rows - 1), { static_cast<int>(Roles::TitleRole) });
 }
