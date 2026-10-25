@@ -31,9 +31,9 @@ QRect settingsWindowGeometry(SettingsWindowPlacement const& placement)
                 bestArea = area;
             }
         if (best != nullptr)
-            return QRect(reachableWindowPosition(
-                             previous.topLeft() - best->topLeft(), previous.size(), *best, placement.frame),
-                         previous.size());
+            return { reachableWindowPosition(
+                         previous.topLeft() - best->topLeft(), previous.size(), *best, placement.frame),
+                     previous.size() };
     }
 
     auto const& a = placement.anchor;
@@ -43,9 +43,9 @@ QRect settingsWindowGeometry(SettingsWindowPlacement const& placement)
     auto const h =
         std::max(placement.minimum.height(),
                  std::min(placement.preferred.height(), a.height() - frame.top() - frame.bottom()));
-    return QRect(
-        reachableWindowPosition(QPoint((a.width() - w) / 2, (a.height() - h) / 2), QSize(w, h), a, frame),
-        QSize(w, h));
+    return { reachableWindowPosition(
+                 QPoint((a.width() - w) / 2, (a.height() - h) / 2), QSize(w, h), a, frame),
+             QSize(w, h) };
 }
 
 } // namespace contour::window

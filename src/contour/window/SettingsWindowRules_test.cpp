@@ -31,7 +31,7 @@ TEST_CASE("every host has its conventions", "[contour][settingswindow][rules]")
     {
         auto const host = static_cast<HostPlatform>(i);
         auto const row = contour::window::settingsWindowConventionsFor(host);
-        CHECK(expected[i].host == host);
+        CHECK(row.host == host);
         CHECK(row.title == expected[i].title);
         CHECK(row.buttons == expected[i].buttons);
     }

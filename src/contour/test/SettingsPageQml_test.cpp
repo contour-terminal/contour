@@ -168,7 +168,7 @@ struct SettingsPageView
     [[nodiscard]] QQuickItem* item() const { return qobject_cast<QQuickItem*>(page.get()); }
 
     /// @return The Settings window, resized to @p size, shown and active.
-    [[nodiscard]] TestWindow activeWindow(QSize size) { return TestWindow { *host.window(), size }; }
+    [[nodiscard]] TestWindow activeWindow(QSize size) const { return TestWindow { *host.window(), size }; }
 };
 
 /// A settings page over a contour.yml of its own, ready to drive. The controller outlives the page.

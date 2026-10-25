@@ -33,18 +33,20 @@ QString SettingsWindowHost::title() const
     return QString::fromUtf8(_conventions.title.data(), static_cast<qsizetype>(_conventions.title.size()));
 }
 
-int SettingsWindowHost::windowFlags() const noexcept
+Qt::WindowFlags SettingsWindowHost::windowFlags() const noexcept
 {
-    // QML's `flags` takes the window flags as an int; every flag Qt defines fits in its 31 value bits.
-    return static_cast<int>(settingsWindowFlags(_conventions.buttons).toInt());
+    return settingsWindowFlags(_conventions.buttons);
 }
 
 std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* near)
 {
     _controller.refresh();
 
-    auto const existed = _window != nullptr;
-    if (!existed)
+    // Where a window built by an earlier show was left; a window this show builds has no such place.
+    auto previous = std::optional<QRect> {};
+    if (_window)
+        previous = _window->geometry();
+    else
     {
         auto built = _factory(*this);
         if (!built)
@@ -54,7 +56,7 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* near)
 
     auto& window = *_window;
     if (!window.isVisible())
-        place(near, existed);
+        place(near, previous);
     if (window.windowStates().testFlag(Qt::WindowMinimized))
         window.setWindowStates(window.windowStates() & ~Qt::WindowMinimized);
     window.show();
@@ -63,19 +65,26 @@ std::expected<void, SettingsWindowError> SettingsWindowHost::show(QScreen* near)
     return {};
 }
 
-void SettingsWindowHost::place(QScreen* near, bool existed)
+void SettingsWindowHost::place(QScreen* near, std::optional<QRect> previous)
 {
     auto& window = *_window;
     auto* screen = near != nullptr ? near : QGuiApplication::primaryScreen();
     if (screen == nullptr)
         return;
 
+    // Wayland ignores a client's position; only the size is ours to choose there.
+    auto const positionable = QGuiApplication::platformName() != QStringLiteral("wayland");
+
     // Realize the still-hidden window now, as WindowController::restoreWindowPosition does, so its actual
     // native frame participates in the clamp: an unrealized window reports no frame, and a client placed at
-    // the top of the work area would put its title bar out of reach.
+    // the top of the work area would put its title bar out of reach. setScreen() alone does not move a
+    // window within a virtual desktop, so it is moved onto that screen first: creation then picks the
+    // monitor, and with it the DPI and the frame, the window opens on.
     if (window.handle() == nullptr)
     {
         window.setScreen(screen);
+        if (positionable)
+            window.setPosition(screen->availableGeometry().topLeft());
         window.create();
     }
 
@@ -86,17 +95,16 @@ void SettingsWindowHost::place(QScreen* near, bool existed)
     auto const geometry = settingsWindowGeometry({
         .preferred = window.property("preferredSize").toSizeF().toSize(),
         .minimum = window.minimumSize(),
-        .previous = existed ? std::optional { window.geometry() } : std::nullopt,
+        .previous = previous,
         .anchor = screen->availableGeometry(),
         .screens = screens,
         .frame = window.frameMargins(),
     });
 
-    // Wayland ignores a client's position; only the size is ours to choose there.
-    if (QGuiApplication::platformName() == QStringLiteral("wayland"))
-        window.resize(geometry.size());
-    else
+    if (positionable)
         window.setGeometry(geometry);
+    else
+        window.resize(geometry.size());
 }
 
 void SettingsWindowHost::closeSettings()
@@ -120,7 +128,9 @@ std::expected<std::unique_ptr<QQuickWindow>, SettingsWindowError> loadSettingsWi
         QVariantMap { { QStringLiteral("host"), QVariant::fromValue(&host) } }));
     if (qobject_cast<QQuickWindow*>(object.get()) == nullptr)
     {
-        errorLog()("The Settings window did not build a window: {}", component.errorString().toStdString());
+        // An object that was built has no component error to report; what it is says what went wrong.
+        errorLog()("The Settings window did not build a window: {}",
+                   object ? object->metaObject()->className() : component.errorString().toStdString());
         return std::unexpected { SettingsWindowError::LoadFailed };
     }
     return std::unique_ptr<QQuickWindow>(static_cast<QQuickWindow*>(object.release()));

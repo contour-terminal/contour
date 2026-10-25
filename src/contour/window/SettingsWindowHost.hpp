@@ -5,6 +5,7 @@
 #include <contour/window/SettingsWindowRules.hpp>
 
 #include <QtCore/QObject>
+#include <QtCore/QRect>
 #include <QtCore/QString>
 #include <QtQuick/QQuickWindow>
 
@@ -12,6 +13,7 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <optional>
 
 class QQmlEngine;
 class QScreen;
@@ -42,7 +44,7 @@ class SettingsWindowHost final: public QObject
     Q_OBJECT
     Q_PROPERTY(contour::window::SettingsController* controller READ controller CONSTANT)
     Q_PROPERTY(QString title READ title CONSTANT)
-    Q_PROPERTY(int windowFlags READ windowFlags CONSTANT)
+    Q_PROPERTY(Qt::WindowFlags windowFlags READ windowFlags CONSTANT)
 
   public:
     /// @param controller  What the page edits; borrowed, outlives this host.
@@ -66,8 +68,8 @@ class SettingsWindowHost final: public QObject
     /// @return The window title of the host's conventions.
     [[nodiscard]] QString title() const;
 
-    /// @return settingsWindowFlags() of the conventions' buttons, as QML's `flags` takes them.
-    [[nodiscard]] int windowFlags() const noexcept;
+    /// @return settingsWindowFlags() of the conventions' buttons, for SettingsWindow.qml's `flags`.
+    [[nodiscard]] Qt::WindowFlags windowFlags() const noexcept;
 
     /// Refreshes the controller, builds the window on the first call, places a hidden window (R-c),
     /// clears a minimised state (keeping maximised), shows, raises and activates it.
@@ -86,9 +88,9 @@ class SettingsWindowHost final: public QObject
 
   private:
     /// Moves the hidden window to where settingsWindowGeometry() puts it.
-    /// @param near    The screen to open on; null for the primary screen.
-    /// @param existed Whether the window was built before this show, so its last geometry counts.
-    void place(QScreen* near, bool existed);
+    /// @param near     The screen to open on; null for the primary screen.
+    /// @param previous Where the window was last shown; none when this show built it.
+    void place(QScreen* near, std::optional<QRect> previous);
 
     SettingsController& _controller;
     SettingsWindowConventions _conventions;

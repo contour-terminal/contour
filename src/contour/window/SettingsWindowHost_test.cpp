@@ -250,7 +250,15 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     auto const drafted = fieldValue();
     REQUIRE(fx.page().property("editorMode").toString() == "profile");
 
-    fx.host.closeSettings();
+    SECTION("through the page's Close button and the Close shortcut")
+    {
+        fx.host.closeSettings();
+    }
+    SECTION("through the title bar's close button, which destroys the platform window")
+    {
+        REQUIRE(settings.close());
+        CHECK(settings.handle() == nullptr);
+    }
     REQUIRE_FALSE(settings.isVisible());
     CHECK(&fx.show() == &settings);
 
