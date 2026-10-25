@@ -2,9 +2,10 @@
 // A full-width band that says one thing and offers up to two ways to answer it: a glyph, a word-wrapped
 // message, an optional action button and a dismiss button.
 //
-// Placed by its user; it only fills the width it is given. It takes its fill, text and glyph colours,
-// its insets and its font from the `chromeStyle` tokens, so under the Terminal row the band is the
-// content's height (the vertical inset is zero there) in the scheme's own palette[0].
+// Placed by its user; it only fills the width it is given. It takes its fill, text and glyph colours
+// (the buttons' labels included), its insets and its font from the `chromeStyle` tokens, so under the
+// Terminal row the band is the content's height (the vertical inset is zero there) in the scheme's own
+// palette[0].
 //
 // It reports intent through signals and neither performs the action nor remembers the dismissal.
 import QtQuick
@@ -76,6 +77,8 @@ Control {
 
         Button {
             objectName: "bannerAction"
+            // The label sits on the banner's fill, not on the window, so it takes the banner's text colour.
+            palette.buttonText: chromeStyle.colors.bannerText
             visible: root.actionText.length > 0
             text: root.actionText
             font: chromeStyle.type.footnote
@@ -85,6 +88,8 @@ Control {
 
         Button {
             objectName: "bannerDismiss"
+            // The label sits on the banner's fill, not on the window, so it takes the banner's text colour.
+            palette.buttonText: chromeStyle.colors.bannerText
             text: root.dismissText
             font: chromeStyle.type.footnote
             Accessible.name: text

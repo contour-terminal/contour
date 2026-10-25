@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <ranges>
 #include <vector>
@@ -162,7 +163,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
             CHECK(fill.kind == ColorSourceKind::Scheme);
             CHECK(fill.slot == SchemeSlot::Bar);
             CHECK(text.kind == ColorSourceKind::Scheme);
-            CHECK(text.slot == SchemeSlot::Foreground);
+            CHECK(text.slot == SchemeSlot::BarText);
             CHECK(glyph.kind == ColorSourceKind::Scheme);
             CHECK(glyph.slot == SchemeSlot::Warning);
             CHECK(toastFill.kind == ColorSourceKind::Scheme);
@@ -321,4 +322,34 @@ TEST_CASE("chromeTokens.schemeColours", "[chrometokens]")
     CHECK(slotOf(chromeSchemeColorsOf(palette), SchemeSlot::Selection) == 0x020202_rgb);
     palette.selection.background = CellBackgroundColor {};
     CHECK(slotOf(chromeSchemeColorsOf(palette), SchemeSlot::Selection) == 0x010101_rgb);
+}
+
+TEST_CASE("chromeTokens.barTextReadsOnTheBar", "[chrometokens]")
+{
+    using namespace contour::config;
+    auto const slotOf = [](ChromeSchemeColors const& colors, SchemeSlot slot) {
+        return colors.bySlot[static_cast<size_t>(slot)];
+    };
+
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        auto const bar = slotOf(colors, SchemeSlot::Bar);
+        auto const text = slotOf(colors, SchemeSlot::BarText);
+        CHECK((text == palette.defaultForeground || text == palette.defaultBackground));
+        CHECK(contrastRatio(text, bar) >= std::max(contrastRatio(palette.defaultForeground, bar),
+                                                   contrastRatio(palette.defaultBackground, bar)));
+    }
+
+    auto light = ColorPalette {};
+    REQUIRE(defaultColorPalettes("contour-light", light));
+    CHECK(slotOf(chromeSchemeColorsOf(light), SchemeSlot::BarText) == light.defaultBackground);
+    CHECK(contrastRatio(light.defaultBackground, light.normalColor(0)) >= 4.5);
+
+    auto dark = ColorPalette {};
+    REQUIRE(defaultColorPalettes("contour-dark", dark));
+    CHECK(slotOf(chromeSchemeColorsOf(dark), SchemeSlot::BarText) == dark.defaultForeground);
 }

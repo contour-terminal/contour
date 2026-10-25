@@ -66,6 +66,7 @@
 #include <mutex>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -5927,6 +5928,56 @@ TEST_CASE("Banner: the Terminal row is the content's height in the scheme's pale
     {
         CHECK(inset > 0);
         CHECK(item->height() > content->implicitHeight());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Banner: the Terminal row's text and button labels read on its fill (offscreen)",
+          "[contour][gui][qml][kit][banner]")
+{
+    using vtbackend::ColorPreference;
+    auto const appearance = GENERATE(ColorPreference::Light, ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark", "contour");
+    INFO("Qt palette: " << (appearance == ColorPreference::Light ? "light" : "dark"));
+    INFO("scheme: " << schemeName);
+
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
+
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    QQmlEngine engine;
+    contour::test::QmlMessageCapture const warnings;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    setup.scheme = contour::config::chromeSchemeColorsOf(palette);
+    contour::test::installChromeStyle(engine, setup);
+
+    auto banner = createBanner(engine,
+                               QVariantMap { { "text", QStringLiteral("Contour has new defaults") },
+                                             { "actionText", QStringLiteral("Use New") } });
+    auto* item = qobject_cast<QQuickItem*>(banner.get());
+    REQUIRE(item != nullptr);
+    auto* background = item->property("background").value<QQuickItem*>();
+    auto* text = item->findChild<QObject*>(QStringLiteral("bannerText"));
+    REQUIRE(background != nullptr);
+    REQUIRE(text != nullptr);
+
+    auto const fill = contour::platform::toRGBColor(background->property("color").value<QColor>());
+    auto const readsOnFill = [&](QObject const* label) {
+        return vtbackend::contrastRatio(
+            contour::platform::toRGBColor(label->property("color").value<QColor>()), fill);
+    };
+
+    CHECK(readsOnFill(text) >= 4.5);
+    for (auto const* name: { "bannerAction", "bannerDismiss" })
+    {
+        INFO("button: " << name);
+        auto* button = item->findChild<QQuickItem*>(QString::fromLatin1(name));
+        REQUIRE(button != nullptr);
+        auto* label = button->property("contentItem").value<QQuickItem*>();
+        REQUIRE(label != nullptr);
+        CHECK(readsOnFill(label) >= 4.5);
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

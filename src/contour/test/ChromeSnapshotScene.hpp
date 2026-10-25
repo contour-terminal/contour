@@ -10,7 +10,6 @@
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
-#include <contour/platform/GuiTheme.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
@@ -34,8 +33,6 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
-#include <QtGui/QPalette>
-#include <QtGui/QStyleHints>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -112,43 +109,6 @@ enum class SnapshotFontError : uint8_t
     families.removeDuplicates();
     return families;
 }
-
-/// Forces the application's palette and color scheme to one appearance for the lifetime of the scope.
-///
-/// The suite never pins a scheme (see test_main.cpp), so the destructor gives back the palette it found
-/// and unpins the scheme.
-class ScopedChromeAppearance
-{
-  public:
-    /// @param appearance The appearance to force: buildThemePalette's palette, and on Qt 6.8 or later
-    ///                   the matching QStyleHints color scheme.
-    explicit ScopedChromeAppearance(vtbackend::ColorPreference appearance):
-        _saved { QGuiApplication::palette() }
-    {
-        auto const scheme =
-            appearance == vtbackend::ColorPreference::Light ? Qt::ColorScheme::Light : Qt::ColorScheme::Dark;
-        QGuiApplication::setPalette(platform::buildThemePalette(scheme));
-#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-        QGuiApplication::styleHints()->setColorScheme(scheme);
-#endif
-    }
-
-    ~ScopedChromeAppearance()
-    {
-        QGuiApplication::setPalette(_saved);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-        QGuiApplication::styleHints()->unsetColorScheme();
-#endif
-    }
-
-    ScopedChromeAppearance(ScopedChromeAppearance const&) = delete;
-    ScopedChromeAppearance& operator=(ScopedChromeAppearance const&) = delete;
-    ScopedChromeAppearance(ScopedChromeAppearance&&) = delete;
-    ScopedChromeAppearance& operator=(ScopedChromeAppearance&&) = delete;
-
-  private:
-    QPalette _saved;
-};
 
 /// One snapshot variant, built as the real Main.qml over mocks and ready to show.
 ///

@@ -65,6 +65,7 @@ enum class SchemeSlot : uint8_t
     Background = 0, //!< The scheme's default background.
     Foreground,     //!< The scheme's default foreground.
     Bar,            //!< ANSI colour 0, the bar fill.
+    BarText,        //!< Whichever of the default foreground and background reads better on @c Bar.
     Secondary,      //!< ANSI colour 8.
     Selection,      //!< The selection background.
     Accent,         //!< ANSI colour 4.
@@ -386,7 +387,7 @@ namespace detail
         .tui = { .inactivePaneOpacity = 0.62, .toastStyle = ToastStyle::Inverse },
         .layout = { .dialog = DialogPlacement::Centered },
         .colors = { schemeColor(SchemeSlot::Bar),
-                    schemeColor(SchemeSlot::Foreground),
+                    schemeColor(SchemeSlot::BarText),
                     schemeColor(SchemeSlot::Warning),
                     schemeColor(SchemeSlot::Foreground),
                     schemeColor(SchemeSlot::Background) },
@@ -451,10 +452,19 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
         return palette.defaultBackground;
     }();
 
+    // ANSI colour 0 is black in a light scheme as in a dark one, but a light scheme's foreground is dark
+    // too: text on the bar takes whichever end of the scheme stands off it.
+    auto const bar = palette.normalColor(0);
+    auto const barText = vtbackend::contrastRatio(palette.defaultForeground, bar)
+                                 >= vtbackend::contrastRatio(palette.defaultBackground, bar)
+                             ? palette.defaultForeground
+                             : palette.defaultBackground;
+
     auto colors = ChromeSchemeColors {};
     colors.bySlot[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Foreground)] = palette.defaultForeground;
-    colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = palette.normalColor(0);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = bar;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)] = barText;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Secondary)] = palette.brightColor(0);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Selection)] = selection;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Accent)] = palette.normalColor(4);
