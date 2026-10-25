@@ -76,7 +76,6 @@
 #include <vthost/DaemonBinary.hpp>
 #include <vthost/DaemonImage.hpp>
 #include <vthost/DaemonStarter.hpp>
-#include <vthost/DurableFiles.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/PlatformStreams.hpp>
 #include <vthost/ServiceControl.hpp>
@@ -1093,9 +1092,10 @@ int ContourApp::daemonAction()
     }
 
     // On --stdio every byte of stdout belongs to the protocol, and from before the configuration
-    // loads: a warning it emits goes to the default log sink, std::cout, as logging is installed only
-    // after the configuration names the socket. A refused combination is reported first, with stdout
-    // still untouched.
+    // loads. The log sinks write to stderr, but a stray std::cout or printf write, or a daemon this
+    // relay auto-starts and that inherits descriptor 1, would still corrupt a frame, so
+    // makeProcessStdioStream() points stdout at stderr. A refused combination is reported first, with
+    // stdout still untouched.
     auto stdioClient = std::shared_ptr<vthost::IByteStream> {};
     if (parameters().get<bool>("contour.daemon.stdio"))
     {
@@ -1549,7 +1549,6 @@ int ContourApp::daemonVerbAction(DaemonVerb verb, std::string const& prefix)
             auto const savedWorkspace = snapshotPath.transform([](std::filesystem::path const& path) {
                 return vthost::SessionSnapshotStore { core::platform::NativeFileSystem::instance(),
                                                       vthost::NativeFilePrivacy::instance(),
-                                                      vthost::NativeDurableFiles::instance(),
                                                       path };
             });
             auto const options = StopOptions {

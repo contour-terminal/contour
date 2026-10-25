@@ -42,7 +42,7 @@ The layering is enforced: a module links only the modules its row in
 CPMAddPackage(
     NAME core-cpp
     GITHUB_REPOSITORY contour-terminal/core-cpp
-    GIT_TAG v0.8.0
+    GIT_TAG v0.9.0
     SYSTEM YES              # core-cpp headers never trip your -Werror
     EXCLUDE_FROM_ALL YES    # build only what you link
     OPTIONS "CORE_CPP_WITH_TUI ON" "CORE_CPP_WITH_TLS OFF")
@@ -64,7 +64,7 @@ consumes core-cpp this way:
 # Copy a tag into your tree, then commit the result as one change. The script is a core-cpp
 # checkout's, not the copy's: sync reads a repository, and the repository it reads by default is
 # the one the script itself is in.
-cmake -DMODE=sync -DREF=v0.8.0 -DDEST=vendor/core-cpp \
+cmake -DMODE=sync -DREF=v0.9.0 -DDEST=vendor/core-cpp \
       -P /path/to/core-cpp/cmake/CoreCppVendor.cmake
 
 # Verify it. Needs no git, so register it as a test of your own suite.
@@ -91,7 +91,7 @@ cmake --workflow --preset ci-gcc-release      # configure, build and test in one
 | Windows (from a Visual Studio developer shell) | `cl-debug`, `cl-release`, `clangcl-debug`, `clangcl-release`, `cl-release-tls`; `cl-release-arm64` from an arm64 one |
 | Any, with emsdk (`EMSDK` set) | `emscripten`: single-threaded WebAssembly, tests run under node |
 
-The build goes through fastcache-cc when a fastcached daemon answers, otherwise ccache; see
+The build goes through pace-cc when a pace-kv daemon answers, otherwise ccache; see
 [`cmake/portable/README.md`](cmake/portable/README.md).
 
 ## Requirements

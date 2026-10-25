@@ -11,6 +11,7 @@
 
 #include <iostream>
 #include <sstream>
+#include <string>
 
 namespace
 {
@@ -21,21 +22,25 @@ auto netLog = core::log::Category { "net", "A category LOG=net selects." };
 auto tuiLog =
     core::log::Category { "tui", "A category LOG=net leaves out.", core::log::Category::State::Enabled };
 
-/// Redirects std::cout into a buffer for as long as it lives.
-class CapturedStandardOutput
+/// Redirects one standard stream into a buffer for as long as it lives.
+class CapturedStream
 {
   public:
-    CapturedStandardOutput(): _previous { std::cout.rdbuf(_buffer.rdbuf()) } {}
-    ~CapturedStandardOutput() { std::cout.rdbuf(_previous); }
+    explicit CapturedStream(std::ostream& stream):
+        _stream { stream }, _previous { stream.rdbuf(_buffer.rdbuf()) }
+    {
+    }
+    ~CapturedStream() { _stream.rdbuf(_previous); }
 
-    CapturedStandardOutput(CapturedStandardOutput const&) = delete;
-    CapturedStandardOutput& operator=(CapturedStandardOutput const&) = delete;
-    CapturedStandardOutput(CapturedStandardOutput&&) = delete;
-    CapturedStandardOutput& operator=(CapturedStandardOutput&&) = delete;
+    CapturedStream(CapturedStream const&) = delete;
+    CapturedStream& operator=(CapturedStream const&) = delete;
+    CapturedStream(CapturedStream&&) = delete;
+    CapturedStream& operator=(CapturedStream&&) = delete;
 
     [[nodiscard]] std::string text() const { return _buffer.str(); }
 
   private:
+    std::ostream& _stream;
     std::ostringstream _buffer;
     std::streambuf* _previous;
 };
@@ -51,15 +56,25 @@ TEST_CASE("main() enables the log categories LOG names, and only those", "[testi
     CHECK_FALSE(tuiLog.isEnabled());
 }
 
-TEST_CASE("main() writes the categories LOG enables to standard output", "[testing]")
+TEST_CASE("main() writes the categories LOG enables to standard error", "[testing]")
 {
     if (core::LiveEnvironment {}.get("LOG") != "net")
         SKIP("needs LOG=net in the environment, as ctest runs this binary");
 
-    auto const output = CapturedStandardOutput {};
-    netLog()("a line on net");
-    tuiLog()("a line on tui");
+    auto outputText = std::string {};
+    auto errorText = std::string {};
+    {
+        // Read before the assertions: Catch2 reports to std::cout too.
+        auto const output = CapturedStream { std::cout };
+        auto const error = CapturedStream { std::cerr };
+        netLog()("a line on net");
+        tuiLog()("a line on tui");
+        outputText = output.text();
+        errorText = error.text();
+    }
 
-    CHECK(output.text().contains("[net] a line on net"));
-    CHECK_FALSE(output.text().contains("a line on tui"));
+    CHECK(errorText.contains("[net] a line on net"));
+    CHECK_FALSE(errorText.contains("a line on tui"));
+    // Standard output is the program's own, which for a test binary is Catch2's report.
+    CHECK(outputText.empty());
 }

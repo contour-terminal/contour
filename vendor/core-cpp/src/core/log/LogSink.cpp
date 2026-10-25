@@ -205,15 +205,18 @@ std::expected<std::unique_ptr<ScopedOutput>, std::string> ScopedOutput::create(O
 
 ScopedOutput::ScopedOutput(OutputConfig const& config, std::ofstream file):
     _file { std::move(file) },
-    _sink { true, [this](std::string_view const& text) {
-               // Sink::write hands us the FULLY formatted message, so locking here makes each
-               // line atomic — precisely the granularity that matters. The write and the flush
-               // are one critical section, so two threads cannot interleave a line's bytes.
-               auto const guard = std::lock_guard { _mutex };
-               auto& out = _file.is_open() ? static_cast<std::ostream&>(_file) : std::cerr;
-               out.write(text.data(), static_cast<std::streamsize>(text.size()));
-               out.flush();
-           } }
+    _sink { true,
+            [this](std::string_view const& text) {
+                // Sink::write hands us the FULLY formatted message, so locking here makes each
+                // line atomic — precisely the granularity that matters. The write and the flush
+                // are one critical section, so two threads cannot interleave a line's bytes.
+                auto const guard = std::lock_guard { _mutex };
+                auto& out = _file.is_open() ? static_cast<std::ostream&>(_file) : std::cerr;
+                out.write(text.data(), static_cast<std::streamsize>(text.size()));
+                out.flush();
+            } },
+    _previousSink { installedSink() },
+    _previousFormatter { installedFormatter() }
 {
     // NEVER configure on an empty filter: it would match no pattern and thereby disable every
     // category. An empty filter means "leave what $LOG set alone".
@@ -223,16 +226,16 @@ ScopedOutput::ScopedOutput(OutputConfig const& config, std::ofstream file):
 
     auto const options = FormatterOptions {
         // A file must never receive SGR escapes. For stderr the gate is stderr's own
-        // tty-ness, not stdout's, which Sink::console() writes to and which can be redirected
-        // independently.
+        // tty-ness, not stdout's, which can be redirected independently.
         .colorize = !_file.is_open() && isStdErrTerminal(),
         .showTimestamp = true,
         .showProcessId = config.showProcessId,
     };
 
     // Snapshot before installing, so the destructor restores exactly what was here — including
-    // whatever core::cli::App already set up. Categories constructed AFTER this point are not
-    // covered; they default to the console sink, which is why this is installed early.
+    // whatever core::cli::App already set up. A category constructed after this point starts out
+    // with the installed sink and formatter, so it writes here too; the destructor gives it what
+    // was installed before.
     for (auto const& each: get())
     {
         auto& target = each.get();
@@ -247,11 +250,23 @@ ScopedOutput::ScopedOutput(OutputConfig const& config, std::ofstream file):
 
 ScopedOutput::~ScopedOutput()
 {
-    // MUST run before _sink dies: every category holds a reference_wrapper into it.
-    for (auto const& point: _restorePoints)
+    // MUST run before _sink dies: every category holds a reference_wrapper into it, and so does the
+    // store, for the categories constructed from now on. Restoring the store's own first also
+    // covers a category constructed while this was installed, which has no restore point.
+    setSink(_previousSink);
+    setFormatter(_previousFormatter);
+
+    // Then each category that existed at installation gets back exactly what it had. By looking up
+    // the categories that exist NOW, so one destroyed in between is not written through.
+    for (auto const& each: get())
     {
-        point.target->setSink(*point.previousSink);
-        point.target->setFormatter(point.previousFormatter);
+        auto& target = each.get();
+        auto const point =
+            std::ranges::find_if(_restorePoints, [&](RestorePoint const& p) { return p.target == &target; });
+        if (point == _restorePoints.end())
+            continue;
+        target.setSink(*point->previousSink);
+        target.setFormatter(point->previousFormatter);
     }
 }
 

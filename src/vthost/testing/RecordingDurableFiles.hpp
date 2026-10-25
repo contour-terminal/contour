@@ -2,11 +2,8 @@
 #pragma once
 
 /// @file
-/// An IDurableFiles over a FileSystem that syncs nothing, creates and renames through the file system, and
-/// remembers what
-/// it was asked to do, in order, and what each file held when it was.
-
-#include <core/platform/FileSystem.hpp>
+/// A FileSystem over in-memory files that syncs nothing, and remembers which durability calls it was asked
+/// for, in order, and what each file held when it was.
 
 #include <cstdint>
 #include <expected>
@@ -16,12 +13,12 @@
 #include <utility>
 #include <vector>
 
-#include <vthost/DurableFiles.hpp>
+#include <vthost/testing/ForwardingFileSystem.hpp>
 
 namespace vthost::testing
 {
 
-/// The calls of IDurableFiles.
+/// The durability calls of core::platform::FileSystem.
 enum class DurableOp : std::uint8_t
 {
     CreateExclusive = 0,
@@ -40,41 +37,35 @@ struct RecordedDurableCall
     bool operator==(RecordedDurableCall const&) const = default;
 };
 
-/// Records every call; fails the one @ref failing names.
-class RecordingDurableFiles final: public IDurableFiles
+/// Records every durability call; fails the one @ref failing names. Everything else passes through to the
+/// in-memory files.
+class RecordingDurableFiles final: public ForwardingFileSystem
 {
   public:
-    /// @param fileSystem The file system renamed in and sampled at each call.
-    explicit RecordingDurableFiles(core::platform::FileSystem const& fileSystem): _fileSystem { fileSystem }
-    {
-    }
-
     /// The calls so far, in order, the failed one included.
     mutable std::vector<RecordedDurableCall> calls;
     /// When set, every call of this operation fails and does nothing.
     std::optional<DurableOp> failing;
 
-    [[nodiscard]] std::expected<void, std::string> createExclusive(
+    [[nodiscard]] std::expected<void, std::string> createNewFile(
         std::filesystem::path const& path) const override
     {
-        return record(DurableOp::CreateExclusive, path, {})
-            .and_then([&]() -> std::expected<void, std::string> {
-                if (_fileSystem.exists(path))
-                    return std::unexpected("File exists: " + path.string());
-                return _fileSystem.writeFile(path, {});
-            });
+        return record(DurableOp::CreateExclusive, path, {}).and_then([&] {
+            return ForwardingFileSystem::createNewFile(path);
+        });
     }
 
     [[nodiscard]] std::expected<void, std::string> syncFile(std::filesystem::path const& path) const override
     {
-        return record(DurableOp::SyncFile, path, _fileSystem.readFile(path).value_or(std::string {}));
+        return record(DurableOp::SyncFile, path, files.readFile(path).value_or(std::string {}));
     }
 
-    [[nodiscard]] std::expected<void, std::string> replace(std::filesystem::path const& from,
-                                                           std::filesystem::path const& to) const override
+    [[nodiscard]] std::expected<void, std::string> replaceFile(std::filesystem::path const& from,
+                                                               std::filesystem::path const& to) const override
     {
-        return record(DurableOp::Replace, from, _fileSystem.readFile(from).value_or(std::string {}))
-            .and_then([&] { return _fileSystem.rename(from, to); });
+        return record(DurableOp::Replace, from, files.readFile(from).value_or(std::string {})).and_then([&] {
+            return ForwardingFileSystem::replaceFile(from, to);
+        });
     }
 
     [[nodiscard]] std::expected<void, std::string> syncDirectory(
@@ -93,8 +84,6 @@ class RecordingDurableFiles final: public IDurableFiles
             return std::unexpected("Input/output error: " + path.string());
         return {};
     }
-
-    core::platform::FileSystem const& _fileSystem;
 };
 
 } // namespace vthost::testing

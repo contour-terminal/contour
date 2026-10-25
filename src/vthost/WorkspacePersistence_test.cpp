@@ -91,8 +91,7 @@ struct PersistenceHarness
         return failing;
     } };
     RecordingFilePrivacy privacy { files };
-    RecordingDurableFiles durability { files };
-    SessionSnapshotStore store { files, privacy, durability, fs::path { SnapshotFile } };
+    SessionSnapshotStore store { files, privacy, fs::path { SnapshotFile } };
     std::vector<std::string> lines; ///< What the writer reported.
     SnapshotWriter writer { store, WriterThreading::Inline, [this](std::string_view line) {
                                lines.emplace_back(line);
@@ -317,10 +316,10 @@ TEST_CASE("a failing disk is reported once until a write succeeds", "[vthost][sn
 TEST_CASE("a background writer writes the newest snapshot and flush waits for it",
           "[vthost][snapshot][persistence][threading]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, fs::path { SnapshotFile } };
+    auto const store = SessionSnapshotStore { durability, privacy, fs::path { SnapshotFile } };
     auto const at = [](int seconds) {
         return std::chrono::sys_seconds { std::chrono::seconds { seconds } };
     };
@@ -362,10 +361,10 @@ TEST_CASE("a background writer writes the newest snapshot and flush waits for it
 
 TEST_CASE("prepareRestore turns each verdict into a restore or nothing", "[vthost][snapshot][persistence]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, fs::path { SnapshotFile } };
+    auto const store = SessionSnapshotStore { durability, privacy, fs::path { SnapshotFile } };
     auto lines = std::vector<std::string> {};
     auto const report = [&](std::string_view line) {
         lines.emplace_back(line);

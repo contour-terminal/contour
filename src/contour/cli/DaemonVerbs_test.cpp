@@ -235,11 +235,11 @@ namespace
 /// A saved workspace of one tab in an in-memory file, as the daemon labelled `default` keeps it.
 struct SavedWorkspace
 {
-    core::platform::testing::InMemoryFileSystem files {};
+    vthost::testing::RecordingDurableFiles durability {};
+    core::platform::testing::InMemoryFileSystem& files { durability.files };
     vthost::testing::RecordingFilePrivacy privacy { files };
-    vthost::testing::RecordingDurableFiles durability { files };
     vthost::SessionSnapshotStore store {
-        files, privacy, durability, std::filesystem::path { "/state/contour/sessions/default.snapshot" }
+        durability, privacy, std::filesystem::path { "/state/contour/sessions/default.snapshot" }
     };
 
     SavedWorkspace()
@@ -305,11 +305,9 @@ TEST_CASE("daemon stop with no daemon running clears the saved workspace on cons
 TEST_CASE("daemon stop with no daemon running and nothing saved creates no file", "[contour][cli][daemon]")
 {
     auto saved = SavedWorkspace {};
-    auto const store =
-        vthost::SessionSnapshotStore { saved.files,
-                                       saved.privacy,
-                                       saved.durability,
-                                       std::filesystem::path { "/state/contour/sessions/other.snapshot" } };
+    auto const store = vthost::SessionSnapshotStore {
+        saved.durability, saved.privacy, std::filesystem::path { "/state/contour/sessions/other.snapshot" }
+    };
     auto port = FakeControlPort { ControlErrorCode::NotRunning };
     auto prompt = FakePrompt { contour::cli::Confirmation::Confirmed };
     auto out = std::ostringstream {};

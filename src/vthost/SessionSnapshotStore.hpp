@@ -6,10 +6,11 @@
 /// without ever losing the last good workspace.
 ///
 /// A write goes to a private temporary sibling, which is synced to the disk before it is renamed over the
-/// file, and the rename is synced too (IDurableFiles): a daemon crash, a power loss or a kernel crash at any
-/// point leaves either the previous snapshot or the new one, whole. The temporary file is created
-/// exclusively, so a link planted in its place is not followed; the content is then written by name, which
-/// would follow a link swapped in between, but only the user can do that inside the `0700` directory.
+/// file, and the rename is synced too (core::platform::FileSystem::syncFile()): a daemon crash, a power loss
+/// or a kernel crash at any point leaves either the previous snapshot or the new one, whole. The temporary
+/// file is created exclusively, so a link planted in its place is not followed; the content is then written
+/// by name, which would follow a link swapped in between, but only the user can do that inside the `0700`
+/// directory.
 ///
 /// A restore never destroys the file it reads. beginRestore() moves `<file>` to `<file>.restored`; the first
 /// successful periodic write after a restore that realized something deletes it (confirmRestored()). A
@@ -26,7 +27,6 @@
 #include <string>
 #include <string_view>
 
-#include <vthost/DurableFiles.hpp>
 #include <vthost/FilePrivacy.hpp>
 #include <vthost/SessionSnapshot.hpp>
 
@@ -90,13 +90,12 @@ struct StoreFailure
 class SessionSnapshotStore
 {
   public:
-    /// @param fileSystem The file system the snapshot lives on.
+    /// @param fileSystem The file system the snapshot lives on, and the durability calls reach the disk
+    ///        through.
     /// @param privacy Makes what the store creates the user's alone.
-    /// @param durability Flushes a write to the disk before and after it replaces the snapshot.
     /// @param path The snapshot file.
     SessionSnapshotStore(core::platform::FileSystem const& fileSystem,
                          IFilePrivacy const& privacy,
-                         IDurableFiles const& durability,
                          std::filesystem::path path);
 
     /// Replaces the snapshot with @p snapshot: a private temporary sibling, synced, then renamed over the
@@ -139,7 +138,6 @@ class SessionSnapshotStore
 
     core::platform::FileSystem const& _fileSystem;
     IFilePrivacy const& _privacy;
-    IDurableFiles const& _durability;
     std::filesystem::path _path;
 };
 

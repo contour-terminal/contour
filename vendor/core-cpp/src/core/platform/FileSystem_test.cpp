@@ -1085,3 +1085,143 @@ TEST_CASE("NativeFileSystem reports a failure on a path the narrow encoding cann
     REQUIRE_FALSE(renamed.has_value());
     CHECK(renamed.error().contains(spelled));
 }
+
+namespace
+{
+/// What one backend's durable replace leaves behind.
+struct DurableReplaceOutcome
+{
+    bool created = false;
+    bool synced = false;
+    bool replaced = false;
+    bool directorySynced = false;
+    std::string target;
+    bool temporaryRemains = true;
+
+    bool operator==(DurableReplaceOutcome const&) const = default;
+};
+
+/// Replaces @p dir's `snapshot` the way a crash-safe writer does, over @p fs, so the model and the
+/// real filesystem are held to the same answers.
+[[nodiscard]] DurableReplaceOutcome replaceDurably(FileSystem const& fs, std::filesystem::path const& dir)
+{
+    auto const temporary = dir / "snapshot.tmp";
+    auto const target = dir / "snapshot";
+    REQUIRE(fs.writeFile(target, "old").has_value());
+
+    auto outcome = DurableReplaceOutcome {};
+    outcome.created = fs.createNewFile(temporary).has_value();
+    REQUIRE(fs.writeFile(temporary, "new").has_value());
+    outcome.synced = fs.syncFile(temporary).has_value();
+    outcome.replaced = fs.replaceFile(temporary, target).has_value();
+    outcome.directorySynced = fs.syncDirectory(dir).has_value();
+    outcome.target = contentsOf(fs, target);
+    outcome.temporaryRemains = fs.exists(temporary);
+    return outcome;
+}
+} // namespace
+
+TEST_CASE("a durable replace answers alike in the model and on the real filesystem", "[FileSystem][durable]")
+{
+    auto const expected = DurableReplaceOutcome {
+        .created = true,
+        .synced = true,
+        .replaced = true,
+        .directorySynced = true,
+        .target = "new",
+        .temporaryRemains = false,
+    };
+
+    auto model = InMemoryFileSystem { { .path = "/data", .isDirectory = true } };
+    CHECK(replaceDurably(model, "/data") == expected);
+
+    auto const dir = core::testing::ScopedTempDir { "core_durable" };
+    CHECK(replaceDurably(core::platform::NativeFileSystem::instance(), dir.path()) == expected);
+}
+
+TEST_CASE("createNewFile creates an empty owner-only file, and only once", "[FileSystem][durable]")
+{
+    namespace fs = std::filesystem;
+    auto const check = [](FileSystem const& backend, fs::path const& file) {
+        REQUIRE(backend.createNewFile(file).has_value());
+        CHECK(backend.isRegularFile(file));
+        CHECK(contentsOf(backend, file).empty());
+        auto const refused = backend.createNewFile(file);
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().contains("snapshot.tmp"));
+    };
+
+    auto model = InMemoryFileSystem { { .path = "/data", .isDirectory = true } };
+    check(model, "/data/snapshot.tmp");
+    CHECK(model.permissions("/data/snapshot.tmp") == (fs::perms::owner_read | fs::perms::owner_write));
+
+    auto const dir = core::testing::ScopedTempDir { "core_create_new" };
+    auto const& native = core::platform::NativeFileSystem::instance();
+    check(native, dir.path() / "snapshot.tmp");
+#ifndef _WIN32
+    // Windows has no group or other bits for std::filesystem to report.
+    CHECK(native.permissions(dir.path() / "snapshot.tmp")
+          == (fs::perms::owner_read | fs::perms::owner_write));
+#endif
+}
+
+TEST_CASE("createNewFile refuses a symlink planted where the file goes", "[FileSystem][durable]")
+{
+    // The model: a dangling symlink is still something there.
+    auto model = InMemoryFileSystem { { .path = "/data", .isDirectory = true } };
+    model.addSymlink("/data/planted.tmp", "/data/elsewhere");
+    CHECK_FALSE(model.createNewFile("/data/planted.tmp").has_value());
+    CHECK_FALSE(model.exists("/data/elsewhere"));
+
+    // The real filesystem: the link is neither followed nor replaced.
+    namespace fs = std::filesystem;
+    auto const dir = core::testing::ScopedTempDir { "core_create_new_link" };
+    auto const elsewhere = dir.path() / "elsewhere";
+    auto const planted = dir.path() / "planted.tmp";
+    auto ec = std::error_code {};
+    fs::create_symlink(elsewhere, planted, ec);
+    if (ec)
+        SKIP("this filesystem refuses symlinks: " + ec.message());
+
+    auto const& native = core::platform::NativeFileSystem::instance();
+    auto const refused = native.createNewFile(planted);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().contains("planted.tmp"));
+    CHECK_FALSE(fs::exists(elsewhere));
+    CHECK(fs::is_symlink(planted));
+}
+
+TEST_CASE("the durability calls say why they cannot, in the model and on the real filesystem",
+          "[FileSystem][durable]")
+{
+    auto const check = [](FileSystem const& backend, std::filesystem::path const& dir) {
+        auto const missing = dir / "missing";
+        REQUIRE(backend.writeFile(dir / "file", "content").has_value());
+
+        auto const synced = backend.syncFile(missing);
+        REQUIRE_FALSE(synced.has_value());
+        CHECK(synced.error().contains("missing"));
+
+        auto const replaced = backend.replaceFile(missing, dir / "target");
+        REQUIRE_FALSE(replaced.has_value());
+        CHECK(replaced.error().contains("missing"));
+        CHECK_FALSE(backend.exists(dir / "target"));
+
+        auto const directorySynced = backend.syncDirectory(missing);
+        REQUIRE_FALSE(directorySynced.has_value());
+        CHECK(directorySynced.error().contains("missing"));
+
+        // A file is not a directory to sync.
+        CHECK_FALSE(backend.syncDirectory(dir / "file").has_value());
+
+        auto const created = backend.createNewFile(missing / "child");
+        REQUIRE_FALSE(created.has_value());
+        CHECK(created.error().contains("child"));
+    };
+
+    auto model = InMemoryFileSystem { { .path = "/data", .isDirectory = true } };
+    check(model, "/data");
+
+    auto const dir = core::testing::ScopedTempDir { "core_durable_errors" };
+    check(core::platform::NativeFileSystem::instance(), dir.path());
+}

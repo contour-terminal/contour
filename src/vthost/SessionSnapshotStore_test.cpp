@@ -61,10 +61,10 @@ namespace
 TEST_CASE("write makes the directory and the file private before any content lands",
           "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
 
     REQUIRE(store.write(sample()));
     CHECK(privacy.calls
@@ -79,10 +79,10 @@ TEST_CASE("write makes the directory and the file private before any content lan
 
 TEST_CASE("write syncs the content before the rename, and the rename after it", "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
 
     REQUIRE(store.write(sample()));
     auto const bytes = encodeSnapshot(sample());
@@ -97,10 +97,10 @@ TEST_CASE("write syncs the content before the rename, and the rename after it", 
 TEST_CASE("write drops a temporary file a crash left, and never follows one planted there",
           "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
     REQUIRE(files.createDirectories(stateDir()));
     REQUIRE(files.writeFile(tempFile(), "left by a crash"));
 
@@ -122,10 +122,10 @@ TEST_CASE("a failed sync keeps the previous snapshot", "[vthost][snapshot][store
                            // The rename landed; only whether it survives a power loss is in doubt.
                            Row { DurableOp::SyncDirectory, StoreStep::SyncDirectory, 2 } })
     {
-        auto files = core::platform::testing::InMemoryFileSystem {};
+        auto durability = RecordingDurableFiles {};
+        auto& files = durability.files;
         auto privacy = RecordingFilePrivacy { files };
-        auto durability = RecordingDurableFiles { files };
-        auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+        auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
         REQUIRE(store.write(sample(1)));
         durability.failing = row.failing;
         auto const result = store.write(sample(2));
@@ -146,8 +146,7 @@ TEST_CASE("a failed write keeps the previous snapshot and leaves no temporary fi
             return failing && op == FaultOp::WriteFile && path == tempFile();
         } };
         auto privacy = RecordingFilePrivacy { files };
-        auto durability = RecordingDurableFiles { files };
-        auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+        auto const store = SessionSnapshotStore { files, privacy, snapshotFile() };
         REQUIRE(store.write(sample(1)));
         failing = true;
         auto const result = store.write(sample(2));
@@ -163,8 +162,7 @@ TEST_CASE("a failed write keeps the previous snapshot and leaves no temporary fi
             return failing && op == FaultOp::Rename && path == snapshotFile();
         } };
         auto privacy = RecordingFilePrivacy { files };
-        auto durability = RecordingDurableFiles { files };
-        auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+        auto const store = SessionSnapshotStore { files, privacy, snapshotFile() };
         REQUIRE(store.write(sample(1)));
         failing = true;
         auto const result = store.write(sample(2));
@@ -175,11 +173,11 @@ TEST_CASE("a failed write keeps the previous snapshot and leaves no temporary fi
     }
     SECTION("the file cannot be restricted")
     {
-        auto files = core::platform::testing::InMemoryFileSystem {};
+        auto durability = RecordingDurableFiles {};
+        auto& files = durability.files;
         auto privacy = RecordingFilePrivacy { files };
-        auto durability = RecordingDurableFiles { files };
         privacy.failure = "denied";
-        auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+        auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
         auto const result = store.write(sample());
         REQUIRE_FALSE(result);
         CHECK(result.error().step == StoreStep::Restrict);
@@ -190,10 +188,10 @@ TEST_CASE("a failed write keeps the previous snapshot and leaves no temporary fi
 
 TEST_CASE("load reports each state of the file", "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
 
     SECTION("no file")
     {
@@ -252,10 +250,10 @@ TEST_CASE("load reports each state of the file", "[vthost][snapshot][store]")
 
 TEST_CASE("a restore keeps its file until the restored workspace is written", "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
     REQUIRE(store.write(sample()));
     auto const loaded = store.load();
     REQUIRE(loaded.verdict == LoadVerdict::Restorable);
@@ -275,10 +273,10 @@ TEST_CASE("a restore keeps its file until the restored workspace is written", "[
 
 TEST_CASE("a restore that realized nothing is retried once, then set aside", "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
     REQUIRE(store.write(sample()));
     REQUIRE(store.beginRestore(RestoreSource::Snapshot));
     REQUIRE(store.endRestore(RestoreSource::Snapshot, RestoreOutcome::NothingRealized));
@@ -297,10 +295,10 @@ TEST_CASE("a restore that realized nothing is retried once, then set aside", "[v
 
 TEST_CASE("a damaged retry copy does not hide the current snapshot", "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
     REQUIRE(store.write(sample(5)));
     REQUIRE(files.writeFile(restoredFile(), "damaged"));
     auto const loaded = store.load();
@@ -358,10 +356,10 @@ TEST_CASE("daemonSnapshotPath keys a daemon at a socket of its own by that socke
 
 TEST_CASE("discard empties the snapshot and drops a pending restore", "[vthost][snapshot][store]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
+    auto durability = RecordingDurableFiles {};
+    auto& files = durability.files;
     auto privacy = RecordingFilePrivacy { files };
-    auto durability = RecordingDurableFiles { files };
-    auto const store = SessionSnapshotStore { files, privacy, durability, snapshotFile() };
+    auto const store = SessionSnapshotStore { durability, privacy, snapshotFile() };
     REQUIRE(store.write(sample()));
 
     SECTION("a plain snapshot")
@@ -379,7 +377,7 @@ TEST_CASE("discard empties the snapshot and drops a pending restore", "[vthost][
     }
     SECTION("no snapshot at all")
     {
-        auto const fresh = SessionSnapshotStore { files, privacy, durability, stateDir() / "other.snapshot" };
+        auto const fresh = SessionSnapshotStore { durability, privacy, stateDir() / "other.snapshot" };
         REQUIRE(fresh.discard());
         CHECK(fresh.load().verdict == LoadVerdict::Empty);
     }

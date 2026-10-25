@@ -119,9 +119,9 @@
 
 include_guard(GLOBAL)
 
-set(FASTCACHED_FETCH_SILENCE_SECONDS 120 CACHE STRING
+set(PACE_FETCH_SILENCE_SECONDS 120 CACHE STRING
     "Seconds a dependency transfer may deliver essentially nothing before it is abandoned")
-set(FASTCACHED_FETCH_MIN_BYTES_PER_SECOND 1 CACHE STRING
+set(PACE_FETCH_MIN_BYTES_PER_SECOND 1 CACHE STRING
     "Bytes/second below which a dependency transfer counts as delivering nothing")
 
 # Both values are refused unless they are positive integers, and the reason is
@@ -132,13 +132,13 @@ set(FASTCACHED_FETCH_MIN_BYTES_PER_SECOND 1 CACHE STRING
 # with a CMake argument error naming neither the setting nor the cause.
 #
 # Zero is the dangerous half. It is how BOTH transports spell *no bound*, so
-# `-DFASTCACHED_FETCH_SILENCE_SECONDS=0` restores #526 exactly while every
+# `-DPACE_FETCH_SILENCE_SECONDS=0` restores #526 exactly while every
 # structural check still sees a bound being passed -- the token is there, the
 # wiring is there, and the number disarms it. A setting whose zero means "off"
 # has to say so or refuse it, and there is nothing here that "off" is for.
 foreach(fetchBoundSetting
-        FASTCACHED_FETCH_SILENCE_SECONDS
-        FASTCACHED_FETCH_MIN_BYTES_PER_SECOND)
+        PACE_FETCH_SILENCE_SECONDS
+        PACE_FETCH_MIN_BYTES_PER_SECOND)
     if(NOT "${${fetchBoundSetting}}" MATCHES "^[0-9]+$" OR "${${fetchBoundSetting}}" EQUAL 0)
         message(FATAL_ERROR
             "${fetchBoundSetting}=\"${${fetchBoundSetting}}\" is not a positive integer. "
@@ -148,5 +148,5 @@ foreach(fetchBoundSetting
     endif()
 endforeach()
 
-set(ENV{GIT_HTTP_LOW_SPEED_LIMIT} "${FASTCACHED_FETCH_MIN_BYTES_PER_SECOND}")
-set(ENV{GIT_HTTP_LOW_SPEED_TIME} "${FASTCACHED_FETCH_SILENCE_SECONDS}")
+set(ENV{GIT_HTTP_LOW_SPEED_LIMIT} "${PACE_FETCH_MIN_BYTES_PER_SECOND}")
+set(ENV{GIT_HTTP_LOW_SPEED_TIME} "${PACE_FETCH_SILENCE_SECONDS}")

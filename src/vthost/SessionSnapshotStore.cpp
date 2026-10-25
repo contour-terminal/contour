@@ -43,9 +43,8 @@ namespace
 
 SessionSnapshotStore::SessionSnapshotStore(core::platform::FileSystem const& fileSystem,
                                            IFilePrivacy const& privacy,
-                                           IDurableFiles const& durability,
                                            std::filesystem::path path):
-    _fileSystem { fileSystem }, _privacy { privacy }, _durability { durability }, _path { std::move(path) }
+    _fileSystem { fileSystem }, _privacy { privacy }, _path { std::move(path) }
 {
 }
 
@@ -85,15 +84,15 @@ std::expected<void, StoreFailure> SessionSnapshotStore::write(WorkspaceSnapshot 
     // rename could reach the disk before the content it names does.
     removeBestEffort(_fileSystem, temporary);
     auto const step = [&]() -> std::expected<void, StoreFailure> {
-        return failedAt(StoreStep::WriteTemporary, _durability.createExclusive(temporary))
+        return failedAt(StoreStep::WriteTemporary, _fileSystem.createNewFile(temporary))
             .and_then([&] { return restrictTo(temporary, PrivateEntry::File); })
             .and_then([&] {
                 return failedAt(StoreStep::WriteTemporary, _fileSystem.writeFile(temporary, content));
             })
-            .and_then([&] { return failedAt(StoreStep::SyncTemporary, _durability.syncFile(temporary)); })
-            .and_then([&] { return failedAt(StoreStep::Replace, _durability.replace(temporary, _path)); })
+            .and_then([&] { return failedAt(StoreStep::SyncTemporary, _fileSystem.syncFile(temporary)); })
+            .and_then([&] { return failedAt(StoreStep::Replace, _fileSystem.replaceFile(temporary, _path)); })
             .and_then(
-                [&] { return failedAt(StoreStep::SyncDirectory, _durability.syncDirectory(directory)); });
+                [&] { return failedAt(StoreStep::SyncDirectory, _fileSystem.syncDirectory(directory)); });
     }();
     if (!step)
         removeBestEffort(_fileSystem, temporary);

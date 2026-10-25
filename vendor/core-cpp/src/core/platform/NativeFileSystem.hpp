@@ -90,6 +90,14 @@ class NativeFileSystem final: public FileSystem
     [[nodiscard]] std::expected<std::filesystem::path, std::string> createTempFile(
         std::string_view prefix) const override;
 
+    [[nodiscard]] std::expected<void, std::string> createNewFile(
+        std::filesystem::path const& path) const override;
+    [[nodiscard]] std::expected<void, std::string> syncFile(std::filesystem::path const& path) const override;
+    [[nodiscard]] std::expected<void, std::string> replaceFile(
+        std::filesystem::path const& from, std::filesystem::path const& to) const override;
+    [[nodiscard]] std::expected<void, std::string> syncDirectory(
+        std::filesystem::path const& directory) const override;
+
   private:
     RenameFunction _rename;
 };

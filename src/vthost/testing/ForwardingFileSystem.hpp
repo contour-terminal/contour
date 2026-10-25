@@ -149,6 +149,27 @@ class ForwardingFileSystem: public core::platform::FileSystem
     {
         return files.createTempFile(prefix);
     }
+    [[nodiscard]] std::expected<void, std::string> createNewFile(
+        std::filesystem::path const& path) const override
+    {
+        // Through this->writeFile(), so a decorator's fault applies to the create too.
+        return FileSystem::createNewFile(path);
+    }
+    [[nodiscard]] std::expected<void, std::string> syncFile(std::filesystem::path const& path) const override
+    {
+        return files.syncFile(path);
+    }
+    [[nodiscard]] std::expected<void, std::string> replaceFile(std::filesystem::path const& from,
+                                                               std::filesystem::path const& to) const override
+    {
+        // Through this->rename(), so a decorator's fault or rule applies to the replace too.
+        return rename(from, to);
+    }
+    [[nodiscard]] std::expected<void, std::string> syncDirectory(
+        std::filesystem::path const& directory) const override
+    {
+        return files.syncDirectory(directory);
+    }
 };
 
 } // namespace vthost::testing

@@ -15,11 +15,14 @@
 # environment variables to every git clone of the configure. That is process-wide
 # state, so only CoreCppTopLevel.cmake includes it, before any dependency is
 # resolved. As a subproject, core-cpp's download is bounded by the parent's
-# FASTCACHED_FETCH_SILENCE_SECONDS when the parent defines it, and is otherwise
-# unbounded. An empty INACTIVITY_TIMEOUT would break the argument list, so none is
-# passed.
+# PACE_FETCH_SILENCE_SECONDS when the parent defines it -- or by
+# FASTCACHED_FETCH_SILENCE_SECONDS, the name a parent's copy from before Pace's rename
+# (fastcached v0.6.0) still defines -- and is otherwise unbounded. An empty
+# INACTIVITY_TIMEOUT would break the argument list, so none is passed.
 set(_coreCppCpmBound "")
-if(DEFINED FASTCACHED_FETCH_SILENCE_SECONDS)
+if(DEFINED PACE_FETCH_SILENCE_SECONDS)
+    set(_coreCppCpmBound INACTIVITY_TIMEOUT "${PACE_FETCH_SILENCE_SECONDS}")
+elseif(DEFINED FASTCACHED_FETCH_SILENCE_SECONDS)
     set(_coreCppCpmBound INACTIVITY_TIMEOUT "${FASTCACHED_FETCH_SILENCE_SECONDS}")
 endif()
 

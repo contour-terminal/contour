@@ -22,8 +22,8 @@ namespace vthost
 ///
 /// The stream takes stdout for itself: the descriptor it writes is a private copy of stdout, and stdout
 /// itself is pointed at stderr from then on. Every byte on stdout belongs to the protocol, so a stray
-/// write to std::cout -- a log sink, a library's diagnostic -- reaches stderr instead of corrupting a
-/// frame. Called once, before anything else is written.
+/// write to std::cout -- a library's diagnostic -- or a process spawned from here that inherits
+/// descriptor 1 reaches stderr instead of corrupting a frame. Called once, before anything else is written.
 /// @return The stream; its closeWrite() closes the real stdout.
 [[nodiscard]] std::shared_ptr<IByteStream> makeProcessStdioStream();
 
