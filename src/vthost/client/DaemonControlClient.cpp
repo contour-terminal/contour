@@ -4,6 +4,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
+#include <core/net/NetError.hpp>
 #include <core/net/WithTimeout.hpp>
 #include <core/net/WriteQueue.hpp>
 
@@ -79,6 +80,14 @@ namespace
         std::optional<proto::DaemonStatusReply> reply; ///< The status, for Purpose::Status.
         proto::CapabilitySet offered;                  ///< What the daemon's ServerHello offered.
     };
+
+    /// @return Whether a conversation ended with the daemon hanging up, cleanly or by a reset.
+    [[nodiscard]] bool hungUp(PumpResult const& outcome) noexcept
+    {
+        return outcome.stop == PumpStop::PeerClosed
+               || (outcome.stop == PumpStop::TransportError && outcome.transportError
+                   && outcome.transportError->code == core::net::NetErrorCode::ConnReset);
+    }
 
     [[nodiscard]] ControlError fail(ControlErrorCode code, std::string detail)
     {
@@ -180,9 +189,10 @@ namespace
             co_return std::unexpected { *conversation.failure };
         if (conversation.reply)
             co_return Answer { .reply = conversation.reply, .offered = std::move(conversation.offered) };
-        // The stop is done once the daemon hangs up after having been asked.
-        if (purpose == Purpose::Stop && conversation.phase == Phase::AwaitAnswer
-            && outcome.stop == PumpStop::PeerClosed)
+        // The stop is done once the daemon hangs up after having been asked. A reset counts as hanging up
+        // here: Windows resets a connection whose process closes it with input unread, and whether the
+        // daemon is gone is what the reconnects that follow find out.
+        if (purpose == Purpose::Stop && conversation.phase == Phase::AwaitAnswer && hungUp(outcome))
             co_return Answer { .reply = std::nullopt, .offered = std::move(conversation.offered) };
         co_return std::unexpected { fail(
             ControlErrorCode::Transport,

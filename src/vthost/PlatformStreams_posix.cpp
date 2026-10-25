@@ -30,6 +30,13 @@ namespace
         return std::system_category().message(error);
     }
 
+    #ifdef SOCK_CLOEXEC
+    /// A stream socket created close-on-exec at once, where the platform can.
+    constexpr auto CloseOnExecStreamSocket = SOCK_STREAM | SOCK_CLOEXEC;
+    #else
+    constexpr auto CloseOnExecStreamSocket = SOCK_STREAM; // macOS: made close-on-exec just after
+    #endif
+
     /// How a stream ends its writing side.
     enum class HalfClose : std::uint8_t
     {
@@ -141,11 +148,16 @@ std::expected<std::shared_ptr<IByteStream>, std::string> connectUnixStream(std::
         return std::unexpected { std::format("the socket path is too long: {}", text) };
     std::ranges::copy(text, std::begin(address.sun_path));
 
-    auto const fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    auto const fd = ::socket(AF_UNIX, CloseOnExecStreamSocket, 0);
     if (fd < 0)
         return std::unexpected { std::format("cannot create a socket: {}", describeErrno(errno)) };
     // Kept as a stream at once, so every return below closes it.
     auto stream = makeSocketStream(fd);
+    #ifndef SOCK_CLOEXEC
+    if (::fcntl(fd, F_SETFD, FD_CLOEXEC) < 0)
+        return std::unexpected { std::format("cannot mark a socket close-on-exec: {}",
+                                             describeErrno(errno)) };
+    #endif
     while (::connect(fd, reinterpret_cast<sockaddr const*>(&address), sizeof(address)) < 0)
     {
         // An interrupted connect goes on in the kernel; asking again says when it is done.

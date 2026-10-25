@@ -32,6 +32,19 @@ namespace
                                                : TransportErrorKind::Unreachable,
                                 .message = error.toString() };
     }
+
+    /// @param error What a connect to a Unix socket failed with.
+    /// @return As classifyConnectFailure(), and DaemonAbsent too for Windows' answer to a socket path that is
+    ///         not there: WSAENETDOWN, which no AF_UNIX connect can otherwise mean, there being no network.
+    [[nodiscard]] TransportError classifyUnixConnectFailure(core::net::NetError const& error)
+    {
+#ifdef _WIN32
+        constexpr auto WindowsNetworkDown = 10050; // WSAENETDOWN
+        if (error.systemCode == WindowsNetworkDown)
+            return TransportError { .kind = TransportErrorKind::DaemonAbsent, .message = error.toString() };
+#endif
+        return classifyConnectFailure(error);
+    }
 } // namespace
 
 struct UnixTransportFactory::EnsureRun
@@ -107,7 +120,7 @@ core::async::Task<std::expected<std::unique_ptr<Connection>, TransportError>> Un
             co_return std::unexpected(std::move(ensured.error()));
     auto socket = co_await core::net::connectUnix(loop, core::pathToUtf8(nativeSocketPath(_socketPath)));
     if (!socket)
-        co_return std::unexpected(classifyConnectFailure(socket.error()));
+        co_return std::unexpected(classifyUnixConnectFailure(socket.error()));
     co_return std::make_unique<Connection>(
         Connection { .lifetime = {}, .socket = std::move(*socket), .token = {} });
 }
