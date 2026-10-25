@@ -89,7 +89,7 @@ Settings window should raise or own its window), and the design canvas's macOS â
 | 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-2.md` (written) |
 | 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-2.md` (written) |
 | 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-2.md` (written) |
-| 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | to write |
+| 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (written) |
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3aâ€“3f | 3.13 | to write |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | to write |
 | 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | to write |
