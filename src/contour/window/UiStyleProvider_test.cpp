@@ -480,6 +480,8 @@ TEST_CASE("UiStyleProvider publishes the 1a token groups per row", "[contour][ui
     CHECK(tokenOf(mac, "radii", "toast").toReal() == 18.0);
     CHECK(tokenOf(mac, "size", "swatchWidth").toReal() == 16.0);
     CHECK(tokenOf(mac, "size", "swatchHeight").toReal() == 16.0);
+    CHECK(tokenOf(mac, "size", "settingsWidth").toReal() == 960.0);
+    CHECK(tokenOf(mac, "size", "settingsMinHeight").toReal() == 480.0);
     CHECK(tokenOf(mac, "motion", "standard").toInt() == 160);
     CHECK(tokenOf(mac, "space", "s10").toReal() == 32.0);
     CHECK(tokenOf(mac, "material", "titleBand").toInt() == tokenOf(mac, "material", "glass").toInt());
@@ -497,6 +499,11 @@ TEST_CASE("UiStyleProvider publishes the 1a token groups per row", "[contour][ui
     // A swatch is a two-cell block, one row high.
     CHECK(tokenOf(terminal, "size", "swatchWidth").toReal() == Catch::Approx(2 * terminal.cellWidth()));
     CHECK(tokenOf(terminal, "size", "swatchHeight").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "size", "settingsWidth").toReal()
+          == Catch::Approx(120 * terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "size", "settingsHeight").toReal() == Catch::Approx(40 * terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "size", "settingsMinWidth").toReal()
+          == Catch::Approx(90 * terminal.widthQuantum()));
     CHECK(tokenOf(terminal, "radii", "toast").toReal() == 0.0);
     CHECK(tokenOf(terminal, "tui", "toastStyle").toInt() == tokenOf(terminal, "tui", "inverse").toInt());
     CHECK(tokenOf(terminal, "tui", "inactivePaneOpacity").toReal() == Catch::Approx(0.62));

@@ -279,6 +279,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/ChromeStyleHost.hpp
         window/ChromeTokenObjects.hpp
         window/MenuRouting.hpp
+        window/SettingsWindowRules.hpp
         window/NewDefaultsNotice.hpp
         window/UiStyleProvider.hpp
         window/WindowControlStyleProvider.hpp
@@ -334,6 +335,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/WindowControlStyleProvider.cpp
         window/WindowController.cpp
         window/WindowPositionStore.cpp
+        window/SettingsWindowRules.cpp
         session/SessionInput.cpp
         session/FontControl.cpp
         session/SpawnCommand.cpp
@@ -796,6 +798,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/AppMenuBar_test.cpp
             window/ContextMenuModel_test.cpp
             window/MenuRouting_test.cpp
+            window/SettingsWindowRules_test.cpp
             platform/PopupShadow_test.cpp
             platform/QtInvoke_test.cpp
             platform/WindowShadowController_test.cpp

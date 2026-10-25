@@ -113,15 +113,19 @@ struct ChromeSchemeColors
 /// Component extents. Logical pixels for the native rows, character cells for the Terminal row.
 struct SizeTokens
 {
-    int titleBar = 0;     ///< Title bar height.
-    int tabWell = 0;      ///< Height of the tab well below the title bar, 0 when tabs sit in it.
-    int tab = 0;          ///< Tab height.
-    int control = 0;      ///< Height of a button or field.
-    int paneHeader = 0;   ///< Height of a pane header.
-    int toast = 0;        ///< Height of a toast.
-    int dialogWidth = 0;  ///< Width of a dialog.
-    int swatchWidth = 0;  ///< Width of a menu's colour swatch.
-    int swatchHeight = 0; ///< Height of a menu's colour swatch.
+    int titleBar = 0;          ///< Title bar height.
+    int tabWell = 0;           ///< Height of the tab well below the title bar, 0 when tabs sit in it.
+    int tab = 0;               ///< Tab height.
+    int control = 0;           ///< Height of a button or field.
+    int paneHeader = 0;        ///< Height of a pane header.
+    int toast = 0;             ///< Height of a toast.
+    int dialogWidth = 0;       ///< Width of a dialog.
+    int swatchWidth = 0;       ///< Width of a menu's colour swatch.
+    int swatchHeight = 0;      ///< Height of a menu's colour swatch.
+    int settingsWidth = 0;     ///< Default width of the Settings window.
+    int settingsHeight = 0;    ///< Default height of the Settings window.
+    int settingsMinWidth = 0;  ///< Smallest width the Settings window may be resized to.
+    int settingsMinHeight = 0; ///< Smallest height the Settings window may be resized to.
 
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
@@ -326,7 +330,11 @@ namespace detail
                   .toast = 36,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
-                  .swatchHeight = 16 },
+                  .swatchHeight = 16,
+                  .settingsWidth = 960,
+                  .settingsHeight = 820,
+                  .settingsMinWidth = 720,
+                  .settingsMinHeight = 480 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6, .popover = 14, .menu = 10, .paneCard = 10, .toast = 18 },
         .type = { .caption = 10, .footnote = 11, .body = 13, .tab = 12, .title = 15 },
@@ -348,7 +356,11 @@ namespace detail
                   .toast = 36,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
-                  .swatchHeight = 16 },
+                  .swatchHeight = 16,
+                  .settingsWidth = 1110,
+                  .settingsHeight = 920,
+                  .settingsMinWidth = 720,
+                  .settingsMinHeight = 480 },
         .space = nativeSpace(4, 4),
         .radii = { .control = 4, .popover = 8, .menu = 8, .paneCard = 4, .toast = 18 },
         .type = { .caption = 12, .footnote = 12, .body = 14, .tab = 12, .title = 20 },
@@ -370,7 +382,11 @@ namespace detail
                   .toast = 36,
                   .dialogWidth = 280,
                   .swatchWidth = 16,
-                  .swatchHeight = 16 },
+                  .swatchHeight = 16,
+                  .settingsWidth = 1100,
+                  .settingsHeight = 920,
+                  .settingsMinWidth = 720,
+                  .settingsMinHeight = 480 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 8, .popover = 12, .menu = 10, .paneCard = 6, .toast = 18 },
         .type = { .caption = 12, .footnote = 12.5, .body = 14, .tab = 13.5, .title = 15 },
@@ -396,7 +412,11 @@ namespace detail
                   .toast = 1,
                   .dialogWidth = 32,
                   .swatchWidth = 2,
-                  .swatchHeight = 1 },
+                  .swatchHeight = 1,
+                  .settingsWidth = 120,
+                  .settingsHeight = 40,
+                  .settingsMinWidth = 90,
+                  .settingsMinHeight = 24 },
         .space = { .paneGap = 1, .splitHit = 1, .paneInset = 0, .scale = { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 } },
         .radii = { .control = 0, .popover = 0, .menu = 0, .paneCard = 0, .toast = 0 },
         .type = { .caption = 0, .footnote = 0, .body = 0, .tab = 0, .title = 0 },

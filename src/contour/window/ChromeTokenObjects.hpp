@@ -44,6 +44,10 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal dialogWidth READ dialogWidth CONSTANT)
     Q_PROPERTY(qreal swatchWidth READ swatchWidth CONSTANT)
     Q_PROPERTY(qreal swatchHeight READ swatchHeight CONSTANT)
+    Q_PROPERTY(qreal settingsWidth READ settingsWidth CONSTANT)
+    Q_PROPERTY(qreal settingsHeight READ settingsHeight CONSTANT)
+    Q_PROPERTY(qreal settingsMinWidth READ settingsMinWidth CONSTANT)
+    Q_PROPERTY(qreal settingsMinHeight READ settingsMinHeight CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -69,6 +73,20 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal swatchWidth() const noexcept { return _tokens.swatchWidth * _units.horizontal; }
     /// @return The height of a menu's colour swatch in logical pixels.
     [[nodiscard]] qreal swatchHeight() const noexcept { return _tokens.swatchHeight * _units.vertical; }
+    /// @return The Settings window's default width in logical pixels.
+    [[nodiscard]] qreal settingsWidth() const noexcept { return _tokens.settingsWidth * _units.horizontal; }
+    /// @return The Settings window's default height in logical pixels.
+    [[nodiscard]] qreal settingsHeight() const noexcept { return _tokens.settingsHeight * _units.vertical; }
+    /// @return The Settings window's minimum width in logical pixels.
+    [[nodiscard]] qreal settingsMinWidth() const noexcept
+    {
+        return _tokens.settingsMinWidth * _units.horizontal;
+    }
+    /// @return The Settings window's minimum height in logical pixels.
+    [[nodiscard]] qreal settingsMinHeight() const noexcept
+    {
+        return _tokens.settingsMinHeight * _units.vertical;
+    }
 
   private:
     config::SizeTokens _tokens {};

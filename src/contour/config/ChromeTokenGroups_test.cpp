@@ -46,12 +46,22 @@ namespace
 /// Every numeric field of a row, in declaration order, so a whole row compares against one list.
 std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
 {
-    auto out = std::vector<double> { double(row.size.titleBar),     double(row.size.tabWell),
-                                     double(row.size.tab),          double(row.size.control),
-                                     double(row.size.paneHeader),   double(row.size.toast),
-                                     double(row.size.dialogWidth),  double(row.size.swatchWidth),
-                                     double(row.size.swatchHeight), double(row.space.paneGap),
-                                     double(row.space.splitHit),    double(row.space.paneInset) };
+    auto out = std::vector<double> { double(row.size.titleBar),
+                                     double(row.size.tabWell),
+                                     double(row.size.tab),
+                                     double(row.size.control),
+                                     double(row.size.paneHeader),
+                                     double(row.size.toast),
+                                     double(row.size.dialogWidth),
+                                     double(row.size.swatchWidth),
+                                     double(row.size.swatchHeight),
+                                     double(row.size.settingsWidth),
+                                     double(row.size.settingsHeight),
+                                     double(row.size.settingsMinWidth),
+                                     double(row.size.settingsMinHeight),
+                                     double(row.space.paneGap),
+                                     double(row.space.splitHit),
+                                     double(row.space.paneInset) };
     for (auto const v: row.space.scale)
         out.push_back(v);
     for (auto const v:
@@ -87,7 +97,7 @@ struct ExpectedRow
 TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
 {
     using namespace contour::config;
-    // size(9) space(3) scale(10) radii(5) type(5) motion(4) elevation e0..e3 (16) separator ring dim opacity
+    // size(13) space(3) scale(10) radii(5) type(5) motion(4) elevation e0..e3 (16) separator ring dim opacity
     auto const native = std::vector<double> { 2, 4, 6, 8, 10, 12, 16, 20, 24, 32 };
     auto const nativeTail = std::vector<double> { 100, 160, 220, 8,  0, 0,  0,  0,  0,  1,   2,  12,
                                                   0,   4,   16,  25, 0, 12, 40, 35, 10, 0.0, -1, 1.0 };
@@ -102,7 +112,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
     };
     auto const rows = std::vector<ExpectedRow> {
         { ChromeStyle::MacOS,
-          join({ 38, 28, 24, 28, 22, 36, 280, 16, 16, 6, 10, 6 },
+          join({ 38, 28, 24, 28, 22, 36, 280, 16, 16, 960, 820, 720, 480, 6, 10, 6 },
                native,
                { 6, 14, 10, 10, 18, 10, 11, 13, 12, 15 },
                nativeTail),
@@ -112,7 +122,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           DialogPlacement::Sheet,
           MenuPresentation::Native },
         { ChromeStyle::Fluent,
-          join({ 40, 0, 34, 32, 28, 36, 280, 16, 16, 4, 10, 4 },
+          join({ 40, 0, 34, 32, 28, 36, 280, 16, 16, 1110, 920, 720, 480, 4, 10, 4 },
                native,
                { 4, 8, 8, 4, 18, 12, 12, 14, 12, 20 },
                nativeTail),
@@ -122,7 +132,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           DialogPlacement::Centered,
           MenuPresentation::InScene },
         { ChromeStyle::ContourLinux,
-          join({ 46, 0, 34, 34, 28, 36, 280, 16, 16, 6, 10, 6 },
+          join({ 46, 0, 34, 34, 28, 36, 280, 16, 16, 1100, 920, 720, 480, 6, 10, 6 },
                native,
                { 8, 12, 10, 6, 18, 12, 12.5, 14, 13.5, 15 },
                nativeTail),
@@ -132,7 +142,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           DialogPlacement::Centered,
           MenuPresentation::InScene },
         { ChromeStyle::Terminal,
-          join({ 1, 1, 1, 2, 1, 1, 32, 2, 1, 1, 1, 0 },
+          join({ 1, 1, 1, 2, 1, 1, 32, 2, 1, 120, 40, 90, 24, 1, 1, 0 },
                { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
                { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
                { 100, 160, 220, 0, 0, 0, 0, 0, 1, 1, 0, 60, 1, 1, 0, 60, 1, 1, 0, 60, 10, 0.0, -1, 0.62 }),

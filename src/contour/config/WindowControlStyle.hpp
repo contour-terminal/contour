@@ -140,6 +140,9 @@ enum class HostPlatform : uint8_t
     KdePlasma,
 };
 
+/// The number of @c HostPlatform enumerators; tables indexed by host pin themselves to it.
+inline constexpr std::size_t HostPlatformCount = static_cast<std::size_t>(HostPlatform::KdePlasma) + 1;
+
 namespace detail
 {
     // inline, so every translation unit that includes this header shares one table rather than
