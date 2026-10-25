@@ -81,7 +81,7 @@ inline constexpr std::array MenuOwnedKeys {
 /// @param key The chord.
 /// @return True when the event's key and modifiers are the chord's, the keypad and group-switch modifiers
 ///         aside, as QKeyEvent::matches() sets them aside.
-[[nodiscard]] inline bool isChord(QKeyEvent const& event, MenuKey const& key)
+[[nodiscard]] inline bool matchesChord(QKeyEvent const& event, MenuKey const& key)
 {
     return std::visit(core::Overloaded {
                           [&](QKeySequence::StandardKey const standard) { return event.matches(standard); },
@@ -106,8 +106,8 @@ inline constexpr std::array MenuOwnedKeys {
 {
     if (placement != command::MenuBarPlacement::Global)
         return ShortcutOverrideClaim::Terminal;
-    auto const menuOwned =
-        std::ranges::any_of(MenuOwnedKeys, [&](MenuOwnedKey const& row) { return isChord(event, row.key); });
+    auto const menuOwned = std::ranges::any_of(
+        MenuOwnedKeys, [&](MenuOwnedKey const& row) { return matchesChord(event, row.key); });
     return menuOwned ? ShortcutOverrideClaim::Menu : ShortcutOverrideClaim::Terminal;
 }
 

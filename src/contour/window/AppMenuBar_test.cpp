@@ -203,6 +203,12 @@ TEST_CASE("a chord Qt has no key for is dropped", "[menubar][keys]")
     CHECK_FALSE(qtKeyFor({ .modifiers = Modifiers { Modifier::Meta }, .input = U'é' }).has_value());
 }
 
+TEST_CASE("a lone surrogate is no key", "[menubar][keys]")
+{
+    for (auto const surrogate: { U'\xD800', U'\xDBFF', U'\xDC00', U'\xDFFF' })
+        CHECK_FALSE(qtKeyFor({ .modifiers = Modifiers { Modifier::Super }, .input = surrogate }).has_value());
+}
+
 TEST_CASE("a chord maps its modifiers and its key", "[menubar][keys]")
 {
     auto const superT = qtKeyFor({ .modifiers = Modifiers { Modifier::Super }, .input = U't' });

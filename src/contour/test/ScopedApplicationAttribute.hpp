@@ -29,7 +29,9 @@ class ScopedApplicationAttribute
 
   private:
     Qt::ApplicationAttribute _attribute; ///< The attribute held on.
-    bool _wasSetBefore;                  ///< Its state before, restored on destruction.
+    /// Its state before, restored on destruction. A plain bool by AGENT.md's "signature you do not own"
+    /// carve-out: it mirrors the bool Qt's testAttribute()/setAttribute() speak.
+    bool _wasSetBefore;
 };
 
 } // namespace contour::test

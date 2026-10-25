@@ -58,6 +58,10 @@ TEST_CASE("adopt hands the Window and Help menus to NSApp", "[display][menubar][
 
     CHECK(NSApp.windowsMenu == window->toNSMenu());
     CHECK(NSApp.helpMenu == help->toNSMenu());
+
+    // The bar is destroyed at the end of the case; leave no dangling menus behind for the next one.
+    NSApp.windowsMenu = nil;
+    NSApp.helpMenu = nil;
 }
 
 TEST_CASE("a rebuild keeps the adopted menus", "[display][menubar][cocoa]")
@@ -128,8 +132,9 @@ TEST_CASE("the application menu holds the Contour menu's rows", "[display][menub
     NSMenu* const applicationMenu = [NSApp.mainMenu itemAtIndex:0].submenu;
     REQUIRE(applicationMenu != nil);
 
-    // Hidden, the Contour menu still hands every row to the menu macOS names after the app: the role rows
-    // under Qt's own titles, with the standard keys, and the rest under theirs.
+    // The Contour menu is empty of rows of its own (Qt hides an empty native menu itself): every row goes to
+    // the menu macOS names after the app, the role rows under Qt's own titles, with the standard keys, and
+    // the rest under theirs.
     for (NSString* const title in
          @[ @"Open Configuration File", @"Reload Configuration", @"Reset Configuration" ])
     {

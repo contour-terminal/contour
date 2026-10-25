@@ -13,10 +13,10 @@
 namespace contour::command
 {
 
-/// Whether the user gave a tab a colour of their own, as opposed to one an application assigned.
+/// Whether the user gave a tab a color of their own, as opposed to one an application assigned.
 enum class UserColorPresence : std::uint8_t
 {
-    Absent = 0, ///< No colour from the user.
+    Absent = 0, ///< No color from the user.
     Present,    ///< The user chose one; "Reset" has something to drop.
 };
 
@@ -25,11 +25,11 @@ struct TabContextMenuState
 {
     int tabIndex = 0; ///< The right-clicked tab's position in its window.
     int tabCount = 0; ///< Tabs in its window.
-    /// The colours the "Tab Color" submenu offers, in order (`SessionModel::colorPalette()`).
+    /// The colors the "Tab Color" submenu offers, in order (`SessionModel::colorPalette()`).
     std::vector<vtbackend::RGBColor> palette {};
-    /// The tab's effective colour, whoever assigned it.
+    /// The tab's effective color, whoever assigned it.
     std::optional<vtbackend::RGBColor> color {};
-    /// Whether the user gave the tab its colour.
+    /// Whether the user gave the tab its color.
     UserColorPresence userColor = UserColorPresence::Absent;
 };
 

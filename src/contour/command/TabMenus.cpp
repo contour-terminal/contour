@@ -32,7 +32,7 @@ namespace
     }
     // }}}
 
-    /// One swatch per palette colour, ticked on the tab's colour.
+    /// One swatch per palette color, ticked on the tab's color.
     [[nodiscard]] std::vector<ContextMenuEntry> swatchRows(TabContextMenuState const& state)
     {
         return std::ranges::to<std::vector>(
@@ -44,7 +44,7 @@ namespace
             }));
     }
 
-    /// The "Tab Color" submenu: the swatches, then a custom colour and a reset.
+    /// The "Tab Color" submenu: the swatches, then a custom color and a reset.
     [[nodiscard]] std::span<Row const> tabColorTemplate()
     {
         static auto const rows = std::array {

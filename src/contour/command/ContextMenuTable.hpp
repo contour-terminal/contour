@@ -25,7 +25,7 @@ namespace contour::command::detail
 /// @param title  The row's display text.
 /// @param action What the row runs.
 /// @param check  The row's check column, if any.
-/// @param swatch The colour the row is drawn as, if it is a swatch.
+/// @param swatch The color the row is drawn as, if it is a swatch.
 /// @return The row.
 [[nodiscard]] inline ContextMenuEntry commandEntry(std::string title,
                                                    actions::Action action,
@@ -38,7 +38,7 @@ namespace contour::command::detail
                               .availability = RowAvailability::Enabled,
                               .check = check,
                               .role = MenuItemRole::None,
-                              .swatch = std::move(swatch),
+                              .swatch = swatch,
                               .children = {} };
 }
 

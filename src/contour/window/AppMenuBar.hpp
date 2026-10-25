@@ -128,6 +128,9 @@ class AppMenuBar
     /// changed and the menu may be refilled, refreshed in place otherwise (see MenuOnOpen).
     void refresh(command::MenuBarMenu which);
 
+    /// Refreshes one menu against an already resolved @p tree, so refreshAll() resolves once.
+    void refresh(command::MenuBarMenu which, command::MenuTree const& tree);
+
     /// Replaces the Window menu's tab list with the one of @p nodes.
     void refillTabList(std::span<command::MenuNode const> nodes, command::MenuTree const& tree);
 

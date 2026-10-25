@@ -227,7 +227,8 @@ namespace
     /// The Qt key of a character: Qt names a letter by its upper case.
     [[nodiscard]] std::optional<Qt::Key> qtKeyOf(char32_t ch) noexcept
     {
-        if (ch == 0 || ch > 0xFFFF)
+        // A lone surrogate is no character, and QChar would hand back half of one.
+        if (ch == 0 || ch > 0xFFFF || (ch >= 0xD800 && ch <= 0xDFFF))
             return std::nullopt;
         return static_cast<Qt::Key>(QChar(static_cast<char16_t>(ch)).toUpper().unicode());
     }
@@ -505,13 +506,18 @@ QList<QAction*> AppMenuBar::fill(
 
 void AppMenuBar::refreshAll()
 {
+    auto const tree = resolve();
     for (auto const index: std::views::iota(std::size_t { 0 }, command::MenuBarMenuCount))
-        refresh(static_cast<MenuBarMenu>(index));
+        refresh(static_cast<MenuBarMenu>(index), tree);
 }
 
 void AppMenuBar::refresh(MenuBarMenu which)
 {
-    auto const tree = resolve();
+    refresh(which, resolve());
+}
+
+void AppMenuBar::refresh(MenuBarMenu which, command::MenuTree const& tree)
+{
     auto const rows = std::span<MenuNode const> { tree.nodes[static_cast<std::size_t>(which)].children };
     auto& top = menu(which);
     auto actions = top.actions();

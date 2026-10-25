@@ -6560,12 +6560,14 @@ TEST_CASE("a KitDialog without a reject text shows one button (offscreen)",
 TEST_CASE("ShowAbout opens the About dialog with the version (offscreen)", "[contour][gui][qml][about]")
 {
     auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark", "contour");
     INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
     contour::test::ScopedChromeAppearance const forced { appearance };
     QQmlEngine engine;
     contour::test::MockMainController controller;
     contour::test::QmlMessageCapture warnings;
-    auto root = contour::test::loadMainWindow(engine, controller, warnings, terminalRowSetup("contour"));
+    auto root = contour::test::loadMainWindow(engine, controller, warnings, terminalRowSetup(schemeName));
     auto& window = *qobject_cast<QQuickWindow*>(root.get());
     window.resize(1024, 640);
     window.show();
