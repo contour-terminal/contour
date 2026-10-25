@@ -18,9 +18,9 @@
 
 using contour::command::MenuBarPlacement;
 using contour::command::MenuItemRole;
+using contour::display::menuKeyFor;
 using contour::display::shortcutOverrideClaim;
 using contour::display::ShortcutOverrideClaim;
-using contour::display::standardKeyFor;
 
 namespace
 {
@@ -69,13 +69,14 @@ TEST_CASE("ShortcutOverride: every other chord stays with the terminal under a g
     CHECK(claimFor(QKeySequence(Qt::Key_A), MenuBarPlacement::Global) == ShortcutOverrideClaim::Terminal);
 }
 
-TEST_CASE("ShortcutOverride: the role-to-key table gives Quit and Preferences their standard keys",
+TEST_CASE("ShortcutOverride: the menu-owned key table gives Quit, Preferences and Minimize their keys",
           "[shortcutoverride]")
 {
-    CHECK(standardKeyFor(MenuItemRole::Quit) == QKeySequence::Quit);
-    CHECK(standardKeyFor(MenuItemRole::Preferences) == QKeySequence::Preferences);
-    CHECK_FALSE(standardKeyFor(MenuItemRole::About).has_value());
-    CHECK_FALSE(standardKeyFor(MenuItemRole::None).has_value());
+    CHECK(menuKeyFor(MenuItemRole::Quit) == QKeySequence(QKeySequence::Quit));
+    CHECK(menuKeyFor(MenuItemRole::Preferences) == QKeySequence(QKeySequence::Preferences));
+    CHECK(menuKeyFor(MenuItemRole::Minimize) == QKeySequence(QKeyCombination(Qt::MetaModifier, Qt::Key_M)));
+    CHECK_FALSE(menuKeyFor(MenuItemRole::About).has_value());
+    CHECK_FALSE(menuKeyFor(MenuItemRole::None).has_value());
 }
 
 namespace
@@ -121,4 +122,38 @@ TEST_CASE("ShortcutOverride: Command+Q goes to a global menu bar as the app deli
 
     // And without a global menu bar nothing leaves the terminal.
     CHECK(claimFor(Qt::Key_Q, Qt::MetaModifier, MenuBarPlacement::None) == ShortcutOverrideClaim::Terminal);
+}
+
+TEST_CASE("ShortcutOverride: Hide, Hide Others and Minimize keep their macOS keys under a global menu bar",
+          "[shortcutoverride]")
+{
+    // Fixed Command chords, not standard keys: they mean the same on every platform theme, so no case here
+    // needs the cocoa platform. Built as the app is sent them, with Control and Meta unswapped.
+    auto const unswapped = contour::test::ScopedApplicationAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
+    REQUIRE(QCoreApplication::testAttribute(Qt::AA_MacDontSwapCtrlAndMeta));
+
+    struct Chord
+    {
+        Qt::Key key;
+        Qt::KeyboardModifiers modifiers;
+    };
+    auto const systemChords = std::array {
+        Chord { .key = Qt::Key_H, .modifiers = Qt::MetaModifier },                   // Hide
+        Chord { .key = Qt::Key_H, .modifiers = Qt::MetaModifier | Qt::AltModifier }, // Hide Others
+        Chord { .key = Qt::Key_M, .modifiers = Qt::MetaModifier },                   // Minimize
+    };
+    for (auto const& chord: systemChords)
+    {
+        INFO(QKeySequence(QKeyCombination(chord.modifiers, chord.key)).toString().toStdString());
+        CHECK(claimFor(chord.key, chord.modifiers, MenuBarPlacement::Global) == ShortcutOverrideClaim::Menu);
+        CHECK(claimFor(chord.key, chord.modifiers, MenuBarPlacement::None)
+              == ShortcutOverrideClaim::Terminal);
+    }
+
+    // The physical Control key and the bare key stay the terminal's: ⌃H is a backspace to the program.
+    CHECK(claimFor(Qt::Key_H, Qt::ControlModifier, MenuBarPlacement::Global)
+          == ShortcutOverrideClaim::Terminal);
+    CHECK(claimFor(Qt::Key_H, Qt::NoModifier, MenuBarPlacement::Global) == ShortcutOverrideClaim::Terminal);
+    CHECK(claimFor(Qt::Key_M, Qt::ControlModifier, MenuBarPlacement::Global)
+          == ShortcutOverrideClaim::Terminal);
 }

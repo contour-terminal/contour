@@ -27,6 +27,7 @@
 #include <ranges>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using namespace contour;
@@ -157,6 +158,7 @@ TEST_CASE("every role maps", "[menubar][keys]")
         Row { MenuItemRole::About, QAction::AboutRole, QAction::AboutRole },
         Row { MenuItemRole::Preferences, QAction::PreferencesRole, QAction::PreferencesRole },
         Row { MenuItemRole::Quit, QAction::QuitRole, QAction::QuitRole },
+        Row { MenuItemRole::Minimize, QAction::NoRole, QAction::NoRole },
     };
     for (auto const& row: Rows)
     {
@@ -260,6 +262,56 @@ TEST_CASE("the Quit and Settings… actions carry the standard keys", "[display]
 
     CHECK(fixture.action(QStringLiteral("Quit Contour")).shortcut() == QKeySequence(QKeySequence::Quit));
     CHECK(fixture.action(QStringLiteral("Settings…")).shortcut() == QKeySequence(QKeySequence::Preferences));
+}
+
+TEST_CASE("the Window menu starts with Minimize and Zoom, and Minimize carries ⌘M", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto fixture = BarFixture {};
+
+    auto const rows = fixture.menu(MenuBarMenu::Window).actions();
+    REQUIRE(rows.size() >= 3);
+    CHECK(rows.at(0)->text() == QStringLiteral("Minimize"));
+    CHECK(rows.at(1)->text() == QStringLiteral("Zoom"));
+    CHECK(rows.at(2)->isSeparator());
+
+    // ⌘ is Qt::MetaModifier under Qt::AA_MacDontSwapCtrlAndMeta, which the app sets.
+    CHECK(rows.at(0)->shortcut() == QKeySequence(QKeyCombination(Qt::MetaModifier, Qt::Key_M)));
+    CHECK(rows.at(1)->shortcut().isEmpty());
+}
+
+TEST_CASE("Minimize and Zoom run their actions", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    auto fixture = BarFixture {};
+
+    fixture.action(QStringLiteral("Minimize")).trigger();
+    fixture.action(QStringLiteral("Zoom")).trigger();
+    QCoreApplication::processEvents();
+
+    REQUIRE(fixture.ran.size() == 2);
+    CHECK(std::holds_alternative<actions::MinimizeWindow>(fixture.ran[0]));
+    CHECK(std::holds_alternative<actions::ZoomWindow>(fixture.ran[1]));
+}
+
+TEST_CASE("the bar has Qt title its Preferences-role row Settings…", "[display][menubar]")
+{
+    REQUIRE_WIDGETS_OR_SKIP();
+    // Qt's cocoa plugin titles the row from this context and source, whatever the action's text says.
+    auto const qtTitle = [] {
+        return QCoreApplication::translate("MAC_APPLICATION_MENU", "Preferences...");
+    };
+    REQUIRE(qtTitle() == QStringLiteral("Preferences..."));
+
+    {
+        auto fixture = BarFixture {};
+        CHECK(qtTitle() == QStringLiteral("Settings…"));
+        // Only that one string: the other application menu strings stay Qt's.
+        CHECK(QCoreApplication::translate("MAC_APPLICATION_MENU", "Quit %1") == QStringLiteral("Quit %1"));
+        CHECK(QCoreApplication::translate("QMenuBar", "Preferences...") == QStringLiteral("Preferences..."));
+    }
+
+    CHECK(qtTitle() == QStringLiteral("Preferences..."));
 }
 
 TEST_CASE("a chord without ⌃ or ⌘ is no key equivalent", "[display][menubar]")

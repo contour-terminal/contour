@@ -160,6 +160,8 @@ struct CloseOtherTabs{};      // close every tab in THIS window except the curre
 struct CloseTabsToRight{};    // close every tab to the right of the current one
 struct MoveTabToNewWindow{};  // tear the current tab off into a window of its own
 struct ShowAbout{};           // show the version of Contour
+struct MinimizeWindow{};      // minimize this window
+struct ZoomWindow{};          // maximize this window, or restore it from maximized
 // clang-format on
 
 using Action = std::variant<CancelSelection,
@@ -276,7 +278,9 @@ using Action = std::variant<CancelSelection,
                             CloseOtherTabs,
                             CloseTabsToRight,
                             MoveTabToNewWindow,
-                            ShowAbout>;
+                            ShowAbout,
+                            MinimizeWindow,
+                            ZoomWindow>;
 
 /// Actions that act on one command block, which they all address the same way: a `target` (pointer, cursor
 /// or last), a `block` that pins one regardless of the target (a context-menu row's), and -- where the
@@ -307,6 +311,8 @@ concept CommandBlockActionConcept =
 /// the first press did not do. OpenCommandOutput has the splits' reason too: each fire forks a pager
 /// pane.
 /// AttachToHost joins them too: each fire starts a client process that opens a window of its own.
+/// ZoomWindow is a toggle, and MinimizeWindow a one-shot gesture like the palette's: the window is gone
+/// from under the key by the second repeat.
 /// The keyboard dispatch (handleAction) consults this concept to filter such actions out of
 /// KeyboardEventType::Repeat events.
 template <typename T>
@@ -341,7 +347,9 @@ concept NonRepeatableActionConcept = CommandBlockActionConcept<T>
                                                     CloseOtherTabs,
                                                     CloseTabsToRight,
                                                     MoveTabToNewWindow,
-                                                    ShowAbout>;
+                                                    ShowAbout,
+                                                    MinimizeWindow,
+                                                    ZoomWindow>;
 
 /// @returns true if @p action must be dropped on keyboard auto-repeat (a NonRepeatableActionConcept
 /// member), false otherwise.
@@ -599,6 +607,10 @@ namespace documentation
         "Moves the current tab into a new window of its own. Does nothing with a single tab."
     };
     constexpr inline std::string_view ShowAbout { "Shows the version of Contour." };
+    constexpr inline std::string_view MinimizeWindow { "Minimizes this window." };
+    constexpr inline std::string_view ZoomWindow {
+        "Maximizes this window, or restores it when it is maximized (the macOS Zoom)."
+    };
     constexpr inline std::string_view SetTabBarVisibility {
         "Sets when this window's tab bar is shown (mode: always, never or multiple). Applies to this "
         "window until it is closed; the settings page is where the choice is made permanent."
@@ -905,6 +917,8 @@ struct ActionCatalogEntry
         ActionCatalogEntry {
             "MoveTabToNewWindow", Action { MoveTabToNewWindow {} }, documentation::MoveTabToNewWindow },
         ActionCatalogEntry { "ShowAbout", Action { ShowAbout {} }, documentation::ShowAbout },
+        ActionCatalogEntry { "MinimizeWindow", Action { MinimizeWindow {} }, documentation::MinimizeWindow },
+        ActionCatalogEntry { "ZoomWindow", Action { ZoomWindow {} }, documentation::ZoomWindow },
     };
     return catalog;
 }

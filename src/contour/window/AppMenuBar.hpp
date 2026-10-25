@@ -19,6 +19,7 @@
 
 class QMenu;
 class QMenuBar;
+class QTranslator;
 
 namespace contour::window
 {
@@ -60,10 +61,10 @@ struct AppMenuBarSources
 
 /// The application's own menu bar: the six menus of buildMenuBar(), as a native QMenuBar.
 ///
-/// On macOS it is the bar at the top of the screen, under every `ui_style` alike. Only the role rows'
-/// standard keys (⌘Q, ⌘,) are the menu's to take from the terminal (display::MenuOwnedKeys): every other
-/// chord a row shows stays the terminal's. ⌘H and ⌥⌘H are no exception, so they reach the terminal rather
-/// than hiding the application.
+/// On macOS it is the bar at the top of the screen, under every `ui_style` alike. Only the chords of
+/// display::MenuOwnedKeys are the menu's to take from the terminal: the role rows' keys (⌘, ⌘Q and ⌘M) and
+/// the application menu's own Hide (⌘H) and Hide Others (⌥⌘H). Every other chord a row shows stays the
+/// terminal's.
 class AppMenuBar
 {
   public:
@@ -109,6 +110,9 @@ class AppMenuBar
     void refillTabList(std::span<command::MenuNode const> nodes, command::MenuTree const& tree);
 
     AppMenuBarSources _sources;
+    /// Installed for the bar's life, and ahead of it: it has Qt title the Preferences-role row "Settings…",
+    /// which no QAction text can, as Qt titles that row from its own string.
+    std::unique_ptr<QTranslator> _applicationMenuText;
     std::unique_ptr<QMenuBar> _menuBar;
     std::array<QMenu*, command::MenuBarMenuCount> _menus {}; ///< Owned by _menuBar.
     /// Hidden, and kept for the bar's life: the Window menu's rows go ahead of it, the window list AppKit

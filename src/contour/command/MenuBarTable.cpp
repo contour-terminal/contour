@@ -359,6 +359,9 @@ namespace
         using namespace actions;
 
         static auto const rows = std::array {
+            windowCommand(MinimizeWindow {}, "Minimize").withRole(MenuItemRole::Minimize),
+            windowCommand(ZoomWindow {}, "Zoom"),
+            Table::separator(),
             windowCommand(SwitchToTabLeft {}, "Previous Tab"),
             windowCommand(SwitchToTabRight {}, "Next Tab"),
             windowCommand(SwitchToPreviousTab {}, "Last Used Tab"),

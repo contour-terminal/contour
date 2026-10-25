@@ -5395,6 +5395,18 @@ bool TerminalSession::operator()(actions::ShowAbout)
     return true;
 }
 
+bool TerminalSession::operator()(actions::MinimizeWindow)
+{
+    _manager->minimizeWindow(this);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ZoomWindow)
+{
+    _manager->zoomWindow(this);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::MoveTabTo event)
 {
     _manager->moveTabTo(event.position, this);

@@ -39,6 +39,9 @@ TEST_CASE("actions::isNonRepeatable flags the structural actions", "[actions][re
     // A held toggle would flip zoom once per repeat, leaving the final state up to the repeat count
     // rather than the user.
     CHECK(actions::isNonRepeatable(actions::Action { actions::TogglePaneZoom {} }));
+    // Zooming the window is a toggle too, and minimizing it a one-shot gesture.
+    CHECK(actions::isNonRepeatable(actions::Action { actions::ZoomWindow {} }));
+    CHECK(actions::isNonRepeatable(actions::Action { actions::MinimizeWindow {} }));
 
     // LaunchLayout spawns a whole window's worth of tabs/panes per fire, and SaveLayout writes a
     // file per fire; a held key must not amplify either into a burst.
@@ -83,6 +86,12 @@ TEST_CASE("actions::fromString round-trips the new pane actions", "[actions][par
     CHECK(std::holds_alternative<actions::ResizePane>(*actions::fromString("ResizePane")));
     // An unknown name yields nullopt.
     CHECK_FALSE(actions::fromString("NoSuchPaneAction").has_value());
+}
+
+TEST_CASE("actions::fromString names the window's Minimize and Zoom", "[actions][parse]")
+{
+    CHECK(std::holds_alternative<actions::MinimizeWindow>(*actions::fromString("MinimizeWindow")));
+    CHECK(std::holds_alternative<actions::ZoomWindow>(*actions::fromString("ZoomWindow")));
 }
 
 TEST_CASE("actions::filterRepeatableActions drops ClosePane on auto-repeat", "[actions][repeat]")

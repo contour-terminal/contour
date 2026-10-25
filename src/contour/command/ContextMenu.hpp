@@ -133,6 +133,7 @@ enum class MenuItemRole : std::uint8_t
     About,       ///< The "About" row.
     Preferences, ///< The "Preferences" / "Settings" row.
     Quit,        ///< The "Quit" row.
+    Minimize,    ///< The Window menu's "Minimize" row, which answers to the platform's minimize key.
 };
 
 /// One row of the menu, already resolved against a ContextMenuState.

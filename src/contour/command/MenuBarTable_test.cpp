@@ -201,6 +201,10 @@ TEST_CASE("menuBar.eachRoleOnce", "[menubar]")
         CHECK(countRole(tree.nodes, role) == 1);
         CHECK(countRole(tree.nodes.front().children, role) == 1);
     }
+    CHECK(countRole(tree.nodes, MenuItemRole::Minimize) == 1);
+    CHECK(
+        countRole(tree.nodes[static_cast<std::size_t>(MenuBarMenu::Window)].children, MenuItemRole::Minimize)
+        == 1);
 }
 
 TEST_CASE("menuBar.noChordTwice", "[menubar]")
@@ -293,6 +297,30 @@ TEST_CASE("menuBar.windowRowsNeedAWindow", "[menubar]")
     auto const single = buildMenuBar(state);
     CHECK(find(single, "Tab Bar")->availability == RowAvailability::Enabled);
     CHECK(find(single, "Pane")->availability == RowAvailability::Disabled);
+}
+
+TEST_CASE("menuBar.windowStartsWithMinimizeAndZoom", "[menubar]")
+{
+    for (auto const& state: { fullState(), MenuBarState {} })
+    {
+        auto const bar = buildMenuBar(state);
+        auto const& window = bar[static_cast<std::size_t>(MenuBarMenu::Window)].children;
+        REQUIRE(window.size() >= 3);
+
+        CHECK(window[0].title == "Minimize");
+        CHECK(std::holds_alternative<actions::MinimizeWindow>(window[0].action));
+        CHECK(window[0].role == MenuItemRole::Minimize);
+        CHECK(window[1].title == "Zoom");
+        CHECK(std::holds_alternative<actions::ZoomWindow>(window[1].action));
+        CHECK(window[1].role == MenuItemRole::None);
+        CHECK(window[2].kind == ContextMenuEntryKind::Separator);
+
+        // They act on the key window, so without one they are there, greyed out.
+        auto const expected =
+            state.window == WindowPresence::Present ? RowAvailability::Enabled : RowAvailability::Disabled;
+        CHECK(window[0].availability == expected);
+        CHECK(window[1].availability == expected);
+    }
 }
 
 TEST_CASE("menuBar.tabList", "[menubar]")

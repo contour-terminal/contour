@@ -4,7 +4,9 @@
 #include <contour/window/AppMenuBar.hpp>
 
 #include <QtCore/QChar>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QString>
+#include <QtCore/QTranslator>
 #include <QtGui/QKeySequence>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMenuBar>
@@ -14,6 +16,7 @@
 #include <cstdint>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -44,7 +47,59 @@ namespace
         RoleRow { .role = MenuItemRole::About, .qtRole = QAction::AboutRole },
         RoleRow { .role = MenuItemRole::Preferences, .qtRole = QAction::PreferencesRole },
         RoleRow { .role = MenuItemRole::Quit, .qtRole = QAction::QuitRole },
+        // Qt has no role for it, and it must not move: it stays the Window menu's first row.
+        RoleRow { .role = MenuItemRole::Minimize, .qtRole = QAction::NoRole },
     };
+
+    /// A string Qt's cocoa plugin titles a macOS application menu item with, and what the bar has it say.
+    struct ApplicationMenuText
+    {
+        std::string_view context; ///< The translation context Qt looks the string up in.
+        std::string_view source;  ///< Qt's own string, as its source text.
+        std::string_view text;    ///< What the bar has the item say.
+    };
+
+    /// The application menu strings the bar retitles; every other one stays Qt's.
+    ///
+    /// Qt titles a merged role row from these strings rather than from the action's text (see
+    /// QCocoaMenuItem::mergeText() and qt_mac_applicationmenu_string(), Qt 6.11), so a translation is the one
+    /// way to retitle one. macOS 13 and later call the Preferences item "Settings…".
+    constexpr auto ApplicationMenuTexts = std::array {
+        ApplicationMenuText {
+            .context = "MAC_APPLICATION_MENU", .source = "Preferences...", .text = "Settings…" },
+    };
+
+    /// A translator of ApplicationMenuTexts alone: any other string is left to the next translator, or to
+    /// its source text.
+    class ApplicationMenuTranslator final: public QTranslator
+    {
+      public:
+        [[nodiscard]] QString translate(char const* context,
+                                        char const* sourceText,
+                                        char const* /*disambiguation*/,
+                                        int /*n*/) const override
+        {
+            if (context == nullptr || sourceText == nullptr)
+                return {};
+            auto const row = std::ranges::find_if(ApplicationMenuTexts, [&](ApplicationMenuText const& text) {
+                return text.context == context && text.source == sourceText;
+            });
+            if (row == ApplicationMenuTexts.end())
+                return {};
+            return QString::fromUtf8(row->text.data(), static_cast<qsizetype>(row->text.size()));
+        }
+
+        /// QTranslator's own signature; it holds strings, so it is never empty.
+        [[nodiscard]] bool isEmpty() const override { return false; }
+    };
+
+    /// A new ApplicationMenuTranslator, installed into the application; it uninstalls itself as it dies.
+    [[nodiscard]] std::unique_ptr<QTranslator> installApplicationMenuText()
+    {
+        auto translator = std::make_unique<ApplicationMenuTranslator>();
+        QCoreApplication::installTranslator(translator.get());
+        return translator;
+    }
 
     /// What opening a menu bar menu may do to its rows.
     enum class MenuOnOpen : std::uint8_t
@@ -304,6 +359,7 @@ bool carriesKeyEquivalent(command::ShortcutChord const& chord) noexcept
 
 AppMenuBar::AppMenuBar(AppMenuBarSources sources, platform::IMenuBarIntegration& integration):
     _sources { std::move(sources) },
+    _applicationMenuText { installApplicationMenuText() },
     // Parentless, so that on macOS it is the one bar every window shares.
     _menuBar { std::make_unique<QMenuBar>() },
     _menus { addMenus(*_menuBar) },
@@ -396,9 +452,9 @@ QList<QAction*> AppMenuBar::fill(
                 auto* const action = new QAction(actionText(node.title), &menu);
                 action->setMenuRole(qtMenuRoleFor(node.role, which));
                 applyState(*action, node);
-                // A role row answers to its platform's standard key, never to the binding's chord.
-                if (auto const standard = display::standardKeyFor(node.role))
-                    action->setShortcut(QKeySequence(*standard));
+                // A role row answers to its menu-owned key, never to the binding's chord.
+                if (auto const owned = display::menuKeyFor(node.role))
+                    action->setShortcut(*owned);
                 else if (node.chord && carriesKeyEquivalent(*node.chord))
                     if (auto const key = qtKeyFor(*node.chord))
                         action->setShortcut(QKeySequence(*key));

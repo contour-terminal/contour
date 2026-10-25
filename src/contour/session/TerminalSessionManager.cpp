@@ -985,6 +985,18 @@ void TerminalSessionManager::showAbout(TerminalSession* acting)
         controller->showAbout();
 }
 
+void TerminalSessionManager::minimizeWindow(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->minimizeWindow();
+}
+
+void TerminalSessionManager::zoomWindow(TerminalSession* acting)
+{
+    if (auto* controller = controllerHostingSession(acting); controller != nullptr)
+        controller->toggleMaximized();
+}
+
 void TerminalSessionManager::beginTabColorPick(TerminalSession* acting)
 {
     if (auto* controller = controllerHostingSession(acting); controller != nullptr)

@@ -348,6 +348,12 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Shows the About dialog over the window hosting @p acting.
     /// @param acting The session that received the action; its hosting window is the target.
     void showAbout(TerminalSession* acting);
+    /// Minimizes the window hosting @p acting.
+    /// @param acting The session that received the action; its hosting window is the target.
+    void minimizeWindow(TerminalSession* acting);
+    /// Maximizes the window hosting @p acting, or restores it when it is maximized.
+    /// @param acting The session that received the action; its hosting window is the target.
+    void zoomWindow(TerminalSession* acting);
     /// Opens the color picker for the active tab of the window hosting @p acting (a `SetTabColor`
     /// keybinding that names no color), routed exactly like beginTabTitleEdit().
     /// @param acting The session that received the keybinding; its hosting window is the target.

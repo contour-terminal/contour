@@ -375,3 +375,25 @@ TEST_CASE("a menu bar action without a session does nothing", "[contour][windowm
 
     CHECK(window->count() == 2);
 }
+
+TEST_CASE("the menu bar's Minimize and Zoom reach the window", "[contour][windowmenus][menubar]")
+{
+    TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedControllerWithOsWindow const window { app.manager() };
+    window->bindWindow(window.osWindow.get());
+    std::ignore = createSessionTabs(app.manager(), *window, 1);
+    REQUIRE(window->activeSession() != nullptr);
+    REQUIRE_FALSE(window.osWindow->windowStates().testFlag(Qt::WindowMaximized));
+
+    // Through the menu bar's path: the active session runs the action, and the window acts on it.
+    window->runMenuBarAction(actions::Action { actions::ZoomWindow {} });
+    QTRY_VERIFY_WITH_TIMEOUT(window.osWindow->windowStates().testFlag(Qt::WindowMaximized), 5000);
+
+    window->runMenuBarAction(actions::Action { actions::ZoomWindow {} });
+    QTRY_VERIFY_WITH_TIMEOUT(!window.osWindow->windowStates().testFlag(Qt::WindowMaximized), 5000);
+
+    window->runMenuBarAction(actions::Action { actions::MinimizeWindow {} });
+    QTRY_VERIFY_WITH_TIMEOUT(window->isMinimized(), 5000);
+
+    contour::test::closeAllTabs(*window);
+}

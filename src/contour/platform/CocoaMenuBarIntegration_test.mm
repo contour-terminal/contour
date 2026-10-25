@@ -98,7 +98,7 @@ TEST_CASE("a rebuild keeps the window list after the rows", "[display][menubar][
     bar.rebuild();
 
     REQUIRE(windows.numberOfItems > 0);
-    CHECK([[windows itemAtIndex:0].title isEqualToString:@"Previous Tab"]);
+    CHECK([[windows itemAtIndex:0].title isEqualToString:@"Minimize"]);
     CHECK([windows indexOfItemWithTitle:@"Listed Window"] == windows.numberOfItems - 1);
 }
 
@@ -136,5 +136,39 @@ TEST_CASE("the application menu holds the Contour menu's rows", "[display][menub
                      && item.keyEquivalentModifierMask == NSEventModifierFlagCommand;
             }];
         CHECK(index != NSNotFound);
+    }
+}
+
+TEST_CASE("the Settings row is titled Settings… in the application menu", "[display][menubar][cocoa]")
+{
+    REQUIRE_COCOA_OR_SKIP();
+    auto const config = contour::config::Config {};
+    auto integration = contour::platform::NullMenuBarIntegration {};
+    auto const bar = contour::window::AppMenuBar {
+        contour::window::AppMenuBarSources {
+            .state = [&] { return contour::command::menuBarStateOf(config); },
+            .chords = [&] { return contour::command::chordIndex(config); },
+            .run = [](contour::actions::Action const&) {},
+        },
+        integration,
+    };
+    REQUIRE(NSApp.mainMenu.numberOfItems > 0);
+    NSMenu* const applicationMenu = [NSApp.mainMenu itemAtIndex:0].submenu;
+    REQUIRE(applicationMenu != nil);
+
+    // Qt titles a Preferences-role row from its own string, whatever the row's text: the bar must have
+    // Qt say "Settings…", as macOS 13 and later do.
+    auto const index = [applicationMenu indexOfItemWithTitle:@"Settings…"];
+    CHECK(index >= 0);
+    for (NSString* const qtTitle in @[ @"Preferences...", @"Preferences…" ])
+    {
+        INFO(qtTitle.UTF8String);
+        CHECK([applicationMenu indexOfItemWithTitle:qtTitle] < 0);
+    }
+    if (index >= 0)
+    {
+        NSMenuItem* const item = [applicationMenu itemAtIndex:index];
+        CHECK([item.keyEquivalent isEqualToString:@","]);
+        CHECK_FALSE(item.hidden);
     }
 }
