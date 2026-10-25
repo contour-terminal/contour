@@ -202,7 +202,8 @@ core::async::Task<void> converseAsControl(core::net::EventLoop* loop,
     auto const socket = std::move(*connected);
     // A daemon that never hangs up fails the test instead of hanging it.
     socket->setReceiveDeadline(std::chrono::seconds { 10 });
-    REQUIRE((co_await socket->write(request)).has_value());
+    auto const written = co_await socket->write(request);
+    REQUIRE(written.has_value());
 
     auto pending = std::vector<std::byte> {};
     auto buffer = std::vector<std::byte>(4096);
@@ -927,7 +928,6 @@ TEST_CASE("a daemon that keeps its workspace offers the restore and writes it as
     CHECK((fs::status(config.persistence.snapshotPath).permissions() & fs::perms::all)
           == (fs::perms::owner_read | fs::perms::owner_write));
 }
-#endif
 
 TEST_CASE("a daemon without persistence offers no restore", "[vthost][daemon][afunix]")
 {
@@ -960,3 +960,4 @@ TEST_CASE("a daemon without persistence offers no restore", "[vthost][daemon][af
     REQUIRE(hello != nullptr);
     CHECK_FALSE(hello->capabilities.contains(vthost::proto::Capability::WorkspaceRestore));
 }
+#endif

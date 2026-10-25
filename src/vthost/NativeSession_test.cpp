@@ -4668,37 +4668,41 @@ TEST_CASE("updates during a streaming snapshot never arm an immediate flush", "[
 {
     auto f = FlushHarness {};
     auto const id = newSession(f.h.host);
-    auto* client = static_cast<FlushClient*>(nullptr);
+    // What follows a snapshot put in flight, the same for either section's.
+    auto const coalesce = [&](FlushClient& client) {
+        REQUIRE(NativeSessionFlushTester::snapshotPending(*client.session, id));
+
+        // A fresh input (and, before a follow's first push, no increment since its snapshot) would make a
+        // flush immediate, and would do so for every update until the snapshot is off the wire, where the
+        // increment is held back regardless. So they coalesce.
+        f.h.host.writeInput(id, "a");
+        auto const firstUpdate = f.clock.now();
+        for ([[maybe_unused]] auto const update: std::views::iota(0, 10))
+        {
+            f.update(client, id, "a");
+            f.clock.advance(100us);
+        }
+        CHECK(NativeSessionFlushTester::armedDeadline(*client.session) == firstUpdate + 20ms);
+        CHECK(NativeSessionFlushTester::flushesInFlight(*client.session) == 1);
+
+        // Once the snapshot is out, the input's echo credit is still unspent.
+        CHECK(turnUntil(f.h.loop,
+                        [&] { return !NativeSessionFlushTester::snapshotPending(*client.session, id); }));
+        f.update(client, id, "a");
+        CHECK(NativeSessionFlushTester::armedDeadline(*client.session) == f.clock.now());
+    };
     SECTION("the attach snapshot, before the session's first push")
     {
-        client = &f.connect();
-        NativeSessionFlushTester::handshake(*client->session);
+        auto& client = f.connect();
+        NativeSessionFlushTester::handshake(*client.session);
+        coalesce(client);
     }
     SECTION("a resync of a session already followed")
     {
-        client = &f.attachPastFirstIncrement(id);
-        client->session->sessionResized(id);
+        auto& client = f.attachPastFirstIncrement(id);
+        client.session->sessionResized(id);
+        coalesce(client);
     }
-    REQUIRE(NativeSessionFlushTester::snapshotPending(*client->session, id));
-
-    // A fresh input (and, before a follow's first push, no increment since its snapshot) would make a flush
-    // immediate, and would do so for every update until the snapshot is off the wire, where the increment
-    // is held back regardless. So they coalesce.
-    f.h.host.writeInput(id, "a");
-    auto const firstUpdate = f.clock.now();
-    for ([[maybe_unused]] auto const update: std::views::iota(0, 10))
-    {
-        f.update(*client, id, "a");
-        f.clock.advance(100us);
-    }
-    CHECK(NativeSessionFlushTester::armedDeadline(*client->session) == firstUpdate + 20ms);
-    CHECK(NativeSessionFlushTester::flushesInFlight(*client->session) == 1);
-
-    // Once the snapshot is out, the input's echo credit is still unspent.
-    CHECK(turnUntil(f.h.loop,
-                    [&] { return !NativeSessionFlushTester::snapshotPending(*client->session, id); }));
-    f.update(*client, id, "a");
-    CHECK(NativeSessionFlushTester::armedDeadline(*client->session) == f.clock.now());
 }
 
 TEST_CASE("input from one client flushes another client's mirror at once too", "[vthost][native][flush]")

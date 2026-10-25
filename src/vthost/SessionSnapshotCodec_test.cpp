@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <numeric>
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -31,7 +30,7 @@ namespace
 [[nodiscard]] ObjectIdentityRecord identityOf(std::string label)
 {
     auto record = ObjectIdentityRecord { .label = std::move(label) };
-    std::iota(record.uuid.begin(), record.uuid.end(), std::uint8_t { 1 });
+    std::ranges::generate(record.uuid, [next = std::uint8_t { 1 }]() mutable { return next++; });
     return record;
 }
 
@@ -160,7 +159,7 @@ template <typename WriteLeaf>
 {
     auto node = proto::Writer {};
     node.u8(0); // leaf
-    writeLeaf(node);
+    std::forward<WriteLeaf>(writeLeaf)(node);
     auto tab = proto::Writer {};
     tab.u8(0); // identity
     tab.u8(0); // title
@@ -177,6 +176,18 @@ template <typename WriteLeaf>
 {
     return depth == 0 ? leaf()
                       : split(vtworkspace::SplitState::Horizontal, 0.5, leaf(), nestedSplits(depth - 1));
+}
+
+/// @return A split tree as balanced as it gets with @p leaves leaves, so it stays shallow however many it
+/// has.
+[[nodiscard]] PaneNode splitsWithLeaves(std::size_t leaves)
+{
+    if (leaves <= 1)
+        return leaf();
+    return split(vtworkspace::SplitState::Horizontal,
+                 0.5,
+                 splitsWithLeaves(leaves / 2),
+                 splitsWithLeaves(leaves - (leaves / 2)));
 }
 
 [[nodiscard]] WorkspaceSnapshot workspaceOf(PaneNode root)
@@ -286,7 +297,10 @@ TEST_CASE("decodeSnapshot names what is wrong with a damaged file", "[vthost][sn
     }
     SECTION("more leaves than a tab may hold")
     {
-        CHECK(decodeSnapshot(encodeSnapshot(workspaceOf(nestedSplits(MaxLeavesPerTab - 1)))).error()
+        // Balanced, so that the leaf count is what is refused, not the depth: a chain of that many splits
+        // is far deeper than MaxPaneDepth, and deep enough to overflow a Windows thread's stack.
+        CHECK(decodeSnapshot(encodeSnapshot(workspaceOf(splitsWithLeaves(MaxLeavesPerTab)))));
+        CHECK(decodeSnapshot(encodeSnapshot(workspaceOf(splitsWithLeaves(MaxLeavesPerTab + 1)))).error()
               == SnapshotError::Malformed);
     }
     SECTION("a ratio of 0 or 1")

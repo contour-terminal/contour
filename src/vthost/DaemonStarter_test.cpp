@@ -125,7 +125,7 @@ TEST_CASE("a started service that never serves is an error naming the socket", "
         std::chrono::milliseconds { 0 });
     auto const result = starter.start();
     REQUIRE_FALSE(result.has_value());
-    CHECK(result.error().find(SocketPath) != std::string::npos);
+    CHECK(result.error().contains(SocketPath));
     CHECK(log.starts == 1);
 }
 
@@ -136,7 +136,7 @@ TEST_CASE("without a registration the daemon is spawned on demand", "[vthost][st
     REQUIRE(starter);
     auto const result = starter->start();
     REQUIRE_FALSE(result.has_value());
-    CHECK(result.error().find(SocketPath) != std::string::npos);
+    CHECK(result.error().contains(SocketPath));
     CHECK(fixture.spawner.spawns == 1);
     CHECK(fixture.binary.calls == 1);
 }

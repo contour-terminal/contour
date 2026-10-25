@@ -92,7 +92,8 @@ TEST_CASE("the skill and the docs list every exit status in the one table's word
     auto const skill = contour::cli::renderAgentSkill("1.2.3");
     auto docFile = std::ifstream(CONTOUR_CONTROL_API_DOC, std::ios::binary);
     REQUIRE(docFile.good());
-    auto const doc = std::string { std::istreambuf_iterator<char>(docFile), {} };
+    auto doc = std::string { std::istreambuf_iterator<char>(docFile), {} };
+    std::erase(doc, '\r'); // a Windows checkout ends the doc's lines with CRLF
     for (auto const status: contour::cli::ExitStatuses)
     {
         auto const code = contour::cli::exitCode(status);

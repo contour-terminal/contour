@@ -297,9 +297,11 @@ TEST_CASE("a lost connection reconnects with Resume of the followed windows", "[
     auto daemon = Daemon {};
     auto h = Supervised { daemon, { daemon.serving() } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         daemon->dropConnection();
-        REQUIRE(co_await h->reached(ConnectionState::Connected, 2));
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        REQUIRE(reconnected);
         h->supervisor->stop();
     }(&h, &daemon));
 
@@ -325,9 +327,11 @@ TEST_CASE("a client that follows every window keeps following every window", "[v
                           { .first = 1ms, .ceiling = 4ms },
                           { .kind = proto::AttachIntentKind::AllWindows, .windows = {} } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         daemon->dropConnection();
-        REQUIRE(co_await h->reached(ConnectionState::Connected, 2));
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        REQUIRE(reconnected);
         h->supervisor->stop();
     }(&h, &daemon));
 
@@ -340,12 +344,15 @@ TEST_CASE("a window created during the connection is resumed too", "[vthost][rec
     auto daemon = Daemon {};
     auto h = Supervised { daemon, { daemon.serving() } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         h->supervisor->current()->createWindow({});
-        REQUIRE(co_await core::net::testing::waitUntil(
-            &h->loop, [h] { return h->supervisor->current()->followedWindows().size() == 2; }));
+        auto const followed = co_await core::net::testing::waitUntil(
+            &h->loop, [h] { return h->supervisor->current()->followedWindows().size() == 2; });
+        REQUIRE(followed);
         daemon->dropConnection();
-        REQUIRE(co_await h->reached(ConnectionState::Connected, 2));
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        REQUIRE(reconnected);
         h->supervisor->stop();
     }(&h, &daemon));
 
@@ -363,9 +370,11 @@ TEST_CASE("transport failures during reconnect keep retrying", "[vthost][reconne
                             failing(TransportErrorKind::Unreachable, "still gone"),
                             daemon.serving() } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         daemon->dropConnection();
-        REQUIRE(co_await h->reached(ConnectionState::Connected, 2));
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        REQUIRE(reconnected);
         h->supervisor->stop();
     }(&h, &daemon));
 
@@ -384,9 +393,11 @@ TEST_CASE("a reconnect the daemon accepts and never answers is retried", "[vthos
                           { .kind = proto::AttachIntentKind::Launch, .windows = {} },
                           { .idleBeforeProbe = 5s, .deadAfter = 15s, .handshakeDeadline = 50ms } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         daemon->dropConnection();
-        REQUIRE(co_await h->reached(ConnectionState::Connected, 2));
+        auto const reconnected = co_await h->reached(ConnectionState::Connected, 2);
+        REQUIRE(reconnected);
         h->supervisor->stop();
     }(&h, &daemon));
 
@@ -400,7 +411,8 @@ TEST_CASE("a refusal after reconnect stops retrying and names both versions", "[
     auto daemon = Daemon {};
     auto h = Supervised { daemon, { daemon.serving(), daemon.serving(disjointVersions()) } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         daemon->dropConnection();
         // No stop(): the refusal ends run() by itself.
         co_return;
@@ -418,9 +430,11 @@ TEST_CASE("stop during backoff ends run promptly", "[vthost][reconnect]")
     auto h = Supervised { daemon, { daemon.serving() }, { .first = 10s, .ceiling = 10s } };
     auto const began = std::chrono::steady_clock::now();
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         daemon->dropConnection();
-        REQUIRE(co_await h->reached(ConnectionState::Reconnecting));
+        auto const reconnecting = co_await h->reached(ConnectionState::Reconnecting);
+        REQUIRE(reconnecting);
         co_await h->loop.delay(50ms);
         h->supervisor->stop();
     }(&h, &daemon));
@@ -460,7 +474,9 @@ TEST_CASE("stop during a slow daemon start ends run promptly", "[vthost][reconne
            core::net::EventLoop* loop,
            std::atomic<bool>* started,
            std::chrono::steady_clock::time_point* stopAt) -> Task<void> {
-            REQUIRE(co_await core::net::testing::waitUntil(loop, [started] { return started->load(); }));
+            auto const running =
+                co_await core::net::testing::waitUntil(loop, [started] { return started->load(); });
+            REQUIRE(running);
             *stopAt = std::chrono::steady_clock::now();
             supervisor->stop();
         }(&supervisor, &daemon.loop, &started, &stopAt)));
@@ -478,7 +494,8 @@ TEST_CASE("a permanent transport error during reconnect stops retrying", "[vthos
                           { daemon.serving(),
                             failing(TransportErrorKind::AuthenticationRequired, "run `ssh home` once") } };
     h.drive([](Supervised* h, Daemon* daemon) -> Task<void> {
-        REQUIRE(co_await h->reached(ConnectionState::Connected));
+        auto const connected = co_await h->reached(ConnectionState::Connected);
+        REQUIRE(connected);
         daemon->dropConnection();
         co_return;
     }(&h, &daemon));

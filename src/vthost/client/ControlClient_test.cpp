@@ -266,7 +266,8 @@ Task<void> subscribeAndRing(ControlClientHarness* h,
                             vtworkspace::SessionId session,
                             std::expected<std::string, ControlClientError>* out)
 {
-    REQUIRE(co_await h->client.handshake());
+    auto const handshaken = co_await h->client.handshake();
+    REQUIRE(handshaken);
     auto const subscribed = co_await h->client.call("events.subscribe", R"({"kinds":["pane.bell"]})", {});
     REQUIRE(subscribed);
     h->host.terminal(session)->writeToScreen("\a");

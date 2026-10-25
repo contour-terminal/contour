@@ -19,7 +19,9 @@ TEST_CASE("the native runner captures standard output and the exit code", "[vtho
     CHECK(printed->standardOutput == "a=1\nb=2\n");
 }
 
-TEST_CASE("the native runner reports a program that is not installed", "[vthost][service][command]")
+// [vfork]: posix_spawn learns of a failed exec through memory it shares with its vfork'd child. valgrind runs
+// that child as a fork, so the spawn reports success, and the child exits 127 instead.
+TEST_CASE("the native runner reports a program that is not installed", "[vthost][service][command][vfork]")
 {
     auto const runner = vthost::makeNativeCommandRunner();
     auto const result = runner->run(std::vector<std::string> { "contour-no-such-program-here" });

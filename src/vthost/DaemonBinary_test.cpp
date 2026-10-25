@@ -271,11 +271,16 @@ TEST_CASE("this process's image store is derived from its environment", "[vthost
                                               .sandbox = vtpty::SandboxState::Host,
                                               .releaseVersion = "0.8.1",
                                               .processId = 42 };
-    auto const env = core::testing::FakeEnvironment {
-        { { "XDG_STATE_HOME", "/home/u/.state" }, { "APPIMAGE", AppImagePath }, { "HOME", "/home/u" } }
-    };
+    auto const env = core::testing::FakeEnvironment { { { "XDG_STATE_HOME", "/home/u/.state" },
+                                                        { "LOCALAPPDATA", "C:/Users/u/AppData/Local" },
+                                                        { "APPIMAGE", AppImagePath },
+                                                        { "HOME", "/home/u" } } };
     auto const config = vthost::ownImageStoreConfig(env, process);
+#ifdef _WIN32
+    CHECK(config.imagesRoot == fs::path { "C:/Users/u/AppData/Local/contour/bin" });
+#else
     CHECK(config.imagesRoot == fs::path { "/home/u/.state/contour/bin" });
+#endif
     CHECK(config.releaseVersion == "0.8.1");
     CHECK(config.processId == 42);
     CHECK(config.inputs.platform == vthost::NativeHostPlatform);

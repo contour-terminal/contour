@@ -3,6 +3,7 @@
 #include <vtpty/ProgramLookup.hpp>
 
 #include <core/async/Task.hpp>
+#include <core/async/WhenAll.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/ISocket.hpp>
 #include <core/net/IoBackend.hpp>
@@ -16,12 +17,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -110,7 +113,31 @@ class FakeStdioSpawner final: public vthost::IStdioSpawner
 /// Writes @p text to @p socket.
 core::async::Task<void> writeText(core::net::ISocket* socket, std::string text)
 {
-    REQUIRE((co_await socket->write(std::as_bytes(std::span { text }))).has_value());
+    auto const written = co_await socket->write(std::as_bytes(std::span { text }));
+    REQUIRE(written.has_value());
+}
+
+/// Connects through @p factory while @p remote writes @p text, which may be more than a socket buffer holds
+/// (8 KiB on macOS): written ahead of the connect, it would wait forever for a reader.
+/// @param out Receives what the connect returned.
+core::async::Task<void> connectWhileWriting(
+    core::net::EventLoop* loop,
+    vthost::SshTransportFactory* factory,
+    core::net::ISocket* remote,
+    std::string text,
+    std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>* out)
+{
+    auto const offer = [](core::net::ISocket* socket, std::string bytes) -> core::async::Task<void> {
+        // The connect may stop reading, and close its end, before every byte is written.
+        std::ignore = co_await socket->write(std::as_bytes(std::span { bytes }));
+    };
+    auto const connect = [](core::net::EventLoop* loop,
+                            vthost::SshTransportFactory* factory,
+                            std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError>* out)
+        -> core::async::Task<void> {
+        *out = co_await factory->connect(*loop);
+    };
+    co_await core::async::whenAll(offer(remote, std::move(text)), connect(loop, factory, out));
 }
 
 /// Reads @p socket until it ends.
@@ -394,10 +421,14 @@ TEST_CASE("ssh connect names a login shell that prints too much", "[vthost][ssh]
 {
     auto fixture = SshFixture {};
     auto [remote, state] = fixture.prepare();
-    fixture.loop.blockOn(writeText(remote.get(), std::string(vthost::StdioPreambleScanLimit + 1, 'x')));
 
     auto factory = fixture.factory();
-    auto const connection = fixture.loop.blockOn(factory.connect(fixture.loop));
+    auto connection = std::expected<std::unique_ptr<vthost::Connection>, vthost::TransportError> {};
+    fixture.loop.blockOn(connectWhileWriting(&fixture.loop,
+                                             &factory,
+                                             remote.get(),
+                                             std::string(vthost::StdioPreambleScanLimit + 1, 'x'),
+                                             &connection));
     REQUIRE_FALSE(connection.has_value());
     CHECK(connection.error().kind == TransportErrorKind::Refused);
     CHECK(connection.error().message.contains(".bashrc"));

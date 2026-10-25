@@ -74,15 +74,15 @@ TEST_CASE("publish prints the table and the gate line, and writes the same to th
 
     auto const text = out.str();
     CHECK(text.starts_with("metric          mode         count     p50 us"));
-    CHECK(text.find("keystroke       daemon           3      200.0") != std::string::npos);
-    CHECK(text.find("flood-mibps     daemon           3       20.0") != std::string::npos);
-    CHECK(text.find("INCONCLUSIVE (informational)\n") != std::string::npos);
+    CHECK(text.contains("keystroke       daemon           3      200.0"));
+    CHECK(text.contains("flood-mibps     daemon           3       20.0"));
+    CHECK(text.contains("INCONCLUSIVE (informational)\n"));
 
     auto written = std::ostringstream {};
     written << std::ifstream(record, std::ios::binary).rdbuf();
     CHECK(written.str().starts_with("keystroke\tdaemon\t3\t200.0\t"));
-    CHECK(written.str().find("flood-mibps\tdaemon\t3\t20.0\n") != std::string::npos);
-    CHECK(written.str().find("(informational)") != std::string::npos);
+    CHECK(written.str().contains("flood-mibps\tdaemon\t3\t20.0\n"));
+    CHECK(written.str().contains("(informational)"));
     std::filesystem::remove(record);
 }
 

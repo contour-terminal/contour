@@ -5572,6 +5572,8 @@ TEST_CASE("Terminal.input the PTY pushed back on is written again by its reader"
     CHECK(written == "x");
 }
 
+namespace
+{
 /// A PTY whose program prints one full row Rows times, then falls silent: a read waits for its
 /// timeout, as a real PTY's does, until the PTY closes.
 class RowPrintingPty final: public vtpty::MockPty
@@ -5633,6 +5635,7 @@ class RowPrintingPty final: public vtpty::MockPty
     int _rowsLeft = Rows;
     bool _closed = false;
 };
+} // namespace
 
 TEST_CASE("Terminal.writeToScreen from another thread keeps apart from what the reader reads",
           "[terminal][threading]")
