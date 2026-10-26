@@ -5,6 +5,7 @@
 #include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
+#include <contour/platform/TitleBandMaterial.hpp>
 
 #include <functional>
 #include <memory>
@@ -26,10 +27,12 @@ struct AppearanceServices
     std::function<std::unique_ptr<INativeMenuPresenter>()> menus = makeNativeMenuPresenter;
     /// Builds the integration that hands the menu bar's Window and Help menus to the OS.
     std::function<std::unique_ptr<IMenuBarIntegration>()> menuBar = makeMenuBarIntegration;
+    /// Builds the material the OS draws behind a client-drawn title band.
+    std::function<std::unique_ptr<ITitleBandMaterial>()> titleBand = makeTitleBandMaterial;
 };
 
-/// @return Factories that build the null sources, the null menu presenter and the null menu bar
-///         integration on every platform; no source ever calls back.
+/// @return Factories that build the null sources, the null menu presenter, the null menu bar
+///         integration and the null title-band material on every platform; no source ever calls back.
 [[nodiscard]] inline AppearanceServices nullAppearanceServices()
 {
     return AppearanceServices {
@@ -45,6 +48,9 @@ struct AppearanceServices
         },
         .menuBar = []() -> std::unique_ptr<IMenuBarIntegration> {
             return std::make_unique<NullMenuBarIntegration>();
+        },
+        .titleBand = []() -> std::unique_ptr<ITitleBandMaterial> {
+            return std::make_unique<NullTitleBandMaterial>();
         },
     };
 }

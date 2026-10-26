@@ -50,6 +50,7 @@ add_library(contour_platform STATIC
     TaskbarProgressSink.cpp TaskbarProgressSink.hpp
     LauncherProgress.hpp LauncherProgressSink.cpp
     TaskbarProgressState.hpp
+    TitleBandMaterial.cpp TitleBandMaterial.hpp
     # The per-OS window frame and the two compositor shadow adapters. Each of the platform-specific
     # ones is wholly inside a platform #ifdef, so it compiles to nothing where it does not apply --
     # listed unconditionally all the same, as the notification pair above is.

@@ -10,9 +10,11 @@
 #include <contour/platform/MenuBarIntegration.hpp>
 #include <contour/platform/NativeMenuPresenter.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
+#include <contour/platform/TitleBandMaterial.hpp>
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace contour::test
 {
@@ -93,9 +95,42 @@ class SwitchedPlatformAppearance final: public platform::IPlatformAppearance
     AppearanceSwitch& _source;
 };
 
+/// What a RecordingTitleBandMaterial was asked, and what it answers.
+struct TitleBandRecord
+{
+    std::vector<platform::TitleBandRequest> applied {}; ///< Every request applied, in order.
+    platform::NativeTitleBarMetrics metrics {};         ///< What metrics() answers.
+    int measured = 0;                                   ///< How often metrics() was called.
+};
+
+/// A title-band material that records into a TitleBandRecord instead of reaching the OS.
+class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
+{
+  public:
+    /// @param record Where to record; it must outlive this material.
+    explicit RecordingTitleBandMaterial(TitleBandRecord& record): _record { record } {}
+
+    /// Appends @p request to the record.
+    void apply(QWindow& /*window*/, platform::TitleBandRequest const& request) override
+    {
+        _record.applied.push_back(request);
+    }
+
+    /// Counts the call.
+    /// @return The record's metrics.
+    [[nodiscard]] platform::NativeTitleBarMetrics metrics(QWindow& /*window*/) const override
+    {
+        ++_record.measured;
+        return _record.metrics;
+    }
+
+  private:
+    TitleBandRecord& _record;
+};
+
 /// Services whose factories attach to the given switches: each stores the callback it is handed into
-/// its switch and returns a source that reads that switch. Menus get the null presenter, and the menu
-/// bar the null integration.
+/// its switch and returns a source that reads that switch. Menus get the null presenter, the menu
+/// bar the null integration, and the title band the null material.
 /// @param accessibility The accessibility switch; it must outlive the services and their sources.
 /// @param appearance The appearance switch; it must outlive the services and their sources.
 /// @return The services.
@@ -121,7 +156,28 @@ class SwitchedPlatformAppearance final: public platform::IPlatformAppearance
         .menuBar = []() -> std::unique_ptr<platform::IMenuBarIntegration> {
             return std::make_unique<platform::NullMenuBarIntegration>();
         },
+        // The null material, so a fixture-built app never dresses an NSWindow.
+        .titleBand = []() -> std::unique_ptr<platform::ITitleBandMaterial> {
+            return std::make_unique<platform::NullTitleBandMaterial>();
+        },
     };
+}
+
+/// The services of appearanceServicesWith(AccessibilitySwitch&, AppearanceSwitch&), with a title-band
+/// material that records into @p titleBand.
+/// @param accessibility The accessibility switch; it must outlive the services and their sources.
+/// @param appearance The appearance switch; it must outlive the services and their sources.
+/// @param titleBand The record; it must outlive the services and their material.
+/// @return The services.
+[[nodiscard]] inline platform::AppearanceServices appearanceServicesWith(AccessibilitySwitch& accessibility,
+                                                                         AppearanceSwitch& appearance,
+                                                                         TitleBandRecord& titleBand)
+{
+    auto services = appearanceServicesWith(accessibility, appearance);
+    services.titleBand = [&titleBand]() -> std::unique_ptr<platform::ITitleBandMaterial> {
+        return std::make_unique<RecordingTitleBandMaterial>(titleBand);
+    };
+    return services;
 }
 
 } // namespace contour::test

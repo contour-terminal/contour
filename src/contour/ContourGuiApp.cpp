@@ -437,6 +437,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _hostIdentity(hostIdentity ? std::move(*hostIdentity) : thisMachineIdentity()),
     _fileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     _taskbarProgressSink(taskbarProgress ? std::move(taskbarProgress) : platform::makeTaskbarProgressSink()),
+    _titleBandMaterial(appearanceServices.titleBand()),
     // The one read of the home directory: QDir's form (`C:/Users/...` on Windows) is the one the tab
     // tooltip's paths arrive in, which the environment's native separators would not match.
     _sessionManager(*this,
@@ -1785,6 +1786,11 @@ platform::PlatformAppearance ContourGuiApp::platformAppearance() const
 platform::INativeMenuPresenter& ContourGuiApp::nativeMenuPresenter() noexcept
 {
     return *_nativeMenus;
+}
+
+platform::ITitleBandMaterial& ContourGuiApp::titleBandMaterial() noexcept
+{
+    return *_titleBandMaterial;
 }
 
 config::MenuPresentation ContourGuiApp::menuPresentation() const noexcept

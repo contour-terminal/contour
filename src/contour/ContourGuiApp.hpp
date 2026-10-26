@@ -567,6 +567,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The injected native menu presenter; the null one where the platform has none.
     [[nodiscard]] platform::INativeMenuPresenter& nativeMenuPresenter() noexcept;
 
+    /// @return The injected title-band material; the null one where the platform draws none.
+    [[nodiscard]] platform::ITitleBandMaterial& titleBandMaterial() noexcept;
+
     /// @return How the resolved chrome style presents menus; @c InScene until terminalGuiAction()
     ///         resolves the style.
     [[nodiscard]] config::MenuPresentation menuPresentation() const noexcept;
@@ -903,6 +906,10 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // _nativeController, which it sends through. Opaque for the reason _extensionRuntime is.
     std::unique_ptr<vtextension::IGrantStore, void (*)(vtextension::IGrantStore*)> _daemonGrants { nullptr,
                                                                                                    nullptr };
+    // The material the OS draws behind each window's title band, built from the appearance services.
+    // Declared before _sessionManager and _qmlEngine, unlike the appearance sources below, so it is destroyed
+    // after them: the manager's window controllers, and the windows they drive, borrow it.
+    std::unique_ptr<platform::ITitleBandMaterial> _titleBandMaterial;
     session::TerminalSessionManager _sessionManager;
     std::unique_ptr<display::ForcedFontDpiProvider> _forcedFontDpiProvider;
     // Shared by every display, reached via the session; @see keyboardLayout(). Unlike the DPI

@@ -20,6 +20,7 @@
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <QtCore/QTemporaryDir>
+#include <QtGui/QWindow>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -428,6 +429,29 @@ TEST_CASE("ContourGuiApp reads accessibility through its injected source", "[con
                                                  .contrast = ContrastPreference::Standard });
     CHECK(app.app().accessibilityPreferences().motion == MotionPreference::Full);
     CHECK(static_cast<bool>(accessibility.notify));
+}
+
+TEST_CASE("the app builds its title-band material through its services", "[contour][app][appearance]")
+{
+    // Declared before the app, so the record and the switches outlive the material and sources.
+    auto record = contour::test::TitleBandRecord {};
+    auto accessibility = contour::test::AccessibilitySwitch {};
+    auto appearance = contour::test::AppearanceSwitch {};
+
+    auto app = TestApp(nullptr,
+                       nullptr,
+                       nullptr,
+                       nullptr,
+                       TestApp::testHostIdentity(),
+                       nullptr,
+                       {},
+                       nullptr,
+                       contour::test::appearanceServicesWith(accessibility, appearance, record));
+
+    auto window = QWindow {};
+    app.app().titleBandMaterial().apply(window, {});
+    CHECK(record.applied.size() == 1);
+    CHECK(record.applied.front() == contour::platform::TitleBandRequest {});
 }
 
 TEST_CASE("A default TestApp never reads the host's accessibility settings", "[contour][app][appearance]")
