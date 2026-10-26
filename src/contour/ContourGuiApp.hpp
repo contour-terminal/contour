@@ -642,6 +642,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     void registerBundledFonts() const;
 
     void setupQCoreApplication();
+    /// Selects the Qt RHI graphics API, and the GPU it runs on, from the configured renderer backend.
+    /// Must run once the QApplication exists and before the first QQuickWindow is created.
+    void selectGraphicsApi();
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();

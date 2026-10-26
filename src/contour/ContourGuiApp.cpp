@@ -1144,9 +1144,9 @@ namespace
     /// (the executable being `<prefix>/bin/contour`). Windows ships none; it uses Cascadia Mono.
     [[nodiscard]] text::BundledFontDirectories bundledFontDirectories(fs::path const& executableDirectory)
     {
-#if defined(__APPLE__)
+#ifdef __APPLE__
         return { .paths = { (executableDirectory / ".." / "Resources" / "fonts").lexically_normal() } };
-#elif defined(_WIN32)
+#elifdef _WIN32
         (void) executableDirectory;
         return {};
 #else
@@ -2331,46 +2331,7 @@ int ContourGuiApp::terminalGuiAction()
     QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
     QQuickStyle::setStyle(QString::fromUtf8(config::uiStyleTokens(_chromeStyle).quickControlsStyle));
 
-    // Select the Qt RHI graphics API from the configured renderer backend, before the first
-    // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
-    // platform-native backend (Direct3D 11 on Windows, Metal on macOS, OpenGL on Linux). The renderer
-    // is backend-portable (RhiRenderer uses QRhi::clipSpaceCorrMatrix()/isYUpInFramebuffer(), and the
-    // shaders are compiled for every backend), so no GL-specific assumptions leak through here.
-    auto const graphicsApiFor =
-        [](config::RenderingBackend backend) -> std::optional<QSGRendererInterface::GraphicsApi> {
-        switch (backend)
-        {
-            case config::RenderingBackend::Auto: return std::nullopt;
-            case config::RenderingBackend::OpenGL: return QSGRendererInterface::OpenGL;
-            case config::RenderingBackend::Software: return QSGRendererInterface::OpenGL;
-            case config::RenderingBackend::Vulkan: return QSGRendererInterface::Vulkan;
-            case config::RenderingBackend::Direct3D11: return QSGRendererInterface::Direct3D11;
-            case config::RenderingBackend::Direct3D12: return QSGRendererInterface::Direct3D12;
-            case config::RenderingBackend::Metal: return QSGRendererInterface::Metal;
-        }
-        return std::nullopt;
-    };
-
-    // Resolve the configured backend against what this platform can actually composite (see
-    // RenderingBackendSelection.h): an unavailable backend — including desktop OpenGL on macOS, which
-    // maps a window but never composites the scene graph, leaving the user with an invisible window —
-    // self-heals to Auto so a mis-set config never prevents startup or hangs on a dead window.
-    auto const configuredBackend = _config.renderer.value().renderingBackend;
-    auto const requestedBackend = resolveRenderingBackend(display::currentRhiPlatform(), configuredBackend);
-    if (requestedBackend != configuredBackend)
-        errorLog()("Renderer backend {} is not available on this platform; falling back to auto.",
-                   configuredBackend);
-
-    if (auto const api = graphicsApiFor(requestedBackend))
-        QQuickWindow::setGraphicsApi(*api);
-
-#ifdef CONTOUR_WITH_GPU_SELECTION
-    // `auto` does not intervene, so it needs no selector: Qt lists and creates the devices as it always did.
-    if (auto const implementation = display::adapterImplementationFor(requestedBackend);
-        implementation && effectiveGpuSelector().preference != config::GpuPreference::Auto)
-        _graphicsDeviceSelector = std::make_unique<display::GraphicsDeviceSelector>(
-            display::makeQtAdapterLister(*implementation), effectiveGpuSelector());
-#endif
+    selectGraphicsApi();
 
     QGuiApplication::setWindowIcon(QIcon(":/contour/logo-256.png"));
 
@@ -2577,6 +2538,50 @@ int ContourGuiApp::terminalGuiAction()
 
     // printf("\r%s", TBC);
     return rv; // releaseQtObjects tears the Qt objects down before `app`
+}
+
+void ContourGuiApp::selectGraphicsApi()
+{
+    // Select the Qt RHI graphics API from the configured renderer backend, before the first
+    // QQuickWindow is created. RenderingBackend::Auto leaves the choice to Qt, which resolves the
+    // platform-native backend (Direct3D 11 on Windows, Metal on macOS, OpenGL on Linux). The renderer
+    // is backend-portable (RhiRenderer uses QRhi::clipSpaceCorrMatrix()/isYUpInFramebuffer(), and the
+    // shaders are compiled for every backend), so no GL-specific assumptions leak through here.
+    auto const graphicsApiFor =
+        [](config::RenderingBackend backend) -> std::optional<QSGRendererInterface::GraphicsApi> {
+        switch (backend)
+        {
+            case config::RenderingBackend::Auto: return std::nullopt;
+            case config::RenderingBackend::OpenGL: return QSGRendererInterface::OpenGL;
+            case config::RenderingBackend::Software: return QSGRendererInterface::OpenGL;
+            case config::RenderingBackend::Vulkan: return QSGRendererInterface::Vulkan;
+            case config::RenderingBackend::Direct3D11: return QSGRendererInterface::Direct3D11;
+            case config::RenderingBackend::Direct3D12: return QSGRendererInterface::Direct3D12;
+            case config::RenderingBackend::Metal: return QSGRendererInterface::Metal;
+        }
+        return std::nullopt;
+    };
+
+    // Resolve the configured backend against what this platform can actually composite (see
+    // RenderingBackendSelection.h): an unavailable backend — including desktop OpenGL on macOS, which
+    // maps a window but never composites the scene graph, leaving the user with an invisible window —
+    // self-heals to Auto so a mis-set config never prevents startup or hangs on a dead window.
+    auto const configuredBackend = _config.renderer.value().renderingBackend;
+    auto const requestedBackend = resolveRenderingBackend(display::currentRhiPlatform(), configuredBackend);
+    if (requestedBackend != configuredBackend)
+        errorLog()("Renderer backend {} is not available on this platform; falling back to auto.",
+                   configuredBackend);
+
+    if (auto const api = graphicsApiFor(requestedBackend))
+        QQuickWindow::setGraphicsApi(*api);
+
+#ifdef CONTOUR_WITH_GPU_SELECTION
+    // `auto` does not intervene, so it needs no selector: Qt lists and creates the devices as it always did.
+    if (auto const implementation = display::adapterImplementationFor(requestedBackend);
+        implementation && effectiveGpuSelector().preference != config::GpuPreference::Auto)
+        _graphicsDeviceSelector = std::make_unique<display::GraphicsDeviceSelector>(
+            display::makeQtAdapterLister(*implementation), effectiveGpuSelector());
+#endif
 }
 
 void ContourGuiApp::setupQCoreApplication()
