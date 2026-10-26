@@ -1339,6 +1339,10 @@ void TerminalSessionManager::paneClosed(vtworkspace::TabId tab, vtworkspace::Pan
 
 void TerminalSessionManager::activePaneChanged(vtworkspace::TabId tab, vtworkspace::PaneId)
 {
+    // A FocusPane* move is the keyboard's; anything else that moves the active pane -- a split, a close, a
+    // swap, a revealed session -- is not. Written before the proxies below are told.
+    _paneActivations[tab.value] =
+        _keyboardPaneMove == tab ? window::PaneActivation::Keyboard : window::PaneActivation::Pointer;
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
     {
         c->notifyTabRowChanged(tab, { window::WindowController::Roles::TitleRole });
@@ -2109,9 +2113,11 @@ void TerminalSessionManager::focusPane(vtworkspace::FocusDirection direction, Te
 {
     if (auto* tab = paneActionTargetTab(acting))
     {
-        // Recorded first, so that the active-pane change the move fires reads it.
-        notePaneActivation(tab->id(), window::PaneActivation::Keyboard);
+        // Only a move that lands reads as the keyboard's: activePaneChanged() records how the pane it fires
+        // for was reached, and a move with no neighbour fires nothing.
+        _keyboardPaneMove = tab->id();
         _model->focusDirection(tab->id(), direction);
+        _keyboardPaneMove.reset();
     }
 }
 

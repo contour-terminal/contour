@@ -745,7 +745,7 @@ void TerminalSession::reportDeviceStartFailure(vtpty::StartFailure const& failur
         recordEndLocked(EndReason::StartFailed, std::format("{}", failure));
     }
     // start() runs on the GUI thread, so the end is announced there, and outside the lock.
-    emit sessionEndChanged();
+    announceSessionEnd();
 }
 
 void TerminalSession::mainLoop()
@@ -1141,8 +1141,12 @@ bool TerminalSession::pollsForegroundProcess() const noexcept
 
 void TerminalSession::startFollowingForegroundProcess(ProcessNameFollower who)
 {
-    // A mirrored pane's program runs on its host: this machine's device has no process group to ask.
+    // A mirrored pane's program runs on its host: this machine's device has no process group to ask. An
+    // ended pane's header names no program either: its footer stands where the program ran.
     if (_hosting == SessionHosting::Remote || _processNameFollowers.test(who))
+        return;
+    if (who == ProcessNameFollower::Header
+        && core::locked(_onClosedMutex, [this] { return _end; }) != EndReason::None)
         return;
     _processNameFollowers.enable(who);
     if (!_foregroundProcessTimer)
@@ -1329,6 +1333,12 @@ void TerminalSession::answerExtensionConsent(vtextension::ConsentAnswer answer)
             this, [this]() { emit requestPermissionForExtension(); }, Qt::QueuedConnection);
 }
 
+std::string_view TerminalSession::foregroundProcessToldToExtensions() const noexcept
+{
+    return _extensionState ? std::string_view { _extensionState->toldForegroundProcessName }
+                           : std::string_view {};
+}
+
 void TerminalSession::tellExtensionsForegroundProcess()
 {
     // Only while an extension follows: a header's poll tells the extensions nothing they did not ask for.
@@ -1357,6 +1367,11 @@ void TerminalSession::extensionFramePublished()
 
 void TerminalSession::tellExtensionsForegroundProcess()
 {
+}
+
+std::string_view TerminalSession::foregroundProcessToldToExtensions() const noexcept
+{
+    return {};
 }
 #endif
 // }}}
@@ -1777,6 +1792,13 @@ void TerminalSession::focusTerminalWindow()
     });
 }
 
+void TerminalSession::announceSessionEnd()
+{
+    // The footer stands where the program ran: its header has no program in front to name.
+    stopFollowingForegroundProcess(ProcessNameFollower::Header);
+    emit sessionEndChanged();
+}
+
 void TerminalSession::recordEndLocked(EndReason reason, std::string detail)
 {
     sessionLog()("Session ended ({}): {}", static_cast<int>(reason), detail);
@@ -1831,7 +1853,7 @@ void TerminalSession::onClosed()
         handleDeviceClosedLocked();
     }
     if (_end != endBefore)
-        emit sessionEndChanged();
+        announceSessionEnd();
 }
 
 void TerminalSession::handleDeviceClosedLocked()

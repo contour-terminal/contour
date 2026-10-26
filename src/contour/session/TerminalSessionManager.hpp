@@ -513,8 +513,10 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Makes leaf @p id the active pane of tab @p tab.
     void activatePane(vtworkspace::TabId tab, vtworkspace::PaneId id);
 
-    /// Records how tab @p tab's active pane was last reached -- a pointer (PaneProxy::activate()) or a
-    /// FocusPane* action -- and, when that changes, tells the tab's proxies, whose focus reads it.
+    /// Records how tab @p tab's active pane was last reached and, when that changes, tells the tab's proxies,
+    /// whose focus reads it. PaneProxy::activate() records Pointer here, since a click on the pane already
+    /// active moves nothing; every active-pane change records itself (activePaneChanged()): Keyboard for a
+    /// FocusPane* move, Pointer for anything else.
     /// @param tab The tab.
     /// @param activation How.
     void notePaneActivation(vtworkspace::TabId tab, window::PaneActivation activation);
@@ -1260,6 +1262,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // TabId -> how that tab's active pane was last reached (@see notePaneActivation); a tab absent from it
     // was reached by the pointer. Pruned when the tab closes.
     std::unordered_map<uint64_t, window::PaneActivation> _paneActivations;
+    // The tab a FocusPane* action is moving the active pane of, while focusPane() runs it: what tells
+    // activePaneChanged() that the move is the keyboard's.
+    std::optional<vtworkspace::TabId> _keyboardPaneMove;
     uint64_t _nextSessionId { 1 };
     // The id pre-minted for the next tab the model is about to create, consumed by the model's
     // SessionAllocator so a model tab and its backing TerminalSession share one id.

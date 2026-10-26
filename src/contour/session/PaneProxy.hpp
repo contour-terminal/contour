@@ -61,7 +61,10 @@ class PaneProxy: public QObject
     /// Writes a new splitter ratio back to the model (called from the QML drag handle).
     Q_INVOKABLE void setRatio(double ratio);
 
-    /// Makes this pane the active pane of its tab (called on focus-in / click), reached by the pointer.
+    /// Makes this pane the active pane of its tab, reached by the pointer: called on TerminalPane.qml's tap
+    /// (relayed by PaneNode.qml) only, which is why it records PaneActivation::Pointer -- a keyboard move
+    /// goes through TerminalSessionManager::focusPane(), and the model's own activations through
+    /// activePaneChanged().
     Q_INVOKABLE void activate();
 
     // {{{ Manager-side wiring (not for QML)

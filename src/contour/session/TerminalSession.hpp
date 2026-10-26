@@ -764,7 +764,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return What this pane's program status says (its record's title, message or app). GUI thread.
     [[nodiscard]] QString const& getProgramStatusText() const noexcept { return _paneProgramStatusText; }
 
-    /// Sets this pane's program status, decided by the manager (window::paneProgramStatusOf), and notifies
+    /// Sets this pane's program status, decided by the manager (window::paneStatusBadgeOf), and notifies
     /// paneProgramStatusChanged() when either part differs. Domain state, not configuration. GUI thread.
     /// @param kind The badge this pane's own records earn.
     /// @param text What it says.
@@ -779,7 +779,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// Adds @p who to those following the program in front. The first follower makes the one-second poll
     /// and polls at once, so a header never waits a second for its name. A remote-hosted pane follows
-    /// nothing: its program runs on the host, which this machine's device knows nothing of. GUI thread.
+    /// nothing: its program runs on the host, which this machine's device knows nothing of. Nor does an
+    /// ended pane's header, whose footer stands where the program ran. GUI thread.
     /// @param who The follower.
     void startFollowingForegroundProcess(ProcessNameFollower who);
 
@@ -791,6 +792,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// foregroundProcessNameChanged() and, while an extension follows, tells the terminal. The poll's tick,
     /// public for the tests to tick it. GUI thread.
     void pollForegroundProcess();
+
+    /// @return The program the extensions were last told is in front (once per name, only while one
+    ///         follows); empty before any was told, and always in a build without extensions. GUI thread.
+    [[nodiscard]] std::string_view foregroundProcessToldToExtensions() const noexcept;
     // }}}
 
     /// @return The ended pane's footer text; empty while the session runs.
@@ -1550,6 +1555,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param reason How it ended (not None).
     /// @param detail What the footer names: an exit code, a signal, a failure; empty for none.
     void recordEndLocked(EndReason reason, std::string detail);
+
+    /// Announces the end recorded (sessionEndChanged()), and has the pane's header stop following the
+    /// program in front, which has gone. GUI thread, outside _onClosedMutex.
+    void announceSessionEnd();
 
     /// Ends a gutter hover, if one is in effect.
     ///

@@ -1516,6 +1516,54 @@ TEST_CASE("TerminalSessionManager: a pane's focus says how it was reached", "[ma
     contour::test::closeAllTabs(*window);
 }
 
+TEST_CASE("TerminalSessionManager: only a FocusPane move leaves a pane keyboard-focused", "[manager][panes]")
+{
+    using contour::window::PaneFocus;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    REQUIRE(left != nullptr);
+    manager.splitActivePane(/*vertical*/ true, left);
+    auto* const right = window->activeSession();
+    REQUIRE(right != left);
+    auto const focusOf = [&](contour::session::TerminalSession const* session) {
+        auto const* proxy = proxyShowing(window->activeTabRootPane(), session);
+        REQUIRE(proxy != nullptr);
+        return static_cast<PaneFocus>(proxy->focus());
+    };
+
+    SECTION("a move with no neighbour to move to")
+    {
+        manager.focusPane(vtworkspace::FocusDirection::Right, right);
+        CHECK(focusOf(right) == PaneFocus::Focused);
+    }
+
+    SECTION("a split after a keyboard move")
+    {
+        manager.focusPane(vtworkspace::FocusDirection::Left, right);
+        REQUIRE(focusOf(left) == PaneFocus::KeyboardFocused);
+        manager.splitActivePane(/*vertical*/ false, left);
+        auto* const added = window->activeSession();
+        REQUIRE(added != left);
+        CHECK(focusOf(added) == PaneFocus::Focused);
+    }
+
+    SECTION("a close after a keyboard move")
+    {
+        manager.focusPane(vtworkspace::FocusDirection::Left, right);
+        REQUIRE(focusOf(left) == PaneFocus::KeyboardFocused);
+        manager.closeActivePane(left, contour::session::SessionEnd::Destroy);
+        left->onClosed();
+        REQUIRE(window->activeSession() == right);
+        CHECK(focusOf(right) == PaneFocus::Focused);
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
 TEST_CASE("TerminalSessionManager: visiblePaneCount follows splits and zoom", "[manager][panes]")
 {
     contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
@@ -1632,6 +1680,84 @@ TEST_CASE("TerminalSessionManager: a split's visible panes poll, and only on cha
         manager.toggleActivePaneZoom(right);
         CHECK(left->pollsForegroundProcess());
         CHECK(right->pollsForegroundProcess());
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: the first follower polls at once", "[manager][processname]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    REQUIRE(left != nullptr);
+
+    // Named before the split shows its header: the header reads the name without waiting for a tick.
+    mockPtyOf(*left).setForegroundProcessName("vim");
+    manager.splitActivePane(/*vertical*/ true, left);
+    CHECK(left->getForegroundProcessName() == QStringLiteral("vim"));
+
+    // And a tab brought to the front reads its panes' names as it shows them.
+    window->createNewTab();
+    REQUIRE_FALSE(left->pollsForegroundProcess());
+    mockPtyOf(*left).setForegroundProcessName("top");
+    window->activateTab(0);
+    CHECK(left->getForegroundProcessName() == QStringLiteral("top"));
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: an extension and a header follow the foreground process together",
+          "[manager][processname]")
+{
+    using contour::session::ProcessNameFollower;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    REQUIRE(left != nullptr);
+    manager.splitActivePane(/*vertical*/ true, left);
+    REQUIRE(left->pollsForegroundProcess()); // its header follows
+
+    // A header's poll tells the extensions nothing they did not ask for.
+    mockPtyOf(*left).setForegroundProcessName("vim");
+    left->pollForegroundProcess();
+    REQUIRE(left->getForegroundProcessName() == QStringLiteral("vim"));
+    CHECK(left->foregroundProcessToldToExtensions().empty());
+
+    left->startFollowingForegroundProcess(ProcessNameFollower::Extension);
+#ifdef CONTOUR_EXTENSIONS
+    // Told at once, as the extension starts following: the name was known.
+    CHECK(left->foregroundProcessToldToExtensions() == "vim");
+#endif
+
+    SECTION("stopping the header keeps the extension's poll")
+    {
+        left->stopFollowingForegroundProcess(ProcessNameFollower::Header);
+        CHECK(left->pollsForegroundProcess());
+        left->stopFollowingForegroundProcess(ProcessNameFollower::Extension);
+        CHECK_FALSE(left->pollsForegroundProcess());
+    }
+
+    SECTION("stopping the extension keeps the header's poll")
+    {
+        left->stopFollowingForegroundProcess(ProcessNameFollower::Extension);
+        CHECK(left->pollsForegroundProcess());
+
+        // And the extensions are no longer told.
+        mockPtyOf(*left).setForegroundProcessName("less");
+        left->pollForegroundProcess();
+        CHECK(left->getForegroundProcessName() == QStringLiteral("less"));
+#ifdef CONTOUR_EXTENSIONS
+        CHECK(left->foregroundProcessToldToExtensions() == "vim");
+#endif
+
+        left->stopFollowingForegroundProcess(ProcessNameFollower::Header);
+        CHECK_FALSE(left->pollsForegroundProcess());
     }
 
     contour::test::closeAllTabs(*window);
@@ -2171,6 +2297,33 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
         CHECK(manager.sessionForId(restarted->modelSessionId()) == nullptr);
         CHECK(window->activeSession() == sibling);
     }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: an ended pane's header stops following its process",
+          "[manager][paneend][processname]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const ended = window->activeSession();
+    REQUIRE(ended != nullptr);
+    manager.splitActivePane(/*vertical*/ true, ended);
+    auto* const survivor = window->activeSession();
+    REQUIRE(ended->pollsForegroundProcess());
+
+    // Its footer stands where its program ran: there is no program in front to name.
+    endEarly(*ended);
+    REQUIRE(ended->getSessionEnd() != static_cast<int>(contour::session::EndReason::None));
+    CHECK_FALSE(ended->pollsForegroundProcess());
+    CHECK(survivor->pollsForegroundProcess());
+
+    // Nor does a later refresh -- a zoom and back -- start it again.
+    manager.toggleActivePaneZoom(survivor);
+    manager.toggleActivePaneZoom(survivor);
+    CHECK_FALSE(ended->pollsForegroundProcess());
 
     contour::test::closeAllTabs(*window);
 }
