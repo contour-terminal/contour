@@ -9914,58 +9914,133 @@ TEST_CASE("Closing the palette over the find bar gives the find bar its focus ba
 // }}}
 
 // {{{ The session's permission question
+namespace
+{
+
+/// A question as TerminalSession::pendingPermission() publishes it: a title, one line, and its id.
+[[nodiscard]] QVariantMap permissionQuestion(int id)
+{
+    return QVariantMap {
+        { QStringLiteral("id"), id },
+        { QStringLiteral("title"), QStringLiteral("Allow “zsh” to read the screen?") },
+        { QStringLiteral("lines"),
+          QVariantList { QVariantMap {
+              { QStringLiteral("text"),
+                QStringLiteral("It asks for the last 24 lines of the terminal, to read them back.") },
+              { QStringLiteral("strong"), false },
+              { QStringLiteral("verbatim"), false } } } },
+    };
+}
+
+/// A SessionChrome over @p session, and its permission dialog.
+struct PermissionChrome
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    std::unique_ptr<QObject> chrome;
+    QObject* dialog = nullptr;
+
+    explicit PermissionChrome(MockSession& session)
+    {
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine);
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
+        while (component.status() == QQmlComponent::Loading)
+            QCoreApplication::processEvents();
+        REQUIRE(component.isReady());
+        QVariantMap initial;
+        initial.insert("session", QVariant::fromValue(static_cast<QObject*>(&session)));
+        chrome.reset(component.createWithInitialProperties(initial));
+        REQUIRE(chrome != nullptr);
+        dialog = chrome->findChild<QObject*>(QStringLiteral("permissionDialog"));
+        REQUIRE(dialog != nullptr);
+        QCoreApplication::processEvents();
+    }
+};
+
+} // namespace
+
 TEST_CASE("SessionChrome opens one dialog for the session's question (offscreen)",
           "[contour][gui][qml][permission]")
 {
+    using contour::session::PermissionDecision;
+    using contour::session::PermissionMemory;
+
+    struct AnswerRow
+    {
+        char const* signal;
+        PermissionDecision decision;
+        PermissionMemory memory;
+    };
+    auto const row =
+        GENERATE(AnswerRow { "yesClicked", PermissionDecision::Allow, PermissionMemory::Once },
+                 AnswerRow { "yesToAllClicked", PermissionDecision::Allow, PermissionMemory::Session },
+                 AnswerRow { "noClicked", PermissionDecision::Deny, PermissionMemory::Once },
+                 AnswerRow { "noToAllClicked", PermissionDecision::Deny, PermissionMemory::Session },
+                 AnswerRow { "rejected", PermissionDecision::Deny, PermissionMemory::Once });
+    INFO(row.signal);
+
     auto const capture = contour::test::QmlMessageCapture {};
-    QQmlEngine engine;
-    MockTabController controller;
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::installChromeStyle(engine);
-    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-    REQUIRE(component.isReady());
-
     MockSession session;
-    QVariantMap initial;
-    initial.insert("session", QVariant::fromValue(static_cast<QObject*>(&session)));
-    std::unique_ptr<QObject> chrome(component.createWithInitialProperties(initial));
-    REQUIRE(chrome != nullptr);
-    auto* const dialog = chrome->findChild<QObject*>(QStringLiteral("permissionDialog"));
-    REQUIRE(dialog != nullptr);
+    auto host = PermissionChrome { session };
 
-    auto const title = QStringLiteral("Allow “zsh” to read the screen?");
-    auto const detail = QStringLiteral("It asks for the last 24 lines of the terminal, to read them back.");
-    session.setPendingPermission(QVariantMap {
-        { QStringLiteral("title"), title },
-        { QStringLiteral("lines"),
-          QVariantList { QVariantMap { { QStringLiteral("text"), detail },
-                                       { QStringLiteral("strong"), false },
-                                       { QStringLiteral("verbatim"), false } } } },
-    });
+    constexpr auto QuestionId = 7;
+    session.setPendingPermission(permissionQuestion(QuestionId));
     QCoreApplication::processEvents();
-    CHECK(dialog->property("title").toString() == title);
-    CHECK(dialog->property("text").toString() == detail);
+    auto const question = permissionQuestion(QuestionId);
+    CHECK(host.dialog->property("title").toString() == question.value(QStringLiteral("title")).toString());
+    CHECK(host.dialog->property("text").toString()
+          == question.value(QStringLiteral("lines")).toList().front().toMap().value(QStringLiteral("text")));
 
-    // "Yes to All" is Allow, remembered for the session.
-    REQUIRE(QMetaObject::invokeMethod(dialog, "yesToAllClicked"));
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, row.signal));
     REQUIRE(session.lastPermissionAnswer.has_value());
-    CHECK(session.lastPermissionAnswer->first == contour::session::PermissionDecision::Allow);
-    CHECK(session.lastPermissionAnswer->second == contour::session::PermissionMemory::Session);
-
-    // Closing it unanswered is Deny, this once.
-    REQUIRE(QMetaObject::invokeMethod(dialog, "rejected"));
-    CHECK(session.lastPermissionAnswer->first == contour::session::PermissionDecision::Deny);
-    CHECK(session.lastPermissionAnswer->second == contour::session::PermissionMemory::Once);
-    CHECK(session.permissionAnswers == 2);
-
-    // Emptied once answered: no dialog opens for nothing.
-    session.setPendingPermission({});
-    QCoreApplication::processEvents();
-    CHECK(dialog->property("title").toString() == title);
+    CHECK(session.lastPermissionAnswer->id == QuestionId);
+    CHECK(session.lastPermissionAnswer->decision == row.decision);
+    CHECK(session.lastPermissionAnswer->memory == row.memory);
+    CHECK(session.permissionAnswers == 1);
     // Offscreen, Qt Labs Platform has no native dialog to open and says so; that is no QML diagnostic.
     CHECK(capture.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("SessionChrome shows a question asked before it bound the session (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    MockSession session;
+    constexpr auto QuestionId = 3;
+    session.setPendingPermission(permissionQuestion(QuestionId));
+    auto host = PermissionChrome { session };
+
+    CHECK(host.dialog->property("title").toString()
+          == permissionQuestion(QuestionId).value(QStringLiteral("title")).toString());
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "yesClicked"));
+    REQUIRE(session.lastPermissionAnswer.has_value());
+    CHECK(session.lastPermissionAnswer->id == QuestionId);
+
+    // Rebound to a session that asks something else, the dialog answers that session's question.
+    MockSession other;
+    constexpr auto OtherId = 11;
+    other.setPendingPermission(permissionQuestion(OtherId));
+    host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(&other)));
+    QCoreApplication::processEvents();
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "noClicked"));
+    REQUIRE(other.lastPermissionAnswer.has_value());
+    CHECK(other.lastPermissionAnswer->id == OtherId);
+    CHECK(session.permissionAnswers == 1);
+}
+
+TEST_CASE("SessionChrome closes the dialog when the question goes (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    MockSession session;
+    auto host = PermissionChrome { session };
+    session.setPendingPermission(permissionQuestion(5));
+    QCoreApplication::processEvents();
+
+    // Settled elsewhere (a reload, another answer): the dialog closes, and a late click answers nothing.
+    session.setPendingPermission({});
+    QCoreApplication::processEvents();
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "yesClicked"));
+    CHECK(session.permissionAnswers == 0);
 }
 // }}}
 

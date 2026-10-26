@@ -132,6 +132,20 @@ constexpr auto TestPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::Col
     return makeSessionWith(app, std::make_unique<vtpty::MockPty>(TestPageSize), std::move(notifier));
 }
 
+/// The id of the question @p session shows, as its dialog reads it.
+[[nodiscard]] int shownQuestionId(contour::session::TerminalSession const& session)
+{
+    return session.pendingPermission().value(QStringLiteral("id")).toInt();
+}
+
+/// Answers the question @p session shows, as its dialog would.
+void answerShown(contour::session::TerminalSession& session,
+                 contour::session::PermissionDecision decision,
+                 contour::session::PermissionMemory memory)
+{
+    session.answerPermission(shownQuestionId(session), decision, memory);
+}
+
 /// Counts into @p asks each time @p session shows a question about @p role -- a dialog opening, or the open
 /// one changing what it says. The connection lives with the session, which every caller outlives.
 void countAsks(contour::session::TerminalSession& session, contour::session::GuardedRole role, int& asks)
@@ -5145,8 +5159,8 @@ namespace
     return font;
 }
 
-/// A copy of @p app's configuration in which profile @p name configures capture_buffer as @p permission: a
-/// file saved with that one setting changed, as the reload that follows would read it.
+/// A copy of @p app's configuration in which profile @p name configures capture_buffer as @p permission: what
+/// a reload reads from a file saved with that one setting changed, built in memory.
 [[nodiscard]] contour::config::Config withCapturePermission(contour::ContourGuiApp& app,
                                                             std::string const& name,
                                                             contour::config::Permission permission)
@@ -5189,7 +5203,7 @@ TEST_CASE("TerminalSession: two questions asked at once are shown one after the 
         held->pendingPermission().value(QStringLiteral("title")).toString().endsWith("to change the font?"));
 
     // The answer to the font is the font's alone: the capture is asked next, once this dialog has closed.
-    held->answerPermission(PermissionDecision::Deny, PermissionMemory::Once);
+    answerShown(*held, PermissionDecision::Deny, PermissionMemory::Once);
     CHECK(held.surface->fontsSet.empty());
     CHECK(mockPtyOf(*held).stdinBuffer().empty());
     QCoreApplication::processEvents();
@@ -5198,13 +5212,62 @@ TEST_CASE("TerminalSession: two questions asked at once are shown one after the 
         held->pendingPermission().value(QStringLiteral("title")).toString().endsWith("to read the screen?"));
 
     // One answer serves both captures, each owed its reply.
-    held->answerPermission(PermissionDecision::Allow, PermissionMemory::Once);
+    answerShown(*held, PermissionDecision::Allow, PermissionMemory::Once);
     CHECK(capturedSeededScreen(*held));
     CHECK(countOccurrences(mockPtyOf(*held).stdinBuffer(), CaptureReplyTerminator) == 2);
     CHECK(held.surface->fontsSet.empty());
     QCoreApplication::processEvents();
     CHECK_FALSE(held->pendingPermissionAsk().has_value());
     CHECK(held->pendingPermission().isEmpty());
+}
+
+TEST_CASE("TerminalSession: an answer counts only for the question it answers",
+          "[contour][session][permission][queue]")
+{
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+
+    TestApp testApp;
+    auto const name = registerProfile(testApp.app(), "ask-twice", [](contour::config::TerminalProfile& p) {
+        p.permissions.value().changeFont = contour::config::Permission::Ask;
+        p.permissions.value().captureBuffer = contour::config::Permission::Ask;
+    });
+    auto held = makeSessionWithSurface(testApp.app(), name);
+    mockPtyOf(*held).stdinBuffer().clear();
+    held->setFontDef(requestedFont());
+    captureWholePage(*held);
+    QCoreApplication::processEvents();
+    REQUIRE(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::ChangeFont });
+    auto const fontQuestion = shownQuestionId(*held);
+
+    SECTION("the same answer given twice (No, then the dialog's rejected) answers one question")
+    {
+        held->answerPermission(fontQuestion, PermissionDecision::Deny, PermissionMemory::Once);
+        held->answerPermission(fontQuestion, PermissionDecision::Deny, PermissionMemory::Once);
+        QCoreApplication::processEvents();
+        CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+        CHECK(mockPtyOf(*held).stdinBuffer().empty()); // the capture was not refused unseen
+        CHECK(shownQuestionId(*held) != fontQuestion);
+    }
+
+    SECTION("an id that is not the shown question's is ignored")
+    {
+        held->answerPermission(fontQuestion + 1, PermissionDecision::Allow, PermissionMemory::Session);
+        CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::ChangeFont });
+        CHECK(held.surface->fontsSet.empty());
+        CHECK_FALSE(held->rememberedDecision(GuardedRole::ChangeFont).has_value());
+    }
+
+    SECTION("a question settled by something else takes its id with it")
+    {
+        // The font change is answered without the dialog -- a reload, a remembered answer: the dialog's
+        // late click on it must not answer the capture now waiting.
+        held->applyPendingFontChange(PermissionDecision::Deny, PermissionMemory::Once);
+        held->answerPermission(fontQuestion, PermissionDecision::Allow, PermissionMemory::Once);
+        QCoreApplication::processEvents();
+        CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+        CHECK(mockPtyOf(*held).stdinBuffer().empty());
+    }
 }
 
 TEST_CASE("TerminalSession: a remembered answer outlives a reload that leaves its setting alone, and not "
@@ -5223,7 +5286,7 @@ TEST_CASE("TerminalSession: a remembered answer outlives a reload that leaves it
 
     captureWholePage(*held);
     REQUIRE(asks == 1);
-    held->answerPermission(PermissionDecision::Allow, PermissionMemory::Session);
+    answerShown(*held, PermissionDecision::Allow, PermissionMemory::Session);
     REQUIRE(capturedSeededScreen(*held));
 
     // The same file again: the answer stands.
@@ -5263,24 +5326,29 @@ TEST_CASE("TerminalSession: the paste prompt's preview is bounded however large 
     auto* clipboard = QGuiApplication::clipboard();
     REQUIRE(clipboard != nullptr);
 
-    // 30 000 lines of 20 bytes: over the soft limit, under the hard one.
-    constexpr auto Lines = 30'000;
+    // 1 500 lines of 400 bytes: over the soft limit, under the hard one, each line far over a shown line's
+    // bound.
+    constexpr auto Lines = 1'500;
+    constexpr auto LineBytes = 399;
     auto text = QString {};
-    for (auto const i: std::views::iota(0, Lines))
-        text += QStringLiteral("%1\n").arg(i, 19, 10, QChar('0'));
+    for ([[maybe_unused]] auto const i: std::views::iota(0, Lines))
+        text += QString(LineBytes, QChar('w')) + QChar('\n');
     clipboard->setText(text);
     session->pasteFromClipboard(1, /*strip=*/false);
 
     auto const prompt = session->pendingPermission();
     auto const lines = prompt.value(QStringLiteral("lines")).toList();
     auto const limits = contour::session::PastePreviewLimits {};
+    auto const ellipsis = QStringLiteral("…");
     REQUIRE(std::cmp_equal(lines.size(), limits.lines + 1));
     for (auto const& line: lines | std::views::take(static_cast<qsizetype>(limits.lines)))
     {
         auto const map = line.toMap();
         CHECK(map.value(QStringLiteral("verbatim")).toBool());
-        auto const bytes = map.value(QStringLiteral("text")).toString().toUtf8().size();
-        CHECK(std::cmp_less_equal(bytes, limits.bytesPerLine + std::string_view { "…" }.size()));
+        auto const shown = map.value(QStringLiteral("text")).toString();
+        // Cut to its bound, and saying so.
+        CHECK(shown.endsWith(ellipsis));
+        CHECK(std::cmp_equal(shown.toUtf8().size(), limits.bytesPerLine + ellipsis.toUtf8().size()));
     }
     CHECK(lines.back().toMap().value(QStringLiteral("text")).toString()
           == QStringLiteral("… %1 more lines").arg(Lines - static_cast<int>(limits.lines)));
@@ -6246,9 +6314,21 @@ TEST_CASE("TerminalSession: asking announces the title", "[contour][session][per
     CHECK(recorder->said.front().politeness == QAccessible::AnnouncementPoliteness::Polite);
 
     // Answered, nothing more is said.
-    session->answerPermission(PermissionDecision::Deny, PermissionMemory::Once);
+    answerShown(*session, PermissionDecision::Deny, PermissionMemory::Once);
     QCoreApplication::processEvents();
     CHECK(recorder->said.size() == 1);
+
+    // Each question shown is said once. Three asked; the first answered, the second settled before it was
+    // shown: the third is said once, though the queue moved on twice before the event loop turned.
+    session->setFontDef(font);
+    session->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Physical);
+    session->requestShowHostWritableStatusLine();
+    REQUIRE(recorder->said.size() == 2);
+    answerShown(*session, PermissionDecision::Deny, PermissionMemory::Once);
+    session->executePendingBufferCapture(PermissionDecision::Deny, PermissionMemory::Once);
+    QCoreApplication::processEvents();
+    CHECK(recorder->said.size() == 3);
+    CHECK(recorder->said.back().message.toStdString().ends_with("to show its own status line?"));
 }
 
 TEST_CASE("TerminalSession: things with no place in the accessibility tree are announced",

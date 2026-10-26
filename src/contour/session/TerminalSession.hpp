@@ -1066,7 +1066,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The remembered decision; nothing when every request still asks (or follows the configuration).
     [[nodiscard]] std::optional<PermissionDecision> rememberedDecision(GuardedRole role) const;
 
-    /// The question this session asks now, for QML: empty while nothing is asked; else `title` (QString),
+    /// The question this session asks now, for QML: empty while nothing is asked; else `id` (int, what
+    /// answerPermission() is handed back; a new one for each question shown), `title` (QString),
     /// `lines` (a list of `{text, strong, verbatim}` maps), `denyText`, `allowText`, `rememberText`,
     /// `rememberScope`, `initialMemory`, `defaultDecision` (each its enum's underlying int, as QML compares
     /// it with Permission.*) and `allowNeedsRemember`. The two line flags and allowNeedsRemember stay bool:
@@ -1076,10 +1077,14 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     [[nodiscard]] QVariantMap pendingPermission() const { return _pendingPermission; }
 
     /// Answers the question shown: runs its role with @p decision and @p memory, and, when another waits, has
-    /// it shown on the next turn of the event loop, once the dialog that answered this one has closed.
+    /// it shown on the next turn of the event loop, once the dialog that answered this one has closed. An
+    /// answer naming any other question -- a doubled click, or one that something else settled meanwhile --
+    /// is ignored: nothing is granted or refused for a question the user did not see.
+    /// @param questionId The `id` of the pendingPermission() answered (an int: QML passes it back).
     /// @param decision Whether the user allowed it.
     /// @param memory How long the answer stands.
-    Q_INVOKABLE void answerPermission(contour::session::permission::PermissionDecision decision,
+    Q_INVOKABLE void answerPermission(int questionId,
+                                      contour::session::permission::PermissionDecision decision,
                                       contour::session::permission::PermissionMemory memory);
 
     /// @return The question shown now, if any.
@@ -2339,6 +2344,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::vector<CaptureBufferRequest> _pendingBufferCaptures;
     std::mutex _pendingBufferCaptureMutex;
 
+    /// The font a program asked for, while its question waits. GUI thread only: setFontDef() writes it in the
+    /// request it posts there.
     std::optional<vtbackend::FontDef> _pendingFontChange;
 
     /// A paste that exceeded the soft limit and is waiting for the user's verdict.
@@ -2365,6 +2372,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     PermissionQueue _permissionQueue;
     /// @see pendingPermission. GUI thread.
     QVariantMap _pendingPermission;
+    /// The id of the question at the front of _permissionQueue: a new one each time another question becomes
+    /// the one to show. GUI thread.
+    int _shownQuestionId = 0;
+    /// The last question announced, so each is said once. GUI thread.
+    int _announcedQuestionId = 0;
     std::unique_ptr<QThread> _exitWatcherThread;
 
     std::atomic<bool> _onClosedHandled = false;

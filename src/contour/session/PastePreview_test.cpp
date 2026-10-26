@@ -119,6 +119,8 @@ TEST_CASE("formatByteCount", "[pastepreview]")
     CHECK(formatByteCount(999) == "999 bytes");
     CHECK(formatByteCount(1000) == "1.0 kB");
     CHECK(formatByteCount(524'289) == "524.3 kB");
+    CHECK(formatByteCount(999'949) == "999.9 kB");
+    CHECK(formatByteCount(999'950) == "1.0 MB");
     CHECK(formatByteCount(2'400'000) == "2.4 MB");
     CHECK(formatByteCount(52'428'800) == "52.4 MB");
 }

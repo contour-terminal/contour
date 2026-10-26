@@ -298,18 +298,36 @@ Item {
     }
 
     // The session's permission question: one at a time, the next shown once this one is answered. What it
-    // shows is the session's pendingPermission, set as the question opens -- program-supplied text the session
-    // has already made safe to show.
+    // shows is the session's pendingPermission -- program-supplied text the session has already made safe to
+    // show. An answer goes to the session that asked, naming the question it answers, so a late or doubled
+    // click (No, then the dialog's rejected) can never answer a question the user did not see.
     RequestPermission {
         id: permissionDialog
         objectName: "permissionDialog"
 
+        // The session whose question is shown, and its id; null and -1 while none is.
+        property var askingSession: null
+        property int questionId: -1
+
         function answer(decision, memory) {
-            if (chrome.session !== null)
-                chrome.session.answerPermission(decision, memory);
+            if (askingSession !== null && questionId >= 0)
+                askingSession.answerPermission(questionId, decision, memory);
+            askingSession = null;
+            questionId = -1;
         }
 
-        function showPrompt(prompt) {
+        // Shows what @p session asks now, or closes the dialog when it asks nothing.
+        function follow(session) {
+            let prompt = session !== null && session.pendingPermission !== undefined ? session.pendingPermission : ({});
+            if (prompt.title === undefined) {
+                askingSession = null;
+                questionId = -1;
+                if (visible)
+                    close();
+                return;
+            }
+            askingSession = session;
+            questionId = prompt.id;
             title = prompt.title;
             text = prompt.lines.map(line => line.text).join("\n");
             open();
@@ -422,9 +440,16 @@ Item {
             chrome.session.setScrollbarMarkTrackPixels(Math.round(vbar.availableHeight));
     }
 
-    // A rebound session has never been told this pane's track height.
-    onSessionChanged: chrome.publishMarkTrack()
-    Component.onCompleted: chrome.publishMarkTrack()
+    // A rebound session has never been told this pane's track height, and may have asked its question while
+    // no chrome showed it: the dialog follows what the session asks now.
+    onSessionChanged: {
+        chrome.publishMarkTrack();
+        permissionDialog.follow(chrome.session);
+    }
+    Component.onCompleted: {
+        chrome.publishMarkTrack();
+        permissionDialog.follow(chrome.session);
+    }
 
     // Update the GUI scrollbar whenever the VT's viewport changes.
     function updateScrollBarPosition() {
@@ -466,11 +491,7 @@ Item {
         }
 
         // The session asks another question, or what the one shown asks changed.
-        function onPendingPermissionChanged() {
-            let prompt = chrome.session.pendingPermission;
-            if (prompt.title !== undefined)
-                permissionDialog.showPrompt(prompt);
-        }
+        function onPendingPermissionChanged() { permissionDialog.follow(chrome.session); }
         function onRequestPermissionForExtension() {
             requestExtensionCommandsDialog.text = chrome.session.pendingExtensionPermissionText();
             requestExtensionCommandsDialog.open();

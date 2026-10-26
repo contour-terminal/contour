@@ -379,16 +379,24 @@ class MockSession: public QObject
     }
 
     /// Records the answer, as TerminalSession::answerPermission() would run the question's role.
-    Q_INVOKABLE void answerPermission(contour::session::permission::PermissionDecision decision,
+    Q_INVOKABLE void answerPermission(int questionId,
+                                      contour::session::permission::PermissionDecision decision,
                                       contour::session::permission::PermissionMemory memory)
     {
-        lastPermissionAnswer = std::pair { decision, memory };
+        lastPermissionAnswer = PermissionAnswer { .id = questionId, .decision = decision, .memory = memory };
         ++permissionAnswers;
     }
 
+    /// An answer the chrome gave: to which question, and what.
+    struct PermissionAnswer
+    {
+        int id = 0;
+        contour::session::PermissionDecision decision = contour::session::PermissionDecision::Deny;
+        contour::session::PermissionMemory memory = contour::session::PermissionMemory::Once;
+    };
+
     /// The last answer given, if any.
-    std::optional<std::pair<contour::session::PermissionDecision, contour::session::PermissionMemory>>
-        lastPermissionAnswer;
+    std::optional<PermissionAnswer> lastPermissionAnswer;
     int permissionAnswers = 0; ///< How often the chrome answered.
     // }}}
 

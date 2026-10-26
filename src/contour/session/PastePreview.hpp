@@ -4,6 +4,7 @@
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <string>
@@ -99,8 +100,10 @@ namespace detail
         return "1 byte";
     if (static_cast<double>(bytes) < Kilo)
         return std::format("{} bytes", bytes);
-    if (static_cast<double>(bytes) < Mega)
-        return std::format("{:.1f} kB", static_cast<double>(bytes) / Kilo);
+    // Decided on the figure as it is printed, to one decimal: 999 950 bytes would print as "1000.0 kB".
+    auto const kilobytes = static_cast<double>(bytes) / Kilo;
+    if (std::round(kilobytes * 10.0) < Kilo * 10.0)
+        return std::format("{:.1f} kB", kilobytes);
     return std::format("{:.1f} MB", static_cast<double>(bytes) / Mega);
 }
 

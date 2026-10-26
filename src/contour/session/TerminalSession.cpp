@@ -1066,17 +1066,24 @@ void TerminalSession::concludeRole(GuardedRole role, PermissionDecision decision
     switch (_permissionQueue.withdraw(role))
     {
         case PromptChange::Due:
+            // A new question from now on: an answer still on its way to the one that went is not its answer.
+            ++_shownQuestionId;
             QMetaObject::invokeMethod(this, [this]() { showNextPermission(); }, Qt::QueuedConnection);
             break;
         case PromptChange::None: publishPendingPermission(); break;
     }
 }
 
-void TerminalSession::answerPermission(PermissionDecision decision, PermissionMemory memory)
+void TerminalSession::answerPermission(int questionId, PermissionDecision decision, PermissionMemory memory)
 {
     auto const ask = _permissionQueue.current();
-    if (!ask)
+    if (!ask || questionId != _shownQuestionId)
+    {
+        // A second answer to one dialog, or an answer to a question something else settled meanwhile.
+        sessionLog()(
+            "Ignoring an answer to question {}: question {} is the one asked.", questionId, _shownQuestionId);
         return;
+    }
     // An extension's consent is answered through its own queue.
     if (auto const* const role = std::get_if<GuardedRole>(&*ask))
     {
@@ -1156,6 +1163,8 @@ void TerminalSession::publishPendingPermission()
 {
     auto const prompt = currentPermissionPrompt();
     auto next = prompt ? toVariantMap(*prompt) : QVariantMap {};
+    if (prompt)
+        next.insert(QStringLiteral("id"), _shownQuestionId);
     if (next == _pendingPermission)
         return;
     _pendingPermission = std::move(next);
@@ -1165,8 +1174,11 @@ void TerminalSession::publishPendingPermission()
 void TerminalSession::showNextPermission()
 {
     publishPendingPermission();
-    if (auto const title = _pendingPermission.value(QStringLiteral("title")).toString(); !title.isEmpty())
-        announce(title);
+    // Said once per question: the queue may move on twice before this runs, and both runs show the same one.
+    if (_pendingPermission.isEmpty() || _announcedQuestionId == _shownQuestionId)
+        return;
+    _announcedQuestionId = _shownQuestionId;
+    announce(_pendingPermission.value(QStringLiteral("title")).toString());
 }
 
 void TerminalSession::reconcilePermissions(config::PermissionsConfig const& previous)
@@ -1236,7 +1248,10 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
                 sessionLog()("Permission for {} requires asking user.", role);
                 switch (_permissionQueue.offer(role))
                 {
-                    case PromptChange::Due: showNextPermission(); break;
+                    case PromptChange::Due:
+                        ++_shownQuestionId;
+                        showNextPermission();
+                        break;
                     case PromptChange::None:
                         // Already asked. Shown, what it asks may have changed since (a later font, another
                         // paste, a larger capture), so the dialog's data follows; waiting, it is built when
@@ -1696,9 +1711,13 @@ void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
     if (!_display)
         return;
 
-    _pendingFontChange = fontDef;
-
-    postPermissionRequest(GuardedRole::ChangeFont);
+    // Raised on the parser thread. The pending font is GUI-thread state -- the gate, its executor and the
+    // prompt read it there -- so it is written there too, in the posted request, never here. The configured
+    // permission is read in it for the reason postPermissionRequest() gives.
+    _display->post([this, fontDef]() {
+        _pendingFontChange = fontDef;
+        requestPermission(configuredPermissionFor(GuardedRole::ChangeFont), GuardedRole::ChangeFont);
+    });
 }
 
 void TerminalSession::applyPendingFontChange(PermissionDecision decision, PermissionMemory memory)
