@@ -1040,18 +1040,32 @@ void TerminalSession::renderBufferUpdated()
         _renderNotifyTarget->renderBufferUpdated();
 }
 
-void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)
+void TerminalSession::executeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory)
 {
     switch (role)
     {
-        case GuardedRole::CaptureBuffer: executePendingBufferCapture(allow, remember); break;
-        case GuardedRole::ChangeFont: applyPendingFontChange(allow, remember); break;
+        case GuardedRole::CaptureBuffer: executePendingBufferCapture(decision, memory); break;
+        case GuardedRole::ChangeFont: applyPendingFontChange(decision, memory); break;
         case GuardedRole::ShowHostWritableStatusLine:
-            executeShowHostWritableStatusLine(allow, remember);
+            executeShowHostWritableStatusLine(decision, memory);
             break;
-        case GuardedRole::BigPaste: applyPendingPaste(allow, remember); break;
-        case GuardedRole::RerunCommand: applyPendingRerun(allow, remember); break;
+        case GuardedRole::BigPaste: applyPendingPaste(decision, memory); break;
+        case GuardedRole::RerunCommand: applyPendingRerun(decision, memory); break;
     }
+}
+
+void TerminalSession::rememberDecision(GuardedRole role, PermissionDecision decision, PermissionMemory memory)
+{
+    // Persistent stands for the session too: a guarded role has nowhere persistent to keep it.
+    if (memory != PermissionMemory::Once)
+        _rememberedPermissions[role] = decision;
+}
+
+std::optional<PermissionDecision> TerminalSession::rememberedDecision(GuardedRole role) const
+{
+    if (auto const i = _rememberedPermissions.find(role); i != _rememberedPermissions.end())
+        return i->second;
+    return std::nullopt;
 }
 
 config::Permission TerminalSession::configuredPermissionFor(GuardedRole role) const
@@ -1091,21 +1105,17 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
     {
         case config::Permission::Allow:
             sessionLog()("Permission for {} allowed by configuration.", role);
-            executeRole(role, true, false);
+            executeRole(role, PermissionDecision::Allow, PermissionMemory::Once);
             return;
         case config::Permission::Deny:
             sessionLog()("Permission for {} denied by configuration.", role);
-            executeRole(role, false, false);
+            executeRole(role, PermissionDecision::Deny, PermissionMemory::Once);
             return;
         case config::Permission::Ask: {
-            if (auto const i = _rememberedPermissions.find(role); i != _rememberedPermissions.end())
+            if (auto const remembered = rememberedDecision(role))
             {
-                auto const allowed = i->second == PermissionDecision::Allow;
-                executeRole(role, allowed, false);
-                if (!allowed)
-                    sessionLog()("Permission for {} denied by user for this session.", role);
-                else
-                    sessionLog()("Permission for {} allowed by user for this session.", role);
+                sessionLog()("Permission for {} answered {} by user for this session.", role, *remembered);
+                executeRole(role, *remembered, PermissionMemory::Once);
             }
             else
             {
@@ -1482,11 +1492,9 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
     postPermissionRequest(GuardedRole::CaptureBuffer);
 }
 
-void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
+void TerminalSession::executePendingBufferCapture(PermissionDecision decision, PermissionMemory memory)
 {
-    if (remember)
-        _rememberedPermissions[GuardedRole::CaptureBuffer] =
-            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
+    rememberDecision(GuardedRole::CaptureBuffer, decision, memory);
 
     // One verdict answers every request outstanding at this moment: the user was asked once, about
     // capturing this buffer, and each request still owes its own reply.
@@ -1507,7 +1515,7 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
         auto const _ = std::scoped_lock { _terminal };
         for (auto const& request: requests)
         {
-            if (allow)
+            if (decision == PermissionDecision::Allow)
                 _terminal.primaryScreen().captureBuffer(request.lines, request.logical);
             else
                 // A refusal is still a reply. The protocol cannot express "no reply is coming", so a client
@@ -1517,8 +1525,7 @@ void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
         }
     }
 
-    sessionLog()(
-        "requestCaptureBuffer: Answered {} request(s) with {}.", requests.size(), allow ? "allow" : "deny");
+    sessionLog()("requestCaptureBuffer: Answered {} request(s) with {}.", requests.size(), decision);
     // The lock's release woke the read loop, which writes the replies, a whole buffer of them perhaps, for as
     // long as the PTY pushes back.
     flushInput();
@@ -1529,11 +1536,9 @@ void TerminalSession::requestShowHostWritableStatusLine()
     postPermissionRequest(GuardedRole::ShowHostWritableStatusLine);
 }
 
-void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remember)
+void TerminalSession::executeShowHostWritableStatusLine(PermissionDecision decision, PermissionMemory memory)
 {
-    if (remember)
-        _rememberedPermissions[GuardedRole::ShowHostWritableStatusLine] =
-            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
+    rememberDecision(GuardedRole::ShowHostWritableStatusLine, decision, memory);
 
     // Under the lock: the parser thread reads what the answer leaves behind at DECSASD 0, and draws the
     // line it puts up. Denied, the line stays hidden, and status_line.sync_to_window_title may show what
@@ -1541,11 +1546,11 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
     // may write a report, sent once the lock is released. See ViNormalMode.
     {
         auto const _ = std::scoped_lock { _terminal };
-        _terminal.answerHostWritableStatusLineRequest(allow
+        _terminal.answerHostWritableStatusLineRequest(decision == PermissionDecision::Allow
                                                           ? vtbackend::HostWritableStatusLineAnswer::Shown
                                                           : vtbackend::HostWritableStatusLineAnswer::Denied);
     }
-    if (!allow)
+    if (decision != PermissionDecision::Allow)
         return;
 
     sessionLog()("Host-writable status line shown.");
@@ -1581,11 +1586,9 @@ void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
     postPermissionRequest(GuardedRole::ChangeFont);
 }
 
-void TerminalSession::applyPendingFontChange(bool allow, bool remember)
+void TerminalSession::applyPendingFontChange(PermissionDecision decision, PermissionMemory memory)
 {
-    if (remember)
-        _rememberedPermissions[GuardedRole::ChangeFont] =
-            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
+    rememberDecision(GuardedRole::ChangeFont, decision, memory);
 
     if (!_pendingFontChange)
         return;
@@ -1596,7 +1599,7 @@ void TerminalSession::applyPendingFontChange(bool allow, bool remember)
     auto const spec = std::move(_pendingFontChange.value());
     _pendingFontChange.reset();
 
-    if (!allow)
+    if (decision != PermissionDecision::Allow)
         return;
 
     if (spec.size != 0.0)
@@ -2073,12 +2076,10 @@ void TerminalSession::sendPasteRepeatedly(std::string const& text, unsigned coun
     terminal().sendPaste(string_view { repeated });
 }
 
-void TerminalSession::applyPendingPaste(bool allow, bool remember)
+void TerminalSession::applyPendingPaste(PermissionDecision decision, PermissionMemory memory)
 {
-    sessionLog()("applyPendingPaste: allow={}, remember={}", allow, remember);
-    if (remember)
-        _rememberedPermissions[GuardedRole::BigPaste] =
-            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
+    sessionLog()("applyPendingPaste: {}, {}", decision, memory);
+    rememberDecision(GuardedRole::BigPaste, decision, memory);
 
     if (!_pendingBigPaste)
         return;
@@ -2086,7 +2087,7 @@ void TerminalSession::applyPendingPaste(bool allow, bool remember)
     // Take the request out either way: a refused paste is finished, not still pending.
     auto const request = std::exchange(_pendingBigPaste, std::nullopt).value();
 
-    if (!allow)
+    if (decision != PermissionDecision::Allow)
         return;
 
     // The stored text is the one that was measured and approved -- deliberately not a fresh read of the
@@ -2133,19 +2134,17 @@ namespace
     }
 } // namespace
 
-void TerminalSession::applyPendingRerun(bool allow, bool remember)
+void TerminalSession::applyPendingRerun(PermissionDecision decision, PermissionMemory memory)
 {
-    sessionLog()("applyPendingRerun: allow={}, remember={}", allow, remember);
-    if (remember)
-        _rememberedPermissions[GuardedRole::RerunCommand] =
-            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
+    sessionLog()("applyPendingRerun: {}, {}", decision, memory);
+    rememberDecision(GuardedRole::RerunCommand, decision, memory);
 
     if (!_pendingRerun)
         return;
 
     // Taken out either way: a refused rerun is finished, not still pending.
     auto const commandLine = std::exchange(_pendingRerun, std::nullopt).value();
-    if (!allow)
+    if (decision != PermissionDecision::Allow)
         return;
 
     // Locked: the prompt is asked about again -- it may have gone while the dialog was up -- and

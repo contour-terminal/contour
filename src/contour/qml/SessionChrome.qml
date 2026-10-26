@@ -26,6 +26,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
+import Contour.Terminal
 
 Item {
     id: chrome
@@ -300,41 +301,41 @@ Item {
     RequestPermission {
         id: requestFontChangeDialog
         text: qsTr("The host application is requesting to change the display font.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingFontChange(false, false);
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Allow, Permission.Session);
+        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Allow, Permission.Once);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Deny, Permission.Session);
+        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Deny, Permission.Once);
+        onRejected: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Deny, Permission.Once);
     }
 
     RequestPermission {
         id: requestLargeFilePaste
         text: qsTr("The host application is going to paste a large file. Are you sure?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingPaste(false, false);
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Allow, Permission.Session);
+        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Allow, Permission.Once);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Deny, Permission.Session);
+        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Deny, Permission.Once);
+        onRejected: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Deny, Permission.Once);
     }
 
     RequestPermission {
         id: requestBufferCaptureDialog
         text: qsTr("The host application is requesting to capture the terminal buffer.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.executePendingBufferCapture(false, false);
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Allow, Permission.Session);
+        onYesClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Allow, Permission.Once);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Deny, Permission.Session);
+        onNoClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Deny, Permission.Once);
+        onRejected: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Deny, Permission.Once);
     }
 
     RequestPermission {
         id: requestShowHostWritableStatusLine
         text: qsTr("The host application is requesting to show the host-writable status line.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(false, false);
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Allow, Permission.Session);
+        onYesClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Allow, Permission.Once);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Deny, Permission.Session);
+        onNoClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Deny, Permission.Once);
+        onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Deny, Permission.Once);
     }
 
     // Asked before RerunCommand types a command at the prompt and enters it: the command line is what the
@@ -343,11 +344,11 @@ Item {
     RequestPermission {
         id: requestRerunCommandDialog
         title: qsTr("Run this command again?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, true);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(true, false);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, true);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingRerun(false, false);
+        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Allow, Permission.Session);
+        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Allow, Permission.Once);
+        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Deny, Permission.Session);
+        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Deny, Permission.Once);
+        onRejected: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Deny, Permission.Once);
     }
 
     // Asked when a status-line extension first runs one of the commands its manifest declares, with

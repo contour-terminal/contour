@@ -1019,17 +1019,47 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The layout; never nullptr.
     [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept;
 
-    Q_INVOKABLE void applyPendingFontChange(bool allow, bool remember);
-    Q_INVOKABLE void applyPendingPaste(bool allow, bool remember);
-    Q_INVOKABLE void executePendingBufferCapture(bool allow, bool remember);
-    Q_INVOKABLE void executeShowHostWritableStatusLine(bool allow, bool remember);
+    // The guarded roles' executors: each answers its role's pending request, and remembers the answer for the
+    // session unless @p memory is Once (see executeRole()). The parameters name the enums' declaring
+    // namespace, so moc's normalized signature names the type registered with QML.
 
-    /// Runs the command RerunCommand asked about, if @p allow: typed at the prompt and entered -- unless
-    /// the prompt went away while the dialog was up, or the line can no longer be typed as it is.
-    /// The two bools are the dialog's answer as every permission wall here gives it to QML.
-    /// @param allow Whether the user allowed it.
-    /// @param remember Whether the answer stands for the rest of the session.
-    Q_INVOKABLE void applyPendingRerun(bool allow, bool remember);
+    /// Applies the font change a program asked for, if @p decision allows it.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    Q_INVOKABLE void applyPendingFontChange(contour::session::permission::PermissionDecision decision,
+                                            contour::session::permission::PermissionMemory memory);
+
+    /// Sends the large paste that waits for the user's verdict, if @p decision allows it.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    Q_INVOKABLE void applyPendingPaste(contour::session::permission::PermissionDecision decision,
+                                       contour::session::permission::PermissionMemory memory);
+
+    /// Answers every buffer capture outstanding: with the capture if @p decision allows it, else with the
+    /// terminating chunk alone.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    Q_INVOKABLE void executePendingBufferCapture(contour::session::permission::PermissionDecision decision,
+                                                 contour::session::permission::PermissionMemory memory);
+
+    /// Shows the host-writable status line a program asked for, if @p decision allows it.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    Q_INVOKABLE void executeShowHostWritableStatusLine(
+        contour::session::permission::PermissionDecision decision,
+        contour::session::permission::PermissionMemory memory);
+
+    /// Runs the command RerunCommand asked about, if @p decision allows it: typed at the prompt and entered
+    /// -- unless the prompt went away while the dialog was up, or the line can no longer be typed as it is.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    Q_INVOKABLE void applyPendingRerun(contour::session::permission::PermissionDecision decision,
+                                       contour::session::permission::PermissionMemory memory);
+
+    /// The answer the user asked to stand for the session for @p role, if any.
+    /// @param role The guarded role.
+    /// @return The remembered decision; nothing when every request still asks (or follows the configuration).
+    [[nodiscard]] std::optional<PermissionDecision> rememberedDecision(GuardedRole role) const;
 
     /// The command RerunCommand asks to run, made safe to show; empty while none is waiting.
     /// @return The command line, for the dialog that asks.
@@ -1487,7 +1517,19 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void postPermissionRequest(GuardedRole role);
 
     void requestPermission(config::Permission allowedByConfig, GuardedRole role);
-    void executeRole(GuardedRole role, bool allow, bool remember);
+
+    /// Runs @p role's executor with the answer it was given.
+    ///
+    /// Once remembers nothing; Session stores @p decision in _rememberedPermissions; Persistent is stored as
+    /// Session, since a guarded role has nowhere persistent to keep an answer (its prompt never offers it).
+    /// A configured allow/deny, or a remembered answer, executes as (decision, Once).
+    /// @param role The role to run.
+    /// @param decision Whether it may run.
+    /// @param memory How long the answer stands.
+    void executeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
+
+    /// Records @p decision for @p role for the rest of the session, unless @p memory is Once.
+    void rememberDecision(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
 
     /// Sends @p text to the application as one paste, repeated @p count times.
     void sendPasteRepeatedly(std::string const& text, unsigned count);

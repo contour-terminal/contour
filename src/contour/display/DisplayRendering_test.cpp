@@ -86,6 +86,8 @@
 
 using namespace std::string_view_literals;
 using namespace std::chrono_literals;
+using contour::session::PermissionDecision;
+using contour::session::PermissionMemory;
 using contour::test::DisplayHarness;
 using contour::test::HarnessWindow;
 
@@ -791,7 +793,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     h.session->setFontDef(fontRequest(RequestedFontSize));
     REQUIRE(QTest::qWaitFor([&] { return fontAsks != 0; }));
     REQUIRE(fontAsks == 1);
-    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/true);
+    h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Session);
     REQUIRE(QTest::qWaitFor([&] { return h.display->fontSize().pt == RequestedFontSize; }));
     h.pump();
 
@@ -817,7 +819,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     h.session->requestCaptureBuffer(vtbackend::LineCount(2), /*logical=*/false);
     REQUIRE(QTest::qWaitFor([&] { return captureAsks != 0; }));
     REQUIRE(captureAsks == 1);
-    h.session->executePendingBufferCapture(/*allow=*/true, /*remember=*/false);
+    h.session->executePendingBufferCapture(PermissionDecision::Allow, PermissionMemory::Once);
     CHECK(contour::test::occurrencesOf(CaptureAnswerEnd, h.sentInput()) == 1); // allowed: answered
 
     // A remembered deny resolves the next request without asking again -- and still answers it, since a
@@ -825,14 +827,14 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
     REQUIRE(QTest::qWaitFor([&] { return captureAsks != 1; }));
     REQUIRE(captureAsks == 2);
-    h.session->executePendingBufferCapture(/*allow=*/false, /*remember=*/true);
+    h.session->executePendingBufferCapture(PermissionDecision::Deny, PermissionMemory::Session);
     h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
     REQUIRE(QTest::qWaitFor(
         [&] { return contour::test::occurrencesOf(CaptureAnswerEnd, h.pty->stdinSnapshot()) == 3; }));
     CHECK(captureAsks == 2); // remembered: resolved without asking again
 
     // ShowHostWritableStatusLine rides the display queue too; a remembered deny resolves silently.
-    h.session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/true);
+    h.session->executeShowHostWritableStatusLine(PermissionDecision::Deny, PermissionMemory::Session);
     h.pump();
 }
 
@@ -935,7 +937,7 @@ TEST_CASE("display: a font change staged without a render target reaches the sta
     // createRenderer(), which materializes it.
     REQUIRE(h.display->fontSize().pt < RequestedFontSize);
     h.session->setFontDef(fontRequest(RequestedFontSize));
-    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false);
+    h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once);
     REQUIRE(QTest::qWaitFor([&] {
         h.pump();
         return h.display->hasRenderTarget() && h.display->fontSize().pt == RequestedFontSize;
@@ -2539,7 +2541,7 @@ TEST_CASE("display: a font change approved with no render target is deferred, no
 
     // OSC 50 in, permission answer back. setFonts() used to Require() a render target here and abort.
     h.session->setFontDef(fontRequest(RequestedFontSize));
-    CHECK_NOTHROW(h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false));
+    CHECK_NOTHROW(h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once));
 
     // Deferred, not dropped: recorded as this session's own font, which every re-seeding path applies
     // once a render target exists again.
@@ -2557,7 +2559,7 @@ TEST_CASE("display: a font change approved after the pane detached is a silent n
     h.display->setSession(nullptr);
     REQUIRE(h.session->display() == nullptr);
 
-    CHECK_NOTHROW(h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false));
+    CHECK_NOTHROW(h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once));
 
     // Re-attach so the fixture tears down along its normal path.
     h.display->setSession(h.session.get());
@@ -2619,7 +2621,7 @@ TEST_CASE("display: a font change approved across a render-target teardown still
     REQUIRE_FALSE(h.display->hasRenderTarget());
 
     // The answer arrives with no render target to apply it to: staged only.
-    h.session->applyPendingFontChange(/*allow=*/true, /*remember=*/false);
+    h.session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once);
     CHECK(h.display->fontSize().pt == sizeBefore); // nothing published yet
 
     // The next sync re-enters createRenderer(), which materializes whatever is staged.

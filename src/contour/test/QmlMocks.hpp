@@ -3,6 +3,7 @@
 
 #include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/session/Permission.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/window/FindBarPlacement.hpp>
 #include <contour/window/PaneState.hpp>
@@ -367,10 +368,22 @@ class MockSession: public QObject
     // }}}
 
     // Permission dialog stubs (SessionChrome connects these signals to dialog .open slots).
-    Q_INVOKABLE void applyPendingFontChange(bool, bool) {}
-    Q_INVOKABLE void applyPendingPaste(bool, bool) {}
-    Q_INVOKABLE void executePendingBufferCapture(bool, bool) {}
-    Q_INVOKABLE void executeShowHostWritableStatusLine(bool, bool) {}
+    Q_INVOKABLE void applyPendingFontChange(contour::session::permission::PermissionDecision,
+                                            contour::session::permission::PermissionMemory)
+    {
+    }
+    Q_INVOKABLE void applyPendingPaste(contour::session::permission::PermissionDecision,
+                                       contour::session::permission::PermissionMemory)
+    {
+    }
+    Q_INVOKABLE void executePendingBufferCapture(contour::session::permission::PermissionDecision,
+                                                 contour::session::permission::PermissionMemory)
+    {
+    }
+    Q_INVOKABLE void executeShowHostWritableStatusLine(contour::session::permission::PermissionDecision,
+                                                       contour::session::permission::PermissionMemory)
+    {
+    }
 
     // The extension prompt: what it shows, and each answer, counted.
     [[nodiscard]] Q_INVOKABLE QString pendingExtensionPermissionText() const { return extensionQuestion; }

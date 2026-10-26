@@ -66,6 +66,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -96,6 +97,8 @@
 #include <vthost/testing/TestHelpers.hpp>
 
 using namespace std::string_literals;
+using contour::session::PermissionDecision;
+using contour::session::PermissionMemory;
 
 namespace
 {
@@ -1274,9 +1277,9 @@ TEST_CASE("TerminalSession: display-dependent requests are safe no-ops without a
     CHECK_NOTHROW(session->scheduleRedraw());
 
     // Pending-permission executors with nothing pending are guarded no-ops.
-    CHECK_NOTHROW(session->applyPendingFontChange(true, false));
-    CHECK_NOTHROW(session->applyPendingPaste(false, false));
-    CHECK_NOTHROW(session->executePendingBufferCapture(false, false));
+    CHECK_NOTHROW(session->applyPendingFontChange(PermissionDecision::Allow, PermissionMemory::Once));
+    CHECK_NOTHROW(session->applyPendingPaste(PermissionDecision::Deny, PermissionMemory::Once));
+    CHECK_NOTHROW(session->executePendingBufferCapture(PermissionDecision::Deny, PermissionMemory::Once));
 }
 
 TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforces the size guards",
@@ -1310,7 +1313,7 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
     // "Yes to all" applies the paste and stores the verdict — and (#2089) the next big paste must resolve
     // from that memory rather than asking a second time. Only requestPermission() reads the remembered
     // answer, so a bare emit here would ask again forever.
-    session->applyPendingPaste(/*allow=*/true, /*remember=*/true);
+    session->applyPendingPaste(PermissionDecision::Allow, PermissionMemory::Session);
     CHECK(mockPtyOf(*session).stdinBuffer().contains("yyy"));
 
     mockPtyOf(*session).stdinBuffer().clear();
@@ -1356,7 +1359,7 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
         session->pasteFromClipboard(1, /*strip=*/false);
         REQUIRE(mockPtyOf(*session).stdinBuffer().empty()); // held for the verdict, not sent
 
-        session->applyPendingPaste(/*allow=*/true, /*remember=*/false);
+        session->applyPendingPaste(PermissionDecision::Allow, PermissionMemory::Once);
 
         auto expected = std::string {};
         expected.reserve(smallPaste.size() * static_cast<size_t>(repeats));
@@ -1377,7 +1380,7 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
 
         // The user is looking at a dialog about the 'y' payload; something else lands on the clipboard.
         clipboard->setText(QStringLiteral("substituted"));
-        session->applyPendingPaste(/*allow=*/true, /*remember=*/false);
+        session->applyPendingPaste(PermissionDecision::Allow, PermissionMemory::Once);
 
         auto const& written = mockPtyOf(*session).stdinBuffer();
         CHECK(written.contains("yyy"));
@@ -1395,7 +1398,7 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
         session->pasteFromClipboard(1, /*strip=*/false);
         REQUIRE(asks == 1);
 
-        session->applyPendingPaste(/*allow=*/false, /*remember=*/true);
+        session->applyPendingPaste(PermissionDecision::Deny, PermissionMemory::Session);
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
         session->pasteFromClipboard(1, /*strip=*/false);
@@ -2510,7 +2513,7 @@ namespace
 void writeToDeniedStatusLine(contour::session::TerminalSession& session, std::string_view text)
 {
     session.terminal().writeToScreen("\033[2$~");
-    session.executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
+    session.executeShowHostWritableStatusLine(PermissionDecision::Deny, PermissionMemory::Once);
     session.terminal().writeToScreen(std::format("\033[1$}}{}\033[0$}}", text));
 }
 
@@ -2533,7 +2536,7 @@ void setStatusLineDisplay(contour::ContourGuiApp& app, vtbackend::StatusDisplayT
 void writeToAllowedStatusLine(contour::session::TerminalSession& session)
 {
     session.terminal().writeToScreen("\033[2$~");
-    session.executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+    session.executeShowHostWritableStatusLine(PermissionDecision::Allow, PermissionMemory::Once);
     session.terminal().writeToScreen("\033[1$}");
     REQUIRE(session.terminal().activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
 }
@@ -2722,7 +2725,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
         setSyncToWindowTitle(testApp.app(), true);
         auto session = makeDisplaylessSession(testApp.app());
         session->terminal().setWindowTitle("before");
-        session->executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+        session->executeShowHostWritableStatusLine(PermissionDecision::Allow, PermissionMemory::Once);
         session->terminal().writeToScreen("\033[1$}status text\033[0$}");
         CHECK(session->terminal().windowTitle() == "before");
     }
@@ -2735,7 +2738,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
         auto session = makeDisplaylessSession(testApp.app());
         session->terminal().setWindowTitle("before");
         session->terminal().writeToScreen("\033[2$~");
-        session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
+        session->executeShowHostWritableStatusLine(PermissionDecision::Deny, PermissionMemory::Once);
         reloadSessionWith(*session,
                           "",
                           "        status_line:\n"
@@ -2749,7 +2752,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
         setSyncToWindowTitle(testApp.app(), false);
         auto session = makeDisplaylessSession(testApp.app());
         session->terminal().writeToScreen("\033[2$~");
-        session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
+        session->executeShowHostWritableStatusLine(PermissionDecision::Deny, PermissionMemory::Once);
         reloadSessionWith(*session,
                           "",
                           "        status_line:\n"
@@ -2770,7 +2773,7 @@ TEST_CASE("TerminalSession: a denied status line's text becomes the window title
         setSyncToWindowTitle(testApp.app(), true);
         auto session = makeDisplaylessSession(testApp.app());
         session->terminal().writeToScreen("\033[2$~");
-        session->executeShowHostWritableStatusLine(/*allow=*/false, /*remember=*/false);
+        session->executeShowHostWritableStatusLine(PermissionDecision::Deny, PermissionMemory::Once);
         session->terminal().writeToScreen("\033[1$}status text");
         session->terminal().writeToScreen(exit);
         CHECK(session->terminal().activeStatusDisplay() == vtbackend::ActiveStatusDisplay::Main);
@@ -3421,12 +3424,66 @@ TEST_CASE("TerminalSession: host-writable status line permission executes headle
     session->requestShowHostWritableStatusLine();
 
     // Deny + remember: caches the denial and leaves the status display untouched.
-    session->executeShowHostWritableStatusLine(false, true);
+    session->executeShowHostWritableStatusLine(PermissionDecision::Deny, PermissionMemory::Session);
     CHECK(session->terminal().statusDisplayType() != vtbackend::StatusDisplayType::HostWritable);
 
     // Allow + remember: switches the status display to host-writable and unsyncs the title.
-    session->executeShowHostWritableStatusLine(true, true);
+    session->executeShowHostWritableStatusLine(PermissionDecision::Allow, PermissionMemory::Session);
     CHECK(session->terminal().statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
+}
+
+TEST_CASE("TerminalSession: each guarded role remembers its decision for the session and nothing else",
+          "[contour][session][permission]")
+{
+    using contour::session::GuardedRole;
+    using contour::session::TerminalSession;
+    using Executor = void (TerminalSession::*)(PermissionDecision, PermissionMemory);
+
+    struct ExecutorRow
+    {
+        Executor execute;
+        GuardedRole role;
+    };
+    auto const executors = std::array {
+        ExecutorRow { .execute = &TerminalSession::applyPendingFontChange, .role = GuardedRole::ChangeFont },
+        ExecutorRow { .execute = &TerminalSession::executePendingBufferCapture,
+                      .role = GuardedRole::CaptureBuffer },
+        ExecutorRow { .execute = &TerminalSession::executeShowHostWritableStatusLine,
+                      .role = GuardedRole::ShowHostWritableStatusLine },
+        ExecutorRow { .execute = &TerminalSession::applyPendingPaste, .role = GuardedRole::BigPaste },
+        ExecutorRow { .execute = &TerminalSession::applyPendingRerun, .role = GuardedRole::RerunCommand },
+    };
+
+    struct Answer
+    {
+        PermissionDecision decision;
+        PermissionMemory memory;
+    };
+    auto const answers = std::array {
+        Answer { .decision = PermissionDecision::Allow, .memory = PermissionMemory::Once },
+        Answer { .decision = PermissionDecision::Deny, .memory = PermissionMemory::Once },
+        Answer { .decision = PermissionDecision::Allow, .memory = PermissionMemory::Session },
+        Answer { .decision = PermissionDecision::Deny, .memory = PermissionMemory::Session },
+        // A role has nowhere persistent to keep an answer: it stands for the session.
+        Answer { .decision = PermissionDecision::Allow, .memory = PermissionMemory::Persistent },
+    };
+
+    TestApp testApp;
+    for (auto const& row: executors)
+        for (auto const& answer: answers)
+        {
+            INFO(std::format("{} answered {} {}", row.role, answer.decision, answer.memory));
+            auto session = makeDisplaylessSession(testApp.app());
+            ((*session).*row.execute)(answer.decision, answer.memory);
+            if (answer.memory == PermissionMemory::Once)
+                CHECK_FALSE(session->rememberedDecision(row.role).has_value());
+            else
+                CHECK(session->rememberedDecision(row.role) == answer.decision);
+            // Only the role answered remembers anything.
+            for (auto const& other: executors)
+                if (other.role != row.role)
+                    CHECK_FALSE(session->rememberedDecision(other.role).has_value());
+        }
 }
 
 TEST_CASE("TerminalSession: font queries and pending font changes are display-safe",
@@ -3446,8 +3503,9 @@ TEST_CASE("TerminalSession: font queries and pending font changes are display-sa
     auto spec = vtbackend::FontDef {};
     spec.size = 13.0;
     session->setFontDef(spec);
-    session->applyPendingFontChange(false, true);
-    session->applyPendingFontChange(true, false); // no pending change left: early-out
+    session->applyPendingFontChange(PermissionDecision::Deny, PermissionMemory::Session);
+    session->applyPendingFontChange(PermissionDecision::Allow,
+                                    PermissionMemory::Once); // no pending change left: early-out
     SUCCEED("font permission paths are display-safe");
 }
 
@@ -4984,7 +5042,7 @@ TEST_CASE("TerminalSession: the configured capture_buffer permission decides the
         CHECK(mockPtyOf(*held).stdinBuffer().empty()); // nothing happens until the user answers
 
         // "Yes to all": the answer is stored, and the capture runs.
-        held->executePendingBufferCapture(/*allow=*/true, /*remember=*/true);
+        held->executePendingBufferCapture(PermissionDecision::Allow, PermissionMemory::Session);
         CHECK(capturedSeededScreen(*held));
 
         // The second request must resolve from that memory instead of asking again.
@@ -5004,7 +5062,7 @@ TEST_CASE("TerminalSession: the configured capture_buffer permission decides the
         captureWholePage(*held);
         REQUIRE(asks == 1);
 
-        held->executePendingBufferCapture(/*allow=*/false, /*remember=*/true);
+        held->executePendingBufferCapture(PermissionDecision::Deny, PermissionMemory::Session);
         CHECK(mockPtyOf(*held).stdinBuffer() == CaptureReplyTerminator);
 
         mockPtyOf(*held).stdinBuffer().clear();
@@ -5044,7 +5102,7 @@ TEST_CASE("TerminalSession: the configured capture_buffer permission decides the
         captureWholePage(*held);
 
         // One verdict answers both, and both replies are on the wire.
-        held->executePendingBufferCapture(/*allow=*/true, /*remember=*/false);
+        held->executePendingBufferCapture(PermissionDecision::Allow, PermissionMemory::Once);
         CHECK(countOccurrences(mockPtyOf(*held).stdinBuffer(), CaptureReplyTerminator) == 2);
         CHECK(capturedSeededScreen(*held));
     }
@@ -7119,7 +7177,7 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
         CHECK(session->pendingRerunCommandLine() == "make");
         CHECK(written.empty());
 
-        session->applyPendingRerun(true, false);
+        session->applyPendingRerun(PermissionDecision::Allow, PermissionMemory::Once);
         CHECK(written == "make\r");
         CHECK(session->pendingRerunCommandLine().isEmpty());
     }
@@ -7127,14 +7185,14 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
     SECTION("refused, nothing is typed")
     {
         REQUIRE((*session)(RerunCommand {}));
-        session->applyPendingRerun(false, false);
+        session->applyPendingRerun(PermissionDecision::Deny, PermissionMemory::Once);
         CHECK(written.empty());
     }
 
     SECTION("allowed for the session, the next one runs without asking")
     {
         REQUIRE((*session)(RerunCommand {}));
-        session->applyPendingRerun(true, true);
+        session->applyPendingRerun(PermissionDecision::Allow, PermissionMemory::Session);
         written.clear();
         CHECK((*session)(RerunCommand {}));
         CHECK(asked.count() == 1);
@@ -7145,7 +7203,7 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
     {
         terminal.writeToScreen("\033[?2004h");
         REQUIRE((*session)(RerunCommand {}));
-        session->applyPendingRerun(true, false);
+        session->applyPendingRerun(PermissionDecision::Allow, PermissionMemory::Once);
         CHECK(written == "\033[200~make\033[201~\r");
     }
 
@@ -7162,7 +7220,7 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
     {
         REQUIRE((*session)(RerunCommand {}));
         terminal.writeToScreen("sleep 9\r\n\033]133;C\033\\");
-        session->applyPendingRerun(true, false);
+        session->applyPendingRerun(PermissionDecision::Allow, PermissionMemory::Once);
         CHECK(written.empty());
     }
 
@@ -10671,8 +10729,9 @@ TEST_CASE("TerminalSession: the host-writable status line shown with resize repo
     session->terminal().setStatusDisplay(vtbackend::StatusDisplayType::None);
     echoResizeReports(*session);
 
-    failOnDeadlock(std::chrono::seconds(10),
-                   [&] { session->executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false); });
+    failOnDeadlock(std::chrono::seconds(10), [&] {
+        session->executeShowHostWritableStatusLine(PermissionDecision::Allow, PermissionMemory::Once);
+    });
 
     CHECK(session->terminal().statusDisplayType() == vtbackend::StatusDisplayType::HostWritable);
     CHECK(reportedItsPage(*session));
@@ -10890,7 +10949,7 @@ TEST_CASE("TerminalSession: toggling the status line selects its type and leaves
     auto session = makeDisplaylessSession(testApp.app());
     auto& terminal = session->terminal();
     terminal.writeToScreen("\033[2$~"); // DECSSDT: the host-writable status line
-    session->executeShowHostWritableStatusLine(/*allow=*/true, /*remember=*/false);
+    session->executeShowHostWritableStatusLine(PermissionDecision::Allow, PermissionMemory::Once);
     terminal.writeToScreen("\033[1$}"); // DECSASD: write to it
     REQUIRE(terminal.activeStatusDisplay() == vtbackend::ActiveStatusDisplay::StatusLine);
 

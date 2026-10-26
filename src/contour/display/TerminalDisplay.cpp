@@ -2033,8 +2033,9 @@ void TerminalDisplay::setFonts(vtrasterizer::FontDescriptions fontDescriptions)
 {
     // Neither state below is a programmer error, so neither may be a Require (which std::abort()s in
     // release too). This is a DISPATCH-TIME entry point: configureDisplay() is posted and
-    // applyPendingFontChange() is the tail of a permission dialog, so the pane can close or the scene
-    // graph be invalidated before it runs. An OSC 50 answered late must not take the process down.
+    // applyPendingFontChange(PermissionDecision, PermissionMemory) is the tail of a permission dialog, so the
+    // pane can close or the scene graph be invalidated before it runs. An OSC 50 answered late must not take
+    // the process down.
     if (!_session)
         return;
 
