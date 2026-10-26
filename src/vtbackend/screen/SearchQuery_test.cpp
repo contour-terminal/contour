@@ -363,3 +363,14 @@ TEST_CASE("searchQuery.aFoldedClassRangeKeepsItsEnds", "[searchquery]")
     CHECK(spansOf(gridOf(mock), 0, U"[Z-a]", InsensitiveRegex)
           == std::vector<Span> { { 0, 0, 0, 0 }, { 0, 8, 0, 8 }, { 0, 10, 0, 10 } });
 }
+
+TEST_CASE("searchQuery.aClassesLeadingCaretIsNoRangeEnd", "[searchquery]")
+{
+    // The ^ right after [ negates the class; it is no low end of a range with the - after it.
+    auto constexpr InsensitiveRegex = SearchOptions { .caseSensitivity = SearchCaseSensitivity::Insensitive,
+                                                      .syntax = SearchSyntax::Regex };
+    auto const mock = termWith(1, 10, "a-Zz");
+    CHECK(spansOf(gridOf(mock), 0, U"[^-z]", InsensitiveRegex) == std::vector<Span> { { 0, 0, 0, 0 } });
+    CHECK(spansOf(gridOf(mock), 0, U"[^-Z]", InsensitiveRegex) == std::vector<Span> { { 0, 0, 0, 0 } });
+    CHECK(SearchQuery::compile(U"[^-!]", RegexOptions, WordDelimiters).has_value());
+}

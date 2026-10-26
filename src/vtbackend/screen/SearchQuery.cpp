@@ -67,6 +67,23 @@ namespace
         return false;
     }
 
+    /// Tells a class's negating `^` -- the first character after the `[` that opens it -- from its items, fed
+    /// the characters of a source in order with the roles they have there.
+    class ClassNegationMarker
+    {
+      public:
+        /// @return Whether @p ch, in @p role, is a class's negating `^`.
+        [[nodiscard]] bool negates(char32_t ch, RegexSourceRole role) noexcept
+        {
+            auto const isMarker = _classJustOpened && role == RegexSourceRole::InClass && ch == U'^';
+            _classJustOpened = role == RegexSourceRole::Plain && ch == U'[';
+            return isMarker;
+        }
+
+      private:
+        bool _classJustOpened = false; ///< Whether the last character opened a class.
+    };
+
     /// The characters of @p source that smart case reads: those the regex spells itself, not its escapes.
     [[nodiscard]] std::u32string unescapedCharactersOf(std::u32string_view source)
     {
@@ -88,8 +105,10 @@ namespace
     {
         auto low = std::optional<char32_t> {};
         auto inRange = false;
+        auto marker = ClassNegationMarker {};
         return anyRegexSourceCharacter(source, [&](char32_t ch, RegexSourceRole role) {
-            auto const endsRun = role != RegexSourceRole::InClass || ch == U']' || ch == U'\\';
+            auto const endsRun =
+                marker.negates(ch, role) || role != RegexSourceRole::InClass || ch == U']' || ch == U'\\';
             if (endsRun)
             {
                 low.reset();
@@ -171,9 +190,11 @@ namespace
             low.reset();
             inRange = false;
         };
+        auto marker = ClassNegationMarker {};
         (void) anyRegexSourceCharacter(
             std::u32string_view(normalized), [&](char32_t ch, RegexSourceRole role) {
-                auto const isClassItem = role == RegexSourceRole::InClass && ch != U']' && ch != U'\\';
+                auto const isClassItem = !marker.negates(ch, role) && role == RegexSourceRole::InClass
+                                         && ch != U']' && ch != U'\\';
                 if (!isClassItem)
                 {
                     flush();
