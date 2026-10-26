@@ -6407,6 +6407,27 @@ TEST_CASE("A resting pointer does not take the selection after the list changes 
         QTest::qWait(contour::test::PopupSettleMs / 20);
     };
 
+    SECTION("a palette opening under a resting pointer keeps row 0")
+    {
+        // While the palette is closed the pointer comes to rest where the sixth row will be: the first
+        // hover the open brings is where the pointer already was, not a move.
+        auto* sixth = paletteRowAt(list, RestingRow + 2);
+        REQUIRE(sixth != nullptr);
+        auto* sixthEntry = sixth->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow"));
+        REQUIRE(sixthEntry != nullptr);
+        auto const restingPoint =
+            sixthEntry->mapToScene(QPointF(sixthEntry->width() / 2, sixthEntry->height() / 2)).toPoint();
+        QMetaObject::invokeMethod(host.palette, "close");
+        waitForPopupClosed(*host.palette);
+        QTest::mouseMove(window, QPoint(1, 1));
+        QTest::mouseMove(window, restingPoint);
+        QCoreApplication::processEvents();
+        QMetaObject::invokeMethod(host.palette, "open");
+        waitForPopupOpened(*host.palette);
+        settle();
+        CHECK(list->property("currentIndex").toInt() == 0);
+    }
+
     SECTION("typing selects the best match, row 0")
     {
         for (auto const key: { 's', 'p', 'l' })

@@ -114,6 +114,7 @@ Popup {
     onAboutToShow: {
         if (root.model)
             root.model.shown = true;
+        listHover.hasPosition = false;
         root._returnFocus = root.window ? root.window.activeFocusItem : null;
         filterField.clear();
         filterField.forceActiveFocus();
@@ -153,6 +154,12 @@ Popup {
     // OpenCommandPalette, a row this palette itself always offers — would re-enter Popup.open() on top of
     // the close that is still unwinding, and the palette would need dismissing twice. Deferring to the
     // next event-loop turn dispatches the command with the popup's state machine at rest.
+    // A palette destroyed while open (its window closing) must not leave refresh() held off for good.
+    Component.onDestruction: {
+        if (root.model)
+            root.model.shown = false;
+    }
+
     // Off screen from the moment it starts to close, so an open asked for during the close refreshes.
     onAboutToHide: {
         if (root.model)
@@ -392,12 +399,25 @@ Popup {
             // pointer position, which would otherwise take the selection from row 0 or the anchor row.
             HoverHandler {
                 id: listHover
-                property point lastPosition: Qt.point(-1, -1)
+                property point lastPosition: Qt.point(-1, -1) // in the window's coordinates
+                // False until the first event since the pointer entered the list (or the palette opened):
+                // that event is where the pointer already was -- a palette opening under a resting
+                // pointer -- so it only records the position.
+                property bool hasPosition: false
+                onHoveredChanged: if (!listHover.hovered) listHover.hasPosition = false
                 onPointChanged: {
-                    const position = listHover.point.position;
-                    if (position.x === listHover.lastPosition.x && position.y === listHover.lastPosition.y)
+                    // Moved is judged in the window's coordinates: the open transition scales the list under
+                    // a resting pointer, which moves it in the list's own.
+                    const scene = listHover.point.scenePosition;
+                    if (!listHover.hasPosition) {
+                        listHover.hasPosition = true;
+                        listHover.lastPosition = Qt.point(scene.x, scene.y);
                         return;
-                    listHover.lastPosition = Qt.point(position.x, position.y);
+                    }
+                    if (scene.x === listHover.lastPosition.x && scene.y === listHover.lastPosition.y)
+                        return;
+                    listHover.lastPosition = Qt.point(scene.x, scene.y);
+                    const position = listHover.point.position;
                     const index = list.indexAt(position.x + list.contentX, position.y + list.contentY);
                     const item = index >= 0 ? list.itemAtIndex(index) : null;
                     // Over a group header, nothing: only the row below it is selectable.
