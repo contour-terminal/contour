@@ -823,3 +823,102 @@ TEST_CASE("serializeToVT.gitFollowsTheShell", "[statusline][git]")
     CHECK(indicatorTextAfterRefresh(mc.terminal).empty());
 }
 // }}}
+
+// {{{ {LastCommand}
+namespace
+{
+/// What `{LastCommand…}` (@p placeholder) shows on @p mc now.
+[[nodiscard]] std::string lastCommandOf(MockTerm<>& mc,
+                                        StatusLineStyling styling = StatusLineStyling::Disabled,
+                                        std::string_view placeholder = "{LastCommand}")
+{
+    return serializeToVT(mc.terminal, parseStatusLineSegment(placeholder), styling);
+}
+
+/// Runs @p command at a fresh prompt for @p duration, ending it with @p exitCode and a new prompt.
+void runFor(MockTerm<>& mc, std::string_view command, std::chrono::milliseconds duration, int exitCode)
+{
+    test::typeAtPrompt(mc, command);
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.steadyClock.advance(duration);
+    mc.writeToScreen(test::commandEnd(exitCode));
+    mc.writeToScreen("\033]133;A\033\\$ ");
+}
+
+/// The SGR that selects @p role's colour on @p mc's palette as the text colour.
+[[nodiscard]] std::string roleSgr(MockTerm<> const& mc, StatusLineDefinitions::ColorRole role)
+{
+    auto const rgb = StatusLineDefinitions::resolveItemColor(StatusLineDefinitions::ItemColor { role },
+                                                             mc.terminal.colorPalette());
+    return std::format("\033[38:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
+}
+} // namespace
+
+TEST_CASE("serializeToVT.lastCommandSaysHowItWent", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    CHECK(lastCommandOf(mc).empty());
+
+    runFor(mc, "ctest", 134s, 0);
+    CHECK(lastCommandOf(mc) == "✓ ctest · 2m 14s");
+
+    runFor(mc, "ctest -R gui", 12'400ms, 8);
+    CHECK(lastCommandOf(mc) == "✗ exit 8 ctest -R gui · 12s");
+
+    // While a command runs, the last one is no longer news.
+    test::typeAtPrompt(mc, "sleep 9");
+    mc.writeToScreen("\033]133;C\033\\");
+    CHECK(lastCommandOf(mc).empty());
+
+    // A block a newer prompt ended without ;D reported nothing about how it went.
+    mc.writeToScreen("\033]133;A\033\\$ ");
+    CHECK(lastCommandOf(mc).empty());
+}
+
+TEST_CASE("serializeToVT.lastCommandIsBoundedAndSafe", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(200) } };
+
+    auto const command = std::string(100, 'x');
+    runFor(mc, command, 4ms, 0);
+    auto const text = lastCommandOf(mc);
+    auto constexpr Status = "✓ "sv;
+    auto constexpr Duration = " · 4ms"sv;
+    REQUIRE(text.starts_with(Status));
+    REQUIRE(text.ends_with(Duration));
+    auto const commandPart =
+        std::string_view { text }.substr(Status.size(), text.size() - Status.size() - Duration.size());
+    CHECK(columnsOf(commandPart) == 32);
+    CHECK(commandPart.ends_with("…"));
+    CHECK(commandPart.starts_with("xxx"));
+
+    mc.writeToScreen(test::reportedCommandStart("evil%1B%5B2Jx"));
+    mc.writeToScreen(test::commandEnd(0));
+    CHECK_FALSE(lastCommandOf(mc).contains('\033'));
+    CHECK(lastCommandOf(mc).contains("evil"));
+}
+
+TEST_CASE("serializeToVT.lastCommandColoursItsStatus", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    runFor(mc, "ctest -R gui", 12'400ms, 8);
+
+    auto const coloured = lastCommandOf(mc, StatusLineStyling::Enabled);
+    CHECK(coloured.contains(roleSgr(mc, StatusLineDefinitions::ColorRole::Danger) + "✗"));
+    CHECK(coloured.contains(roleSgr(mc, StatusLineDefinitions::ColorRole::Muted) + " · "));
+
+    // The item's own colour wins: it is the only one drawn.
+    auto const own = lastCommandOf(mc, StatusLineStyling::Enabled, "{LastCommand:Color=#102030}");
+    CHECK(own.contains("38:2:16:32:48"));
+    CHECK(std::ranges::distance(own | std::views::split("38:2"sv)) == 2);
+}
+
+TEST_CASE("parseStatusLineSegment.lastCommandMaxWidth", "[statusline][lastcommand]")
+{
+    CHECK(canonical("{LastCommand:MaxWidth=20}"sv) == "{LastCommand:MaxWidth=20}");
+    CHECK(canonical("{LastCommand}"sv) == "{LastCommand}");
+}
+// }}}

@@ -5,6 +5,7 @@
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <crispy/InterpolatedString.hpp>
@@ -66,6 +67,39 @@ namespace // helper functions
         core::unreachable();
     }
 
+    /// The width of @p text in columns: counted in COLUMNS, not bytes, because a CJK name is two columns per
+    /// codepoint and three bytes, and measuring bytes would elide text that fits.
+    [[nodiscard]] int columnsOf(std::string_view text)
+    {
+        auto columns = 0;
+        for (auto const codepoint: unicode::convert_to<char32_t>(text))
+            columns += static_cast<int>(unicode::width(codepoint));
+        return columns;
+    }
+
+    /// @p text, cut at its END to at most @p maxWidth columns with a trailing "…" when it is wider.
+    /// @param text The text, valid UTF-8.
+    /// @param maxWidth The widest the result may be, in columns.
+    /// @return @p text itself, or its head and "…"; never cut inside a codepoint.
+    [[nodiscard]] std::string elideEnd(std::string_view text, ColumnCount maxWidth)
+    {
+        if (columnsOf(text) <= unbox<int>(maxWidth))
+            return std::string { text };
+
+        // The ellipsis is budgeted for, as elideMiddle() budgets for its own.
+        auto const budget = unbox<int>(maxWidth) - 1;
+        auto head = std::u32string {};
+        auto columns = 0;
+        for (auto const codepoint: unicode::convert_to<char32_t>(text))
+        {
+            columns += static_cast<int>(unicode::width(codepoint));
+            if (columns > budget)
+                break;
+            head += codepoint;
+        }
+        return unicode::convert_to<char>(std::u32string_view { head }) + "…";
+    }
+
     /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
     /// @param segments The parts, outermost first.
     /// @param separator What goes between two parts.
@@ -75,21 +109,12 @@ namespace // helper functions
                                           std::string_view separator,
                                           ColumnCount maxWidth)
     {
-        auto const widthOf = [](std::string_view text) {
-            // Counted in COLUMNS, not bytes: a CJK container name is two columns per codepoint and
-            // three bytes, and measuring bytes would elide text that fits.
-            auto columns = 0;
-            for (auto const codepoint: unicode::convert_to<char32_t>(text))
-                columns += static_cast<int>(unicode::width(codepoint));
-            return columns;
-        };
-
         auto const join = [&](std::vector<std::string> const& parts) {
             return core::joinWith(parts, separator);
         };
 
         auto candidate = join(segments);
-        if (widthOf(candidate) <= unbox<int>(maxWidth))
+        if (columnsOf(candidate) <= unbox<int>(maxWidth))
             return candidate;
 
         // Keep both ends: the first answers *where*, the last answers *who*.
@@ -97,7 +122,7 @@ namespace // helper functions
         {
             auto elided = std::vector<std::string> { segments.front(), "…", segments.back() };
             candidate = join(elided);
-            if (widthOf(candidate) <= unbox<int>(maxWidth))
+            if (columnsOf(candidate) <= unbox<int>(maxWidth))
                 return candidate;
         }
 
@@ -822,6 +847,46 @@ namespace
         [[nodiscard]] std::string visit(StatusLineDefinitions::Git const&) const
         {
             return vt.gitBranch();
+        }
+
+        /// How the newest command that reported its end went; nothing while one runs, before any, or when
+        /// a newer prompt ended it without a report.
+        std::string visit(StatusLineDefinitions::LastCommand const& item)
+        {
+            using StatusLineDefinitions::ColorRole;
+
+            auto const& blocks = vt.commandBlocks();
+            if (auto const* const current = blocks.current();
+                current && current->state == CommandBlockState::Running)
+                return {};
+            auto const* const last = blocks.lastFinished();
+            if (!last || last->end != CommandBlockEnd::Reported)
+                return {};
+
+            // The status and the duration carry their own colours, as the Tabs strip's active tab does --
+            // unless the item names a colour of its own, which then colours all of it.
+            auto const intrinsic = styling == StatusLineStyling::Enabled && !item.foregroundColor;
+            auto const run = [&](std::string text, ColorRole role) {
+                if (!intrinsic)
+                    return text;
+                return SGRSAVE() + makeTextColor(StatusLineDefinitions::ItemColor { role }) + text
+                       + SGRRESTORE();
+            };
+
+            auto parts = std::vector<std::string> {};
+            if (auto const exitCode = last->exitCode)
+                parts.push_back(*exitCode == 0 ? run("✓", ColorRole::Success)
+                                               : run(std::format("✗ exit {}", *exitCode), ColorRole::Danger));
+            // display() is sanitized: no byte of the command line reaches the status screen as an escape.
+            if (auto command = elideEnd(last->commandLine.display(), item.maxWidth); !command.empty())
+                parts.push_back(std::move(command));
+
+            auto text = core::joinWith(parts, " ");
+            if (last->duration)
+                text += run(
+                    std::format("{}{}", text.empty() ? "" : " · ", formatCommandDuration(*last->duration)),
+                    ColorRole::Muted);
+            return text;
         }
 
         std::string visit(StatusLineDefinitions::Tabs const& tabs)

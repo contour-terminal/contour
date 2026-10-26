@@ -31,6 +31,7 @@ Variable             | Description
 `{Git}`              | the branch of the Git repository the shell's directory is in (a ref outside `refs/heads/` as `remotes/origin/x`, a detached HEAD as its first 7 hex digits), read from `.git/HEAD` or a worktree's `.git` file; empty outside a repository or in a directory on another machine. It is read again only after a command ends or the shell reports its directory, never per frame
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
 `{Hyperlink}`        | reveals the hyperlink at the given mouse location
+`{LastCommand}`      | how the last command went, from the shell integration's command blocks (OSC 133): `✓ make · 4ms` after a success, `✗ exit 8 ctest · 12s` after a failure; the status drawn in the `success` or `danger` role and the duration in `muted`, unless the item names a `Color=` of its own. Empty while a command runs, and when a newer prompt ended one that reported no exit status. The command text is at most `MaxWidth=` columns (default `32`), cut at its end with `…`
 `{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)
 `{ProtectedMode}`    | indicates protected mode, if currently enabled
 `{SearchMode}`       | indicates search highlight mode, if currently active
@@ -74,11 +75,11 @@ Parameter                 | Description
 
 These parameters apply to all variables above.
 
-`{Cwd}` and `{Context}` additionally take this attribute:
+`{Cwd}`, `{Context}` and `{LastCommand}` additionally take this attribute:
 
 Parameter                 | Description
 --------------------------|--------------------------------------------------------------------
-`MaxWidth=N`              | the widest the item may draw, in columns; beyond it the middle is elided and both ends kept. Default `40` for `{Cwd}`, `32` for `{Context}`; a value that is not a number `> 0` keeps the default.
+`MaxWidth=N`              | the widest the item may draw, in columns; beyond it the middle is elided and both ends kept. Default `40` for `{Cwd}`, `32` for `{Context}` and for `{LastCommand}`'s command text, which is cut at its end instead; a value that is not a number `> 0` keeps the default.
 
 A role names a color by what it means rather than by its value, and takes it from the active color
 scheme when the line is drawn, so it follows a scheme change: `accent` is palette color 4 (blue),

@@ -194,6 +194,13 @@ namespace StatusLineDefinitions
     /// The branch, ref or short commit of the repository the shell is in, read from its `.git/HEAD`.
     struct Git: Styles {};
 
+    /// How the last command went, from the shell's command blocks: `✓ make · 4ms`, `✗ exit 8 ctest · 12s`.
+    struct LastCommand: Styles
+    {
+        /// Widest the COMMAND TEXT alone may draw, in columns; a longer one is cut at its end with `…`.
+        ColumnCount maxWidth { 32 };
+    };
+
     struct Tabs: Styles
     {
         std::optional<ItemColor> activeColor;
@@ -222,7 +229,8 @@ namespace StatusLineDefinitions
         Tabs,
         Context,
         Cwd,
-        Git
+        Git,
+        LastCommand
     >;
     // clang-format on
 
@@ -319,6 +327,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<Git>
     { static constexpr std::string_view Name = "Git", Label = "Git branch", Sample = "main"; };
+
+    template <> struct ItemTraits<LastCommand>
+    { static constexpr std::string_view Name = "LastCommand", Label = "Last command", Sample = "\u2713 make \u00b7 4ms"; };
 
     template <> struct ItemTraits<Text>
     { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; };
