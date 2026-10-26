@@ -61,6 +61,16 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::BandSolid).tabCount == scriptRow(SnapshotScript::SingleTab).tabCount);
     CHECK(scriptRow(SnapshotScript::BandSolid).frame == SnapshotFrame::ClientBand);
     CHECK(scriptRow(SnapshotScript::BandSolid).mode == SnapshotWindowMode::Windowed);
+    // The macOS host: three-tabs with every row on macOS, and the only row that moves a row off its host.
+    CHECK(scriptRow(SnapshotScript::MacOSHost).name == "macos-host");
+    CHECK(scriptRow(SnapshotScript::MacOSHost).tabCount == scriptRow(SnapshotScript::ThreeTabs).tabCount);
+    CHECK(scriptRow(SnapshotScript::MacOSHost).frame == SnapshotFrame::ClientBand);
+    CHECK(scriptRow(SnapshotScript::MacOSHost).mode == SnapshotWindowMode::Windowed);
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        CHECK((row.host == SnapshotHost::MacOS) == (row.script == SnapshotScript::MacOSHost));
+    }
     // Each of the four axes is set by its own row only: every other row is a client band, windowed,
     // with no drift.
     for (auto const& row: SnapshotScripts)
@@ -99,6 +109,21 @@ TEST_CASE("snapshot.rowHosts", "[snapshot]")
     CHECK(shortcutStyleFor(rowHost(ChromeStyle::Fluent).host) == ShortcutStyle::Text);
     CHECK(shortcutStyleFor(rowHost(ChromeStyle::ContourLinux).host) == ShortcutStyle::Text);
     CHECK(shortcutStyleFor(rowHost(ChromeStyle::Terminal).host) == ShortcutStyle::Text);
+}
+
+TEST_CASE("snapshot.variantHost", "[snapshot]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::HostPlatform;
+    using namespace contour::test::snapshot;
+    for (auto const row:
+         { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        CAPTURE(contour::config::chromeStyleName(row));
+        // A script's own host overrides the row's; every other script keeps it.
+        CHECK(variantHost({ .script = SnapshotScript::MacOSHost, .row = row }) == HostPlatform::MacOS);
+        CHECK(variantHost({ .script = SnapshotScript::ThreeTabs, .row = row }) == rowHost(row).host);
+    }
 }
 
 TEST_CASE("snapshot.rowsRenderableUnder", "[snapshot]")

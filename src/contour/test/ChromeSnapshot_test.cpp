@@ -31,6 +31,8 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 #include <QtGui/QPalette>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -38,6 +40,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <ranges>
@@ -254,6 +257,23 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 REQUIRE(background != nullptr);
                 if (variant.row == contour::config::ChromeStyle::MacOS)
                     CHECK(background->property("color").value<QColor>().alphaF() == 1.0);
+                break;
+            }
+            case SnapshotScript::MacOSHost: {
+                // On a macOS host the Terminal row's band grows by whole cells until it holds the native
+                // title bar (S3); the macOS row's is the title bar's height, checked above.
+                REQUIRE(variantHost(variant) == contour::config::HostPlatform::MacOS);
+                if (variant.row != contour::config::ChromeStyle::Terminal)
+                    break;
+                auto const* context = QQmlEngine::contextForObject(&scene.root());
+                REQUIRE(context != nullptr);
+                auto const* style = context->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+                REQUIRE(style != nullptr);
+                auto const cell = style->property("cellHeight").toReal();
+                REQUIRE(cell > 0);
+                CHECK(titleBar->height()
+                      == cell * std::ceil(ChromeSnapshotScene::SnapshotNativeTitleBarHeight / cell));
+                CHECK(titleBar->height() >= ChromeSnapshotScene::SnapshotNativeTitleBarHeight);
                 break;
             }
             case SnapshotScript::SingleTab: break;

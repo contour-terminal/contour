@@ -201,8 +201,11 @@ ThemedWindow
         // reveals over the window (bandBelowMenuBar), as the controller measured it; 0 off macOS.
         restingTop: appWindow.band.bandEdge === "bottom" ? parent.height - titleBar.height
                   : appWindow.bandBelowMenuBar ? ((appWindow.win && appWindow.win.titleBandRevealTop) || 0) : 0
+        // A revealed band slides in and out; a pinned one slides between the top and its place below the
+        // menu bar. Under Reduce Motion neither slides: the revealed band fades, the pinned one moves at once.
         Behavior on y {
-            enabled: titleBar.presence === "reveal" && chromeStyle.motion.animates
+            enabled: (titleBar.presence === "reveal" || titleBar.presence === "pinned")
+                     && chromeStyle.motion.animates
             NumberAnimation { duration: chromeStyle.motion.standard }
         }
         // Shown per the band table: on macOS always (it carries the traffic lights), elsewhere per the

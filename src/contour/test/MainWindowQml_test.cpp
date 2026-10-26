@@ -1799,14 +1799,15 @@ TEST_CASE("the revealed band sits at the reveal top (offscreen)", "[contour][gui
     }
 }
 
-TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar while the edge is hovered "
-          "(offscreen)",
-          "[contour][gui][qml][mainwindow][band][hosts]")
+namespace
 {
-    // 1c's Pinned presence (an interrupted remote connection in full screen) at the controller's measured
-    // height. AppKit's menu bar is hidden until the pointer reaches the screen edge, so the pinned band rests
-    // at the top, and moves below the menu bar only while the pointer is on the edge, as a native full-screen
-    // toolbar does (review I1, ruling a).
+/// 1c's Pinned presence (an interrupted remote connection in full screen) at the controller's measured
+/// height, under @p motion. AppKit's menu bar is hidden until the pointer reaches the screen edge, so the
+/// pinned band rests at the top, and moves below the menu bar only while the pointer is on the edge, as a
+/// native full-screen toolbar does (review I1, ruling a): sliding there and back under full motion, at once
+/// under Reduce Motion.
+void checkPinnedBand(MotionPreference motion)
+{
     constexpr auto RevealTop = 24.0;
     constexpr auto Measured = 40.0;
     QQmlEngine engine;
@@ -1818,13 +1819,14 @@ TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar wh
     controller.setTitleBandHeight(Measured);
     controller.setTitleBandRevealTop(RevealTop);
     contour::test::QmlMessageCapture warnings;
-    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    auto root = loadMainWindow(engine, controller, warnings, macOSSetup(motion));
     auto* window = qobject_cast<QQuickWindow*>(root.get());
     REQUIRE(window != nullptr);
     window->showFullScreen();
     REQUIRE(QTest::qWaitForWindowExposed(window));
     REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
-    QTest::mouseMove(window, QPoint { window->width() / 4, window->height() / 2 });
+    auto const awayPoint = QPoint { window->width() / 4, window->height() / 2 };
+    QTest::mouseMove(window, awayPoint);
     QCoreApplication::processEvents();
 
     auto const& titleBar = named(*root, QStringLiteral("titleBar"));
@@ -1836,11 +1838,25 @@ TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar wh
     CHECK(content.y() == 0);
     CHECK(controller.chromeHeight() == 0);
 
+    // Waits until the band rests at @p target, noting whether it passed through a place in between.
+    auto const moveTo = [&](double target) {
+        auto slid = false;
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                auto const y = titleBar.y();
+                slid = slid || (y > 0 && y < RevealTop);
+                return y == target;
+            },
+            2000));
+        return slid;
+    };
+    auto const slides = motion == MotionPreference::Full;
+
     // The pointer on the edge reveals AppKit's menu bar: the band makes room below it.
     auto const& edge = named(*root, QStringLiteral("bandRevealEdge"));
     REQUIRE(edge.isVisible());
     QTest::mouseMove(window, centreOf(edge));
-    REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == RevealTop; }, 2000));
+    CHECK(moveTo(RevealTop) == slides);
     // Down onto the band keeps it there.
     QTest::mouseMove(window, centreOf(titleBar));
     QCoreApplication::processEvents();
@@ -1849,12 +1865,28 @@ TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar wh
     CHECK(content.y() == 0);
     CHECK(controller.chromeHeight() == 0);
 
-    // Away again: back at the top, still pinned.
-    QTest::mouseMove(window, QPoint { window->width() / 4, window->height() / 2 });
-    REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == 0; }, 2000));
+    // Away again: back at the top, still pinned, and never faded.
+    QTest::mouseMove(window, awayPoint);
+    CHECK(moveTo(0) == slides);
     CHECK(titleBar.isVisible());
+    CHECK(titleBar.opacity() == 1);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     window->showNormal();
+}
+} // namespace
+
+TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar while the edge is hovered "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][band][hosts]")
+{
+    SECTION("sliding")
+    {
+        checkPinnedBand(MotionPreference::Full);
+    }
+    SECTION("moving at once, under Reduce Motion")
+    {
+        checkPinnedBand(MotionPreference::Reduced);
+    }
 }
 
 TEST_CASE("Fluent and ContourLinux bands keep today's colour (offscreen)",

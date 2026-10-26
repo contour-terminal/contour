@@ -157,7 +157,7 @@ class ChromeSnapshotScene
         _rootPane { makePaneTree(scriptRow(variant.script).panes, _sessions) },
         _history { PaletteHistoryCapacity },
         _paletteModel { makePaletteModel(
-            _history, _actionCommands, _config, command::shortcutStyleFor(rowHost(variant.row).host)) },
+            _history, _actionCommands, _config, command::shortcutStyleFor(variantHost(variant))) },
         _settings { makeSettings(scriptRow(variant.script).surface) },
         _controller { MainWindowScene {
             .tabCount = scriptRow(variant.script).tabCount,
@@ -172,7 +172,8 @@ class ChromeSnapshotScene
             .tabBarPosition = config::TabBarPosition::Top,
             .drift = scriptRow(variant.script).drift,
             .frame = scriptRow(variant.script).frame,
-            .nativeControlsInset = nativeControlsInsetFor(variant.row, scriptRow(variant.script).mode),
+            .nativeControlsInset =
+                nativeControlsInsetFor(variantHost(variant), scriptRow(variant.script).mode),
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -389,7 +390,7 @@ class ChromeSnapshotScene
     /// token there, and a revealed band rests at the window's top.
     void measureBand()
     {
-        if (rowHost(_variant.row).host != config::HostPlatform::MacOS
+        if (variantHost(_variant) != config::HostPlatform::MacOS
             || scriptRow(_variant.script).mode != SnapshotWindowMode::Windowed
             || scriptRow(_variant.script).frame != SnapshotFrame::ClientBand)
             return;
@@ -411,17 +412,17 @@ class ChromeSnapshotScene
         _controller.setTitleBandRevealTop(geometry.revealTop);
     }
 
-    /// The inset the OS reserves for its own window controls on @p row's host, as the frame adapter reports
-    /// it: none in full screen, where AppKit hides the traffic lights from the window.
-    /// @param row  The chrome row.
+    /// The inset the OS reserves for its own window controls on @p host, as the frame adapter reports it:
+    /// none in full screen, where AppKit hides the traffic lights from the window.
+    /// @param host The host the picture is rendered on.
     /// @param mode The script's window mode.
     /// @return SnapshotTrafficLightInset on the macOS host while windowed, 0 otherwise.
-    [[nodiscard]] static constexpr qreal nativeControlsInsetFor(config::ChromeStyle row,
+    [[nodiscard]] static constexpr qreal nativeControlsInsetFor(config::HostPlatform host,
                                                                 SnapshotWindowMode mode) noexcept
     {
         if (mode == SnapshotWindowMode::FullScreenRevealed)
             return 0;
-        return rowHost(row).host == config::HostPlatform::MacOS ? SnapshotTrafficLightInset : 0;
+        return host == config::HostPlatform::MacOS ? SnapshotTrafficLightInset : 0;
     }
 
     /// Shows the window in full screen and rests the pointer on the band's reveal edge, waiting until the
@@ -517,7 +518,7 @@ class ChromeSnapshotScene
             return nullptr;
         return std::make_unique<window::SettingsWindowHost>(
             *_settings,
-            window::settingsWindowConventionsFor(rowHost(_variant.row).host),
+            window::settingsWindowConventionsFor(variantHost(_variant)),
             [this](window::SettingsWindowHost& host) { return window::loadSettingsWindow(_engine, host); });
     }
 
@@ -632,8 +633,8 @@ class ChromeSnapshotScene
         auto const chrome = ChromeSetup {
             .row = _variant.row,
             .font = _chromeFont,
-            .windowControls = config::resolveWindowControlStyle(config::WindowControlStyle::Auto,
-                                                                rowHost(_variant.row).host),
+            .windowControls =
+                config::resolveWindowControlStyle(config::WindowControlStyle::Auto, variantHost(_variant)),
             .accessibility = { .transparency = scriptRow(_variant.script).transparency },
             .appearance = {},
             .scheme = config::chromeSchemeColorsOf(
