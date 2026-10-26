@@ -2955,6 +2955,11 @@ QString TerminalSession::renderSearchSummary(SearchStatus const& status) const
     {
         case SearchOutcome::Idle: return {};
         case SearchOutcome::NoMatch: return tr("No results");
+        // Nothing found yet, and the walk still going: the same mark as a count still being walked.
+        case SearchOutcome::Pending: return tr("…");
+        case SearchOutcome::Invalid:
+            return status.error == vtbackend::SearchPatternError::TooComplex ? tr("Pattern too complex")
+                                                                             : tr("Invalid pattern");
         case SearchOutcome::Matched: break;
     }
 
