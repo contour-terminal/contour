@@ -154,6 +154,10 @@
           <li>Adds <code>Hide=&lt;mode&gt;</code> and <code>Chip</code> to <code>{InputMode}</code>, and <code>MaxWidth=</code> to <code>{Cwd}</code> and <code>{LastCommand}</code></li>
           <li>Changes a status line too wide for its pane to drop its least important items first, right to left</li>
           <li>Changes the new default status line to show where you are, the branch, how the last command went and the scroll position</li>
+          <li>Paints the macOS tab bar in a tint of the terminal background, solid also under Reduce Transparency and in full screen</li>
+          <li>Sizes the macOS tab bar from the window's own title bar, and places it below the menu bar in full screen</li>
+          <li>Grows the macOS tab bar under <code>ui_style: terminal</code> to whole rows around the window buttons</li>
+          <li>Requires Qt 6.9 or later for the GUI on macOS; configure rejects an older Qt there</li>
         </ul>
       </description>
     </release>
