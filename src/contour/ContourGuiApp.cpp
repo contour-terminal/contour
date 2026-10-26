@@ -1813,21 +1813,37 @@ config::MenuPresentation ContourGuiApp::menuPresentation() const noexcept
     return config::ChromeTokenRows[static_cast<size_t>(_chromeStyle)].layout.menu;
 }
 
-window::TitleBandTokens ContourGuiApp::titleBandTokens() const
+window::TitleBandTokens ContourGuiApp::titleBandTokens(window::BarCentre centre) const
 {
     if (_chromeStyleHost)
-        return _chromeStyleHost->provider().titleBandTokens();
-    // No provider yet: the Pill rows' band is their title-bar token; the Flat rows' is their measured strip,
-    // which nobody has measured, so 0 leaves the band to its own height.
-    auto const row =
-        config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), _config.chromeDensity.value());
+        return _chromeStyleHost->provider().titleBandTokens(centre);
+    // No provider yet: an empty band is its bare-band token, the Pill rows' band their title-bar token; the
+    // Flat rows' is their measured strip, which nobody has measured, so 0 leaves the band to its own height.
+    auto const density = _config.chromeDensity.value();
+    auto const row = config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), density);
+    auto const height = [&] {
+        if (centre == window::BarCentre::Empty)
+            return static_cast<double>(row.size.bareBand);
+        return row.layout.tabShape == config::TabShape::Pill ? static_cast<double>(row.size.titleBar) : 0.0;
+    }();
     return window::TitleBandTokens {
         .style = _chromeStyle,
         .material = row.material.titleBand,
-        .height =
-            row.layout.tabShape == config::TabShape::Pill ? static_cast<double>(row.size.titleBar) : 0.0,
+        .height = height,
         .cellHeight = 0.0,
+        .density = density,
     };
+}
+
+window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs inputs) const
+{
+    if (_chromeStyleHost)
+        return _chromeStyleHost->provider().titleBandOf(inputs);
+    auto const density = _config.chromeDensity.value();
+    inputs.shape =
+        config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), density).layout.tabShape;
+    inputs.density = density;
+    return window::resolveTitleBand(inputs);
 }
 
 window::ChromeInputs ContourGuiApp::chromeInputs() const

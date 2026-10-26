@@ -43,6 +43,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QPoint>
 #include <QtCore/QPointF>
+#include <QtCore/QRectF>
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUrl>
@@ -1737,6 +1738,115 @@ TEST_CASE("the band takes the controller's height (offscreen)", "[contour][gui][
     QCoreApplication::processEvents();
     CHECK(titleBar.height() == token);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// @return The setup @p row is loaded under, in @p density.
+[[nodiscard]] contour::test::ChromeSetup densitySetup(ChromeStyle row, contour::config::ChromeDensity density)
+{
+    auto setup = rowSetup(row);
+    setup.density = density;
+    return setup;
+}
+
+/// The title bar's geometry and the chrome height Main.qml declares.
+struct BarGeometry
+{
+    int chromeHeight = 0;
+    bool visible = false;
+    QRectF rect {};
+
+    bool operator==(BarGeometry const&) const = default;
+};
+
+/// Loads Main.qml on @p row in @p density with @p tabCount tabs under Multiple.
+/// @return The bar's geometry.
+[[nodiscard]] BarGeometry barGeometryOf(ChromeStyle row, contour::config::ChromeDensity density, int tabCount)
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = tabCount,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, densitySetup(row, density));
+    auto const& titleBar = named(*root, QStringLiteral("titleBar"));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    return BarGeometry { .chromeHeight = controller.chromeHeight(),
+                         .visible = titleBar.isVisible(),
+                         .rect = QRectF { titleBar.x(), titleBar.y(), titleBar.width(), titleBar.height() } };
+}
+} // namespace
+
+TEST_CASE("Minimal with one tab is a bare band (offscreen)", "[contour][gui][qml][mainwindow][band][density]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple } };
+    contour::test::QmlMessageCapture warnings;
+    auto const setup = densitySetup(ChromeStyle::MacOS, contour::config::ChromeDensity::Minimal);
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+
+    // The mock measures nothing (titleBandHeight 0), so the bar is the bare-band token: AppKit's bare title
+    // bar on macOS (ruling P3: 32 pt; 28 on Fluent and ContourLinux).
+    auto const bareBand = styleGroup(engine, "size").property("bareBand").toReal();
+    CHECK(bareBand == 32);
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+    CHECK(titleBar.isVisible());
+    CHECK(titleBar.height() == bareBand);
+    CHECK(controller.chromeHeight() == static_cast<int>(bareBand));
+    CHECK_FALSE(named(*root, QStringLiteral("bandTitle")).isVisible());
+    auto const* well = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
+    CHECK((well == nullptr || !well->isVisible()));
+    // Painted in the terminal background, opaque.
+    auto const background = contour::platform::toQColor(
+        setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Background)]);
+    CHECK(bandBackgroundOf(*root) == background);
+    CHECK(bandBackgroundOf(*root).alphaF() == 1.0);
+
+    // A second tab: the Comfortable band returns, with the well.
+    controller.setTabBarShouldShow(true);
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    auto const* shownWell = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
+    REQUIRE(shownWell != nullptr);
+    CHECK(shownWell->isVisible());
+    CHECK(titleBar.height() == 38);
+    CHECK(controller.chromeHeight() == 38);
+    CHECK(bandBackgroundOf(*root) != background);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Minimal keeps a user's always-shown tab bar (offscreen)",
+          "[contour][gui][qml][mainwindow][band][density]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Always } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine,
+                               controller,
+                               warnings,
+                               densitySetup(ChromeStyle::MacOS, contour::config::ChromeDensity::Minimal));
+
+    auto const* well = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
+    REQUIRE(well != nullptr);
+    CHECK(well->isVisible());
+    CHECK(named(*root, QStringLiteral("titleBar")).height() == 38);
+    CHECK(controller.chromeHeight() == 38);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Minimal leaves Fluent, Linux and the Terminal row as Comfortable has them (offscreen)",
+          "[contour][gui][qml][mainwindow][band][density]")
+{
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+        for (auto const tabCount: { 1, 3 })
+        {
+            INFO("row: " << contour::config::chromeStyleName(row) << ", tabs: " << tabCount);
+            CHECK(barGeometryOf(row, contour::config::ChromeDensity::Minimal, tabCount)
+                  == barGeometryOf(row, contour::config::ChromeDensity::Comfortable, tabCount));
+        }
 }
 
 namespace

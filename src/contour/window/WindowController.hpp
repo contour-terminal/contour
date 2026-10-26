@@ -19,6 +19,7 @@
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
+#include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -534,12 +535,19 @@ class WindowController:
     /// window state, safe area, a chrome refresh) calls it. GUI thread.
     void refreshTitleBand();
 
+    /// Where this window's band and tabs go now (ContourGuiApp::titleBandOf): the decision Main.qml asks
+    /// UiStyleProvider::titleBand for, from the same inputs -- the frame, the mode, the tab-bar gate, its
+    /// edge and the host chip's notice.
+    /// @return The band.
+    [[nodiscard]] TitleBand titleBand() const;
+
     /// @return What this window asks the OS to draw behind and around its band now: the chrome row's surface
-    ///         for the window's frame and mode, in the effective colour scheme.
+    ///         for the window's frame, mode and band centre (titleBand()), in the effective colour scheme.
     [[nodiscard]] platform::TitleBandRequest titleBandRequest() const;
 
-    /// @return The band's height and full-screen resting place, from the app's band tokens and, where the
-    ///         frame is the full-size content view, the native title bar as measured now.
+    /// @return The band's height and full-screen resting place, from the app's band tokens for the band's
+    ///         centre (titleBand()) and, where the frame is the full-size content view, the native title bar
+    ///         as measured now.
     [[nodiscard]] TitleBandGeometry titleBandGeometry() const;
 
     /// @return The band's height as last published by refreshTitleBand(), in logical pixels.

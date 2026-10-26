@@ -8,6 +8,7 @@
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
+#include <contour/window/TitleBandLayout.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -481,6 +482,17 @@ class UiStyleProvider: public QObject
     [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(
         int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const;
 
+    /// Where the title band and the tabs go (window::resolveTitleBand), for this row's tab shape and this
+    /// provider's density, whatever @p inputs says of either.
+    /// @param inputs The window's side of the decision: frame, mode, gate, edge and the host's notice.
+    /// @return The band.
+    [[nodiscard]] TitleBand titleBandOf(TitleBandInputs inputs) const noexcept
+    {
+        inputs.shape = _groups.layout.tabShape;
+        inputs.density = _inputs.density;
+        return resolveTitleBand(inputs);
+    }
+
     /// The tab well's widths for @p tabCount tabs in @p available logical pixels (window::layoutTabWell).
     /// @param available The width the band leaves the well.
     /// @param tabCount  The number of tabs.
@@ -503,15 +515,18 @@ class UiStyleProvider: public QObject
     [[nodiscard]] qreal bandHeight() const noexcept;
 
     /// The title band's tokens as this provider resolves them: its row, the row's resolved title-band
-    /// material, bandHeight() and, on the Terminal row, one cell's height (0 elsewhere).
+    /// material, the band's height -- @c size.bareBand for a band whose middle is empty, else bandHeight() --
+    /// on the Terminal row one cell's height (0 elsewhere), and the density.
+    /// @param centre What the band's middle holds (titleBandOf()).
     /// @return The tokens window::resolveTitleBandGeometry() takes.
-    [[nodiscard]] TitleBandTokens titleBandTokens() const noexcept
+    [[nodiscard]] TitleBandTokens titleBandTokens(BarCentre centre) const noexcept
     {
         return TitleBandTokens {
             .style = _inputs.row,
             .material = _groups.material.titleBand,
-            .height = bandHeight(),
+            .height = centre == BarCentre::Empty ? _size.bareBand() : bandHeight(),
             .cellHeight = _inputs.row == config::ChromeStyle::Terminal ? cellHeight() : 0.0,
+            .density = _inputs.density,
         };
     }
 
@@ -522,15 +537,15 @@ class UiStyleProvider: public QObject
     /// - @c Clear: transparent, so a material behind the band shows;
     /// - @c Tint: window::legibleBandTint of the chrome scheme's background for the chrome's tone (decided
     ///   as statusColor() decides it), else the palette's window colour.
+    /// - @c Background: the chrome scheme's background itself (Minimal's bare band).
     ///
     /// Reads the palette, so a binding over it also reads @ref paletteRevision. Ints and a name rather than
     /// enums: the QML-facing carve-out, whose one caller (Main.qml) passes the values it passes titleBand()
     /// and the centre titleBand() answered.
     /// @param frame  A window::WindowFrame.
     /// @param mode   A window::WindowMode.
-    /// @param centre What the band's middle holds, as titleBand() names it ("empty", "tabs" or "title").
-    ///               Every centre paints alike today; it is the seam a bare band (Minimal) keys its own
-    ///               fill on.
+    /// @param centre What the band's middle holds, as titleBand() names it ("empty", "tabs" or "title"):
+    ///               under Minimal an empty band is the bare band, in the terminal background.
     /// @return The fill; the palette's window colour for a value out of range or an unknown centre.
     [[nodiscard]] Q_INVOKABLE QColor bandFill(int frame, int mode, QString const& centre) const;
 

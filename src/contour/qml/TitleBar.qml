@@ -108,8 +108,11 @@ Item {
     // The whole bar's height, and so the window's chrome height (Main.qml declares it to the
     // WindowController, which feeds the WM size hints): the measured height where there is one, else the
     // band token -- 38 under the Pill shape, one character row in the terminal style, and the historical
-    // 34px on the other native rows.
-    implicitHeight: root.measuredHeight > 0 ? root.measuredHeight : chromeStyle.bandHeight
+    // 34px on the other native rows; a band whose middle is empty (Minimal, one tab) is the bare band,
+    // as WindowController::refreshTitleBand measures it from the same token.
+    readonly property real tokenHeight: root.isBand && root.centre === "empty" ? chromeStyle.size.bareBand
+                                                                              : chromeStyle.bandHeight
+    implicitHeight: root.measuredHeight > 0 ? root.measuredHeight : root.tokenHeight
 
     // A hidden "reveal" bar fades under Reduce Motion (and slides under full motion, see slideOffset).
     opacity: root.isConcealed && !chromeStyle.motion.animates ? 0 : 1

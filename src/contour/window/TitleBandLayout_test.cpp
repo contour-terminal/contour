@@ -10,6 +10,7 @@
 #include <span>
 
 using namespace contour::window;
+using contour::config::ChromeDensity;
 using contour::config::TabBarPosition;
 using contour::config::TabShape;
 
@@ -156,6 +157,13 @@ constexpr auto InterruptedCases = std::array {
     });
 }
 
+/// @return @p inputs under @p density.
+[[nodiscard]] constexpr TitleBandInputs withDensity(TitleBandInputs inputs, ChromeDensity density) noexcept
+{
+    inputs.density = density;
+    return inputs;
+}
+
 } // namespace
 
 TEST_CASE("titleBand.rules", "[titleband]")
@@ -204,6 +212,41 @@ TEST_CASE("titleBand.fullScreenReveals", "[titleband]")
                       << int(inputs.strip) << ", position " << int(inputs.position));
         CHECK(resolveTitleBand(inputs) == expected);
     }
+}
+
+TEST_CASE("titleBand.minimalBareBand", "[titleband]")
+{
+    // One tab under Minimal: the Pill band stays for the traffic lights, its middle empty (R-f).
+    auto const bare = TitleBandInputs { .shape = Pill,
+                                        .frame = ClientBand,
+                                        .mode = Windowed,
+                                        .strip = GateHidden,
+                                        .position = Top,
+                                        .density = ChromeDensity::Minimal };
+    CHECK(resolveTitleBand(bare)
+          == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
+    // In full screen it reveals on the edge like any top band.
+    auto full = bare;
+    full.mode = FullScreen;
+    CHECK(resolveTitleBand(full)
+          == TitleBand { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
+
+    // With the gate shown, Minimal resolves as Comfortable.
+    auto shown = bare;
+    shown.strip = GateShown;
+    CHECK(resolveTitleBand(shown) == resolveTitleBand(withDensity(shown, ChromeDensity::Comfortable)));
+
+    // Every Flat row and every native-frame row answers alike in both densities.
+    detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
+        if (inputs.shape != Flat && inputs.frame != NativeFrame)
+            return;
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position) << ", notice "
+                      << int(inputs.notice));
+        for (auto const density: std::views::iota(size_t { 0 }, contour::config::ChromeDensityCount))
+            CHECK(resolveTitleBand(withDensity(inputs, static_cast<ChromeDensity>(density)))
+                  == resolveTitleBand(withDensity(inputs, ChromeDensity::Comfortable)));
+    });
 }
 
 TEST_CASE("titleBand.names", "[titleband]")

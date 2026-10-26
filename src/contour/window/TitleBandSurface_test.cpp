@@ -93,6 +93,48 @@ TEST_CASE("surface.fullScreenIsSolid", "[titlebandsurface]")
     CHECK(full.growth == windowed.growth);
 }
 
+TEST_CASE("surface.minimalBareBandIsTheBackground", "[titlebandsurface]")
+{
+    using contour::config::ChromeDensity;
+    auto const bare = [](BarCentre centre, WindowMode mode, ChromeStyle style = ChromeStyle::MacOS) {
+        return resolveTitleBandSurface(TitleBandSurfaceInputs { .style = style,
+                                                                .material = Material::Solid,
+                                                                .frame = WindowFrame::ClientBand,
+                                                                .mode = mode,
+                                                                .centre = centre,
+                                                                .density = ChromeDensity::Minimal });
+    };
+    auto const comfortable =
+        surfaceOf(ChromeStyle::MacOS, Material::Solid, WindowFrame::ClientBand, WindowMode::Windowed);
+
+    // The bare band: the client's own paint in the terminal background, over the bare title bar (ruling P3:
+    // no compact toolbar, so AppKit's title bar is 32 pt).
+    auto const windowed = bare(BarCentre::Empty, WindowMode::Windowed);
+    CHECK(windowed.backdrop == BandBackdrop::Client);
+    CHECK(windowed.fill == BandFill::Background);
+    CHECK(windowed.growth == TitleBarGrowth::None);
+    CHECK(windowed == BareBandSurface);
+
+    // With tabs (or a title) in the middle, Minimal's band is the Comfortable one.
+    CHECK(bare(BarCentre::Tabs, WindowMode::Windowed) == comfortable);
+    CHECK(bare(BarCentre::Title, WindowMode::Windowed) == comfortable);
+
+    // Full screen keeps the client's paint and the terminal background.
+    auto const full = bare(BarCentre::Empty, WindowMode::FullScreen);
+    CHECK(full.backdrop == BandBackdrop::Client);
+    CHECK(full.fill == BandFill::Background);
+
+    // A row the table does not name keeps today's band, and a native frame has none.
+    CHECK(bare(BarCentre::Empty, WindowMode::Windowed, ChromeStyle::Fluent) == TitleBandSurface {});
+    CHECK(resolveTitleBandSurface(TitleBandSurfaceInputs { .style = ChromeStyle::MacOS,
+                                                           .material = Material::Solid,
+                                                           .frame = WindowFrame::NativeFrame,
+                                                           .mode = WindowMode::Windowed,
+                                                           .centre = BarCentre::Empty,
+                                                           .density = ChromeDensity::Minimal })
+          == TitleBandSurface {});
+}
+
 TEST_CASE("surface.rowsAreUnique", "[titlebandsurface]")
 {
     for (auto const i: std::views::iota(size_t { 0 }, TitleBandSurfaceRows.size()))

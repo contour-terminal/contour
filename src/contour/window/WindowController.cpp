@@ -80,6 +80,12 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _headerRevealTimer.setTimerType(Qt::PreciseTimer);
     connect(&_headerRevealTimer, &QTimer::timeout, this, &WindowController::refreshHeaderReveal);
 
+    // The band's centre follows the tab-bar gate, its edge and the host's connection (titleBand()); under
+    // Minimal an empty centre is the bare band, which is shorter and detaches the compact toolbar.
+    connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
+    connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
+    connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
+
     _commandPalette->setSources({ &_tabCommands,
                                   &_profileCommands,
                                   &_layoutCommands,
@@ -1340,14 +1346,30 @@ bool WindowController::dressesTitleBand() const noexcept
     return framePolicy().shadow == platform::FrameShadowStrategy::FullSizeContent;
 }
 
+TitleBand WindowController::titleBand() const
+{
+    auto const& app = _manager.app();
+    return app.titleBandOf(TitleBandInputs {
+        .frame = _titleBarVisible ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
+        .mode = windowMode(),
+        .strip = tabBarShouldShow() ? TabStripGate::Shown : TabStripGate::Hidden,
+        .position = _tabBarPosition,
+        .notice = hostNoticeOf(hostChipPresence(app.attachedHostLabel()),
+                               hostChipStateOf(_manager.hostConnection())),
+    });
+}
+
 platform::TitleBandRequest WindowController::titleBandRequest() const
 {
-    auto const tokens = _manager.app().titleBandTokens();
+    auto const centre = titleBand().centre;
+    auto const tokens = _manager.app().titleBandTokens(centre);
     auto const surface = resolveTitleBandSurface(TitleBandSurfaceInputs {
         .style = tokens.style,
         .material = tokens.material,
         .frame = _titleBarVisible ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
         .mode = windowMode(),
+        .centre = centre,
+        .density = tokens.density,
     });
     return platform::TitleBandRequest { .backdrop = surface.backdrop,
                                         .growth = surface.growth,
@@ -1368,7 +1390,7 @@ TitleBandGeometry WindowController::titleBandGeometry() const
                             ? _manager.app().titleBandMaterial().metrics(*_osWindow)
                             : platform::NativeTitleBarMetrics {};
     return resolveTitleBandGeometry(TitleBandGeometryInputs {
-        .tokens = _manager.app().titleBandTokens(),
+        .tokens = _manager.app().titleBandTokens(titleBand().centre),
         .mode = windowMode(),
         .devicePixelRatio = _osWindow != nullptr ? _osWindow->devicePixelRatio() : 1.0,
         .nativeHeight = native.height,
@@ -1391,8 +1413,8 @@ void WindowController::refreshTitleBand()
         // (safeAreaMarginsChanged -> here) before apply() returns; the nested refresh must find it applied.
         _appliedTitleBand = request;
         _manager.app().titleBandMaterial().apply(*_osWindow, request);
-        // The toolbar moves the traffic lights (78 -> 84 pt, spike-decisions.md §D2): the band's leading
-        // slot reads the inset again.
+        // The toolbar moves the traffic lights (78 -> 84 pt, spike-decisions.md §D2), and Minimal's bare band
+        // detaching it moves them back: the band's leading slot reads the inset again.
         if (growthChanged)
             emit nativeControlsInsetChanged();
     }

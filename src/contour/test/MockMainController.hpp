@@ -102,7 +102,7 @@ class MockMainController: public MainWindowControllerMock
         bool titleBarVisible READ titleBarVisible WRITE setTitleBarVisible NOTIFY titleBarVisibleChanged)
     // Mirrors WindowController's frame adapter: what the OS reserves for its own window controls, which
     // follows the frame (zero once show_title_bar hands the title area to the system).
-    Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY nativeControlsInsetChanged)
     // Mirrors WindowController's macOS frame hints, which Main.qml's `flags` read; false (no hint) unless a
     // test sets them, as it does to load the real Main.qml under Qt::ExpandedClientAreaHint.
     Q_PROPERTY(bool needsExpandedClientArea READ needsExpandedClientArea WRITE setNeedsExpandedClientArea
@@ -212,12 +212,23 @@ class MockMainController: public MainWindowControllerMock
         {
             _titleBarVisible = visible;
             emit titleBarVisibleChanged();
+            emit nativeControlsInsetChanged();
         }
     }
     /// @return The scene's inset while the chrome draws the band, and 0 under the native frame.
     [[nodiscard]] qreal nativeControlsInset() const noexcept
     {
         return _titleBarVisible ? 0 : _scene.nativeControlsInset;
+    }
+    /// Moves the OS's window controls, as WindowController's frame adapter reports once the band's
+    /// title-bar growth changed (Minimal's bare band detaches the compact toolbar: 84 -> 78 pt).
+    /// @param inset What the OS reserves while the chrome draws the band.
+    void setNativeControlsInset(qreal inset)
+    {
+        if (_scene.nativeControlsInset == inset)
+            return;
+        _scene.nativeControlsInset = inset;
+        emit nativeControlsInsetChanged();
     }
 
     [[nodiscard]] bool needsExpandedClientArea() const noexcept { return _needsExpandedClientArea; }
@@ -412,6 +423,7 @@ class MockMainController: public MainWindowControllerMock
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
+    void nativeControlsInsetChanged();
     void frameHintsChanged();
     void contextMenuModelChanged();
     void titleBarContextMenuModelChanged();

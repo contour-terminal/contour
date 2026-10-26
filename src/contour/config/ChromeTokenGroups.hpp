@@ -43,6 +43,7 @@ enum class BandFill : uint8_t
     Palette = 0, //!< Today's palette window colour.
     Clear,       //!< Nothing, so the backdrop shows as it is.
     Tint,        //!< The terminal background, tinted (see window::bandTintOf).
+    Background,  //!< The terminal background itself (Minimal's bare band).
 };
 
 /// What the native title bar is grown with.

@@ -5,6 +5,7 @@
 /// How tall the title band is and where it rests in full screen: the band's token height reconciled with
 /// the native title bar's, per the chrome row's traffic-light fit. Pure and Qt-free.
 
+#include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -22,9 +23,11 @@ struct TitleBandTokens
     config::ChromeStyle style = config::ChromeStyle::ContourLinux; ///< The chrome row.
     config::Material material = config::Material::None; ///< The row's resolved title-band material.
     /// The band's token height in logical pixels: the provider's @c bandHeight (38 on MacOS, today's strip
-    /// height on the Flat rows, one cell on the Terminal row).
+    /// height on the Flat rows, one cell on the Terminal row), or @c size.bareBand for a band whose middle
+    /// is empty (Minimal: 32 on MacOS, 28 on Fluent and ContourLinux).
     double height = 0;
     double cellHeight = 0; ///< One chrome cell's height on the Terminal row; 0 on the native rows.
+    config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
 };
 
 /// How a band makes room for the native traffic lights.

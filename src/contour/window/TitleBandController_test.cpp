@@ -39,7 +39,11 @@ namespace
 {
 
 using contour::config::BandBackdrop;
+using contour::config::ChromeDensity;
+using contour::config::TabBarVisibility;
+using contour::config::TitleBarGrowth;
 using contour::platform::TitleBandRequest;
+using contour::window::BarCentre;
 
 /// How long an offscreen window-state change may take to arrive, in milliseconds.
 constexpr auto WindowStateTimeoutMs = 2000;
@@ -268,7 +272,7 @@ TEST_CASE("the band is at least the token tall", "[contour][titleband][controlle
     auto fixture = TitleBandFixture {};
     fixture.useClientBand();
     fixture.controller().refreshTitleBand();
-    auto const tokens = fixture.app.app().titleBandTokens();
+    auto const tokens = fixture.app.app().titleBandTokens(fixture.controller().titleBand().centre);
 
     if (hostDressesTitleBand())
     {
@@ -371,4 +375,62 @@ TEST_CASE("another screen and a new safe area measure the band again", "[contour
     }
     else
         CHECK(fixture.record.measured == measured);
+}
+
+TEST_CASE("Minimal's bare band detaches the toolbar and is as tall as the bare title bar",
+          "[contour][titleband][controller]")
+{
+    // Ruling P3: on macOS the bare band (one tab under Minimal) is AppKit's bare title bar, 32 pt, without
+    // the compact toolbar; the toolbar comes back with the tabs, and each change moves the traffic lights.
+    auto fixture = TitleBandFixture {};
+    fixture.app.app().config().chromeDensity = ChromeDensity::Minimal;
+    fixture.record.metrics.height = 32;
+    auto& controller = fixture.controller();
+    controller.setTabBarVisibility(TabBarVisibility::Multiple);
+    REQUIRE_FALSE(controller.tabBarShouldShow());
+    fixture.useClientBand();
+
+    if (!hostDressesTitleBand())
+    {
+        // The Flat rows' band is the strip: Minimal never empties it, and nothing is applied.
+        CHECK(controller.titleBand().centre == BarCentre::Tabs);
+        CHECK(fixture.record.applied.empty());
+        return;
+    }
+
+    auto const bare = fixture.app.app().titleBandTokens(BarCentre::Empty);
+    CHECK(bare.height == 32);
+    CHECK(controller.titleBand().centre == BarCentre::Empty);
+    REQUIRE_FALSE(fixture.record.applied.empty());
+    CHECK(fixture.record.applied.back().growth == TitleBarGrowth::None);
+    CHECK(fixture.record.applied.back().backdrop == BandBackdrop::Client);
+    CHECK(controller.titleBandHeight() == 32);
+
+    // The tabs show: the toolbar is attached again, the traffic lights move, and the band is measured anew.
+    auto insets = QSignalSpy { &controller, &contour::window::WindowController::nativeControlsInsetChanged };
+    fixture.record.metrics.height = 40;
+    controller.setTabBarVisibility(TabBarVisibility::Always);
+    CHECK(controller.titleBand().centre == BarCentre::Tabs);
+    CHECK(fixture.record.applied.back().growth == TitleBarGrowth::CompactToolbar);
+    CHECK(insets.count() == 1);
+    CHECK(controller.titleBandHeight() == 40);
+
+    // And one tab again: bare once more.
+    fixture.record.metrics.height = 32;
+    controller.setTabBarVisibility(TabBarVisibility::Multiple);
+    CHECK(fixture.record.applied.back().growth == TitleBarGrowth::None);
+    CHECK(insets.count() == 2);
+    CHECK(controller.titleBandHeight() == 32);
+}
+
+TEST_CASE("Comfortable keeps the toolbar with one tab", "[contour][titleband][controller]")
+{
+    auto fixture = TitleBandFixture {};
+    fixture.controller().setTabBarVisibility(TabBarVisibility::Multiple);
+    fixture.useClientBand();
+    if (!hostDressesTitleBand())
+        return;
+    CHECK(fixture.controller().titleBand().centre == BarCentre::Title);
+    REQUIRE_FALSE(fixture.record.applied.empty());
+    CHECK(fixture.record.applied.back().growth == TitleBarGrowth::CompactToolbar);
 }

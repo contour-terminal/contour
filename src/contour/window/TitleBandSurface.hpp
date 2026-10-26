@@ -3,9 +3,11 @@
 
 /// @file
 /// What the title band shows behind it and paints itself: one table matched on the chrome row and its
-/// title-band material, followed by one full-screen step; and the tint the band paints, taken from the
-/// terminal background. Pure and Qt-free, so the band, its snapshot rows and the tests read the same rows.
+/// title-band material, followed by Minimal's bare-band step and one full-screen step; and the tint the band
+/// paints, taken from the terminal background. Pure and Qt-free, so the band, its snapshot rows and the tests
+/// read the same rows.
 
+#include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -28,6 +30,8 @@ struct TitleBandSurfaceInputs
     config::Material material = config::Material::None; ///< The row's resolved @c material.titleBand.
     WindowFrame frame = WindowFrame::ClientBand;        ///< Who draws the title area.
     WindowMode mode = WindowMode::Windowed;             ///< Windowed or full screen.
+    BarCentre centre = BarCentre::Empty;                ///< What the band's middle holds (resolveTitleBand).
+    config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
 };
 
 /// What the band shows behind it, what it paints, and what the native title bar is grown with.
@@ -76,9 +80,19 @@ inline constexpr auto TitleBandSurfaceRows = std::array {
                                        .growth = config::TitleBarGrowth::CompactToolbar } },
 };
 
+/// Minimal's bare band (R-f): an empty band painted in the terminal background, so the window reads
+/// bar-less. Over the bare native title bar, without the compact toolbar (ruling P3): the band is as tall as
+/// AppKit's own title bar (32 pt), and the traffic lights sit where a bare title bar puts them (78 pt).
+inline constexpr auto BareBandSurface = TitleBandSurface {
+    .backdrop = config::BandBackdrop::Client,
+    .fill = config::BandFill::Background,
+    .growth = config::TitleBarGrowth::None,
+};
+
 /// Decides the band's surface.
 ///
-/// A native frame has no band of ours (R-e). In full screen no material sits behind terminal text (D2):
+/// A native frame has no band of ours (R-e). Under Minimal, a row's band whose middle is empty is the bare
+/// band (BareBandSurface). In full screen no material sits behind terminal text (D2):
 /// the native material becomes the client's own paint, and a cleared band becomes the tint.
 /// @param inputs What the surface depends on.
 /// @return The surface; @c TitleBandSurface {} where no row matches or the frame is native.
@@ -94,7 +108,9 @@ inline constexpr auto TitleBandSurfaceRows = std::array {
     if (row == TitleBandSurfaceRows.end())
         return {};
 
-    auto surface = row->surface;
+    auto surface = inputs.density == config::ChromeDensity::Minimal && inputs.centre == BarCentre::Empty
+                       ? BareBandSurface
+                       : row->surface;
     if (inputs.mode == WindowMode::FullScreen)
     {
         if (surface.backdrop == config::BandBackdrop::NativeMaterial)

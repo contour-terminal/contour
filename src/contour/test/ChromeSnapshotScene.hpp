@@ -23,6 +23,7 @@
 #include <contour/window/SettingsWindowRules.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <core/platform/FileSystem.hpp>
@@ -35,6 +36,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUrl>
+#include <QtCore/QVariant>
 #include <QtCore/QVariantMap>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
@@ -130,6 +132,13 @@ class ChromeSnapshotScene
     /// toolbar, as the Step 1d spike measured it (spike-decisions.md §D2, ruling S2: 40 pt; 32 bare). A
     /// constant for the reason SnapshotTrafficLightInset is one (see there).
     static constexpr qreal SnapshotNativeTitleBarHeight = 40;
+
+    /// AppKit's bare title bar, without the compact toolbar: what Minimal's bare band covers (ruling P3, the
+    /// spike's 32 pt).
+    static constexpr qreal SnapshotBareTitleBarHeight = 32;
+
+    /// The traffic lights' inset over a bare title bar (spike-decisions.md §D2: 78 pt; 84 with the toolbar).
+    static constexpr qreal SnapshotBareTrafficLightInset = 78;
 
     /// The chip state a script's connection column shows.
     /// @param connection The script's host connection.
@@ -384,10 +393,11 @@ class ChromeSnapshotScene
 
     /// Gives the mock the band geometry the controller measures in production on the row's host
     /// (window::resolveTitleBandGeometry over the chrome's tokens and SnapshotNativeTitleBarHeight), so the
-    /// band is drawn at the height that sits beside SnapshotTrafficLightInset. Only on a macOS host,
-    /// windowed, with the client band: elsewhere there is no native title bar under the band (a native frame
-    /// draws its own above it), and in full screen the title bar leaves the window -- the band keeps its
-    /// token there, and a revealed band rests at the window's top.
+    /// band is drawn at the height that sits beside SnapshotTrafficLightInset -- or, for Minimal's bare band,
+    /// which detaches the toolbar, over SnapshotBareTitleBarHeight beside SnapshotBareTrafficLightInset. Only
+    /// on a macOS host, windowed, with the client band: elsewhere there is no native title bar under the band
+    /// (a native frame draws its own above it), and in full screen the title bar leaves the window -- the
+    /// band keeps its token there, and a revealed band rests at the window's top.
     void measureBand()
     {
         if (variantHost(_variant) != config::HostPlatform::MacOS
@@ -397,15 +407,31 @@ class ChromeSnapshotScene
         auto const* provider = qobject_cast<window::UiStyleProvider const*>(
             _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
         REQUIRE(provider != nullptr);
+        // The band Main.qml decided: under Minimal an empty one is the bare band, over the bare title bar.
+        auto const centre =
+            window::barCentreNamed(
+                window().property("band").toMap().value(QStringLiteral("centre")).toString().toStdString())
+                .value_or(window::BarCentre::Tabs);
+        auto const tokens = provider->titleBandTokens(centre);
+        auto const surface = window::resolveTitleBandSurface(window::TitleBandSurfaceInputs {
+            .style = tokens.style,
+            .material = tokens.material,
+            .frame = window::WindowFrame::ClientBand,
+            .mode = window::WindowMode::Windowed,
+            .centre = centre,
+            .density = tokens.density,
+        });
+        auto const grown = surface.growth == config::TitleBarGrowth::CompactToolbar;
         auto const geometry = window::resolveTitleBandGeometry(window::TitleBandGeometryInputs {
-            .tokens = provider->titleBandTokens(),
+            .tokens = tokens,
             .mode = window::WindowMode::Windowed,
             .devicePixelRatio = window().devicePixelRatio(),
-            .nativeHeight = SnapshotNativeTitleBarHeight,
+            .nativeHeight = grown ? SnapshotNativeTitleBarHeight : SnapshotBareTitleBarHeight,
             .fullScreenTop = 0,
         });
         _controller.setTitleBandHeight(geometry.height);
         _controller.setTitleBandRevealTop(geometry.revealTop);
+        _controller.setNativeControlsInset(grown ? SnapshotTrafficLightInset : SnapshotBareTrafficLightInset);
     }
 
     /// The inset the OS reserves for its own window controls on @p host, as the frame adapter reports it:

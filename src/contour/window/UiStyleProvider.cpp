@@ -212,19 +212,6 @@ namespace
         return QString::fromUtf8(name);
     }
 
-    /// The band centre QML names @p name (window::barCentreName's inverse).
-    /// @param name A centre as UiStyleProvider::titleBand answers it.
-    /// @return The centre, or @c std::nullopt for a name no centre has.
-    [[nodiscard]] std::optional<BarCentre> barCentreOf(QString const& name)
-    {
-        for (auto const index: std::views::iota(size_t { 0 }, BarCentreCount))
-        {
-            auto const centre = static_cast<BarCentre>(index);
-            if (name == nameOf(barCentreName(centre)))
-                return centre;
-        }
-        return std::nullopt;
-    }
 } // namespace
 
 ChromeInputs chromeInputsFor(config::ChromeStyle row, QFont const& font)
@@ -361,14 +348,13 @@ QVariantMap UiStyleProvider::titleBand(
         || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount)
         || !inRange(hostChipState, HostChipStateCount))
         return {};
-    auto const band = resolveTitleBand(
-        TitleBandInputs { .shape = _groups.layout.tabShape,
-                          .frame = static_cast<WindowFrame>(frame),
-                          .mode = static_cast<WindowMode>(mode),
-                          .strip = static_cast<TabStripGate>(strip),
-                          .position = static_cast<config::TabBarPosition>(position),
-                          .notice = hostNoticeOf(hostChipPresence(hostLabel.toStdString()),
-                                                 static_cast<HostChipState>(hostChipState)) });
+    auto const band =
+        titleBandOf(TitleBandInputs { .frame = static_cast<WindowFrame>(frame),
+                                      .mode = static_cast<WindowMode>(mode),
+                                      .strip = static_cast<TabStripGate>(strip),
+                                      .position = static_cast<config::TabBarPosition>(position),
+                                      .notice = hostNoticeOf(hostChipPresence(hostLabel.toStdString()),
+                                                             static_cast<HostChipState>(hostChipState)) });
     return { { QStringLiteral("band"), nameOf(barPresenceName(band.band)) },
              { QStringLiteral("bandEdge"), nameOf(barEdgeName(band.bandEdge)) },
              { QStringLiteral("centre"), nameOf(barCentreName(band.centre)) },
@@ -420,7 +406,8 @@ qreal UiStyleProvider::bandHeight() const noexcept
 QColor UiStyleProvider::bandFill(int frame, int mode, QString const& centre) const
 {
     auto const paletteWindow = QGuiApplication::palette().color(QPalette::Window);
-    if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount) || !barCentreOf(centre))
+    auto const bandCentre = barCentreNamed(centre.toStdString());
+    if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount) || !bandCentre)
         return paletteWindow;
 
     auto const surface = resolveTitleBandSurface(TitleBandSurfaceInputs {
@@ -428,17 +415,20 @@ QColor UiStyleProvider::bandFill(int frame, int mode, QString const& centre) con
         .material = _groups.material.titleBand,
         .frame = static_cast<WindowFrame>(frame),
         .mode = static_cast<WindowMode>(mode),
+        .centre = *bandCentre,
+        .density = _inputs.density,
     });
+    auto const background = _inputs.scheme.bySlot[static_cast<size_t>(config::SchemeSlot::Background)];
     switch (surface.fill)
     {
         case config::BandFill::Palette: break;
         case config::BandFill::Clear: return { Qt::transparent };
         case config::BandFill::Tint: {
             auto const tint =
-                legibleBandTint(_inputs.scheme.bySlot[static_cast<size_t>(config::SchemeSlot::Background)],
-                                paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
+                legibleBandTint(background, paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
             return tint ? platform::toQColor(*tint) : paletteWindow;
         }
+        case config::BandFill::Background: return platform::toQColor(background);
     }
     return paletteWindow;
 }

@@ -28,6 +28,7 @@
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
+#include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -595,11 +596,18 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     [[nodiscard]] config::MenuPresentation menuPresentation() const noexcept;
 
     /// The title band's tokens: the chrome row, its resolved title-band material, the band's token height
-    /// and, on the Terminal row, one cell's height. From the published provider once the GUI built it; before
-    /// that (and in a headless test) from the row's tokens alone, with the Flat rows' height and the cell
-    /// unknown (0).
+    /// for @p centre, on the Terminal row one cell's height, and the chrome density. From the published
+    /// provider once the GUI built it; before that (and in a headless test) from the row's tokens alone,
+    /// with the Flat rows' height and the cell unknown (0).
+    /// @param centre What the band's middle holds: an empty one is @c size.bareBand tall.
     /// @return The tokens.
-    [[nodiscard]] window::TitleBandTokens titleBandTokens() const;
+    [[nodiscard]] window::TitleBandTokens titleBandTokens(window::BarCentre centre) const;
+
+    /// Where the title band and the tabs go (window::resolveTitleBand) for the resolved row's tab shape and
+    /// the configured chrome density, whatever @p inputs says of either.
+    /// @param inputs A window's side of the decision: frame, mode, gate, edge and the host's notice.
+    /// @return The band.
+    [[nodiscard]] window::TitleBand titleBandOf(window::TitleBandInputs inputs) const;
 
     /// @return Where this host's menu bar lives, resolved once from the host at construction.
     [[nodiscard]] command::MenuBarPlacement menuBarPlacement() const noexcept { return _menuBarPlacement; }
