@@ -32,7 +32,7 @@ Variable             | Description
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
 `{Hyperlink}`        | reveals the hyperlink at the given mouse location
 `{LastCommand}`      | how the last command went, from the shell integration's command blocks (OSC 133): `✓ make · 4ms` after a success, `✗ exit 8 ctest · 12s` after a failure; the status drawn in the `success` or `danger` role and the duration in `muted`, unless the item names a `Color=` of its own. Empty while a command runs, and when a newer prompt ended one that reported no exit status. A multi-line command's line breaks and tabs read as spaces. The command text is at most `MaxWidth=` columns (default `32`), cut at its end with `…`
-`{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)
+`{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL); see `Hide=` and `Chip` below
 `{ProtectedMode}`    | indicates protected mode, if currently enabled
 `{Scroll}`           | how far the view is scrolled back into the history, out of how far it can be: `↑ 1 240 / 10 000`, thousands grouped by a space. Empty at the bottom, and while the view cannot scroll (the alternate screen)
 `{SearchMode}`       | indicates search highlight mode, if currently active
@@ -92,6 +92,19 @@ the bar's legible ink instead -- the scheme's foreground or background, bright w
 white -- so it stays readable in every input mode and scheme; a `#RRGGBB` color is drawn as written. Roles are
 read in any case and written lowercase. A value that is neither a role nor a color leaves the color
 unset. The same values are accepted by the `Tabs` attributes `ActiveColor` and `ActiveBackground`.
+
+The `InputMode` variable additionally takes these attributes:
+
+Parameter                 | Description
+--------------------------|--------------------------------------------------------------------
+`Hide=<mode>`             | shows nothing, `Left=`/`Right=` included, while the terminal is in that mode: `Normal`, `Insert`, `Visual`, `VisualLine`, `VisualBlock` or `Hint`, read in any case. An unknown mode hides the item in none.
+`Chip`                    | draws the item, `Left=` and `Right=` included, as a chip filled with its mode's colors (`indicatorStatusLine*Mode` of the color scheme), while the rest of the line keeps the idle (Insert) colors in every mode. The chip's text takes the fill's legible ink where the scheme's own would not read at 4.5:1. Only the focused pane's chip is colored, and an item naming `Color=` or `BackgroundColor=` takes those instead. Without `Chip`, the whole line takes the mode's colors.
+
+They are written after the other attributes:
+
+```
+{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}
+```
 
 The `Command` variable additionally takes these attributes:
 

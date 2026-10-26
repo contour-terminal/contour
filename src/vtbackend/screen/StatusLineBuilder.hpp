@@ -137,7 +137,21 @@ namespace StatusLineDefinitions
     };
     struct HistoryLineCount: Styles {};
     struct Hyperlink: Styles {};
-    struct InputMode: Styles {};
+    /// How an `{InputMode}` item draws.
+    enum class InputModeLook : uint8_t
+    {
+        Text = 0, ///< As text on the line, which takes the mode's colours as a whole.
+        Chip,     ///< As a chip filled with its mode's colours, on a line that keeps the idle ones.
+    };
+
+    /// The vi input mode, `NORMAL`, `VISUAL`, ...: optionally hidden in one mode, and optionally a chip.
+    struct InputMode: Styles
+    {
+        /// The mode in which the item shows nothing, adornments and all; none when unset.
+        std::optional<ViMode> hiddenIn {};
+        /// Whether the item is drawn as text or as a chip.
+        InputModeLook look = InputModeLook::Text;
+    };
     struct Progress: Styles {};
     struct ProtectedMode: Styles {};
     struct SearchMode: Styles {};
@@ -204,6 +218,52 @@ namespace StatusLineDefinitions
         /// costly to lose.
         ColumnCount maxWidth { 32 };
     };
+
+    /// One vi input mode as `{InputMode:Hide=<name>}` spells it.
+    struct InputModeName
+    {
+        ViMode mode;           ///< The mode.
+        std::string_view name; ///< As written in a template.
+    };
+
+    /// The input modes a template may name, one row per ViMode in enumerator order: the parser, the
+    /// serializer and the settings page all read this table.
+    inline constexpr auto InputModeNames = std::array {
+        InputModeName { .mode = ViMode::Normal, .name = "Normal" },
+        InputModeName { .mode = ViMode::Insert, .name = "Insert" },
+        InputModeName { .mode = ViMode::Visual, .name = "Visual" },
+        InputModeName { .mode = ViMode::VisualLine, .name = "VisualLine" },
+        InputModeName { .mode = ViMode::VisualBlock, .name = "VisualBlock" },
+        InputModeName { .mode = ViMode::Hint, .name = "Hint" },
+    };
+
+    static_assert(InputModeNames.size() == ViModeCount, "Every ViMode needs a row in InputModeNames.");
+    static_assert(
+        [] {
+            for (auto const index: std::views::iota(std::size_t { 0 }, InputModeNames.size()))
+                if (static_cast<std::size_t>(InputModeNames[index].mode) != index)
+                    return false;
+            return true;
+        }(),
+        "InputModeNames' row i must describe ViMode enumerator i.");
+
+    /// The input mode @p name spells.
+    /// @param name A mode's name, ASCII case-insensitive.
+    /// @return The mode, or nullopt for an unknown name -- so a typo never hides an item.
+    [[nodiscard]] std::optional<ViMode> inputModeFrom(std::string_view name) noexcept;
+
+    /// How a template spells @p mode -- the inverse of inputModeFrom().
+    /// @param mode The mode.
+    /// @return Its row's name in @ref InputModeNames.
+    [[nodiscard]] std::string_view inputModeName(ViMode mode) noexcept;
+
+    /// The colours an `{InputMode:Chip}` draws in: filled with @p modePair's background, its text in the
+    /// pair's foreground while that reads at @ref MinimumTextContrast, and otherwise in the fill's legible
+    /// ink (legibleInkOn()).
+    /// @param modePair The indicator status line's pair for the mode shown.
+    /// @param palette The scheme's palette, whose ink is tried.
+    /// @return The chip's foreground and background.
+    [[nodiscard]] RGBColorPair modeChipColors(RGBColorPair modePair, ColorPalette const& palette) noexcept;
 
     /// The working directory the shell reports, home-abbreviated and middle-elided.
     struct Cwd: Styles
@@ -424,6 +484,12 @@ template <typename T>
     };
     return holdsOne(definition.left) || holdsOne(definition.middle) || holdsOne(definition.right);
 }
+
+/// Whether @p definition draws its input mode as a chip, in which case the rest of the line keeps the idle
+/// colours in every mode.
+/// @param definition The status line.
+/// @return Whether any of its segments holds an `{InputMode:Chip}`.
+[[nodiscard]] bool showsModeChip(StatusLineDefinition const& definition) noexcept;
 
 // "{Clock:Bold,Italic,Color=#FFFF00} | {VTType} | {InputMode} {SearchPrompt:Bold,Color=Yellow}"
 StatusLineSegment parseStatusLineSegment(std::string_view text);

@@ -2329,8 +2329,17 @@ class Terminal: public IStatusLinePublishTarget
     ///         host's own chrome (the indicator status line's roles) is coloured from it.
     [[nodiscard]] ColorPalette const& defaultColorPalette() const noexcept { return _defaultColorPalette; }
 
-    /// The indicator status line's colors for the focus and the input mode as they are now.
+    /// The indicator status line's colors for the focus and the input mode as they are now: the inactive
+    /// pair while unfocused; the idle (Insert) pair in every mode when the template draws its mode as a chip
+    /// (showsModeChip()), which then carries the mode's colours alone; and the mode's pair otherwise.
     [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
+
+    /// The indicator status line's pair for @p mode, as the scheme names it.
+    /// @param mode The vi input mode.
+    /// @return The Insert pair for Insert, the Normal pair for Normal and Hint, the Visual pair for the
+    /// visual
+    ///         modes.
+    [[nodiscard]] RGBColorPair indicatorStatusLineColorsFor(ViMode mode) const noexcept;
 
     [[nodiscard]] std::vector<ColorPalette> const& savedColorPalettes() const noexcept
     {

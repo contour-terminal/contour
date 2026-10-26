@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <limits>
@@ -1364,6 +1365,10 @@ enum class ViMode : uint8_t
     /// Hint overlay mode (keyboard-driven link following).
     Hint,
 };
+
+/// How many @ref ViMode enumerators there are: a table with one row per mode checks its size against this, so
+/// a new mode is a compile error there rather than a row silently missing. Kept beside the enumeration.
+inline constexpr auto ViModeCount = static_cast<std::size_t>(ViMode::Hint) + 1;
 
 std::string toString(GraphicsRendition s);
 

@@ -151,16 +151,48 @@ namespace // helper functions
     }
 } // namespace
 
-namespace StatusLineDefinitions
+namespace
 {
-    std::optional<ItemColor> parseItemColor(std::string_view text)
+    /// Whether @p text spells @p name, ignoring ASCII case. An ASCII fold, not std::tolower: that reads the
+    /// locale, and a Turkish one does not fold 'I' to 'i'.
+    [[nodiscard]] bool spellsIgnoringAsciiCase(std::string_view text, std::string_view name) noexcept
     {
-        // An ASCII fold, not std::tolower: that reads the locale, and a Turkish one does not fold 'I' to 'i'.
         auto const asciiLower = [](char c) {
             return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
         };
+        return std::ranges::equal(text, name, {}, asciiLower, asciiLower);
+    }
+} // namespace
+
+namespace StatusLineDefinitions
+{
+    std::optional<ViMode> inputModeFrom(std::string_view name) noexcept
+    {
+        auto const spells = [&](InputModeName const& row) {
+            return spellsIgnoringAsciiCase(name, row.name);
+        };
+        if (auto const row = std::ranges::find_if(InputModeNames, spells); row != InputModeNames.end())
+            return row->mode;
+        return std::nullopt;
+    }
+
+    std::string_view inputModeName(ViMode mode) noexcept
+    {
+        return InputModeNames[static_cast<std::size_t>(mode)].name;
+    }
+
+    RGBColorPair modeChipColors(RGBColorPair modePair, ColorPalette const& palette) noexcept
+    {
+        if (contrastRatio(modePair.foreground, modePair.background) >= MinimumTextContrast)
+            return modePair;
+        return RGBColorPair { .foreground = legibleInkOn(palette, modePair.background),
+                              .background = modePair.background };
+    }
+
+    std::optional<ItemColor> parseItemColor(std::string_view text)
+    {
         auto const spells = [&](ColorRoleName const& r) {
-            return std::ranges::equal(text, r.name, {}, asciiLower);
+            return spellsIgnoringAsciiCase(text, r.name);
         };
         if (auto const row = std::ranges::find_if(ColorRoleNames, spells); row != ColorRoleNames.end())
             return ItemColor { row->role };
@@ -298,6 +330,15 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
         if (auto const verbosity = tryParseStringAttribute(interpolation, "Verbosity"))
             item.verbosity = StatusLineDefinitions::contextVerbosityFrom(*verbosity);
         item.separator = tryParseStringAttribute(interpolation, "Separator");
+        return item;
+    }
+    else if constexpr (std::same_as<T, StatusLineDefinitions::InputMode>)
+    {
+        auto item = StatusLineDefinitions::InputMode { styles };
+        if (auto const mode = tryParseStringAttribute(interpolation, "Hide"))
+            item.hiddenIn = StatusLineDefinitions::inputModeFrom(*mode);
+        if (interpolation.flags.contains("Chip"))
+            item.look = StatusLineDefinitions::InputModeLook::Chip;
         return item;
     }
     else if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
@@ -446,6 +487,22 @@ namespace
             return std::format("\033[48:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
         }
 
+        /// The SGR that fills @p item as a chip in its mode's pair, which wraps its adornments and text
+        /// alike; empty when it is no chip, names a colour of its own (user colours win), or is drawn in an
+        /// unfocused pane -- only the focused pane carries a coloured chip.
+        [[nodiscard]] std::string chipColors(StatusLineDefinitions::InputMode const& item) const
+        {
+            if (item.look != StatusLineDefinitions::InputModeLook::Chip || item.foregroundColor
+                || item.backgroundColor || !vt.focused())
+                return {};
+
+            auto const chip = StatusLineDefinitions::modeChipColors(
+                vt.indicatorStatusLineColorsFor(vt.inputHandler().mode()), vt.defaultColorPalette());
+            auto const fill = std::optional { StatusLineDefinitions::ItemColor { chip.background } };
+            return makeTextColor(StatusLineDefinitions::ItemColor { chip.foreground }, fill)
+                   + makeBackgroundColor(fill);
+        }
+
         void applyStyles(StatusLineDefinitions::Styles const& styles) // {{{
         {
             if (styling == StatusLineStyling::Disabled)
@@ -495,6 +552,9 @@ namespace
                             {
                                 result += SGRSAVE();
                                 applyStyles(item);
+                                if constexpr (std::same_as<std::decay_t<decltype(item)>,
+                                                           StatusLineDefinitions::InputMode>)
+                                    result += chipColors(item);
                             }
                             result += item.textLeft;
                             result += text;
@@ -616,9 +676,13 @@ namespace
             });
         }
 
-        std::string visit(StatusLineDefinitions::InputMode const&)
+        /// The mode's name, or nothing in the mode the item hides in.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::InputMode const& item) const
         {
-            return std::string(modeString(vt.inputHandler().mode()));
+            auto const mode = vt.inputHandler().mode();
+            if (item.hiddenIn == mode)
+                return {};
+            return std::string(modeString(mode));
         }
 
         std::string visit(StatusLineDefinitions::ProtectedMode const&)
@@ -994,6 +1058,16 @@ namespace
     };
 } // namespace
 
+bool showsModeChip(StatusLineDefinition const& definition) noexcept
+{
+    auto const isChip = [](StatusLineDefinitions::Item const& item) {
+        auto const* const inputMode = std::get_if<StatusLineDefinitions::InputMode>(&item);
+        return inputMode && inputMode->look == StatusLineDefinitions::InputModeLook::Chip;
+    };
+    return std::ranges::any_of(definition.left, isChip) || std::ranges::any_of(definition.middle, isChip)
+           || std::ranges::any_of(definition.right, isChip);
+}
+
 std::string groupDigits(std::uint64_t value)
 {
     auto const digits = std::to_string(value);
@@ -1128,6 +1202,46 @@ namespace
         if (!styles.textRight.empty())
             attributes.add("Right", styles.textRight);
     }
+
+    /// Appends what an item of type @p T carries beyond its styles, after them: Context's verbosity and
+    /// separator, Tabs' active colours and separator, InputMode's look and hidden mode, and a MaxWidth off
+    /// its default.
+    template <typename T>
+    void appendOwnAttributes(AttributeWriter& attributes, T const& v)
+    {
+        if constexpr (std::same_as<T, StatusLineDefinitions::Context>)
+        {
+            // Only what is NOT the default: a config Contour writes must be one Contour reads
+            // back, and one it wrote must not gain noise. The default is read off a
+            // default-constructed item rather than restated, so it cannot drift from the header.
+            if (auto const name = StatusLineDefinitions::contextVerbosityName(v.verbosity); !name.empty())
+                attributes.add("Verbosity", std::string { name });
+            if (v.separator)
+                attributes.add("Separator", *v.separator);
+        }
+
+        if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
+        {
+            attributes.addColor("ActiveColor", v.activeColor);
+            attributes.addColor("ActiveBackground", v.activeBackground);
+            if (v.separator)
+                attributes.add("Separator", *v.separator);
+        }
+
+        // After the styles, Left and Right among them, as Context's own attributes are.
+        if constexpr (std::same_as<T, StatusLineDefinitions::InputMode>)
+        {
+            if (v.look == StatusLineDefinitions::InputModeLook::Chip)
+                attributes.add("Chip");
+            if (v.hiddenIn)
+                attributes.add("Hide", StatusLineDefinitions::inputModeName(*v.hiddenIn));
+        }
+
+        // Last, so that Context keeps writing Verbosity, Separator, MaxWidth.
+        if constexpr (HasMaxWidth<T>)
+            if (v.maxWidth != T {}.maxWidth)
+                attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
+    }
 } // namespace
 
 std::string serializeStatusLineSegment(StatusLineSegment const& segment)
@@ -1185,30 +1299,7 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
 
                 appendStyles(attributes, v);
 
-                if constexpr (std::same_as<T, StatusLineDefinitions::Context>)
-                {
-                    // Only what is NOT the default: a config Contour writes must be one Contour reads
-                    // back, and one it wrote must not gain noise. The default is read off a
-                    // default-constructed item rather than restated, so it cannot drift from the header.
-                    if (auto const name = StatusLineDefinitions::contextVerbosityName(v.verbosity);
-                        !name.empty())
-                        attributes.add("Verbosity", std::string { name });
-                    if (v.separator)
-                        attributes.add("Separator", *v.separator);
-                }
-
-                if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
-                {
-                    attributes.addColor("ActiveColor", v.activeColor);
-                    attributes.addColor("ActiveBackground", v.activeBackground);
-                    if (v.separator)
-                        attributes.add("Separator", *v.separator);
-                }
-
-                // Last, so that Context keeps writing Verbosity, Separator, MaxWidth.
-                if constexpr (HasMaxWidth<T>)
-                    if (v.maxWidth != T {}.maxWidth)
-                        attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
+                appendOwnAttributes(attributes, v);
 
                 result += '}';
             },

@@ -1004,13 +1004,8 @@ RGBColor backgroundAt(MockTerm<>& mock, int line)
 {
     mock.terminal.refreshRenderBuffer(true);
     auto const buffer = mock.terminal.renderBuffer();
-    for (auto const& cell: buffer.get().cells)
-        if (cell.position.line == LineOffset(line) && cell.position.column == ColumnOffset(0))
-            return cell.attributes.backgroundColor;
-    for (auto const& row: buffer.get().lines)
-        if (row.lineOffset == LineOffset(line))
-            return row.fillAttributes.backgroundColor;
-    return {};
+    return test::backgroundAt(buffer.get(),
+                              CellLocation { .line = LineOffset(line), .column = ColumnOffset(0) });
 }
 
 } // namespace

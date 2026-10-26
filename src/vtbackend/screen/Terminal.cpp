@@ -1576,8 +1576,14 @@ RGBColorPair Terminal::indicatorStatusLineColors() const
 {
     if (!_focused)
         return colorPalette().indicatorStatusLineInactive;
+    if (showsModeChip(_indicatorStatusLineDefinition))
+        return colorPalette().indicatorStatusLineInsertMode;
+    return indicatorStatusLineColorsFor(_inputHandler.mode());
+}
 
-    switch (_inputHandler.mode())
+RGBColorPair Terminal::indicatorStatusLineColorsFor(ViMode mode) const noexcept
+{
+    switch (mode)
     {
         case ViMode::Insert: return colorPalette().indicatorStatusLineInsertMode;
         case ViMode::Normal:

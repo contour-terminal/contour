@@ -1330,3 +1330,180 @@ TEST_CASE("parseStatusLineSegment.scrollRoundTrips", "[statusline][scroll]")
     CHECK(canonical("{Scroll:Faint}"sv) == "{Scroll:Faint}");
 }
 // }}}
+
+// {{{ {InputMode}: Hide=<mode> and Chip
+TEST_CASE("parseStatusLineSegment.inputModeHideAndChip", "[statusline][inputmode]")
+{
+    auto const inputModeOf = [](std::string_view text) {
+        auto const segment = parseStatusLineSegment(text);
+        REQUIRE(segment.size() == 1);
+        REQUIRE(std::holds_alternative<StatusLineDefinitions::InputMode>(segment[0]));
+        return std::get<StatusLineDefinitions::InputMode>(segment[0]);
+    };
+
+    for (auto const& row: StatusLineDefinitions::InputModeNames)
+    {
+        INFO(row.name);
+        CHECK(inputModeOf(std::format("{{InputMode:Hide={}}}", row.name)).hiddenIn == row.mode);
+        auto lower = std::string { row.name };
+        std::ranges::transform(lower, lower.begin(), [](char c) {
+            return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+        });
+        CHECK(inputModeOf(std::format("{{InputMode:Hide={}}}", lower)).hiddenIn == row.mode);
+        CHECK(StatusLineDefinitions::inputModeFrom(row.name) == row.mode);
+        CHECK(StatusLineDefinitions::inputModeName(row.mode) == row.name);
+    }
+
+    // An unknown mode hides the item in none, rather than in all.
+    CHECK_FALSE(inputModeOf("{InputMode:Hide=Typing}"sv).hiddenIn.has_value());
+    CHECK(inputModeOf("{InputMode}"sv).look == StatusLineDefinitions::InputModeLook::Text);
+    CHECK(inputModeOf("{InputMode:Chip}"sv).look == StatusLineDefinitions::InputModeLook::Chip);
+
+    CHECK(canonical("{InputMode:Chip,Hide=Insert}"sv) == "{InputMode:Chip,Hide=Insert}");
+    // Chip and Hide are written after the styles, Left and Right among them.
+    CHECK(canonical("{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}"sv)
+          == "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}");
+    CHECK(canonical("{InputMode:Hide=insert,Chip,Bold}"sv) == "{InputMode:Bold,Chip,Hide=Insert}");
+    CHECK(canonical("{InputMode:Hide=Typing}"sv) == "{InputMode}");
+}
+
+TEST_CASE("serializeToVT.inputModeHidesInItsMode", "[statusline][inputmode]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto const segment = parseStatusLineSegment("{InputMode:Hide=Insert,Left=<,Right=>}"sv);
+    REQUIRE(mc.terminal.inputHandler().mode() == ViMode::Insert);
+
+    // Hidden with its adornments, as an item with nothing to say is.
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Disabled).empty());
+
+    mc.terminal.inputHandler().setMode(ViMode::Normal);
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Disabled) == "<NORMAL>");
+}
+
+TEST_CASE("statusLine.colors.modeChipReadsOnEveryScheme", "[statusline][inputmode][colors]")
+{
+    // The chip is filled with its mode's pair; its text keeps the pair's foreground while that reads
+    // at 4.5:1, and takes the fill's legible ink where it does not.
+    for (auto const scheme: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme, palette));
+        for (auto const& pair: { palette.indicatorStatusLineNormalMode,
+                                 palette.indicatorStatusLineInsertMode,
+                                 palette.indicatorStatusLineVisualMode })
+        {
+            INFO(scheme << ": " << formatColor(pair.foreground) << " on " << formatColor(pair.background));
+            auto const chip = StatusLineDefinitions::modeChipColors(pair, palette);
+            CHECK(chip.background == pair.background);
+            CHECK(contrastRatio(chip.foreground, chip.background) >= MinimumTextContrast);
+            if (contrastRatio(pair.foreground, pair.background) >= MinimumTextContrast)
+                CHECK(chip.foreground == pair.foreground);
+        }
+    }
+}
+
+namespace
+{
+/// The status row's background at @p column, after a fresh frame of @p mc's terminal.
+[[nodiscard]] RGBColor statusRowBackgroundAt(MockTerm<>& mc, int column)
+{
+    REQUIRE(mc.terminal.refreshRenderBuffer());
+    auto const buffer = mc.terminal.renderBuffer();
+    REQUIRE(buffer.get().statusBar.has_value());
+    return test::backgroundAt(
+        buffer.get(),
+        CellLocation { .line = buffer.get().statusBar->lineOffset, .column = ColumnOffset(column) });
+}
+
+/// Gives @p mc the contour-dark scheme, whose Normal, Insert and Visual bars differ -- MockTerm's own default
+/// palette gives all four indicator pairs the same colours, against which no chip could be told apart.
+void useContourDark(MockTerm<>& mc)
+{
+    REQUIRE(defaultColorPalettes("contour-dark", mc.terminal.defaultColorPalette()));
+    mc.terminal.resetColorPalette();
+    auto const& palette = mc.terminal.colorPalette();
+    REQUIRE(palette.indicatorStatusLineNormalMode.background
+            != palette.indicatorStatusLineInsertMode.background);
+    REQUIRE(palette.indicatorStatusLineVisualMode.background
+            != palette.indicatorStatusLineInsertMode.background);
+    REQUIRE(palette.indicatorStatusLineVisualMode.background
+            != palette.indicatorStatusLineNormalMode.background);
+    REQUIRE(palette.indicatorStatusLineInactive.background
+            != palette.indicatorStatusLineNormalMode.background);
+}
+} // namespace
+
+TEST_CASE("Terminal.indicatorStatusLine.aChipKeepsTheLineQuiet", "[terminal][statusline][inputmode]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    useContourDark(mc);
+    auto const& palette = mc.terminal.colorPalette();
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+
+    SECTION("a chip takes its mode's pair, the line the idle one")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Chip,Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        for (auto const column: std::views::iota(0, 8))
+        {
+            INFO(column);
+            CHECK(statusRowBackgroundAt(mc, column) == palette.indicatorStatusLineNormalMode.background);
+        }
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInsertMode.background);
+
+        mc.terminal.inputHandler().setMode(ViMode::Visual);
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineVisualMode.background);
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInsertMode.background);
+    }
+
+    SECTION("without a chip the whole line takes the mode's pair")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineNormalMode.background);
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineNormalMode.background);
+    }
+
+    SECTION("an unfocused pane draws the chip's text on the inactive line")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Chip,Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        (void) mc.terminal.sendFocusOutEvent();
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineInactive.background);
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInactive.background);
+        CHECK(test::trimRight(mc.terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0)))
+              == " NORMAL  x");
+
+        (void) mc.terminal.sendFocusInEvent();
+        CHECK(statusRowBackgroundAt(mc, 0) == palette.indicatorStatusLineNormalMode.background);
+    }
+
+    SECTION("a colour of the item's own wins over the chip")
+    {
+        mc.terminal.setStatusLineDefinition(
+            parseStatusLineDefinition("{InputMode:Chip,BackgroundColor=#102030,Left= ,Right= } x", "", ""));
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        CHECK(statusRowBackgroundAt(mc, 0) == RGBColor { 0x10, 0x20, 0x30 });
+        CHECK(statusRowBackgroundAt(mc, 9) == palette.indicatorStatusLineInsertMode.background);
+    }
+}
+
+TEST_CASE("serializeToVT.modeChipTextReads", "[statusline][inputmode][colors]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    useContourDark(mc);
+    mc.terminal.inputHandler().setMode(ViMode::Normal);
+    auto const chip = StatusLineDefinitions::modeChipColors(
+        mc.terminal.colorPalette().indicatorStatusLineNormalMode, mc.terminal.defaultColorPalette());
+    auto const line =
+        serializeToVT(mc.terminal, parseStatusLineSegment("{InputMode:Chip}"sv), StatusLineStyling::Enabled);
+    CHECK(line.contains(textSgrOf(chip.foreground)));
+    // Measured unstyled, the chip is its text alone.
+    CHECK(
+        serializeToVT(mc.terminal, parseStatusLineSegment("{InputMode:Chip}"sv), StatusLineStyling::Disabled)
+        == "NORMAL");
+}
+// }}}
