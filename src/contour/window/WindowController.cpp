@@ -1002,6 +1002,11 @@ bool WindowController::needsFramelessHint() const noexcept
     return framePolicy().framelessHint == platform::FramelessHint::Apply;
 }
 
+bool WindowController::needsExpandedClientArea() const noexcept
+{
+    return framePolicy().expansion == platform::ClientAreaExpansion::QtHint;
+}
+
 bool WindowController::needsClientFrameAffordances() const noexcept
 {
     return framePolicy().affordances == platform::FrameAffordances::Client;

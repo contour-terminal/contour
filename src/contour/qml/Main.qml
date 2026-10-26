@@ -35,8 +35,23 @@ ThemedWindow
     // corners, so Windows and macOS withhold it and keep a real frame instead -- Windows zeroes that
     // frame in WM_NCCALCSIZE, macOS lets the content fill a transparent title bar. Only the
     // Linux/BSD desktops go genuinely frameless, and there the shadow comes from the compositor
-    // (platform/WindowShadow.hpp) rather than from the frame.
+    // (platform/WindowShadow.hpp) rather than from the frame. On macOS, Qt.ExpandedClientAreaHint is what
+    // lets the content fill that title bar: Qt owns the full-size content view and its safe area, the
+    // frame adapter does not (needsExpandedClientArea is true there alone, so other platforms never
+    // evaluate the hint).
     flags: Qt.Window | ((win && win.needsFramelessHint) ? Qt.FramelessWindowHint : 0)
+                     | ((win && win.needsExpandedClientArea) ? Qt.ExpandedClientAreaHint : 0)
+    // Under that hint the title bar becomes the window's safe area, and an ApplicationWindow (Qt >= 6.9) pads
+    // its content by the safe area -- which would push the band below the very title bar it fills. Zeroed
+    // while the hint is set alone; a Binding rather than `topPadding: 0`, because before Qt 6.9 (still
+    // supported off macOS) the property does not exist, and an inactive Binding never names it.
+    Binding
+    {
+        target: appWindow
+        property: "topPadding"
+        value: 0
+        when: !!(win && win.needsExpandedClientArea)
+    }
 
     // Application window's background must be transparent in order to support transparent/semi-transparent
     // background in the terminal widgets.

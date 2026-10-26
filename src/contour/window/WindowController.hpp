@@ -114,8 +114,9 @@ class WindowController:
     Q_PROPERTY(
         contour::session::TerminalSession* activeSession READ activeSession NOTIFY activeSessionChanged)
     Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
-    // All three follow titleBarVisible, so they re-evaluate on the same signal.
+    // All four follow titleBarVisible, so they re-evaluate on the same signal.
     Q_PROPERTY(bool needsFramelessHint READ needsFramelessHint NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(bool needsExpandedClientArea READ needsExpandedClientArea NOTIFY titleBarVisibleChanged)
     Q_PROPERTY(
         bool needsClientFrameAffordances READ needsClientFrameAffordances NOTIFY titleBarVisibleChanged)
     // NOT on titleBarVisibleChanged: this one is measured from the OS's own buttons, which only
@@ -478,6 +479,13 @@ class WindowController:
     /// window its system shadow and rounded corners, and both platforms have a way to keep the frame
     /// while still giving the client area the whole window.
     [[nodiscard]] bool needsFramelessHint() const noexcept;
+
+    /// Whether the window should carry Qt::ExpandedClientAreaHint, which lets the content fill the title
+    /// bar and reports the bar as the window's safe area.
+    ///
+    /// True on macOS under our own title band alone (platform::ClientAreaExpansion::QtHint): Qt is the
+    /// one owner of the full-size content view, and the Cocoa frame adapter leaves the style mask alone.
+    [[nodiscard]] bool needsExpandedClientArea() const noexcept;
 
     /// Whether WE supply the window's frame affordances -- ResizeBorder.qml's hit zones and the tab
     /// strip's own min/max/close controls -- or the OS frame does.

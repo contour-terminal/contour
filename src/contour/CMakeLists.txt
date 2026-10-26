@@ -66,6 +66,13 @@ if(CONTOUR_FRONTEND_GUI)
 
     message(STATUS "Qt components: ${QT_COMPONENTS}")
     find_package(Qt6 COMPONENTS ${QT_COMPONENTS} REQUIRED)
+
+    # One owner of the macOS title bar's safe area: Qt::ExpandedClientAreaHint, which needs Qt 6.9 and has
+    # no fallback (Step 1d, ruling D1). Checked here, inside the GUI gate, because a headless build finds
+    # no Qt and its empty Qt6_VERSION would compare as older.
+    if(APPLE AND Qt6_VERSION VERSION_LESS 6.9)
+        message(FATAL_ERROR "macOS builds need Qt 6.9 or later (Qt::ExpandedClientAreaHint, QWindow::safeAreaMargins).")
+    endif()
 endif()
 # }}}
 
@@ -840,6 +847,7 @@ if(CONTOUR_FRONTEND_GUI)
                 platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm
                 platform/CocoaTaskbarProgressSink_test.mm
+                platform/CocoaWindowFrame_test.mm
                 platform/CocoaWindowResizeGrid_test.mm)
             set_target_properties(contour_gui_test PROPERTIES
                 OBJCXX_STANDARD ${CMAKE_CXX_STANDARD}
@@ -847,6 +855,7 @@ if(CONTOUR_FRONTEND_GUI)
             set_source_files_properties(
                 platform/CocoaAppearanceSources_test.mm platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm platform/CocoaTaskbarProgressSink_test.mm
+                platform/CocoaWindowFrame_test.mm
                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)

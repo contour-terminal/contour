@@ -76,6 +76,17 @@ enum class FramelessHint : uint8_t
     Apply,
 };
 
+/// Who extends the client area under the title bar, where a decorated window lets the content fill it.
+///
+/// One owner, so two cannot disagree: on macOS it is Qt's Qt::ExpandedClientAreaHint (Qt >= 6.9), which
+/// also publishes the title bar as the window's safe area, and the Cocoa frame adapter no longer touches
+/// the style mask (Step 1d spike, D1 = Hint).
+enum class ClientAreaExpansion : uint8_t
+{
+    None = 0, //!< The client area stops at the frame, or there is no frame to extend under.
+    QtHint,   //!< Qt::ExpandedClientAreaHint, set through Main.qml's `flags`.
+};
+
 /// Everything that follows from a platform and a decoration choice.
 struct FramePolicy
 {
@@ -83,6 +94,7 @@ struct FramePolicy
     FrameAffordances affordances;
     ControlPlacement controlPlacement;
     FramelessHint framelessHint;
+    ClientAreaExpansion expansion;
 
     [[nodiscard]] constexpr bool operator==(FramePolicy const&) const noexcept = default;
 };
@@ -93,13 +105,15 @@ namespace detail
     inline constexpr auto ServerFramePolicy = FramePolicy { .shadow = FrameShadowStrategy::None,
                                                             .affordances = FrameAffordances::Native,
                                                             .controlPlacement = ControlPlacement::OwnBar,
-                                                            .framelessHint = FramelessHint::Withhold };
+                                                            .framelessHint = FramelessHint::Withhold,
+                                                            .expansion = ClientAreaExpansion::None };
 
     /// A genuinely frameless window: we draw everything, and the shadow is the compositor's to grant.
     inline constexpr auto ClientFramePolicy = FramePolicy { .shadow = FrameShadowStrategy::None,
                                                             .affordances = FrameAffordances::Client,
                                                             .controlPlacement = ControlPlacement::OwnBar,
-                                                            .framelessHint = FramelessHint::Apply };
+                                                            .framelessHint = FramelessHint::Apply,
+                                                            .expansion = ClientAreaExpansion::None };
 } // namespace detail
 
 /// How @p platform should frame a window whose title bar is @p decoration.
@@ -128,17 +142,19 @@ namespace detail
             return FramePolicy { .shadow = FrameShadowStrategy::NativeFrameKept,
                                  .affordances = FrameAffordances::Client,
                                  .controlPlacement = ControlPlacement::OwnBar,
-                                 .framelessHint = FramelessHint::Withhold };
+                                 .framelessHint = FramelessHint::Withhold,
+                                 .expansion = ClientAreaExpansion::None };
 
         case FramePlatform::MacOS:
-            // The window stays a decorated NSWindow with a transparent, hidden title bar, so AppKit
-            // keeps drawing the shadow, the rounded corners AND the traffic lights -- over our own
-            // chrome, since the content view extends under them. Ours must switch off and the tab
-            // strip must leave their corner clear.
+            // The window stays a decorated NSWindow with a hidden title, so AppKit keeps drawing the
+            // shadow, the rounded corners AND the traffic lights -- over our own chrome, since Qt's hint
+            // extends the content view under them. Ours must switch off and the tab strip must leave
+            // their corner clear.
             return FramePolicy { .shadow = FrameShadowStrategy::FullSizeContent,
                                  .affordances = FrameAffordances::Native,
                                  .controlPlacement = ControlPlacement::OverChrome,
-                                 .framelessHint = FramelessHint::Withhold };
+                                 .framelessHint = FramelessHint::Withhold,
+                                 .expansion = ClientAreaExpansion::QtHint };
 
         case FramePlatform::Other: return detail::ClientFramePolicy;
     }
