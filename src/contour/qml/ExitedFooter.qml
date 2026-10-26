@@ -28,7 +28,7 @@ Item {
     /// Whether the buttons are runs of bracketed cells (the Terminal row) rather than rounded shapes.
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
     /// Whether the session has ended, so the footer shows.
-    readonly property bool ended: session ? session.sessionEnd !== chromeStyle.paneEnds.none : false
+    readonly property bool ended: session ? session.paneState === chromeStyle.paneStates.ended : false
     /// Whether the end offers Restart.
     readonly property bool restartOffered: session ? session.restartOffer === chromeStyle.paneEnds.restartOffered
                                                    : false

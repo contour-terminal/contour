@@ -2,6 +2,8 @@
 #pragma once
 
 #include <contour/config/NewDefaultsOffer.hpp>
+#include <contour/session/EndReason.hpp>
+#include <contour/window/PaneState.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -53,8 +55,9 @@ class MockSession: public QObject
     // kind. Both change together, so one signal serves them.
     Q_PROPERTY(QVariantList scrollbarMarks READ scrollbarMarks NOTIFY scrollbarMarksChanged)
     Q_PROPERTY(QVariantList scrollbarMarkColors READ scrollbarMarkColors NOTIFY scrollbarMarksChanged)
-    // Mirrors TerminalSession's reconnecting state, which TerminalPane's overlay shows.
-    Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
+    // Mirrors TerminalSession's pane state (window::paneStateOf over the end and the connection), which the
+    // card's reconnecting pill and the ended pane's footer read.
+    Q_PROPERTY(int paneState READ paneState NOTIFY paneStateChanged)
     // {{{ Panes: what the pane header reads, mirroring TerminalSession's properties and their signals.
     Q_PROPERTY(
         QString displayWorkingDirectory READ displayWorkingDirectory NOTIFY displayWorkingDirectoryChanged)
@@ -76,11 +79,21 @@ class MockSession: public QObject
     [[nodiscard]] int pageLineCount() const { return _lines; }
     [[nodiscard]] bool isReconnecting() const { return _reconnecting; }
 
+    /// @return window::paneStateOf over the mocked end and connection, as TerminalSession answers it.
+    [[nodiscard]] int paneState() const
+    {
+        using vthost::client::ConnectionState;
+        return static_cast<int>(
+            window::paneStateOf(static_cast<session::EndReason>(_sessionEnd),
+                                _reconnecting ? ConnectionState::Reconnecting : ConnectionState::Connected));
+    }
+
     /// Loses or regains the host connection, as TerminalSession::setHostConnection does.
     void setReconnecting(bool reconnecting)
     {
         _reconnecting = reconnecting;
         emit reconnectingChanged();
+        emit paneStateChanged();
     }
     [[nodiscard]] int pageColumnsCount() const { return _columns; }
     [[nodiscard]] int historyLineCount() const { return _historyLineCount; }
@@ -227,6 +240,7 @@ class MockSession: public QObject
         _endMessage = std::move(message);
         _restartOffer = restart;
         emit sessionEndChanged();
+        emit paneStateChanged();
     }
 
     /// Counts the footer's Restart, as TerminalSession::restart() would start the session again.
@@ -266,6 +280,7 @@ class MockSession: public QObject
     void opacityChanged();
     void dimUnfocusedChanged();
     void reconnectingChanged();
+    void paneStateChanged();
     void displayWorkingDirectoryChanged();
     void foregroundProcessNameChanged();
     void titleChanged();

@@ -249,6 +249,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* badgeKinds READ badgeKinds CONSTANT)
     /// The QML names of an ended pane's ends and restart offers.
     Q_PROPERTY(QObject* paneEnds READ paneEnds CONSTANT)
+    /// The QML names of a pane's states (window::PaneState), for a session's paneState.
+    Q_PROPERTY(QObject* paneStates READ paneStates CONSTANT)
     /// The height of a pane header the held modifier reveals over its pane (Minimal).
     Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
     // }}}
@@ -308,6 +310,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
     [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
     [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
+    [[nodiscard]] QObject* paneStates() noexcept { return &_paneStates; }
     /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
     /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
     /// @return The row's pane header height before the density applies, in logical pixels.
@@ -714,6 +717,7 @@ class UiStyleProvider: public QObject
     ChromePaneRoleNames _paneRoles;
     ChromeBadgeKindNames _badgeKinds;
     ChromePaneEndNames _paneEnds;
+    ChromePaneStateNames _paneStates;
     int _paletteRevision = 0;
 };
 

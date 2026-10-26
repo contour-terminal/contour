@@ -473,6 +473,7 @@ void TerminalSession::setHostConnection(vthost::client::ConnectionState state)
     if (_hosting != SessionHosting::Remote)
         return;
     auto const wasReconnecting = isReconnecting();
+    auto const lastPaneState = paneState();
     // A return to Connected repaints the mirror, which is not news to the tab badge.
     if (auto const grace =
             window::resyncGraceAfter(_hostConnection, state, _app.terminalClocks().steady.now()))
@@ -480,6 +481,8 @@ void TerminalSession::setHostConnection(vthost::client::ConnectionState state)
     _hostConnection = state;
     if (isReconnecting() != wasReconnecting)
         emit reconnectingChanged();
+    if (paneState() != lastPaneState)
+        emit paneStateChanged();
 }
 
 TerminalSession::~TerminalSession()
@@ -1825,6 +1828,7 @@ void TerminalSession::announceSessionEnd()
     // The footer stands where the program ran: its header has no program in front to name.
     stopFollowingForegroundProcess(ProcessNameFollower::Header);
     emit sessionEndChanged();
+    emit paneStateChanged();
 }
 
 void TerminalSession::recordEndLocked(EndReason reason, std::string detail)

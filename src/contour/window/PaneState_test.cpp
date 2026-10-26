@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <contour/session/EndReason.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -32,7 +33,8 @@ TEST_CASE("paneState.followsTheEndThenTheConnection", "[panestate]")
             auto const expected = [&] {
                 if (end != EndReason::None)
                     return PaneState::Ended;
-                if (connection == ConnectionState::Reconnecting)
+                // A first connection reads as reconnecting, as the window's host chip says.
+                if (connection == ConnectionState::Connecting || connection == ConnectionState::Reconnecting)
                     return PaneState::Reconnecting;
                 return PaneState::Live;
             }();
@@ -46,4 +48,15 @@ TEST_CASE("paneState.anEndedPaneIsEndedEvenWhileReconnecting", "[panestate]")
     CHECK(paneStateOf(EndReason::Disconnected, ConnectionState::Reconnecting) == PaneState::Ended);
     CHECK(paneStateOf(EndReason::None, ConnectionState::Reconnecting) == PaneState::Reconnecting);
     CHECK(paneStateOf(EndReason::None, ConnectionState::Connected) == PaneState::Live);
+}
+
+TEST_CASE("paneState.foldsTheConnectionAsTheHostChipDoes", "[panestate]")
+{
+    // The pane's pill and the window's host chip never disagree about a connection being sought.
+    for (auto const connection: AllConnections)
+    {
+        INFO("connection " << static_cast<int>(connection));
+        CHECK((paneStateOf(EndReason::None, connection) == PaneState::Reconnecting)
+              == (hostChipStateOf(connection) == HostChipState::Reconnecting));
+    }
 }

@@ -250,7 +250,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
     _paneRoles { this },
     _badgeKinds { this },
-    _paneEnds { this }
+    _paneEnds { this },
+    _paneStates { this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);

@@ -28,6 +28,7 @@
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneState.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Hyperlink.hpp>
@@ -11051,6 +11052,48 @@ TEST_CASE("TerminalSession: a mirrored pane follows its host connection, a local
     local->setHostConnection(ConnectionState::Reconnecting);
     CHECK_FALSE(local->isReconnecting());
     CHECK(localChanges == 0);
+}
+
+TEST_CASE("TerminalSession: paneState is window::paneStateOf over the end and the host connection",
+          "[contour][session][reconnect][panestate]")
+{
+    using contour::window::PaneState;
+    using vthost::client::ConnectionState;
+    TestApp testApp;
+    auto const remote =
+        std::make_unique<contour::session::TerminalSession>(&testApp.app().sessionsManager(),
+                                                            std::make_unique<vtpty::MockPty>(TestPageSize),
+                                                            testApp.app(),
+                                                            std::string {},
+                                                            std::nullopt,
+                                                            std::nullopt,
+                                                            contour::test::makeTestNotifier(),
+                                                            contour::session::SessionRole::Shell,
+                                                            contour::session::SessionHosting::Remote);
+    auto changes = QSignalSpy(remote.get(), &contour::session::TerminalSession::paneStateChanged);
+    auto const stateOf = [&remote] {
+        return static_cast<PaneState>(remote->property("paneState").toInt());
+    };
+    CHECK(stateOf() == PaneState::Live); // born connected
+
+    remote->setHostConnection(ConnectionState::Reconnecting);
+    CHECK(stateOf() == PaneState::Reconnecting);
+    CHECK(changes.count() == 1);
+    remote->setHostConnection(ConnectionState::Connecting); // the same pane state: no signal
+    CHECK(changes.count() == 1);
+    remote->setHostConnection(ConnectionState::Connected);
+    CHECK(stateOf() == PaneState::Live);
+    CHECK(changes.count() == 2);
+
+    // An end wins over the connection, and a connection change after it is no news to the pane.
+    remote->noteTransportLost();
+    mockPtyOf(*remote).close();
+    remote->onClosed();
+    CHECK(stateOf() == PaneState::Ended);
+    CHECK(changes.count() == 3);
+    remote->setHostConnection(ConnectionState::Reconnecting);
+    CHECK(stateOf() == PaneState::Ended);
+    CHECK(changes.count() == 3);
 }
 
 TEST_CASE("TerminalSession: a remote pane reconnects exactly while its window's host chip says so",

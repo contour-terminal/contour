@@ -19,6 +19,7 @@
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneState.hpp>
 #include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/CommandBlockId.hpp>
@@ -259,9 +260,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
     Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
-    // Whether the daemon connection this pane mirrors through is being sought again: a QML-facing property,
-    // the documented bool exception (AGENT.md), read by TerminalPane.qml's reconnecting overlay.
-    Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
+    // What the pane shows over and around its terminal (a window::PaneState's value, chromeStyle.paneStates
+    // names them): window::paneStateOf over the session's end and its host connection, so the card's
+    // reconnecting pill and the ended pane's footer read one decision instead of making it again. An int,
+    // not the enum, until it is registered with the meta-object system (AGENT.md, QML-facing exception).
+    Q_PROPERTY(int paneState READ getPaneState NOTIFY paneStateChanged)
     // How the session ended while its pane waits (an EndReason's value; 0 while it runs), what the pane's
     // footer says about it, and whether the footer offers Restart (a FooterRestart's value). Ints, not
     // the enums, until they are registered with the meta-object system (AGENT.md, QML-facing exception).
@@ -828,6 +831,16 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         return window::hostChipStateOf(_hostConnection) == window::HostChipState::Reconnecting;
     }
+
+    /// What this pane shows over and around its terminal. GUI thread only (see _end).
+    /// @return window::paneStateOf(_end, _hostConnection).
+    [[nodiscard]] window::PaneState paneState() const noexcept
+    {
+        return window::paneStateOf(_end, _hostConnection);
+    }
+
+    /// @return paneState() as its enumerator value, for QML.
+    [[nodiscard]] int getPaneState() const noexcept { return static_cast<int>(paneState()); }
 
     /// The name of the program in front of this session's shell, which a tab with an empty label shows, asked
     /// of the device now (vtpty::Pty::foregroundProcessName). GUI thread. One query of the process table per
@@ -1441,6 +1454,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void searchStateChanged();
     /// isReconnecting() changed.
     void reconnectingChanged();
+    /// paneState() changed: the host connection was lost or regained, or the session ended.
+    void paneStateChanged();
     /// The session ended and its pane now waits (sessionEnd, endMessage and restartOffer changed). Raised
     /// once per end, on the GUI thread, after _onClosedMutex is released.
     void sessionEndChanged();

@@ -9,6 +9,7 @@
 
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/window/PaneState.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QObject>
@@ -893,6 +894,29 @@ class ChromePaneEndNames: public QObject
 
   private:
     [[nodiscard]] static constexpr int of(session::EndReason end) noexcept { return static_cast<int>(end); }
+};
+
+/// The QML names of a pane's states, `chromeStyle.paneStates`, for what a TerminalSession's `paneState`
+/// answers (window::paneStateOf): the pane card's pill and the ended pane's footer compare against these
+/// rather than deciding the state again.
+class ChromePaneStateNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int live READ live CONSTANT)
+    Q_PROPERTY(int reconnecting READ reconnecting CONSTANT)
+    Q_PROPERTY(int ended READ ended CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromePaneStateNames(QObject* parent);
+
+    /// @return Each window::PaneState as its underlying value.
+    [[nodiscard]] static constexpr int live() noexcept { return of(PaneState::Live); }
+    [[nodiscard]] static constexpr int reconnecting() noexcept { return of(PaneState::Reconnecting); }
+    [[nodiscard]] static constexpr int ended() noexcept { return of(PaneState::Ended); }
+
+  private:
+    [[nodiscard]] static constexpr int of(PaneState state) noexcept { return static_cast<int>(state); }
 };
 
 } // namespace contour::window

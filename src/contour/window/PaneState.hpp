@@ -2,7 +2,9 @@
 #pragma once
 
 #include <contour/session/EndReason.hpp>
+#include <contour/window/HostChipState.hpp>
 
+#include <cstddef>
 #include <cstdint>
 
 #include <vthost/client/ConnectionState.hpp>
@@ -18,18 +20,22 @@ enum class PaneState : uint8_t
     Ended,        ///< The session ended and the pane waits for Restart or Close in its footer.
 };
 
+/// Number of @c PaneState enumerators, derived from the last one.
+inline constexpr size_t PaneStateCount = static_cast<size_t>(PaneState::Ended) + 1;
+
 /// Decides a pane's state from its session's end and its host connection.
 /// @param end        How the pane's session ended; None while it runs.
 /// @param connection The state of the daemon connection the session is mirrored over (Connected for a
 ///                   local one).
 /// @return Ended once the session ended, whatever the connection; else Reconnecting while the connection
-///         is sought again; else Live.
+///         is being (re)established, folded as the window's host chip folds it (hostChipStateOf), so the
+///         pane's pill and the chip never disagree; else Live.
 [[nodiscard]] constexpr PaneState paneStateOf(session::EndReason end,
                                               vthost::client::ConnectionState connection) noexcept
 {
     if (end != session::EndReason::None)
         return PaneState::Ended;
-    if (connection == vthost::client::ConnectionState::Reconnecting)
+    if (hostChipStateOf(connection) == HostChipState::Reconnecting)
         return PaneState::Reconnecting;
     return PaneState::Live;
 }

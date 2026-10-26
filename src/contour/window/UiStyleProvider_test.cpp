@@ -1283,6 +1283,29 @@ TEST_CASE("chromeStyle names an ended pane's ends and restart offers in QML", "[
           == contour::session::PaneFooterRows.size() + contour::session::FooterRestartCount);
 }
 
+TEST_CASE("UiStyleProvider: paneStates names every window::PaneState for QML", "[contour][uistyle]")
+{
+    using contour::window::PaneState;
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+    auto const evaluate = [&engine](char const* expression) {
+        auto qmlExpression = QQmlExpression(engine.rootContext(), nullptr, QString::fromLatin1(expression));
+        auto const value = qmlExpression.evaluate();
+        REQUIRE(!qmlExpression.hasError());
+        return value;
+    };
+
+    CHECK(evaluate("chromeStyle.paneStates.live").toInt() == static_cast<int>(PaneState::Live));
+    CHECK(evaluate("chromeStyle.paneStates.reconnecting").toInt()
+          == static_cast<int>(PaneState::Reconnecting));
+    CHECK(evaluate("chromeStyle.paneStates.ended").toInt() == static_cast<int>(PaneState::Ended));
+
+    // One name per state, so a new enumerator needs a QML name too.
+    auto const& meta = contour::window::ChromePaneStateNames::staticMetaObject;
+    auto const names = static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
+    CHECK(names == contour::window::PaneStateCount);
+}
+
 TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uistyle]")
 {
     using contour::config::ChromeDensity;

@@ -99,9 +99,7 @@ Item {
         z: 1
         width: card.width
         height: card.height - y
-        visible: card.session ? card.session.isReconnecting === true
-                                && card.session.sessionEnd === chromeStyle.paneEnds.none
-                              : false
+        visible: card.session ? card.session.paneState === chromeStyle.paneStates.reconnecting : false
         clip: card.headerInline && card.cornerRadius > 0
         // The dim's colour, for the scene's own checks.
         readonly property color color: chromeStyle.paneDimColor
