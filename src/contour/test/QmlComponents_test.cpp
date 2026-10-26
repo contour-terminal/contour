@@ -4065,8 +4065,10 @@ TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fr
     auto const isWhole = [](qreal value) {
         return std::abs(value - std::round(value)) < 1e-9;
     };
+    // The solver's own rounding, with no tolerance of its own: one would hide a product that lands a hair
+    // above a whole pixel at a non-binary ratio, which the solver counts as one pixel more.
     auto const ceilOf = [](qreal value) {
-        return static_cast<int>(std::ceil(value - 1e-9));
+        return contour::window::detail::ceilOf(value);
     };
     auto const* provider = qobject_cast<contour::window::UiStyleProvider const*>(&host.style());
     REQUIRE(provider != nullptr);

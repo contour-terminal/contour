@@ -93,7 +93,11 @@ FocusScope {
     // ratio distinct from its screen's), and there they would differ. Closing it needs C++:
     // QWindow::devicePixelRatio() is a plain method, not a Q_PROPERTY, so QML cannot read it -- it would
     // take a QML-facing per-window object, which does not exist today (the only context properties are
-    // the app-global terminalSessions and chromeStyle).
+    // the app-global terminalSessions and chromeStyle). Where they differ, the solver's headroom is what
+    // absorbs it: it rounds the window-grid snap up to a whole logical pixel, which covers any screen-grid
+    // snap of a whole-pixel token -- but the Terminal row's tokens are cells, a fractional number of logical
+    // pixels, and there a finer screen grid can draw a gap or inset a fraction of a pixel wider than was
+    // counted, taking it from a card's last column or row.
     readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
 
     // The session the backdrop takes its opacity from: the first leaf's. A split's panes share their
@@ -183,7 +187,8 @@ FocusScope {
                 containmentMask: hitArea
 
                 // Minimal draws its split line; Comfortable's gap is the root's backdrop showing through, so
-                // filling it again would composite a translucent profile's gap twice.
+                // filling it again would composite a translucent profile's gap twice. Minimal's line is the
+                // separator ink, translucent by design, so it keeps the backdrop beneath it to sit on.
                 Rectangle {
                     objectName: "splitLine"
                     anchors.fill: parent

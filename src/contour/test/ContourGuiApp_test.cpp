@@ -480,6 +480,16 @@ TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixe
         1.0,
         1.25);
     CHECK(app.app().splitChrome(1.25) == expected);
+    // And the ratio is the one asked about: the card's inset is counted on that device grid, which at
+    // 1.25 is not what it is at 1.
+    auto const atOne = contour::window::splitChromeOf(
+        contour::config::resolveChromeTokens(
+            row, app.app().accessibilityPreferences(), app.app().config().chromeDensity.value()),
+        1.0,
+        1.0,
+        1.0);
+    REQUIRE(atOne != expected);
+    CHECK(app.app().splitChrome(1.0) == atOne);
     // A card's header and inset are part of it, so a split leaf's window grows by more than the gap.
     CHECK(expected.leafHeader > 0);
     CHECK(expected.rootInset > 0);
