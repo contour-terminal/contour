@@ -1798,12 +1798,13 @@ bool WindowController::applyContentDrivenResize(session::DisplaySurface& request
     }
 
     // The gap, header and inset come from the same chrome tokens PaneNode.qml draws with, so solver and
-    // canvas cannot diverge. The layout root bounds the ratio walk: while zoomed it IS the leaf, so the
-    // leaf owns the whole content area edge to edge and no split ratio, card or inset applies.
+    // canvas cannot diverge -- counted on this window's device-pixel grid, as the QML snaps them. The
+    // layout root bounds the ratio walk: while zoomed it IS the leaf, so the leaf owns the whole content
+    // area edge to edge and no split ratio, card or inset applies.
     auto const content = vtworkspace::contentSizeForLeaf(
         *leaf,
         vtworkspace::LayoutSize { .width = leafContentLogical.width, .height = leafContentLogical.height },
-        _manager.app().splitChrome(),
+        _manager.app().splitChrome(osWindow->devicePixelRatio()),
         *layoutRoot);
 
     display::displayLog()("Content-driven window resize: leaf {}x{} -> content {}x{} + {} chrome.",

@@ -147,7 +147,7 @@ enum class ChromeColorRole : uint8_t
     PaneHeaderText,       //!< The focused pane's header text.
     PaneHeaderTextDimmed, //!< An unfocused pane's header text, and the working directory.
     PaneSplitLine,        //!< The line a split is drawn with where the gap does not draw it.
-    PaneGrabber,          //!< The split handle's grabber.
+    PaneGrabber,          //!< The split handle's grabber, and the Terminal row's engaged split line.
     PaneFooterFill,       //!< The exited footer's fill.
     PaneFooterText,       //!< The exited footer's text.
 };

@@ -1805,18 +1805,19 @@ window::ChromeInputs ContourGuiApp::chromeInputs() const
     };
 }
 
-vtworkspace::SplitChrome ContourGuiApp::splitChrome() const
+vtworkspace::SplitChrome ContourGuiApp::splitChrome(double devicePixelRatio) const
 {
     if (_chromeStyleHost)
     {
         auto const& provider = _chromeStyleHost->provider();
         return window::splitChromeOf(
-            provider.resolvedRow(), provider.units().horizontal, provider.units().vertical);
+            provider.resolvedRow(), provider.units().horizontal, provider.units().vertical, devicePixelRatio);
     }
     return window::splitChromeOf(
         config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), _config.chromeDensity.value()),
         1.0,
-        1.0);
+        1.0,
+        devicePixelRatio);
 }
 
 void ContourGuiApp::refreshChromeStyle()

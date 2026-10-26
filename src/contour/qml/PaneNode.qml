@@ -51,12 +51,35 @@ FocusScope {
         return Math.max(minPaneRatio, Math.min(1.0 - minPaneRatio, raw))
     }
 
-    // Round a logical extent to whole device pixels at ratio `dpr` (#2040). The gap and the first card
-    // both go through it, so the second card's origin (`first + gap`) lands on the device grid too. Pure
-    // and hoisted for the same reason as clampRatio: the offscreen screen's ratio is always 1.
+    // Round a logical extent to whole device pixels at ratio `dpr` (#2040): the first card's share, so
+    // the second card's origin (`inset + first + gap`) lands on the device grid. Pure and hoisted for the
+    // same reason as clampRatio: the offscreen screen's ratio is always 1.
     function snapToDevice(logical, dpr) {
         return Math.round(logical * dpr) / dpr
     }
+
+    // Floor a gap or an inset to whole device pixels at ratio `dpr`, keeping a non-zero one at least one
+    // device pixel. Floor, not round: the window-size solver counts these extents rounded UP
+    // (window::snappedChromePixels mirrors this rule), so what is drawn never exceeds what was counted and
+    // no card loses a column to it. The 1e-9 keeps an exact product (6 x 1.5) from flooring a pixel short.
+    function snapGapToDevice(logical, dpr) {
+        if (logical <= 0)
+            return 0
+        return Math.max(1, Math.floor(logical * dpr + 1e-9)) / dpr
+    }
+
+    // The device-pixel grid both the geometry and the clip path agree about (#2040): the inset, the gap
+    // and the first card all sit on it.
+    //
+    // KNOWN GAP: this is the SCREEN's ratio, while every C++ consumer of the boundary rounds at
+    // QWindow::devicePixelRatio() -- TerminalDisplay::devicePixelRatio(), the frame-derived scale in
+    // TerminalRenderNode::prepare(), and the window-size solver's split chrome. The two agree unless
+    // something overrides the ratio per window (QT_SCALE_FACTOR, or a compositor handing Qt a window
+    // ratio distinct from its screen's), and there they would differ. Closing it needs C++:
+    // QWindow::devicePixelRatio() is a plain method, not a Q_PROPERTY, so QML cannot read it -- it would
+    // take a QML-facing per-window object, which does not exist today (the only context properties are
+    // the app-global terminalSessions and chromeStyle).
+    readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
 
     // The session the backdrop takes its opacity from: the first leaf's. A split's panes share their
     // tab's profile, and an opaque backdrop would hide the desktop a translucent profile shows through.
@@ -95,7 +118,7 @@ FocusScope {
     // Split branch: two child PaneNodes in a SplitView, inset from the content edge at the tree's root.
     Loader {
         anchors.fill: parent
-        anchors.margins: root.isSplitRoot ? chromeStyle.space.paneInset : 0
+        anchors.margins: root.isSplitRoot ? root.snapGapToDevice(chromeStyle.space.paneInset, root.dprSnap) : 0
         active: root.node !== null && !root.node.isLeaf
         sourceComponent: splitComponent
     }
@@ -113,35 +136,26 @@ FocusScope {
             // orientation: vtworkspace::SplitState::Vertical (2) => side-by-side (Qt.Horizontal).
             orientation: (root.node && root.node.orientation === 2) ? Qt.Horizontal : Qt.Vertical
 
-            // The device-pixel grid both the geometry and the clip path agree about (#2040). Shared by
-            // the handle and the first child, because BOTH have to sit on it -- see below.
-            //
-            // KNOWN GAP: this is the SCREEN's ratio, while every C++ consumer of the boundary rounds at
-            // QWindow::devicePixelRatio() -- TerminalDisplay::devicePixelRatio(), and the frame-derived
-            // scale in TerminalRenderNode::prepare(). The two agree unless something overrides the ratio
-            // per window (QT_SCALE_FACTOR, or a compositor handing Qt a window ratio distinct from its
-            // screen's), and there they would differ. Closing it needs C++: QWindow::devicePixelRatio()
-            // is a plain method, not a Q_PROPERTY, so QML cannot read it -- it would take a QML-facing
-            // per-window object, which does not exist today (the only context properties are the
-            // app-global terminalSessions and chromeStyle).
-            readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
+            // The root's device-pixel grid, shared by the handle and the first child (see root.dprSnap).
+            readonly property real dprSnap: root.dprSnap
 
             // The handle IS the gap between two cards: `space.paneGap` wide side by side, `space.paneGapRows`
             // high stacked -- the same tokens the window-size solver counts (window::splitChromeOf), so the
             // two cannot diverge. Its containment mask widens what grabs it to `space.splitHit` without
             // moving a card: Qt's documented way to make a SplitView handle easier to hit.
             //
-            // Snapped to whole device pixels for the same reason the first child's extent is: the SECOND
-            // pane's origin is `firstChild.width + gap`, so snapping only the extent leaves that origin
-            // fractional whenever the gap is. At the very common 125% desktop scale a 6 point gap is 7.5
-            // device pixels, and 175% makes it 10.5 -- users on exactly those scales would have seen the
-            // #2040 artifact survive in the right/bottom pane.
+            // Floored to whole device pixels for the same reason the first child's extent is rounded: the
+            // SECOND pane's origin is `inset + firstChild.width + gap`, so snapping only the extent leaves
+            // that origin fractional whenever the gap is. At the very common 125% desktop scale a 6 point
+            // gap is 7.5 device pixels, and 175% makes it 10.5 -- users on exactly those scales would have
+            // seen the #2040 artifact survive in the right/bottom pane. Floored rather than rounded so the
+            // gap never outgrows what the solver counted (see root.snapGapToDevice).
             handle: Item {
                 id: splitHandle
                 objectName: "splitHandle"
 
                 readonly property bool sideBySide: splitView.orientation === Qt.Horizontal
-                readonly property real thickness: root.snapToDevice(
+                readonly property real thickness: root.snapGapToDevice(
                     sideBySide ? chromeStyle.space.paneGap : chromeStyle.space.paneGapRows, splitView.dprSnap)
                 // The hit area's own hover counts too: SplitHandle.hovered follows the SplitView's
                 // hoverEnabled, which a platform without hover effects leaves off.
@@ -154,11 +168,13 @@ FocusScope {
                 implicitHeight: sideBySide ? splitView.height : thickness
                 containmentMask: hitArea
 
+                // Minimal draws its split line; Comfortable's gap is the root's backdrop showing through, so
+                // filling it again would composite a translucent profile's gap twice.
                 Rectangle {
+                    objectName: "splitLine"
                     anchors.fill: parent
-                    visible: splitHandle.lineGlyph === ""
-                    color: chromeStyle.density === "minimal"
-                        ? chromeStyle.colors.paneSplitLine : chromeStyle.colors.paneGapFill
+                    visible: splitHandle.lineGlyph === "" && chromeStyle.density === "minimal"
+                    color: chromeStyle.colors.paneSplitLine
                     opacity: root.backdropSession ? root.backdropSession.opacity : 1.0
                 }
 
@@ -191,18 +207,27 @@ FocusScope {
                     Behavior on opacity { NumberAnimation { duration: chromeStyle.motion.fast } }
                 }
 
-                Repeater {
-                    model: splitHandle.lineGlyph === "" ? 0
-                        : Math.ceil(splitHandle.sideBySide ? splitHandle.height / chromeStyle.cellHeight
-                                                           : splitHandle.width / chromeStyle.cellWidth)
-                    delegate: Text {
-                        required property int index
-                        objectName: "splitLineGlyph"
-                        x: splitHandle.sideBySide ? 0 : index * chromeStyle.cellWidth
-                        y: splitHandle.sideBySide ? index * chromeStyle.cellHeight : 0
-                        text: splitHandle.lineGlyph
-                        font: chromeStyle.font
-                        color: splitHandle.engaged ? splitView.palette.highlight : chromeStyle.colors.paneSplitLine
+                // Clipped to the handle, as the last glyph overhangs it; the handle itself is not clipped,
+                // since its hit area overhangs it on purpose.
+                Item {
+                    objectName: "splitLineGlyphs"
+                    anchors.fill: parent
+                    clip: true
+
+                    Repeater {
+                        model: splitHandle.lineGlyph === "" ? 0
+                            : Math.ceil(splitHandle.sideBySide ? splitHandle.height / chromeStyle.cellHeight
+                                                               : splitHandle.width / chromeStyle.cellWidth)
+                        delegate: Text {
+                            required property int index
+                            objectName: "splitLineGlyph"
+                            x: splitHandle.sideBySide ? 0 : index * chromeStyle.cellWidth
+                            y: splitHandle.sideBySide ? index * chromeStyle.cellHeight : 0
+                            text: splitHandle.lineGlyph
+                            font: chromeStyle.font
+                            // The grabber's colour is the row's accent (the Terminal row draws no grabber).
+                            color: splitHandle.engaged ? chromeStyle.colors.paneGrabber : chromeStyle.colors.paneSplitLine
+                        }
                     }
                 }
             }

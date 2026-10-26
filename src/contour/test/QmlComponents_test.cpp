@@ -31,8 +31,10 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabColorScheme.hpp>
+#include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/shell/ScrollbarMarks.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
@@ -83,6 +85,7 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
+#include <vtworkspace/Primitives.hpp>
 
 using contour::test::MockPaneProxy;
 using contour::test::MockSession;
@@ -3717,13 +3720,6 @@ namespace
 [[nodiscard]] QQuickItem* findItemNamed(QQuickItem const& root, QString const& objectName);
 [[nodiscard]] qreal chromeToken(QQmlEngine& engine, char const* group, char const* name);
 
-/// A split's axis as MockPaneProxy::orientation carries it (vtworkspace::SplitState).
-enum class SplitAxis : std::uint8_t
-{
-    Stacked = 1,
-    SideBySide = 2,
-};
-
 /// A split of two leaves, each with its own session, on one token row and density, in a 400 x 300 window.
 struct SplitHost
 {
@@ -3737,7 +3733,9 @@ struct SplitHost
                           new MockPaneProxy(/*leaf*/ true) };
     std::unique_ptr<QObject> paneNode;
 
-    SplitHost(contour::config::ChromeStyle row, contour::config::ChromeDensity density, SplitAxis axis)
+    SplitHost(contour::config::ChromeStyle row,
+              contour::config::ChromeDensity density,
+              vtworkspace::SplitState axis)
     {
         qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
         engine.rootContext()->setContextProperty("terminalSessions", &controller);
@@ -3806,28 +3804,21 @@ struct SplitHost
     }
 };
 
-/// The densities the handle cases run under, with the gap edge a press inside a card must still grab from.
-struct DensityCase
-{
-    contour::config::ChromeDensity density {};
-    int insideCard = 0; ///< How far inside the first card, in points, a press still grabs the divider.
-};
-constexpr auto HandleDensities = std::array {
-    DensityCase { .density = contour::config::ChromeDensity::Comfortable, .insideCard = 1 },
-    DensityCase { .density = contour::config::ChromeDensity::Minimal, .insideCard = 3 },
-};
+/// The densities the handle cases run under.
+constexpr auto HandleDensities =
+    std::array { contour::config::ChromeDensity::Comfortable, contour::config::ChromeDensity::Minimal };
 } // namespace
 
 TEST_CASE("split handle: the handle is the gap, and its hit area is wider (offscreen)",
           "[contour][gui][qml][split][handle]")
 {
     using contour::config::ChromeStyle;
-    auto const [density, insideCard] = GENERATE(from_range(HandleDensities));
+    auto const density = GENERATE(from_range(HandleDensities));
     CAPTURE(static_cast<int>(density));
 
     SECTION("side by side")
     {
-        auto host = SplitHost(ChromeStyle::MacOS, density, SplitAxis::SideBySide);
+        auto host = SplitHost(ChromeStyle::MacOS, density, vtworkspace::SplitState::Vertical);
         auto const gap = host.token("space", "paneGap");
         auto const hit = host.token("space", "splitHit");
         auto const& handle = host.required("splitHandle");
@@ -3836,6 +3827,9 @@ TEST_CASE("split handle: the handle is the gap, and its hit area is wider (offsc
         CHECK(hitArea.width() == hit);
         CHECK(hitArea.x() == (gap - hit) / 2);
         CHECK(hitArea.height() == handle.height());
+
+        // Only Minimal draws a line; Comfortable's gap is the root's backdrop showing through.
+        CHECK(host.required("splitLine").isVisible() == (density == contour::config::ChromeDensity::Minimal));
 
         // The layout ignores the hit area: the second card starts one gap after the first.
         auto const& first = host.required("splitFirst");
@@ -3846,7 +3840,7 @@ TEST_CASE("split handle: the handle is the gap, and its hit area is wider (offsc
 
     SECTION("stacked")
     {
-        auto host = SplitHost(ChromeStyle::MacOS, density, SplitAxis::Stacked);
+        auto host = SplitHost(ChromeStyle::MacOS, density, vtworkspace::SplitState::Horizontal);
         auto const& handle = host.required("splitHandle");
         auto const& hitArea = host.required("splitHitArea");
         CHECK(handle.height() == host.token("space", "paneGapRows"));
@@ -3859,7 +3853,7 @@ TEST_CASE("split handle: the grabber shows on hover (offscreen)", "[contour][gui
 {
     auto host = SplitHost(contour::config::ChromeStyle::MacOS,
                           contour::config::ChromeDensity::Comfortable,
-                          SplitAxis::SideBySide);
+                          vtworkspace::SplitState::Vertical);
     auto const& grabber = host.required("splitGrabber");
     CHECK_FALSE(grabber.isVisible());
 
@@ -3872,14 +3866,18 @@ TEST_CASE("split handle: the grabber shows on hover (offscreen)", "[contour][gui
 TEST_CASE("split handle: a press inside a card's edge drags the divider (offscreen)",
           "[contour][gui][qml][split][handle]")
 {
-    auto const [density, insideCard] = GENERATE(from_range(HandleDensities));
+    auto const density = GENERATE(from_range(HandleDensities));
     CAPTURE(static_cast<int>(density));
-    auto host = SplitHost(contour::config::ChromeStyle::MacOS, density, SplitAxis::SideBySide);
+    auto host = SplitHost(contour::config::ChromeStyle::MacOS, density, vtworkspace::SplitState::Vertical);
     auto* splitView = findSplitView(&host.root());
     REQUIRE(splitView != nullptr);
 
+    // Half a point inside the edge of the hit area's overhang into the first card: 1.5 pt on the
+    // comfortable row (10 around 6), 3 pt on Minimal (8 around 1).
+    auto const overhang = (host.token("space", "splitHit") - host.token("space", "paneGap")) / 2;
+    REQUIRE(overhang > 1);
     auto const& handle = host.required("splitHandle");
-    auto const press = SplitHost::inWindow(handle, { -static_cast<qreal>(insideCard), handle.height() / 2 });
+    auto const press = SplitHost::inWindow(handle, { 0.5 - overhang, handle.height() / 2 });
     QTest::mousePress(&host.window, Qt::LeftButton, Qt::NoModifier, press);
     CHECK(splitView->property("resizing").toBool());
     for (auto const step: std::views::iota(1, 5))
@@ -3894,9 +3892,9 @@ TEST_CASE("split handle: a press inside a card's edge drags the divider (offscre
 TEST_CASE("split handle: the scrollbar's centre still scrolls (offscreen)",
           "[contour][gui][qml][split][handle]")
 {
-    auto const [density, insideCard] = GENERATE(from_range(HandleDensities));
+    auto const density = GENERATE(from_range(HandleDensities));
     CAPTURE(static_cast<int>(density));
-    auto host = SplitHost(contour::config::ChromeStyle::MacOS, density, SplitAxis::SideBySide);
+    auto host = SplitHost(contour::config::ChromeStyle::MacOS, density, vtworkspace::SplitState::Vertical);
     host.leftSession.setScrollbarRight(true);
     host.leftSession.setScrollbarVisible(true);
     host.leftSession.setHistoryLineCount(1000);
@@ -3948,7 +3946,7 @@ TEST_CASE("split handle: the root inset and backdrop appear only when split (off
     {
         auto host = SplitHost(contour::config::ChromeStyle::MacOS,
                               contour::config::ChromeDensity::Comfortable,
-                              SplitAxis::SideBySide);
+                              vtworkspace::SplitState::Vertical);
         auto const inset = host.token("space", "paneInset");
         REQUIRE(inset > 0);
         auto const& backdrop = host.required("splitBackdrop");
@@ -3974,37 +3972,71 @@ TEST_CASE("split handle: the Terminal row draws the split as a line of box glyph
 
     SECTION("side by side: one cell wide, a vertical line")
     {
-        auto host = SplitHost(ChromeStyle::Terminal, ChromeDensity::Comfortable, SplitAxis::SideBySide);
+        auto host =
+            SplitHost(ChromeStyle::Terminal, ChromeDensity::Comfortable, vtworkspace::SplitState::Vertical);
         auto const& handle = host.required("splitHandle");
-        // One cell, on whole device pixels.
-        CHECK(handle.width() == Catch::Approx(host.style().property("cellWidth").toReal()).margin(0.5));
+        // One cell, floored to whole device pixels.
+        auto const cellWidth = host.style().property("cellWidth").toReal();
+        CHECK(handle.width() <= cellWidth);
+        CHECK(handle.width() > cellWidth - 1);
+        CHECK(host.required("splitHitArea").width() >= handle.width());
         auto const& glyph = host.required("splitLineGlyph");
         CHECK(glyph.property("text").toString() == QString::fromUtf8(glyphs[0]));
         CHECK_FALSE(host.required("splitGrabber").isVisible());
+
+        // The glyphs are clipped to the handle, which the last one overhangs.
+        auto const& line = host.required("splitLineGlyphs");
+        CHECK(line.clip());
+        CHECK(line.size() == handle.size());
+
+        // The line takes the row's accent (its grabber colour) while engaged.
+        auto* colors = host.style().property("colors").value<QObject*>();
+        REQUIRE(colors != nullptr);
+        QTest::mouseMove(&host.window, QPoint { 20, 20 }); // inside the first card, off the handle
+        CHECK(QTest::qWaitFor([&] {
+            return glyph.property("color").value<QColor>()
+                   == colors->property("paneSplitLine").value<QColor>();
+        }));
+        QTest::mouseMove(&host.window, host.gapCentre());
+        CHECK(QTest::qWaitFor([&] {
+            return glyph.property("color").value<QColor>() == colors->property("paneGrabber").value<QColor>();
+        }));
     }
 
     SECTION("stacked: one cell high, a horizontal line")
     {
-        auto host = SplitHost(ChromeStyle::Terminal, ChromeDensity::Comfortable, SplitAxis::Stacked);
+        auto host =
+            SplitHost(ChromeStyle::Terminal, ChromeDensity::Comfortable, vtworkspace::SplitState::Horizontal);
         auto const& handle = host.required("splitHandle");
-        CHECK(handle.height() == Catch::Approx(host.style().property("cellHeight").toReal()).margin(0.5));
+        auto const cellHeight = host.style().property("cellHeight").toReal();
+        CHECK(handle.height() <= cellHeight);
+        CHECK(handle.height() > cellHeight - 1);
+        // The row's split hit is one cell WIDE, narrower than a stacked gap one cell HIGH: the hit area
+        // never shrinks what grabs the divider below the gap itself.
+        CHECK(host.required("splitHitArea").height() >= handle.height());
         auto const& glyph = host.required("splitLineGlyph");
         CHECK(glyph.property("text").toString() == QString::fromUtf8(glyphs[1]));
     }
 }
 
-TEST_CASE("split handle: the gap snaps to whole device pixels at fractional scales (offscreen)",
+TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fractional scales (offscreen)",
           "[contour][gui][qml][split][handle]")
 {
-    // #2040: the second card's origin is `first + gap`, so both must land on the device-pixel grid. The
-    // offscreen screen's ratio is 1, so the snap the handle and the first card share is asked directly.
-    auto host = SplitHost(contour::config::ChromeStyle::MacOS,
-                          contour::config::ChromeDensity::Comfortable,
-                          SplitAxis::SideBySide);
-    auto const snap = [&host](qreal logical, qreal dpr) {
+    // #2040: the second card's origin is `inset + first + gap`, so all three must land on the device-pixel
+    // grid; and the inset and gap are floored, so the canvas never spends more than the window-size solver
+    // counts for them (splitChromeOf, which rounds the same snap up). The offscreen screen's ratio is 1, so
+    // the snaps PaneNode shares are asked directly.
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    auto const [row, density] = GENERATE(std::pair { ChromeStyle::MacOS, ChromeDensity::Comfortable },
+                                         std::pair { ChromeStyle::MacOS, ChromeDensity::Minimal },
+                                         std::pair { ChromeStyle::Terminal, ChromeDensity::Comfortable });
+    CAPTURE(static_cast<int>(row), static_cast<int>(density));
+    auto host = SplitHost(row, density, vtworkspace::SplitState::Vertical);
+    auto const call = [&host](char const* function, qreal logical, qreal dpr) {
         QVariant result;
         REQUIRE(QMetaObject::invokeMethod(&host.root(),
-                                          "snapToDevice",
+                                          function,
                                           Q_RETURN_ARG(QVariant, result),
                                           Q_ARG(QVariant, logical),
                                           Q_ARG(QVariant, dpr)));
@@ -4013,16 +4045,35 @@ TEST_CASE("split handle: the gap snaps to whole device pixels at fractional scal
     auto const isWhole = [](qreal value) {
         return std::abs(value - std::round(value)) < 1e-9;
     };
+    auto const ceilOf = [](qreal value) {
+        return static_cast<int>(std::ceil(value - 1e-9));
+    };
+    auto const* provider = qobject_cast<contour::window::UiStyleProvider const*>(&host.style());
+    REQUIRE(provider != nullptr);
 
-    auto const gap = host.token("space", "paneGap");
-    for (auto const dpr: { 1.25, 1.75 })
+    for (auto const dpr: { 1.0, 1.25, 1.75 })
     {
         CAPTURE(dpr);
-        auto const first = snap(400 * 0.5, dpr);
-        auto const snappedGap = snap(gap, dpr);
-        CHECK(isWhole(snappedGap * dpr));
-        CHECK(isWhole((first + snappedGap) * dpr));
-        CHECK(std::abs(snappedGap - gap) <= (0.5 / dpr) + 1e-9);
+        auto const chrome = contour::window::splitChromeOf(
+            provider->resolvedRow(), provider->units().horizontal, provider->units().vertical, dpr);
+        auto const inset = call("snapGapToDevice", host.token("space", "paneInset"), dpr);
+        auto const gap = call("snapGapToDevice", host.token("space", "paneGap"), dpr);
+        auto const stackedGap = call("snapGapToDevice", host.token("space", "paneGapRows"), dpr);
+        auto const first = call("snapToDevice", (host.root().width() - (2 * inset)) * 0.5, dpr);
+
+        CHECK(isWhole(inset * dpr));
+        CHECK(isWhole((inset + first) * dpr));
+        CHECK(isWhole((inset + first + gap) * dpr));
+        CHECK(gap * dpr >= 1); // never floored away
+
+        // What is drawn never exceeds what the solver counts, per axis -- and the solver counts exactly
+        // that, rounded up to a whole logical pixel.
+        CHECK(gap <= chrome.sideBySideGap);
+        CHECK(stackedGap <= chrome.stackedGap);
+        CHECK(inset <= chrome.rootInset);
+        CHECK(ceilOf(gap) == chrome.sideBySideGap);
+        CHECK(ceilOf(stackedGap) == chrome.stackedGap);
+        CHECK(ceilOf(inset) == chrome.rootInset);
     }
 }
 

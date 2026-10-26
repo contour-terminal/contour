@@ -555,9 +555,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// What a split tree spends around its leaves, for the window-size solver: the published provider's
     /// resolved tokens in its own units, or -- before the GUI exists, or headless -- the configured row
-    /// resolved against the density and the accessibility preferences, one logical pixel per unit.
+    /// resolved against the density and the accessibility preferences, one logical pixel per unit. The
+    /// gaps and the inset are counted as PaneNode.qml draws them on @p devicePixelRatio's grid.
+    /// @param devicePixelRatio The ratio of the window being sized; positive.
     /// @return The gaps per axis, the pane header and the cards' inset, in logical pixels.
-    [[nodiscard]] vtworkspace::SplitChrome splitChrome() const;
+    [[nodiscard]] vtworkspace::SplitChrome splitChrome(double devicePixelRatio) const;
 
     /// @return The OS appearance as the injected source reports it now.
     [[nodiscard]] platform::PlatformAppearance platformAppearance() const;

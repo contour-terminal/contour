@@ -2276,7 +2276,7 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
     REQUIRE(tab->rootPane()->first()->session() == h.session->modelSessionId());
     h.pump();
 
-    auto const chrome = h.testApp.app().splitChrome();
+    auto const chrome = h.testApp.app().splitChrome(h.window->devicePixelRatio());
     REQUIRE(controller.resizeWindowForPage(*h.display, page));
     h.pump();
     CHECK(h.window->width() == (2 * leafExtent.width()) + (2 * chrome.rootInset));
