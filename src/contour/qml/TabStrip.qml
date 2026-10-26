@@ -32,7 +32,7 @@ Row {
     readonly property real fixedWidth: hostBadge.width + newTabButton.width + newTabMenuButton.width
 
     // The QML-facing carve-out of the shape token: whether the tabs are pills in a well.
-    readonly property bool pill: chromeStyle.layout.tabShape === chromeStyle.layout.pill
+    readonly property bool pill: chromeStyle.layout.isPill
     // The well's widths for the tabs there are: { tabWidth, wellWidth, label, scrolls }.
     readonly property var wellLayout: chromeStyle.tabWellLayout(root.availableWidth, list.count)
 
@@ -46,10 +46,13 @@ Row {
     }
     onWellLayoutChanged: Qt.callLater(root.revealActiveTab)
 
-    // Maps a cursor x (in list content coordinates) to the tab slot the dragged tab would drop into:
-    // slot i means "before tab i" (so dropping past the midpoint of tab i lands after it). Returns a
-    // value in [0, count]. Kept a pure function so the drop math is obvious and reviewable.
-    function dropIndexFor(x) {
+    // Maps a cursor x (in the drop area's coordinates, what a DropArea's drag reports) to the tab slot
+    // the dragged tab would drop into: slot i means "before tab i" (so dropping past the midpoint of tab
+    // i lands after it). Returns a value in [0, count]. A scrolled well's tabs sit at their CONTENT
+    // positions, so the visible x is shifted by how far the list has scrolled before it is compared.
+    // Kept a pure function so the drop math is obvious and reviewable.
+    function dropIndexFor(areaX) {
+        var x = areaX - list.x + list.contentX
         var count = list.count
         for (var i = 0; i < count; ++i) {
             var item = list.itemAtIndex(i)
@@ -61,7 +64,7 @@ Row {
         return count
     }
 
-    // The x position of the insertion caret for a given drop slot: the left edge of the tab at that
+    // The content x of the insertion caret for a given drop slot: the left edge of the tab at that
     // slot, or the right edge of the last tab when the slot is past the end.
     function dropIndexToX(index) {
         var count = list.count
@@ -73,6 +76,12 @@ Row {
         }
         var item = list.itemAtIndex(index)
         return item ? item.x : 0
+    }
+
+    // Where the caret for drop slot @p index stands, in the drop area's coordinates: the slot's content
+    // position, moved back by the scroll, so the caret is on the visible tab edge it names.
+    function caretX(index) {
+        return root.dropIndexToX(index) - list.contentX + list.x
     }
 
     // The remote host this window's sessions run on (`contour client --host`), at the strip's leading edge,
@@ -197,8 +206,8 @@ Row {
             height: parent.height
             color: palette.highlight
             visible: dropArea.containsDrag
-            // Center the bar on the slot boundary (dropIndexToX gives the boundary x).
-            x: root.dropIndexToX(dropArea.hoverIndex) - width / 2
+            // Center the bar on the slot boundary (caretX gives the boundary x).
+            x: root.caretX(dropArea.hoverIndex) - width / 2
             z: 2
         }
 

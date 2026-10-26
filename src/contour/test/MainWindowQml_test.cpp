@@ -46,6 +46,7 @@
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -1025,8 +1026,151 @@ TEST_CASE("a coloured pill is tinted at 20 % and its icon at 100 % (offscreen)",
         INFO("painted: " << painted.name().toStdString() << " expected: " << fill.name().toStdString());
         CHECK(contrastOf(over(labelColor, painted), painted) >= contour::config::MinimumTextContrast);
 
+        // Hovered, the tint lies over the hover fill instead, and the label still reads on it.
+        auto const centre = tab.mapToScene(QPointF(tab.width() / 2, tab.height() / 2));
+        QTest::mouseMove(window, centre.toPoint());
+        REQUIRE(QTest::qWaitFor([&] { return tab.property("closeShown").toBool(); }, 1000));
+        auto const hoveredExpected =
+            evaluateIn(tab,
+                       QStringLiteral(
+                           "Qt.tint(Qt.tint(Qt.tint(systemPalette.window, chromeStyle.colors.tabWellFill), "
+                           "chromeStyle.colors.tabHoverFill), Qt.rgba(%1, %2, %3, chromeStyle.tint.tab))")
+                           .arg(color.redF())
+                           .arg(color.greenF())
+                           .arg(color.blueF()))
+                .value<QColor>();
+        auto const hoveredFill = part(tab, QStringLiteral("tabBackground")).property("color").value<QColor>();
+        CHECK(hoveredFill.rgba() == hoveredExpected.rgba());
+        CHECK(hoveredFill.rgba() != fill.rgba());
+        auto const hoveredLabel = label.property("color").value<QColor>();
+        CHECK(hoveredLabel.rgba()
+              == styleGroup(engine, "colors").property("tabTextTinted").value<QColor>().rgba());
+        QCoreApplication::processEvents();
+        auto const hoveredImage = window->grabWindow();
+        REQUIRE_FALSE(hoveredImage.isNull());
+        auto const hoveredPainted = hoveredImage.pixelColor(probe.toPoint());
+        INFO("hovered painted: " << hoveredPainted.name().toStdString());
+        CHECK(contrastOf(over(hoveredLabel, hoveredPainted), hoveredPainted)
+              >= contour::config::MinimumTextContrast);
+
         CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     }
+}
+
+TEST_CASE("a pill's labels dim one level while its window is in the background (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 2 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 2);
+    auto const& colors = styleGroup(engine, "colors");
+    auto const labelOf = [](QQuickItem const& tab) {
+        return part(tab, QStringLiteral("tabLabel")).property("color").value<QColor>().rgba();
+    };
+    auto const role = [&](char const* name) {
+        return colors.property(name).value<QColor>().rgba();
+    };
+
+    window->requestActivate();
+    REQUIRE(QTest::qWaitForWindowActive(window));
+    CHECK(labelOf(*tabs[0]) == role("tabTextActive"));
+    CHECK(labelOf(*tabs[1]) == role("tabText"));
+
+    // Another window takes the focus: each label goes one level down.
+    QQuickWindow other;
+    other.resize(200, 200);
+    other.show();
+    other.requestActivate();
+    REQUIRE(QTest::qWaitForWindowActive(&other));
+    REQUIRE(QTest::qWaitFor([&] { return labelOf(*tabs[0]) == role("tabText"); }, 1000));
+    CHECK(labelOf(*tabs[1]) == role("tabTextDimmed"));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a drop in a scrolled well lands under the pointer (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    constexpr auto TabCount = 30; // more than fit icon-only in 900 pixels, so the well scrolls
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = TabCount, .activeTab = TabCount - 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root, 900);
+
+    auto* strip = root->findChild<QQuickItem*>(QStringLiteral("tabStrip"));
+    auto* list = root->findChild<QQuickItem*>(QStringLiteral("tabList"));
+    REQUIRE(strip != nullptr);
+    REQUIRE(list != nullptr);
+    auto* area = list->parentItem(); // the DropArea's coordinates
+    REQUIRE(area != nullptr);
+    REQUIRE(QTest::qWaitFor([&] { return list->property("contentX").toReal() > 0; }, 1000)); // scrolled
+
+    auto const tabs = tabDelegates(*root);
+    auto checked = 0;
+    for (auto const index: std::views::iota(0, TabCount))
+    {
+        auto const* tab = tabs[static_cast<std::size_t>(index)];
+        if (tab == nullptr)
+            continue;
+        auto const visibleLeft = tab->mapToItem(list, QPointF(0, 0)).x();
+        if (visibleLeft < 0 || visibleLeft + tab->width() > list->width())
+            continue; // only tabs fully in the well's view
+        ++checked;
+        INFO("tab " << index);
+        // A quarter into the tab is before its midpoint: the slot before it.
+        auto const pointer = tab->mapToItem(area, QPointF(tab->width() / 4, tab->height() / 2));
+        auto slot = QVariant {};
+        REQUIRE(QMetaObject::invokeMethod(
+            strip, "dropIndexFor", Q_RETURN_ARG(QVariant, slot), Q_ARG(QVariant, pointer.x())));
+        CHECK(slot.toInt() == index);
+        // The caret for that slot stands at the tab's left edge, inside the visible well.
+        auto caret = QVariant {};
+        REQUIRE(QMetaObject::invokeMethod(
+            strip, "caretX", Q_RETURN_ARG(QVariant, caret), Q_ARG(QVariant, index)));
+        CHECK(caret.toReal() == Catch::Approx(tab->mapToItem(area, QPointF(0, 0)).x()));
+        CHECK(caret.toReal() >= list->x());
+        CHECK(caret.toReal() <= list->x() + list->width());
+    }
+    CHECK(checked > 0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("an icon-only pill renames in the open (offscreen)", "[contour][gui][qml][mainwindow][tabwell]")
+{
+    constexpr auto TabCount = 20;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = TabCount, .activeTab = TabCount - 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root, 900);
+
+    auto const tabs = tabDelegates(*root);
+    auto* tab = tabs.back();
+    REQUIRE(tab != nullptr);
+    REQUIRE(tab->property("iconOnly").toBool());
+    // An icon-only pill has no room for a close button, active or not.
+    CHECK_FALSE(part(*tab, QStringLiteral("tabCloseButton")).isVisible());
+
+    emit controller.tabTitleEditRequested(TabCount - 1); // what SetTabTitle asks of the active tab
+    QQuickItem* field = nullptr;
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            field = tab->findChild<QQuickItem*>(QStringLiteral("tabRenameField"));
+            return field != nullptr;
+        },
+        1000));
+    CHECK(field->isVisible());
+    CHECK(field->width() > 0);
+    CHECK(field->width() >= tab->width() - (2 * styleGroup(engine, "space").property("s1").toReal()) - 1);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 TEST_CASE("the Terminal row draws one cell-high tabs with glyph badges (offscreen)",

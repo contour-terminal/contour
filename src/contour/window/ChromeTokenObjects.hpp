@@ -291,6 +291,8 @@ class ChromeMotionTokens: public QObject
     Q_PROPERTY(int pulse READ pulse CONSTANT)
     Q_PROPERTY(int style READ style CONSTANT)
     Q_PROPERTY(int full READ full CONSTANT)
+    // A bool for QML, the documented QML-facing carve-out: whether anything spins or pulses at all.
+    Q_PROPERTY(bool animates READ animates CONSTANT)
     Q_PROPERTY(int crossFade READ crossFade CONSTANT)
 
   public:
@@ -316,6 +318,8 @@ class ChromeMotionTokens: public QObject
 
     /// @return The QML names of config::MotionStyle's enumerators.
     [[nodiscard]] static constexpr int full() noexcept { return static_cast<int>(config::MotionStyle::Full); }
+    /// @return Whether the chrome runs its spinners and pulses: false under Reduce Motion (CrossFade).
+    [[nodiscard]] bool animates() const noexcept { return _tokens.style == config::MotionStyle::Full; }
     [[nodiscard]] static constexpr int crossFade() noexcept
     {
         return static_cast<int>(config::MotionStyle::CrossFade);
@@ -499,6 +503,9 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int tabShape READ tabShape CONSTANT)
     Q_PROPERTY(int flat READ flat CONSTANT)
     Q_PROPERTY(int pill READ pill CONSTANT)
+    // A bool for QML, the documented QML-facing carve-out: the one place the shape is compared, so the
+    // tab, the strip and the badge slot cannot disagree on it.
+    Q_PROPERTY(bool isPill READ isPill CONSTANT)
     Q_PROPERTY(int profileMenu READ profileMenu CONSTANT)
     Q_PROPERTY(int caret READ caret CONSTANT)
     Q_PROPERTY(int secondaryClick READ secondaryClick CONSTANT)
@@ -529,6 +536,8 @@ class ChromeLayoutTokens: public QObject
     /// @return The QML names of config::TabShape's enumerators.
     [[nodiscard]] static constexpr int flat() noexcept { return static_cast<int>(config::TabShape::Flat); }
     [[nodiscard]] static constexpr int pill() noexcept { return static_cast<int>(config::TabShape::Pill); }
+    /// @return Whether the tabs are pills in a well (config::TabShape::Pill).
+    [[nodiscard]] bool isPill() const noexcept { return _tokens.tabShape == config::TabShape::Pill; }
 
     /// @return How the profile menu is reached, a config::ProfileMenuAffordance as its underlying value.
     [[nodiscard]] int profileMenu() const noexcept { return static_cast<int>(_tokens.profileMenu); }

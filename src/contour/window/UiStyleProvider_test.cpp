@@ -893,6 +893,32 @@ TEST_CASE("UiStyleProvider: the active tab's font is bold only where the row set
     }
 }
 
+TEST_CASE("UiStyleProvider: the shape and motion flags QML reads follow the tokens", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+    for (auto const index: std::views::iota(std::size_t { 0 }, contour::config::detail::ChromeStyleCount))
+    {
+        CAPTURE(index);
+        auto provider = UiStyleProvider(chromeInputsFor(static_cast<ChromeStyle>(index), font));
+        auto const* layout = provider.layout();
+        auto const* motion = provider.motion();
+        REQUIRE(layout != nullptr);
+        REQUIRE(motion != nullptr);
+        CHECK(
+            layout->property("isPill").toBool()
+            == (contour::config::ChromeTokenRows[index].layout.tabShape == contour::config::TabShape::Pill));
+        CHECK(motion->property("animates").toBool()); // no row reduces motion of its own accord
+    }
+
+    auto inputs = chromeInputsFor(ChromeStyle::MacOS, font);
+    inputs.accessibility.motion = contour::config::MotionPreference::Reduced;
+    auto reduced = UiStyleProvider(inputs);
+    CHECK_FALSE(reduced.motion()->property("animates").toBool());
+}
+
 TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;

@@ -1585,9 +1585,9 @@ TEST_CASE("A TabItem shows its badge and gives it back its width when there is n
 
     // Working (3): spins without a progress, stands at the angle of one.
     tab->setProperty("tabBadge", static_cast<int>(TabBadgeKind::Working));
-    CHECK(glyph->property("spinning").toBool());
+    CHECK(badge->property("spinning").toBool());
     tab->setProperty("tabBadgeProgress", 50);
-    CHECK_FALSE(glyph->property("spinning").toBool());
+    CHECK_FALSE(badge->property("spinning").toBool());
     CHECK(glyph->rotation() == 180.0);
 
     // A kind this build does not know draws nothing.

@@ -50,19 +50,19 @@ Item {
     // once the well is too narrow for labels. The Flat shape always shows its label.
     property string labelMode: "full"
 
-    // The QML-facing carve-out of the shape token: which of the two drawings this tab is.
-    readonly property bool pill: chromeStyle.layout.tabShape === chromeStyle.layout.pill
+    // Which of the two drawings this tab is (the style's one QML-facing shape flag).
+    readonly property bool pill: chromeStyle.layout.isPill
     readonly property bool iconOnly: root.pill && root.labelMode === "iconOnly"
     // Whether the fill and the label come from the chrome colour roles rather than the OS palette: the
     // pills and the Terminal row do, so a scheme's legible selection pair is what the active tab wears.
     readonly property bool roleColors: chromeStyle.layout.tabColors === chromeStyle.layout.roles
     readonly property var colors: chromeStyle.colors
 
-    // Whether the chrome animates at all: under Reduce Motion nothing spins or pulses.
-    readonly property bool fullMotion: chromeStyle.motion.style === chromeStyle.motion.full
     readonly property bool hasBadge: badgeSlot.known
     // The close button shows on every Flat tab, and on a pill only while it is active or hovered and has
-    // the room for one.
+    // the room for one. A hidden button is hidden from assistive technology too, so an inactive or an
+    // icon-only pill offers no "Close tab" there; closing it stays reachable through its context menu and
+    // the keyboard (the CloseTab action on the tab once activated).
     readonly property bool closeShown: !root.pill || (!root.iconOnly && (root.tabActive || hover.hovered))
     // The gap between the parts of a tab: the kit's 6 between a pill's icon, title, badge and close.
     readonly property real partGap: root.pill ? chromeStyle.space.s3 : chromeStyle.labelGap
@@ -255,7 +255,7 @@ Item {
         anchors.left: parent.left
         anchors.leftMargin: chromeStyle.space.s5
         anchors.verticalCenter: parent.verticalCenter
-        visible: root.pill && !(root.iconOnly && root.hasBadge)
+        visible: root.pill && !(root.iconOnly && (root.hasBadge || renameLoader.active))
         width: root.pill ? chromeStyle.size.tabIcon : 0
         height: width
         radius: chromeStyle.radii.tabIcon
@@ -302,7 +302,7 @@ Item {
             radius: progressTrack.radius
 
             SequentialAnimation on opacity {
-                running: root.tabProgressState === 3 && root.fullMotion
+                running: root.tabProgressState === 3 && chromeStyle.motion.animates
                 loops: Animation.Infinite
                 // Restores full opacity when the state leaves Indeterminate mid-cycle; without it the
                 // bar would keep whatever opacity the animation was stopped at. Addressed by id: an
@@ -480,12 +480,14 @@ Item {
         // Collapse to nothing — width AND margin — when not zoomed. The label anchors to this item's
         // left edge, so anything it still occupies is stolen from every tab's title, zoomed or not:
         // a fixed margin here would elide the title 4px early on tabs that have no badge at all.
-        anchors.rightMargin: root.tabZoomed ? root.partGap : 0
+        anchors.rightMargin: zoomBadge.shown ? root.partGap : 0
         anchors.verticalCenter: parent.verticalCenter
-        width: root.tabZoomed ? chromeStyle.badgeWidth : 0
+        width: zoomBadge.shown ? chromeStyle.badgeWidth : 0
         height: chromeStyle.badgeHeight
         radius: chromeStyle.radius
-        visible: root.tabZoomed
+        visible: zoomBadge.shown
+        // An icon-only pill has no room for it.
+        readonly property bool shown: root.tabZoomed && !root.iconOnly
         // Tinted from the tab's own foreground, so the badge tracks the active/inactive and
         // colored/uncolored variants instead of hardcoding a color per theme.
         color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
@@ -502,13 +504,17 @@ Item {
     Loader {
         id: renameLoader
         active: false
-        anchors.left: root.pill ? icon.right : colorCell.right
-        anchors.leftMargin: label.anchors.leftMargin
-        anchors.right: badgeSlot.left
-        anchors.rightMargin: root.partGap
+        // Where the label is; an icon-only pill has no label to stand in for, so the field takes the
+        // whole pill but its well padding (and the icon makes way, see there) rather than the negative
+        // width between the icon and the badge.
+        anchors.left: root.iconOnly ? parent.left : root.pill ? icon.right : colorCell.right
+        anchors.leftMargin: root.iconOnly ? chromeStyle.space.s1 : label.anchors.leftMargin
+        anchors.right: root.iconOnly ? parent.right : badgeSlot.left
+        anchors.rightMargin: root.iconOnly ? chromeStyle.space.s1 : root.partGap
         anchors.verticalCenter: parent.verticalCenter
         function start() { active = true }
         sourceComponent: TextField {
+            objectName: "tabRenameField"   // findChild() handle for the GUI test
             // Edit the RAW template (e.g. "a: {WindowTitle}"), not the expanded label the tab shows.
             // Empty for a never-renamed tab, so the editor opens blank.
             text: root.tabRawTitle

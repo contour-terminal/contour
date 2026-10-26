@@ -21,8 +21,8 @@ Item {
     // Reads paletteRevision so the ink re-evaluates on a light/dark flip or an accent change.
     readonly property var look: chromeStyle.paletteRevision < 0 ? ({}) : chromeStyle.badgeLook(root.kind)
     readonly property bool known: root.kind > 0 && root.look.glyph !== undefined
-    // The QML-facing carve-out of the shape token: which of the two drawings below is the slot's.
-    readonly property bool pill: chromeStyle.layout.tabShape === chromeStyle.layout.pill
+    // Which of the two drawings below is the slot's.
+    readonly property bool pill: chromeStyle.layout.isPill
     readonly property color ink: root.known ? root.look.ink : "transparent"
     // The ring is Working's mark: with a progress it stands still as a dial of that many degrees.
     readonly property bool working: root.known && root.look.mark === "ring"
@@ -32,7 +32,6 @@ Item {
     // may work for hours in a minimized window, and under Reduce Motion nothing spins.
     readonly property bool windowShown: Window.visibility !== Window.Hidden
                                         && Window.visibility !== Window.Minimized
-    readonly property bool fullMotion: chromeStyle.motion.style === chromeStyle.motion.full
 
     visible: root.known
     implicitWidth: root.known ? root.edge : 0
@@ -47,7 +46,7 @@ Item {
 
         RotationAnimation on rotation {
             objectName: "tabBadgeSpinner"   // findChild() handle for the GUI test
-            running: root.spinning && root.windowShown && root.fullMotion
+            running: root.spinning && root.windowShown && chromeStyle.motion.animates
             loops: Animation.Infinite
             from: 0
             to: 360
@@ -126,7 +125,6 @@ Item {
             text: root.known ? root.look.glyph : ""
             font: chromeStyle.badgeFont
             color: root.ink
-            readonly property bool spinning: root.spinning
             rotation: root.progressAngle
         }
     }
