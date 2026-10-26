@@ -1579,7 +1579,9 @@ constexpr auto LightBackgroundSequence = std::string_view { "\033]11;rgb:fafa/fa
 TEST_CASE("TerminalSessionManager: OSC 11 in the focused session recolours a terminal-themed chrome",
           "[manager][theme][chromefollow]")
 {
-    contour::test::ConfiguredTestApp testApp;
+    // Sessions over mock ptys, as in every case of this group: the app's own factory would spawn a shell
+    // and hand each session the platform's notifier, which on Linux reaches the machine's session bus.
+    contour::test::ConfiguredTestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
     loadTerminalTheme(testApp);
     contour::test::ScopedController const win { testApp.manager() };
 
@@ -1599,7 +1601,7 @@ TEST_CASE("TerminalSessionManager: OSC 11 in the focused session recolours a ter
 TEST_CASE("TerminalSessionManager: OSC 11 in an unfocused session leaves the chrome alone",
           "[manager][theme][chromefollow]")
 {
-    contour::test::ConfiguredTestApp testApp;
+    contour::test::ConfiguredTestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
     loadTerminalTheme(testApp);
     contour::test::ScopedController const win { testApp.manager() };
 
@@ -1627,7 +1629,7 @@ TEST_CASE("TerminalSessionManager: OSC 11 under a forced theme leaves the chrome
     // Only `theme: terminal` follows the background: under `dark`, re-applying would repaint the whole
     // application for the scheme it already shows. Qt skips a palette equal to the current one, so a
     // sentinel palette stands in for the applied one: any re-apply overwrites it.
-    contour::test::ConfiguredTestApp testApp;
+    contour::test::ConfiguredTestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
     loadTheme(testApp, "theme: dark\n", contour::config::GuiTheme::Dark);
     contour::test::ScopedController const win { testApp.manager() };
 
@@ -1648,7 +1650,7 @@ TEST_CASE("TerminalSessionManager: OSC 11 under a forced theme leaves the chrome
 TEST_CASE("TerminalSessionManager: an OSC 11 that keeps the chrome's scheme does not repaint it",
           "[manager][theme][chromefollow]")
 {
-    contour::test::ConfiguredTestApp testApp;
+    contour::test::ConfiguredTestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
     loadTerminalTheme(testApp);
     contour::test::ScopedController const win { testApp.manager() };
 

@@ -29,6 +29,7 @@
 
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch_session.hpp>
+#include <catch2/catch_test_case_info.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 
@@ -77,9 +78,36 @@ class DeferredDeletionDrain final: public Catch::EventListenerBase
     return false;
 }
 
+/// The first test case after which this process ran QtDBus's connection thread; empty while none has.
+///
+/// The thread outlives whatever started it, so the first case to end with it running is the one that
+/// reached a bus -- the run-wide gate in main() names it instead of leaving a bisection by tag to whoever
+/// reads the failure. Written only by SessionBusWitness, on the thread Catch2 runs the cases on.
+/// @return The test case's name.
+[[nodiscard]] std::string& firstCaseOnSessionBus()
+{
+    static auto name = std::string {};
+    return name;
+}
+
+/// Records, in firstCaseOnSessionBus, the first test case that ends with a session bus reached.
+class SessionBusWitness final: public Catch::EventListenerBase
+{
+  public:
+    using Catch::EventListenerBase::EventListenerBase;
+
+    /// Checks the bus after each test case, until one has been found to reach it.
+    void testCaseEnded(Catch::TestCaseStats const& stats) override
+    {
+        if (firstCaseOnSessionBus().empty() && reachedSessionBus())
+            firstCaseOnSessionBus() = stats.testInfo->name;
+    }
+};
+
 } // namespace
 
 CATCH_REGISTER_LISTENER(DeferredDeletionDrain)
+CATCH_REGISTER_LISTENER(SessionBusWitness)
 
 int main(int argc, char* argv[])
 {
@@ -163,7 +191,11 @@ int main(int argc, char* argv[])
         std::cerr << "\n=================================================================\n"
                   << "FAILURE: a test reached the session bus (a QDBusConnection thread is running). Give a\n"
                      "session contour::test::makeTestNotifier(), or run a real-transport case only under\n"
-                     "contour::test::onPrivateSessionBus(). Run the suite by tag to find which test it was.\n"
+                     "contour::test::onPrivateSessionBus().\n"
+                  << "The first test case to end with it running: \""
+                  << (firstCaseOnSessionBus().empty() ? std::string { "(none; it started after the last)" }
+                                                      : firstCaseOnSessionBus())
+                  << "\"\n"
                   << "=================================================================\n";
         return testResult != 0 ? testResult : 1;
     }
