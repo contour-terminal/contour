@@ -17,28 +17,64 @@ namespace
     /// Between the footer's two key hints: "↩ Run · ⎋ Close".
     constexpr auto HintSeparator = std::string_view { " · " };
 
-    /// A row of the listing before it is placed: the entry plus what it is ranked and grouped by.
+    /// A row of the listing before it is placed: the entry plus what it is ranked by.
     struct Candidate
     {
-        PaletteEntry entry {};                            ///< The row as it will be listed.
-        CommandCategory category = CommandCategory::Pane; ///< The group it lands in.
-        int score = 0;                                    ///< The fuzzy score; 0 when unfiltered.
+        PaletteEntry entry {};   ///< The row as it will be listed.
+        int score = 0;           ///< The fuzzy score; 0 when unfiltered.
         std::size_t recency = 0; ///< Position in the recent list; its size when absent (sorts last).
     };
 
-    /// Ranks @p a before @p b: higher score, then more recent, then title.
+    /// One bucket of candidates per CommandCategory.
+    using Buckets = std::array<std::vector<Candidate>, CommandCategoryCount>;
+
+    /// @return The bucket of @p buckets that collects @p category.
+    [[nodiscard]] std::vector<Candidate>& bucketOf(Buckets& buckets, CommandCategory category) noexcept
+    {
+        return buckets[static_cast<std::size_t>(category)];
+    }
+
+    /// A candidate row: @p kind over @p index, titled @p title.
+    /// @param matches The title's matched byte offsets; empty when unfiltered.
+    [[nodiscard]] Candidate candidateOf(PaletteEntryKind kind,
+                                        std::size_t index,
+                                        std::string title,
+                                        std::vector<int> matches = {},
+                                        int score = 0,
+                                        std::size_t recency = 0)
+    {
+        return Candidate { .entry = PaletteEntry { .kind = kind,
+                                                   .index = index,
+                                                   .title = std::move(title),
+                                                   .titleMatches = std::move(matches),
+                                                   .groupTitle = {} },
+                           .score = score,
+                           .recency = recency };
+    }
+
+    /// Matches @p filter against @p title, the text the user reads and types at, falling back to
+    /// @p fallback (an id or catalogue name: "splitv" finds "Split Vertical"); a fallback hit highlights
+    /// nothing, there being no id on screen.
+    /// @return The score and the title's matched offsets, or nullopt when neither matches.
+    [[nodiscard]] std::optional<FuzzyMatch> matchTitleOr(std::string_view filter,
+                                                         std::string_view title,
+                                                         std::string_view fallback)
+    {
+        if (auto match = fuzzyMatch(filter, title))
+            return match;
+        if (auto const score = fuzzyScore(filter, fallback))
+            return FuzzyMatch { .score = *score, .positions = {} };
+        return std::nullopt;
+    }
+
+    /// Ranks @p a before @p b: higher score, then more recent, then title. Unfiltered and outside the
+    /// recent list, that is title order alone.
     [[nodiscard]] bool rankedBefore(Candidate const& a, Candidate const& b) noexcept
     {
         if (a.score != b.score)
             return a.score > b.score;
         if (a.recency != b.recency)
             return a.recency < b.recency;
-        return a.entry.title < b.entry.title;
-    }
-
-    /// Orders by title alone, the browsing order of a group.
-    [[nodiscard]] bool titledBefore(Candidate const& a, Candidate const& b) noexcept
-    {
         return a.entry.title < b.entry.title;
     }
 
@@ -98,57 +134,34 @@ namespace
                 continue;
             auto const& command = tree.commands[*index];
             auto const* parent = parentOf(tree, *index);
-            recentRows.push_back(Candidate {
-                .entry =
-                    PaletteEntry { .kind = PaletteEntryKind::Command,
-                                   .index = *index,
-                                   .title = parent ? qualifierOf(*parent) + command.argument : command.title,
-                                   .titleMatches = {},
-                                   .groupTitle = {} },
-                .category = command.category,
-                .score = 0,
-                .recency = 0,
-            });
+            recentRows.push_back(
+                candidateOf(PaletteEntryKind::Command,
+                            *index,
+                            parent ? qualifierOf(*parent) + command.argument : command.title));
         }
         if (!recentRows.empty())
             appendGroup(recentRows, RecentGroupTitle, result);
 
-        auto buckets = std::array<std::vector<Candidate>, CommandCategoryCount> {};
+        auto buckets = Buckets {};
         for (auto const index: tree.plain)
         {
             auto const& command = tree.commands[index];
-            buckets[static_cast<std::size_t>(command.category)].push_back(Candidate {
-                .entry = PaletteEntry { .kind = PaletteEntryKind::Command,
-                                        .index = index,
-                                        .title = command.title,
-                                        .titleMatches = {},
-                                        .groupTitle = {} },
-                .category = command.category,
-                .score = 0,
-                .recency = 0,
-            });
+            bucketOf(buckets, command.category)
+                .push_back(candidateOf(PaletteEntryKind::Command, index, command.title));
         }
         for (auto const index: std::views::iota(std::size_t { 0 }, tree.parents.size()))
         {
             auto const& parent = tree.parents[index];
-            buckets[static_cast<std::size_t>(parent.category)].push_back(Candidate {
-                .entry = PaletteEntry { .kind = PaletteEntryKind::DrillIn,
-                                        .index = index,
-                                        .title = parent.title,
-                                        .titleMatches = {},
-                                        .groupTitle = {} },
-                .category = parent.category,
-                .score = 0,
-                .recency = 0,
-            });
+            bucketOf(buckets, parent.category)
+                .push_back(candidateOf(PaletteEntryKind::DrillIn, index, parent.title));
         }
 
         for (auto const& group: PaletteGroups)
         {
-            auto& bucket = buckets[static_cast<std::size_t>(group.category)];
+            auto& bucket = bucketOf(buckets, group.category);
             if (bucket.empty())
                 continue;
-            std::ranges::stable_sort(bucket, titledBefore);
+            std::ranges::stable_sort(bucket, rankedBefore);
             appendGroup(bucket, group.title, result);
         }
 
@@ -159,35 +172,21 @@ namespace
     [[nodiscard]] std::vector<PaletteEntry> listTopFiltered(PaletteTree const& tree,
                                                             PaletteQuery const& query)
     {
-        auto buckets = std::array<std::vector<Candidate>, CommandCategoryCount> {};
-        auto const add = [&](Candidate candidate) {
-            buckets[static_cast<std::size_t>(candidate.category)].push_back(std::move(candidate));
-        };
+        auto buckets = Buckets {};
 
         for (auto const index: tree.plain)
         {
             auto const& command = tree.commands[index];
-            // The title is what the user reads and types at; the id is the fallback ("splitv" finds
-            // "Split Vertical"), and highlights nothing, there being no id on screen.
-            auto score = std::optional<int> {};
-            auto matches = std::vector<int> {};
-            if (auto match = fuzzyMatch(query.filter, command.title))
-            {
-                score = match->score;
-                matches = std::move(match->positions);
-            }
-            else
-                score = fuzzyScore(query.filter, command.id);
-            if (!score)
+            auto match = matchTitleOr(query.filter, command.title, command.id);
+            if (!match)
                 continue;
-            add(Candidate { .entry = PaletteEntry { .kind = PaletteEntryKind::Command,
-                                                    .index = index,
-                                                    .title = command.title,
-                                                    .titleMatches = std::move(matches),
-                                                    .groupTitle = {} },
-                            .category = command.category,
-                            .score = *score,
-                            .recency = recencyOf(query.recent, command.id) });
+            bucketOf(buckets, command.category)
+                .push_back(candidateOf(PaletteEntryKind::Command,
+                                       index,
+                                       command.title,
+                                       std::move(match->positions),
+                                       match->score,
+                                       recencyOf(query.recent, command.id)));
         }
 
         for (auto const parentIndex: std::views::iota(std::size_t { 0 }, tree.parents.size()))
@@ -208,35 +207,25 @@ namespace
                     continue;
                 for (auto& position: match->positions)
                     position += static_cast<int>(qualifier.size());
-                add(Candidate { .entry = PaletteEntry { .kind = PaletteEntryKind::Command,
-                                                        .index = index,
-                                                        .title = qualifier + command.argument,
-                                                        .titleMatches = std::move(match->positions),
-                                                        .groupTitle = {} },
-                                .category = command.category,
-                                .score = match->score,
-                                .recency = recency });
+                bucketOf(buckets, command.category)
+                    .push_back(candidateOf(PaletteEntryKind::Command,
+                                           index,
+                                           qualifier + command.argument,
+                                           std::move(match->positions),
+                                           match->score,
+                                           recency));
             }
 
-            auto score = std::optional<int> {};
-            auto matches = std::vector<int> {};
-            if (auto match = fuzzyMatch(query.filter, parent.title))
-            {
-                score = match->score;
-                matches = std::move(match->positions);
-            }
-            else
-                score = fuzzyScore(query.filter, parent.name);
-            if (!score)
+            auto match = matchTitleOr(query.filter, parent.title, parent.name);
+            if (!match)
                 continue;
-            add(Candidate { .entry = PaletteEntry { .kind = PaletteEntryKind::DrillIn,
-                                                    .index = parentIndex,
-                                                    .title = parent.title,
-                                                    .titleMatches = std::move(matches),
-                                                    .groupTitle = {} },
-                            .category = parent.category,
-                            .score = *score,
-                            .recency = parentRecency });
+            bucketOf(buckets, parent.category)
+                .push_back(candidateOf(PaletteEntryKind::DrillIn,
+                                       parentIndex,
+                                       parent.title,
+                                       std::move(match->positions),
+                                       match->score,
+                                       parentRecency));
         }
 
         // Each group ranked within; the groups ordered by their best row, ties by table order, so row 0
@@ -244,20 +233,19 @@ namespace
         auto groups = std::vector<PaletteGroupRow> {};
         for (auto const& group: PaletteGroups)
         {
-            auto& bucket = buckets[static_cast<std::size_t>(group.category)];
+            auto& bucket = bucketOf(buckets, group.category);
             if (bucket.empty())
                 continue;
             std::ranges::stable_sort(bucket, rankedBefore);
             groups.push_back(group);
         }
         std::ranges::stable_sort(groups, [&](PaletteGroupRow const& a, PaletteGroupRow const& b) {
-            return buckets[static_cast<std::size_t>(a.category)].front().score
-                   > buckets[static_cast<std::size_t>(b.category)].front().score;
+            return bucketOf(buckets, a.category).front().score > bucketOf(buckets, b.category).front().score;
         });
 
         auto result = std::vector<PaletteEntry> {};
         for (auto const& group: groups)
-            appendGroup(buckets[static_cast<std::size_t>(group.category)], group.title, result);
+            appendGroup(bucketOf(buckets, group.category), group.title, result);
         return result;
     }
 
@@ -274,14 +262,12 @@ namespace
             auto match = fuzzyMatch(query.filter, command.argument);
             if (!match)
                 continue;
-            rows.push_back(Candidate { .entry = PaletteEntry { .kind = PaletteEntryKind::Command,
-                                                               .index = index,
-                                                               .title = command.argument,
-                                                               .titleMatches = std::move(match->positions),
-                                                               .groupTitle = {} },
-                                       .category = command.category,
-                                       .score = match->score,
-                                       .recency = recencyOf(query.recent, command.id) });
+            rows.push_back(candidateOf(PaletteEntryKind::Command,
+                                       index,
+                                       command.argument,
+                                       std::move(match->positions),
+                                       match->score,
+                                       recencyOf(query.recent, command.id)));
         }
 
         // Unfiltered, every score is 0, so this is recency then argument: the recently used first.
@@ -297,8 +283,8 @@ namespace
 
 Command const* PaletteTree::find(std::string_view id) const noexcept
 {
-    auto const found = std::ranges::find(commands, id, &Command::id);
-    return found == commands.end() ? nullptr : &*found;
+    auto const index = commandIndexOf(*this, id);
+    return index ? &commands[*index] : nullptr;
 }
 
 PaletteTree buildPaletteTree(std::vector<Command> commands)

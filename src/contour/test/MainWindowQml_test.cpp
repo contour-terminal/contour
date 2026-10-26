@@ -27,6 +27,7 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
+#include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
@@ -85,6 +86,8 @@
 
 using contour::test::loadMainWindow;
 using contour::test::MockMainController;
+using contour::test::waitForPopupClosed;
+using contour::test::waitForPopupOpened;
 
 TEST_CASE("Main.qml startup: sized-before-shown ordering and declared chrome (offscreen)",
           "[contour][gui][qml][mainwindow]")
@@ -2729,10 +2732,7 @@ struct MainWindowPalette
 /// Whether @p item is @p ancestor or lies beneath it in the visual tree.
 [[nodiscard]] bool isWithin(QQuickItem const* item, QQuickItem const* ancestor)
 {
-    for (auto const* node = item; node != nullptr; node = node->parentItem())
-        if (node == ancestor)
-            return true;
-    return false;
+    return item != nullptr && ancestor != nullptr && (item == ancestor || ancestor->isAncestorOf(item));
 }
 
 /// Shows and activates Main.qml's window, so it holds an active focus item.
@@ -2744,21 +2744,6 @@ struct MainWindowPalette
     window->requestActivate();
     REQUIRE(QTest::qWaitForWindowActive(window));
     return *window;
-}
-
-/// How long a case waits for a popup's transition at most, in milliseconds.
-constexpr auto PopupSettleMs = 2000;
-
-/// Waits until @p popup has finished opening.
-void waitForPopupOpened(QObject const& popup)
-{
-    REQUIRE(QTest::qWaitFor([&] { return popup.property("opened").toBool(); }, PopupSettleMs));
-}
-
-/// Waits until @p popup has finished closing.
-void waitForPopupClosed(QObject const& popup)
-{
-    REQUIRE(QTest::qWaitFor([&] { return !popup.property("visible").toBool(); }, PopupSettleMs));
 }
 
 } // namespace

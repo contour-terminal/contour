@@ -551,13 +551,14 @@ TEST_CASE("footerHints follows the row and the depth", "[contour][palette]")
         return QString::fromStdString(paletteFooterHints(kind, depth, ShortcutStyle::Text));
     };
 
-    CHECK(model.footerHints(rowOf(model, "SplitVertical"))
-          == text(PaletteEntryKind::Command, PaletteDepth::Top));
-    CHECK(model.footerHints(rowOf(model, "ChangeProfile"))
-          == text(PaletteEntryKind::DrillIn, PaletteDepth::Top));
-    CHECK(model.footerHints(-1).isEmpty());
-    CHECK(model.footerHints(model.rowCount()).isEmpty());
+    auto const hintsAt = [&](int row) {
+        return roleAt(model, row, CommandPaletteModel::Roles::FooterHintsRole).toString();
+    };
+    CHECK(hintsAt(rowOf(model, "SplitVertical")) == text(PaletteEntryKind::Command, PaletteDepth::Top));
+    CHECK(hintsAt(rowOf(model, "ChangeProfile")) == text(PaletteEntryKind::DrillIn, PaletteDepth::Top));
+    CHECK(hintsAt(-1).isEmpty());
+    CHECK(hintsAt(model.rowCount()).isEmpty());
 
     model.enter(rowOf(model, "ChangeProfile"));
-    CHECK(model.footerHints(0) == text(PaletteEntryKind::Command, PaletteDepth::Level));
+    CHECK(hintsAt(0) == text(PaletteEntryKind::Command, PaletteDepth::Level));
 }

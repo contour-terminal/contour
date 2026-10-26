@@ -301,8 +301,9 @@ std::vector<Command> TabCommandSource::commands() const
         // derived form rather than rendering an empty quote.
         if (!titles[index].empty())
         {
-            command.title = std::format("Switch To Tab {}: {}", position, titles[index]);
             command.argument = std::format("{}: {}", position, titles[index]);
+            command.title =
+                std::format("{} {}", splitCamelCase(actions::name(command.action)), command.argument);
         }
 
         result.push_back(std::move(command));

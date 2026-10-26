@@ -144,14 +144,6 @@ void CommandPaletteModel::back()
     emit filterChanged();
 }
 
-QString CommandPaletteModel::footerHints(int row) const
-{
-    if (row < 0 || static_cast<std::size_t>(row) >= _rows.size())
-        return {};
-    return QString::fromStdString(
-        command::paletteFooterHints(_rows[static_cast<std::size_t>(row)].kind, paletteDepth(), _hintStyle));
-}
-
 QString CommandPaletteModel::levelTitle() const
 {
     if (!_level)
@@ -225,6 +217,11 @@ QVariant CommandPaletteModel::data(QModelIndex const& index, int role) const
             return matches;
         }
         case Roles::KindRole: return static_cast<int>(entry.kind);
+        case Roles::FooterHintsRole:
+            // Per row rather than an invokable: a level change and a re-rank both reset the model, so the
+            // selected row's hints are always the current ones.
+            return QString::fromStdString(
+                command::paletteFooterHints(entry.kind, paletteDepth(), _hintStyle));
         default: return {};
     }
 }
@@ -239,6 +236,7 @@ QHash<int, QByteArray> CommandPaletteModel::roleNames() const
         { static_cast<int>(Roles::GroupTitleRole), "groupTitle" },
         { static_cast<int>(Roles::TitleMatchesRole), "titleMatches" },
         { static_cast<int>(Roles::KindRole), "kind" },
+        { static_cast<int>(Roles::FooterHintsRole), "footerHints" },
     };
 }
 

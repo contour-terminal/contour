@@ -27,6 +27,7 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/MockMainController.hpp>
+#include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
@@ -4117,13 +4118,23 @@ TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fr
 
 namespace
 {
+/// The `Accessible` attached object of @p item, or null when the QML never attached one (or @p item is
+/// null).
+[[nodiscard]] QObject* accessibleOf(QObject const* item)
+{
+    if (item == nullptr)
+        return nullptr;
+    for (auto* child: item->findChildren<QObject*>(Qt::FindDirectChildrenOnly))
+        if (child->inherits("QQuickAccessibleAttached"))
+            return child;
+    return nullptr;
+}
+
 /// The name an item announces, read from its `Accessible` attached object; empty without one.
 [[nodiscard]] QString accessibleNameOf(QObject const& item)
 {
-    for (auto const* child: item.findChildren<QObject*>(Qt::FindDirectChildrenOnly))
-        if (child->inherits("QQuickAccessibleAttached"))
-            return child->property("name").toString();
-    return {};
+    auto const* attached = accessibleOf(&item);
+    return attached != nullptr ? attached->property("name").toString() : QString {};
 }
 
 /// @return The chrome style installed on @p engine, as the provider it is.
@@ -4959,6 +4970,9 @@ TEST_CASE("TerminalPane dim overlay follows the session's dimUnfocused live (off
 namespace
 {
 
+using contour::test::waitForPopupClosed;
+using contour::test::waitForPopupOpened;
+
 /// What a palette test's configuration and window hold: its profiles, its layouts and its tabs.
 struct PaletteInventory
 {
@@ -5062,9 +5076,6 @@ struct PaletteHost
     [[nodiscard]] int focusRestores() const { return window->property("focusRestores").toInt(); }
 };
 
-/// How long a test waits for the palette's open or close transition at most, in milliseconds.
-constexpr auto PaletteSettleMs = 2000;
-
 /// The host window's size when a test names none.
 constexpr auto DefaultPaletteHostSize = QSize { 800, 600 };
 
@@ -5139,15 +5150,8 @@ constexpr auto DefaultPaletteHostSize = QSize { 800, 600 };
     // list, which is the state every assertion below is about. Opened once its enter transition is over.
     QMetaObject::invokeMethod(host.palette, "open");
     QCoreApplication::processEvents();
-    REQUIRE(QTest::qWaitFor([&] { return host.palette->property("opened").toBool(); }, PaletteSettleMs));
+    waitForPopupOpened(*host.palette);
     return host;
-}
-
-/// Waits until the palette has finished closing (its exit transition), then lets a deferred dispatch run.
-void waitForPaletteClosed(QObject const& palette)
-{
-    REQUIRE(QTest::qWaitFor([&] { return !palette.property("visible").toBool(); }, PaletteSettleMs));
-    QCoreApplication::processEvents();
 }
 
 /// Builds the host under the default chrome row (see the overload).
@@ -5267,7 +5271,7 @@ TEST_CASE("Accepting a palette row runs that command and gives the keyboard back
     };
 
     QMetaObject::invokeMethod(host.palette, "acceptCurrent");
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
 
     // (Which also proves the observer above ran at all.)
     REQUIRE(controller.ran.size() == 1);
@@ -5317,17 +5321,18 @@ TEST_CASE("Picking OpenCommandPalette re-opens the palette cleanly, not on top o
     };
 
     // ... and with the popup at rest, it runs.
-    REQUIRE(QTest::qWaitFor([&] { return !controller.ran.isEmpty(); }, PaletteSettleMs));
+    REQUIRE(QTest::qWaitFor([&] { return !controller.ran.isEmpty(); }, contour::test::PopupSettleMs));
 
     // It ran, exactly once, and re-opened the palette — a fresh open rather than one stacked on a close.
     REQUIRE(controller.ran.size() == 1);
     CHECK(controller.ran.front() == QStringLiteral("OpenCommandPalette"));
-    CHECK(QTest::qWaitFor([&] { return host.palette->property("opened").toBool(); }, PaletteSettleMs));
+    CHECK(QTest::qWaitFor([&] { return host.palette->property("opened").toBool(); },
+                          contour::test::PopupSettleMs));
     controller.observeOnRun = {};
 
     // And one dismissal dismisses it.
     QMetaObject::invokeMethod(host.palette, "close");
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
 
     CHECK_FALSE(host.palette->property("opened").toBool());
     CHECK_FALSE(host.palette->property("visible").toBool());
@@ -5349,7 +5354,7 @@ TEST_CASE("Dismissing the palette runs nothing and gives the keyboard back (offs
     REQUIRE(host.palette->property("visible").toBool());
 
     QMetaObject::invokeMethod(host.palette, "close");
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
 
     CHECK(controller.ran.isEmpty());
     CHECK_FALSE(host.palette->property("visible").toBool());
@@ -5758,16 +5763,6 @@ void pressPaletteKey(QQuickWindow* window, Qt::Key key, Qt::KeyboardModifiers mo
     QCoreApplication::processEvents();
 }
 
-/// The provider the palette's engine draws with.
-[[nodiscard]] contour::window::UiStyleProvider const& paletteStyleOf(QQmlEngine& engine)
-{
-    auto* provider = engine.rootContext()
-                         ->contextProperty(QStringLiteral("chromeStyle"))
-                         .value<contour::window::UiStyleProvider*>();
-    REQUIRE(provider != nullptr);
-    return *provider;
-}
-
 /// The MacOS row, which the canvas's numbers are given for.
 [[nodiscard]] contour::test::ChromeSetup macPaletteSetup()
 {
@@ -5780,17 +5775,6 @@ void pressPaletteKey(QQuickWindow* window, Qt::Key key, Qt::KeyboardModifiers mo
 [[nodiscard]] QObject* paletteEnterAnimation(PaletteHost const& host, QString const& name)
 {
     return host.palette->findChild<QObject*>(name);
-}
-
-/// The Accessible attached object of @p item, or null when the QML never attached one.
-[[nodiscard]] QObject* paletteAccessibleOf(QObject* item)
-{
-    if (item == nullptr)
-        return nullptr;
-    for (auto* child: item->findChildren<QObject*>(Qt::FindDirectChildrenOnly))
-        if (child->inherits("QQuickAccessibleAttached"))
-            return child;
-    return nullptr;
 }
 
 } // namespace
@@ -5888,7 +5872,9 @@ TEST_CASE("The footer shows the selected row's description only (offscreen)", "[
     REQUIRE(list->property("currentIndex").toInt() == 0);
     CHECK(description->property("text").toString() == paletteRole(model, 0, Roles::DescriptionRole));
     CHECK_FALSE(description->property("text").toString().isEmpty());
-    CHECK(hints->property("text").toString() == controller.model().footerHints(0));
+    CHECK(
+        hints->property("text").toString()
+        == paletteRole(controller.model(), 0, contour::window::CommandPaletteModel::Roles::FooterHintsRole));
 
     pressPaletteKey(focusPaletteField(host), Qt::Key_Down);
     REQUIRE(list->property("currentIndex").toInt() == 1);
@@ -5928,7 +5914,7 @@ TEST_CASE("A drill-in row shows its glyph and Enter opens its level (offscreen)"
     REQUIRE(list != nullptr);
     REQUIRE(filter != nullptr);
     REQUIRE(level != nullptr);
-    auto const drillInGlyph = paletteStyleOf(engine).drillInGlyph();
+    auto const drillInGlyph = providerOf(engine).drillInGlyph();
 
     filter->setProperty("text", QStringLiteral("profile"));
     QCoreApplication::processEvents();
@@ -5959,7 +5945,7 @@ TEST_CASE("A drill-in row shows its glyph and Enter opens its level (offscreen)"
     CHECK(controller.ran.isEmpty());
 
     pressPaletteKey(window, Qt::Key_Return);
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
     CHECK(controller.ran == QStringList { QStringLiteral("ChangeProfile:dark") });
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -5993,7 +5979,7 @@ TEST_CASE("Escape in a level goes back one level, then closes (offscreen)", "[co
           == paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
 
     pressPaletteKey(window, Qt::Key_Escape);
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
     CHECK(controller.ran.isEmpty());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -6071,7 +6057,7 @@ TEST_CASE("A filter surfaces a child, which runs directly (offscreen)", "[contou
     CHECK_FALSE(glyph->isVisible());
 
     pressPaletteKey(focusPaletteField(host), Qt::Key_Return);
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
     CHECK(controller.ran == QStringList { QStringLiteral("LaunchLayout:split-dev") });
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
@@ -6195,7 +6181,7 @@ TEST_CASE("The Terminal row draws the palette in cells (offscreen)", "[contour][
     REQUIRE(setup.row == contour::config::ChromeStyle::Terminal);
     auto const host = openPalette(engine, controller, setup, QSize { 1280, 800 });
     REQUIRE(host.palette != nullptr);
-    auto const& style = paletteStyleOf(engine);
+    auto const& style = providerOf(engine);
 
     CHECK(host.palette->property("width").toReal() == Catch::Approx(48 * style.widthQuantum()));
     auto* background = host.palette->property("background").value<QQuickItem*>();
@@ -6243,7 +6229,7 @@ TEST_CASE("accessibility: the palette's field, rows and group headers declare a 
     REQUIRE(host.palette != nullptr);
 
     // The field itself, so there is one editable node.
-    auto* query = paletteAccessibleOf(palettePart(host, QStringLiteral("commandPaletteFilter")));
+    auto* query = accessibleOf(palettePart(host, QStringLiteral("commandPaletteFilter")));
     REQUIRE(query != nullptr);
     CHECK(query->property("role").toInt() == QAccessible::EditableText);
     CHECK(query->property("name").toString() == QStringLiteral("Command"));
@@ -6252,12 +6238,11 @@ TEST_CASE("accessibility: the palette's field, rows and group headers declare a 
     REQUIRE(list != nullptr);
     auto* first = paletteRowAt(list, 0);
     REQUIRE(first != nullptr);
-    auto* header =
-        paletteAccessibleOf(first->findChild<QQuickItem*>(QStringLiteral("commandPaletteGroupHeader")));
+    auto* header = accessibleOf(first->findChild<QQuickItem*>(QStringLiteral("commandPaletteGroupHeader")));
     REQUIRE(header != nullptr);
     CHECK(header->property("role").toInt() == QAccessible::Heading);
     CHECK(header->property("name").toString() == first->property("groupTitle").toString());
-    auto* row = paletteAccessibleOf(first->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow")));
+    auto* row = accessibleOf(first->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow")));
     REQUIRE(row != nullptr);
     CHECK(row->property("role").toInt() == QAccessible::ListItem);
     CHECK(row->property("name").toString() == first->property("title").toString());
@@ -6267,8 +6252,7 @@ TEST_CASE("accessibility: the palette's field, rows and group headers declare a 
     QCoreApplication::processEvents();
     auto* parentItem = paletteRowAt(list, paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
     REQUIRE(parentItem != nullptr);
-    auto* parentRow =
-        paletteAccessibleOf(parentItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow")));
+    auto* parentRow = accessibleOf(parentItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow")));
     REQUIRE(parentRow != nullptr);
     CHECK(parentRow->property("description").toString() == QStringLiteral("Opens a list"));
 
@@ -6290,7 +6274,7 @@ TEST_CASE("Keys typed straight after open reach the field (offscreen)", "[contou
     auto* window = filter->window(); // taken while open: a closed popup's items leave the window
     REQUIRE(window != nullptr);
     QMetaObject::invokeMethod(host.palette, "close");
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
 
     QMetaObject::invokeMethod(host.palette, "open");
     REQUIRE_FALSE(host.palette->property("opened").toBool()); // the enter transition is still running
@@ -6298,7 +6282,7 @@ TEST_CASE("Keys typed straight after open reach the field (offscreen)", "[contou
     SECTION("Escape before the palette has finished opening closes it")
     {
         QTest::keyClick(window, Qt::Key_Escape);
-        waitForPaletteClosed(*host.palette);
+        waitForPopupClosed(*host.palette);
         CHECK_FALSE(host.palette->property("visible").toBool());
         CHECK(controller.ran.isEmpty());
     }
@@ -6309,12 +6293,12 @@ TEST_CASE("Keys typed straight after open reach the field (offscreen)", "[contou
             QTest::keyClick(window, key);
         CHECK(filter->property("text").toString() == QStringLiteral("spl"));
         // ... and are still there once the palette has finished opening.
-        REQUIRE(QTest::qWaitFor([&] { return host.palette->property("opened").toBool(); }, PaletteSettleMs));
+        waitForPopupOpened(*host.palette);
         CHECK(filter->property("text").toString() == QStringLiteral("spl"));
         CHECK(controller.model().filter() == QStringLiteral("spl"));
 
         QTest::keyClick(window, Qt::Key_Escape);
-        waitForPaletteClosed(*host.palette);
+        waitForPopupClosed(*host.palette);
         CHECK(controller.ran.isEmpty());
     }
 
@@ -6439,7 +6423,7 @@ TEST_CASE("Under Reduce Motion the palette only fades (offscreen)", "[contour][g
 
     // Re-open and watch the scale while the enter transition runs: it never leaves 1.
     QMetaObject::invokeMethod(host.palette, "close");
-    waitForPaletteClosed(*host.palette);
+    waitForPopupClosed(*host.palette);
     auto minimumScale = 1.0;
     QMetaObject::invokeMethod(host.palette, "open");
     for ([[maybe_unused]] auto const tick: std::views::iota(0, 10))
@@ -9363,9 +9347,9 @@ TEST_CASE("Closing the palette over the find bar gives the find bar its focus ba
     REQUIRE(quickWindow->activeFocusItem() == field);
 
     QMetaObject::invokeMethod(palette, "open");
-    REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, PaletteSettleMs));
+    waitForPopupOpened(*palette);
     QMetaObject::invokeMethod(palette, "close");
-    waitForPaletteClosed(*palette);
+    waitForPopupClosed(*palette);
 
     CHECK(quickWindow->activeFocusItem() == field);
     CHECK(window->property("focusRestores").toInt() == 0);
@@ -9373,12 +9357,12 @@ TEST_CASE("Closing the palette over the find bar gives the find bar its focus ba
     SECTION("a find bar that closed under the palette hands over to the terminal")
     {
         QMetaObject::invokeMethod(palette, "open");
-        REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, PaletteSettleMs));
+        waitForPopupOpened(*palette);
         QMetaObject::invokeMethod(bar, "close");
-        REQUIRE(QTest::qWaitFor([&] { return !bar->property("visible").toBool(); }, PaletteSettleMs));
+        waitForPopupClosed(*bar);
         auto const before = window->property("focusRestores").toInt();
         QMetaObject::invokeMethod(palette, "close");
-        waitForPaletteClosed(*palette);
+        waitForPopupClosed(*palette);
         CHECK(window->property("focusRestores").toInt() == before + 1);
     }
 

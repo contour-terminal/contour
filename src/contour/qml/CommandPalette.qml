@@ -55,9 +55,11 @@ Popup {
     y: root.placement.y
     width: root.placement.width
     // Fits its content, up to the placement's height.
-    height: Math.min(root.placement.maxHeight,
-                     queryRow.height + topRule.height + list.contentHeight + empty.height
-                     + bottomRule.height + footer.height)
+    height: Math.min(root.placement.maxHeight, root.fixedHeight + list.contentHeight)
+
+    // Everything in the column but the list: the query row, the two rules, the empty label and the footer.
+    readonly property real fixedHeight: queryRow.height + topRule.height + empty.height + bottomRule.height
+                                        + footer.height
 
     background: PopupSurface {
         color: chromeStyle.colors.paletteSurface
@@ -119,23 +121,18 @@ Popup {
     // Where the keyboard goes back to on close: @p item, or where it has been hidden (a dialog's button gone
     // while the palette was up) its nearest visible ancestor in the same popup or dialog. Null when there is
     // none -- @p item was not over the overlay, or its popup has closed -- and the terminal takes it.
+    // One walk up: the first visible node is the candidate, and it counts only if the walk reaches the
+    // overlay, i.e. @p item sits inside a popup or a dialog.
     function _handBackTarget(item) {
         const overlay = root.Overlay.overlay;
-        if (!item || !root._isOverOverlay(item))
-            return null;
-        for (let node = item; node && node !== overlay; node = node.parent)
-            if (node.visible)
-                return node;
-        return null;
-    }
-
-    // Whether @p item sits in the window's overlay layer, i.e. inside a popup or a dialog.
-    function _isOverOverlay(item) {
-        const overlay = root.Overlay.overlay;
-        for (let node = item; node; node = node.parent)
+        let target = null;
+        for (let node = item; node; node = node.parent) {
             if (node === overlay)
-                return true;
-        return false;
+                return target;
+            if (!target && node.visible)
+                target = node;
+        }
+        return null;
     }
 
     // The command the user picked, held until this popup has actually closed — see onClosed.
@@ -201,6 +198,12 @@ Popup {
             root.model.back();
         else
             root.close();
+    }
+
+    // Moves the selection by @p delta rows, within the list.
+    function step(delta) {
+        if (list.count > 0)
+            root.select(Math.max(0, Math.min(list.currentIndex + delta, list.count - 1)));
     }
 
     // Selects @p index and keeps it in view — the arrow keys walk a 200-row level past the viewport.
@@ -319,8 +322,8 @@ Popup {
 
                 // Arrow keys move the SELECTION while the caret stays in the field, so the user never
                 // has to leave the box to pick a row.
-                Keys.onDownPressed: root.select(Math.min(list.currentIndex + 1, list.count - 1))
-                Keys.onUpPressed: root.select(Math.max(list.currentIndex - 1, 0))
+                Keys.onDownPressed: root.step(1)
+                Keys.onUpPressed: root.step(-1)
                 Keys.onReturnPressed: root.activateCurrent()
                 Keys.onEnterPressed: root.activateCurrent()
                 Keys.onEscapePressed: root.stepBack()
@@ -331,10 +334,10 @@ Popup {
                 Keys.onPressed: (event) => {
                     if (event.modifiers & Qt.ControlModifier) {
                         if (event.key === Qt.Key_J) {
-                            root.select(Math.min(list.currentIndex + 1, list.count - 1));
+                            root.step(1);
                             event.accepted = true;
                         } else if (event.key === Qt.Key_K) {
-                            root.select(Math.max(list.currentIndex - 1, 0));
+                            root.step(-1);
                             event.accepted = true;
                         }
                     } else if (event.key === Qt.Key_Backspace && text === "" && root.inLevel) {
@@ -359,8 +362,7 @@ Popup {
             objectName: "commandPaletteList"
             width: parent.width
             // Takes whatever the query row, the rules and the footer leave.
-            height: Math.max(0, root.height - queryRow.height - topRule.height - empty.height
-                                - bottomRule.height - footer.height)
+            height: Math.max(0, root.height - root.fixedHeight)
             clip: true
             // Null-guarded: the controller dies before this tree on window close (see `controller`).
             model: root.model
@@ -380,6 +382,7 @@ Popup {
                 required property string shortcut
                 required property string groupTitle
                 required property int kind
+                required property string footerHints
                 required property var titleMatches
 
                 readonly property bool isCurrent: row.index === list.currentIndex
@@ -536,12 +539,7 @@ Popup {
                 objectName: "commandPaletteFooterHints"
                 x: parent.width - width - root.textInset
                 anchors.verticalCenter: parent.verticalCenter
-                // Reads the depth, the filter and the current row's kind, so the binding re-runs on a level
-                // change and on a re-rank that puts another kind of row under the same index; the
-                // invokable itself is opaque to the binding engine.
-                text: root.model && list.currentItem && root.model.depth >= 0 && root.model.filter !== undefined
-                      && list.currentItem.kind >= 0
-                      ? root.model.footerHints(list.currentIndex) : ""
+                text: list.currentItem ? list.currentItem.footerHints : ""
                 font: chromeStyle.type.footnote
                 color: chromeStyle.colors.paletteSecondaryText
             }

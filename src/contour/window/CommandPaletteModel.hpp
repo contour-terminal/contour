@@ -63,6 +63,7 @@ class CommandPaletteModel: public QAbstractListModel
         GroupTitleRole,            //!< The group's header on its first row; empty on every other row.
         TitleMatchesRole,          //!< Matched title indices (UTF-16 code units) for highlighting.
         KindRole,                  //!< The row's command::PaletteEntryKind, as an int.
+        FooterHintsRole,           //!< The footer's key hints with this row selected, e.g. "↩ Run · ⎋ Close".
     };
 
     /// @param history   The app-wide most-recently-used list. Must outlive this model.
@@ -99,11 +100,6 @@ class CommandPaletteModel: public QAbstractListModel
     /// Leaves the level, restoring the filter it was entered from; anchorRow becomes the parent's row.
     /// Emits levelChanged() then filterChanged(). Does nothing at the top.
     Q_INVOKABLE void back();
-
-    /// The footer's key hints for row @p row at the current depth, e.g. "↩ Run · ⎋ Close".
-    /// @param row The selected row.
-    /// @return The hints; empty out of range.
-    [[nodiscard]] Q_INVOKABLE QString footerHints(int row) const;
 
     // {{{ QAbstractListModel
     [[nodiscard]] QVariant data(QModelIndex const& index, int role = Qt::DisplayRole) const override;

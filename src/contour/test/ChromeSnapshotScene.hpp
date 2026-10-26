@@ -14,6 +14,7 @@
 #include <contour/session/EndReason.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
+#include <contour/test/PopupWaits.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlIncubation.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -346,8 +347,6 @@ class ChromeSnapshotScene
   private:
     /// How many recent commands the palette remembers, as MockPaletteController remembers them.
     static constexpr std::size_t PaletteHistoryCapacity = 5;
-    /// How long the scene waits for the palette's transitions at most, in milliseconds.
-    static constexpr int PaletteSettleMs = 2000;
 
     /// The toast's message.
     static inline auto const ToastText = QStringLiteral("Copied 3 lines");
@@ -482,7 +481,7 @@ class ChromeSnapshotScene
         auto const* palette = root().findChild<QObject*>(QStringLiteral("commandPalette"));
         REQUIRE(palette != nullptr);
         _controller.openCommandPalette();
-        REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, PaletteSettleMs));
+        waitForPopupOpened(*palette);
     }
 
     /// Types @p text into the open palette's filter field.
@@ -510,10 +509,8 @@ class ChromeSnapshotScene
                    == QStringLiteral("ChangeProfile");
         });
         REQUIRE(parent != rows.end());
-        model.enter(*parent);
-        REQUIRE(
-            QTest::qWaitFor([&] { return model.depth() == static_cast<int>(command::PaletteDepth::Level); },
-                            PaletteSettleMs));
+        model.enter(*parent); // synchronous: the level is listed on return
+        REQUIRE(model.depth() == static_cast<int>(command::PaletteDepth::Level));
     }
 
     /// Gives the mock the band geometry and the traffic lights' inset the controller measures in production
