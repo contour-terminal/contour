@@ -9,6 +9,7 @@
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
+#include <crispy/ASCII.hpp>
 #include <crispy/InterpolatedString.hpp>
 
 #include <core/Utils.hpp>
@@ -158,10 +159,7 @@ namespace
     /// locale, and a Turkish one does not fold 'I' to 'i'.
     [[nodiscard]] bool spellsIgnoringAsciiCase(std::string_view text, std::string_view name) noexcept
     {
-        auto const asciiLower = [](char c) {
-            return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-        };
-        return std::ranges::equal(text, name, {}, asciiLower, asciiLower);
+        return std::ranges::equal(text, name, {}, crispy::ascii::fold, crispy::ascii::fold);
     }
 } // namespace
 
@@ -355,13 +353,9 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
         return T { styles };
 }
 
-/// Whether items of type @p T carry a `MaxWidth=`, the widest they may draw in columns.
-template <typename T>
-concept HasMaxWidth = requires(T t) { t.maxWidth; };
-
 /// Reads @p interpolation's `MaxWidth=` into @p item; a missing, non-numeric or non-positive one keeps
 /// the default, so a typo cannot collapse the item to nothing.
-template <HasMaxWidth T>
+template <StatusLineDefinitions::HasMaxWidth T>
 static void readMaxWidth(T& item, crispy::StringInterpolation const& interpolation)
 {
     if (auto const width = tryParseStringAttribute(interpolation, "MaxWidth"))
@@ -393,7 +387,7 @@ static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
         if (result || interpolation.name != StatusLineDefinitions::ItemTraits<T>::Name)
             return;
         result = makeItemOfType<T>(styles, interpolation);
-        if constexpr (HasMaxWidth<T>)
+        if constexpr (StatusLineDefinitions::HasMaxWidth<T>)
             if (result)
                 readMaxWidth(std::get<T>(*result), interpolation);
     });
@@ -1241,7 +1235,7 @@ namespace
         }
 
         // Last, so that Context keeps writing Verbosity, Separator, MaxWidth.
-        if constexpr (HasMaxWidth<T>)
+        if constexpr (StatusLineDefinitions::HasMaxWidth<T>)
             if (v.maxWidth != T {}.maxWidth)
                 attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
     }

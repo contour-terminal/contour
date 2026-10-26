@@ -375,6 +375,11 @@ namespace StatusLineDefinitions
     template <typename T>
     struct ItemTraits;
 
+    /// Whether items of type @p T carry a `MaxWidth=`, the widest they may draw in columns: the parser, the
+    /// serializer and the settings page's bridge each carry it through by this one test.
+    template <typename T>
+    concept HasMaxWidth = requires(T t) { t.maxWidth; };
+
     // clang-format off
     template <> struct ItemTraits<Title>
     { static constexpr std::string_view Name = "Title", Label = "Window title", Sample = "~/src"; static constexpr auto Priority = StatusLinePriority::Normal; };

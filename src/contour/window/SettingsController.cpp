@@ -2817,7 +2817,7 @@ QVariantList SettingsController::parseIndicatorSegment(QString const& templateSt
 
                 // Every item with a column budget, not only Context's: {Cwd:MaxWidth=20} has no control in
                 // the page either, and has to survive an edit of its segment all the same.
-                if constexpr (requires { v.maxWidth; })
+                if constexpr (HasMaxWidth<T>)
                     row[QStringLiteral("maxWidth")] = unbox<int>(v.maxWidth);
 
                 items.push_back(row);
@@ -2899,7 +2899,7 @@ QString SettingsController::serializeIndicatorSegment(QVariantList const& items)
             }();
 
             // A missing or nonsensical width keeps the default rather than collapsing the item to nothing.
-            if constexpr (requires { item.maxWidth; })
+            if constexpr (HasMaxWidth<T>)
                 if (auto const width = row.value(QStringLiteral("maxWidth")).toInt(); width > 0)
                     item.maxWidth = vtbackend::ColumnCount(width);
 

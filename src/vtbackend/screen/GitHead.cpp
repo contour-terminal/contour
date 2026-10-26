@@ -4,6 +4,7 @@
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/Utils.hpp>
 #include <core/async/DetachedTask.hpp>
 #include <core/async/ResumeOn.hpp>
 #include <core/async/StopToken.hpp>
@@ -46,22 +47,6 @@ namespace
     /// The lengths of an object id in hex digits: SHA-1, and SHA-256 repositories.
     constexpr auto ObjectIdLengths = std::array<std::size_t, 2> { 40, 64 };
 
-    constexpr auto Whitespace = std::string_view { " \t\r\n" };
-
-    /// @p text without its trailing whitespace.
-    [[nodiscard]] std::string_view trimEnd(std::string_view text) noexcept
-    {
-        auto const end = text.find_last_not_of(Whitespace);
-        return end == std::string_view::npos ? std::string_view {} : text.substr(0, end + 1);
-    }
-
-    /// @p text without its leading whitespace.
-    [[nodiscard]] std::string_view trimStart(std::string_view text) noexcept
-    {
-        auto const start = text.find_first_not_of(Whitespace);
-        return start == std::string_view::npos ? std::string_view {} : text.substr(start);
-    }
-
     /// Whether @p text is an object id: 40 or 64 hex digits.
     [[nodiscard]] bool isObjectId(std::string_view text) noexcept
     {
@@ -80,10 +65,11 @@ namespace
         auto const contents = fileSystem.readMetadata(dotGit);
         if (!contents)
             return std::nullopt;
-        auto const firstLine = trimEnd(std::string_view { *contents }.substr(0, contents->find('\n')));
+        auto const firstLine =
+            core::trimRight(std::string_view { *contents }.substr(0, contents->find('\n')));
         if (!firstLine.starts_with(GitDirPrefix))
             return std::nullopt;
-        auto const target = trimStart(firstLine.substr(GitDirPrefix.size()));
+        auto const target = core::trimLeft(firstLine.substr(GitDirPrefix.size()));
         if (target.empty())
             return std::nullopt;
         auto gitDir = core::pathFromUtf8(target);
@@ -99,10 +85,10 @@ std::optional<GitHead> parseGitHead(std::string_view contents)
 {
     constexpr auto RefPrefix = std::string_view { "ref:" };
 
-    auto const text = trimEnd(contents);
+    auto const text = core::trimRight(contents);
     if (text.starts_with(RefPrefix))
     {
-        auto const ref = trimStart(text.substr(RefPrefix.size()));
+        auto const ref = core::trimLeft(text.substr(RefPrefix.size()));
         // The first form whose prefix matches decides: "refs/heads/" with no name is no branch, not a ref.
         if (auto const form =
                 std::ranges::find_if(RefForms, [&](RefForm const& f) { return ref.starts_with(f.prefix); });

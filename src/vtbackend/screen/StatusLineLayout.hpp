@@ -73,6 +73,16 @@ struct StatusLinePlacement
     std::optional<ColumnOffset> rightStart {};  ///< None while the right segment is empty or not shown.
 };
 
+/// Whether a middle segment @p middle columns wide fits a line @p columns wide at all, the left segment
+/// aside: centred, it must leave room on either side of it.
+/// @param middle The middle segment's width.
+/// @param columns The line's width.
+/// @return Whether it is narrow enough to be centred.
+[[nodiscard]] constexpr bool middleFitsTheLine(ColumnCount middle, ColumnCount columns) noexcept
+{
+    return columns / ColumnCount(2) - ColumnCount(1) > middle / ColumnCount(2);
+}
+
 /// Places the segments of a status line @p columns wide. The middle is centred, and not shown where it is too
 /// wide or would overlap the left; the right ends in the last column, and is not shown where it is as wide as
 /// the line or would overlap what the segments before it take.
@@ -88,8 +98,7 @@ struct StatusLinePlacement
     auto taken = widths.left;
 
     auto const middleStart = (columns - widths.middle) / ColumnCount(2);
-    if (widths.middle > ColumnCount(0)
-        && columns / ColumnCount(2) - ColumnCount(1) > widths.middle / ColumnCount(2) && taken <= middleStart)
+    if (widths.middle > ColumnCount(0) && middleFitsTheLine(widths.middle, columns) && taken <= middleStart)
     {
         placement.middleStart = ColumnOffset::cast_from(middleStart);
         taken = std::max(taken, middleStart + widths.middle);
@@ -217,8 +226,7 @@ template <typename MeasureSegment>
             {
                 case StatusLineSide::Left: return false;
                 case StatusLineSide::Middle:
-                    return side == StatusLineSide::Left
-                           && columns / ColumnCount(2) - ColumnCount(1) > widths.middle / ColumnCount(2);
+                    return side == StatusLineSide::Left && middleFitsTheLine(widths.middle, columns);
                 case StatusLineSide::Right:
                     return widths.right < columns
                            && (side == StatusLineSide::Left
