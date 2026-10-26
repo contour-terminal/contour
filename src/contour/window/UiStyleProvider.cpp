@@ -323,6 +323,17 @@ QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
              { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
 }
 
+QFont UiStyleProvider::activeTabFont(QFont const& base) const
+{
+    auto font = base;
+    switch (_groups.layout.activeTabWeight)
+    {
+        case config::ActiveTabWeight::Regular: break;
+        case config::ActiveTabWeight::Bold: font.setBold(true); break;
+    }
+    return font;
+}
+
 qreal UiStyleProvider::snapToCells(qreal length) const
 {
     auto const quantum = _metrics.widthQuantum;

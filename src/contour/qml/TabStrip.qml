@@ -1,6 +1,11 @@
 // vim:syntax=qml
 // The horizontal tab strip plus the new-tab split button ("+" and a "▾" profile dropdown).
 //
+// Under the Pill shape (chromeStyle.layout.tabShape) the tabs sit in a rounded well, every pill as wide
+// as chromeStyle.tabWellLayout() says for the width the title bar leaves it: equal widths up to the
+// maximum, icon-only pills below the minimum, and a well that scrolls, keeping the active tab in view,
+// once even those do not fit. The Flat shape is today's strip, each tab as wide as its title.
+//
 // The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
 // whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
 // the strip hosts the tabs' one context menu and the new-tab dropdown — neither a row of the tab model.
@@ -20,7 +25,26 @@ Row {
     // The ApplicationWindow, so a delegate can call restoreTerminalFocus() when a rename closes.
     required property var window
 
+    // The width the title bar leaves the tab well: its own width less the window controls, the drag
+    // reserve and this strip's fixed parts (fixedWidth). Assigned by TitleBar.
+    property real availableWidth: 0
+    // The strip's parts that are not the tabs, which the title bar subtracts from the well's width.
+    readonly property real fixedWidth: hostBadge.width + newTabButton.width + newTabMenuButton.width
+
+    // The QML-facing carve-out of the shape token: whether the tabs are pills in a well.
+    readonly property bool pill: chromeStyle.layout.tabShape === chromeStyle.layout.pill
+    // The well's widths for the tabs there are: { tabWidth, wellWidth, label, scrolls }.
+    readonly property var wellLayout: chromeStyle.tabWellLayout(root.availableWidth, list.count)
+
     spacing: 0
+
+    // Brings the active tab into view, should the well have scrolled it out. Deferred, because it runs on
+    // changes the list has not laid out yet.
+    function revealActiveTab() {
+        if (root.pill && root.controller)
+            list.positionViewAtIndex(root.controller.activeTabIndex, ListView.Contain)
+    }
+    onWellLayoutChanged: Qt.callLater(root.revealActiveTab)
 
     // Maps a cursor x (in list content coordinates) to the tab slot the dragged tab would drop into:
     // slot i means "before tab i" (so dropping past the midpoint of tab i lands after it). Returns a
@@ -82,13 +106,29 @@ Row {
 
     // The tab list plus a DropArea that accepts tabs dragged from this or any other window's strip.
     Item {
-        width: list.contentWidth
+        width: root.pill ? root.wellLayout.wellWidth : list.contentWidth
         height: root.height
+
+        // The well the pills sit in, centred in the bar. Only the Pill shape has one.
+        Rectangle {
+            id: well
+            objectName: "tabWell"   // findChild() handle for the GUI test
+            visible: root.pill
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            height: chromeStyle.size.tabWell
+            radius: chromeStyle.radii.tabWell
+            color: chromeStyle.colors.tabWellFill
+        }
 
         ListView {
             id: list
             objectName: "tabList" // so offscreen tests can findChild() it
-            anchors.fill: parent
+            anchors.fill: root.pill ? well : parent
+            // The well's padding at either end and between the pills; the Flat strip sets tabs flush.
+            leftMargin: root.pill ? chromeStyle.space.s1 : 0
+            rightMargin: root.pill ? chromeStyle.space.s1 : 0
+            spacing: root.pill ? chromeStyle.space.s1 : 0
             // Shrink to content width (the Row's implicitWidth then reflects the tabs + button); the
             // parent layout caps the Row, and clip keeps overflow tidy.
             orientation: ListView.Horizontal
@@ -99,6 +139,8 @@ Row {
             // QML tree is still alive, so `controller` resets to null and this binding re-evaluates
             // once more before teardown finishes (previously a TypeError in the shutdown log).
             currentIndex: root.controller ? root.controller.activeTabIndex : -1
+            onCurrentIndexChanged: Qt.callLater(root.revealActiveTab)
+            onCountChanged: Qt.callLater(root.revealActiveTab)
 
             delegate: TabItem {
                 // Role values injected for this row. Declared as required properties (the modern
@@ -117,7 +159,12 @@ Row {
                 required property string badgeText
                 required property int badgeProgress
 
-                height: list.height
+                // A pill is the well's width and its own height, centred in the well; a Flat tab is as
+                // wide as its title and as tall as the strip.
+                height: root.pill ? chromeStyle.size.tab : list.height
+                width: root.pill ? root.wellLayout.tabWidth : implicitWidth
+                y: root.pill ? (list.height - height) / 2 : 0
+                labelMode: root.pill ? root.wellLayout.label : "full"
                 controller: root.controller
                 window: root.window
                 tabIndex: index
@@ -136,7 +183,7 @@ Row {
 
             // Animate reordering when a tab is moved.
             moveDisplaced: Transition {
-                NumberAnimation { properties: "x"; duration: 120 }
+                NumberAnimation { properties: "x"; duration: chromeStyle.motion.standard }
             }
         }
 

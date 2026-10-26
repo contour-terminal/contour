@@ -57,6 +57,7 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal hostDot READ hostDot CONSTANT)
     Q_PROPERTY(qreal toolbarButton READ toolbarButton CONSTANT)
     Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
+    Q_PROPERTY(qreal flyoutSwatch READ flyoutSwatch CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -117,6 +118,8 @@ class ChromeSizeTokens: public QObject
     [[nodiscard]] qreal toolbarButton() const noexcept { return _tokens.toolbarButton * _units.horizontal; }
     /// @return The height of a band toolbar chip in logical pixels.
     [[nodiscard]] qreal toolbarChip() const noexcept { return _tokens.toolbarChip * _units.vertical; }
+    /// @return The edge of a tab colour flyout swatch in logical pixels; a width, so the swatch stays square.
+    [[nodiscard]] qreal flyoutSwatch() const noexcept { return _tokens.flyoutSwatch * _units.horizontal; }
 
   private:
     config::SizeTokens _tokens {};
@@ -499,6 +502,9 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int profileMenu READ profileMenu CONSTANT)
     Q_PROPERTY(int caret READ caret CONSTANT)
     Q_PROPERTY(int secondaryClick READ secondaryClick CONSTANT)
+    Q_PROPERTY(int tabColors READ tabColors CONSTANT)
+    Q_PROPERTY(int palette READ palette CONSTANT)
+    Q_PROPERTY(int roles READ roles CONSTANT)
 
   public:
     /// @param tokens The resolved layout group.
@@ -534,6 +540,18 @@ class ChromeLayoutTokens: public QObject
     [[nodiscard]] static constexpr int secondaryClick() noexcept
     {
         return static_cast<int>(config::ProfileMenuAffordance::SecondaryClick);
+    }
+
+    /// @return Where a tab's colours come from, a config::TabColorSource as its underlying value.
+    [[nodiscard]] int tabColors() const noexcept { return static_cast<int>(_tokens.tabColors); }
+    /// @return The QML names of config::TabColorSource's enumerators.
+    [[nodiscard]] static constexpr int palette() noexcept
+    {
+        return static_cast<int>(config::TabColorSource::Palette);
+    }
+    [[nodiscard]] static constexpr int roles() noexcept
+    {
+        return static_cast<int>(config::TabColorSource::Roles);
     }
 
   private:

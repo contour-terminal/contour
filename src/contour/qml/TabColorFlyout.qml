@@ -24,7 +24,7 @@ Popup {
 
     modal: true
     focus: true
-    padding: 8
+    padding: chromeStyle.space.s4
 
     // Keep the whole picker inside the window, wherever the tab it hangs off happens to be. A Popup is
     // positioned against its PARENT (this tab), and Qt's default `margins: -1` means it is never pushed
@@ -85,7 +85,7 @@ Popup {
     background: PopupSurface {}
 
     contentItem: Column {
-        spacing: 8
+        spacing: chromeStyle.space.s4
 
         // A GridView rather than a Grid+Repeater: it already implements cursor-key navigation over a
         // 2D cell layout (and the moveCurrentIndex*() primitives the vim motions below reuse), so the
@@ -95,10 +95,13 @@ Popup {
             objectName: "tabColorGrid"
 
             // Swatch geometry, named once: the cell, the delegate and the grid's own size derive from
-            // these, so the layout stays coherent if a swatch ever changes size.
-            readonly property int swatchSize: 30
-            readonly property int swatchSpacing: 8
+            // these, so the layout stays coherent if a swatch ever changes size. The flyout's swatch is
+            // its own token, larger than a menu's, so it stays an easy target.
+            readonly property real swatchSize: chromeStyle.size.flyoutSwatch
+            readonly property real swatchSpacing: chromeStyle.space.s4
             readonly property int swatchColumns: 8
+            // How far the keyboard ring stands off its swatch: half the spacing, so it frames the cell.
+            readonly property real ringGap: swatchSpacing / 2
 
             model: root.swatchColors
             cellWidth: swatchSize + swatchSpacing
@@ -118,10 +121,11 @@ Popup {
             // so it frames the (smaller, centered) swatch. Hidden once Tab hands the focus to the hex
             // field — it marks where the keys are, not a selection that outlives them.
             highlight: Rectangle {
-                radius: 9
+                // Concentric with the swatch it frames.
+                radius: chromeStyle.radii.control + grid.ringGap
                 color: "transparent"
                 border.width: 2
-                border.color: systemPalette.highlight
+                border.color: chromeStyle.colors.swatchRing
                 visible: grid.activeFocus
             }
             highlightMoveDuration: 0
@@ -191,14 +195,14 @@ Popup {
                     anchors.centerIn: parent
                     width: grid.swatchSize
                     height: grid.swatchSize
-                    radius: 5
+                    radius: chromeStyle.radii.control
                     color: cell.modelData
-                    border.width: 1
+                    border.width: chromeStyle.borderWidth
                     border.color: palette.mid
 
                     HoverHandler { id: swatchHover }
                     scale: swatchHover.hovered ? 1.15 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 80 } }
+                    Behavior on scale { NumberAnimation { duration: chromeStyle.motion.fast } }
 
                     TapHandler {
                         onTapped: root.applySwatch(cell.index)
@@ -214,7 +218,7 @@ Popup {
         // controller.setTabColor() the preset swatches use, so the backend needs no new API.
         RowLayout {
             width: grid.width
-            spacing: 8
+            spacing: chromeStyle.space.s4
 
             Label {
                 text: "#"
@@ -234,10 +238,10 @@ Popup {
 
             // Live preview of the typed color; click it to apply.
             Rectangle {
-                Layout.preferredWidth: 30
-                Layout.preferredHeight: 30
-                radius: 5
-                border.width: 1
+                Layout.preferredWidth: grid.swatchSize
+                Layout.preferredHeight: grid.swatchSize
+                radius: chromeStyle.radii.control
+                border.width: chromeStyle.borderWidth
                 border.color: palette.mid
                 color: hexField.acceptableInput ? ("#" + hexField.text) : "transparent"
                 TapHandler {

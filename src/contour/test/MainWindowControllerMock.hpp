@@ -4,8 +4,10 @@
 #include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/command/TabMenus.hpp>
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/RemoteChrome.hpp>
+#include <contour/window/TabColorScheme.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -13,6 +15,7 @@
 #include <QtCore/QPointF>
 #include <QtCore/QString>
 #include <QtCore/QVariantList>
+#include <QtGui/QColor>
 
 #include <array>
 #include <ranges>
@@ -63,6 +66,30 @@ inline constexpr auto MockProfileNames =
             {},
             command::ShortcutStyle::Text)
             .nodes);
+}
+
+/// What WindowController::tabBackgroundColor() answers, for a mock to answer the same: the WT-style fill
+/// of a coloured tab on the native Flat strip. The flags mirror the invokable QML calls.
+/// @return The fill, from the same TabColorScheme math as the real one.
+[[nodiscard]] inline QColor mockTabBackgroundColor(
+    QColor const& tabColor, QColor const& rowBackground, bool active, bool hovered, bool windowActive)
+{
+    auto const state = [&] {
+        if (active)
+            return window::TabVisualState::Active;
+        if (hovered)
+            return window::TabVisualState::Hover;
+        return windowActive ? window::TabVisualState::Inactive
+                            : window::TabVisualState::InactiveWindowUnfocused;
+    }();
+    return platform::toQColor(window::tabBackgroundColor(
+        platform::toRGBColor(tabColor), platform::toRGBColor(rowBackground), state));
+}
+
+/// What WindowController::tabTextColor() answers: the label that reads on a coloured fill.
+[[nodiscard]] inline QColor mockTabTextColor(QColor const& tabBackground)
+{
+    return platform::toQColor(window::contrastingTextColor(platform::toRGBColor(tabBackground)));
 }
 
 /// The window-controller surface Main.qml's own Connections bind, shared by every offscreen mock that

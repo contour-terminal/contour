@@ -870,6 +870,29 @@ TEST_CASE("UiStyleProvider: snapToCells rounds up to whole cells on the Terminal
     CHECK(mac.snapToCells(70) == 70.0);
 }
 
+TEST_CASE("UiStyleProvider: the active tab's font is bold only where the row sets it apart by weight",
+          "[contour][uistyle]")
+{
+    using contour::config::ActiveTabWeight;
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto base = QGuiApplication::font();
+    base.setBold(false);
+    for (auto const index: std::views::iota(std::size_t { 0 }, contour::config::detail::ChromeStyleCount))
+    {
+        auto const row = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        auto const provider = UiStyleProvider(chromeInputsFor(row, base));
+        auto const font = provider.activeTabFont(base);
+        auto const bold =
+            contour::config::ChromeTokenRows[index].layout.activeTabWeight == ActiveTabWeight::Bold;
+        CHECK(font.bold() == bold);
+        CHECK(font.family() == base.family());
+        CHECK(font.pointSizeF() == base.pointSizeF());
+    }
+}
+
 TEST_CASE("UiStyleProvider publishes the band's tokens", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;

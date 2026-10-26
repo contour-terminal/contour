@@ -140,6 +140,8 @@ class ChromeSnapshotScene
             .hostLabel = QString::fromUtf8(scriptRow(variant.script).hostLabel),
             .hostingNotice = hostingNoticeFor(scriptRow(variant.script).banner),
             .tabBarVisibility = _look.tabBarVisibility,
+            .decor = scriptRow(variant.script).decor,
+            .activeTab = scriptRow(variant.script).activeTab,
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -155,6 +157,9 @@ class ChromeSnapshotScene
 
     /// @return The object the script's action created over the window, or null when it created none.
     [[nodiscard]] QObject const* overlay() const noexcept { return _overlay.get(); }
+
+    /// @return The tab colour flyout the script's action opened, or null when it opened none.
+    [[nodiscard]] QObject const* openedTabColorFlyout() const noexcept { return _tabColorFlyout; }
 
     /// Shows the window at SnapshotWindowSize, opens the Settings window over it when the script's surface
     /// is that one, performs the script's action, and lets the scene settle.
@@ -178,6 +183,7 @@ class ChromeSnapshotScene
             case ScriptAction::OpenKitDialog: openKitDialog(); break;
             case ScriptAction::OpenTabMenu: openTabMenu(); break;
             case ScriptAction::OpenAbout: openAbout(); break;
+            case ScriptAction::OpenTabColorFlyout: openTabColorFlyout(); break;
         }
         _incubation.settle();
         QCoreApplication::processEvents();
@@ -232,7 +238,8 @@ class ChromeSnapshotScene
     static inline auto const DialogAcceptText = QStringLiteral("Close Tab");
     static inline auto const DialogRejectText = QStringLiteral("Cancel");
 
-    /// The tab whose context menu the tab-menu script opens: the middle of three.
+    /// The tab whose context menu the tab-menu script opens, and whose colour flyout the tab-color-flyout
+    /// script opens: the middle of three.
     static constexpr int SnapshotMenuTab = 1;
 
     /// The title of the tab menu's colour sub-menu.
@@ -439,6 +446,29 @@ class ChromeSnapshotScene
         REQUIRE(QTest::qWaitFor([&] { return colors->property("opened").toBool(); }, 2000));
     }
 
+    /// Opens the second tab's colour flyout the way the SetTabColor action does for its tab, and waits
+    /// for it.
+    void openTabColorFlyout()
+    {
+        // A delegate has no QObject parent, so the flyout is reached through the list that made it.
+        auto* list = root().findChild<QQuickItem*>(QStringLiteral("tabList"));
+        REQUIRE(list != nullptr);
+        // The window was only just shown: the strip is laid out over the next frames.
+        QQuickItem* tab = nullptr;
+        auto const realized = [&] {
+            QMetaObject::invokeMethod(list, "forceLayout");
+            QMetaObject::invokeMethod(
+                list, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, tab), Q_ARG(int, SnapshotMenuTab));
+            return tab != nullptr;
+        };
+        REQUIRE(QTest::qWaitFor(realized, 2000));
+        auto* flyout = tab->findChild<QObject*>(QStringLiteral("tabColorFlyout"));
+        REQUIRE(flyout != nullptr);
+        emit _controller.tabColorPickRequested(SnapshotMenuTab);
+        REQUIRE(QTest::qWaitFor([&] { return flyout->property("opened").toBool(); }, 2000));
+        _tabColorFlyout = flyout;
+    }
+
     /// The row of @p menu that opens the sub-menu titled @p title.
     /// @return The row, or null when @p menu has no such sub-menu.
     [[nodiscard]] static QQuickItem* subMenuRow(QObject& menu, QString const& title)
@@ -494,8 +524,9 @@ class ChromeSnapshotScene
     /// The Settings window over *_settings, on _engine; null unless the script's surface is that window.
     std::unique_ptr<window::SettingsWindowHost> _settingsWindow;
     IncubationDriver _incubation;
-    std::unique_ptr<QObject> _root;    ///< The QML tree dies before everything it borrows.
-    std::unique_ptr<QObject> _overlay; ///< Last: the toast, parented into _root's tree, dies first.
+    std::unique_ptr<QObject> _root;           ///< The QML tree dies before everything it borrows.
+    std::unique_ptr<QObject> _overlay;        ///< Last: the toast, parented into _root's tree, dies first.
+    QObject const* _tabColorFlyout = nullptr; ///< The flyout openTabColorFlyout() opened; owned by _root.
 };
 
 } // namespace contour::test::snapshot

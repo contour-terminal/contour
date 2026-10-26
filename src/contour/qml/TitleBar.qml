@@ -80,6 +80,7 @@ Item {
 
         // Leading slot: macOS puts its traffic lights here, before the tabs.
         Loader {
+            id: leadingSlot
             objectName: "leadingWindowControls"
             Layout.fillHeight: true
             active: root.useCustomWindowControls && windowControls.side === "leading"
@@ -97,10 +98,17 @@ Item {
 
         TabStrip {
             id: tabStrip
+            objectName: "tabStrip"
             Layout.fillHeight: true
             // Take only as much width as the tabs need, but never crowd out the drag region: the
-            // RowLayout gives the remaining width to the fillWidth drag region below.
-            Layout.preferredWidth: Math.min(implicitWidth, root.width * 0.7)
+            // RowLayout gives the remaining width to the fillWidth drag region below. A well is already
+            // sized to what is left it (availableWidth), so it needs no cap of its own.
+            Layout.preferredWidth: tabStrip.pill ? implicitWidth : Math.min(implicitWidth, root.width * 0.7)
+            // What the well may take: the bar less the window controls, the drag reserve and the strip's
+            // own buttons. Read from the slots' preferred widths, which do not depend on the strip.
+            availableWidth: Math.max(0, root.width - leadingSlot.Layout.preferredWidth
+                                        - trailingSlot.Layout.preferredWidth
+                                        - chromeStyle.space.dragReserve - tabStrip.fixedWidth)
             controller: root.controller
             // Threaded down so a closed inline rename can hand keyboard focus back to the terminal.
             window: root.window
@@ -113,6 +121,8 @@ Item {
             objectName: "dragRegion"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // The band that always stays draggable, however many tabs there are.
+            Layout.minimumWidth: chromeStyle.space.dragReserve
 
             // Right-click opens the title bar menu. It does not fight the handlers below: both of those
             // take the LEFT button only, which the DragHandler now says explicitly rather than leaving
@@ -151,6 +161,7 @@ Item {
 
         // Trailing slot: where Windows and Breeze put theirs, after the drag region.
         Loader {
+            id: trailingSlot
             objectName: "trailingWindowControls"
             Layout.fillHeight: true
             active: root.useCustomWindowControls && windowControls.side === "trailing"

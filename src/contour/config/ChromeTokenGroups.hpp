@@ -79,6 +79,20 @@ enum class TabShape : uint8_t
     Pill,     //!< A well of pills inside the window's title band.
 };
 
+/// Where a tab's fill and label colours come from.
+enum class TabColorSource : uint8_t
+{
+    Palette = 0, //!< The OS palette: highlight for the active tab, a user colour as a WT-style fill.
+    Roles,       //!< The chrome colour roles (TabActiveFill, TabText, ...), so a scheme's legible pair holds.
+};
+
+/// How the active tab's label is set apart from the others, beyond its fill.
+enum class ActiveTabWeight : uint8_t
+{
+    Regular = 0, //!< By its fill alone.
+    Bold,        //!< In bold as well: the Terminal row's selection can fall back to the bar's own colour.
+};
+
 /// How the chrome animates.
 enum class MotionStyle : uint8_t
 {
@@ -253,6 +267,9 @@ struct SizeTokens
     int toolbarButton = 0; ///< Width of a band toolbar button.
     int toolbarChip = 0;   ///< Height of a band toolbar chip.
 
+    // The tab colour flyout.
+    int flyoutSwatch = 0; ///< Edge of a swatch in the tab colour flyout (bigger than a menu's).
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -382,6 +399,8 @@ struct LayoutTokens
     MenuPresentation menu = MenuPresentation::InScene;  ///< How menus are presented; read by C++ only.
     TabShape tabShape = TabShape::Flat;                 ///< How the tabs are drawn.
     ProfileMenuAffordance profileMenu = ProfileMenuAffordance::Caret; ///< How the profile menu is reached.
+    TabColorSource tabColors = TabColorSource::Palette;               ///< Where a tab's colours come from.
+    ActiveTabWeight activeTabWeight = ActiveTabWeight::Regular;       ///< How the active label stands out.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -646,7 +665,8 @@ namespace detail
                   .hostChip = 24,
                   .hostDot = 7,
                   .toolbarButton = 28,
-                  .toolbarChip = 22 },
+                  .toolbarChip = 22,
+                  .flyoutSwatch = 30 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -669,7 +689,9 @@ namespace detail
         .layout = { .dialog = DialogPlacement::Sheet,
                     .menu = MenuPresentation::Native,
                     .tabShape = TabShape::Pill,
-                    .profileMenu = ProfileMenuAffordance::SecondaryClick },
+                    .profileMenu = ProfileMenuAffordance::SecondaryClick,
+                    .tabColors = TabColorSource::Roles,
+                    .activeTabWeight = ActiveTabWeight::Regular },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -697,7 +719,8 @@ namespace detail
                   .hostChip = 24,
                   .hostDot = 7,
                   .toolbarButton = 32,
-                  .toolbarChip = 22 },
+                  .toolbarChip = 22,
+                  .flyoutSwatch = 30 },
         .space = nativeSpace(4, 4),
         .radii = { .control = 4,
                    .popover = 8,
@@ -720,7 +743,9 @@ namespace detail
         .layout = { .dialog = DialogPlacement::Centered,
                     .menu = MenuPresentation::InScene,
                     .tabShape = TabShape::Flat,
-                    .profileMenu = ProfileMenuAffordance::Caret },
+                    .profileMenu = ProfileMenuAffordance::Caret,
+                    .tabColors = TabColorSource::Palette,
+                    .activeTabWeight = ActiveTabWeight::Regular },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -748,7 +773,8 @@ namespace detail
                   .hostChip = 24,
                   .hostDot = 7,
                   .toolbarButton = 34,
-                  .toolbarChip = 22 },
+                  .toolbarChip = 22,
+                  .flyoutSwatch = 30 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 8,
                    .popover = 12,
@@ -771,7 +797,9 @@ namespace detail
         .layout = { .dialog = DialogPlacement::Centered,
                     .menu = MenuPresentation::InScene,
                     .tabShape = TabShape::Flat,
-                    .profileMenu = ProfileMenuAffordance::Caret },
+                    .profileMenu = ProfileMenuAffordance::Caret,
+                    .tabColors = TabColorSource::Palette,
+                    .activeTabWeight = ActiveTabWeight::Regular },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -803,7 +831,8 @@ namespace detail
                   .hostChip = 1,
                   .hostDot = 1,
                   .toolbarButton = 2,
-                  .toolbarChip = 1 },
+                  .toolbarChip = 1,
+                  .flyoutSwatch = 2 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,
@@ -842,7 +871,9 @@ namespace detail
         .layout = { .dialog = DialogPlacement::Centered,
                     .menu = MenuPresentation::InScene,
                     .tabShape = TabShape::Flat,
-                    .profileMenu = ProfileMenuAffordance::Caret },
+                    .profileMenu = ProfileMenuAffordance::Caret,
+                    .tabColors = TabColorSource::Roles,
+                    .activeTabWeight = ActiveTabWeight::Bold },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         .colors = { schemeColor(SchemeSlot::Bar),

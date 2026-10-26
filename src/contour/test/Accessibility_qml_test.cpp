@@ -12,8 +12,10 @@
 
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QCoreApplication>
+#include <QtGui/QAccessible>
 #include <QtGui/QColor>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
@@ -188,17 +190,25 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
         QString url;
         QVariantMap initialProperties;
         std::size_t swatches = 0; ///< How many `menuSwatch` parts the primitive shows.
+        QString name {};          ///< The name it must announce; any non-empty one when empty.
+        int role = -1;            ///< The QAccessible::Role it must declare; any when -1.
     };
     auto const cases = std::array {
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Banner.qml"),
                .initialProperties = QVariantMap { { "text", QStringLiteral("Contour has new defaults") } },
-               .swatches = 0 },
+               .swatches = 0,
+               .name = {},
+               .role = -1 },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/Toast.qml"),
                .initialProperties = QVariantMap { { "text", QStringLiteral("Copied 3 lines") } },
-               .swatches = 0 },
+               .swatches = 0,
+               .name = {},
+               .role = -1 },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/KitDialog.qml"),
                .initialProperties = QVariantMap { { "heading", QStringLiteral("Close this tab?") } },
-               .swatches = 0 },
+               .swatches = 0,
+               .name = {},
+               .role = -1 },
         Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/MenuSwatchRow.qml"),
                .initialProperties =
                    QVariantMap { { "swatches",
@@ -207,7 +217,15 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                                                                 { "actionId", 0 },
                                                                 { "enabled", true },
                                                                 { "checked", false } } } } },
-               .swatches = 1 },
+               .swatches = 1,
+               .name = {},
+               .role = -1 },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/TabBadgeSlot.qml"),
+               .initialProperties =
+                   QVariantMap { { "kind", static_cast<int>(contour::window::TabBadgeKind::Blocked) } },
+               .swatches = 0,
+               .name = QStringLiteral("Waiting for you"),
+               .role = QAccessible::StaticText },
     };
 
     for (auto const& testCase: cases)
@@ -222,6 +240,10 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
         REQUIRE(attached != nullptr);
         CHECK(attached->property("role").isValid());
         CHECK_FALSE(attached->property("name").toString().isEmpty());
+        if (!testCase.name.isEmpty())
+            CHECK(attached->property("name").toString() == testCase.name);
+        if (testCase.role >= 0)
+            CHECK(attached->property("role").toInt() == testCase.role);
 
         // A primitive made of parts names each part as well: a swatch row's every swatch is a button.
         auto const parts = partsNamed(*root, QStringLiteral("menuSwatch"));

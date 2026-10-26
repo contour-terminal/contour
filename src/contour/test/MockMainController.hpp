@@ -2,10 +2,13 @@
 #pragma once
 
 #include <contour/config/TabBarMode.hpp>
+#include <contour/platform/ColorConversion.hpp>
+#include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MainWindowControllerMock.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -18,13 +21,39 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cstddef>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <vtworkspace/PaneLayout.hpp>
 
 namespace contour::test
 {
+
+/// The colour row 0 wears under snapshot::TabDecor::EveryBadge.
+inline constexpr auto DecorTabColor = vtbackend::RGBColor { 0xE74856u };
+
+/// One badged row under snapshot::TabDecor::EveryBadge.
+struct DecorBadge
+{
+    window::TabBadgeKind kind = window::TabBadgeKind::None; ///< The badge the row shows.
+    int progress = -1;                                      ///< Its progress percent; -1 for none.
+};
+
+/// The badges of rows 1, 2, ... under snapshot::TabDecor::EveryBadge: one per kind, Working at 40 %.
+inline constexpr auto DecorBadges = std::array {
+    DecorBadge { .kind = window::TabBadgeKind::Output, .progress = -1 },
+    DecorBadge { .kind = window::TabBadgeKind::Working, .progress = 40 },
+    DecorBadge { .kind = window::TabBadgeKind::Blocked, .progress = -1 },
+    DecorBadge { .kind = window::TabBadgeKind::Done, .progress = -1 },
+    DecorBadge { .kind = window::TabBadgeKind::Error, .progress = -1 },
+};
+static_assert(DecorBadges.size() + 1 == window::TabBadgeKindCount, "one decor row per badge kind");
+
+/// How long row 0's title is under snapshot::TabDecor::LongTitle: longer than any tab is wide.
+inline constexpr auto DecorLongTitleLength = 200;
 
 /// The shape a MockMainController is built in: what its window holds, fixed for its lifetime.
 ///
@@ -35,10 +64,12 @@ struct MainWindowScene
     int tabCount = 2;                  ///< How many tabs the strip lists.
     QObject* rootPane = nullptr;       ///< The active tab's pane tree; borrowed, may be null.
     QObject* commandPalette = nullptr; ///< The command palette's model; borrowed, may be null.
-    QString hostLabel;                 ///< The attached host; empty for a local window.
+    QString hostLabel {};              ///< The attached host; empty for a local window.
     QString hostingNotice {};          ///< The hosting notice the window starts with; empty for none.
     /// When the tab strip is shown, resolved against @c tabCount into the initial tabBarShouldShow.
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
+    snapshot::TabDecor decor = snapshot::TabDecor::Plain; ///< What the tabs carry beyond their titles.
+    int activeTab = 0;                                    ///< The active tab's index.
 };
 
 /// Manager + WindowController in one mock: `terminalSessions` context property AND the object
@@ -103,7 +134,7 @@ class MockMainController: public MainWindowControllerMock
         attachedHost = _scene.hostLabel;
     }
 
-    [[nodiscard]] int activeTabIndex() const noexcept { return 0; }
+    [[nodiscard]] int activeTabIndex() const noexcept { return _scene.activeTab; }
     [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
     void setHostingNotice(QString notice)
     {
@@ -209,7 +240,28 @@ class MockMainController: public MainWindowControllerMock
     Q_INVOKABLE void closeWindow() { calls << QStringLiteral("closeWindow"); }
     Q_INVOKABLE [[nodiscard]] bool canCloseWindow() const noexcept { return true; }
     Q_INVOKABLE void toggleTitleBar() {}
-    Q_INVOKABLE [[nodiscard]] QVariantList tabColorPalette() const { return {}; }
+    /// Mirrors WindowController::tabColorPalette(): the colours the flyout offers, the mock's menu palette.
+    Q_INVOKABLE [[nodiscard]] QVariantList tabColorPalette() const
+    {
+        auto colors = QVariantList {};
+        for (auto const color: MockTabPalette)
+            colors.append(platform::toQColor(color));
+        return colors;
+    }
+    /// Mirrors WindowController::tabBackgroundColor(): the WT-style fill of a coloured native Flat tab.
+    Q_INVOKABLE [[nodiscard]] QColor tabBackgroundColor(QColor const& tabColor,
+                                                        QColor const& rowBackground,
+                                                        bool active,
+                                                        bool hovered,
+                                                        bool windowActive) const
+    {
+        return mockTabBackgroundColor(tabColor, rowBackground, active, hovered, windowActive);
+    }
+    /// Mirrors WindowController::tabTextColor(): the label that reads on a coloured fill.
+    Q_INVOKABLE [[nodiscard]] QColor tabTextColor(QColor const& tabBackground) const
+    {
+        return mockTabTextColor(tabBackground);
+    }
     Q_INVOKABLE void activateTab(int) {}
     Q_INVOKABLE void moveTab(int, int) {}
     Q_INVOKABLE [[nodiscard]] quint64 windowIdValue() const noexcept { return 1; }
@@ -236,22 +288,23 @@ class MockMainController: public MainWindowControllerMock
     {
         if (index.row() < 0 || index.row() >= _scene.tabCount)
             return {};
+        auto const badge = decorBadge(index.row());
         switch (static_cast<Roles>(role))
         {
-            case Roles::TitleRole: return QStringLiteral("Tab %1").arg(index.row() + 1);
+            case Roles::TitleRole: return title(index.row());
             case Roles::RawTitleRole: return QString();
-            case Roles::ColorRole: return QColor(Qt::transparent);
-            case Roles::IsActiveRole: return index.row() == 0;
+            case Roles::ColorRole: return color(index.row());
+            case Roles::IsActiveRole: return index.row() == _scene.activeTab;
             case Roles::PaneCountRole: return 1;
             case Roles::SessionIdRole: return index.row();
             case Roles::ZoomedRole: return false;
             // 0 = ProgressState::Inactive: no operation in flight, so TabItem paints no bar.
             case Roles::ProgressStateRole:
             case Roles::ProgressPercentageRole: return 0;
-            // 0 = TabBadgeKind::None: nothing competes for the slot, so TabItem paints no badge.
-            case Roles::BadgeRole: return 0;
+            // TabBadgeKind::None unless the decor badges the row: nothing then competes for the slot.
+            case Roles::BadgeRole: return static_cast<int>(badge.kind);
             case Roles::BadgeTextRole: return QString {};
-            case Roles::BadgeProgressRole: return -1;
+            case Roles::BadgeProgressRole: return badge.progress;
             default: return {};
         }
     }
@@ -293,6 +346,31 @@ class MockMainController: public MainWindowControllerMock
     void tabColorPickRequested(int /*index*/);
 
   private:
+    /// The title of row @p row: "Tab n", or a title too long for any tab on row 0 under LongTitle.
+    [[nodiscard]] QString title(int row) const
+    {
+        if (_scene.decor == snapshot::TabDecor::LongTitle && row == 0)
+            return { DecorLongTitleLength, QChar(u'w') };
+        return QStringLiteral("Tab %1").arg(row + 1);
+    }
+
+    /// The colour of row @p row: DecorTabColor on row 0 under EveryBadge, else none (transparent).
+    [[nodiscard]] QColor color(int row) const
+    {
+        if (_scene.decor == snapshot::TabDecor::EveryBadge && row == 0)
+            return platform::toQColor(DecorTabColor);
+        return { Qt::transparent };
+    }
+
+    /// The badge of row @p row: rows 1, 2, ... carry DecorBadges under EveryBadge.
+    [[nodiscard]] DecorBadge decorBadge(int row) const
+    {
+        auto const slot = static_cast<std::size_t>(row) - 1;
+        if (_scene.decor != snapshot::TabDecor::EveryBadge || row < 1 || slot >= DecorBadges.size())
+            return {};
+        return DecorBadges[slot];
+    }
+
     MainWindowScene _scene;
     int _chromeHeight = 0;
     int _tabBarPosition = 0;       // 0 = Top (default), 1 = Bottom

@@ -15,14 +15,19 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/NewDefaultsOffer.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
+#include <contour/platform/ColorConversion.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -31,7 +36,9 @@
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUrl>
 #include <QtGui/QColor>
+#include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QPalette>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -41,10 +48,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <ranges>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include <QtTest/QTest>
 #include <vtworkspace/PaneLayout.hpp>
@@ -666,4 +679,440 @@ TEST_CASE("Main.qml loads under every chrome row (offscreen)", "[contour][gui][q
         CHECK(controls->property("side").toString() == (isMac ? "leading" : "trailing"));
         CHECK(root->findChild<QQuickItem*>(QStringLiteral("titleBar")) != nullptr);
     }
+}
+
+namespace
+{
+using contour::config::ChromeStyle;
+using contour::test::MainWindowScene;
+using contour::test::snapshot::TabDecor;
+
+/// The setup a chrome row is loaded under, with the window controls its host shows.
+/// @param row    The chrome row.
+/// @param scheme The terminal scheme the Terminal row paints with; the default palette's otherwise.
+[[nodiscard]] contour::test::ChromeSetup rowSetup(
+    ChromeStyle row,
+    contour::config::ChromeSchemeColors scheme =
+        contour::config::chromeSchemeColorsOf(vtbackend::ColorPalette {}))
+{
+    return contour::test::ChromeSetup {
+        .row = row,
+        .font = QGuiApplication::font(),
+        .windowControls = contour::config::resolveWindowControlStyle(
+            contour::config::WindowControlStyle::Auto, contour::test::snapshot::rowHost(row).host),
+        .accessibility = {},
+        .appearance = {},
+        .scheme = scheme,
+    };
+}
+
+/// The chrome scheme of the bundled colour scheme @p name.
+[[nodiscard]] contour::config::ChromeSchemeColors bundledScheme(std::string_view name)
+{
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+    return contour::config::chromeSchemeColorsOf(palette);
+}
+
+/// Shows Main.qml's window at @p width and waits until it is exposed, so pointer and hover cases work.
+void showWindow(QObject& root, int width = 1024)
+{
+    auto* window = qobject_cast<QQuickWindow*>(&root);
+    REQUIRE(window != nullptr);
+    window->resize(width, 640);
+    window->show();
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+    // The pointer rests where an earlier case left it, which may be over a tab: park it in the content,
+    // so no tab starts out hovered.
+    // Two moves, because a move to where the pointer already is sends nothing.
+    QTest::mouseMove(window, QPoint(1, window->height() / 2));
+    QTest::mouseMove(window, QPoint(window->width() / 2, window->height() / 2));
+    QCoreApplication::processEvents();
+}
+
+/// The chrome style's sub-object @p name (`size`, `radii`, `colors`, ...).
+[[nodiscard]] QObject& styleGroup(QQmlEngine& engine, char const* name)
+{
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto* group = style->property(name).value<QObject*>();
+    REQUIRE(group != nullptr);
+    return *group;
+}
+
+/// The chrome style itself.
+[[nodiscard]] QObject& chromeStyleOf(QQmlEngine& engine)
+{
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    return *style;
+}
+
+/// The realized tab delegates of the strip, by index; an entry is null for a delegate out of view.
+[[nodiscard]] std::vector<QQuickItem*> tabDelegates(QObject& root)
+{
+    auto* list = root.findChild<QQuickItem*>(QStringLiteral("tabList"));
+    REQUIRE(list != nullptr);
+    QMetaObject::invokeMethod(list, "forceLayout");
+    auto items = std::vector<QQuickItem*> {};
+    for (auto const index: std::views::iota(0, list->property("count").toInt()))
+    {
+        QQuickItem* item = nullptr;
+        QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, item), Q_ARG(int, index));
+        items.push_back(item);
+    }
+    return items;
+}
+
+/// The child of @p item named @p name, failing the test when there is none.
+[[nodiscard]] QQuickItem& part(QQuickItem const& item, QString const& name)
+{
+    auto* child = item.findChild<QQuickItem*>(name);
+    INFO("part: " << name.toStdString());
+    REQUIRE(child != nullptr);
+    return *child;
+}
+
+/// @return @p color as the RGB the contrast helpers take.
+[[nodiscard]] vtbackend::RGBColor rgbOf(QColor const& color)
+{
+    return vtbackend::RGBColor { static_cast<uint8_t>(color.red()),
+                                 static_cast<uint8_t>(color.green()),
+                                 static_cast<uint8_t>(color.blue()) };
+}
+
+/// @return @p top composited over the opaque @p ground: what a translucent label paints.
+[[nodiscard]] QColor over(QColor const& top, QColor const& ground)
+{
+    auto const alpha = top.alphaF();
+    auto const mix = [alpha](float a, float b) {
+        return (a * alpha) + (b * (1.0F - alpha));
+    };
+    return QColor::fromRgbF(
+        mix(top.redF(), ground.redF()), mix(top.greenF(), ground.greenF()), mix(top.blueF(), ground.blueF()));
+}
+
+/// @return The WCAG contrast of @p a against @p b, opaque colours both.
+[[nodiscard]] double contrastOf(QColor const& a, QColor const& b)
+{
+    return vtbackend::contrastRatio(rgbOf(a), rgbOf(b));
+}
+
+/// Evaluates @p expression in @p item's own QML context, failing the test on an error.
+[[nodiscard]] QVariant evaluateIn(QQuickItem& item, QString const& expression)
+{
+    auto evaluation = QQmlExpression(qmlContext(&item), &item, expression);
+    auto value = evaluation.evaluate();
+    INFO("expression: " << expression.toStdString()
+                        << " error: " << evaluation.error().toString().toStdString());
+    REQUIRE_FALSE(evaluation.hasError());
+    return value;
+}
+} // namespace
+
+TEST_CASE("the macOS row draws the well and pills at the canvas tokens (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+
+    auto const& size = styleGroup(engine, "size");
+    auto const& radii = styleGroup(engine, "radii");
+
+    auto const* well = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
+    REQUIRE(well != nullptr);
+    CHECK(well->isVisible());
+    CHECK(well->height() == size.property("tabWell").toReal());
+    CHECK(well->property("radius").toReal() == radii.property("tabWell").toReal());
+
+    auto* strip = root->findChild<QQuickItem*>(QStringLiteral("tabStrip"));
+    REQUIRE(strip != nullptr);
+    auto layout = QVariantMap {};
+    REQUIRE(QMetaObject::invokeMethod(&chromeStyleOf(engine),
+                                      "tabWellLayout",
+                                      Q_RETURN_ARG(QVariantMap, layout),
+                                      Q_ARG(qreal, strip->property("availableWidth").toReal()),
+                                      Q_ARG(int, 3)));
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 3);
+    for (auto* tab: tabs)
+    {
+        REQUIRE(tab != nullptr);
+        CHECK(tab->height() == size.property("tab").toReal());
+        CHECK(part(*tab, QStringLiteral("tabBackground")).property("radius").toReal()
+              == radii.property("tab").toReal());
+        CHECK(part(*tab, QStringLiteral("tabIcon")).width() == size.property("tabIcon").toReal());
+        CHECK(tab->width() == layout.value(QStringLiteral("tabWidth")).toReal());
+        CHECK(tab->width() == tabs.front()->width());
+    }
+
+    // The close button shows on the active tab, and on an inactive one only while it is hovered.
+    CHECK(part(*tabs[0], QStringLiteral("tabCloseButton")).isVisible());
+    auto& inactiveClose = part(*tabs[1], QStringLiteral("tabCloseButton"));
+    CHECK_FALSE(inactiveClose.isVisible());
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    auto const centre = tabs[1]->mapToScene(QPointF(tabs[1]->width() / 2, tabs[1]->height() / 2));
+    QTest::mouseMove(window, centre.toPoint());
+    REQUIRE(QTest::qWaitFor([&] { return inactiveClose.isVisible(); }, 1000));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Fluent and ContourLinux rows keep today's geometry (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 3, .decor = TabDecor::EveryBadge } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        showWindow(*root);
+
+        auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        REQUIRE(titleBar != nullptr);
+        CHECK(titleBar->height() == 34); // today's chromeHeightUnits
+
+        auto const tabs = tabDelegates(*root);
+        REQUIRE(tabs.size() == 3);
+        auto& first = *tabs[0];              // coloured, active, no badge
+        CHECK(first.implicitHeight() == 32); // today's tabHeightUnits
+        CHECK(first.height() == titleBar->height());
+        auto const labelWidth = part(first, QStringLiteral("tabLabel")).implicitWidth();
+        // Today's sum, snapped up to the whole pixel so the label never loses a fraction of one.
+        CHECK(first.implicitWidth() == std::ceil(std::clamp(labelWidth + 56, 120.0, 240.0)));
+
+        auto const* well = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
+        CHECK((well == nullptr || !well->isVisible()));
+        auto const* newTab = root->findChild<QQuickItem*>(QStringLiteral("newTabButton"));
+        REQUIRE(newTab != nullptr);
+        CHECK(newTab->width() == 32);
+        auto const* newTabMenu = root->findChild<QQuickItem*>(QStringLiteral("newTabMenuButton"));
+        REQUIRE(newTabMenu != nullptr);
+        CHECK(newTabMenu->isVisible());
+        CHECK(part(*tabs[1], QStringLiteral("tabCloseButton")).isVisible());
+
+        // A coloured tab is filled WT-style, as it always was.
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        auto const expected = controller.tabBackgroundColor(
+            contour::platform::toQColor(contour::test::DecorTabColor),
+            QGuiApplication::palette().color(QPalette::Active, QPalette::Window),
+            true,
+            false,
+            window->isActive());
+        CHECK(part(first, QStringLiteral("tabBackground")).property("color").value<QColor>() == expected);
+        CHECK(part(first, QStringLiteral("tabColorCell")).property("text").toString().isEmpty());
+
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a long title elides inside the pill (offscreen)", "[contour][gui][qml][mainwindow][tabwell]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 2, .decor = TabDecor::LongTitle } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 2);
+    auto& tab = *tabs[0];
+    auto const& label = part(tab, QStringLiteral("tabLabel"));
+    CHECK(label.property("truncated").toBool());
+    CHECK(tab.width() <= chromeStyleOf(engine).property("maxTabWidth").toReal());
+    auto const fullTitle = QString(contour::test::DecorLongTitleLength, QChar(u'w'));
+    CHECK(evaluateIn(tab, QStringLiteral("Accessible.name")).toString() == fullTitle);
+
+    auto const* dragRegion = root->findChild<QQuickItem*>(QStringLiteral("dragRegion"));
+    REQUIRE(dragRegion != nullptr);
+    CHECK(dragRegion->width() >= styleGroup(engine, "space").property("dragReserve").toReal());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("twenty tabs go icon-only and keep the active one in view (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    constexpr auto TabCount = 20;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = TabCount, .activeTab = TabCount - 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root, 900);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == static_cast<std::size_t>(TabCount));
+    auto realized = 0;
+    for (auto* tab: tabs | std::views::filter([](QQuickItem const* item) { return item != nullptr; }))
+    {
+        ++realized;
+        CHECK_FALSE(part(*tab, QStringLiteral("tabLabel")).isVisible());
+        CHECK(tab->width() == tabs.back()->width());
+    }
+    CHECK(realized > 0);
+
+    auto const* list = root->findChild<QQuickItem*>(QStringLiteral("tabList"));
+    REQUIRE(list != nullptr);
+    auto const* active = tabs.back();
+    REQUIRE(active != nullptr);
+    auto const contentX = list->property("contentX").toReal();
+    CHECK(active->x() >= contentX);
+    CHECK(active->x() + active->width() <= contentX + list->width());
+
+    auto const* newTab = root->findChild<QQuickItem*>(QStringLiteral("newTabButton"));
+    REQUIRE(newTab != nullptr);
+    CHECK(newTab->isVisible());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a coloured pill is tinted at 20 % and its icon at 100 % (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    for (auto const appearance: contour::test::snapshot::SnapshotAppearances)
+    {
+        INFO("appearance: " << contour::test::snapshot::appearanceName(appearance));
+        auto const scoped = contour::test::ScopedChromeAppearance { appearance };
+        QQmlEngine engine;
+        // Row 0 wears the colour; the second tab is the active one, so the coloured pill is at rest.
+        MockMainController controller { MainWindowScene {
+            .tabCount = 2, .decor = TabDecor::EveryBadge, .activeTab = 1 } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        showWindow(*root);
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        window->requestActivate();
+        REQUIRE(QTest::qWaitForWindowActive(window));
+
+        auto const tabs = tabDelegates(*root);
+        REQUIRE(tabs.size() == 2);
+        auto& tab = *tabs[0];
+        // At rest: hover reaches the scene on a later frame than the pointer move that ended it.
+        REQUIRE(QTest::qWaitFor([&] { return !tab.property("closeShown").toBool(); }, 1000));
+        auto const color = contour::platform::toQColor(contour::test::DecorTabColor);
+        auto const expected =
+            evaluateIn(
+                tab,
+                QStringLiteral("Qt.tint(Qt.tint(systemPalette.window, chromeStyle.colors.tabWellFill), "
+                               "Qt.rgba(%1, %2, %3, chromeStyle.tint.tab))")
+                    .arg(color.redF())
+                    .arg(color.greenF())
+                    .arg(color.blueF()))
+                .value<QColor>();
+        auto const fill = part(tab, QStringLiteral("tabBackground")).property("color").value<QColor>();
+        INFO("fill " << fill.name(QColor::HexArgb).toStdString() << " expected "
+                     << expected.name(QColor::HexArgb).toStdString());
+        CHECK(fill == expected);
+        CHECK(part(tab, QStringLiteral("tabIcon")).property("color").value<QColor>() == color);
+
+        // The label on the tint keeps 4.5:1, measured against the pixels the pill paints.
+        auto const& label = part(tab, QStringLiteral("tabLabel"));
+        auto const labelColor = label.property("color").value<QColor>();
+        CHECK(labelColor.rgba()
+              == styleGroup(engine, "colors").property("tabTextTinted").value<QColor>().rgba());
+        auto const image = window->grabWindow();
+        REQUIRE_FALSE(image.isNull());
+        auto const probe =
+            tab.mapToScene(QPointF(tab.width() - (styleGroup(engine, "space").property("s4").toReal() / 2),
+                                   tab.height() / 2))
+            * window->devicePixelRatio();
+        auto const painted = image.pixelColor(probe.toPoint());
+        INFO("painted: " << painted.name().toStdString() << " expected: " << fill.name().toStdString());
+        CHECK(contrastOf(over(labelColor, painted), painted) >= contour::config::MinimumTextContrast);
+
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the Terminal row draws one cell-high tabs with glyph badges (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    using contour::config::SchemeSlot;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 6, .decor = TabDecor::EveryBadge } };
+    contour::test::QmlMessageCapture warnings;
+    auto const scheme = bundledScheme("contour-light");
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal, scheme));
+    showWindow(*root);
+
+    auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+    REQUIRE(titleBar != nullptr);
+    CHECK(titleBar->height() == chromeStyleOf(engine).property("cellHeight").toReal());
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 6);
+    for (auto const index: std::views::iota(std::size_t { 0 }, tabs.size() - 1))
+        CHECK(part(*tabs[index], QStringLiteral("tabSeparator")).property("text").toString() == "│");
+    for (auto* tab: tabs)
+        CHECK_FALSE(part(*tab, QStringLiteral("tabIcon")).isVisible());
+
+    auto const& cell = part(*tabs[0], QStringLiteral("tabColorCell"));
+    CHECK(cell.isVisible());
+    CHECK(cell.property("text").toString() == "▌");
+    CHECK(cell.property("color").value<QColor>()
+          == contour::platform::toQColor(contour::test::DecorTabColor));
+
+    auto const& colors = styleGroup(engine, "colors");
+    auto const activeFill = colors.property("tabActiveFill").value<QColor>();
+    auto const& activeLabel = part(*tabs[0], QStringLiteral("tabLabel"));
+    CHECK(part(*tabs[0], QStringLiteral("tabBackground")).property("color").value<QColor>() == activeFill);
+    CHECK(contrastOf(over(activeLabel.property("color").value<QColor>(), activeFill), activeFill)
+          >= contour::config::MinimumTextContrast);
+
+    auto const glyphs = std::array { QStringLiteral("•"),
+                                     QStringLiteral("◑"),
+                                     QStringLiteral("!"),
+                                     QStringLiteral("✓"),
+                                     QStringLiteral("✕") };
+    static_assert(glyphs.size() == contour::test::DecorBadges.size());
+    auto const well = colors.property("tabWellFill").value<QColor>();
+    auto const bar = scheme.bySlot[static_cast<size_t>(SchemeSlot::Bar)];
+    auto const floor =
+        std::min(contour::config::MinimumTextContrast,
+                 vtbackend::contrastRatio(scheme.bySlot[static_cast<size_t>(SchemeSlot::BarText)], bar));
+    for (auto const index: std::views::iota(std::size_t { 0 }, glyphs.size()))
+    {
+        INFO("badge row " << index + 1);
+        auto const& glyph = part(*tabs[index + 1], QStringLiteral("tabBadgeGlyph"));
+        CHECK(glyph.isVisible());
+        CHECK(glyph.property("text").toString() == glyphs[index]);
+        // The badge costs its tab the badge's cells, never the title.
+        auto const& badgedLabel = part(*tabs[index + 1], QStringLiteral("tabLabel"));
+        CHECK_FALSE(badgedLabel.property("truncated").toBool());
+        CHECK(contrastOf(over(glyph.property("color").value<QColor>(), well), well) >= floor);
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Terminal row sets the active tab apart where its fill is the bar's (offscreen)",
+          "[contour][gui][qml][mainwindow][tabwell]")
+{
+    // one-dark's selection falls back to the bar itself, so the active tab's fill is the well's: the
+    // label's weight is what still tells it from the others.
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 2 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(
+        engine, controller, warnings, rowSetup(ChromeStyle::Terminal, bundledScheme("one-dark")));
+    showWindow(*root);
+
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == 2);
+    auto const fillOf = [](QQuickItem const& tab) {
+        return part(tab, QStringLiteral("tabBackground")).property("color").value<QColor>();
+    };
+    auto const boldOf = [](QQuickItem const& tab) {
+        return part(tab, QStringLiteral("tabLabel")).property("font").value<QFont>().bold();
+    };
+    CHECK(fillOf(*tabs[0]) == fillOf(*tabs[1])); // the premise: the fill alone says nothing here
+    CHECK(boldOf(*tabs[0]));
+    CHECK_FALSE(boldOf(*tabs[1]));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

@@ -46,6 +46,9 @@ enum class SnapshotScript : uint8_t
     NewDefaultsBanner,
     TabMenu,
     About,
+    TabBadges,      //!< Every badge kind on one strip, beside a coloured active tab.
+    TabOverflow,    //!< More tabs than the strip holds, the last one active.
+    TabColorFlyout, //!< The second tab's colour flyout.
 };
 
 /// How a script's active tab is divided into panes.
@@ -69,8 +72,17 @@ enum class ScriptAction : uint8_t
     OpenPalette,
     ShowToast,
     OpenKitDialog,
-    OpenTabMenu, //!< The second tab's context menu, with its "Tab Color" sub-menu open.
-    OpenAbout,   //!< The About dialog, raised by the ShowAbout action.
+    OpenTabMenu,        //!< The second tab's context menu, with its "Tab Color" sub-menu open.
+    OpenAbout,          //!< The About dialog, raised by the ShowAbout action.
+    OpenTabColorFlyout, //!< The second tab's colour flyout, as the SetTabColor action opens it.
+};
+
+/// What a script's tabs carry beyond their titles.
+enum class TabDecor : uint8_t
+{
+    Plain = 0,  //!< "Tab 1", "Tab 2", ...: no colour, no badge.
+    EveryBadge, //!< Row 0 coloured, rows 1 to 5 one badge kind each (see MockMainController).
+    LongTitle,  //!< Row 0's title is long enough to elide in any tab.
 };
 
 /// Whether the window is attached to a host, and in which state.
@@ -105,6 +117,8 @@ struct SnapshotScriptRow
     HostConnection connection = HostConnection::Local;     ///< The attached host's state.
     std::string_view hostLabel {};                         ///< The attached host's label; empty when local.
     SnapshotBanner banner = SnapshotBanner::None;          ///< The banner shown above the content.
+    TabDecor decor = TabDecor::Plain;                      ///< What the tabs carry.
+    int activeTab = 0;                                     ///< The active tab's index.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -117,7 +131,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::ThreeTabs,
                         .name = "three-tabs",
                         .tabCount = 3,
@@ -126,7 +142,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::SplitThree,
                         .name = "split-three",
                         .tabCount = 1,
@@ -135,7 +153,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::Palette,
                         .name = "palette",
                         .tabCount = 1,
@@ -144,7 +164,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenPalette,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::Settings,
                         .name = "settings",
                         .tabCount = 1,
@@ -153,7 +175,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::RemoteReconnecting,
                         .name = "remote-reconnecting",
                         .tabCount = 1,
@@ -162,7 +186,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Reconnecting,
                         .hostLabel = "build-01",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::Toast,
                         .name = "toast",
                         .tabCount = 1,
@@ -171,7 +197,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::ShowToast,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::KitDialog,
                         .name = "kit-dialog",
                         .tabCount = 1,
@@ -180,7 +208,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenKitDialog,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::HostingBanner,
                         .name = "hosting-banner",
                         .tabCount = 1,
@@ -189,7 +219,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::Hosting },
+                        .banner = SnapshotBanner::Hosting,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::NewDefaultsBanner,
                         .name = "new-defaults-banner",
                         .tabCount = 1,
@@ -198,7 +230,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::None,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::NewDefaults },
+                        .banner = SnapshotBanner::NewDefaults,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::TabMenu,
                         .name = "tab-menu",
                         .tabCount = 3,
@@ -207,7 +241,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenTabMenu,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
     SnapshotScriptRow { .script = SnapshotScript::About,
                         .name = "about",
                         .tabCount = 1,
@@ -216,7 +252,42 @@ inline constexpr auto SnapshotScripts = std::array {
                         .action = ScriptAction::OpenAbout,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
-                        .banner = SnapshotBanner::None },
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
+    SnapshotScriptRow { .script = SnapshotScript::TabBadges,
+                        .name = "tab-badges",
+                        .tabCount = 6,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::EveryBadge,
+                        .activeTab = 0 },
+    SnapshotScriptRow { .script = SnapshotScript::TabOverflow,
+                        .name = "tab-overflow",
+                        .tabCount = 20,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 19 },
+    SnapshotScriptRow { .script = SnapshotScript::TabColorFlyout,
+                        .name = "tab-color-flyout",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::OpenTabColorFlyout,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0 },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

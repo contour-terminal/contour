@@ -28,6 +28,25 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::NewDefaultsBanner).banner == SnapshotBanner::NewDefaults);
     CHECK(scriptRow(SnapshotScript::NewDefaultsBanner).name == "new-defaults-banner");
     CHECK(scriptRow(SnapshotScript::SingleTab).banner == SnapshotBanner::None);
+    CHECK(scriptRow(SnapshotScript::TabBadges).decor == TabDecor::EveryBadge);
+    CHECK(scriptRow(SnapshotScript::TabOverflow).tabCount == 20);
+    CHECK(scriptRow(SnapshotScript::TabOverflow).activeTab
+          == scriptRow(SnapshotScript::TabOverflow).tabCount - 1);
+    CHECK(scriptRow(SnapshotScript::TabColorFlyout).action == ScriptAction::OpenTabColorFlyout);
+    CHECK(scriptRow(SnapshotScript::TabColorFlyout).tabCount >= 2); // it opens the second tab's flyout
+    // The scripts that came before the decor keep plain tabs, the first one active.
+    for (auto const script: { SnapshotScript::SingleTab, SnapshotScript::ThreeTabs, SnapshotScript::TabMenu })
+    {
+        CHECK(scriptRow(script).decor == TabDecor::Plain);
+        CHECK(scriptRow(script).activeTab == 0);
+    }
+    // Every row's active tab is one of its tabs.
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        CHECK(row.activeTab >= 0);
+        CHECK(row.activeTab < row.tabCount);
+    }
 }
 
 TEST_CASE("snapshot.rowHosts", "[snapshot]")

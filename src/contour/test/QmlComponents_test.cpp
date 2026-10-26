@@ -55,6 +55,7 @@
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
+#include <QtQml/QQmlExpression>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -307,21 +308,11 @@ class MockTabController: public QAbstractListModel
                                                         bool hovered,
                                                         bool windowActive) const
     {
-        auto const state = [&] {
-            if (active)
-                return contour::window::TabVisualState::Active;
-            if (hovered)
-                return contour::window::TabVisualState::Hover;
-            return windowActive ? contour::window::TabVisualState::Inactive
-                                : contour::window::TabVisualState::InactiveWindowUnfocused;
-        }();
-        return contour::platform::toQColor(contour::window::tabBackgroundColor(
-            contour::platform::toRGBColor(tabColor), contour::platform::toRGBColor(rowBackground), state));
+        return contour::test::mockTabBackgroundColor(tabColor, rowBackground, active, hovered, windowActive);
     }
     Q_INVOKABLE [[nodiscard]] QColor tabTextColor(QColor const& tabBackground) const
     {
-        return contour::platform::toQColor(
-            contour::window::contrastingTextColor(contour::platform::toRGBColor(tabBackground)));
+        return contour::test::mockTabTextColor(tabBackground);
     }
 
   signals:
@@ -1705,6 +1696,115 @@ TEST_CASE("A palette change recolours a TabItem's badge (offscreen)", "[contour]
     CHECK(onLight != onDark);
     CHECK(onDark != QColor(Qt::transparent));
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+TEST_CASE("the badge slot draws each kind from the look table", "[contour][gui][qml][tabbadge]")
+{
+    // The Pill shape draws the look's mark, the Flat shape its glyph; both in the status ink, both named.
+    using contour::window::TabBadgeKind;
+    using contour::window::TabBadgeKindCount;
+    auto const rows =
+        std::array { contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::ContourLinux };
+    for (auto const row: rows)
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        contour::test::QmlMessageCapture const warnings;
+        QQmlEngine engine;
+        auto setup = contour::test::defaultChromeSetup();
+        setup.row = row;
+        contour::test::installChromeStyle(engine, setup);
+        auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+        REQUIRE(style != nullptr);
+        auto const pill = row == contour::config::ChromeStyle::MacOS;
+
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TabBadgeSlot.qml")));
+        INFO("errors: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+
+        for (auto const index: std::views::iota(std::size_t { 1 }, TabBadgeKindCount))
+        {
+            auto const kind = static_cast<TabBadgeKind>(index);
+            auto const& look = contour::window::tabBadgeLook(kind);
+            INFO("kind: " << index);
+            auto slot = std::unique_ptr<QObject>(component.createWithInitialProperties(
+                { { QStringLiteral("kind"), static_cast<int>(index) } }));
+            REQUIRE(slot != nullptr);
+            auto* item = qobject_cast<QQuickItem*>(slot.get());
+            REQUIRE(item != nullptr);
+            CHECK(item->isVisible());
+
+            auto* mark = slot->findChild<QQuickItem*>(QStringLiteral("tabBadgeMark"));
+            auto* glyph = slot->findChild<QQuickItem*>(QStringLiteral("tabBadgeGlyph"));
+            REQUIRE(mark != nullptr);
+            REQUIRE(glyph != nullptr);
+            CHECK(mark->isVisible() == pill);
+            CHECK(glyph->isVisible() == !pill);
+            if (pill)
+                CHECK(mark->property("mark").toString()
+                      == QString::fromUtf8(contour::window::badgeMarkName(look.mark)));
+            else
+                CHECK(glyph->property("text").toString() == QString::fromUtf8(look.glyph));
+
+            auto ink = QColor {};
+            REQUIRE(QMetaObject::invokeMethod(
+                style, "statusInk", Q_RETURN_ARG(QColor, ink), Q_ARG(int, static_cast<int>(look.ink))));
+            CHECK(slot->property("ink").value<QColor>() == ink);
+            if (!pill)
+                CHECK(glyph->property("color").value<QColor>() == ink);
+
+            auto name = QQmlExpression(qmlContext(item), item, QStringLiteral("Accessible.name"));
+            CHECK(name.evaluate().toString() == QString::fromUtf8(look.accessibleName));
+        }
+
+        // Working at 40 % stands still as a dial of 144 degrees.
+        auto working = std::unique_ptr<QObject>(component.createWithInitialProperties(
+            { { QStringLiteral("kind"), static_cast<int>(TabBadgeKind::Working) },
+              { QStringLiteral("progress"), 40 } }));
+        REQUIRE(working != nullptr);
+        auto const* dial = working->findChild<QObject*>(QStringLiteral("tabBadgeMark"));
+        REQUIRE(dial != nullptr);
+        CHECK(dial->property("sweep").toReal() == Catch::Approx(144.0));
+        CHECK_FALSE(working->property("spinning").toBool());
+
+        // None, and a kind the table does not know, draw nothing and take no room.
+        for (auto const unknown: { 0, static_cast<int>(TabBadgeKindCount) + 3 })
+        {
+            auto none = std::unique_ptr<QObject>(
+                component.createWithInitialProperties({ { QStringLiteral("kind"), unknown } }));
+            REQUIRE(none != nullptr);
+            auto const* noneItem = qobject_cast<QQuickItem*>(none.get());
+            REQUIRE(noneItem != nullptr);
+            CHECK_FALSE(noneItem->isVisible());
+            CHECK(noneItem->implicitWidth() == 0.0);
+        }
+
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the progress pulse stops under Reduce Motion (offscreen)", "[contour][gui][qml][tabbadge]")
+{
+    // An indeterminate progress pulses; under Reduce Motion it is shown whole and still.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.accessibility.motion = contour::config::MotionPreference::Reduced;
+    auto const host = makeTabItemHost(engine, controller, TabStripAt::Top, 800, setup);
+    auto* tab = host->property("tabItem").value<QQuickItem*>();
+    REQUIRE(tab != nullptr);
+    auto const* fill = tab->findChild<QQuickItem*>(QStringLiteral("progressFill"));
+    REQUIRE(fill != nullptr);
+    auto* style = engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    REQUIRE(style != nullptr);
+    auto const pulse = style->property("motion").value<QObject*>()->property("pulse").toInt();
+
+    tab->setProperty("tabProgressState", 3); // vtbackend::ProgressState::Indeterminate
+    QTest::qWait(pulse);
+    CHECK(fill->isVisible());
+    CHECK(fill->opacity() == 1.0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 TEST_CASE("A TabItem's tooltip shows a program's status text literally, never as markup",

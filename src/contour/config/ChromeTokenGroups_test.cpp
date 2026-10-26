@@ -72,7 +72,8 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(size.hostChip),
              double(size.hostDot),
              double(size.toolbarButton),
-             double(size.toolbarChip) });
+             double(size.toolbarChip),
+             double(size.flyoutSwatch) });
     append({ double(row.space.paneGap), double(row.space.splitHit), double(row.space.paneInset) });
     for (auto const v: row.space.scale)
         out.push_back(v);
@@ -132,13 +133,15 @@ struct ExpectedRow
     contour::config::MenuPresentation menu = contour::config::MenuPresentation::InScene;
     contour::config::TabShape tabShape = contour::config::TabShape::Flat;
     contour::config::ProfileMenuAffordance profileMenu = contour::config::ProfileMenuAffordance::Caret;
+    contour::config::TabColorSource tabColors = contour::config::TabColorSource::Palette;
+    contour::config::ActiveTabWeight activeTabWeight = contour::config::ActiveTabWeight::Regular;
 };
 } // namespace
 
 TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
 {
     using namespace contour::config;
-    // size(13+9) space(3) scale(10) space(3) radii(5+7) type(5) motion(6) elevation e0..e3 (16)
+    // size(13+10) space(3) scale(10) space(3) radii(5+7) type(5) motion(6) elevation e0..e3 (16)
     // separator ring dim opacity tint
     auto const native = std::vector<double> { 2, 4, 6, 8, 10, 12, 16, 20, 24, 32 };
     auto const nativeBand = std::vector<double> { 40, 2, 9 };
@@ -150,7 +153,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
     auto const rows = std::vector<ExpectedRow> {
         { ChromeStyle::MacOS,
           joined({ { 38, 28, 24, 28, 22, 36, 280, 16, 16, 960, 820, 720, 480 },
-                   { 14, 16, 14, 6, 2, 24, 7, 28, 22 },
+                   { 14, 16, 14, 6, 2, 24, 7, 28, 22, 30 },
                    { 6, 10, 6 },
                    native,
                    nativeBand,
@@ -165,10 +168,12 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           DialogPlacement::Sheet,
           MenuPresentation::Native,
           TabShape::Pill,
-          ProfileMenuAffordance::SecondaryClick },
+          ProfileMenuAffordance::SecondaryClick,
+          TabColorSource::Roles,
+          ActiveTabWeight::Regular },
         { ChromeStyle::Fluent,
           joined({ { 40, 0, 34, 32, 28, 36, 280, 16, 16, 1110, 920, 720, 480 },
-                   { 14, 16, 14, 6, 2, 24, 7, 32, 22 },
+                   { 14, 16, 14, 6, 2, 24, 7, 32, 22, 30 },
                    { 4, 10, 4 },
                    native,
                    nativeBand,
@@ -183,10 +188,12 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           DialogPlacement::Centered,
           MenuPresentation::InScene,
           TabShape::Flat,
-          ProfileMenuAffordance::Caret },
+          ProfileMenuAffordance::Caret,
+          TabColorSource::Palette,
+          ActiveTabWeight::Regular },
         { ChromeStyle::ContourLinux,
           joined({ { 46, 0, 34, 34, 28, 36, 280, 16, 16, 1100, 920, 720, 480 },
-                   { 14, 16, 14, 6, 2, 24, 7, 34, 22 },
+                   { 14, 16, 14, 6, 2, 24, 7, 34, 22, 30 },
                    { 6, 10, 6 },
                    native,
                    nativeBand,
@@ -201,10 +208,12 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           DialogPlacement::Centered,
           MenuPresentation::InScene,
           TabShape::Flat,
-          ProfileMenuAffordance::Caret },
+          ProfileMenuAffordance::Caret,
+          TabColorSource::Palette,
+          ActiveTabWeight::Regular },
         { ChromeStyle::Terminal,
           joined({ { 1, 1, 1, 2, 1, 1, 32, 2, 1, 120, 40, 90, 24 },
-                   { 1, 1, 1, 1, 1, 1, 1, 2, 1 },
+                   { 1, 1, 1, 1, 1, 1, 1, 2, 1, 2 },
                    { 1, 1, 0 },
                    { 0, 0, 0, 1, 1, 1, 1, 1, 2, 3 },
                    { 4, 1, 1 },
@@ -219,7 +228,9 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           DialogPlacement::Centered,
           MenuPresentation::InScene,
           TabShape::Flat,
-          ProfileMenuAffordance::Caret },
+          ProfileMenuAffordance::Caret,
+          TabColorSource::Roles,
+          ActiveTabWeight::Bold },
     };
 
     for (auto const& expected: rows)
@@ -240,6 +251,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
         CHECK(row.layout.menu == expected.menu);
         CHECK(row.layout.tabShape == expected.tabShape);
         CHECK(row.layout.profileMenu == expected.profileMenu);
+        CHECK(row.layout.tabColors == expected.tabColors);
+        CHECK(row.layout.activeTabWeight == expected.activeTabWeight);
 
         auto const& fill = row.colors[static_cast<size_t>(ChromeColorRole::BannerFill)];
         auto const& text = row.colors[static_cast<size_t>(ChromeColorRole::BannerText)];
@@ -522,6 +535,22 @@ TEST_CASE("chromeTokens.onlyTheMacRowIsAPill", "[chrometokens]")
         CAPTURE(index);
         auto const isMac = static_cast<ChromeStyle>(index) == ChromeStyle::MacOS;
         CHECK((ChromeTokenRows[index].layout.tabShape == TabShape::Pill) == isMac);
+    }
+}
+
+TEST_CASE("chromeTokens.tabColoursFollowTheRolesWhereTheChromeDrawsItsOwn", "[chrometokens]")
+{
+    using namespace contour::config;
+    for (auto const index: AllStyles())
+    {
+        CAPTURE(index);
+        auto const& layout = ChromeTokenRows[index].layout;
+        auto const style = static_cast<ChromeStyle>(index);
+        // The native Flat rows keep today's palette look; the pills and the Terminal row draw the roles.
+        auto const native = layout.tabShape == TabShape::Flat && style != ChromeStyle::Terminal;
+        CHECK((layout.tabColors == TabColorSource::Palette) == native);
+        // Only the Terminal row's active fill can be the bar's own colour, so only it needs the bold.
+        CHECK((layout.activeTabWeight == ActiveTabWeight::Bold) == (style == ChromeStyle::Terminal));
     }
 }
 

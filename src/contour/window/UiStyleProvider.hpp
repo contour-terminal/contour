@@ -377,6 +377,12 @@ class UiStyleProvider: public QObject
     ///         the well scrolls (a QML-facing bool, the documented carve-out).
     [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
 
+    /// The font the active tab's label is set in: @p base, in bold where the row sets the active tab
+    /// apart by weight (config::ActiveTabWeight), because its fill can be the bar's own colour there.
+    /// @param base The font every other tab's label is set in.
+    /// @return The active label's font.
+    [[nodiscard]] Q_INVOKABLE QFont activeTabFont(QFont const& base) const;
+
     /// @p length rounded up to whole chrome cells (R-q): a cell on the Terminal row, a pixel elsewhere.
     /// @param length A horizontal extent in logical pixels.
     /// @return The extent, snapped up to the width quantum.

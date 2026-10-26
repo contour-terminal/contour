@@ -393,6 +393,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/TitleBar.qml
         qml/TabStrip.qml
         qml/TabItem.qml
+        qml/TabBadgeSlot.qml
         qml/TabColorFlyout.qml
         qml/WindowControls.qml
         qml/ResizeBorder.qml

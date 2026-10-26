@@ -1,7 +1,14 @@
 // vim:syntax=qml
-// One tab in the title-bar tab strip. A colored tab is filled with its color (WT-style, faded when
-// inactive/unfocused); an uncolored tab uses the OS highlight/transparent look. Single-click
-// activates, double-click renames, right-click opens the context menu. Mutations go through
+// One tab in the title-bar tab strip, in one of two shapes (chromeStyle.layout.tabShape):
+//
+//   - Pill (macOS): a rounded pill in the strip's well -- an icon square, the title, the badge slot and a
+//     close button shown on hover and on the active tab. A coloured tab tints the pill and fills the icon.
+//   - Flat (today's strip): the label, the badge slot and the close button on a fill. On the native rows
+//     a coloured tab is filled with its colour (WT-style, faded when inactive/unfocused) and an uncoloured
+//     one uses the OS highlight; on the Terminal row the fill is the colour roles' and the colour is a
+//     leading "▌" cell.
+//
+// Single-click activates, double-click renames, right-click opens the context menu. Mutations go through
 // `controller` (TerminalSessionManager, exposed as `terminalSessions`).
 import QtQuick
 import QtQuick.Controls
@@ -39,16 +46,26 @@ Item {
     property string tabBadgeText: ""
     property int tabBadgeProgress: -1
 
-    // How the kind is drawn -- { glyph, mark, ink, name } -- from the style's look table
-    // (UiStyleProvider::badgeLook); empty for a kind it does not know, which draws nothing. Reads
-    // paletteRevision so the ink re-evaluates on a light/dark flip or an accent change.
-    readonly property var badgeLook: chromeStyle.paletteRevision < 0 ? ({}) : chromeStyle.badgeLook(root.tabBadge)
-    // Whether the window holding the tab is on screen; what the badge's spinner runs on.
-    readonly property bool windowShown: Window.visibility !== Window.Hidden
-                                        && Window.visibility !== Window.Minimized
+    // What the pill shows, as TabStrip reads it from chromeStyle.tabWellLayout(): "full", or "iconOnly"
+    // once the well is too narrow for labels. The Flat shape always shows its label.
+    property string labelMode: "full"
+
+    // The QML-facing carve-out of the shape token: which of the two drawings this tab is.
+    readonly property bool pill: chromeStyle.layout.tabShape === chromeStyle.layout.pill
+    readonly property bool iconOnly: root.pill && root.labelMode === "iconOnly"
+    // Whether the fill and the label come from the chrome colour roles rather than the OS palette: the
+    // pills and the Terminal row do, so a scheme's legible selection pair is what the active tab wears.
+    readonly property bool roleColors: chromeStyle.layout.tabColors === chromeStyle.layout.roles
+    readonly property var colors: chromeStyle.colors
+
     // Whether the chrome animates at all: under Reduce Motion nothing spins or pulses.
     readonly property bool fullMotion: chromeStyle.motion.style === chromeStyle.motion.full
-    readonly property bool hasBadge: root.tabBadge > 0 && root.badgeLook.glyph !== undefined
+    readonly property bool hasBadge: badgeSlot.known
+    // The close button shows on every Flat tab, and on a pill only while it is active or hovered and has
+    // the room for one.
+    readonly property bool closeShown: !root.pill || (!root.iconOnly && (root.tabActive || hover.hovered))
+    // The gap between the parts of a tab: the kit's 6 between a pill's icon, title, badge and close.
+    readonly property real partGap: root.pill ? chromeStyle.space.s3 : chromeStyle.labelGap
 
     // The tab's natural size, in whatever unit the chrome style counts in: logical pixels natively,
     // whole character cells in the terminal style. `widthQuantum` is what expresses that difference
@@ -60,17 +77,27 @@ Item {
     // four are tokens now, `tabSlack` being that leftover, so the sum says what it is made of AND
     // still comes to 56 natively: a tab is exactly as wide as it always was. `trailingPadding` is
     // part of that promise -- it is 0 natively, precisely so this sum is unchanged there.
-    readonly property real naturalWidth: label.implicitWidth + chromeStyle.labelPadding
-                                         + chromeStyle.labelGap + chromeStyle.controlWidth
-                                         + chromeStyle.trailingPadding
-                                         + separator.width + chromeStyle.tabSlack
-                                         + zoomBadge.width + zoomBadge.anchors.rightMargin
-                                         + badgeSlot.width + badgeSlot.anchors.rightMargin
-    implicitWidth: chromeStyle.widthQuantum
-                   * Math.round(Math.min(chromeStyle.maxTabWidth,
-                                         Math.max(chromeStyle.minTabWidth, root.naturalWidth))
-                                / chromeStyle.widthQuantum)
-    implicitHeight: chromeStyle.tabHeight
+    //
+    // A pill is laid out as the kit draws it: s5, the icon, s3, the title, the badge and the close button
+    // each after an s3, then s4. Its width is the well's (TabStrip assigns it); this is only what it would
+    // like.
+    readonly property real naturalWidth: root.pill
+        ? chromeStyle.space.s5 + icon.width + chromeStyle.space.s3 + label.implicitWidth
+          + root.partGap + badgeSlot.width + badgeSlot.gapAfter
+          + zoomBadge.width + zoomBadge.anchors.rightMargin
+          + chromeStyle.size.tabClose + chromeStyle.space.s4
+        : label.implicitWidth + chromeStyle.labelPadding
+          + chromeStyle.labelGap + chromeStyle.controlWidth
+          + chromeStyle.trailingPadding
+          + separator.width + chromeStyle.tabSlack
+          + zoomBadge.width + zoomBadge.anchors.rightMargin
+          + badgeSlot.width + badgeSlot.gapAfter
+          + colorCell.width
+    // Snapped UP to the quantum (snapToCells): rounding to the nearest cell would take back up to half a
+    // cell the label needs, and elide a title that fits.
+    implicitWidth: chromeStyle.snapToCells(Math.min(chromeStyle.maxTabWidth,
+                                                    Math.max(chromeStyle.minTabWidth, root.naturalWidth)))
+    implicitHeight: root.pill ? chromeStyle.size.tab : chromeStyle.tabHeight
 
     // Live OS palette handle so the tab adapts to dark/light in realtime.
     SystemPalette {
@@ -93,10 +120,33 @@ Item {
     // hover tint (color + alpha) is defined once.
     readonly property color hoverWash: chromeStyle.wash(systemPalette.highlight)
 
-    // The fill behind the label; also drives text contrast. Colored: the WT-style fade from
-    // TabColorScheme.hpp (via the controller). Uncolored: OS highlight / hover wash / transparent.
+    // A pill's own fill by state, before any tab colour: the well shows through a pill at rest.
+    readonly property color pillStateFill: root.tabActive ? root.colors.tabActiveFill
+                                         : hover.hovered ? root.colors.tabHoverFill
+                                         : "transparent"
+    // What a pill sits on: the band's ground with the well's fill over it. A tint is laid over this
+    // rather than over the pill's translucent fill alone, so the tinted pill is opaque and its label's
+    // contrast is the one measured against it.
+    readonly property color wellGround: Qt.tint(systemPalette.window, root.colors.tabWellFill)
+
+    // The fill behind the label; also drives text contrast.
+    //   - Pill: the state's fill, and a coloured tab's colour over it at chromeStyle.tint.tab.
+    //   - Flat with the colour roles (Terminal): the role fills; the colour is the leading cell instead.
+    //   - Flat with the OS palette (today's native strip): a coloured tab's WT-style fade from
+    //     TabColorScheme.hpp (via the controller), else OS highlight / hover wash / transparent.
     // controller is null-guarded (torn down before this tree on window close).
     readonly property color effectiveBackground: {
+        if (root.pill) {
+            if (!root.colored)
+                return root.pillStateFill
+            return Qt.tint(Qt.tint(root.wellGround, root.pillStateFill),
+                           Qt.rgba(root.tabColor.r, root.tabColor.g, root.tabColor.b, chromeStyle.tint.tab))
+        }
+        if (root.roleColors) {
+            if (root.tabActive)
+                return root.colors.tabActiveFill
+            return hover.hovered ? root.colors.tabHoverFill : root.colors.tabWellFill
+        }
         if (root.colored && root.controller)
             return root.controller.tabBackgroundColor(root.tabColor, systemPalette.window,
                                                       root.tabActive, hover.hovered, Window.active)
@@ -107,12 +157,29 @@ Item {
         return "transparent"
     }
 
-    // Label / close-glyph color: contrast against a colored fill, else the matching palette role.
+    // Label / close-glyph color. With the colour roles: the active label, a tinted pill's label one level
+    // up so it keeps 4.5:1 on the tint, else the inactive label -- each one level dimmer on a pill while
+    // its window is in the background. With the OS palette: contrast against a coloured fill, else the
+    // matching palette role.
     readonly property color foreground: {
+        if (root.roleColors) {
+            const background = root.pill && !Window.active
+            if (root.tabActive)
+                return background ? root.colors.tabText : root.colors.tabTextActive
+            if (background)
+                return root.colors.tabTextDimmed
+            return root.colored && root.pill ? root.colors.tabTextTinted : root.colors.tabText
+        }
         if (root.colored && root.controller)
             return root.controller.tabTextColor(root.effectiveBackground)
         return root.tabActive ? systemPalette.highlightedText : systemPalette.windowText
     }
+
+    // The label's font: the kit's tab type on a pill, the chrome font on the Flat strip; for the active
+    // tab, whatever the row sets it apart with (bold on the Terminal row, see activeTabFont).
+    readonly property font baseLabelFont: root.pill ? chromeStyle.type.tab : chromeStyle.font
+    readonly property font labelFont: root.tabActive ? chromeStyle.activeTabFont(root.baseLabelFont)
+                                                     : root.baseLabelFont
 
     // The pixmap the OS drag cursor shows while this tab is dragged (see dragProxy). grabToImage is
     // ASYNCHRONOUS -- it delivers the url on a later frame -- so the tab grabs ahead of a drag: when the
@@ -156,20 +223,63 @@ Item {
     onTabActiveChanged: root.refreshDragImage()
 
     Rectangle {
+        id: background
+        objectName: "tabBackground"   // findChild() handle for the GUI test
         anchors.fill: parent
+        // A pill is rounded; the Flat strip's tabs are square, as they always were.
+        radius: root.pill ? chromeStyle.radii.tab : 0
         color: root.effectiveBackground
+    }
+
+    // The tab colour as a cell of its own, on a row that draws colours as glyphs (the Terminal row's
+    // "▌"): the colour roles keep the fill, so the colour needs a place of its own. Empty, and so zero
+    // wide, for an uncoloured tab and on every row whose glyph is empty.
+    Text {
+        id: colorCell
+        objectName: "tabColorCell"   // findChild() handle for the GUI test
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        visible: !root.pill && text !== ""
+        width: visible ? implicitWidth : 0
+        text: root.colored ? chromeStyle.tabColorGlyph : ""
+        font: chromeStyle.font
+        color: root.tabColor
+    }
+
+    // The pill's icon: the kit's tinted square (one per tab, whatever runs in it). A coloured tab fills
+    // it with its colour, the active tab with the accent, the rest with the dimmed label colour. In an
+    // icon-only pill the badge takes its place when there is one.
+    Rectangle {
+        id: icon
+        objectName: "tabIcon"   // findChild() handle for the GUI test
+        anchors.left: parent.left
+        anchors.leftMargin: chromeStyle.space.s5
+        anchors.verticalCenter: parent.verticalCenter
+        visible: root.pill && !(root.iconOnly && root.hasBadge)
+        width: root.pill ? chromeStyle.size.tabIcon : 0
+        height: width
+        radius: chromeStyle.radii.tabIcon
+        color: root.colored ? root.tabColor
+             : root.tabActive ? chromeStyle.accentColor
+             : root.colors.tabTextDimmed
     }
 
     // Progress indicator (OSC 9;4) for the tab's active pane: a thin bar along the tab's bottom edge,
     // under the label rather than beside it, so it costs the title no width and every tab keeps the
-    // same layout whether or not an application is reporting progress.
+    // same layout whether or not an application is reporting progress. Inside a pill it is inset from
+    // the pill's rounded ends and lifted off its bottom.
     Rectangle {
         id: progressTrack
         objectName: "progressTrack"  // findChild() handle for the GUI test
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: chromeStyle.borderWidth * 2
+        anchors.leftMargin: root.pill ? chromeStyle.space.s5 : 0
+        anchors.rightMargin: root.pill ? chromeStyle.space.s5 : 0
+        anchors.bottomMargin: root.pill ? chromeStyle.space.s1 : 0
+        height: root.pill ? chromeStyle.size.progressBar : chromeStyle.borderWidth * 2
+        radius: root.pill ? progressTrack.round : 0
+        readonly property real round: height / 2
         // State 0 is Inactive: nothing in flight, so nothing to paint.
         visible: root.tabProgressState !== 0
         // The unfilled remainder, tinted from the tab's own foreground exactly as the zoom badge is, so
@@ -189,6 +299,7 @@ Item {
             // The state->color mapping lives in the style's own token row, so this side neither
             // repeats it nor names the states. @see UiStyleProvider::progressColor.
             color: chromeStyle.progressColor(root.tabProgressState)
+            radius: progressTrack.radius
 
             SequentialAnimation on opacity {
                 running: root.tabProgressState === 3 && root.fullMotion
@@ -328,66 +439,35 @@ Item {
     Text {
         id: label
         objectName: "tabLabel"   // findChild() handle for the GUI test
-        anchors.left: parent.left
-        anchors.leftMargin: chromeStyle.labelPadding
+        anchors.left: root.pill ? icon.right : colorCell.right
+        anchors.leftMargin: root.pill ? chromeStyle.space.s3 : chromeStyle.labelPadding
         anchors.right: badgeSlot.left
-        anchors.rightMargin: chromeStyle.labelGap
+        anchors.rightMargin: root.partGap
         anchors.verticalCenter: parent.verticalCenter
         // The chrome font: the platform UI font natively, the terminal's monospace font in the
-        // terminal style, which is what puts the label on the same grid as the content below.
-        font: chromeStyle.font
+        // terminal style, which is what puts the label on the same grid as the content below; the
+        // kit's tab type on a pill.
+        font: root.labelFont
         text: root.tabTitle
         color: root.foreground
         elide: Text.ElideRight
-        visible: !renameLoader.active
+        visible: !renameLoader.active && !root.iconOnly
     }
 
     // The badge slot, between the label and the zoom badge, collapsing to nothing the way the zoom badge
-    // does when there is none. Its text is drawn as text, never markup: the tooltip is what a program sent.
-    Item {
+    // does when there is none; in an icon-only pill it stands where the icon was. Its text is drawn as
+    // text, never markup: the tooltip is what a program sent.
+    TabBadgeSlot {
         id: badgeSlot
         objectName: "tabBadgeSlot"   // findChild() handle for the GUI test
-        anchors.right: zoomBadge.left
-        anchors.rightMargin: root.hasBadge ? chromeStyle.labelGap : 0
+        kind: root.tabBadge
+        progress: root.tabBadgeProgress
+        // Left of the zoom badge, or centred on the icon it stands in for. Positioned by x rather than
+        // by anchors that detach, which an anchor layout does not undo reliably.
+        x: root.iconOnly ? icon.x + (icon.width - width) / 2 : zoomBadge.x - gapAfter - width
         anchors.verticalCenter: parent.verticalCenter
-        width: root.hasBadge ? chromeStyle.badgeHeight : 0
-        height: chromeStyle.badgeHeight
-        visible: root.hasBadge
-
-        // Spins a working badge while the program gave no progress. Its own item, so that the glyph's
-        // rotation stays a binding the animation never writes over.
-        Item {
-            id: badgeSpinner
-            anchors.fill: parent
-            RotationAnimation on rotation {
-                objectName: "tabBadgeSpinner"   // findChild() handle for the GUI test
-                // Only while someone can see it -- a program may work for hours in a minimized window --
-                // and only where the chrome animates at all.
-                running: badgeGlyph.spinning && root.windowShown && root.fullMotion
-                loops: Animation.Infinite
-                from: 0
-                to: 360
-                duration: chromeStyle.motion.spinner
-                // Back upright when it stops, as the progress bar restores its opacity.
-                onRunningChanged: if (!running) badgeSpinner.rotation = 0
-            }
-
-            Text {
-                id: badgeGlyph
-                objectName: "tabBadgeGlyph"
-                anchors.centerIn: parent
-                textFormat: Text.PlainText
-                text: root.hasBadge ? root.badgeLook.glyph : ""
-                font: chromeStyle.badgeFont
-                color: root.hasBadge ? root.badgeLook.ink : "transparent"
-
-                // The ring is Working's mark: with a progress it stands still at the angle its percentage
-                // names, so it reads as a dial.
-                readonly property bool working: root.hasBadge && root.badgeLook.mark === "ring"
-                readonly property bool spinning: working && root.tabBadgeProgress < 0
-                rotation: working && root.tabBadgeProgress >= 0 ? 360 * root.tabBadgeProgress / 100.0 : 0
-            }
-        }
+        // The gap after the badge, which collapses with it.
+        readonly property real gapAfter: root.hasBadge ? root.partGap : 0
     }
 
     // Zoom badge. A zoomed tab shows only one of its panes, which makes it look exactly like a
@@ -400,7 +480,7 @@ Item {
         // Collapse to nothing — width AND margin — when not zoomed. The label anchors to this item's
         // left edge, so anything it still occupies is stolen from every tab's title, zoomed or not:
         // a fixed margin here would elide the title 4px early on tabs that have no badge at all.
-        anchors.rightMargin: root.tabZoomed ? chromeStyle.labelGap : 0
+        anchors.rightMargin: root.tabZoomed ? root.partGap : 0
         anchors.verticalCenter: parent.verticalCenter
         width: root.tabZoomed ? chromeStyle.badgeWidth : 0
         height: chromeStyle.badgeHeight
@@ -422,10 +502,10 @@ Item {
     Loader {
         id: renameLoader
         active: false
-        anchors.left: parent.left
-        anchors.leftMargin: chromeStyle.labelPadding
+        anchors.left: root.pill ? icon.right : colorCell.right
+        anchors.leftMargin: label.anchors.leftMargin
         anchors.right: badgeSlot.left
-        anchors.rightMargin: chromeStyle.labelGap
+        anchors.rightMargin: root.partGap
         anchors.verticalCenter: parent.verticalCenter
         function start() { active = true }
         sourceComponent: TextField {
@@ -501,10 +581,13 @@ Item {
         // whatever ends the tab -- in a style that rules between tabs, the close button sat flush
         // against that rule, so "×│" read as one piece of box drawing instead of a button next to a
         // border. Zero natively, where tabs have no drawn edge. @see naturalWidth, which sums it.
-        anchors.rightMargin: chromeStyle.trailingPadding
+        // A pill ends in the kit's s4 instead, and collapses the button while it is hidden, so a pill
+        // at rest gives its title the room.
+        anchors.rightMargin: root.pill ? chromeStyle.space.s4 : chromeStyle.trailingPadding
         anchors.verticalCenter: parent.verticalCenter
-        width: chromeStyle.controlWidth
-        height: chromeStyle.controlHeight
+        visible: root.closeShown
+        width: !root.pill ? chromeStyle.controlWidth : root.closeShown ? chromeStyle.size.tabClose : 0
+        height: root.pill ? chromeStyle.size.tabClose : chromeStyle.controlHeight
         text: chromeStyle.closeGlyph
         Accessible.name: qsTr("Close tab %1").arg(root.tabTitle)
         // Don't take keyboard focus away from the terminal when clicked.
@@ -513,7 +596,10 @@ Item {
         // Flat, transparent chrome so the button blends into the tab fill instead of showing an opaque
         // style button panel; a subtle highlight wash gives hover feedback.
         background: Rectangle {
-            color: closeButton.hovered ? root.hoverWash : "transparent"
+            radius: root.pill ? chromeStyle.radii.tabClose : 0
+            color: !closeButton.hovered ? "transparent"
+                 : root.pill ? root.colors.tabCloseFill
+                 : root.hoverWash
         }
         // Share the label's foreground so the glyph stays legible on colored fills and in light mode.
         contentItem: Text {

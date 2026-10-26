@@ -15,6 +15,7 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/TestEnvironment.hpp>
 #include <contour/window/SettingsController.hpp>
+#include <contour/window/TabBadge.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
 
@@ -35,6 +36,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <ranges>
 
 #include <QtQuickControls2/QQuickStyle>
 #include <QtTest/QTest>
@@ -149,6 +151,41 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const* dialog = scene.root().findChild<QObject*>(QStringLiteral("aboutDialog"));
                 REQUIRE(dialog != nullptr);
                 CHECK(dialog->property("opened").toBool());
+                break;
+            }
+            case SnapshotScript::TabBadges: {
+                auto* tabList = scene.root().findChild<QObject*>(QStringLiteral("tabList"));
+                REQUIRE(tabList != nullptr);
+                CHECK(tabList->property("count").toInt() == row.tabCount);
+                // Every kind but None shows in its own tab's slot.
+                CHECK(visibleItemsNamed(*scene.window().contentItem(), QStringLiteral("tabBadgeSlot"))
+                      == static_cast<int>(contour::window::TabBadgeKindCount) - 1);
+                // In the chrome's own font, a badge costs a short title nothing: "Tab 2" is never elided.
+                for (auto const index: std::views::iota(0, row.tabCount))
+                {
+                    QQuickItem* tab = nullptr;
+                    QMetaObject::invokeMethod(
+                        tabList, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, tab), Q_ARG(int, index));
+                    REQUIRE(tab != nullptr);
+                    auto const* label = tab->findChild<QQuickItem*>(QStringLiteral("tabLabel"));
+                    REQUIRE(label != nullptr);
+                    CAPTURE(index);
+                    CHECK_FALSE(label->property("truncated").toBool());
+                }
+                break;
+            }
+            case SnapshotScript::TabOverflow: {
+                auto const* tabList = scene.root().findChild<QObject*>(QStringLiteral("tabList"));
+                REQUIRE(tabList != nullptr);
+                CHECK(tabList->property("count").toInt() == row.tabCount);
+                CHECK(tabList->property("currentIndex").toInt() == row.activeTab);
+                break;
+            }
+            case SnapshotScript::TabColorFlyout: {
+                auto const* flyout = scene.openedTabColorFlyout();
+                REQUIRE(flyout != nullptr);
+                CHECK(flyout->objectName() == QStringLiteral("tabColorFlyout"));
+                CHECK(flyout->property("tabIndex").toInt() == 1); // the second tab's
                 break;
             }
             case SnapshotScript::SingleTab: break;
