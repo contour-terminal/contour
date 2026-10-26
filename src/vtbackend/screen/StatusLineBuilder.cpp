@@ -3,6 +3,7 @@
 
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
@@ -63,6 +64,72 @@ namespace // helper functions
             case ViMode::Hint: return "HINT"sv;
         }
         core::unreachable();
+    }
+
+    /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
+    /// @param segments The parts, outermost first.
+    /// @param separator What goes between two parts.
+    /// @param maxWidth The widest the result may be, in columns.
+    /// @return The joined parts; the first, "…" and the last; or the last alone cut at its start.
+    [[nodiscard]] std::string elideMiddle(std::vector<std::string> const& segments,
+                                          std::string_view separator,
+                                          ColumnCount maxWidth)
+    {
+        auto const widthOf = [](std::string_view text) {
+            // Counted in COLUMNS, not bytes: a CJK container name is two columns per codepoint and
+            // three bytes, and measuring bytes would elide text that fits.
+            auto columns = 0;
+            for (auto const codepoint: unicode::convert_to<char32_t>(text))
+                columns += static_cast<int>(unicode::width(codepoint));
+            return columns;
+        };
+
+        auto const join = [&](std::vector<std::string> const& parts) {
+            return core::joinWith(parts, separator);
+        };
+
+        auto candidate = join(segments);
+        if (widthOf(candidate) <= unbox<int>(maxWidth))
+            return candidate;
+
+        // Keep both ends: the first answers *where*, the last answers *who*.
+        if (segments.size() > 2)
+        {
+            auto elided = std::vector<std::string> { segments.front(), "…", segments.back() };
+            candidate = join(elided);
+            if (widthOf(candidate) <= unbox<int>(maxWidth))
+                return candidate;
+        }
+
+        // Still too wide: the innermost alone, cut at its own START so its tail -- the part that
+        // identifies it -- survives.
+        //
+        // Cut by CODEPOINT, never by byte: a container name is UTF-8, and erasing one byte at a
+        // time leaves the string starting on a continuation byte, which is mojibake on screen and
+        // an invalid sequence handed to writeToScreenInternal(). The ellipsis is budgeted for
+        // rather than added afterwards, because prepending it to a string already at maxWidth
+        // overflows the width by exactly the column the caller allotted.
+        auto const codepoints = unicode::convert_to<char32_t>(std::string_view { segments.back() });
+        auto const budget = unbox<int>(maxWidth) - 1; // one column for the leading '…'
+        if (budget <= 0)
+            return {};
+
+        auto kept = size_t {};
+        auto columns = 0;
+        for (auto index = codepoints.size(); index-- > 0;)
+        {
+            columns += static_cast<int>(unicode::width(codepoints[index]));
+            if (columns > budget)
+                break;
+            kept = codepoints.size() - index;
+        }
+        if (kept == 0)
+            return {};
+
+        auto tail = std::string { "…" };
+        unicode::convert_to<char>(std::u32string_view { codepoints }.substr(codepoints.size() - kept),
+                                  std::back_inserter(tail));
+        return tail;
     }
 } // namespace
 
@@ -194,9 +261,6 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
         if (auto const verbosity = tryParseStringAttribute(interpolation, "Verbosity"))
             item.verbosity = StatusLineDefinitions::contextVerbosityFrom(*verbosity);
         item.separator = tryParseStringAttribute(interpolation, "Separator");
-        if (auto const width = tryParseStringAttribute(interpolation, "MaxWidth"))
-            if (auto const columns = core::toInteger<10, int>(*width); columns && *columns > 0)
-                item.maxWidth = ColumnCount(*columns);
         return item;
     }
     else if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
@@ -210,6 +274,20 @@ static std::optional<StatusLineDefinitions::Item> makeItemOfType(
     }
     else
         return T { styles };
+}
+
+/// Whether items of type @p T carry a `MaxWidth=`, the widest they may draw in columns.
+template <typename T>
+concept HasMaxWidth = requires(T t) { t.maxWidth; };
+
+/// Reads @p interpolation's `MaxWidth=` into @p item; a missing, non-numeric or non-positive one keeps
+/// the default, so a typo cannot collapse the item to nothing.
+template <HasMaxWidth T>
+static void readMaxWidth(T& item, crispy::StringInterpolation const& interpolation)
+{
+    if (auto const width = tryParseStringAttribute(interpolation, "MaxWidth"))
+        if (auto const columns = core::toInteger<10, int>(*width); columns && *columns > 0)
+            item.maxWidth = ColumnCount(*columns);
 }
 
 /// The item @p interpolation describes, or nullopt when it names no known placeholder (or names one but
@@ -236,6 +314,9 @@ static std::optional<StatusLineDefinitions::Item> makeStatusLineItem(
         if (result || interpolation.name != StatusLineDefinitions::ItemTraits<T>::Name)
             return;
         result = makeItemOfType<T>(styles, interpolation);
+        if constexpr (HasMaxWidth<T>)
+            if (result)
+                readMaxWidth(std::get<T>(*result), interpolation);
     });
     return result;
 }
@@ -689,68 +770,6 @@ namespace
                    + sanitizeCommandLine(value, SanitizePurpose::Display);
         }
 
-        /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
-        [[nodiscard]] static std::string elide(std::vector<std::string> const& segments,
-                                               std::string const& separator,
-                                               ColumnCount maxWidth)
-        {
-            auto const widthOf = [](std::string_view text) {
-                // Counted in COLUMNS, not bytes: a CJK container name is two columns per codepoint and
-                // three bytes, and measuring bytes would elide text that fits.
-                auto columns = 0;
-                for (auto const codepoint: unicode::convert_to<char32_t>(text))
-                    columns += static_cast<int>(unicode::width(codepoint));
-                return columns;
-            };
-
-            auto const join = [&](std::vector<std::string> const& parts) {
-                return core::joinWith(parts, separator);
-            };
-
-            auto candidate = join(segments);
-            if (widthOf(candidate) <= unbox<int>(maxWidth))
-                return candidate;
-
-            // Keep both ends: the first answers *where*, the last answers *who*.
-            if (segments.size() > 2)
-            {
-                auto elided = std::vector<std::string> { segments.front(), "…", segments.back() };
-                candidate = join(elided);
-                if (widthOf(candidate) <= unbox<int>(maxWidth))
-                    return candidate;
-            }
-
-            // Still too wide: the innermost alone, cut at its own START so its tail -- the part that
-            // identifies it -- survives.
-            //
-            // Cut by CODEPOINT, never by byte: a container name is UTF-8, and erasing one byte at a
-            // time leaves the string starting on a continuation byte, which is mojibake on screen and
-            // an invalid sequence handed to writeToScreenInternal(). The ellipsis is budgeted for
-            // rather than added afterwards, because prepending it to a string already at maxWidth
-            // overflows the width by exactly the column the caller allotted.
-            auto const codepoints = unicode::convert_to<char32_t>(std::string_view { segments.back() });
-            auto const budget = unbox<int>(maxWidth) - 1; // one column for the leading '…'
-            if (budget <= 0)
-                return {};
-
-            auto kept = size_t {};
-            auto columns = 0;
-            for (auto index = codepoints.size(); index-- > 0;)
-            {
-                columns += static_cast<int>(unicode::width(codepoints[index]));
-                if (columns > budget)
-                    break;
-                kept = codepoints.size() - index;
-            }
-            if (kept == 0)
-                return {};
-
-            auto tail = std::string { "…" };
-            unicode::convert_to<char>(std::u32string_view { codepoints }.substr(codepoints.size() - kept),
-                                      std::back_inserter(tail));
-            return tail;
-        }
-
         std::string visit(StatusLineDefinitions::Context const& item)
         {
             auto const& stack = vt.contexts();
@@ -779,7 +798,24 @@ namespace
             if (segments.empty())
                 return {};
 
-            return elide(segments, item.separator.value_or(" › "), item.maxWidth);
+            return elideMiddle(segments, item.separator.value_or(" › "), item.maxWidth);
+        }
+
+        std::string visit(StatusLineDefinitions::Cwd const& item)
+        {
+            auto const directory = vt.resolveWorkingDirectory(CwdPurpose::Display);
+            if (!directory)
+                return {};
+
+            // Sanitized before it is cut, as the pane header's text is: a byte that is not UTF-8 or is a
+            // control becomes U+FFFD, so nothing the shell reports reaches writeToScreenInternal() as an
+            // escape.
+            auto const shown = sanitizeCommandLine(homeAbbreviatedPath(*directory, vt.homeDirectory()),
+                                                   SanitizePurpose::Display);
+            auto parts = std::vector<std::string> {};
+            for (auto const part: std::views::split(shown, '/'))
+                parts.emplace_back(std::string_view { part });
+            return elideMiddle(parts, "/", item.maxWidth);
         }
 
         std::string visit(StatusLineDefinitions::Tabs const& tabs)
@@ -1003,8 +1039,6 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                         attributes.add("Verbosity", std::string { name });
                     if (v.separator)
                         attributes.add("Separator", *v.separator);
-                    if (v.maxWidth != StatusLineDefinitions::Context {}.maxWidth)
-                        attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
                 }
 
                 if constexpr (std::same_as<T, StatusLineDefinitions::Tabs>)
@@ -1014,6 +1048,11 @@ std::string serializeStatusLineSegment(StatusLineSegment const& segment)
                     if (v.separator)
                         attributes.add("Separator", *v.separator);
                 }
+
+                // Last, so that Context keeps writing Verbosity, Separator, MaxWidth.
+                if constexpr (HasMaxWidth<T>)
+                    if (v.maxWidth != T {}.maxWidth)
+                        attributes.add("MaxWidth", std::to_string(unbox(v.maxWidth)));
 
                 result += '}';
             },

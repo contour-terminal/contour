@@ -59,4 +59,11 @@ string abbreviateHomePath(std::string_view path, std::string_view home)
     return "~" + string { path.substr(home.size()) };
 }
 
+string homeAbbreviatedPath(ResolvedWorkingDirectory const& directory, std::string_view home)
+{
+    if (directory.locality != ContextLocality::Local)
+        return directory.path;
+    return abbreviateHomePath(directory.path, home);
+}
+
 } // namespace vtbackend

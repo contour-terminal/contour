@@ -257,4 +257,17 @@ TEST_CASE("abbreviateHomePath.an empty path stays empty", "[cwd]")
     CHECK(abbreviateHomePath("", "/home/bob").empty());
 }
 
+TEST_CASE("homeAbbreviatedPath.only a directory on this machine is abbreviated", "[cwd]")
+{
+    // This machine's home says nothing about another machine's paths: an ssh shell's /home/bob is not ~.
+    auto const at = [](ContextLocality locality) {
+        return ResolvedWorkingDirectory { .path = "/home/bob/src",
+                                          .source = CwdSource::Osc7,
+                                          .locality = locality };
+    };
+    CHECK(homeAbbreviatedPath(at(ContextLocality::Local), "/home/bob") == "~/src");
+    CHECK(homeAbbreviatedPath(at(ContextLocality::Foreign), "/home/bob") == "/home/bob/src");
+    CHECK(homeAbbreviatedPath(at(ContextLocality::Unknown), "/home/bob") == "/home/bob/src");
+}
+
 // }}}

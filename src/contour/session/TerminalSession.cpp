@@ -2399,10 +2399,8 @@ std::string TerminalSession::shownWorkingDirectory(std::string_view home) const
     if (!resolved) // Nothing reported: the directory the session started in, which is on this machine.
         return vtbackend::abbreviateHomePath(displayWorkingDirectory(), home);
 
-    auto const shown = resolved->locality == vtbackend::ContextLocality::Local
-                           ? vtbackend::abbreviateHomePath(resolved->path, home)
-                           : resolved->path;
-    return vtbackend::sanitizeCommandLine(shown, vtbackend::SanitizePurpose::Display);
+    return vtbackend::sanitizeCommandLine(vtbackend::homeAbbreviatedPath(*resolved, home),
+                                          vtbackend::SanitizePurpose::Display);
 }
 
 void TerminalSession::setPaneProgramStatus(window::TabBadgeKind kind, QString text)

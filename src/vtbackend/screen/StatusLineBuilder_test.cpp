@@ -6,7 +6,11 @@
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 
+#include <core/Environment.hpp>
 #include <core/Utils.hpp>
+
+#include <libunicode/convert.h>
+#include <libunicode/width.h>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -698,5 +702,80 @@ TEST_CASE("statusLine.colors.rolesReadOnContourSchemes", "[statusline][colors]")
             CHECK(ratio >= minimum);
         }
     }
+}
+// }}}
+
+// {{{ {Cwd}
+namespace
+{
+/// What `{Cwd}` shows once the shell has reported @p url (OSC 7).
+[[nodiscard]] std::string cwdAfterReporting(std::string_view url)
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    mc.writeToScreen(std::format("\033]7;{}\033\\", url));
+    return serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled);
+}
+
+/// The width of @p text in columns.
+[[nodiscard]] int columnsOf(std::string_view text)
+{
+    auto columns = 0;
+    for (auto const codepoint: unicode::convert_to<char32_t>(text))
+        columns += static_cast<int>(unicode::width(codepoint));
+    return columns;
+}
+} // namespace
+
+TEST_CASE("serializeToVT.cwdShowsWhereTheShellIs", "[statusline][cwd]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    CHECK(serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled).empty());
+
+    CHECK(cwdAfterReporting("file:///srv/app") == "/srv/app");
+    // Shown though it is another machine's: the status line says where the user is.
+    CHECK(cwdAfterReporting("file://elsewhere.example/srv/app") == "/srv/app");
+
+    if (auto const home = core::defaultEnvironment().get("HOME"); home && !home->empty())
+    {
+        CHECK(cwdAfterReporting(std::format("file://{}/repo/contour", *home)) == "~/repo/contour");
+        // This machine's home says nothing about another machine's paths, as the pane header has it.
+        CHECK(cwdAfterReporting(std::format("file://elsewhere.example{}/x", *home))
+              == std::format("{}/x", *home));
+    }
+}
+
+TEST_CASE("serializeToVT.cwdOfADeepOrBrokenPath", "[statusline][cwd]")
+{
+    auto deep = std::string { "file://" };
+    for (auto const level: std::views::iota(0, 60))
+        deep += std::format("/d{}", level);
+    CHECK(cwdAfterReporting(deep) == "/…/d59");
+
+    auto const wide = cwdAfterReporting("file:///" + std::string(300, 'a'));
+    CHECK(columnsOf(wide) <= 40);
+    CHECK(wide.starts_with("…"));
+
+    CHECK(cwdAfterReporting("file:///tmp/a%FFb") == "/tmp/a\uFFFDb");
+    CHECK_FALSE(cwdAfterReporting("file:///tmp/a%1Bb").contains('\033'));
+}
+
+TEST_CASE("parseStatusLineSegment.maxWidthIsGeneric", "[statusline][cwd]")
+{
+    CHECK(canonical("{Cwd:MaxWidth=20}"sv) == "{Cwd:MaxWidth=20}");
+    auto const narrow = parseStatusLineSegment("{Cwd:MaxWidth=20}"sv);
+    REQUIRE(narrow.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Cwd>(narrow[0]));
+    CHECK(std::get<StatusLineDefinitions::Cwd>(narrow[0]).maxWidth == ColumnCount(20));
+
+    auto const plain = parseStatusLineSegment("{Cwd}"sv);
+    REQUIRE(plain.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Cwd>(plain[0]));
+    CHECK(std::get<StatusLineDefinitions::Cwd>(plain[0]).maxWidth == ColumnCount(40));
+    CHECK(serializeStatusLineSegment(plain) == "{Cwd}");
+
+    auto const zero = parseStatusLineSegment("{Cwd:MaxWidth=0}"sv);
+    REQUIRE(zero.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Cwd>(zero[0]));
+    CHECK(std::get<StatusLineDefinitions::Cwd>(zero[0]).maxWidth == ColumnCount(40));
 }
 // }}}

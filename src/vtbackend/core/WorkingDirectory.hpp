@@ -108,4 +108,17 @@ struct ResolvedWorkingDirectory
 /// @return @p path with the home prefix replaced by `~`, or @p path unchanged.
 [[nodiscard]] std::string abbreviateHomePath(std::string_view path, std::string_view home);
 
+/// The path @p directory reads as where it is SHOWN -- the pane header, the status line's `{Cwd}`:
+/// abbreviated as a shell prompt writes it, but only for a directory on this machine, because this
+/// machine's home says nothing about another machine's paths (an ssh shell's `/home/bob` is not `~`).
+///
+/// One function for every such surface, so two views of the same pane cannot disagree about it. Not made
+/// safe to show: the caller sanitizes, as it does any text it draws.
+///
+/// @param directory The resolved working directory.
+/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @return The path, home-abbreviated when @p directory is Local.
+[[nodiscard]] std::string homeAbbreviatedPath(ResolvedWorkingDirectory const& directory,
+                                              std::string_view home);
+
 } // namespace vtbackend

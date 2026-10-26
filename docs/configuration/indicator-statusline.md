@@ -25,6 +25,7 @@ This text may contain placeholders to be replaced by their respective dynamic co
 Variable             | Description
 ---------------------|--------------------------------------------------------------------
 `{Clock}`            | current clock in HH:MM format
+`{Cwd}`              | the working directory the shell reports, with the home directory as `~` when it is on this machine; at most `MaxWidth=` columns (default `40`), eliding the middle directories (`/…/d59`)
 `{Command}`          | yields the output of the given command, as specified via parameter `Program=...` (or the `{Command:<command>}` shorthand), re-run every `Interval=...` seconds
 `{Extension}`        | what the [status-line extension](../extensions.md) named by parameter `Name=...` (or the `{Extension:<name>}` shorthand) draws
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
@@ -71,6 +72,12 @@ Parameter                 | Description
 `Inverse`                 | inversed text/background coloring
 
 These parameters apply to all variables above.
+
+`{Cwd}` and `{Context}` additionally take this attribute:
+
+Parameter                 | Description
+--------------------------|--------------------------------------------------------------------
+`MaxWidth=N`              | the widest the item may draw, in columns; beyond it the middle is elided and both ends kept. Default `40` for `{Cwd}`, `32` for `{Context}`; a value that is not a number `> 0` keeps the default.
 
 A role names a color by what it means rather than by its value, and takes it from the active color
 scheme when the line is drawn, so it follows a scheme change: `accent` is palette color 4 (blue),

@@ -3514,6 +3514,10 @@ class Terminal: public IStatusLinePublishTarget
     /// is held automatically extends the selection without requiring mouse movement.
     void extendSelectionAfterScroll();
 
+    /// @return The user's home directory, for abbreviating a path to `~`; empty when the environment names
+    ///         none.
+    [[nodiscard]] std::string_view homeDirectory() const noexcept { return _homeDirectory; }
+
     /// @returns either an empty string or a file:// URL of the last set working directory, as reported.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
     {

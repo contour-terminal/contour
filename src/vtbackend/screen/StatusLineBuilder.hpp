@@ -182,6 +182,14 @@ namespace StatusLineDefinitions
         ColumnCount maxWidth { 32 };
     };
 
+    /// The working directory the shell reports, home-abbreviated and middle-elided.
+    struct Cwd: Styles
+    {
+        /// Widest the path may draw, in COLUMNS. Beyond it the MIDDLE components are elided, keeping the
+        /// first and the last: `/…/d59`.
+        ColumnCount maxWidth { 40 };
+    };
+
     struct Tabs: Styles
     {
         std::optional<ItemColor> activeColor;
@@ -208,7 +216,8 @@ namespace StatusLineDefinitions
         TraceMode,
         VTType,
         Tabs,
-        Context
+        Context,
+        Cwd
     >;
     // clang-format on
 
@@ -299,6 +308,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<Context>
     { static constexpr std::string_view Name = "Context", Label = "Context breadcrumb", Sample = "container:build \u203a root"; };
+
+    template <> struct ItemTraits<Cwd>
+    { static constexpr std::string_view Name = "Cwd", Label = "Working directory", Sample = "~/repo/contour"; };
 
     template <> struct ItemTraits<Text>
     { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; };
