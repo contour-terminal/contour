@@ -80,9 +80,10 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _headerRevealTimer.setTimerType(Qt::PreciseTimer);
     connect(&_headerRevealTimer, &QTimer::timeout, this, &WindowController::refreshHeaderReveal);
 
-    // The band's centre follows the tab-bar gate, its edge and the host's connection (titleBand()); under
-    // Minimal an empty centre is the bare band, which is shorter and detaches the compact toolbar.
+    // The band follows the tab-bar gate, the tab count, its edge and the host's connection (titleBand());
+    // under Minimal an empty centre is the bare band, which is shorter and detaches the compact toolbar.
     connect(this, &WindowController::tabBarShouldShowChanged, this, &WindowController::refreshTitleBand);
+    connect(this, &WindowController::countChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
 
@@ -1356,6 +1357,7 @@ TitleBand WindowController::titleBand() const
         .position = _tabBarPosition,
         .notice = hostNoticeOf(hostChipPresence(app.attachedHostLabel()),
                                hostChipStateOf(_manager.hostConnection())),
+        .tabs = count() == 1 ? OpenTabs::One : OpenTabs::Several,
     });
 }
 

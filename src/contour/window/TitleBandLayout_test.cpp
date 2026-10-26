@@ -11,6 +11,7 @@
 
 using namespace contour::window;
 using contour::config::ChromeDensity;
+using contour::config::ChromeStyle;
 using contour::config::TabBarPosition;
 using contour::config::TabShape;
 
@@ -243,9 +244,10 @@ TEST_CASE("titleBand.minimalBareBand", "[titleband]")
     shown.strip = GateShown;
     CHECK(resolveTitleBand(shown) == resolveTitleBand(withDensity(shown, ChromeDensity::Comfortable)));
 
-    // Every Flat row and every native-frame row answers alike in both densities.
+    // Every Flat row and every native-frame row answers alike in both densities -- but the Terminal row's
+    // (titleBand.minimalTerminalRow).
     detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
-        if (inputs.shape != Flat && inputs.frame != NativeFrame)
+        if ((inputs.shape != Flat && inputs.frame != NativeFrame) || inputs.style == ChromeStyle::Terminal)
             return;
         INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
                       << int(inputs.strip) << ", position " << int(inputs.position) << ", notice "
@@ -254,6 +256,57 @@ TEST_CASE("titleBand.minimalBareBand", "[titleband]")
             CHECK(resolveTitleBand(withDensity(inputs, static_cast<ChromeDensity>(density)))
                   == resolveTitleBand(withDensity(inputs, ChromeDensity::Comfortable)));
     });
+}
+
+TEST_CASE("titleBand.minimalTerminalRow", "[titleband]")
+{
+    // Minimal hides the Terminal row's bar row while there is one tab, whatever the gate says
+    // (tui.dc.html's Density note); Comfortable keeps it.
+    auto const oneTab = TitleBandInputs { .shape = Flat,
+                                          .frame = ClientBand,
+                                          .mode = Windowed,
+                                          .strip = GateShown,
+                                          .position = Top,
+                                          .density = ChromeDensity::Minimal,
+                                          .style = ChromeStyle::Terminal,
+                                          .tabs = OpenTabs::One };
+    CHECK(resolveTitleBand(oneTab)
+          == TitleBand { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden });
+    auto bottom = oneTab;
+    bottom.position = Bottom;
+    CHECK(resolveTitleBand(bottom)
+          == TitleBand { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden });
+    auto full = oneTab;
+    full.mode = FullScreen;
+    CHECK(resolveTitleBand(full).band == BarPresence::Hidden);
+
+    // Comfortable, several tabs, another Flat row, or an interrupted connection: the strip as before.
+    for (auto const& other: { withDensity(oneTab, ChromeDensity::Comfortable),
+                              [&] {
+                                  auto several = oneTab;
+                                  several.tabs = OpenTabs::Several;
+                                  return several;
+                              }(),
+                              [&] {
+                                  auto flat = oneTab;
+                                  flat.style = ChromeStyle::ContourLinux;
+                                  return flat;
+                              }(),
+                              [&] {
+                                  auto remote = oneTab;
+                                  remote.notice = Interrupted;
+                                  return remote;
+                              }() })
+        CHECK(resolveTitleBand(other).band == BarPresence::Shown);
+
+    // The row overload fills the row's side, whatever the inputs said.
+    auto const window = TitleBandInputs { .strip = GateShown, .tabs = OpenTabs::One };
+    CHECK(
+        resolveTitleBand(
+            TitleBandRow { .style = ChromeStyle::Terminal, .shape = Flat, .density = ChromeDensity::Minimal },
+            window)
+            .band
+        == BarPresence::Hidden);
 }
 
 TEST_CASE("titleBand.names", "[titleband]")

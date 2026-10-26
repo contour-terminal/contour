@@ -1761,13 +1761,16 @@ struct BarGeometry
     bool operator==(BarGeometry const&) const = default;
 };
 
-/// Loads Main.qml on @p row in @p density with @p tabCount tabs under Multiple.
+/// Loads Main.qml on @p row in @p density with @p tabCount tabs under @p visibility.
 /// @return The bar's geometry.
-[[nodiscard]] BarGeometry barGeometryOf(ChromeStyle row, contour::config::ChromeDensity density, int tabCount)
+[[nodiscard]] BarGeometry barGeometryOf(ChromeStyle row,
+                                        contour::config::ChromeDensity density,
+                                        int tabCount,
+                                        TabBarVisibility visibility = TabBarVisibility::Multiple)
 {
     QQmlEngine engine;
     MockMainController controller { MainWindowScene { .tabCount = tabCount,
-                                                      .tabBarVisibility = TabBarVisibility::Multiple } };
+                                                      .tabBarVisibility = visibility } };
     contour::test::QmlMessageCapture warnings;
     auto root = loadMainWindow(engine, controller, warnings, densitySetup(row, density));
     auto const& titleBar = named(*root, QStringLiteral("titleBar"));
@@ -1846,16 +1849,37 @@ TEST_CASE("Minimal keeps a user's always-shown tab bar (offscreen)",
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("Minimal leaves Fluent, Linux and the Terminal row as Comfortable has them (offscreen)",
+TEST_CASE("Minimal leaves Fluent and Linux as Comfortable has them (offscreen)",
           "[contour][gui][qml][mainwindow][band][density]")
 {
-    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
-        for (auto const tabCount: { 1, 3 })
-        {
-            INFO("row: " << contour::config::chromeStyleName(row) << ", tabs: " << tabCount);
-            CHECK(barGeometryOf(row, contour::config::ChromeDensity::Minimal, tabCount)
-                  == barGeometryOf(row, contour::config::ChromeDensity::Comfortable, tabCount));
-        }
+    for (auto const visibility: { TabBarVisibility::Multiple, TabBarVisibility::Always })
+        for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+            for (auto const tabCount: { 1, 3 })
+            {
+                INFO("row: " << contour::config::chromeStyleName(row) << ", tabs: " << tabCount
+                             << ", visibility: " << static_cast<int>(visibility));
+                CHECK(
+                    barGeometryOf(row, contour::config::ChromeDensity::Minimal, tabCount, visibility)
+                    == barGeometryOf(row, contour::config::ChromeDensity::Comfortable, tabCount, visibility));
+            }
+}
+
+TEST_CASE("Minimal hides the Terminal row's bar while there is one tab (offscreen)",
+          "[contour][gui][qml][mainwindow][band][density]")
+{
+    using contour::config::ChromeDensity;
+    // Under Always, so the gate itself would show the bar: Comfortable keeps it, Minimal hides it.
+    auto const comfortable =
+        barGeometryOf(ChromeStyle::Terminal, ChromeDensity::Comfortable, 1, TabBarVisibility::Always);
+    CHECK(comfortable.visible);
+    CHECK(comfortable.chromeHeight > 0);
+    auto const minimal =
+        barGeometryOf(ChromeStyle::Terminal, ChromeDensity::Minimal, 1, TabBarVisibility::Always);
+    CHECK_FALSE(minimal.visible);
+    CHECK(minimal.chromeHeight == 0);
+    // With more tabs the bar row returns, as Comfortable has it.
+    CHECK(barGeometryOf(ChromeStyle::Terminal, ChromeDensity::Minimal, 3, TabBarVisibility::Always)
+          == barGeometryOf(ChromeStyle::Terminal, ChromeDensity::Comfortable, 3, TabBarVisibility::Always));
 }
 
 namespace

@@ -435,10 +435,10 @@ class ChromeSnapshotScene
             _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
         REQUIRE(provider != nullptr);
         // The band Main.qml decided: under Minimal an empty one is the bare band, over the bare title bar.
-        auto const centre =
-            window::barCentreNamed(
-                window().property("band").toMap().value(QStringLiteral("centre")).toString().toStdString())
-                .value_or(window::BarCentre::Tabs);
+        auto const named = window::barCentreNamed(
+            window().property("band").toMap().value(QStringLiteral("centre")).toString().toStdString());
+        REQUIRE(named.has_value());
+        auto const centre = *named;
         auto const tokens = provider->titleBandTokens(centre);
         auto const surface = window::resolveTitleBandSurface(window::TitleBandSurfaceInputs {
             .style = tokens.style,

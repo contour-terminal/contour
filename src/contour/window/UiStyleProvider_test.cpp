@@ -922,30 +922,31 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
     CHECK(mac.isHostChipShown(QStringLiteral("home")));
     CHECK_FALSE(mac.isHostChipShown({}));
 
-    auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0);
+    auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0, 0);
     CHECK(macBand.value("band").toString() == QStringLiteral("shown"));
     CHECK(macBand.value("bandEdge").toString() == QStringLiteral("top"));
     CHECK(macBand.value("centre").toString() == QStringLiteral("title"));
     CHECK(macBand.value("tabBar").toString() == QStringLiteral("hidden"));
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
-    CHECK(mac.titleBand(0, 1, 1, 0, {}, 0).value("band").toString() == QStringLiteral("reveal"));
-    CHECK(mac.titleBand(2, 0, 0, 0, {}, 0).isEmpty());
-    CHECK(mac.titleBand(0, 0, 0, -1, {}, 0).isEmpty());
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0, 0).value("band").toString() == QStringLiteral("hidden"));
+    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0, 0).value("centre").toString() == QStringLiteral("tabs"));
+    CHECK(mac.titleBand(0, 1, 1, 0, {}, 0, 0).value("band").toString() == QStringLiteral("reveal"));
+    CHECK(mac.titleBand(2, 0, 0, 0, {}, 0, 0).isEmpty());
+    CHECK(mac.titleBand(0, 0, 0, -1, {}, 0, 0).isEmpty());
+    CHECK(mac.titleBand(0, 0, 0, 0, {}, 0, 2).isEmpty());
     // A remote window whose connection is not up shows the strip whatever the gate says; a local one, or a
     // connected one, does not.
     constexpr auto Reconnecting = static_cast<int>(contour::window::HostChipState::Reconnecting);
     constexpr auto Disconnected = static_cast<int>(contour::window::HostChipState::Disconnected);
-    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting).value("band").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting, 0).value("band").toString()
           == QStringLiteral("shown"));
-    CHECK(fluent.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected).value("bandEdge").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected, 0).value("bandEdge").toString()
           == QStringLiteral("bottom"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0).value("band").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0, 0).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, Disconnected).value("band").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, Disconnected, 0).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 3).isEmpty());
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 3, 0).isEmpty());
 
     auto const crowded = mac.tabWellLayout(300, 12);
     CHECK(crowded.value("scrolls").toBool());
@@ -1550,6 +1551,53 @@ TEST_CASE("bandFill follows the material, the mode and the tone", "[contour][uis
         CHECK(mac.bandFill(0, 0, tabs) == QColor(LightChrome));
         CHECK(mac.bandFill(0, 1, tabs) == QColor(LightChrome));
     });
+}
+
+TEST_CASE("UiStyleProvider: Minimal's band, from the provider", "[contour][uistyle]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    using contour::window::BarCentre;
+    using contour::window::BarPresence;
+    using contour::window::OpenTabs;
+    using contour::window::TabStripGate;
+    using contour::window::TitleBandInputs;
+    using contour::window::UiStyleProvider;
+    auto const oneTab = TitleBandInputs { .strip = TabStripGate::Hidden, .tabs = OpenTabs::One };
+
+    // macOS: one tab under Multiple is the bare band, 32 pt (ruling P3); Comfortable centres the title.
+    auto const mac = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Minimal));
+    CHECK(mac.titleBandOf(oneTab).centre == BarCentre::Empty);
+    CHECK(mac.titleBandTokens(BarCentre::Empty).height == 32);
+    CHECK(mac.titleBandTokens(BarCentre::Empty).density == ChromeDensity::Minimal);
+    CHECK(mac.titleBandTokens(BarCentre::Tabs).height == mac.bandHeight());
+    CHECK(mac.titleBand(0, 0, 0, 0, {}, 0, 1).value("centre").toString() == QStringLiteral("empty"));
+    auto const macComfortable =
+        UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable));
+    CHECK(macComfortable.titleBandOf(oneTab).centre == BarCentre::Title);
+
+    // Fluent and ContourLinux: the 28-pt bare-band token; their strip is never emptied.
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        CAPTURE(contour::config::chromeStyleName(row));
+        auto const provider = UiStyleProvider(densityInputs(row, ChromeDensity::Minimal));
+        CHECK(provider.titleBandTokens(BarCentre::Empty).height == 28);
+        auto shown = oneTab;
+        shown.strip = TabStripGate::Shown;
+        CHECK(provider.titleBandOf(shown).band == BarPresence::Shown);
+    }
+
+    // The Terminal row under Minimal hides its bar row while there is one tab, whatever the gate says.
+    auto shownOneTab = oneTab;
+    shownOneTab.strip = TabStripGate::Shown;
+    auto const terminal = UiStyleProvider(densityInputs(ChromeStyle::Terminal, ChromeDensity::Minimal));
+    CHECK(terminal.titleBandOf(shownOneTab).band == BarPresence::Hidden);
+    auto severalTabs = shownOneTab;
+    severalTabs.tabs = OpenTabs::Several;
+    CHECK(terminal.titleBandOf(severalTabs).band == BarPresence::Shown);
+    auto const terminalComfortable =
+        UiStyleProvider(densityInputs(ChromeStyle::Terminal, ChromeDensity::Comfortable));
+    CHECK(terminalComfortable.titleBandOf(shownOneTab).band == BarPresence::Shown);
 }
 
 TEST_CASE("bandFill keeps Minimal's bare band legible on every bundled scheme", "[contour][uistyle]")

@@ -1835,15 +1835,16 @@ window::TitleBandTokens ContourGuiApp::titleBandTokens(window::BarCentre centre)
     };
 }
 
-window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs inputs) const
+window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs const& inputs) const
 {
     if (_chromeStyleHost)
         return _chromeStyleHost->provider().titleBandOf(inputs);
+    // No provider yet: the row as the provider would resolve it.
     auto const density = _config.chromeDensity.value();
-    inputs.shape =
+    auto const shape =
         config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), density).layout.tabShape;
-    inputs.density = density;
-    return window::resolveTitleBand(inputs);
+    return window::resolveTitleBand(
+        window::TitleBandRow { .style = _chromeStyle, .shape = shape, .density = density }, inputs);
 }
 
 window::ChromeInputs ContourGuiApp::chromeInputs() const

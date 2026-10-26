@@ -603,11 +603,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The tokens.
     [[nodiscard]] window::TitleBandTokens titleBandTokens(window::BarCentre centre) const;
 
-    /// Where the title band and the tabs go (window::resolveTitleBand) for the resolved row's tab shape and
-    /// the configured chrome density, whatever @p inputs says of either.
-    /// @param inputs A window's side of the decision: frame, mode, gate, edge and the host's notice.
+    /// Where the title band and the tabs go (window::resolveTitleBand) for the chrome row: the published
+    /// provider's (UiStyleProvider::titleBandOf) once the GUI built it; before that (and in a headless test)
+    /// the resolved row's style and tab shape and the configured density.
+    /// @param inputs A window's side of the decision: frame, mode, gate, tab count, edge and the host's
+    /// notice.
     /// @return The band.
-    [[nodiscard]] window::TitleBand titleBandOf(window::TitleBandInputs inputs) const;
+    [[nodiscard]] window::TitleBand titleBandOf(window::TitleBandInputs const& inputs) const;
 
     /// @return Where this host's menu bar lives, resolved once from the host at construction.
     [[nodiscard]] command::MenuBarPlacement menuBarPlacement() const noexcept { return _menuBarPlacement; }
