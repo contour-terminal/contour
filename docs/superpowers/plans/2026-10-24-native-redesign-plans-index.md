@@ -82,7 +82,7 @@ Settings window should raise or own its window), and the design canvas's macOS â
 | 1b | Menus as data, `NativeMenuPresenter` (macOS), `MenuBarTable` + `AppMenuBar` | 1a | 3.2 | `2026-10-25-native-redesign-step-1b.md` (done) |
 | 4a | Settings window shell; pseudo-tab and `settingsActive` removed; the `settings` row of the snapshot table (`SnapshotScripts`) changes in the same commit | 1b | 3.3 | `2026-10-25-native-redesign-step-4a.md` (done) |
 | 1c | Title band, tab well and pills, badge slot, HostChip, drift chip, tab colour, no-title-bar and full screen | 4a | 3.4 | `2026-10-25-native-redesign-step-1c.md` (done) |
-| 1d | macOS title-band material and safe area (spike first) | 1c | 3.5 | `2026-10-25-native-redesign-step-1d.md` (written) |
+| 1d | macOS title-band material and safe area (spike first) | 1c | 3.5 | `2026-10-25-native-redesign-step-1d.md` (done) |
 | 2 | Pane cards, headers, gap and hit area, densities, pane states | 1d | 3.6 | `2026-10-25-native-redesign-step-1d.md` (written) |
 | 3a | Status line placeholders, flags, role colours, collapse, final template | 2 | 3.7 | `2026-10-25-native-redesign-step-2.md` (written) |
 | 3b | Find bar: regex, whole word, chunked search, placement | 2 | 3.8 | `2026-10-25-native-redesign-step-2.md` (written) |
