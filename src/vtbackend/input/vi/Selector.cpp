@@ -166,18 +166,11 @@ SelectionExtent Selection::extent() const
                                       return _helper.cellEmpty(at(column));
                                   }));
 
-        // A wide character is one character over the cells it covers.
-        auto covered = 0;
-        for (auto const column: columns | std::views::take(std::ranges::ssize(columns) - blanks))
-        {
-            if (covered > 0)
-            {
-                --covered;
-                continue;
-            }
-            ++characters;
-            covered = std::max(1, _helper.cellWidth(at(column))) - 1;
-        }
+        // A wide character is one character over the cells it covers: its second cell holds no text, as
+        // a copy has it -- also where a rectangle's left edge cuts the character and keeps only that cell.
+        characters += static_cast<size_t>(
+            std::ranges::count_if(columns | std::views::take(std::ranges::ssize(columns) - blanks),
+                                  [&](int column) { return _helper.cellHoldsText(at(column)); }));
     }
     return SelectionExtent { .lines = lines, .characters = characters };
 }

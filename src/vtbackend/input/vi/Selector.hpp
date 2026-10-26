@@ -28,6 +28,10 @@ struct SelectionHelper
     [[nodiscard]] virtual bool wrappedLine(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual bool cellEmpty(CellLocation pos) const noexcept = 0;
     [[nodiscard]] virtual int cellWidth(CellLocation pos) const noexcept = 0;
+    /// Whether the cell at @p pos holds text of its own: not the second cell of a wide character, a cell a
+    /// text-sizing block reaches into, or the padding a wide character left at a row's end
+    /// (NoTextCellFlags) -- the cells a copy leaves out.
+    [[nodiscard]] virtual bool cellHoldsText(CellLocation pos) const noexcept = 0;
 };
 
 /// The most cells Selection::extent() looks at to count a selection's characters: a larger selection
@@ -41,8 +45,8 @@ struct SelectionExtent
     /// The rows it spans, the first and the last included.
     LineCount lines {};
     /// The characters a copy of it yields -- each row's cells up to its last non-blank one, the spaces
-    /// between words included, a wide character once -- or nullopt when it spans
-    /// @ref SelectionCharacterCountLimit cells or more.
+    /// between words included, a cell with no text of its own (a wide character's second cell) not -- or
+    /// nullopt when it spans @ref SelectionCharacterCountLimit cells or more.
     std::optional<std::size_t> characters {};
 
     bool operator==(SelectionExtent const&) const = default;

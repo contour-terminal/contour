@@ -4234,6 +4234,7 @@ class Terminal: public IStatusLinePublishTarget
         [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
         [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
         [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
+        [[nodiscard]] bool cellHoldsText(CellLocation pos) const noexcept override;
     };
     void triggerWordWiseSelection(CellLocation startPos, TheSelectionHelper const& selectionHelper);
     bool handleMouseSelection(Modifiers modifiers, uint8_t clickCount);

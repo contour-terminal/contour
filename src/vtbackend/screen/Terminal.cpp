@@ -1154,6 +1154,11 @@ int Terminal::TheSelectionHelper::cellWidth(CellLocation pos) const noexcept
     return terminal->displayedPage().cellWidthAt(pos);
 }
 
+bool Terminal::TheSelectionHelper::cellHoldsText(CellLocation pos) const noexcept
+{
+    return !terminal->displayedPage().at(pos).flags().any(NoTextCellFlags);
+}
+
 void Terminal::updateInputMethodPreeditString(std::string preeditString)
 {
     auto const composing = !preeditString.empty();

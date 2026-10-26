@@ -29,6 +29,10 @@ struct TestSelectionHelper: public vtbackend::SelectionHelper
         return screen->isCellEmpty(pos);
     }
     [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override { return screen->at(pos).width(); }
+    [[nodiscard]] bool cellHoldsText(CellLocation pos) const noexcept override
+    {
+        return !screen->at(pos).flags().any(NoTextCellFlags);
+    }
 };
 
 } // namespace
@@ -306,6 +310,17 @@ TEST_CASE("Selector.extentCountsWhatACopyYields", "[selector]")
     CHECK(extentOfRow("a\u4E2Db") == 3);
     // A combining mark is part of the character it combines with.
     CHECK(extentOfRow("e\u0301x") == 2);
+}
+
+TEST_CASE("Selector.extentSkipsTheHalfOfAWideCharacterARectangleCuts", "[selector]")
+{
+    // A rectangle whose left edge falls on a wide character's second cell holds that cell alone, which a
+    // copy leaves out: columns 2 to 3 of "a中b" are the second half of 中 and "b" -- one character a row.
+    auto term = MockTerm(PageSize { LineCount(3), ColumnCount(16) }, LineCount(5));
+    term.writeToScreen("a\u4E2Db\r\na\u4E2Db");
+    auto const helper = TestSelectionHelper(term.terminal.primaryScreen());
+    CHECK(extentOf<RectangularSelection>(helper, cellAt(0, 2), cellAt(1, 3))
+          == SelectionExtent { .lines = LineCount(2), .characters = 2 });
 }
 
 TEST_CASE("Selector.extentReachesIntoTheScrollback", "[selector]")
