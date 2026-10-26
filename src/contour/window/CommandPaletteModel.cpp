@@ -81,7 +81,8 @@ void CommandPaletteModel::refresh(std::unordered_map<std::string, std::string> s
 
     // Every open starts at the top with an empty query. Reset here rather than through back() and
     // setFilter({}), which would each rebuild the rows against the OLD tree first.
-    auto const wasInLevel = _level.has_value();
+    // levelChanged is anchorRow's NOTIFY too, so it fires when either moves.
+    auto const levelOrAnchorMoves = _level.has_value() || _anchorRow != 0;
     auto const hadFilter = !_filter.isEmpty();
     _level.reset();
     _filter.clear();
@@ -90,7 +91,7 @@ void CommandPaletteModel::refresh(std::unordered_map<std::string, std::string> s
 
     rebuildRows();
 
-    if (wasInLevel)
+    if (levelOrAnchorMoves)
         emit levelChanged();
     if (hadFilter)
         emit filterChanged();

@@ -139,10 +139,8 @@ TEST_CASE("With no filter, the palette groups its rows behind Recently used", "[
     SECTION("exactly one row per group carries its title")
     {
         auto headers = headersOf(model);
-        auto const count = headers.size();
         std::ranges::sort(headers);
         CHECK(std::ranges::unique(headers).empty());
-        CHECK(headers.size() == count);
     }
 
     SECTION("a recent command still appears in its group too")
@@ -211,6 +209,8 @@ TEST_CASE("Typing ranks across groups and keeps their headers", "[contour][palet
         REQUIRE(toggle >= 0);
         CHECK(horizontal < toggle);
         CHECK(vertical < toggle);
+        // One of the two Splits is under the cursor when the popup opens.
+        CHECK((idAt(model, 0) == "SplitHorizontal" || idAt(model, 0) == "SplitVertical"));
 
         for (auto const row: std::views::iota(0, model.rowCount()))
         {
@@ -254,6 +254,19 @@ TEST_CASE("The palette reports which title characters the filter matched", "[con
         REQUIRE(row >= 0);
         // "splitv" over "Split Vertical": S p l i t (0..4), then V (6) past the space.
         CHECK(titleMatchesAt(model, row) == std::vector<int> { 0, 1, 2, 3, 4, 6 });
+    }
+
+    SECTION("clearing the filter clears the highlight again")
+    {
+        model.setFilter(QStringLiteral("split"));
+        auto const filtered = rowOf(model, "SplitVertical");
+        REQUIRE(filtered >= 0);
+        REQUIRE_FALSE(titleMatchesAt(model, filtered).empty());
+
+        model.setFilter(QString {});
+        auto const cleared = rowOf(model, "SplitVertical");
+        REQUIRE(cleared >= 0);
+        CHECK(titleMatchesAt(model, cleared).empty());
     }
 }
 
@@ -496,6 +509,28 @@ TEST_CASE("Reopening the palette starts at the top", "[contour][palette]")
     CHECK(model.filter().isEmpty());
     CHECK(levelSpy.count() == 1);
     CHECK(rowOf(model, "ChangeProfile") >= 0);
+}
+
+TEST_CASE("Reopening the palette re-anchors at row 0 and says so", "[contour][palette]")
+{
+    // anchorRow's NOTIFY is levelChanged: a refresh that moves the anchor must emit it even at the top.
+    auto const config = configWithProfiles({ "dark" });
+    auto const profiles = command::ProfileCommandSource { config };
+    auto const actionCommands = command::ActionCommandSource {};
+    auto history = command::CommandHistory { 3 };
+    auto model =
+        CommandPaletteModel { history, Sources { &profiles, &actionCommands }, command::ShortcutStyle::Text };
+    model.refresh({});
+
+    model.enter(rowOf(model, "ChangeProfile"));
+    model.back();
+    REQUIRE(model.anchorRow() > 0);
+
+    auto levelSpy = QSignalSpy { &model, &CommandPaletteModel::levelChanged };
+    model.refresh({});
+
+    CHECK(model.anchorRow() == 0);
+    CHECK(levelSpy.count() == 1);
 }
 
 TEST_CASE("footerHints follows the row and the depth", "[contour][palette]")
