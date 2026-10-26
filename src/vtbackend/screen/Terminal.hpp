@@ -2336,9 +2336,8 @@ class Terminal: public IStatusLinePublishTarget
 
     /// The indicator status line's pair for @p mode, as the scheme names it.
     /// @param mode The vi input mode.
-    /// @return The Insert pair for Insert, the Normal pair for Normal and Hint, the Visual pair for the
-    /// visual
-    ///         modes.
+    /// @return The Insert pair for Insert, the Normal pair for Normal and Hint, and the Visual pair for
+    ///         the visual modes.
     [[nodiscard]] RGBColorPair indicatorStatusLineColorsFor(ViMode mode) const noexcept;
 
     [[nodiscard]] std::vector<ColorPalette> const& savedColorPalettes() const noexcept

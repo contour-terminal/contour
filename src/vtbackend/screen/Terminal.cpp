@@ -1665,64 +1665,67 @@ void Terminal::updateIndicatorStatusLine()
     using Styling = StatusLineStyling;
     auto const& definitions = _indicatorStatusLineDefinition;
 
-    // A segment is placed by the columns the screen lays its text out in, not by its bytes.
-    auto const widthOf = [&](std::span<StatusLineDefinitions::Item const> items) {
-        return columnsOnTheGrid(serializeToVT(*this, items, Styling::Disabled),
-                                _indicatorStatusScreen.clusterWidthPolicy());
-    };
     auto const columns = _indicatorStatusScreen.pageSize().columns;
-
-    // Too narrow for every item, the line drops whole ones by priority until each segment is placed.
+    auto const policy = _indicatorStatusScreen.clusterWidthPolicy();
     auto const sides = std::array {
         std::pair { StatusLineSide::Left, &definitions.left },
         std::pair { StatusLineSide::Middle, &definitions.middle },
         std::pair { StatusLineSide::Right, &definitions.right },
     };
+
+    // Each item is visited once to measure it, its unstyled text kept: a segment's text is its items' texts
+    // joined, so a segment is measured as the grid lays it out -- by columns, not bytes, and with a cluster
+    // that joins across two items as one -- without visiting its items again.
+    auto texts = std::vector<std::string> {};
     auto extents = std::vector<StatusLineItemExtent> {};
     for (auto const& [side, segment]: sides)
         for (auto const& item: *segment)
+        {
+            auto& text = texts.emplace_back(serializeToVT(*this, std::span { &item, 1 }, Styling::Disabled));
             extents.push_back(StatusLineItemExtent { .side = side,
-                                                     .width = widthOf(std::span { &item, 1 }),
+                                                     .width = columnsOnTheGrid(text, policy),
                                                      .priority = StatusLineDefinitions::priorityOf(item),
                                                      .kind = StatusLineDefinitions::kindOf(item) });
-    auto const fates = collapseStatusLine(extents, columns);
-
-    // The segments as drawn: the template's own while nothing is dropped, which is every frame that fits.
-    auto shownSegments = std::array<StatusLineSegment, 3> {};
-    auto const collapsed = std::ranges::contains(fates, StatusLineItemFate::Dropped);
-    if (collapsed)
-    {
-        auto fate = fates.begin();
-        for (auto const& [side, segment]: sides)
-            for (auto const& item: *segment)
-                if (*fate++ == StatusLineItemFate::Shown)
-                    shownSegments[std::to_underlying(side)].push_back(item);
-    }
-    auto const segmentOf = [&](StatusLineSide side) -> StatusLineSegment const& {
-        return collapsed ? shownSegments[std::to_underlying(side)] : *sides[std::to_underlying(side)].second;
+        }
+    auto const measureSegment = [&](StatusLineSide side, std::span<StatusLineItemFate const> fates) {
+        auto joined = std::string {};
+        for (auto const [index, extent]: core::views::enumerate(extents))
+            if (extent.side == side && fates[index] == StatusLineItemFate::Shown)
+                joined += texts[index];
+        return columnsOnTheGrid(joined, policy);
     };
-    auto const& left = segmentOf(StatusLineSide::Left);
-    auto const& middle = segmentOf(StatusLineSide::Middle);
-    auto const& right = segmentOf(StatusLineSide::Right);
 
-    // Re-measured as whole segments, so a cluster that joins across two items is measured as the grid lays it
-    // out.
+    // Too narrow for every item, the line drops whole ones by priority until each segment is placed.
+    auto const fates = collapseStatusLine(extents, columns, measureSegment);
     auto const placement = placeStatusLineSegments(
-        StatusLineSegmentWidths { .left = widthOf(left), .middle = widthOf(middle), .right = widthOf(right) },
+        StatusLineSegmentWidths { .left = measureSegment(StatusLineSide::Left, fates),
+                                  .middle = measureSegment(StatusLineSide::Middle, fates),
+                                  .right = measureSegment(StatusLineSide::Right, fates) },
         columns);
 
+    // Draws the shown items of the segment on @p side, styled; an item's text does not depend on its
+    // neighbours, so they are drawn one by one, and nothing is copied for a line that dropped some.
+    auto const draw = [&](StatusLineSide side) {
+        auto text = std::string {};
+        auto index = std::size_t { 0 };
+        for (auto const& [segmentSide, segment]: sides)
+            for (auto const& item: *segment)
+                if (fates[index++] == StatusLineItemFate::Shown && segmentSide == side)
+                    text += serializeToVT(*this, std::span { &item, 1 }, Styling::Enabled);
+        writeToScreenInternal(_indicatorStatusScreen, text);
+    };
+
     // The left segment starts in the first column, and one wider than the line is cut at its last.
-    if (!left.empty())
-        writeToScreenInternal(_indicatorStatusScreen, serializeToVT(*this, left, Styling::Enabled));
+    draw(StatusLineSide::Left);
     if (placement.middleStart)
     {
         _indicatorStatusScreen.moveCursorToColumn(*placement.middleStart);
-        writeToScreenInternal(_indicatorStatusScreen, serializeToVT(*this, middle, Styling::Enabled));
+        draw(StatusLineSide::Middle);
     }
     if (placement.rightStart)
     {
         _indicatorStatusScreen.moveCursorToColumn(*placement.rightStart);
-        writeToScreenInternal(_indicatorStatusScreen, serializeToVT(*this, right, Styling::Enabled));
+        draw(StatusLineSide::Right);
     }
 
     // What the template printed may reset its rendition -- a {Command}'s output and an {Extension}'s text are

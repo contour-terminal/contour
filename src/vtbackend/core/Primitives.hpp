@@ -1366,9 +1366,32 @@ enum class ViMode : uint8_t
     Hint,
 };
 
+/// Whether @p mode names a @ref ViMode enumerator.
+///
+/// Exhaustive and without a default, so a new mode is a -Wswitch error here (the build is -Werror), right
+/// beside @ref ViModeCount, which must then count it.
+/// @param mode The value to test.
+/// @return Whether it is one of the enumerators.
+[[nodiscard]] constexpr bool isViMode(ViMode mode) noexcept
+{
+    switch (mode)
+    {
+        case ViMode::Normal:
+        case ViMode::Insert:
+        case ViMode::Visual:
+        case ViMode::VisualLine:
+        case ViMode::VisualBlock:
+        case ViMode::Hint: return true;
+    }
+    return false;
+}
+
 /// How many @ref ViMode enumerators there are: a table with one row per mode checks its size against this, so
-/// a new mode is a compile error there rather than a row silently missing. Kept beside the enumeration.
-inline constexpr auto ViModeCount = static_cast<std::size_t>(ViMode::Hint) + 1;
+/// a new mode is a compile error there rather than a row silently missing.
+inline constexpr auto ViModeCount = std::size_t { 6 };
+
+static_assert(isViMode(static_cast<ViMode>(ViModeCount - 1)) && !isViMode(static_cast<ViMode>(ViModeCount)),
+              "ViModeCount must count every ViMode, numbered from zero without gaps.");
 
 std::string toString(GraphicsRendition s);
 

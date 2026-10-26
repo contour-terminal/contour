@@ -1511,13 +1511,14 @@ TEST_CASE("serializeToVT.modeChipTextReads", "[statusline][inputmode][colors]")
 // {{{ Collapse by priority
 TEST_CASE("Terminal.indicatorStatusLine.anyWidthDrawsWithoutOverlap", "[terminal][statusline][collapse]")
 {
-    // An Essential mode chip, a Normal terminal type, the title in the middle and a Low clock on the right:
-    // in a narrow pane the clock goes first, then the type; nothing overlaps, and the mode is cut only when
-    // it alone is wider than the line.
+    // An Essential mode, a Normal terminal type, a title in the middle and a Low clock on the right: in a
+    // narrow pane the clock goes first, then the type; every piece drawn is drawn whole, in its own place,
+    // and the mode is cut only when it alone is wider than the line.
     for (auto const width: std::views::iota(1, 41))
     {
         INFO(width);
         auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(width) } };
+        mc.writeToScreen("\033]2;@@\033\\");
         mc.terminal.setStatusLineDefinition(parseStatusLineDefinition(
             "{InputMode:Left= ,Right= }{VTType:Left= }", "{Title}", "{Clock:Left= }"));
         mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
@@ -1525,24 +1526,37 @@ TEST_CASE("Terminal.indicatorStatusLine.anyWidthDrawsWithoutOverlap", "[terminal
         REQUIRE(mc.terminal.refreshRenderBuffer());
 
         auto const line = mc.terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0));
-        auto const text = test::trimRight(line);
-        CHECK(columnsOf(text) <= width);
+        auto const vtType = serializeToVT(
+            mc.terminal, parseStatusLineSegment("{VTType:Left= }"sv), StatusLineStyling::Disabled);
         auto const clock = serializeToVT(
             mc.terminal, parseStatusLineSegment("{Clock:Left= }"sv), StatusLineStyling::Disabled);
+        REQUIRE(clock.size() == 6);
+
         if (width >= 8)
             CHECK(line.starts_with(" NORMAL "));
         else
-            CHECK(std::string_view { " NORMAL " }.starts_with(text));
-        // The clock, when shown, ends in the last column, whole.
-        if (text.contains(clock.substr(1)))
-            CHECK(text.ends_with(clock));
+            CHECK(std::string_view { " NORMAL " }.starts_with(test::trimRight(line)));
+        // The type follows the mode, whole, or is not there at all.
+        if (line.contains(vtType.substr(1, 2)))
+            CHECK(line.substr(8).starts_with(vtType));
+        // The title is centred, whole, or not there at all.
+        if (line.contains('@'))
+            CHECK(line.substr(static_cast<std::size_t>((width - 2) / 2), 2) == "@@");
+        // The clock ends in the last column, whole, or is not there at all.
+        if (line.contains(':'))
+            CHECK(line.ends_with(clock));
+
         if (width == 12)
+            CHECK(test::trimRight(line) == " NORMAL");
+        if (width == 40)
         {
-            CHECK(text == " NORMAL");
-            CHECK_FALSE(text.contains(clock.substr(1)));
+            CHECK(line.contains(vtType));
+            CHECK(line.contains("@@"));
+            CHECK(line.ends_with(clock));
         }
     }
 }
+
 TEST_CASE("Terminal.indicatorStatusLine.aLongTitleCostsOnlyItself", "[terminal][statusline][collapse]")
 {
     // A title too long for the middle takes nothing else with it: the right segment keeps its clock and its
