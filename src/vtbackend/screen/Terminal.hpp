@@ -2313,6 +2313,13 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] ColorPalette& colorPalette() noexcept { return _colorPalette; }
     [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _defaultColorPalette; }
 
+    /// @return The scheme's palette: what resetColorPalette() restores, and what no OSC 4 changes. The
+    ///         host's own chrome (the indicator status line's roles) is coloured from it.
+    [[nodiscard]] ColorPalette const& defaultColorPalette() const noexcept { return _defaultColorPalette; }
+
+    /// The indicator status line's colors for the focus and the input mode as they are now.
+    [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
+
     [[nodiscard]] std::vector<ColorPalette> const& savedColorPalettes() const noexcept
     {
         return _savedColorPalettes;
@@ -4133,9 +4140,6 @@ class Terminal: public IStatusLinePublishTarget
     /// Called by updateIndicatorStatusLine() on the render thread under the state lock; reads files only
     /// after endCommand() or setCurrentWorkingDirectory() invalidated the branch, so not per frame.
     void refreshGitHead();
-
-    /// The indicator status line's colors for the focus and the input mode as they are now.
-    [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
 
     void updateCursorVisibilityState() const noexcept;
 

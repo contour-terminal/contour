@@ -671,24 +671,73 @@ TEST_CASE("statusLine.colors.hexAndRolesMix", "[statusline][colors]")
     CHECK_FALSE(std::get<StatusLineDefinitions::Clock>(unknown[0]).foregroundColor.has_value());
 }
 
+namespace
+{
+/// The SGR that selects @p color as the text colour.
+[[nodiscard]] std::string textSgrOf(RGBColor color)
+{
+    return std::format("\033[38:2:{}:{}:{}m", color.red, color.green, color.blue);
+}
+
+/// Draws every status-line bar of @p palette, whatever the focus and the input mode, on black.
+void paintEveryBarBlack(ColorPalette& palette)
+{
+    for (auto* const pair: { &palette.indicatorStatusLineInactive,
+                             &palette.indicatorStatusLineInsertMode,
+                             &palette.indicatorStatusLineNormalMode,
+                             &palette.indicatorStatusLineVisualMode })
+        pair->background = 0x000000_rgb;
+}
+} // namespace
+
 TEST_CASE("serializeToVT.roleIsResolvedWhenDrawn", "[statusline][colors]")
 {
     auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    paintEveryBarBlack(mc.terminal.colorPalette());
+    mc.terminal.defaultColorPalette().palette[4] = 0x5599FF_rgb;
     auto const segment = parseStatusLineSegment("{VTType:Color=accent}"sv);
-    auto const sgrOf = [](RGBColor c) {
-        return std::format("\033[38:2:{}:{}:{}m", c.red, c.green, c.blue);
-    };
 
-    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled)
-              .contains(sgrOf(mc.terminal.colorPalette().normalColor(4))));
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled).contains(textSgrOf(0x5599FF_rgb)));
 
     // A scheme change reaches the next frame: nothing resolved the role when the template was parsed.
-    mc.terminal.colorPalette().palette[4] = 0x123456_rgb;
-    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled).contains("38:2:18:52:86"));
+    mc.terminal.defaultColorPalette().palette[4] = 0xFFAA00_rgb;
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled).contains(textSgrOf(0xFFAA00_rgb)));
+
+    // A role the bar would swallow gives way to the bar's legible ink: the scheme's better end on it.
+    mc.terminal.defaultColorPalette().palette[4] = 0x123456_rgb;
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled)
+              .contains(textSgrOf(legibleInkOn(mc.terminal.defaultColorPalette(), 0x000000_rgb))));
+
+    // A hex colour is the user's, drawn as written even where it does not read.
+    CHECK(serializeToVT(
+              mc.terminal, parseStatusLineSegment("{VTType:Color=#123456}"sv), StatusLineStyling::Enabled)
+              .contains(textSgrOf(0x123456_rgb)));
+}
+
+TEST_CASE("serializeToVT.rolesIgnoreTheProgramsPalette", "[statusline][colors]")
+{
+    // The status line is the host's chrome: OSC 4 recolours the program's own text, never the furniture.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    paintEveryBarBlack(mc.terminal.colorPalette());
+    mc.terminal.defaultColorPalette().palette[4] = 0x5599FF_rgb;
+    mc.terminal.defaultColorPalette().palette[8] = 0xA0A0A0_rgb;
+    mc.terminal.resetColorPalette();
+    paintEveryBarBlack(mc.terminal.colorPalette());
+
+    mc.writeToScreen("\033]4;4;rgb:ff/ff/00\033\\\033]4;8;rgb:00/00/00\033\\");
+    REQUIRE(mc.terminal.colorPalette().palette[4] == 0xFFFF00_rgb);
+
+    auto const line = serializeToVT(mc.terminal,
+                                    parseStatusLineSegment("{VTType:Color=accent}{Clock:Color=muted}"sv),
+                                    StatusLineStyling::Enabled);
+    CHECK(line.contains(textSgrOf(0x5599FF_rgb)));
+    CHECK(line.contains(textSgrOf(0xA0A0A0_rgb)));
+    CHECK_FALSE(line.contains(textSgrOf(0xFFFF00_rgb)));
 }
 
 TEST_CASE("statusLine.colors.rolesReadOnContourSchemes", "[statusline][colors]")
 {
+    // The roles' own colours, before any fallback: the Contour schemes are designed for them on the idle bar.
     for (auto const scheme: { "contour-dark"sv, "contour-light"sv })
     {
         auto palette = ColorPalette {};
@@ -697,12 +746,31 @@ TEST_CASE("statusLine.colors.rolesReadOnContourSchemes", "[statusline][colors]")
         for (auto const& row: StatusLineDefinitions::ColorRoleNames)
         {
             INFO(scheme << ": " << row.name);
-            auto const ratio = contrastRatio(StatusLineDefinitions::resolveItemColor(
-                                                 StatusLineDefinitions::ItemColor { row.role }, palette),
-                                             background);
+            auto const ratio = contrastRatio(StatusLineDefinitions::roleColor(row.role, palette), background);
             auto const minimum = row.role == StatusLineDefinitions::ColorRole::Muted ? 3.0 : 4.5;
             CHECK(ratio >= minimum);
         }
+    }
+}
+
+TEST_CASE("statusLine.colors.rolesReadOnEveryBar", "[statusline][colors]")
+{
+    // Resolved against the bar it is drawn on, every role reads on every bundled scheme's every bar.
+    for (auto const scheme: defaultColorPaletteNames())
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme, palette));
+        for (auto const& bar: { palette.indicatorStatusLineInactive,
+                                palette.indicatorStatusLineNormalMode,
+                                palette.indicatorStatusLineInsertMode,
+                                palette.indicatorStatusLineVisualMode })
+            for (auto const& row: StatusLineDefinitions::ColorRoleNames)
+            {
+                INFO(scheme << ": " << row.name << " on " << formatColor(bar.background));
+                auto const ink = StatusLineDefinitions::resolveItemColor(
+                    StatusLineDefinitions::ItemColor { row.role }, palette, bar.background);
+                CHECK(contrastRatio(ink, bar.background) >= MinimumTextContrast);
+            }
     }
 }
 // }}}
@@ -848,8 +916,10 @@ void runFor(MockTerm<>& mc, std::string_view command, std::chrono::milliseconds 
 /// The SGR that selects @p role's colour on @p mc's palette as the text colour.
 [[nodiscard]] std::string roleSgr(MockTerm<> const& mc, StatusLineDefinitions::ColorRole role)
 {
-    auto const rgb = StatusLineDefinitions::resolveItemColor(StatusLineDefinitions::ItemColor { role },
-                                                             mc.terminal.colorPalette());
+    auto const rgb =
+        StatusLineDefinitions::resolveItemColor(StatusLineDefinitions::ItemColor { role },
+                                                mc.terminal.defaultColorPalette(),
+                                                mc.terminal.indicatorStatusLineColors().background);
     return std::format("\033[38:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
 }
 } // namespace

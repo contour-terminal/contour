@@ -178,8 +178,9 @@ enum class SchemeSlot : uint8_t
     Background = 0, //!< The scheme's default background.
     Foreground,     //!< The scheme's default foreground.
     Bar,            //!< ANSI colour 0, the bar fill.
-    /// The bar's one ink: the first of @c BarInkFallbacks that reads on @c Bar at 4.5:1. Every text on the
-    /// bar is inked with it, so one bar never carries two answers to the same question.
+    /// The bar's one ink: vtbackend::legibleInkOn(), the first of vtbackend::InkFallbacks that reads on @c
+    /// Bar at 4.5:1. Every text on the bar is inked with it, so one bar never carries two answers to the same
+    /// question.
     BarInk,
     Secondary, //!< ANSI colour 8.
     /// The chrome's selection: the scheme's (@c schemeSelectionOf) where an end of the scheme reads on it
@@ -498,8 +499,9 @@ struct ChromeTokenRow
     MinimalDensityTokens minimal {}; ///< The extents the Minimal density replaces.
 };
 
-/// The WCAG AA ratio chrome text must reach against what it sits on.
-inline constexpr double MinimumTextContrast = 4.5;
+/// The WCAG AA ratio chrome text must reach against what it sits on: the terminal's own, one entity, so a
+/// scope that sees both namespaces finds no ambiguity.
+using vtbackend::MinimumTextContrast;
 
 namespace detail
 {
@@ -1205,29 +1207,12 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
     return palette.defaultBackground;
 }
 
-/// Where the bar's ink comes from, in the order it is tried. All three ink the bar itself.
-enum class BarInkSource : uint8_t
-{
-    SchemeEnd = 0, //!< Whichever of the default foreground and background reads better on the bar.
-    BrightWhite,   //!< ANSI 15 (bright white), for a scheme whose own ends are dim.
-    Mono,          //!< Black or white, whichever reads better: always at least 4.58:1.
-};
-
-/// The candidates for the bar's ink, first legible one wins. one-dark's grey foreground on its black ANSI 0
-/// and solarized-light's on its cream fail 4.5:1; the last candidate always reads, so the bar does on every
-/// scheme.
-inline constexpr std::array BarInkFallbacks {
-    BarInkSource::SchemeEnd,
-    BarInkSource::BrightWhite,
-    BarInkSource::Mono,
-};
-
 /// Where the chrome's selection comes from, in the order it is tried.
 enum class SelectionSource : uint8_t
 {
     Scheme = 0, //!< The scheme's own selection, with its better end of the scheme on top.
     Inverse,    //!< Inverse video: the foreground as the fill, the background as the text.
-    Bar,        //!< The bar and its ink (@c BarInkFallbacks): always legible.
+    Bar,        //!< The bar and its ink (vtbackend::legibleInkOn()): always legible.
 };
 
 /// The candidates for the chrome's selection, first legible one wins. Most bundled schemes inherit a
@@ -1288,24 +1273,9 @@ namespace detail
     };
 
     // The bar's ink, resolved once: the bar's text, the Terminal row's selection fallback and every
-    // SchemeOnBar source read this slot.
-    auto const barInk = detail::firstLegiblePair(BarInkFallbacks, [&](BarInkSource source) {
-                            switch (source)
-                            {
-                                case BarInkSource::SchemeEnd:
-                                    return detail::InkPair { .fill = bar, .text = readableOn(bar) };
-                                case BarInkSource::BrightWhite:
-                                    return detail::InkPair { .fill = bar, .text = palette.brightColor(7) };
-                                case BarInkSource::Mono: break;
-                            }
-                            auto const black = vtbackend::RGBColor { 0, 0, 0 };
-                            auto const white = vtbackend::RGBColor { 255, 255, 255 };
-                            return detail::InkPair { .fill = bar,
-                                                     .text = vtbackend::contrastRatio(black, bar)
-                                                                     >= vtbackend::contrastRatio(white, bar)
-                                                                 ? black
-                                                                 : white };
-                        }).text;
+    // SchemeOnBar source read this slot. The status line's roles take the same chain
+    // (vtbackend::InkFallbacks) on their own bars.
+    auto const barInk = vtbackend::legibleInkOn(palette, bar);
 
     auto const selection = detail::firstLegiblePair(SelectionFallbacks, [&](SelectionSource source) {
         switch (source)

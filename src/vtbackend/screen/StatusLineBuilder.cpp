@@ -179,10 +179,25 @@ namespace StatusLineDefinitions
         return formatColor(std::get<RGBColor>(color));
     }
 
-    RGBColor resolveItemColor(ItemColor const& color, ColorPalette const& palette) noexcept
+    RGBColor roleColor(ColorRole role, ColorPalette const& palette) noexcept
+    {
+        return palette.indexedColor(ColorRoleNames[static_cast<std::size_t>(role)].paletteIndex);
+    }
+
+    RGBColor resolveItemColor(ItemColor const& color, ColorPalette const& palette, RGBColor ground) noexcept
+    {
+        auto const* const role = std::get_if<ColorRole>(&color);
+        if (!role)
+            return std::get<RGBColor>(color);
+        if (auto const rgb = roleColor(*role, palette); contrastRatio(rgb, ground) >= MinimumTextContrast)
+            return rgb;
+        return legibleInkOn(palette, ground);
+    }
+
+    RGBColor resolveItemBackground(ItemColor const& color, ColorPalette const& palette) noexcept
     {
         if (auto const* const role = std::get_if<ColorRole>(&color))
-            return palette.indexedColor(ColorRoleNames[static_cast<std::size_t>(*role)].paletteIndex);
+            return roleColor(*role, palette);
         return std::get<RGBColor>(color);
     }
 } // namespace StatusLineDefinitions
@@ -398,27 +413,39 @@ namespace
         StatusLineStyling styling;
         std::string result {};
 
-        /// The SGR that selects @p color as the text colour, a role resolved against the terminal's palette
-        /// now; @p defaultSequence when there is none.
-        [[nodiscard]] std::string makeTextColor(std::optional<StatusLineDefinitions::ItemColor> const& color,
-                                                std::string_view defaultSequence = {}) const
+        /// What text drawn over @p background sits on: that background, or the bar's when there is none.
+        [[nodiscard]] RGBColor groundOf(
+            std::optional<StatusLineDefinitions::ItemColor> const& background) const
+        {
+            if (background)
+                return StatusLineDefinitions::resolveItemBackground(*background, vt.defaultColorPalette());
+            return vt.indicatorStatusLineColors().background;
+        }
+
+        /// The SGR that selects @p color as the text colour over @p background. A role is resolved now,
+        /// against the scheme (the default palette: the status line is host chrome, which a program's OSC 4
+        /// does not recolour) and the ground it is drawn on. Empty when there is no colour.
+        [[nodiscard]] std::string makeTextColor(
+            std::optional<StatusLineDefinitions::ItemColor> const& color,
+            std::optional<StatusLineDefinitions::ItemColor> const& background) const
         {
             if (!color)
-                return std::string(defaultSequence);
+                return {};
 
-            auto const rgb = StatusLineDefinitions::resolveItemColor(*color, vt.colorPalette());
+            auto const rgb = StatusLineDefinitions::resolveItemColor(
+                *color, vt.defaultColorPalette(), groundOf(background));
             return std::format("\033[38:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
         }
 
-        /// The SGR that selects @p color as the background, as makeTextColor() resolves it.
+        /// The SGR that selects @p color as the background, a role resolved against the scheme; empty when
+        /// there is none.
         [[nodiscard]] std::string makeBackgroundColor(
-            std::optional<StatusLineDefinitions::ItemColor> const& color,
-            std::string_view defaultSequence = {}) const
+            std::optional<StatusLineDefinitions::ItemColor> const& color) const
         {
             if (!color)
-                return std::string(defaultSequence);
+                return {};
 
-            auto const rgb = StatusLineDefinitions::resolveItemColor(*color, vt.colorPalette());
+            auto const rgb = StatusLineDefinitions::resolveItemBackground(*color, vt.defaultColorPalette());
             return std::format("\033[48:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
         }
 
@@ -427,7 +454,7 @@ namespace
             if (styling == StatusLineStyling::Disabled)
                 return;
 
-            result += makeTextColor(styles.foregroundColor);
+            result += makeTextColor(styles.foregroundColor, styles.backgroundColor);
             result += makeBackgroundColor(styles.backgroundColor);
 
             result +=
@@ -869,7 +896,8 @@ namespace
             auto const run = [&](std::string text, ColorRole role) {
                 if (!intrinsic)
                     return text;
-                return SGRSAVE() + makeTextColor(StatusLineDefinitions::ItemColor { role }) + text
+                return SGRSAVE()
+                       + makeTextColor(StatusLineDefinitions::ItemColor { role }, item.backgroundColor) + text
                        + SGRRESTORE();
             };
 
@@ -906,7 +934,9 @@ namespace
                 if (activePositionStylized)
                 {
                     fragment += SGRSAVE();
-                    fragment += makeTextColor(tabs.activeColor);
+                    fragment +=
+                        makeTextColor(tabs.activeColor,
+                                      tabs.activeBackground ? tabs.activeBackground : tabs.backgroundColor);
                     fragment += makeBackgroundColor(tabs.activeBackground);
                 }
 

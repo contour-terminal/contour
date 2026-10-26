@@ -499,7 +499,7 @@ TEST_CASE("chromeTokens.barInkIsTheFirstLegibleCandidate", "[chrometokens]")
         auto const ink = slotOf(colors, SchemeSlot::BarInk);
         CHECK(contrastRatio(ink, bar) >= MinimumTextContrast);
 
-        // BarInkFallbacks in order: the better end of the scheme, ANSI 15, then black or white.
+        // vtbackend::InkFallbacks in order: the better end of the scheme, ANSI 15, then black or white.
         auto const schemeEnd =
             contrastRatio(palette.defaultForeground, bar) >= contrastRatio(palette.defaultBackground, bar)
                 ? palette.defaultForeground

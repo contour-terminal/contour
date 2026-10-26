@@ -77,11 +77,32 @@ namespace StatusLineDefinitions
     /// @return The role's lowercase name, or formatColor()'s `#RRGGBB`.
     [[nodiscard]] std::string formatItemColor(ItemColor const& color);
 
-    /// The RGB value @p color draws with.
-    /// @param color The colour.
-    /// @param palette The palette a role resolves against.
-    /// @return @p color itself, or the palette entry its role names.
-    [[nodiscard]] RGBColor resolveItemColor(ItemColor const& color, ColorPalette const& palette) noexcept;
+    /// The colour @p role names in @p palette, before any concern for what it is drawn on.
+    /// @param role The role.
+    /// @param palette The scheme's palette.
+    /// @return The palette entry the role's row names.
+    [[nodiscard]] RGBColor roleColor(ColorRole role, ColorPalette const& palette) noexcept;
+
+    /// The RGB value text in @p color draws with on @p ground.
+    ///
+    /// A hex colour is the user's and is drawn as written. A role is the scheme's colour for it while that
+    /// reads on @p ground at @ref MinimumTextContrast, and otherwise the ground's legible ink
+    /// (legibleInkOn()): blue accent text on the blue Normal-mode bar would vanish, where the ink keeps it
+    /// readable.
+    /// @param color The text colour.
+    /// @param palette The scheme's palette -- the terminal's default one, which programs cannot change.
+    /// @param ground What the text is drawn on: the item's own background, or the bar's.
+    /// @return The colour to draw the text in.
+    [[nodiscard]] RGBColor resolveItemColor(ItemColor const& color,
+                                            ColorPalette const& palette,
+                                            RGBColor ground) noexcept;
+
+    /// The RGB value a background in @p color fills with: the hex colour, or the role's colour as is.
+    /// @param color The background colour.
+    /// @param palette The scheme's palette.
+    /// @return The fill.
+    [[nodiscard]] RGBColor resolveItemBackground(ItemColor const& color,
+                                                 ColorPalette const& palette) noexcept;
 
     struct Styles
     {

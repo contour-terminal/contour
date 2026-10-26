@@ -552,6 +552,34 @@ bool defaultColorPalettes(std::string_view colorPaletteName, ColorPalette& palet
 /// @return The names, in table order.
 [[nodiscard]] std::span<std::string_view const> defaultColorPaletteNames() noexcept;
 
+/// The WCAG AA ratio text must reach against the ground it is drawn on.
+inline constexpr double MinimumTextContrast = 4.5;
+
+/// Where the ink for text on a ground comes from, in the order legibleInkOn() tries it.
+enum class InkSource : uint8_t
+{
+    SchemeEnd = 0, ///< Whichever of the default foreground and background reads better on the ground.
+    BrightWhite,   ///< ANSI 15 (bright white), for a scheme whose own ends are dim.
+    Mono,          ///< Black or white, whichever reads better: always at least 4.58:1.
+};
+
+/// The candidates for ink on a ground, first legible one wins. one-dark's grey foreground on its black ANSI 0
+/// and solarized-light's on its cream fail 4.5:1; the last candidate always reads, so text does on every
+/// ground.
+inline constexpr std::array InkFallbacks {
+    InkSource::SchemeEnd,
+    InkSource::BrightWhite,
+    InkSource::Mono,
+};
+
+/// The ink text on @p ground is drawn in: the first of @ref InkFallbacks that reads at
+/// @ref MinimumTextContrast. The chrome's bar ink and a status-line role that would not read on its bar
+/// both take it, so the two cannot disagree about what is legible.
+/// @param palette The scheme whose ends and ANSI 15 are tried.
+/// @param ground  What the text is drawn on.
+/// @return The ink; at least 4.5:1 against @p ground.
+[[nodiscard]] RGBColor legibleInkOn(ColorPalette const& palette, RGBColor ground) noexcept;
+
 enum class ColorTarget : uint8_t
 {
     Foreground,

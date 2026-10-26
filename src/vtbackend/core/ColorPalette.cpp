@@ -406,6 +406,26 @@ namespace
 
 } // namespace
 
+RGBColor legibleInkOn(ColorPalette const& palette, RGBColor ground) noexcept
+{
+    auto const better = [ground](RGBColor a, RGBColor b) {
+        return contrastRatio(a, ground) >= contrastRatio(b, ground) ? a : b;
+    };
+    auto const inkOf = [&](InkSource source) {
+        switch (source)
+        {
+            case InkSource::SchemeEnd: return better(palette.defaultForeground, palette.defaultBackground);
+            case InkSource::BrightWhite: return palette.brightColor(7);
+            case InkSource::Mono: break;
+        }
+        return better(RGBColor { 0, 0, 0 }, RGBColor { 255, 255, 255 });
+    };
+    for (auto const source: InkFallbacks)
+        if (auto const ink = inkOf(source); contrastRatio(ink, ground) >= MinimumTextContrast)
+            return ink;
+    return inkOf(InkSource::Mono);
+}
+
 std::span<std::string_view const> defaultColorPaletteNames() noexcept
 {
     return BuiltinColorPaletteNames;
