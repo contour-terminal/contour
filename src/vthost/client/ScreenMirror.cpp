@@ -417,7 +417,7 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
     // Nothing recorded is comparable yet.
     if (!_primed)
     {
-        fullReplay(screen, LocalHistory::Discard);
+        replay(screen, LocalHistory::Discard, ReplayCause::Attach);
         return;
     }
     // A page change ends the comparisons before they start, rather than each one below remembering
@@ -430,9 +430,11 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
     // where they collided — no rebuild at all for a mirror holding no history for the incoming page.
     //
     // Stated once, here, so a comparison added below inherits it instead of opting in.
+    //
+    // The program's doing, though the host forces a snapshot to carry it: news (@see frameOf).
     if (screen.screenType != _screenType)
     {
-        fullReplay(screen, LocalHistory::Keep);
+        replay(screen, LocalHistory::Keep, ReplayCause::ScreenSwitch);
         return;
     }
     // A floor that jumped further than the viewport advanced means the server
@@ -457,9 +459,12 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
     auto const sizeChanged = screen.columns != _columns || screen.lines != _lines;
     auto const identityLost = screen.generation != _generation;
     // Only what makes the mirror's OWN history wrong may erase it (@see LocalHistory).
+    // Both are the program's doing, whether a snapshot carried them or not.
     if (floorOutranScroll || (identityLost && !sizeChanged))
     {
-        fullReplay(screen, LocalHistory::Discard);
+        replay(screen,
+               LocalHistory::Discard,
+               floorOutranScroll ? ReplayCause::HistoryCleared : ReplayCause::Reset);
         return;
     }
     // A window into a larger grid that has to move with the cursor rewrites the whole page: every row it
@@ -470,7 +475,15 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
     }();
     if (delta.snapshot != 0 || sizeChanged || screen.viewportBase < _viewportBase || origin != _origin)
     {
-        fullReplay(screen, LocalHistory::Keep);
+        // Named in that order: a resize or a pan riding a snapshot is still the resync.
+        auto const cause = [&] {
+            if (delta.snapshot != 0)
+                return ReplayCause::Resync;
+            if (sizeChanged)
+                return ReplayCause::Resize;
+            return ReplayCause::WindowMoved;
+        }();
+        replay(screen, LocalHistory::Keep, cause);
         return;
     }
 
@@ -566,6 +579,11 @@ void ScreenMirror::apply(RemoteScreen const& screen, proto::Delta const& delta)
 }
 
 void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
+{
+    replay(screen, history, ReplayCause::Attach);
+}
+
+void ScreenMirror::replay(RemoteScreen const& screen, LocalHistory history, ReplayCause cause)
 {
     // Decided before `_primed` flips: the first replay is the attach, and nothing it shows is news.
     auto const blockSync = _primed ? CommandBlockSync::Follow : CommandBlockSync::Prime;
@@ -683,8 +701,13 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
         finish(screen);
         anchorPrimaryPage(screen);
     }
-    // A repaint of what the host showed already, not output: the attach, a resync, a resize.
-    _terminal->screenReplayed();
+    // A repaint of what the host showed already -- the attach, a resync, a resize -- is not output; what the
+    // program did to its screen is.
+    switch (frameOf(cause))
+    {
+        case MirrorFrame::Replay: _terminal->screenReplayed(); break;
+        case MirrorFrame::Output: _terminal->screenUpdated(); break;
+    }
 }
 
 std::optional<proto::RowAddress> ScreenMirror::hostRowOf(int64_t stableId, uint64_t generation) const

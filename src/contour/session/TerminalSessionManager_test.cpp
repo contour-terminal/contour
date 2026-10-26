@@ -1237,6 +1237,33 @@ TEST_CASE("TerminalSessionManager: a remote pane's replays are not news", "[mana
         CHECK(badgeAt(*window, 0) == TabBadgeKind::Output);
     }
 
+    SECTION("a program entering the alternate screen is news, though a snapshot carries it")
+    {
+        app.steadyClock().advance(contour::window::ResyncGracePeriod);
+        auto screen = vthost::client::RemoteScreen {};
+        screen.columns = unbox<int>(contour::test::MockPtySessionFactory::DefaultPageSize.columns);
+        screen.lines = unbox<int>(contour::test::MockPtySessionFactory::DefaultPageSize.lines);
+        auto mirror = vthost::client::ScreenMirror { background->terminal(), vthost::DaemonMachine::Same };
+
+        // The first replay finds the session on the alternate screen already: the attach, not news.
+        screen.screenType = 1;
+        auto const first = deltaOf("vim", /*snapshot*/ true);
+        screen.apply(first);
+        mirror.apply(screen, first);
+        drainPosted();
+        REQUIRE(background->terminal().isAlternateScreen());
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+
+        // The program leaves it: the page flip the host forces a snapshot for.
+        screen.screenType = 0;
+        auto const flip = deltaOf("prompt", /*snapshot*/ true);
+        screen.apply(flip);
+        mirror.apply(screen, flip);
+        drainPosted();
+        REQUIRE_FALSE(background->terminal().isAlternateScreen());
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Output);
+    }
+
     contour::test::closeAllTabs(*window);
 }
 

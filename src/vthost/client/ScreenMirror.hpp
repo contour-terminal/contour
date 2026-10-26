@@ -87,6 +87,59 @@ enum class LocalHistory : uint8_t
     Discard,
 };
 
+/// Why a primed mirror, or an attaching one, rewrote its whole page rather than applying an update row by
+/// row: the branch of ScreenMirror::apply() that took the update, or the explicit ScreenMirror::fullReplay().
+/// Its frame is announced by frameOf().
+enum class ReplayCause : uint8_t
+{
+    /// The first update into a fresh or restarted mirror (nothing recorded to compare with), or an explicit
+    /// fullReplay(): what the host showed already, whatever state the session is found in.
+    Attach,
+    /// A snapshot delta to a primed mirror: the server resynchronized -- a ResyncRequired, or output that
+    /// overran its scrollback floor between two pushes, which an increment can no longer name.
+    Resync,
+    /// The announced size moved: the window manager's doing, not the program's.
+    Resize,
+    /// The window into a larger host grid panned, or the host's page base moved back.
+    WindowMoved,
+    /// The program entered or left the alternate screen (or another DEC page).
+    ScreenSwitch,
+    /// The server's floor outran its viewport advance: the program cleared the history (`clear`, CSI 3 J).
+    HistoryCleared,
+    /// Row identity lost at an unchanged size: the program reset the terminal (RIS).
+    Reset,
+};
+
+/// How a frame of the mirror terminal is announced to its listener.
+enum class MirrorFrame : uint8_t
+{
+    Replay, ///< Terminal::screenReplayed(): a repaint of what the host showed already, not news.
+    Output, ///< Terminal::screenUpdated(): what the program did, news to whatever tracks unseen output.
+};
+
+/// The one place that decides whether a full replay is news (the GUI's tab dot): it is when the program
+/// caused it, and only a primed mirror can tell that (an unprimed one's replay is the Attach).
+///
+/// A missed dot, never a false one: output that overran the server's scrollback floor between two pushes
+/// arrives as a snapshot and reads as a Resync. Rarer still, a history-limit change on the host bumps the
+/// generation as a reset does, and is a Reset.
+/// @param cause Why the page was replayed.
+/// @return How its frame is announced.
+[[nodiscard]] constexpr MirrorFrame frameOf(ReplayCause cause) noexcept
+{
+    switch (cause)
+    {
+        case ReplayCause::Attach:
+        case ReplayCause::Resync:
+        case ReplayCause::Resize:
+        case ReplayCause::WindowMoved: return MirrorFrame::Replay;
+        case ReplayCause::ScreenSwitch:
+        case ReplayCause::HistoryCleared:
+        case ReplayCause::Reset: return MirrorFrame::Output;
+    }
+    return MirrorFrame::Replay;
+}
+
 /// Stateful per-session populator. Feed every Delta (after the owning `RemoteScreen` applied it);
 /// the mirror terminal is up to date when the call returns.
 class ScreenMirror
@@ -118,8 +171,8 @@ class ScreenMirror
     /// Not defaulted: erasing the user's scrollback is the kind of decision a caller should have to
     /// write down.
     ///
-    /// Its frame is announced as Terminal::screenReplayed(), not screenUpdated(): a replay is not output,
-    /// so nothing that tracks unseen output (the GUI's tab badge) takes it for news.
+    /// Its frame is announced as Terminal::screenReplayed(), not screenUpdated(): it is the Attach
+    /// (@see frameOf), so nothing that tracks unseen output (the GUI's tab badge) takes it for news.
     /// @param screen The mirrored screen to replay.
     /// @param history Whether to keep or erase the mirror's local scrollback.
     void fullReplay(RemoteScreen const& screen, LocalHistory history);
@@ -155,6 +208,13 @@ class ScreenMirror
     void applyEvent(proto::SessionEventPdu const& event);
 
   private:
+    /// The full replay itself, announced as frameOf(@p cause) says: what fullReplay() and every replaying
+    /// branch of apply() run.
+    /// @param screen The mirrored screen to replay.
+    /// @param history Whether to keep or erase the mirror's local scrollback.
+    /// @param cause Why the page is replayed.
+    void replay(RemoteScreen const& screen, LocalHistory history, ReplayCause cause);
+
     /// Replaces the mirror terminal's program-status records with the host's
     /// (Terminal::replaceProgramStatus), dropping each record whose state this build does not know. The
     /// caller holds the terminal lock.

@@ -89,6 +89,11 @@ inline constexpr auto ResyncGracePeriod = std::chrono::milliseconds { 500 };
 /// report is a write like any other, so a background program that only reports its status marks unseen
 /// output too. The badge shows that dot only once the program's status is None, as every status kind
 /// outranks it (TabBadgeRules).
+///
+/// A remote pane's frame is output only when the mirror says so (vthost::client::frameOf): a repaint of
+/// what the host showed already -- the attach, a resize, a resync snapshot -- is not. Output that overran
+/// the server's scrollback floor between two pushes arrives as such a snapshot, so it reads as a resync:
+/// a missed dot, never a false one.
 class TabAttention
 {
   public:

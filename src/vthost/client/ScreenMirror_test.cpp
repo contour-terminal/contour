@@ -604,6 +604,155 @@ TEST_CASE("a mirror's replays are repaints, and only its deltas are output", "[v
     }
 }
 
+TEST_CASE("a replay's frame is news only when the program caused it", "[vthost][mirror]")
+{
+    using vthost::client::MirrorFrame;
+    using vthost::client::ReplayCause;
+    CHECK(vthost::client::frameOf(ReplayCause::Attach) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::Resync) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::Resize) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::WindowMoved) == MirrorFrame::Replay);
+    CHECK(vthost::client::frameOf(ReplayCause::ScreenSwitch) == MirrorFrame::Output);
+    CHECK(vthost::client::frameOf(ReplayCause::HistoryCleared) == MirrorFrame::Output);
+    CHECK(vthost::client::frameOf(ReplayCause::Reset) == MirrorFrame::Output);
+}
+
+namespace
+{
+
+/// The snapshot a host at generation 1 sends of its one-line page at row 1, holding @p text.
+/// @return The delta, applied to @p screen as well.
+proto::Delta seedSnapshot(vthost::client::RemoteScreen& screen, std::string_view text)
+{
+    auto seed = proto::Delta {};
+    seed.snapshot = 1;
+    seed.generation = 1;
+    seed.stableViewportBase = 1;
+    seed.stableFloor = 1;
+    seed.lines = { rowAt(1, text) };
+    screen.apply(seed);
+    return seed;
+}
+
+} // namespace
+
+TEST_CASE("a primed mirror reports what the program did to its screen as output", "[vthost][mirror]")
+{
+    // Once primed, a replay the program caused -- the alternate screen entered or left, a `clear`, a RIS --
+    // is news for its tab; one the host's plumbing caused -- a resize, a resync snapshot -- is not.
+    auto bare = BareMirror { vtbackend::LineCount(10) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+    bare.mirror->apply(screen, seedSnapshot(screen, "a"));
+    REQUIRE(bare.events.screenReplays == 1);
+    REQUIRE(bare.events.screenUpdates == 0);
+
+    SECTION("a program entering and leaving the alternate screen")
+    {
+        // A page flip reaches the mirror as the snapshot the host forces for it (ResyncRequired).
+        screen.screenType = 1;
+        auto const enter = seedSnapshot(screen, "vim");
+        bare.mirror->apply(screen, enter);
+        CHECK(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 1);
+        CHECK(bare.events.screenReplays == 1);
+
+        screen.screenType = 0;
+        auto const leave = seedSnapshot(screen, "a");
+        bare.mirror->apply(screen, leave);
+        CHECK_FALSE(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 2);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a clear that discarded the host's history")
+    {
+        auto clear = proto::Delta {};
+        clear.snapshot = 1;
+        clear.generation = 1;
+        clear.stableViewportBase = 1;
+        clear.stableFloor = 5; // the floor outran a viewport that did not move
+        clear.lines = { rowAt(1, "") };
+        screen.apply(clear);
+        bare.mirror->apply(screen, clear);
+        CHECK(bare.events.screenUpdates == 1);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a reset that destroyed the host's row identity at an unchanged size")
+    {
+        auto reset = seedSnapshot(screen, "b");
+        reset.generation = 2;
+        screen.apply(reset);
+        bare.mirror->apply(screen, reset);
+        CHECK(bare.events.screenUpdates == 1);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a resize, which reflowed the host's rows")
+    {
+        screen.columns = 6;
+        auto resize = seedSnapshot(screen, "a");
+        resize.generation = 2;
+        screen.apply(resize);
+        bare.mirror->apply(screen, resize);
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 2);
+    }
+
+    SECTION("a resync snapshot, as one for output that overran the host's scrollback floor")
+    {
+        // The overrun's output is lost to the dot: a missed one, never a false one.
+        bare.mirror->apply(screen, seedSnapshot(screen, "z"));
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 2);
+    }
+}
+
+TEST_CASE("an unprimed mirror's first replay is the attach, whatever it finds", "[vthost][mirror]")
+{
+    auto bare = BareMirror { vtbackend::LineCount(10) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    SECTION("a session already on the alternate screen, with history cleared and reset behind it")
+    {
+        screen.screenType = 1;
+        auto seed = seedSnapshot(screen, "vim");
+        seed.generation = 7;
+        seed.stableFloor = 9;
+        seed.stableViewportBase = 9;
+        seed.lines = { rowAt(9, "vim") };
+        screen.apply(seed);
+        bare.mirror->apply(screen, seed);
+        CHECK(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 1);
+    }
+
+    SECTION("a restarted mirror, whose next connection finds another screen, generation and floor")
+    {
+        bare.mirror->apply(screen, seedSnapshot(screen, "a"));
+        bare.mirror->restart();
+        auto fresh = vthost::client::RemoteScreen {};
+        fresh.columns = 5;
+        fresh.lines = 1;
+        fresh.screenType = 1;
+        auto first = seedSnapshot(fresh, "vim");
+        first.generation = 3;
+        first.stableFloor = 4;
+        first.stableViewportBase = 4;
+        first.lines = { rowAt(4, "vim") };
+        fresh.apply(first);
+        bare.mirror->apply(fresh, first);
+        CHECK(bare.terminal->isAlternateScreen());
+        CHECK(bare.events.screenUpdates == 0);
+        CHECK(bare.events.screenReplays == 2);
+    }
+}
+
 TEST_CASE("a server-side clear drops the mirror's local scrollback", "[vthost][mirror]")
 {
     // Unit-level: drive ScreenMirror directly, and assert on the mirror terminal's OWN scrollback

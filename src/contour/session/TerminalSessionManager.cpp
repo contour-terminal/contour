@@ -1414,8 +1414,9 @@ void TerminalSessionManager::paneSwapped(vtworkspace::TabId tab, vtworkspace::Pa
     // `session`, so the two affected panes render their new terminals.
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
         c->rebuildActiveTabPaneProxies();
-    // In a zoomed tab the zoomed leaf keeps its id, so no zoom change is reported, yet the session in front
-    // is another one now: it is seen.
+    // Defensive: a swap in a zoomed tab ends the zoom (vtworkspace::Tab), so paneZoomChanged() reports it
+    // and marks the uncovered panes seen already. Marking here as well keeps the session now in front seen
+    // whichever seam reports the swap, and whatever the model does about zoom in the future.
     markVisibleSessionsSeen(_model->windowOfTab(tab));
 }
 
