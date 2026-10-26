@@ -226,6 +226,9 @@ namespace StatusLineDefinitions
     /// How much the selection holds, as `y` would copy it: `12 lines · 418 chars`.
     struct SelectionSize: Styles {};
 
+    /// How far the view is scrolled back, out of how far it can be: `↑ 1 240 / 10 000`; empty at the bottom.
+    struct Scroll: Styles {};
+
     struct Tabs: Styles
     {
         std::optional<ItemColor> activeColor;
@@ -256,7 +259,8 @@ namespace StatusLineDefinitions
         Cwd,
         Git,
         LastCommand,
-        SelectionSize
+        SelectionSize,
+        Scroll
     >;
     // clang-format on
 
@@ -359,6 +363,9 @@ namespace StatusLineDefinitions
 
     template <> struct ItemTraits<SelectionSize>
     { static constexpr std::string_view Name = "Selection", Label = "Selection size", Sample = "12 lines \u00b7 418 chars"; };
+
+    template <> struct ItemTraits<Scroll>
+    { static constexpr std::string_view Name = "Scroll", Label = "Scroll position", Sample = "\u2191 1 240 / 10 000"; };
 
     template <> struct ItemTraits<Text>
     { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; };

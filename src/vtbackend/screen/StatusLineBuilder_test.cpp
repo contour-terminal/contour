@@ -1287,3 +1287,44 @@ TEST_CASE("parseStatusLineSegment.selectionRoundTrips", "[statusline][selection]
     CHECK(canonical("{Selection:Faint}"sv) == "{Selection:Faint}");
 }
 // }}}
+
+// {{{ {Scroll}
+TEST_CASE("serializeToVT.scrollIsEmptyAtTheBottom", "[statusline][scroll]")
+{
+    // A fresh terminal, its page the one on display, with more history than the item's own numbers need.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(2000) };
+    for (auto const i: std::views::iota(0, 1400))
+        mc.writeToScreen(std::format("line {}\r\n", i));
+    auto const scrollable = mc.terminal.viewport().scrollableLineCount();
+    REQUIRE(scrollable >= LineCount(1300));
+    auto const scroll = parseStatusLineSegment("{Scroll}"sv);
+
+    CHECK(serializeToVT(mc.terminal, scroll, StatusLineStyling::Disabled).empty());
+
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(1240)));
+    CHECK(serializeToVT(mc.terminal, scroll, StatusLineStyling::Disabled)
+          == std::format("↑ 1 240 / {}", groupDigits(unbox<std::uint64_t>(scrollable))));
+
+    REQUIRE(mc.terminal.viewport().scrollToBottom());
+    CHECK(serializeToVT(mc.terminal, scroll, StatusLineStyling::Disabled).empty());
+}
+
+TEST_CASE("serializeToVT.scrollIsEmptyWhileTheViewCannotScroll", "[statusline][scroll]")
+{
+    // The alternate screen has no history to scroll through.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(100) };
+    for (auto const i: std::views::iota(0, 20))
+        mc.writeToScreen(std::format("line {}\r\n", i));
+    REQUIRE(mc.terminal.viewport().scrollUp(LineCount(5)));
+    mc.writeToScreen("\033[?1049h");
+    REQUIRE(mc.terminal.viewport().scrollingDisabled());
+    CHECK(serializeToVT(mc.terminal, parseStatusLineSegment("{Scroll}"sv), StatusLineStyling::Disabled)
+              .empty());
+}
+
+TEST_CASE("parseStatusLineSegment.scrollRoundTrips", "[statusline][scroll]")
+{
+    CHECK(canonical("{Scroll}"sv) == "{Scroll}");
+    CHECK(canonical("{Scroll:Faint}"sv) == "{Scroll:Faint}");
+}
+// }}}

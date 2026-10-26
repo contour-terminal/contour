@@ -595,6 +595,19 @@ namespace
                 return std::format("{}", scrollable);
         }
 
+        /// How far the view is scrolled back, out of the same bound HistoryLineCount divides by; nothing at
+        /// the bottom, where every frame of ordinary use is, or while the view cannot scroll.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::Scroll const&) const
+        {
+            auto const& viewport = vt.viewport();
+            auto const offset = viewport.scrollOffset();
+            if (viewport.scrollingDisabled() || !offset.value)
+                return {};
+            return std::format("↑ {} / {}",
+                               groupDigits(unbox<std::uint64_t>(offset)),
+                               groupDigits(unbox<std::uint64_t>(viewport.scrollableLineCount())));
+        }
+
         std::string visit(StatusLineDefinitions::Hyperlink const&)
         {
             return describePointerCell([&](CellLocation cell) {

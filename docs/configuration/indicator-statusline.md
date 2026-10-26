@@ -34,6 +34,7 @@ Variable             | Description
 `{LastCommand}`      | how the last command went, from the shell integration's command blocks (OSC 133): `✓ make · 4ms` after a success, `✗ exit 8 ctest · 12s` after a failure; the status drawn in the `success` or `danger` role and the duration in `muted`, unless the item names a `Color=` of its own. Empty while a command runs, and when a newer prompt ended one that reported no exit status. A multi-line command's line breaks and tabs read as spaces. The command text is at most `MaxWidth=` columns (default `32`), cut at its end with `…`
 `{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)
 `{ProtectedMode}`    | indicates protected mode, if currently enabled
+`{Scroll}`           | how far the view is scrolled back into the history, out of how far it can be: `↑ 1 240 / 10 000`, thousands grouped by a space. Empty at the bottom, and while the view cannot scroll (the alternate screen)
 `{SearchMode}`       | indicates search highlight mode, if currently active
 `{SearchPrompt}`     | the active search pattern, if any (read-only; search is typed into the find bar)
 `{Selection}`        | how much the selection holds, as `y` would copy it: `12 lines · 418 chars`, thousands grouped by a space (`1 240`). Empty without a selection. The characters (cells that are not blank) are counted only while the selection spans fewer than 10 000 cells at the page's width; a larger one shows its lines alone, `1 240 lines`
