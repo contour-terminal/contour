@@ -49,15 +49,17 @@ struct TitleBandGeometryInputs
     double devicePixelRatio = 1;            ///< The window's device-pixel ratio.
     /// The native title bar's height; 0 where there is none (Linux, Windows, offscreen, a native frame).
     double nativeHeight = 0;
-    /// Where a revealed band rests in full screen, window-relative (below the menu bar or the notch).
+    /// Where AppKit's revealed full-screen title bar starts, window-relative (below the menu bar or the
+    /// notch).
     double fullScreenTop = 0;
 };
 
 /// The band's height and its full-screen resting place.
 struct TitleBandGeometry
 {
-    double height = 0;    ///< The band's height in logical pixels.
-    double revealTop = 0; ///< Where the revealed band rests in full screen; 0 when windowed.
+    double height = 0; ///< The band's height in logical pixels.
+    /// Where a full-screen band rests below the menu bar: below AppKit's revealed title bar; 0 when windowed.
+    double revealTop = 0;
 
     [[nodiscard]] bool operator==(TitleBandGeometry const&) const = default;
 };
@@ -69,6 +71,11 @@ struct TitleBandGeometry
 /// rounded up to whole device pixels, and @c GrowBandToCells the smallest whole number of cells that holds
 /// both.
 ///
+/// In full screen the band rests BELOW AppKit's revealed title bar, not under it: that bar is a window of its
+/// own (NSToolbarFullScreenWindow) stacked above ours, and it takes the clicks over its whole extent
+/// (measured with the window server, final review finding 3). So the reveal top is the bar's top plus its
+/// height, the native title bar's.
+///
 /// @c inline rather than @c constexpr: it calls std::ceil, which is constexpr only where the library
 /// implements P0533.
 /// @param inputs What the geometry depends on.
@@ -77,7 +84,9 @@ struct TitleBandGeometry
     TitleBandGeometryInputs const& inputs) noexcept
 {
     auto const& tokens = inputs.tokens;
-    auto const revealTop = inputs.mode == WindowMode::FullScreen ? std::max(0.0, inputs.fullScreenTop) : 0.0;
+    auto const revealTop = inputs.mode == WindowMode::FullScreen
+                               ? std::max(0.0, inputs.fullScreenTop) + std::max(0.0, inputs.nativeHeight)
+                               : 0.0;
     if (inputs.nativeHeight <= 0)
         return TitleBandGeometry { .height = tokens.height, .revealTop = revealTop };
 

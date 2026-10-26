@@ -57,10 +57,15 @@ TEST_CASE("geometry.devicePixelSnap", "[titlebandgeometry]")
 
 TEST_CASE("geometry.revealTop", "[titlebandgeometry]")
 {
-    CHECK(geometryOf(Mac, WindowMode::FullScreen, 2, 28, 24).revealTop == 24);
+    // Below AppKit's revealed strip, a window of its own that takes the clicks over it: its top plus the
+    // native title bar's height.
+    CHECK(geometryOf(Mac, WindowMode::FullScreen, 2, 28, 24).revealTop == 24 + 28);
+    CHECK(geometryOf(Mac, WindowMode::FullScreen, 2, 40, 0).revealTop == 40);
     CHECK(geometryOf(Mac, WindowMode::Windowed, 2, 28, 24).revealTop == 0);
     // Window-relative, never above the window's own top.
-    CHECK(geometryOf(Mac, WindowMode::FullScreen, 2, 28, -5).revealTop == 0);
+    CHECK(geometryOf(Mac, WindowMode::FullScreen, 2, 28, -5).revealTop == 28);
+    // No native title bar (Linux, Windows): nothing to rest below.
+    CHECK(geometryOf(Mac, WindowMode::FullScreen, 2, 0, 0).revealTop == 0);
 }
 
 TEST_CASE("geometry.terminalRow", "[titlebandgeometry]")

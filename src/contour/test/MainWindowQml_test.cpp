@@ -2049,49 +2049,40 @@ TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar wh
 
 namespace
 {
-/// The traffic lights' inset AppKit's revealed full-screen strip keeps (spike-decisions.md: the lights at
-/// x 12-70 in NSToolbarFullScreenWindow), as the controller publishes it in full screen too.
+/// The traffic lights' inset the controller publishes in full screen too, where AppKit draws them in its
+/// revealed strip (spike-decisions.md: x 12-70 in NSToolbarFullScreenWindow).
 constexpr auto FullScreenInset = 84.0;
 } // namespace
 
-TEST_CASE("a revealed full-screen band clears the traffic lights over it (offscreen)",
+TEST_CASE("a revealed full-screen band leaves the traffic lights to the strip above it (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
-    // Revealed, the band rests under AppKit's revealed strip, which draws the traffic lights over its leading
-    // corner: Tab 1 starts past them.
+    // Revealed, the band rests below AppKit's revealed strip, which holds the traffic lights (and takes the
+    // clicks over itself): Tab 1 starts at the band's leading edge.
     auto band = FullScreenBand { MotionPreference::Full,
                                  MainWindowScene { .tabCount = 3, .nativeControlsInset = FullScreenInset } };
     band.revealFromEdge();
     band.waitUntilIn();
-    CHECK(named(*band.root, QStringLiteral("leadingWindowControls")).width() == FullScreenInset);
-    auto const tabs = tabDelegates(*band.root);
-    REQUIRE_FALSE(tabs.empty());
-    CHECK(tabs.front()->mapToItem(band.titleBar, QPointF(0, 0)).x() >= FullScreenInset);
+    CHECK(named(*band.root, QStringLiteral("leadingWindowControls")).width() == 0);
     CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("a pinned full-screen band at the top leaves no room for the hidden traffic lights (offscreen)",
+TEST_CASE("a pinned full-screen band at the top leaves no room for the traffic lights (offscreen)",
           "[contour][gui][qml][mainwindow][band][hosts]")
 {
-    // Resting at y 0 while the menu bar is hidden, nothing of AppKit's is drawn over the band.
     auto band = PinnedFullScreenBand { MotionPreference::Full, FullScreenInset };
     CHECK(band.titleBar->y() == 0);
     CHECK(band.leadingInset() == 0);
     CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("a pinned full-screen band below the menu bar clears the traffic lights (offscreen)",
+TEST_CASE("a pinned full-screen band below the menu bar leaves the traffic lights to the strip (offscreen)",
           "[contour][gui][qml][mainwindow][band][hosts]")
 {
-    // The pointer on the edge reveals AppKit's strip with the traffic lights, and the band moves under it.
+    // The pointer on the edge reveals AppKit's strip with the traffic lights, and the band moves below it.
     auto band = PinnedFullScreenBand { MotionPreference::Full, FullScreenInset };
     band.hoverEdge();
     REQUIRE(QTest::qWaitFor([&] { return band.titleBar->y() == PinnedRevealTop; }, 2000));
-    CHECK(band.leadingInset() == FullScreenInset);
-
-    // Away again: back at the top, and the corner is free.
-    QTest::mouseMove(band.window, band.awayPoint());
-    REQUIRE(QTest::qWaitFor([&] { return band.titleBar->y() == 0; }, 2000));
     CHECK(band.leadingInset() == 0);
     CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

@@ -10,6 +10,7 @@
 #include <contour/platform/CocoaWindowFrame.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/test/TestEnvironment.hpp>
+#include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
 
@@ -208,6 +209,43 @@ struct ShownBand
     return index != NSNotFound ? NSApp.windows[index] : nil;
 }
 
+/// @return The screen point (AppKit's, from the bottom-left) at @p point in @p window (logical, from its
+///         top-left).
+[[nodiscard]] NSPoint screenPointIn(NSWindow* window, QPointF point)
+{
+    return NSMakePoint(NSMinX(window.frame) + point.x(), NSMaxY(window.frame) - point.y());
+}
+
+/// @return What owns the topmost on-screen window at @p screenPoint, for a failure's message: the window
+///         server's name for it and its owner's.
+[[nodiscard]] std::string topmostWindowDescription(NSPoint screenPoint)
+{
+    auto const number = [NSWindow windowNumberAtPoint:screenPoint belowWindowWithWindowNumber:0];
+    auto* const info = (__bridge_transfer NSArray*) CGWindowListCopyWindowInfo(
+        kCGWindowListOptionIncludingWindow, static_cast<CGWindowID>(number));
+    if (info.count == 0)
+        return "window #" + std::to_string(number);
+    NSDictionary* const window = info.firstObject;
+    auto const field = [window](CFStringRef key) -> std::string {
+        char const* const text = [[window[(__bridge NSString*) key] description] UTF8String];
+        return text != nullptr ? std::string { text } : std::string { "?" };
+    };
+    return "window #" + std::to_string(number) + " \"" + field(kCGWindowName) + "\" of "
+           + field(kCGWindowOwnerName);
+}
+
+/// Moves the pointer to the top edge of @p screen, where AppKit reveals a full-screen window's title bar.
+void hoverScreenTopEdge(NSScreen* screen, CGFloat x)
+{
+    // Quartz's global space is top-left based, on the primary screen's top.
+    auto const primaryTop = NSMaxY(NSScreen.screens.firstObject.frame);
+    auto const top = CGPointMake(x, primaryTop - NSMaxY(screen.frame) + 1);
+    CGWarpMouseCursorPosition(top);
+    auto* const move = CGEventCreateMouseEvent(nullptr, kCGEventMouseMoved, top, kCGMouseButtonLeft);
+    CGEventPost(kCGHIDEventTap, move);
+    CFRelease(move);
+}
+
 /// @return Whether AppKit would deliver a click at @p point (window-logical, from the top-left) to Qt's
 ///         content view rather than to a title-bar view of its own: the view the theme frame hit-tests there.
 [[nodiscard]] bool contentReceivesClickAt(NSWindow* window, QPointF point)
@@ -337,6 +375,74 @@ TEST_CASE("the shipped band takes its own clicks, windowed and in full screen", 
     REQUIRE(toggleFullScreenAndWait(nsWindow, true));
     band.apply(selectedRequest(WindowMode::FullScreen));
     CHECK(contentReceivesClickAt(nsWindow, QPointF { 300, 20 }));
+
+    REQUIRE(toggleFullScreenAndWait(nsWindow, false));
+}
+
+TEST_CASE("clicks on the revealed full-screen band reach our window", "[display][cocoa][titleband]")
+{
+    // Review finding 3: in full screen AppKit's revealed title bar is a window of its own,
+    // NSToolbarFullScreenWindow, stacked above ours -- which no hit test of our theme frame can see. So the
+    // window server is asked which window is topmost at a point on the band where it rests below the menu
+    // bar: ours, or the strip only if it lets mouse events through. Measured on a notched MacBook (macOS
+    // 26): the strip was topmost over its own 40 pt and took real clicks there, so the band rests below it.
+    REQUIRE_COCOA_OR_SKIP();
+    using contour::window::WindowMode;
+    auto band = ShownBand {};
+    NSWindow* const nsWindow = band.nsWindow();
+    REQUIRE(nsWindow != nil);
+    band.apply(selectedRequest(WindowMode::Windowed));
+    // Only the active application's window goes into a full-screen space of its own.
+    [NSApp activateIgnoringOtherApps:YES];
+    [nsWindow makeKeyAndOrderFront:nil];
+    REQUIRE(toggleFullScreenAndWait(nsWindow, true));
+    band.apply(selectedRequest(WindowMode::FullScreen));
+
+    NSScreen* const screen = nsWindow.screen;
+    REQUIRE(screen != nil);
+    auto const centre = NSMakePoint(NSMidX(screen.frame), NSMidY(screen.frame));
+    // On screen once the space has settled: our window spans the screen's width (below the menu bar or the
+    // notch) and is topmost at its centre.
+    auto const shown = QTest::qWaitFor(
+        [&] {
+            return NSWidth(nsWindow.frame) == NSWidth(screen.frame)
+                   && [NSWindow windowNumberAtPoint:centre belowWindowWithWindowNumber:0] == nsWindow.windowNumber;
+        },
+        FullScreenTimeoutMs);
+    if (!shown)
+    {
+        // A locked screen, or a session without one, never shows the space: say what covers it.
+        auto const reason = "the full-screen space is not on screen; topmost is " + topmostWindowDescription(centre);
+        REQUIRE(toggleFullScreenAndWait(nsWindow, false));
+        SKIP(reason);
+    }
+
+    hoverScreenTopEdge(screen, NSMidX(screen.frame));
+    NSWindow* strip = nil;
+    std::ignore = QTest::qWaitFor(
+        [&] {
+            strip = fullScreenTitleBarWindow();
+            return strip != nil && NSHeight(strip.frame) > 0;
+        },
+        FullScreenTimeoutMs);
+    REQUIRE(strip != nil);
+    // A tab label's place on the band where it rests below the menu bar (TitleBandGeometry::revealTop, from
+    // the metrics the controller measures), past the traffic lights.
+    auto const metrics = band.material->metrics(*band.window);
+    auto const geometry = contour::window::resolveTitleBandGeometry({
+        .mode = WindowMode::FullScreen,
+        .nativeHeight = metrics.height,
+        .fullScreenTop = metrics.fullScreenTop,
+    });
+    auto const point = screenPointIn(nsWindow, QPointF { 300, geometry.revealTop + 20 });
+    auto const topmost = [NSWindow windowNumberAtPoint:point belowWindowWithWindowNumber:0];
+    UNSCOPED_INFO("strip " << NSStringFromRect(strip.frame).UTF8String << " #" << strip.windowNumber
+                           << ", ours #" << nsWindow.windowNumber << "; reveal top " << geometry.revealTop
+                           << "; at the band: " << topmostWindowDescription(point));
+    CHECK((topmost == nsWindow.windowNumber || (topmost == strip.windowNumber && strip.ignoresMouseEvents)));
+    // The band rests below the strip because the strip takes the clicks over itself (measured here: the
+    // window server names it topmost, and it does not ignore mouse events).
+    CHECK(geometry.revealTop >= NSMaxY(nsWindow.frame) - NSMinY(strip.frame) - 0.5);
 
     REQUIRE(toggleFullScreenAndWait(nsWindow, false));
 }

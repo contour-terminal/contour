@@ -421,8 +421,8 @@ class ChromeSnapshotScene
     /// and window::resolveTitleBandGeometry over the chrome's tokens and that height. Only on a macOS host
     /// with the client band: elsewhere there is no native title bar under the band (a native frame draws its
     /// own above it). In full screen the title bar leaves the window: the band keeps its token and a revealed
-    /// one rests at the window's top, but AppKit's revealed strip still draws the traffic lights over it, so
-    /// the inset stands.
+    /// one rests at the window's top (the scene has no AppKit strip to rest below); the inset is published as
+    /// the controller publishes it there, and Main.qml applies none.
     void measureBand()
     {
         if (variantHost(_variant) != config::HostPlatform::MacOS

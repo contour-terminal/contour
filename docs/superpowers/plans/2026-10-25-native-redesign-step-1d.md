@@ -1060,9 +1060,12 @@ ls "$CONTOUR_SNAPSHOT_DIR"/*.png | wc -l
     stays the same solid tint, and the terminal does not resize.
   - `theme: terminal` with contour-light while the OS is dark: a light band with legible labels.
   - Move the window to a display with another scale: the band's height and the shadow are right.
-  - Full screen: the revealed band sits below the menu bar, under AppKit's revealed traffic lights, and is
-    solid; its top is right once the animation settles (M7), also after toggling full screen twice quickly.
-    Moving down from the screen edge across the menu bar keeps the band revealed. A pinned band (kill the
+  - Full screen: the revealed band sits below AppKit's revealed strip with the traffic lights (a window of
+    its own, which takes the clicks over itself: final review finding 3), and is solid; its top is right
+    once the animation settles (M7), also after toggling full screen twice quickly. Moving down from the
+    screen edge across the menu bar keeps the band revealed. Click a tab while the band is revealed: the tab
+    is selected. Whether AppKit's strip ever hides again in full screen, or stays over the window's top
+    40 pt, and whether the terminal's top rows under it take clicks. A pinned band (kill the
     daemon connection) rests at the top and slides down below the menu bar on hover. After leaving, the
     tint and the shadow return.
   - Click another app: the inactive title bar goes flat, as AppKit draws it (R-g), and the labels dim.

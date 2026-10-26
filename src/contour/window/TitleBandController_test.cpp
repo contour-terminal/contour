@@ -223,9 +223,10 @@ TEST_CASE("full screen keeps the solid band and moves only its resting place",
     CHECK(fixture.controller().titleBandRequest() == windowed);
     CHECK(fixture.record.applied.size() == applied);
     CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
-    CHECK(fixture.controller().titleBandRevealTop() == (hostDressesTitleBand() ? 24 : 0));
-    // The traffic lights move into AppKit's revealed strip, over the revealed band: their inset is still
-    // published, and Main.qml applies it while the band rests below the menu bar.
+    // Below AppKit's revealed title bar: its top plus its height.
+    CHECK(fixture.controller().titleBandRevealTop() == (hostDressesTitleBand() ? 24 + 28 : 0));
+    // The traffic lights move into AppKit's revealed strip: their inset is still published, and Main.qml,
+    // which rests the band below that strip, applies none in full screen.
     CHECK(fixture.controller().nativeControlsInset() == windowedInset);
     CHECK(changes.count() == (hostDressesTitleBand() ? 1 : 0));
 

@@ -252,10 +252,10 @@ ThemedWindow
         useCustomWindowControls: !!(appWindow.win && appWindow.win.needsClientFrameAffordances)
         // `|| 0` for the same reason the gates above use `!!`: a controller that predates this
         // property answers undefined, and assigning that to a real is a QML error. In full screen AppKit
-        // draws the traffic lights in the strip it reveals below the menu bar, over a band resting there
-        // (bandBelowMenuBar) -- the controller publishes their inset there too -- and nowhere over a
-        // pinned band resting at the top while the menu bar is hidden.
-        nativeControlsInset: appWindow.bandMode === 1 && !appWindow.bandBelowMenuBar ? 0
+        // draws the traffic lights in the strip it reveals below the menu bar, a window of its own that
+        // takes the clicks over it -- so the band rests below that strip while it is revealed
+        // (titleBandRevealTop), and no light is over it there.
+        nativeControlsInset: appWindow.bandMode === 1 ? 0
                              : ((appWindow.win && appWindow.win.nativeControlsInset) || 0)
     }
 
