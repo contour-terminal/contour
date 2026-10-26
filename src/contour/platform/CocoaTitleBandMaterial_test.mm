@@ -234,17 +234,56 @@ struct ShownBand
            + field(kCGWindowOwnerName);
 }
 
+/// @return @p point (AppKit's screen space, from the bottom-left) in Quartz's global space, which is top-left
+///         based on the primary screen's top.
+[[nodiscard]] CGPoint quartzPointOf(NSPoint point)
+{
+    return CGPointMake(point.x, NSMaxY(NSScreen.screens.firstObject.frame) - point.y);
+}
+
+/// Posts one mouse event of @p type at @p point (Quartz's global space), as the HID system would.
+void postMouseEvent(CGEventType type, CGPoint point)
+{
+    auto* const event = CGEventCreateMouseEvent(nullptr, type, point, kCGMouseButtonLeft);
+    CGEventPost(kCGHIDEventTap, event);
+    CFRelease(event);
+}
+
+/// Moves the pointer to @p point (AppKit's screen space).
+void moveMouseToScreenPoint(NSPoint point)
+{
+    auto const quartz = quartzPointOf(point);
+    CGWarpMouseCursorPosition(quartz);
+    postMouseEvent(kCGEventMouseMoved, quartz);
+}
+
+/// Clicks the left button at @p point (AppKit's screen space).
+void clickAtScreenPoint(NSPoint point)
+{
+    auto const quartz = quartzPointOf(point);
+    postMouseEvent(kCGEventLeftMouseDown, quartz);
+    postMouseEvent(kCGEventLeftMouseUp, quartz);
+}
+
 /// Moves the pointer to the top edge of @p screen, where AppKit reveals a full-screen window's title bar.
 void hoverScreenTopEdge(NSScreen* screen, CGFloat x)
 {
-    // Quartz's global space is top-left based, on the primary screen's top.
-    auto const primaryTop = NSMaxY(NSScreen.screens.firstObject.frame);
-    auto const top = CGPointMake(x, primaryTop - NSMaxY(screen.frame) + 1);
-    CGWarpMouseCursorPosition(top);
-    auto* const move = CGEventCreateMouseEvent(nullptr, kCGEventMouseMoved, top, kCGMouseButtonLeft);
-    CGEventPost(kCGHIDEventTap, move);
-    CFRelease(move);
+    moveMouseToScreenPoint(NSMakePoint(x, NSMaxY(screen.frame) - 1));
 }
+
+/// Counts the mouse presses Qt delivers to the object it filters.
+class PressCounter final: public QObject
+{
+  public:
+    int count = 0; ///< Presses seen so far.
+
+    bool eventFilter(QObject* /*watched*/, QEvent* event) override
+    {
+        if (event->type() == QEvent::MouseButtonPress)
+            ++count;
+        return false;
+    }
+};
 
 /// @return Whether AppKit would deliver a click at @p point (window-logical, from the top-left) to Qt's
 ///         content view rather than to a title-bar view of its own: the view the theme frame hit-tests there.
@@ -379,24 +418,32 @@ TEST_CASE("the shipped band takes its own clicks, windowed and in full screen", 
     REQUIRE(toggleFullScreenAndWait(nsWindow, false));
 }
 
-TEST_CASE("clicks on the revealed full-screen band reach our window", "[display][cocoa][titleband]")
+TEST_CASE("in full screen the band and the top rows take their own clicks", "[display][cocoa][titleband]")
 {
-    // Review finding 3: in full screen AppKit's revealed title bar is a window of its own,
-    // NSToolbarFullScreenWindow, stacked above ours -- which no hit test of our theme frame can see. So the
-    // window server is asked which window is topmost at a point on the band where it rests below the menu
-    // bar: ours, or the strip only if it lets mouse events through. Measured on a notched MacBook (macOS
-    // 26): the strip was topmost over its own 40 pt and took real clicks there, so the band rests below it.
+    // Review finding 3: in full screen AppKit's revealed title bar is a window of its own, stacked above ours
+    // -- which no hit test of our theme frame can see. With the compact toolbar attached it was an
+    // NSToolbarFullScreenWindow strip over the window's top 40 pt that took the clicks there, revealed or
+    // not; so full screen detaches the toolbar (ruling S7). Measured here then: with the pointer away no
+    // strip covers the top rows, but revealed AppKit still shows its bare 32-pt title bar, with the traffic
+    // lights, in a window of its own that takes the clicks over it -- so the band rests below it
+    // (TitleBandGeometry::revealTop). The window server is asked which window is topmost, and a real click is
+    // posted, at (a) a point on the revealed band, and (b) a top-row point with the pointer away -- where a
+    // pinned band rests while the menu bar is hidden.
     REQUIRE_COCOA_OR_SKIP();
     using contour::window::WindowMode;
     auto band = ShownBand {};
     NSWindow* const nsWindow = band.nsWindow();
     REQUIRE(nsWindow != nil);
     band.apply(selectedRequest(WindowMode::Windowed));
+    REQUIRE(nsWindow.toolbar != nil);
     // Only the active application's window goes into a full-screen space of its own.
     [NSApp activateIgnoringOtherApps:YES];
     [nsWindow makeKeyAndOrderFront:nil];
     REQUIRE(toggleFullScreenAndWait(nsWindow, true));
+    // As the controller does on the window-state change.
+    REQUIRE(selectedRequest(WindowMode::FullScreen).growth == TitleBarGrowth::None);
     band.apply(selectedRequest(WindowMode::FullScreen));
+    CHECK(nsWindow.toolbar == nil);
 
     NSScreen* const screen = nsWindow.screen;
     REQUIRE(screen != nil);
@@ -417,34 +464,57 @@ TEST_CASE("clicks on the revealed full-screen band reach our window", "[display]
         SKIP(reason);
     }
 
+    auto presses = PressCounter {};
+    band.window->installEventFilter(&presses);
+    // Asks the window server at @p point (window-logical) and clicks there; true if the click reached Qt.
+    auto const ourClickAt = [&](QPointF point, char const* where) {
+        auto const screenPoint = screenPointIn(nsWindow, point);
+        auto const topmost = [NSWindow windowNumberAtPoint:screenPoint belowWindowWithWindowNumber:0];
+        UNSCOPED_INFO(where << " (" << point.x() << ", " << point.y() << "): topmost "
+                            << topmostWindowDescription(screenPoint) << ", ours #" << nsWindow.windowNumber);
+        CHECK(topmost == nsWindow.windowNumber);
+        auto const before = presses.count;
+        clickAtScreenPoint(screenPoint);
+        std::ignore = QTest::qWaitFor([&] { return presses.count > before; }, 1000);
+        return presses.count > before;
+    };
+
+    // (b) The pointer away and the menu bar hidden: the top row is ours.
+    moveMouseToScreenPoint(centre);
+    QTest::qWait(2000);
+    CHECK(ourClickAt(QPointF { 300, 10 }, "top row, band hidden"));
+
+    // (a) Revealed: the band rests below the title bar AppKit reveals (TitleBandGeometry::revealTop, from the
+    // metrics the controller measures).
     hoverScreenTopEdge(screen, NSMidX(screen.frame));
-    NSWindow* strip = nil;
-    std::ignore = QTest::qWaitFor(
-        [&] {
-            strip = fullScreenTitleBarWindow();
-            return strip != nil && NSHeight(strip.frame) > 0;
-        },
-        FullScreenTimeoutMs);
-    REQUIRE(strip != nil);
-    // A tab label's place on the band where it rests below the menu bar (TitleBandGeometry::revealTop, from
-    // the metrics the controller measures), past the traffic lights.
+    QTest::qWait(1000);
     auto const metrics = band.material->metrics(*band.window);
     auto const geometry = contour::window::resolveTitleBandGeometry({
         .mode = WindowMode::FullScreen,
         .nativeHeight = metrics.height,
         .fullScreenTop = metrics.fullScreenTop,
     });
-    auto const point = screenPointIn(nsWindow, QPointF { 300, geometry.revealTop + 20 });
-    auto const topmost = [NSWindow windowNumberAtPoint:point belowWindowWithWindowNumber:0];
-    UNSCOPED_INFO("strip " << NSStringFromRect(strip.frame).UTF8String << " #" << strip.windowNumber
-                           << ", ours #" << nsWindow.windowNumber << "; reveal top " << geometry.revealTop
-                           << "; at the band: " << topmostWindowDescription(point));
-    CHECK((topmost == nsWindow.windowNumber || (topmost == strip.windowNumber && strip.ignoresMouseEvents)));
-    // The band rests below the strip because the strip takes the clicks over itself (measured here: the
-    // window server names it topmost, and it does not ignore mouse events).
-    CHECK(geometry.revealTop >= NSMaxY(nsWindow.frame) - NSMinY(strip.frame) - 0.5);
+    // For the record: where AppKit shows the traffic lights while the band is revealed.
+    NSButton* const close = [nsWindow standardWindowButton:NSWindowCloseButton];
+    NSWindow* const strip = fullScreenTitleBarWindow();
+    auto const describe = [](NSWindow* window) {
+        if (window == nil)
+            return std::string { "none" };
+        char const* const text = NSStringFromRect(window.frame).UTF8String;
+        return text != nullptr ? std::string { text } : std::string { "?" };
+    };
+    UNSCOPED_INFO("revealed: reveal top " << geometry.revealTop << ", title bar " << metrics.height << ", strip "
+                                          << describe(strip) << ", close button's window " << describe(close.window)
+                                          << ", inset " << band.frame->nativeControlsInset(*band.window));
+    if (strip != nil)
+        CHECK(geometry.revealTop >= NSMaxY(nsWindow.frame) - NSMinY(strip.frame) - 0.5);
+    CHECK(ourClickAt(QPointF { 300, geometry.revealTop + 20 }, "revealed band"));
 
+    band.window->removeEventFilter(&presses);
+    moveMouseToScreenPoint(centre);
     REQUIRE(toggleFullScreenAndWait(nsWindow, false));
+    band.apply(selectedRequest(WindowMode::Windowed));
+    CHECK(nsWindow.toolbar != nil);
 }
 
 // Hidden ([.]): the record of why the native-material row is unselected (ruling S6) -- under

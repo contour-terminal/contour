@@ -94,7 +94,10 @@ inline constexpr auto BareBandSurface = TitleBandSurface {
 ///
 /// A native frame has no band of ours (R-e). Under Minimal, a row's band whose middle is empty is the bare
 /// band (BareBandSurface). In full screen no material sits behind terminal text (R-b, owner decision 2):
-/// the native material becomes the client's own paint, and a cleared band becomes the tint.
+/// the native material becomes the client's own paint, and a cleared band becomes the tint. And full screen
+/// detaches the compact toolbar (ruling S7): it only sizes the windowed band, while in full screen AppKit
+/// would show it in an NSToolbarFullScreenWindow strip of its own over the window's top, which takes the
+/// clicks there (final review finding 3, measured).
 /// @param inputs What the surface depends on.
 /// @return The surface; @c TitleBandSurface {} where no row matches or the frame is native.
 [[nodiscard]] constexpr TitleBandSurface resolveTitleBandSurface(
@@ -118,6 +121,7 @@ inline constexpr auto BareBandSurface = TitleBandSurface {
             surface.backdrop = config::BandBackdrop::Client;
         if (surface.fill == config::BandFill::Clear)
             surface.fill = config::BandFill::Tint;
+        surface.growth = config::TitleBarGrowth::None;
     }
     return surface;
 }

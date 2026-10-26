@@ -73,8 +73,9 @@ struct TitleBandGeometry
 ///
 /// In full screen the band rests BELOW AppKit's revealed title bar, not under it: that bar is a window of its
 /// own (NSToolbarFullScreenWindow) stacked above ours, and it takes the clicks over its whole extent
-/// (measured with the window server, final review finding 3). So the reveal top is the bar's top plus its
-/// height, the native title bar's.
+/// (measured with the window server, final review finding 3) -- even bare, once ruling S7 has detached the
+/// compact toolbar, though then only while revealed. So the reveal top is the bar's top plus its height, the
+/// native title bar's.
 ///
 /// @c inline rather than @c constexpr: it calls std::ceil, which is constexpr only where the library
 /// implements P0533.

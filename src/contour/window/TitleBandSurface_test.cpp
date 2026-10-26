@@ -90,7 +90,13 @@ TEST_CASE("surface.fullScreenIsSolid", "[titlebandsurface]")
         surfaceOf(ChromeStyle::MacOS, Material::Glass, WindowFrame::ClientBand, WindowMode::FullScreen);
     CHECK(full.backdrop == BandBackdrop::Client);
     CHECK(full.fill == BandFill::Tint);
-    CHECK(full.growth == windowed.growth);
+    CHECK(windowed.growth == TitleBarGrowth::CompactToolbar);
+    // Ruling S7: full screen detaches the compact toolbar, so AppKit puts no NSToolbarFullScreenWindow strip
+    // over the band and the top rows to take their clicks.
+    CHECK(full.growth == TitleBarGrowth::None);
+    CHECK(
+        surfaceOf(ChromeStyle::MacOS, Material::Solid, WindowFrame::ClientBand, WindowMode::FullScreen).growth
+        == TitleBarGrowth::None);
 }
 
 TEST_CASE("surface.minimalBareBandIsTheBackground", "[titlebandsurface]")

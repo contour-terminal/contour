@@ -207,35 +207,57 @@ TEST_CASE("a scale change measures the title bar again", "[contour][titleband][c
         CHECK(fixture.record.measured == measured);
 }
 
-TEST_CASE("full screen keeps the solid band and moves only its resting place",
+TEST_CASE("full screen detaches the compact toolbar and keeps the solid band",
           "[contour][titleband][controller]")
 {
-    // Ruling S6: windowed and full screen ask for the same client backdrop, so entering full screen applies
-    // nothing and Main.qml's `flags` do not toggle during AppKit's transition; only the reveal top moves.
+    // Ruling S6: windowed and full screen ask for the same client backdrop, so Main.qml's `flags` do not
+    // toggle during AppKit's transition. Ruling S7: full screen detaches the compact toolbar, whose
+    // full-screen strip would take the clicks over the band and the top rows, and leaving attaches it again;
+    // each way the band and the traffic lights' inset are measured again.
     auto fixture = TitleBandFixture {};
     fixture.useClientBand();
     auto const windowed = fixture.controller().titleBandRequest();
-    auto const windowedInset = fixture.controller().nativeControlsInset();
     auto const applied = fixture.record.applied.size();
     auto changes = QSignalSpy { &fixture.controller(), &contour::window::WindowController::titleBandChanged };
+    auto insets =
+        QSignalSpy { &fixture.controller(), &contour::window::WindowController::nativeControlsInsetChanged };
+    auto measured = fixture.record.measured;
 
     fixture.setWindowStates(Qt::WindowFullScreen);
-    CHECK(fixture.controller().titleBandRequest() == windowed);
-    CHECK(fixture.record.applied.size() == applied);
+    auto const full = fixture.controller().titleBandRequest();
+    CHECK(full.backdrop == windowed.backdrop);
     CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
     // Below AppKit's revealed title bar: its top plus its height.
     CHECK(fixture.controller().titleBandRevealTop() == (hostDressesTitleBand() ? 24 + 28 : 0));
-    // The traffic lights move into AppKit's revealed strip: their inset is still published, and Main.qml,
-    // which rests the band below that strip, applies none in full screen.
-    CHECK(fixture.controller().nativeControlsInset() == windowedInset);
     CHECK(changes.count() == (hostDressesTitleBand() ? 1 : 0));
+    if (hostDressesTitleBand())
+    {
+        CHECK(windowed.growth == TitleBarGrowth::CompactToolbar);
+        CHECK(full.growth == TitleBarGrowth::None);
+        REQUIRE(fixture.record.applied.size() == applied + 1);
+        CHECK(fixture.record.applied.back() == full);
+        CHECK(insets.count() >= 1);
+        CHECK(fixture.record.measured > measured);
+    }
+    else
+        CHECK(fixture.record.applied.size() == applied);
 
+    insets.clear();
+    measured = fixture.record.measured;
     fixture.setWindowStates(Qt::WindowNoState);
     CHECK(fixture.controller().titleBandRequest() == windowed);
-    CHECK(fixture.record.applied.size() == applied);
     CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
     CHECK(fixture.controller().titleBandRevealTop() == 0);
     CHECK(changes.count() == (hostDressesTitleBand() ? 2 : 0));
+    if (hostDressesTitleBand())
+    {
+        REQUIRE(fixture.record.applied.size() == applied + 2);
+        CHECK(fixture.record.applied.back() == windowed);
+        CHECK(insets.count() >= 1);
+        CHECK(fixture.record.measured > measured);
+    }
+    else
+        CHECK(fixture.record.applied.size() == applied);
 }
 
 TEST_CASE("show_title_bar applies no material, and turning it off applies again",

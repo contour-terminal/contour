@@ -31,7 +31,9 @@ struct TitleBandRequest
 struct NativeTitleBarMetrics
 {
     /// The title bar's height. On macOS it is Qt's safe-area top, QWindow::safeAreaMargins().top(), which
-    /// Qt::ExpandedClientAreaHint makes the title bar's extent above the content layout rectangle.
+    /// Qt::ExpandedClientAreaHint makes the title bar's extent above the content layout rectangle. In full
+    /// screen it is the title bar AppKit reveals over the window's top (a bare one: full screen detaches the
+    /// compact toolbar, ruling S7), whose window takes the clicks over it -- so the band rests below it.
     qreal height = 0.0;
     /// In full screen, where a revealed title bar's top sits below the window's top; window-relative, >= 0.
     qreal fullScreenTop = 0.0;

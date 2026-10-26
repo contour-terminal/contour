@@ -101,6 +101,18 @@ namespace
         return std::max(0.0, static_cast<qreal>(screenTop - windowOffset));
     }
 
+    /// @return The title bar's height: windowed, Qt's safe-area top (the title bar above the content layout
+    ///         rectangle); in full screen, where the safe area is empty, the bare title bar AppKit reveals over
+    ///         the window's top in a window of its own (measured: 32 pt, the titled frame's extent).
+    [[nodiscard]] qreal titleBarHeightOf(QWindow const& window, NSWindow* nsWindow)
+    {
+        if ((nsWindow.styleMask & NSWindowStyleMaskFullScreen) == 0)
+            return static_cast<qreal>(window.safeAreaMargins().top());
+        auto const content = NSMakeRect(0, 0, 100, 100);
+        auto const frame = [NSWindow frameRectForContentRect:content styleMask:NSWindowStyleMaskTitled];
+        return static_cast<qreal>(NSHeight(frame) - NSHeight(content));
+    }
+
     /// AppKit's title bar around the macOS title band -- its appearance, its toolbar, its shadow -- and the
     /// measure of it.
     ///
@@ -139,7 +151,7 @@ namespace
             NSWindow* const nsWindow = nsWindowOf(window);
             if (nsWindow == nil)
                 return {};
-            return NativeTitleBarMetrics { .height = static_cast<qreal>(window.safeAreaMargins().top()),
+            return NativeTitleBarMetrics { .height = titleBarHeightOf(window, nsWindow),
                                            .fullScreenTop = fullScreenTopOf(nsWindow) };
         }
     };
