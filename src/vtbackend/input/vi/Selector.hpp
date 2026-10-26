@@ -40,7 +40,9 @@ struct SelectionExtent
 {
     /// The rows it spans, the first and the last included.
     LineCount lines {};
-    /// Its non-blank cells, or nullopt when it spans @ref SelectionCharacterCountLimit cells or more.
+    /// The characters a copy of it yields -- each row's cells up to its last non-blank one, the spaces
+    /// between words included, a wide character once -- or nullopt when it spans
+    /// @ref SelectionCharacterCountLimit cells or more.
     std::optional<std::size_t> characters {};
 
     bool operator==(SelectionExtent const&) const = default;
@@ -121,9 +123,11 @@ class Selection
     /// Constructs a vector of ranges for this selection.
     [[nodiscard]] virtual std::vector<Range> ranges() const;
 
-    /// How much this selection holds: its rows always, in O(1), and its non-blank cells only while
-    /// its rows at the page's width are fewer than @ref SelectionCharacterCountLimit cells -- a bound
-    /// checked before any cell is read, so no call reads more than that many.
+    /// How much this selection holds: its rows always, in O(1), and its characters as a copy yields them
+    /// only while its rows times rowWidth() are fewer than @ref SelectionCharacterCountLimit cells -- a
+    /// bound checked before any cell is read or ranges() is asked, so a call reads at most that many
+    /// cells (twice: once to find each row's last non-blank cell, once to count) and allocates at most
+    /// that many rows' Range. The status line calls it on every frame, under the terminal's lock.
     /// @return The extent.
     [[nodiscard]] SelectionExtent extent() const;
 
@@ -136,6 +140,11 @@ class Selection
     static CellLocation stretchedColumn(SelectionHelper const& gridHelper, CellLocation coord) noexcept;
 
   protected:
+    /// The widest any of this selection's rows is, in O(1): the page's width, as a linear selection's
+    /// inner rows span it whole.
+    /// @return The width.
+    [[nodiscard]] virtual ColumnCount rowWidth() const noexcept;
+
     State _state = State::Waiting;
     SelectionHelper const& _helper;
     ViMode _viMode;
@@ -153,6 +162,12 @@ class RectangularSelection: public Selection
     [[nodiscard]] bool contains(CellLocation coord) const noexcept override;
     [[nodiscard]] bool intersects(Rect area) const noexcept override;
     [[nodiscard]] std::vector<Range> ranges() const override;
+
+  protected:
+    /// The rectangle's own width. A wide character on its right edge stretches a row by one more column,
+    /// which the bound does not count.
+    /// @return The width.
+    [[nodiscard]] ColumnCount rowWidth() const noexcept override;
 };
 
 class LinearSelection final: public Selection

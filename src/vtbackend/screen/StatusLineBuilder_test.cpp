@@ -1259,11 +1259,12 @@ TEST_CASE("serializeToVT.selectionSaysWhatYWouldCopy", "[statusline][selection]"
     REQUIRE(mc.terminal.selector()->state() == Selection::State::Waiting);
     CHECK(selectionOf(mc).empty());
 
-    // Row 0 whole and row 1 to "c": "hello world" is ten characters and a blank, "abc" three.
+    // Row 0 whole and row 1 to "c", as `y` copies them: "hello world" with its space, not the 69 blank
+    // columns after it, and "abc".
     select(mc,
            CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
            CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
-    CHECK(selectionOf(mc) == "2 lines · 13 chars");
+    CHECK(selectionOf(mc) == "2 lines · 14 chars");
 
     select(mc,
            CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },

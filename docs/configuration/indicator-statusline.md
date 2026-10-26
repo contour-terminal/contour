@@ -37,7 +37,7 @@ Variable             | Description
 `{Scroll}`           | how far the view is scrolled back into the history, out of how far it can be: `↑ 1 240 / 10 000`, thousands grouped by a space. Empty at the bottom, and while the view cannot scroll (the alternate screen)
 `{SearchMode}`       | indicates search highlight mode, if currently active
 `{SearchPrompt}`     | the active search pattern, if any (read-only; search is typed into the find bar)
-`{Selection}`        | how much the selection holds, as `y` would copy it: `12 lines · 418 chars`, thousands grouped by a space (`1 240`). Empty without a selection. The characters (cells that are not blank) are counted only while the selection spans fewer than 10 000 cells at the page's width; a larger one shows its lines alone, `1 240 lines`
+`{Selection}`        | how much the selection holds, as `y` would copy it: `12 lines · 418 chars`, thousands grouped by a space (`1 240`). Empty without a selection. The characters are those a copy yields: each row up to its last non-blank cell, the spaces between words included, a wide character once. They are counted only while the selection spans fewer than 10 000 cells (its rows at the page's width, or at a rectangle's own width); a larger one shows its lines alone, `1 240 lines`
 `{Tabs}`             | indicates active tabs
 `{Text}`             | given text (makes only sense when customized with flags)
 `{Title}`            | current window title

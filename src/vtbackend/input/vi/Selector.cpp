@@ -7,8 +7,10 @@
 
 #include <core/Times.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
+#include <ranges>
 
 using namespace std;
 
@@ -139,18 +141,44 @@ vector<Selection::Range> Selection::ranges() const
     return result;
 }
 
+ColumnCount Selection::rowWidth() const noexcept
+{
+    return _helper.pageSize().columns;
+}
+
 SelectionExtent Selection::extent() const
 {
     auto const lines = LineCount::cast_from(std::abs(unbox(_to.line - _from.line)) + 1);
-    auto const cells = unbox<size_t>(lines) * unbox<size_t>(_helper.pageSize().columns);
-    if (cells >= SelectionCharacterCountLimit)
+    if (unbox<size_t>(lines) * unbox<size_t>(rowWidth()) >= SelectionCharacterCountLimit)
         return SelectionExtent { .lines = lines, .characters = nullopt };
 
     auto characters = size_t { 0 };
-    renderSelection(*this, [&](CellLocation cell) {
-        if (!_helper.cellEmpty(cell))
+    for (Range const& range: ranges())
+    {
+        auto const at = [&](int column) {
+            return CellLocation { .line = range.line, .column = ColumnOffset(column) };
+        };
+        auto const columns = std::views::iota(unbox(range.fromColumn), unbox(range.toColumn) + 1);
+
+        // As a copy does, the row ends at its last non-blank cell: the padding after it is not text.
+        auto const blanks =
+            std::ranges::distance(columns | std::views::reverse | std::views::take_while([&](int column) {
+                                      return _helper.cellEmpty(at(column));
+                                  }));
+
+        // A wide character is one character over the cells it covers.
+        auto covered = 0;
+        for (auto const column: columns | std::views::take(std::ranges::ssize(columns) - blanks))
+        {
+            if (covered > 0)
+            {
+                --covered;
+                continue;
+            }
             ++characters;
-    });
+            covered = std::max(1, _helper.cellWidth(at(column))) - 1;
+        }
+    }
     return SelectionExtent { .lines = lines, .characters = characters };
 }
 // }}}
@@ -234,6 +262,11 @@ bool RectangularSelection::intersects(Rect area) const noexcept
 
     // innser
     return area.top.as<LineOffset>() < from.line && to.line < area.bottom.as<LineOffset>();
+}
+
+ColumnCount RectangularSelection::rowWidth() const noexcept
+{
+    return ColumnCount::cast_from(std::abs(unbox(_to.column - _from.column)) + 1);
 }
 
 vector<Selection::Range> RectangularSelection::ranges() const
