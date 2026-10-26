@@ -71,13 +71,17 @@ Rectangle {
     // where it does not (the Terminal row). Null keeps the popup shadow below.
     property var elevation: null
 
-    ElevationShadow {
+    // Built only where a surface asks for it: the popups that take the style's shadow below carry no part of
+    // this path at all.
+    Loader {
         objectName: "popupElevationShadow"
-        visible: root.elevation !== null
+        active: root.elevation !== null
         anchors.fill: parent
         z: -1
-        level: root.elevation !== null ? root.elevation : chromeStyle.elevation.e0
-        radius: root.radius
+        sourceComponent: ElevationShadow {
+            level: root.elevation
+            radius: root.radius
+        }
     }
 
     // How far the shadow reaches beyond the surface, and the unstretched corner. Both are functions

@@ -6171,6 +6171,32 @@ TEST_CASE("A long or right-to-left title elides inside its row (offscreen)", "[c
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("A popup surface without an elevation builds no elevation shadow (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // Every popup but the palette keeps the style's popup shadow, and carries no part of the elevation
+    // path: an idle ElevationShadow inside the surface was seen washing a dialog's surface grey.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine);
+    component.setData(QByteArrayLiteral("import Contour.Ui\nPopupSurface { width: 100; height: 100 }\n"),
+                      QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PopupSurfaceTestHost.qml")));
+    INFO("errors: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto const surface = std::unique_ptr<QObject>(component.create());
+    REQUIRE(surface != nullptr);
+
+    auto* loader = surface->findChild<QObject*>(QStringLiteral("popupElevationShadow"));
+    REQUIRE(loader != nullptr);
+    CHECK_FALSE(loader->property("active").toBool());
+    CHECK(loader->property("item").value<QObject*>() == nullptr);
+    CHECK(surface->findChildren<QQuickItem*>(QStringLiteral("elevationSoftShadow")).isEmpty());
+    CHECK(surface->findChildren<QQuickItem*>(QStringLiteral("elevationHardShadow")).isEmpty());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("The Terminal row draws the palette in cells (offscreen)", "[contour][gui][qml][palette]")
 {
     contour::test::QmlMessageCapture const warnings;

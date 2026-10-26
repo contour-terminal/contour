@@ -274,9 +274,11 @@ Popup {
 
             Row {
                 id: queryLead
-                x: chromeStyle.space.paletteInset
+                // The query starts where the rows' titles do; the prompt and the level chip sit apart from
+                // it and from each other by s4 (one cell on the Terminal row, where s2 is none).
+                x: root.textInset
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: chromeStyle.space.s2
+                spacing: chromeStyle.space.s4
 
                 Label {
                     objectName: "commandPalettePrompt"
@@ -300,7 +302,7 @@ Popup {
                 id: filterField
                 objectName: "commandPaletteFilter"
                 x: queryLead.x + (queryLead.width > 0 ? queryLead.width + queryLead.spacing : 0)
-                width: parent.width - x - chromeStyle.space.paletteInset
+                width: parent.width - x - root.textInset
                 anchors.verticalCenter: parent.verticalCenter
                 placeholderText: qsTr("Type a command or search…")
                 // The one editable node assistive technology sees.
