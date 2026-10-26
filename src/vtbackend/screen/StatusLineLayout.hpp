@@ -170,6 +170,7 @@ namespace detail
 ///
 /// Drops whole items, never shortens one, while some non-empty segment would not be placed and more than one
 /// item with a width remains -- so a single item wider than the line is shown, to be cut at the last column.
+/// A segment with no item of a width, only separators, is never worth dropping an item for.
 /// Only an item that can make an unplaced segment placed is a candidate: one of that segment, or one of a
 /// segment before it (a placed middle helps the right) unless the segment is too wide on its own -- a middle
 /// that cannot be centred, a right as wide as the line. The right segment's items never help the middle. The
@@ -207,8 +208,14 @@ template <typename MeasureSegment>
                                                       .right = measureSegment(StatusLineSide::Right, drawn) };
         auto const placement = placeStatusLineSegments(widths, columns);
 
-        // A non-empty middle or right segment that is not shown, or a left one wider than the line.
+        // A non-empty middle or right segment that is not shown, or a left one wider than the line -- if it
+        // has an item to say something. Separators alone, such as the « and » of an empty title, frame
+        // nothing, and are not worth an item of another segment.
         auto const isUnplaced = [&](StatusLineSide side) {
+            if (std::ranges::none_of(indices, [&](std::size_t index) {
+                    return items[index].side == side && counts(index) && isItem(index);
+                }))
+                return false;
             switch (side)
             {
                 case StatusLineSide::Left: return widths.left > columns;

@@ -327,3 +327,19 @@ TEST_CASE("collapseStatusLine.measuresTheLineAsItWouldBeDrawn", "[statusline][co
         CHECK(collapseStatusLine(items, ColumnCount(columns)) == expected);
     }
 }
+
+TEST_CASE("collapseStatusLine.aSegmentOfSeparatorsAloneCostsNothing", "[statusline][collapse]")
+{
+    using enum StatusLinePriority;
+
+    // An extension's notice in the left segment, and a middle whose title has nothing to say: the middle's
+    // « and » frame nothing, so there is nothing in it worth an item -- it is not drawn, and the notice is.
+    auto const items = std::vector {
+        item(StatusLineSide::Left, 43, Normal),  separator(StatusLineSide::Middle, 2),
+        item(StatusLineSide::Middle, 0, Normal), separator(StatusLineSide::Middle, 2),
+        item(StatusLineSide::Right, 1, Normal),  separator(StatusLineSide::Right, 3),
+        item(StatusLineSide::Right, 5, Low),
+    };
+    CHECK(collapseStatusLine(items, ColumnCount(80))
+          == std::vector { Shown, Shown, Shown, Shown, Shown, Shown, Shown });
+}
