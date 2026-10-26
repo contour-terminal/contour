@@ -1045,25 +1045,30 @@ ls "$CONTOUR_SNAPSHOT_DIR"/*.png | wc -l
 ```
 
   Expected: the count equals `SnapshotScripts.size() × 4 rows × 2 editions × 2 appearances`, with
-  `SnapshotScripts.size()` read from `ChromeSnapshotPlan.hpp`. Look at `band-solid.macos.*` (the tint, light
-  and dark) and `single-tab.macos.*` (a clear band if D4's fill is `Clear`: the material is AppKit's and is
-  not in the picture). `three-tabs.*` and `single-tab.*` on Fluent, Linux and Terminal look as they did after
-  1c.
+  `SnapshotScripts.size()` read from `ChromeSnapshotPlan.hpp`. Look at `band-solid.macos.*` and
+  `single-tab.macos.*` (the same opaque tint, light and dark: under S6 the MacOS band is `Solid`, so Reduce
+  Transparency changes nothing), and `macos-host.terminal.*` (the Terminal row on a macOS host: its band grown
+  to whole cells around the traffic lights, S3). `three-tabs.*` and `single-tab.*` on Fluent, Linux and
+  Terminal look as they did after 1c.
 - [ ] **Step 4: Owner manual checks.** Batched per phase (ruling): list them in the ledger for the owner, and do
   not wait on them. On this Mac, `out/appleclang-debug/src/contour/contour.app`:
-  - Windowed, with the OS in light and then dark mode: the band shows the material (the desktop or the tint
-    through it, per D4), the panes are opaque, and the shadow and rounded corners are there.
+  - Windowed, with the OS in light and then dark mode: the band is the opaque tint of the terminal background
+    (S6: `Solid`, no material), the panes are opaque, and the shadow and rounded corners are there. Note
+    whether macOS 26's toolbar glass draws over the tint, and whether a hairline shows at y 40.
   - Drag-resize quickly for five seconds: no flash in the band, and the shadow follows.
   - Toggle Reduce Transparency (System Settings › Accessibility › Display) with the window open: the band
-    turns solid and back, and the terminal does not resize.
+    stays the same solid tint, and the terminal does not resize.
   - `theme: terminal` with contour-light while the OS is dark: a light band with legible labels.
   - Move the window to a display with another scale: the band's height and the shadow are right.
   - Full screen: the revealed band sits below the menu bar, under AppKit's revealed traffic lights, and is
-    solid. After leaving, the material and the shadow return.
+    solid; its top is right once the animation settles (M7), also after toggling full screen twice quickly.
+    Moving down from the screen edge across the menu bar keeps the band revealed. A pinned band (kill the
+    daemon connection) rests at the top and slides down below the menu bar on hover. After leaving, the
+    tint and the shadow return.
   - Click another app: the inactive title bar goes flat, as AppKit draws it (R-g), and the labels dim.
   - `ui_style: terminal`: the traffic lights sit per D3, and stay through a resize, a full-screen exit and a
     focus change.
-  - `show_title_bar: true`: an ordinary title bar, no material.
+  - `show_title_bar: true`: an ordinary title bar, no tint.
   - Record what was seen against the spike's measurements in the ledger.
 - [ ] **Step 5: Release notes** with `/add-release-note` in `metainfo.xml`, under the open `0.9.0` release:
   - "Shows the macOS title-bar material behind the tab bar, tinted from the terminal background, with a solid
