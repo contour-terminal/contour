@@ -480,6 +480,7 @@ TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirro
         largeGridSnapshot(screen, { wideRowAt(1, 40, 0, U'A'), wideRowAt(20, 40, 39, U'X') }, cellAt(2, 2));
     bare.mirror->apply(screen, first);
     auto const& page = bare.terminal->primaryScreen();
+    REQUIRE(bare.events.screenReplays == 1);
     REQUIRE(bare.terminal->reportedCellOrigin() == vtbackend::CellLocation {});
     REQUIRE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
     REQUIRE(page.cursor().position == cellAt(2, 2));
@@ -499,6 +500,9 @@ TEST_CASE("the mirror pans when the cursor moves past the view", "[vthost][mirro
     CHECK(page.grid().lineText(vtbackend::LineOffset(4)) == "         X");
     CHECK_FALSE(page.grid().lineText(vtbackend::LineOffset(0)).starts_with("A"));
     CHECK(page.cursor().position == cellAt(4, 9));
+    // The pan is the window moving, not the program's output: a repaint, not news.
+    CHECK(bare.events.screenReplays == 2);
+    CHECK(bare.events.screenUpdates == 0);
 }
 
 TEST_CASE("a mirror at least as large as the remote grid is not panned", "[vthost][mirror][viewport]")
@@ -668,15 +672,26 @@ TEST_CASE("a primed mirror reports what the program did to its screen as output"
 
     SECTION("a clear that discarded the host's history")
     {
+        // Output scrolls three rows into the host's history (floor 1, page at row 4) ...
+        auto output = proto::Delta {};
+        output.generation = 1;
+        output.stableViewportBase = 4;
+        output.stableFloor = 1;
+        output.lines = { rowAt(4, "d") };
+        screen.apply(output);
+        bare.mirror->apply(screen, output);
+        REQUIRE(bare.events.screenUpdates == 1);
+
+        // ... and the clear moves the floor up to the page, which did not move.
         auto clear = proto::Delta {};
         clear.snapshot = 1;
         clear.generation = 1;
-        clear.stableViewportBase = 1;
-        clear.stableFloor = 5; // the floor outran a viewport that did not move
-        clear.lines = { rowAt(1, "") };
+        clear.stableViewportBase = 4;
+        clear.stableFloor = 4;
+        clear.lines = { rowAt(4, "") };
         screen.apply(clear);
         bare.mirror->apply(screen, clear);
-        CHECK(bare.events.screenUpdates == 1);
+        CHECK(bare.events.screenUpdates == 2);
         CHECK(bare.events.screenReplays == 1);
     }
 

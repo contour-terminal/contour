@@ -28,7 +28,9 @@
 ///  - command-block heads through `Screen::noteBlockRowChange` and `Terminal::placeCommandBlockHeads`
 ///    (the parser's erases and prompts keep them on the host, by a rule the mirror applies to its own rows),
 ///  - the cursor through `Screen::moveCursorTo`, and the frame through `Terminal::screenUpdated` -- or
-///    `Terminal::screenReplayed` for a full replay, which repaints rather than reports output.
+///    `Terminal::screenReplayed` for a full replay the host's plumbing caused, which repaints rather than
+///    reports output. A primed mirror's screen switch, clear or reset is the program's doing and reports
+///    output (@see frameOf).
 ///
 /// The mirror OWNS its terminal's screen, and its scrollback is real scrollback built by scrolling
 /// rows through the page — so a resync must not erase it unless the server actually discarded its
@@ -105,8 +107,14 @@ enum class ReplayCause : uint8_t
     /// The program entered or left the alternate screen (or another DEC page).
     ScreenSwitch,
     /// The server's floor outran its viewport advance: the program cleared the history (`clear`, CSI 3 J).
+    /// A history limit lowered on the host can read as this rather than as a Reset; the frame is the same.
     HistoryCleared,
     /// Row identity lost at an unchanged size: the program reset the terminal (RIS).
+    ///
+    /// A false positive the wire cannot rule out: sizes that changed and changed back while the host's
+    /// snapshot was queued (80 -> 81 -> 80 columns) bump the generation at the size the mirror already has,
+    /// so the server's reflow reads as a Reset and dots a background tab. Telling them apart needs a cause
+    /// or size epoch in the snapshot, which is a protocol change.
     Reset,
 };
 
@@ -122,7 +130,8 @@ enum class MirrorFrame : uint8_t
 ///
 /// A missed dot, never a false one: output that overran the server's scrollback floor between two pushes
 /// arrives as a snapshot and reads as a Resync. Rarer still, a history-limit change on the host bumps the
-/// generation as a reset does, and is a Reset.
+/// generation as a reset does, and is a Reset (or a HistoryCleared, if it lowered the floor first). The one
+/// false dot is a server-coalesced resize that ended at the mirror's size (@see ReplayCause::Reset).
 /// @param cause Why the page was replayed.
 /// @return How its frame is announced.
 [[nodiscard]] constexpr MirrorFrame frameOf(ReplayCause cause) noexcept
