@@ -1755,3 +1755,81 @@ TEST_CASE("UiStyleProvider publishes the command palette's tokens per row", "[co
         CHECK(std::fmod(y, terminal.cellHeight()) == Catch::Approx(0.0).margin(1e-9));
     }
 }
+
+TEST_CASE("UiStyleProvider: the command palette's inks read on every row, appearance and bundled scheme",
+          "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::MinimumMarkContrast;
+    using contour::config::MinimumTextContrast;
+    using contour::window::UiStyleProvider;
+
+    // One row per ink the palette draws, against the ground it is drawn on; on the native rows, the kit's
+    // two labels on its elevated surface in both appearances. The surface carries the
+    // query, the titles, the group headers, the shortcuts, the drill-in glyph, the placeholder, the empty
+    // label and the footer's description and hints.
+    struct InkRow
+    {
+        char const* ink = "";
+        char const* ground = "";
+        double minimum = 0.0;
+        char const* what = "";
+    };
+    auto const surfaceInks = std::array {
+        InkRow { .ink = "paletteText",
+                 .ground = "paletteSurface",
+                 .minimum = MinimumTextContrast,
+                 .what = "titles" },
+        InkRow { .ink = "paletteSecondaryText",
+                 .ground = "paletteSurface",
+                 .minimum = MinimumTextContrast,
+                 .what = "headers, shortcuts, footer" },
+    };
+    // The selected row. On the native rows these are the OS's own selected-row pair
+    // (QPalette::Highlight / HighlightedText), which this test cannot vouch for: the platform sets them,
+    // and an offscreen palette says nothing about what macOS, Windows or KDE will paint (Breeze's #3DAEE9
+    // under white reads about 2.5:1). Only the Terminal row's pair, taken from the scheme, is asserted.
+    auto const selectionInks = std::array {
+        InkRow { .ink = "paletteSelectionText",
+                 .ground = "paletteSelectionFill",
+                 .minimum = MinimumTextContrast,
+                 .what = "selected title and accessory" },
+        // The selected row's fill is a state mark (WCAG 1.4.11) against the surface around it.
+        InkRow { .ink = "paletteSelectionFill",
+                 .ground = "paletteSurface",
+                 .minimum = MinimumMarkContrast,
+                 .what = "selection" },
+    };
+
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
+        {
+            auto const row = static_cast<ChromeStyle>(index);
+            CAPTURE(index);
+            auto inputs = contour::window::chromeInputsFor(row, QGuiApplication::font());
+            inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+            auto const provider = UiStyleProvider(inputs);
+            auto const color = [&](char const* role) {
+                return tokenOf(provider, "colors", role).value<QColor>();
+            };
+            auto const check = [&](InkRow const& pair) {
+                INFO(pair.what << ": " << pair.ink << " on " << pair.ground);
+                auto const ground = color(pair.ground);
+                CHECK(contrastOf(over(color(pair.ink), ground), ground) >= pair.minimum);
+            };
+            for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+                withWindowColor(window, [&] {
+                    INFO("chrome: " << window.name().toStdString());
+                    for (auto const& pair: surfaceInks)
+                        check(pair);
+                    if (row == ChromeStyle::Terminal)
+                        for (auto const& pair: selectionInks)
+                            check(pair);
+                });
+        }
+    }
+}

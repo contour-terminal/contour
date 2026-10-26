@@ -1210,10 +1210,10 @@ TEST_CASE("chromeTokens.paletteColourRoles", "[chrometokens]")
                           .terminal = schemeOnBar(SchemeSlot::Secondary) },
         PaletteColorRow { .role = PaletteSelectionFill,
                           .native = sourceOf(ColorSourceKind::PaletteHighlight),
-                          .terminal = schemeColor(SchemeSlot::Selection) },
+                          .terminal = schemeColor(SchemeSlot::BarSelection) },
         PaletteColorRow { .role = PaletteSelectionText,
                           .native = sourceOf(ColorSourceKind::PaletteHighlightedText),
-                          .terminal = schemeColor(SchemeSlot::SelectionText) },
+                          .terminal = schemeColor(SchemeSlot::BarSelectionText) },
         PaletteColorRow {
             .role = PaletteSeparator, .native = separator(), .terminal = schemeColor(SchemeSlot::Secondary) },
     };
@@ -1260,6 +1260,34 @@ TEST_CASE("chromeTokens.paletteTextReads", "[chrometokens]")
                                       ? legibleOnBar(colors, source.slot)
                                       : slotIn(colors, slotOf(ink));
             CHECK(contrastRatio(inkColor, slotIn(colors, slotOf(ground))) >= MinimumTextContrast);
+        }
+    }
+}
+
+TEST_CASE("chromeTokens.barSelectionStandsOffTheBar", "[chrometokens]")
+{
+    // A selected row drawn on the bar (the Terminal row's command palette) is a mark against the bar as
+    // well as a ground for its text, on every bundled scheme: the plain Selection may be the bar itself
+    // (one-dark) and so mark nothing.
+    using namespace contour::config;
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        auto const bar = slotIn(colors, SchemeSlot::Bar);
+        auto const fill = slotIn(colors, SchemeSlot::BarSelection);
+        auto const text = slotIn(colors, SchemeSlot::BarSelectionText);
+        CHECK(contrastRatio(text, fill) >= MinimumTextContrast);
+        CHECK(contrastRatio(fill, bar) >= MinimumMarkContrast);
+
+        // The chrome's own selection is kept wherever it already marks on the bar.
+        auto const selection = slotIn(colors, SchemeSlot::Selection);
+        if (contrastRatio(selection, bar) >= MinimumMarkContrast)
+        {
+            CHECK(fill == selection);
+            CHECK(text == slotIn(colors, SchemeSlot::SelectionText));
         }
     }
 }

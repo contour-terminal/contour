@@ -202,10 +202,14 @@ enum class SchemeSlot : uint8_t
     Danger,        //!< ANSI colour 1.
     Success,       //!< ANSI colour 2.
     Warning,       //!< ANSI colour 3.
+    /// A selection that also stands off @c Bar at 3:1, for a selected row drawn on the bar (the command
+    /// palette): @c Selection where it does, else inverse video on the bar (@c BarInk as the fill).
+    BarSelection,
+    BarSelectionText, //!< The text on @c BarSelection, at 4.5:1.
 };
 
 /// Number of @c SchemeSlot enumerators, derived from the last one.
-inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::Warning) + 1;
+inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::BarSelectionText) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
 inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
@@ -1215,12 +1219,13 @@ namespace detail
                     // A cell row has no hover: the button is its glyph.
                     detail::noColor(), // PaneHeaderActionHover
                     // The palette is a bar-coloured block: the bar's ink, ANSI 8 where it reads there.
-                    schemeColor(SchemeSlot::Bar),           // PaletteSurface
-                    schemeColor(SchemeSlot::BarInk),        // PaletteText
-                    schemeOnBar(SchemeSlot::Secondary),     // PaletteSecondaryText
-                    schemeColor(SchemeSlot::Selection),     // PaletteSelectionFill
-                    schemeColor(SchemeSlot::SelectionText), // PaletteSelectionText
-                    schemeColor(SchemeSlot::Secondary) },   // PaletteSeparator
+                    schemeColor(SchemeSlot::Bar),       // PaletteSurface
+                    schemeColor(SchemeSlot::BarInk),    // PaletteText
+                    schemeOnBar(SchemeSlot::Secondary), // PaletteSecondaryText
+                    // A selected row on the bar-coloured surface must also stand off it (BarSelection).
+                    schemeColor(SchemeSlot::BarSelection),     // PaletteSelectionFill
+                    schemeColor(SchemeSlot::BarSelectionText), // PaletteSelectionText
+                    schemeColor(SchemeSlot::Secondary) },      // PaletteSeparator
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),
@@ -1315,6 +1320,7 @@ enum class SelectionSource : uint8_t
     Scheme = 0, //!< The scheme's own selection, with its better end of the scheme on top.
     Inverse,    //!< Inverse video: the foreground as the fill, the background as the text.
     Bar,        //!< The bar and its ink (vtbackend::legibleInkOn()): always legible.
+    BarInverse, //!< The bar's ink as the fill, the bar as the text: legible, and stands off the bar.
 };
 
 /// The candidates for the chrome's selection, first legible one wins. Most bundled schemes inherit a
@@ -1324,6 +1330,14 @@ inline constexpr std::array SelectionFallbacks {
     SelectionSource::Scheme,
     SelectionSource::Inverse,
     SelectionSource::Bar,
+};
+
+/// The candidates for a selection drawn on the bar, first one that reads and stands off the bar wins: the
+/// last one always does, the bar's ink reading on the bar at 4.5:1 both ways round.
+inline constexpr std::array BarSelectionFallbacks {
+    SelectionSource::Scheme,
+    SelectionSource::Inverse,
+    SelectionSource::BarInverse,
 };
 
 namespace detail
@@ -1357,6 +1371,28 @@ namespace detail
         }
         return best;
     }
+
+    /// The first candidate whose text reads on its fill at 4.5:1 and whose fill stands off @p ground at
+    /// 3:1 (a mark, WCAG 1.4.11); failing all, the last.
+    /// @param candidates The sources, in the order they are tried; not empty.
+    /// @param ground     What the fill is drawn on.
+    /// @param pairOf     Maps a source to its pair.
+    /// @return The chosen pair.
+    template <typename Source, size_t N, typename PairOf>
+    [[nodiscard]] InkPair firstMarkedPair(std::array<Source, N> const& candidates,
+                                          vtbackend::RGBColor ground,
+                                          PairOf const& pairOf)
+    {
+        static_assert(N > 0);
+        for (auto const source: candidates)
+        {
+            auto const candidate = pairOf(source);
+            if (vtbackend::contrastRatio(candidate.text, candidate.fill) >= MinimumTextContrast
+                && vtbackend::contrastRatio(candidate.fill, ground) >= MinimumMarkContrast)
+                return candidate;
+        }
+        return pairOf(candidates.back());
+    }
 } // namespace detail
 
 /// Reduces a terminal colour palette to the slots the Terminal chrome paints with.
@@ -1379,7 +1415,7 @@ namespace detail
     // (vtbackend::InkFallbacks) on their own bars.
     auto const barInk = vtbackend::legibleInkOn(palette, bar);
 
-    auto const selection = detail::firstLegiblePair(SelectionFallbacks, [&](SelectionSource source) {
+    auto const pairOf = [&](SelectionSource source) {
         switch (source)
         {
             case SelectionSource::Scheme: {
@@ -1389,10 +1425,13 @@ namespace detail
             case SelectionSource::Inverse:
                 return detail::InkPair { .fill = palette.defaultForeground,
                                          .text = palette.defaultBackground };
+            case SelectionSource::BarInverse: return detail::InkPair { .fill = barInk, .text = bar };
             case SelectionSource::Bar: break;
         }
         return detail::InkPair { .fill = bar, .text = barInk };
-    });
+    };
+    auto const selection = detail::firstLegiblePair(SelectionFallbacks, pairOf);
+    auto const barSelection = detail::firstMarkedPair(BarSelectionFallbacks, bar, pairOf);
 
     auto colors = ChromeSchemeColors {};
     colors.bySlot[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
@@ -1406,6 +1445,8 @@ namespace detail
     colors.bySlot[static_cast<size_t>(SchemeSlot::Danger)] = palette.normalColor(1);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Success)] = palette.normalColor(2);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Warning)] = palette.normalColor(3);
+    colors.bySlot[static_cast<size_t>(SchemeSlot::BarSelection)] = barSelection.fill;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::BarSelectionText)] = barSelection.text;
     return colors;
 }
 
