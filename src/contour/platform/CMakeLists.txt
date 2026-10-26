@@ -92,11 +92,12 @@ if(APPLE)
         CocoaNativeMenuPresenter.mm
         CocoaPlatformAppearance.mm
         CocoaTaskbarProgressSink.mm
+        CocoaTitleBandMaterial.mm
         CocoaWindowFrame.mm
         CocoaWindowResizeGrid.mm)
     set_source_files_properties(
         CocoaAccessibilityPreferenceSource.mm CocoaMenuBarIntegration.mm CocoaNativeMenuPresenter.mm
-        CocoaPlatformAppearance.mm CocoaTaskbarProgressSink.mm
+        CocoaPlatformAppearance.mm CocoaTaskbarProgressSink.mm CocoaTitleBandMaterial.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(contour_platform PUBLIC "-framework AppKit")
     # QMenu::toNSMenu(), for the menu bar integration alone; the interface only forward-declares QMenu.

@@ -847,6 +847,7 @@ if(CONTOUR_FRONTEND_GUI)
                 platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm
                 platform/CocoaTaskbarProgressSink_test.mm
+                platform/CocoaTitleBandMaterial_test.mm
                 platform/CocoaWindowFrame_test.mm
                 platform/CocoaWindowResizeGrid_test.mm)
             set_target_properties(contour_gui_test PROPERTIES
@@ -855,7 +856,7 @@ if(CONTOUR_FRONTEND_GUI)
             set_source_files_properties(
                 platform/CocoaAppearanceSources_test.mm platform/CocoaMenuBarIntegration_test.mm
                 platform/CocoaNativeMenuPresenter_test.mm platform/CocoaTaskbarProgressSink_test.mm
-                platform/CocoaWindowFrame_test.mm
+                platform/CocoaTitleBandMaterial_test.mm platform/CocoaWindowFrame_test.mm
                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
         endif()
         if(CONTOUR_WITH_GPU_SELECTION)

@@ -1,24 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/platform/TitleBandMaterial.hpp>
 
+// macOS defines makeTitleBandMaterial() in CocoaTitleBandMaterial.mm.
+#ifndef __APPLE__
+
 namespace contour::platform
 {
 
-#ifndef __APPLE__
-
 std::unique_ptr<ITitleBandMaterial> makeTitleBandMaterial()
 {
     return std::make_unique<NullTitleBandMaterial>();
 }
-
-#else
-
-// Temporary: the null material on macOS too, until CocoaTitleBandMaterial.mm defines the native one.
-std::unique_ptr<ITitleBandMaterial> makeTitleBandMaterial()
-{
-    return std::make_unique<NullTitleBandMaterial>();
-}
-
-#endif
 
 } // namespace contour::platform
+
+#endif

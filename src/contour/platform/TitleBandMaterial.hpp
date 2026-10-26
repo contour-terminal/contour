@@ -30,7 +30,9 @@ struct TitleBandRequest
 /// The native title bar as measured, in logical pixels; all zero where there is none.
 struct NativeTitleBarMetrics
 {
-    qreal height = 0.0; ///< The title bar's height above the content layout rectangle.
+    /// The title bar's height. On macOS it is Qt's safe-area top, QWindow::safeAreaMargins().top(), which
+    /// Qt::ExpandedClientAreaHint makes the title bar's extent above the content layout rectangle.
+    qreal height = 0.0;
     /// In full screen, where a revealed title bar's top sits below the window's top; window-relative, >= 0.
     qreal fullScreenTop = 0.0;
 
