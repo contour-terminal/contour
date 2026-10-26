@@ -9,8 +9,10 @@
 #include <core/Times.hpp>
 #include <core/Utils.hpp>
 
+#include <cstddef>
 #include <format>
 #include <functional>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -26,6 +28,22 @@ struct SelectionHelper
     [[nodiscard]] virtual bool wrappedLine(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual bool cellEmpty(CellLocation pos) const noexcept = 0;
     [[nodiscard]] virtual int cellWidth(CellLocation pos) const noexcept = 0;
+};
+
+/// The most cells Selection::extent() looks at to count a selection's characters: a larger selection
+/// reports its lines alone. The status line asks on every frame, under the terminal's lock, so the count
+/// must cost a bounded amount however much is selected.
+inline constexpr std::size_t SelectionCharacterCountLimit = 10'000;
+
+/// How much a selection holds, as the status line says it.
+struct SelectionExtent
+{
+    /// The rows it spans, the first and the last included.
+    LineCount lines {};
+    /// Its non-blank cells, or nullopt when it spans @ref SelectionCharacterCountLimit cells or more.
+    std::optional<std::size_t> characters {};
+
+    bool operator==(SelectionExtent const&) const = default;
 };
 
 /**
@@ -102,6 +120,12 @@ class Selection
 
     /// Constructs a vector of ranges for this selection.
     [[nodiscard]] virtual std::vector<Range> ranges() const;
+
+    /// How much this selection holds: its rows always, in O(1), and its non-blank cells only while
+    /// its rows at the page's width are fewer than @ref SelectionCharacterCountLimit cells -- a bound
+    /// checked before any cell is read, so no call reads more than that many.
+    /// @return The extent.
+    [[nodiscard]] SelectionExtent extent() const;
 
     /// Marks the selection as completed.
     void complete();

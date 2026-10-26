@@ -247,3 +247,58 @@ TEST_CASE("Selector.Rectangular", "[selector]")
 }
 
 // NOLINTEND(misc-const-correctness,readability-function-cognitive-complexity)
+
+namespace
+{
+/// The cell at @p line, @p column.
+[[nodiscard]] constexpr CellLocation cellAt(int line, int column)
+{
+    return CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
+}
+
+/// The extent of a selection of type @p S from @p from to @p to, extended as a mouse drag would.
+template <typename S>
+[[nodiscard]] SelectionExtent extentOf(SelectionHelper const& helper, CellLocation from, CellLocation to)
+{
+    auto selection = S(helper, from, []() {});
+    (void) selection.extend(to);
+    return selection.extent();
+}
+} // namespace
+
+TEST_CASE("Selector.extentCountsLinesAndCharacters", "[selector]")
+{
+    auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
+    auto& screen = term.terminal.primaryScreen();
+    auto const helper = TestSelectionHelper(screen);
+    // Row 1 holds three characters and eight cells nothing was written to.
+    term.writeToScreen("12345,67890abc\r\n12345,67890");
+    REQUIRE(screen.grid().lineText(LineOffset(1)).starts_with("abc"));
+
+    // Row 0 from column 3 (8 cells), row 1 whole (3 written), row 2 to column 4 (5 cells).
+    auto const linear = SelectionExtent { .lines = LineCount(3), .characters = 16 };
+    CHECK(extentOf<LinearSelection>(helper, cellAt(0, 3), cellAt(2, 4)) == linear);
+    CHECK(extentOf<LinearSelection>(helper, cellAt(2, 4), cellAt(0, 3)) == linear);
+
+    // Columns 1 to 3 of each row: "234", "bc" and an empty cell, "234".
+    CHECK(extentOf<RectangularSelection>(helper, cellAt(0, 1), cellAt(2, 3))
+          == SelectionExtent { .lines = LineCount(3), .characters = 8 });
+}
+
+TEST_CASE("Selector.extentCountsCharactersOnlyBelowTheLimit", "[selector]")
+{
+    // 99 rows of 101 columns is one cell below the limit; 100 of 100 is the limit itself.
+    auto below = MockTerm(PageSize { LineCount(99), ColumnCount(101) }, LineCount(0));
+    below.writeToScreen("ab");
+    auto const belowHelper = TestSelectionHelper(below.terminal.primaryScreen());
+    REQUIRE(std::size_t { 99 } * 101 == SelectionCharacterCountLimit - 1);
+    CHECK(extentOf<LinearSelection>(belowHelper, cellAt(0, 0), cellAt(98, 100))
+          == SelectionExtent { .lines = LineCount(99), .characters = 2 });
+
+    auto atLimit = MockTerm(PageSize { LineCount(100), ColumnCount(100) }, LineCount(0));
+    atLimit.writeToScreen("ab");
+    auto const atLimitHelper = TestSelectionHelper(atLimit.terminal.primaryScreen());
+    REQUIRE(std::size_t { 100 } * 100 == SelectionCharacterCountLimit);
+    CHECK(extentOf<LinearSelection>(atLimitHelper, cellAt(0, 0), cellAt(99, 99))
+          == SelectionExtent { .lines = LineCount(100), .characters = std::nullopt });
+}

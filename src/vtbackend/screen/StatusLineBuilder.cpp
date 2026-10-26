@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <chrono>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <format>
 #include <iterator>
 #include <optional>
@@ -925,6 +927,23 @@ namespace
             return text;
         }
 
+        /// How much the selection holds -- what `y` would copy; nothing before a selection is dragged.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::SelectionSize const&) const
+        {
+            auto const* const selection = vt.selector();
+            if (!selection || selection->state() == Selection::State::Waiting)
+                return {};
+
+            auto const counted = [](std::size_t count, std::string_view noun) {
+                return std::format("{} {}{}", groupDigits(count), noun, count == 1 ? "" : "s");
+            };
+            auto const extent = selection->extent();
+            auto text = counted(unbox<std::size_t>(extent.lines), "line");
+            if (extent.characters)
+                text += " · " + counted(*extent.characters, "char");
+            return text;
+        }
+
         std::string visit(StatusLineDefinitions::Tabs const& tabs)
         {
             auto const tabsInfo = vt.guiTabsInfoForStatusLine();
@@ -961,6 +980,21 @@ namespace
         // }}}
     };
 } // namespace
+
+std::string groupDigits(std::uint64_t value)
+{
+    auto const digits = std::to_string(value);
+    auto result = std::string {};
+    result.reserve(digits.size() + (digits.size() / 3));
+    for (auto const [index, digit]: core::views::enumerate(digits))
+    {
+        // A space before each group of three counted from the right, but never before the first digit.
+        if (index > 0 && (digits.size() - index) % 3 == 0)
+            result += ' ';
+        result += digit;
+    }
+    return result;
+}
 
 std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, StatusLineStyling styling)
 {

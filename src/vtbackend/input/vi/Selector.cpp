@@ -8,6 +8,7 @@
 #include <core/Times.hpp>
 
 #include <cassert>
+#include <cstdlib>
 
 using namespace std;
 
@@ -136,6 +137,21 @@ vector<Selection::Range> Selection::ranges() const
     }
 
     return result;
+}
+
+SelectionExtent Selection::extent() const
+{
+    auto const lines = LineCount::cast_from(std::abs(unbox(_to.line - _from.line)) + 1);
+    auto const cells = unbox<size_t>(lines) * unbox<size_t>(_helper.pageSize().columns);
+    if (cells >= SelectionCharacterCountLimit)
+        return SelectionExtent { .lines = lines, .characters = nullopt };
+
+    auto characters = size_t { 0 };
+    renderSelection(*this, [&](CellLocation cell) {
+        if (!_helper.cellEmpty(cell))
+            ++characters;
+    });
+    return SelectionExtent { .lines = lines, .characters = characters };
 }
 // }}}
 // {{{ LinearSelection

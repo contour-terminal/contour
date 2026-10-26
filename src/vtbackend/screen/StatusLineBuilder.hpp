@@ -11,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -222,6 +223,9 @@ namespace StatusLineDefinitions
         ColumnCount maxWidth { 32 };
     };
 
+    /// How much the selection holds, as `y` would copy it: `12 lines · 418 chars`.
+    struct SelectionSize: Styles {};
+
     struct Tabs: Styles
     {
         std::optional<ItemColor> activeColor;
@@ -251,7 +255,8 @@ namespace StatusLineDefinitions
         Context,
         Cwd,
         Git,
-        LastCommand
+        LastCommand,
+        SelectionSize
     >;
     // clang-format on
 
@@ -352,6 +357,9 @@ namespace StatusLineDefinitions
     template <> struct ItemTraits<LastCommand>
     { static constexpr std::string_view Name = "LastCommand", Label = "Last command", Sample = "\u2713 make \u00b7 4ms"; };
 
+    template <> struct ItemTraits<SelectionSize>
+    { static constexpr std::string_view Name = "Selection", Label = "Selection size", Sample = "12 lines \u00b7 418 chars"; };
+
     template <> struct ItemTraits<Text>
     { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; };
 
@@ -435,6 +443,11 @@ enum class StatusLineStyling : uint8_t
 ///       corrupted. Callers offering a text field should reject those characters up front so the
 ///       user is told, rather than quietly losing the styling. Unstyled text is always safe.
 [[nodiscard]] std::string serializeStatusLineSegment(StatusLineSegment const& segment);
+
+/// @p value with its thousands joined by a space, as the status line prints a count: `1240` reads `1 240`.
+/// @param value The number.
+/// @return Its decimal digits, grouped in threes from the right.
+[[nodiscard]] std::string groupDigits(std::uint64_t value);
 
 class Terminal;
 std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, StatusLineStyling styling);

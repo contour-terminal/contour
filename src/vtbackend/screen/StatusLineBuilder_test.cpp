@@ -1216,3 +1216,74 @@ TEST_CASE("parseStatusLineSegment.lastCommandMaxWidth", "[statusline][lastcomman
     CHECK(canonical("{LastCommand}"sv) == "{LastCommand}");
 }
 // }}}
+
+// {{{ {Selection}
+namespace
+{
+/// What `{Selection}` shows on @p mc.
+[[nodiscard]] std::string selectionOf(MockTerm<> const& mc)
+{
+    return serializeToVT(mc.terminal, parseStatusLineSegment("{Selection}"sv), StatusLineStyling::Disabled);
+}
+
+/// Selects from @p from to @p to on @p mc, as a mouse drag does.
+void select(MockTerm<>& mc, CellLocation from, CellLocation to)
+{
+    mc.terminal.setSelector(std::make_unique<LinearSelection>(mc.terminal.selectionHelper(), from, []() {}));
+    REQUIRE(mc.terminal.selector()->extend(to));
+}
+} // namespace
+
+TEST_CASE("groupDigits.thousandsAreJoinedByASpace", "[statusline][selection]")
+{
+    CHECK(groupDigits(0) == "0");
+    CHECK(groupDigits(999) == "999");
+    CHECK(groupDigits(1000) == "1 000");
+    CHECK(groupDigits(1240) == "1 240");
+    CHECK(groupDigits(10000) == "10 000");
+    CHECK(groupDigits(1234567) == "1 234 567");
+}
+
+TEST_CASE("serializeToVT.selectionSaysWhatYWouldCopy", "[statusline][selection]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    mc.writeToScreen("hello world\r\nabc");
+    CHECK(selectionOf(mc).empty());
+
+    // A selection not yet dragged anywhere selects nothing.
+    mc.terminal.setSelector(
+        std::make_unique<LinearSelection>(mc.terminal.selectionHelper(),
+                                          CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+                                          []() {}));
+    REQUIRE(mc.terminal.selector()->state() == Selection::State::Waiting);
+    CHECK(selectionOf(mc).empty());
+
+    // Row 0 whole and row 1 to "c": "hello world" is ten characters and a blank, "abc" three.
+    select(mc,
+           CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+           CellLocation { .line = LineOffset(1), .column = ColumnOffset(2) });
+    CHECK(selectionOf(mc) == "2 lines · 13 chars");
+
+    select(mc,
+           CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) },
+           CellLocation { .line = LineOffset(1), .column = ColumnOffset(1) });
+    CHECK(selectionOf(mc) == "1 line · 1 char");
+}
+
+TEST_CASE("serializeToVT.selectionOfManyCellsCountsOnlyItsLines", "[statusline][selection]")
+{
+    // 200 rows of 80 columns is above the limit: counting what it holds is not worth a frame.
+    auto mc = MockTerm { PageSize { LineCount(200), ColumnCount(80) } };
+    mc.writeToScreen("abc");
+    select(mc,
+           CellLocation { .line = LineOffset(0), .column = ColumnOffset(0) },
+           CellLocation { .line = LineOffset(199), .column = ColumnOffset(79) });
+    CHECK(selectionOf(mc) == "200 lines");
+}
+
+TEST_CASE("parseStatusLineSegment.selectionRoundTrips", "[statusline][selection]")
+{
+    CHECK(canonical("{Selection}"sv) == "{Selection}");
+    CHECK(canonical("{Selection:Faint}"sv) == "{Selection:Faint}");
+}
+// }}}

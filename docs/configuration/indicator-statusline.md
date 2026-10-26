@@ -36,6 +36,7 @@ Variable             | Description
 `{ProtectedMode}`    | indicates protected mode, if currently enabled
 `{SearchMode}`       | indicates search highlight mode, if currently active
 `{SearchPrompt}`     | the active search pattern, if any (read-only; search is typed into the find bar)
+`{Selection}`        | how much the selection holds, as `y` would copy it: `12 lines · 418 chars`, thousands grouped by a space (`1 240`). Empty without a selection. The characters (cells that are not blank) are counted only while the selection spans fewer than 10 000 cells at the page's width; a larger one shows its lines alone, `1 240 lines`
 `{Tabs}`             | indicates active tabs
 `{Text}`             | given text (makes only sense when customized with flags)
 `{Title}`            | current window title
