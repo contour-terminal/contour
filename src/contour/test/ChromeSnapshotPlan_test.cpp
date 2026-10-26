@@ -54,7 +54,14 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::NativeTitleBar).name == "native-title-bar");
     CHECK(scriptRow(SnapshotScript::FullScreenReveal).mode == SnapshotWindowMode::FullScreenRevealed);
     CHECK(scriptRow(SnapshotScript::FullScreenReveal).name == "full-screen-reveal");
-    // Each of the three axes is set by its own row only: every other row is a client band, windowed,
+    // The solid band: single-tab under Reduce Transparency, and the only row built so.
+    CHECK(scriptRow(SnapshotScript::BandSolid).name == "band-solid");
+    CHECK(scriptRow(SnapshotScript::BandSolid).transparency
+          == contour::config::TransparencyPreference::Reduced);
+    CHECK(scriptRow(SnapshotScript::BandSolid).tabCount == scriptRow(SnapshotScript::SingleTab).tabCount);
+    CHECK(scriptRow(SnapshotScript::BandSolid).frame == SnapshotFrame::ClientBand);
+    CHECK(scriptRow(SnapshotScript::BandSolid).mode == SnapshotWindowMode::Windowed);
+    // Each of the four axes is set by its own row only: every other row is a client band, windowed,
     // with no drift.
     for (auto const& row: SnapshotScripts)
     {
@@ -63,6 +70,8 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
         CHECK((row.frame == SnapshotFrame::NativeFrame) == (row.script == SnapshotScript::NativeTitleBar));
         CHECK((row.mode == SnapshotWindowMode::FullScreenRevealed)
               == (row.script == SnapshotScript::FullScreenReveal));
+        CHECK((row.transparency == contour::config::TransparencyPreference::Reduced)
+              == (row.script == SnapshotScript::BandSolid));
         // A host chip needs a host to name, and a host is never local.
         CHECK(row.hostLabel.empty() == (row.connection == HostConnection::Local));
     }

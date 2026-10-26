@@ -74,14 +74,18 @@ ThemedWindow
     property int tabBarPosition: win ? win.tabBarPosition : 0
     property bool tabBarShouldShow: win ? win.tabBarShouldShow : true
 
+    // The band's WindowFrame and WindowMode, as the ints titleBand() and bandFill() take.
+    readonly property int bandFrame: appWindow.win && appWindow.win.titleBarVisible ? 1 : 0
+    readonly property int bandMode: appWindow.visibility === Window.FullScreen ? 1 : 0
+
     // Where the title band and the tabs go -- { band, bandEdge, centre, tabBar }, each by name -- from the
     // row's tab shape (UiStyleProvider::titleBand): who draws the frame (show_title_bar), whether the window
     // is in full screen, the tab-bar gate, the configured edge and the host chip, whose interrupted
     // connection shows the band whatever the gate says. The ints are the enumerators' underlying values:
     // WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen }, TabStripGate { Hidden,
     // Shown }, TabBarPosition { Top, Bottom } and HostChipState. Main.qml is the only caller.
-    readonly property var band: chromeStyle.titleBand(appWindow.win && appWindow.win.titleBarVisible ? 1 : 0,
-                                                      appWindow.visibility === Window.FullScreen ? 1 : 0,
+    readonly property var band: chromeStyle.titleBand(appWindow.bandFrame,
+                                                      appWindow.bandMode,
                                                       appWindow.tabBarShouldShow ? 1 : 0,
                                                       appWindow.tabBarPosition,
                                                       (appWindow.win && appWindow.win.hostLabel) || "",
@@ -185,7 +189,12 @@ ThemedWindow
         // A full-screen band slides from above its resting place by its slideOffset.
         anchors.left: parent.left
         anchors.right: parent.right
-        y: (appWindow.band.bandEdge === "bottom" ? parent.height - titleBar.height : 0) + titleBar.slideOffset
+        y: titleBar.restingTop + titleBar.slideOffset
+        // At the bottom edge, or at the top -- where a full-screen band (revealed or pinned) rests below the
+        // menu bar AppKit reveals over the window, as the controller measured it; 0 off macOS.
+        restingTop: appWindow.band.bandEdge === "bottom" ? parent.height - titleBar.height
+                  : (presence === "reveal" || presence === "pinned")
+                    ? ((appWindow.win && appWindow.win.titleBandRevealTop) || 0) : 0
         Behavior on y {
             enabled: titleBar.presence === "reveal" && chromeStyle.motion.animates
             NumberAnimation { duration: chromeStyle.motion.standard }
@@ -205,6 +214,14 @@ ThemedWindow
                  || (presence === "reveal"
                      && (revealed || (chromeStyle.motion.animates ? y > -height : opacity > 0)))
         height: presence === "hidden" ? 0 : implicitHeight
+        // The band's height as the window measured it, grown to the native title bar it covers (macOS);
+        // `|| 0` (no measurement) keeps the token. The tabs bar below carries no traffic lights: it keeps
+        // the token.
+        measuredHeight: (appWindow.win && appWindow.win.titleBandHeight) || 0
+        // The band's surface: the frame and mode it is drawn in, as titleBand() was asked, and the centre it
+        // answered. Reads paletteRevision first, since the fill reads the palette.
+        fill: chromeStyle.paletteRevision < 0 ? "transparent"
+              : chromeStyle.bandFill(appWindow.bandFrame, appWindow.bandMode, appWindow.band.centre || "")
         readonly property real effectiveHeight: presence === "shown" ? implicitHeight : 0
         onHoveredChanged: appWindow.updateBandReveal()
         onEngagedChanged: appWindow.updateBandReveal()
@@ -254,9 +271,10 @@ ThemedWindow
         anchors.left: parent.left
         anchors.right: parent.right
         y: 0
-        // The band's resting rectangle while it is revealed, so the pointer keeps it however far it has
-        // slid; passive, so every click still reaches the band beneath.
-        height: titleBar.revealed ? titleBar.implicitHeight : chromeStyle.space.revealEdge
+        // Down to the band's resting rectangle while it is revealed, so the pointer keeps it however far it
+        // has slid, and on its way down from the menu bar above it; passive, so every click still reaches
+        // the band beneath.
+        height: titleBar.revealed ? titleBar.restingTop + titleBar.implicitHeight : chromeStyle.space.revealEdge
         visible: appWindow.band.band === "reveal"
         z: 3
 

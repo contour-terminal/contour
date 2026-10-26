@@ -242,6 +242,15 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             }
             case SnapshotScript::FullScreenReveal: CHECK(titleBar->property("revealed").toBool()); break;
+            case SnapshotScript::BandSolid: {
+                // Reduce Transparency: the band is the solid tint, opaque wherever it is drawn.
+                auto const* background =
+                    scene.root().findChild<QQuickItem*>(QStringLiteral("bandBackground"));
+                REQUIRE(background != nullptr);
+                if (variant.row == contour::config::ChromeStyle::MacOS)
+                    CHECK(background->property("color").value<QColor>().alphaF() == 1.0);
+                break;
+            }
             case SnapshotScript::SingleTab: break;
         }
     }

@@ -596,7 +596,7 @@ class ChromeSnapshotScene
             .font = _chromeFont,
             .windowControls = config::resolveWindowControlStyle(config::WindowControlStyle::Auto,
                                                                 rowHost(_variant.row).host),
-            .accessibility = {},
+            .accessibility = { .transparency = scriptRow(_variant.script).transparency },
             .appearance = {},
             .scheme = config::chromeSchemeColorsOf(
                 *config::preferredColorPalette(config::defaultColors(_variant.edition), _variant.appearance)),

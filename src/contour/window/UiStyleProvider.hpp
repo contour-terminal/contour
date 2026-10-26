@@ -498,6 +498,25 @@ class UiStyleProvider: public QObject
     /// @return The title band's height in logical pixels. @see bandHeight
     [[nodiscard]] qreal bandHeight() const noexcept;
 
+    /// What the title band paints: its surface (window::resolveTitleBandSurface) for this row's resolved
+    /// @c material.titleBand, @p frame and @p mode, as a colour.
+    ///
+    /// - @c Palette: the application palette's window colour (the band before Step 1d);
+    /// - @c Clear: transparent, so a material behind the band shows;
+    /// - @c Tint: window::legibleBandTint of the chrome scheme's background for the chrome's tone (decided
+    ///   as statusColor() decides it), else the palette's window colour.
+    ///
+    /// Reads the palette, so a binding over it also reads @ref paletteRevision. Ints and a name rather than
+    /// enums: the QML-facing carve-out, whose one caller (Main.qml) passes the values it passes titleBand()
+    /// and the centre titleBand() answered.
+    /// @param frame  A window::WindowFrame.
+    /// @param mode   A window::WindowMode.
+    /// @param centre What the band's middle holds, as titleBand() names it ("empty", "tabs" or "title").
+    ///               Every centre paints alike today; it is the seam a bare band (Minimal) keys its own
+    ///               fill on.
+    /// @return The fill; the palette's window colour for a value out of range or an unknown centre.
+    [[nodiscard]] Q_INVOKABLE QColor bandFill(int frame, int mode, QString const& centre) const;
+
     /// The colour that says @p role, for the chrome the application palette currently paints.
     ///
     /// Picks the light or dark variant by the luminance of the palette's @c Window colour, so a status

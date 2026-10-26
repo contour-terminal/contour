@@ -1638,6 +1638,236 @@ TEST_CASE("the drift chip reveals with a full-screen band, never over the cells 
 
 namespace
 {
+/// What chromeStyle.bandFill(@p frame, @p mode, @p centre) answers on @p engine.
+[[nodiscard]] QColor bandFillOf(QQmlEngine& engine, int frame, int mode, QString const& centre)
+{
+    auto fill = QColor {};
+    REQUIRE(QMetaObject::invokeMethod(&chromeStyleOf(engine),
+                                      "bandFill",
+                                      Q_RETURN_ARG(QColor, fill),
+                                      Q_ARG(int, frame),
+                                      Q_ARG(int, mode),
+                                      Q_ARG(QString, centre)));
+    return fill;
+}
+
+/// The colour the band's background paints.
+[[nodiscard]] QColor bandBackgroundOf(QObject& root)
+{
+    return named(root, QStringLiteral("bandBackground")).property("color").value<QColor>();
+}
+
+/// The macOS row whose terminal scheme has the chrome palette's tone (preflight F19), so its band paints
+/// the tint rather than falling back to the palette.
+/// @param transparency The Reduce Transparency setting the chrome is built under.
+[[nodiscard]] contour::test::ChromeSetup tintedMacOSSetup(
+    contour::config::TransparencyPreference transparency)
+{
+    auto scheme = contour::config::chromeSchemeColorsOf(vtbackend::ColorPalette {});
+    scheme.bySlot[static_cast<std::size_t>(contour::config::SchemeSlot::Background)] =
+        vtbackend::RGBColor(0x1C1E24);
+    auto setup = rowSetup(ChromeStyle::MacOS, scheme);
+    setup.accessibility.transparency = transparency;
+    return setup;
+}
+} // namespace
+
+namespace
+{
+/// Loads the macOS row under @p transparency and checks its band paints the surface bandFill() names.
+void checkBandPaintsSurface(contour::config::TransparencyPreference transparency)
+{
+    auto const appearance = contour::test::ScopedChromeAppearance { vtbackend::ColorPreference::Dark };
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, tintedMacOSSetup(transparency));
+    showWindow(*root);
+
+    auto const& titleBar = named(*root, QStringLiteral("titleBar"));
+    auto const centre = titleBar.property("centre").toString();
+    auto const fill = bandFillOf(engine, 0, 0, centre);
+    CHECK(bandBackgroundOf(*root) == fill);
+    // The tint of the scheme, not the palette: the surface table decided it.
+    CHECK(fill != QGuiApplication::palette().color(QPalette::Window));
+    // Opaque: under Reduce Transparency too (Review Focus 2).
+    CHECK(bandBackgroundOf(*root).alphaF() == 1.0);
+    // The panes below the band are not the band's to paint: they start under it, as before.
+    auto const& content = named(*root, QStringLiteral("content"));
+    CHECK(content.y() == titleBar.height());
+    CHECK_FALSE(isInside(&content, &titleBar));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+} // namespace
+
+TEST_CASE("the macOS band paints its surface (offscreen)", "[contour][gui][qml][mainwindow][band]")
+{
+    checkBandPaintsSurface(contour::config::TransparencyPreference::Allowed);
+}
+
+TEST_CASE("the band is the tint under Reduce Transparency (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    checkBandPaintsSurface(contour::config::TransparencyPreference::Reduced);
+}
+
+TEST_CASE("the band takes the controller's height (offscreen)", "[contour][gui][qml][mainwindow][band]")
+{
+    constexpr auto Measured = 52.0;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+
+    auto const& titleBar = named(*root, QStringLiteral("titleBar"));
+    auto const token = chromeStyleOf(engine).property("bandHeight").toReal();
+    CHECK(titleBar.height() == token);
+
+    controller.setTitleBandHeight(Measured);
+    QCoreApplication::processEvents();
+    CHECK(titleBar.height() == Measured);
+    CHECK(controller.chromeHeight() == static_cast<int>(Measured));
+    CHECK(named(*root, QStringLiteral("content")).y() == Measured);
+    // The tabs bar carries no traffic lights: it keeps the token.
+    CHECK(named(*root, QStringLiteral("tabsBar")).implicitHeight() == token);
+
+    // Unmeasured again: back to the token.
+    controller.setTitleBandHeight(0);
+    QCoreApplication::processEvents();
+    CHECK(titleBar.height() == token);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// The full-screen reveal on the macOS row under @p motion, with the band resting 24 below the window's top.
+void checkRevealTop(MotionPreference motion)
+{
+    constexpr auto RevealTop = 24.0;
+    auto band = FullScreenBand { motion };
+    auto const reduced = motion == MotionPreference::Reduced;
+    auto& titleBar = *band.titleBar;
+    auto const& content = named(*band.root, QStringLiteral("content"));
+    auto const contentY = content.y();
+    auto const contentHeight = content.height();
+
+    band.controller.setTitleBandRevealTop(RevealTop);
+    QCoreApplication::processEvents();
+    // Still concealed: slid wholly above the window from its new resting place, or faded out at it.
+    CHECK(band.concealed());
+    if (reduced)
+        CHECK(titleBar.y() == RevealTop);
+
+    QTest::mouseMove(band.window, centreOf(named(*band.root, QStringLiteral("bandRevealEdge"))));
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            // Under Reduce Motion the band fades in place: it never leaves its resting top.
+            if (reduced)
+                CHECK(titleBar.y() == RevealTop);
+            return band.revealed() && titleBar.y() == RevealTop && titleBar.opacity() == 1;
+        },
+        2000));
+    CHECK(titleBar.isVisible());
+    CHECK(bandBackgroundOf(*band.root).alphaF() == 1.0);
+    // Over the top rows: the content keeps its place and its size.
+    CHECK(content.y() == contentY);
+    CHECK(content.height() == contentHeight);
+    CHECK(band.controller.chromeHeight() == 0);
+
+    QTest::mouseMove(band.window, band.awayPoint());
+    REQUIRE(QTest::qWaitFor(
+        [&] {
+            if (reduced)
+                CHECK(titleBar.y() == RevealTop);
+            return band.concealed();
+        },
+        2000));
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+} // namespace
+
+TEST_CASE("the revealed band sits at the reveal top (offscreen)", "[contour][gui][qml][mainwindow][band]")
+{
+    SECTION("sliding")
+    {
+        checkRevealTop(MotionPreference::Full);
+    }
+    SECTION("fading, under Reduce Motion")
+    {
+        checkRevealTop(MotionPreference::Reduced);
+    }
+}
+
+TEST_CASE("a pinned full-screen band rests at the reveal top too (offscreen)",
+          "[contour][gui][qml][mainwindow][band][hosts]")
+{
+    // 1c's Pinned presence (an interrupted remote connection in full screen) keeps working below the menu
+    // bar: it rests where a revealed band does, at the controller's measured height.
+    constexpr auto RevealTop = 24.0;
+    constexpr auto Measured = 40.0;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .hostLabel = QStringLiteral("home"),
+                                                      .tabBarVisibility = TabBarVisibility::Multiple,
+                                                      .hostChipState =
+                                                          contour::window::HostChipState::Disconnected } };
+    controller.setTitleBandHeight(Measured);
+    controller.setTitleBandRevealTop(RevealTop);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    window->showFullScreen();
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+    REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
+    QTest::mouseMove(window, QPoint { window->width() / 4, window->height() / 2 });
+    QCoreApplication::processEvents();
+
+    auto const& titleBar = named(*root, QStringLiteral("titleBar"));
+    CHECK(titleBar.property("presence").toString() == QStringLiteral("pinned"));
+    CHECK(titleBar.isVisible());
+    CHECK(titleBar.y() == RevealTop);
+    CHECK(titleBar.height() == Measured);
+    CHECK(named(*root, QStringLiteral("content")).y() == 0);
+    CHECK(controller.chromeHeight() == 0);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    window->showNormal();
+}
+
+TEST_CASE("Fluent and ContourLinux bands keep today's colour (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 3 } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        showWindow(*root);
+        CHECK(bandBackgroundOf(*root) == QGuiApplication::palette().color(QPalette::Window));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the Terminal row's band keeps the palette and one cell (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
+    showWindow(*root);
+    REQUIRE(controller.titleBandHeight() == 0);
+    CHECK(bandBackgroundOf(*root) == QGuiApplication::palette().color(QPalette::Window));
+    CHECK(named(*root, QStringLiteral("titleBar")).height()
+          == chromeStyleOf(engine).property("cellHeight").toReal());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
 /// One accessible node met by a walk of the tree, with the roles of the nodes above it.
 struct AccessibleNode
 {

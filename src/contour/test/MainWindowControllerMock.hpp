@@ -119,6 +119,11 @@ class MainWindowControllerMock: public QAbstractListModel
     // headers Minimal hides.
     Q_PROPERTY(int headerReveal READ headerReveal WRITE setHeaderReveal NOTIFY headerRevealChanged)
     // }}}
+    // Mirrors WindowController's measured title band: 0 (the band keeps its token height, at the window's
+    // top) unless a test sets them, as the material's measurement would.
+    Q_PROPERTY(qreal titleBandHeight READ titleBandHeight WRITE setTitleBandHeight NOTIFY titleBandChanged)
+    Q_PROPERTY(
+        qreal titleBandRevealTop READ titleBandRevealTop WRITE setTitleBandRevealTop NOTIFY titleBandChanged)
 
   public:
     using QAbstractListModel::QAbstractListModel;
@@ -228,6 +233,32 @@ class MainWindowControllerMock: public QAbstractListModel
     }
     // }}}
 
+    /// Mirrors WindowController::titleBandHeight(): the band's measured height, 0 for none.
+    [[nodiscard]] qreal titleBandHeight() const noexcept { return _titleBandHeight; }
+
+    /// Measures the band, as WindowController::refreshTitleBand() would.
+    /// @param height The band's height in logical pixels; 0 leaves the band to its token.
+    void setTitleBandHeight(qreal height)
+    {
+        if (_titleBandHeight == height)
+            return;
+        _titleBandHeight = height;
+        emit titleBandChanged();
+    }
+
+    /// Mirrors WindowController::titleBandRevealTop(): where a revealed full-screen band rests.
+    [[nodiscard]] qreal titleBandRevealTop() const noexcept { return _titleBandRevealTop; }
+
+    /// Measures the full-screen reveal top, as WindowController::refreshTitleBand() would.
+    /// @param top The band's resting top in full screen, in window coordinates.
+    void setTitleBandRevealTop(qreal top)
+    {
+        if (_titleBandRevealTop == top)
+            return;
+        _titleBandRevealTop = top;
+        emit titleBandChanged();
+    }
+
     std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
     std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
     int newTabMenuOpenings = 0;          ///< How often the new-tab menu was asked for.
@@ -249,13 +280,16 @@ class MainWindowControllerMock: public QAbstractListModel
     void aboutRequested();
     void visiblePaneCountChanged();
     void headerRevealChanged();
+    void titleBandChanged();
 
   private:
     QVariantList _tabContextMenuModel {};
     QVariantList _newTabMenuModel {};
-    int _hostChipState = 0;    ///< @see hostChipState; 0 = HostChipState::Connected.
-    int _visiblePaneCount = 1; ///< @see visiblePaneCount; one pane, unsplit.
-    int _headerReveal = 0;     ///< @see headerReveal; 0 = HeaderReveal::None.
+    int _hostChipState = 0;        ///< @see hostChipState; 0 = HostChipState::Connected.
+    int _visiblePaneCount = 1;     ///< @see visiblePaneCount; one pane, unsplit.
+    int _headerReveal = 0;         ///< @see headerReveal; 0 = HeaderReveal::None.
+    qreal _titleBandHeight = 0;    ///< @see titleBandHeight; 0 = not measured.
+    qreal _titleBandRevealTop = 0; ///< @see titleBandRevealTop; 0 = the window's top.
 };
 
 } // namespace contour::test

@@ -18,6 +18,8 @@
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -1408,3 +1410,88 @@ TEST_CASE("UiStyleProvider: hairline is one device pixel", "[contour][uistyle]")
 }
 
 // }}}
+
+namespace
+{
+/// The macOS row's inputs with @p background as the chrome scheme's background.
+[[nodiscard]] contour::window::ChromeInputs bandInputs(contour::config::ChromeStyle row,
+                                                       vtbackend::RGBColor background)
+{
+    auto inputs = contour::window::chromeInputsFor(row, QGuiApplication::font());
+    inputs.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Background)] = background;
+    return inputs;
+}
+} // namespace
+
+TEST_CASE("bandFill follows the material, the mode and the tone", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::TransparencyPreference;
+    using contour::window::ChromeTone;
+    using contour::window::legibleBandTint;
+    using contour::window::UiStyleProvider;
+    using contour::window::WindowFrameCount;
+    using contour::window::WindowModeCount;
+    auto const tabs = QStringLiteral("tabs");
+    auto const paletteWindow = [] {
+        return QGuiApplication::palette().color(QPalette::Window);
+    };
+    // The chrome's tone and the scheme's background agree in each pass (preflight F19), so the band paints
+    // the tint; the scheme's background stands off the palette's window, so the tint is not the palette.
+    struct TonePass
+    {
+        QRgb chrome = 0;
+        vtbackend::RGBColor background {};
+        ChromeTone tone = ChromeTone::Light;
+    };
+    for (auto const& pass: { TonePass { DarkChrome, vtbackend::RGBColor(0x1C1E24), ChromeTone::Dark },
+                             TonePass { LightChrome, vtbackend::RGBColor(0xFAFAF8), ChromeTone::Light } })
+    {
+        CAPTURE(QColor(pass.chrome).name().toStdString());
+        auto const tint = contour::platform::toQColor(*legibleBandTint(pass.background, pass.tone));
+        withWindowColor(QColor(pass.chrome), [&] {
+            auto const mac = UiStyleProvider(bandInputs(ChromeStyle::MacOS, pass.background));
+            CHECK(mac.bandFill(0, 0, tabs) == tint);
+            CHECK(mac.bandFill(0, 0, tabs) != paletteWindow());
+            CHECK(mac.bandFill(0, 0, QStringLiteral("title")) == tint);
+            CHECK(mac.bandFill(0, 0, QStringLiteral("empty")) == tint);
+
+            // Reduce Transparency (Review Focus 2): the same opaque tint.
+            auto reducedInputs = bandInputs(ChromeStyle::MacOS, pass.background);
+            reducedInputs.accessibility.transparency = TransparencyPreference::Reduced;
+            auto const reduced = UiStyleProvider(reducedInputs);
+            CHECK(reduced.bandFill(0, 0, tabs) == tint);
+            CHECK(reduced.bandFill(0, 0, tabs).alpha() == 255);
+
+            // Full screen (Review Focus 5): opaque, never cleared behind terminal text.
+            CHECK(mac.bandFill(0, 1, tabs) == tint);
+            CHECK(mac.bandFill(0, 1, tabs).alpha() == 255);
+
+            // A native frame has no band of ours: the palette, as today.
+            CHECK(mac.bandFill(1, 0, tabs) == paletteWindow());
+
+            // Linux and Windows unchanged: every frame and mode paints the palette window colour.
+            for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+            {
+                CAPTURE(contour::config::chromeStyleName(row));
+                auto const provider = UiStyleProvider(bandInputs(row, pass.background));
+                for (auto const frame: std::views::iota(0, static_cast<int>(WindowFrameCount)))
+                    for (auto const mode: std::views::iota(0, static_cast<int>(WindowModeCount)))
+                        CHECK(provider.bandFill(frame, mode, tabs) == paletteWindow());
+            }
+
+            // Out of range, or a centre titleBand() never names: the palette window colour.
+            CHECK(mac.bandFill(7, 9, tabs) == paletteWindow());
+            CHECK(mac.bandFill(-1, 0, tabs) == paletteWindow());
+            CHECK(mac.bandFill(0, 0, QStringLiteral("bogus")) == paletteWindow());
+        });
+    }
+
+    // A dark scheme under a light chrome (Review Focus 3): the tint would carry the chrome's dark ink on a
+    // dark ground, so the band keeps the palette window colour.
+    withWindowColor(QColor(LightChrome), [&] {
+        auto const mac = UiStyleProvider(bandInputs(ChromeStyle::MacOS, vtbackend::RGBColor(0x1E1E1E)));
+        CHECK(mac.bandFill(0, 0, tabs) == QColor(LightChrome));
+        CHECK(mac.bandFill(0, 1, tabs) == QColor(LightChrome));
+    });
+}

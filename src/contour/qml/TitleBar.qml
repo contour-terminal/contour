@@ -38,9 +38,14 @@ Item {
     property string presence: "shown"
     /// Whether a "reveal" bar is revealed. Assigned by Main.qml, from the reveal edge and `hovered`.
     property bool revealed: false
-    /// How far a hidden "reveal" bar is slid above its resting place: its height under full motion, and 0
-    /// under Reduce Motion, where it fades instead. Main.qml adds it to the resting `y`.
-    readonly property real slideOffset: root.isConcealed && chromeStyle.motion.animates ? -root.height : 0
+    /// Where the bar rests, in the window: Main.qml's to say, since it places the bar. A full-screen band
+    /// rests below the menu bar AppKit reveals over the window's top (WindowController.titleBandRevealTop).
+    property real restingTop: 0
+    /// How far a hidden "reveal" bar is slid above its resting place: wholly out of the window -- its height
+    /// and its resting top -- under full motion, and 0 under Reduce Motion, where it fades in place instead.
+    /// Main.qml adds it to `restingTop`.
+    readonly property real slideOffset: root.isConcealed && chromeStyle.motion.animates
+                                        ? -(root.restingTop + root.height) : 0
     /// Whether the pointer is over the bar.
     readonly property bool hovered: bandHover.hovered
     /// Whether the bar has a popup or an editor of its own open -- the new-tab menu, the tab menu, a
@@ -91,10 +96,20 @@ Item {
     // up to whole cells there, so the tabs after it stay on the cell grid.
     property real nativeControlsInset: 0
 
+    /// The band's height as the window measured it (WindowController.titleBandHeight): the token grown to
+    /// the native title bar it covers, on macOS. 0, as on a bar that measures nothing, keeps the token.
+    property real measuredHeight: 0
+
+    /// What the bar paints behind its parts. The band's is its surface (UiStyleProvider.bandFill, which
+    /// Main.qml assigns); a bar holding only the tabs carries no traffic lights and keeps the OS window
+    /// colour.
+    property color fill: systemPalette.window
+
     // The whole bar's height, and so the window's chrome height (Main.qml declares it to the
-    // WindowController, which feeds the WM size hints): the band token, 38 under the Pill shape, one
-    // character row in the terminal style, and the historical 34px on the other native rows.
-    implicitHeight: chromeStyle.bandHeight
+    // WindowController, which feeds the WM size hints): the measured height where there is one, else the
+    // band token -- 38 under the Pill shape, one character row in the terminal style, and the historical
+    // 34px on the other native rows.
+    implicitHeight: root.measuredHeight > 0 ? root.measuredHeight : chromeStyle.bandHeight
 
     // A hidden "reveal" bar fades under Reduce Motion (and slides under full motion, see slideOffset).
     opacity: root.isConcealed && !chromeStyle.motion.animates ? 0 : 1
@@ -114,13 +129,13 @@ Item {
         colorGroup: SystemPalette.Active
     }
 
-    // Opaque background so the transparent window doesn't show the desktop through the bar. The
-    // ApplicationWindow itself is transparent for terminal see-through, so the bar must paint a fully
-    // opaque fill of its own — sourced from the OS window color so it matches the system theme (the
-    // palette roles are opaque QColors).
+    // The bar's own fill, so the transparent window doesn't show the desktop through it: the
+    // ApplicationWindow itself is transparent for terminal see-through. Opaque unless the surface is
+    // cleared for a material behind it (`fill`); the palette roles and the band's tint are opaque QColors.
     Rectangle {
+        objectName: root.isBand ? "bandBackground" : "tabsBarBackground"
         anchors.fill: parent
-        color: systemPalette.window
+        color: root.fill
     }
 
     // The window controls, wherever they go. One definition, instantiated by whichever of the two

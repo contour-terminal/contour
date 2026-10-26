@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -208,6 +210,20 @@ namespace
     [[nodiscard]] QString nameOf(std::string_view name)
     {
         return QString::fromUtf8(name);
+    }
+
+    /// The band centre QML names @p name (window::barCentreName's inverse).
+    /// @param name A centre as UiStyleProvider::titleBand answers it.
+    /// @return The centre, or @c std::nullopt for a name no centre has.
+    [[nodiscard]] std::optional<BarCentre> barCentreOf(QString const& name)
+    {
+        for (auto const index: std::views::iota(size_t { 0 }, BarCentreCount))
+        {
+            auto const centre = static_cast<BarCentre>(index);
+            if (name == nameOf(barCentreName(centre)))
+                return centre;
+        }
+        return std::nullopt;
     }
 } // namespace
 
@@ -398,6 +414,32 @@ qreal UiStyleProvider::bandHeight() const noexcept
         case config::TabShape::Flat: break;
     }
     return _metrics.chromeHeight;
+}
+
+QColor UiStyleProvider::bandFill(int frame, int mode, QString const& centre) const
+{
+    auto const paletteWindow = QGuiApplication::palette().color(QPalette::Window);
+    if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount) || !barCentreOf(centre))
+        return paletteWindow;
+
+    auto const surface = resolveTitleBandSurface(TitleBandSurfaceInputs {
+        .style = _inputs.row,
+        .material = _groups.material.titleBand,
+        .frame = static_cast<WindowFrame>(frame),
+        .mode = static_cast<WindowMode>(mode),
+    });
+    switch (surface.fill)
+    {
+        case config::BandFill::Palette: break;
+        case config::BandFill::Clear: return { Qt::transparent };
+        case config::BandFill::Tint: {
+            auto const tint =
+                legibleBandTint(_inputs.scheme.bySlot[static_cast<size_t>(config::SchemeSlot::Background)],
+                                paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
+            return tint ? platform::toQColor(*tint) : paletteWindow;
+        }
+    }
+    return paletteWindow;
 }
 
 QColor UiStyleProvider::statusColor(int role) const
