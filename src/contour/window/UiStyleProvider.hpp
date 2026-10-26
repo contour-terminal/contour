@@ -338,6 +338,11 @@ class UiStyleProvider: public QObject
     /// @return The colour; transparent for a role outside the table.
     [[nodiscard]] Q_INVOKABLE QColor colorOn(int role, QColor const& background) const;
 
+    /// How far a pane card keeps its terminal in from every edge (window::cardContentInset) at its radius.
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return The inset in logical pixels, on the device grid; 0 for a square card.
+    [[nodiscard]] Q_INVOKABLE qreal paneCardContentInset(qreal devicePixelRatio) const;
+
     /// One device pixel, in logical pixels: the pane card's border width.
     /// @param devicePixelRatio The window's device-pixel ratio.
     /// @return @c 1 / @p devicePixelRatio, or 1 for a ratio of 0 or less.

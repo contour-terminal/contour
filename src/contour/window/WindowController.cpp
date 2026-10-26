@@ -1439,7 +1439,8 @@ void WindowController::followHeldModifier(QEvent const& event)
             _heldModifier.modifierReleased();
             break;
         }
-        case QEvent::MouseButtonPress: _heldModifier.otherInput(); break;
+        // A click on a revealed header's button must reach it, so a press hides nothing already shown.
+        case QEvent::MouseButtonPress: _heldModifier.pointerPressed(_clock.now()); break;
         default: return;
     }
     refreshHeaderReveal();

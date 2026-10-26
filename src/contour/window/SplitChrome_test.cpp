@@ -4,11 +4,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <numbers>
 
 using contour::config::AccessibilityPreferences;
 using contour::config::ChromeDensity;
 using contour::config::ChromeStyle;
 using contour::config::resolveChromeTokens;
+using contour::window::cardContentInset;
 using contour::window::snappedChromePixels;
 using contour::window::splitChromeOf;
 using vtworkspace::SplitChrome;
@@ -31,7 +33,11 @@ constexpr auto SplitChromeCases = std::array {
                       .density = ChromeDensity::Comfortable,
                       .unitWidth = 1.0,
                       .unitHeight = 1.0,
-                      .expected = { .sideBySideGap = 6, .stackedGap = 6, .leafHeader = 22, .rootInset = 6 } },
+                      .expected = { .sideBySideGap = 6,
+                                    .stackedGap = 6,
+                                    .leafHeader = 22,
+                                    .rootInset = 6,
+                                    .leafInset = 3 } },
     SplitChromeCase { .style = ChromeStyle::MacOS,
                       .density = ChromeDensity::Minimal,
                       .unitWidth = 1.0,
@@ -41,7 +47,11 @@ constexpr auto SplitChromeCases = std::array {
                       .density = ChromeDensity::Comfortable,
                       .unitWidth = 1.0,
                       .unitHeight = 1.0,
-                      .expected = { .sideBySideGap = 4, .stackedGap = 4, .leafHeader = 28, .rootInset = 4 } },
+                      .expected = { .sideBySideGap = 4,
+                                    .stackedGap = 4,
+                                    .leafHeader = 28,
+                                    .rootInset = 4,
+                                    .leafInset = 2 } },
     SplitChromeCase {
         .style = ChromeStyle::Terminal,
         .density = ChromeDensity::Comfortable,
@@ -84,13 +94,40 @@ TEST_CASE("splitChromeOf counts the gaps and the inset as drawn on the device gr
     CHECK(splitChromeOf(tokens, 7.4, 16.2, 1.25)
           == SplitChrome { .sideBySideGap = 8, .stackedGap = 16, .leafHeader = 17, .rootInset = 0 });
 
-    // A native row's whole-point tokens: whatever fraction a scale floors off, the count is the token.
+    // A native row's whole-point tokens: whatever fraction a scale floors off, the count is the token. The
+    // cards' content inset is rounded UP on the device grid instead, so it is counted by the scale.
     auto const mac = resolveChromeTokens(ChromeStyle::MacOS, AccessibilityPreferences {});
+    auto const withoutCardInset = [](SplitChrome chrome) {
+        chrome.leafInset = 0;
+        return chrome;
+    };
     for (auto const dpr: { 1.0, 1.25, 1.5, 1.75, 2.0 })
     {
         CAPTURE(dpr);
-        CHECK(splitChromeOf(mac, 1.0, 1.0, dpr) == splitChromeOf(mac, 1.0, 1.0, 1.0));
+        CHECK(withoutCardInset(splitChromeOf(mac, 1.0, 1.0, dpr))
+              == withoutCardInset(splitChromeOf(mac, 1.0, 1.0, 1.0)));
     }
+}
+
+TEST_CASE("cardContentInset keeps the grid inside a rounded card's corners", "[splitchrome]")
+{
+    // r 10: the arc is 2.93 deep at 45 degrees, 3 device pixels at 100 % and 6 at 200 %.
+    CHECK(cardContentInset(10.0, 1.0) == 3.0);
+    CHECK(cardContentInset(10.0, 2.0) == 3.0);
+    // 3.66 device pixels at 125 % is 4 of them: 3.2 points, which the solver counts as 4.
+    CHECK(cardContentInset(10.0, 1.25) == 4.0 / 1.25);
+    CHECK(splitChromeOf(resolveChromeTokens(ChromeStyle::MacOS, AccessibilityPreferences {}), 1.0, 1.0, 1.25)
+              .leafInset
+          == 4);
+    // The grid's corner lies on or inside the arc: distance from the arc's centre is sqrt 2 (r - inset).
+    for (auto const radius: { 4.0, 6.0, 10.0 })
+        for (auto const dpr: { 1.0, 1.25, 1.5, 1.75, 2.0 })
+        {
+            CAPTURE(radius, dpr);
+            CHECK(std::numbers::sqrt2 * (radius - cardContentInset(radius, dpr)) <= radius + 1e-9);
+        }
+    // A square card, as Minimal's and the Terminal row's are, keeps its grid at the edge.
+    CHECK(cardContentInset(0.0, 1.0) == 0.0);
 }
 
 static_assert(

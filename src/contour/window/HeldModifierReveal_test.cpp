@@ -67,6 +67,21 @@ TEST_CASE("heldModifier.aPressWhileArmedKeepsTheFirstTime", "[heldmodifier]")
     CHECK(reveal.dueAt() == T0 + 500ms);
 }
 
+TEST_CASE("heldModifier.aPointerPressDisarmsOnlyAPendingHold", "[heldmodifier]")
+{
+    auto reveal = HeldModifierReveal { 500ms };
+    reveal.modifierPressed(T0);
+    reveal.pointerPressed(T0 + 100ms);
+    CHECK(reveal.at(T0 + 600ms) == HeaderReveal::None);
+    CHECK_FALSE(reveal.dueAt().has_value());
+
+    reveal.modifierReleased();
+    reveal.modifierPressed(T0 + 1s);
+    REQUIRE(reveal.at(T0 + 1s + 500ms) == HeaderReveal::HeldModifier);
+    reveal.pointerPressed(T0 + 1s + 600ms);
+    CHECK(reveal.at(T0 + 1s + 700ms) == HeaderReveal::HeldModifier);
+}
+
 TEST_CASE("heldModifier.otherInputWhileReleasedIsIgnored", "[heldmodifier]")
 {
     auto reveal = HeldModifierReveal { 500ms };

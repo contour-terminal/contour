@@ -49,6 +49,9 @@ struct SplitChrome
     int leafHeader = 0;
     /// How far a split tree's cards sit in from each edge of the content area.
     int rootInset = 0;
+    /// How far each leaf's grid sits in from every edge of its card, so that no cell reaches the card's
+    /// rounded corners.
+    int leafInset = 0;
 
     [[nodiscard]] constexpr bool operator==(SplitChrome const&) const noexcept = default;
 };
@@ -71,10 +74,11 @@ inline constexpr int CellDividerThickness = 1;
 /// cross axis passes through unchanged. SplitState::Vertical places children side-by-side (splits the
 /// width axis); SplitState::Horizontal stacks them (splits the height axis).
 ///
-/// A leaf inside a split is a card: its header (`leafHeader`) sits above its grid, and the whole tree is
-/// inset by `rootInset` from every content edge. So the walk first adds the header to the height, then
-/// solves each level, then adds twice the inset to both axes. A leaf that is its own layout root is
-/// drawn edge to edge, with neither.
+/// A leaf inside a split is a card: its grid sits `leafInset` in from every edge of the card, its header
+/// (`leafHeader`) above it, and the whole tree is inset by `rootInset` from every content edge. So the walk
+/// first adds twice the card's inset to both axes and the header to the height, then solves each level,
+/// then adds twice the root inset to both axes. A leaf that is its own layout root is drawn edge to edge,
+/// with none of these.
 ///
 /// Each upward step CEILS, so the leaf ends up with at least the requested extent — exact in the common
 /// case; any surplus is absorbed by the consumer's floor-to-grid semantics as padding. Never undershoots:
@@ -101,8 +105,9 @@ inline constexpr int CellDividerThickness = 1;
     if (&leaf == &layoutRoot)
         return requiredLeafSize;
 
-    auto width = static_cast<double>(requiredLeafSize.width);
-    auto height = static_cast<double>(requiredLeafSize.height) + chrome.leafHeader;
+    auto const cardInset = 2.0 * chrome.leafInset;
+    auto width = static_cast<double>(requiredLeafSize.width) + cardInset;
+    auto height = static_cast<double>(requiredLeafSize.height) + chrome.leafHeader + cardInset;
 
     for (auto const* node = &leaf; node != &layoutRoot; node = node->parent())
     {

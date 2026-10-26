@@ -1914,6 +1914,23 @@ TEST_CASE("WindowController: holding the reveal modifier alone reveals the heade
         CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
     }
 
+    SECTION("a press while revealed stays revealed")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        REQUIRE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::mouseClick(osWindow, Qt::LeftButton, Qt::AltModifier, QPoint { 10, 10 });
+        CHECK(revealed(*window));
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+    }
+
+    SECTION("a press before the delay never reveals")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        QTest::mouseClick(osWindow, Qt::LeftButton, Qt::AltModifier, QPoint { 10, 10 });
+        CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+    }
+
     SECTION("a release hides")
     {
         QTest::keyPress(osWindow, Qt::Key_Alt);

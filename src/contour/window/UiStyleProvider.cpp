@@ -5,6 +5,7 @@
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabWellLayout.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -507,6 +508,11 @@ QColor UiStyleProvider::colorOn(int role, QColor const& background) const
     auto const tone = toneOf(platform::toRGBColor(background));
     return _colors.resolve(_groups.colors[static_cast<size_t>(role)],
                            tone == ChromeTone::Dark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
+}
+
+qreal UiStyleProvider::paneCardContentInset(qreal devicePixelRatio) const
+{
+    return devicePixelRatio > 0 ? cardContentInset(_radii.paneCard(), devicePixelRatio) : 0.0;
 }
 
 qreal UiStyleProvider::hairline(qreal devicePixelRatio) const

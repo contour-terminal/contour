@@ -49,6 +49,10 @@ ContourTerminal {
     // header, whose own bottom edge is square, so the pane's top corners are square to meet it.
     property real squareTop: 0
 
+    // How far the pane's background and dim reach beyond it on every side: a rounded card keeps the grid
+    // in from its corners (window::cardContentInset), and its colour fills the card up to the edge.
+    property real backgroundOutset: 0
+
     // When this pane becomes the active pane (mouse click OR a keyboard FocusPane* action, which
     // flips node.active via the model's activePaneChanged), grab Qt keyboard focus so keystrokes go
     // to this terminal — not just the focus cue. Without this, keyboard pane navigation moved the
@@ -99,10 +103,12 @@ ContourTerminal {
     // the color wash that restores text contrast over a blurred image. All session reads are
     // null-guarded (the session is transiently null during split rebinds).
     //
-    // The two colour layers take the card's corners (cornerRadius, squared at the top by squareTop); the
-    // image and its blur stay rectangular.
+    // The two colour layers fill the card (backgroundOutset beyond the grid) and take its corners
+    // (cornerRadius, squared at the top by squareTop); the image and its blur keep to the grid, which a
+    // card keeps clear of its corners.
     Item {
         anchors.fill: parent
+        anchors.margins: -pane.backgroundOutset
         z: -1
         clip: pane.squareTop > 0
 
@@ -119,6 +125,7 @@ ContourTerminal {
         Image {
             id: backgroundImage
             anchors.fill: parent
+            anchors.margins: pane.backgroundOutset
             opacity: pane.session ? pane.session.opacityBackground : 1.0
             focus: false
             visible: pane.session ? pane.session.isImageBackground : false
@@ -223,6 +230,7 @@ ContourTerminal {
     Item {
         objectName: "dimOverlay"
         anchors.fill: parent
+        anchors.margins: -pane.backgroundOutset
         z: 5
         clip: pane.squareTop > 0
         property color color: pane.dimOverlayColor(

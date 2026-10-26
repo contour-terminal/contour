@@ -49,8 +49,10 @@ Item {
     Accessible.role: Accessible.StaticText
     Accessible.name: workingDirectory !== "" ? qsTr("%1, %2").arg(name).arg(workingDirectory) : name
 
-    // A click on the header, as on the terminal, makes the pane the active one.
+    // A click on the header, as on the terminal, makes the pane the active one. It takes the press for
+    // itself: an overlay header lies over the terminal, which must not see the click as its own.
     TapHandler {
+        gesturePolicy: TapHandler.ReleaseWithinBounds
         onTapped: if (header.node) header.node.activate()
     }
 

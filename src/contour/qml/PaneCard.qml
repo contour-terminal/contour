@@ -29,6 +29,9 @@ Item {
     readonly property bool isCard: visiblePanes >= 2
     readonly property color fill: session ? session.backgroundColor : "black"
     readonly property real cornerRadius: isCard ? chromeStyle.radii.paneCard : 0
+    // How far the grid sits in from every edge of a rounded card, so that no cell reaches its corners; the
+    // window-size solver counts it (window::splitChromeOf).
+    readonly property real contentInset: isCard ? chromeStyle.paneCardContentInset(Screen.devicePixelRatio) : 0
 
     // The provider's decision for this pane's header; an empty map (a value out of range) hides it.
     readonly property var policy: chromeStyle.paneHeader(headerReveal,
@@ -50,17 +53,20 @@ Item {
     ElevationShadow {
         objectName: "paneCardShadow"
         anchors.fill: parent
-        visible: card.isCard && card.isActive
+        // A soft shadow only: the Terminal row's hard offset copy would shade the gap beside the card.
+        visible: card.isCard && card.isActive && chromeStyle.elevation.e1.blur > 0
         level: chromeStyle.elevation.e1
         radius: card.cornerRadius
     }
 
     TerminalPane {
         id: terminal
-        x: 0
-        y: card.headerInline ? header.height : 0
-        width: card.width
-        height: card.height - y
+        // The grid, contentInset in from the card's edges and below an inline header.
+        x: card.contentInset
+        y: (card.headerInline ? header.height : 0) + card.contentInset
+        width: card.width - x - card.contentInset
+        height: card.height - y - card.contentInset
+        backgroundOutset: card.contentInset
         session: card.session
         paneActive: card.isActive
         visiblePanes: card.visiblePanes

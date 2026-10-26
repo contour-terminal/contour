@@ -55,7 +55,10 @@ LayoutSize simulateAllocation(Pane& root, Pane const& leaf, LayoutSize content, 
             height = (height * share) - (isFirst ? 0.0 : static_cast<double>(chrome.stackedGap));
     }
     if (isSplit)
-        height -= chrome.leafHeader;
+    {
+        height -= chrome.leafHeader + (2.0 * chrome.leafInset);
+        width -= 2.0 * chrome.leafInset;
+    }
     return { .width = static_cast<int>(width), .height = static_cast<int>(height) };
 }
 
@@ -193,6 +196,29 @@ TEST_CASE("PaneLayout: a split leaf adds the header and the root inset", "[vtwor
     // Second: the gap is the second child's, ceil((400 + 6) / 0.5) before the inset.
     CHECK(contentSizeForLeaf(*second, required, Cards, root)
           == LayoutSize { .width = 812 + 12, .height = 300 + 22 + 12 });
+}
+
+TEST_CASE("PaneLayout: a rounded card's content inset is counted on both axes", "[vtworkspace][layout]")
+{
+    // The macOS row's cards with their grid 3 pt in from the rounded corners (r 10).
+    constexpr auto Cards =
+        SplitChrome { .sideBySideGap = 6, .stackedGap = 6, .leafHeader = 22, .rootInset = 6, .leafInset = 3 };
+    auto root = Pane { PaneId { 1 }, SessionId { 1 } };
+    auto const [first, second] =
+        root.split(SplitState::Vertical, PaneId { 2 }, PaneId { 3 }, SessionId { 2 }, 0.5);
+    auto const required = LayoutSize { .width = 400, .height = 300 };
+
+    CHECK(contentSizeForLeaf(*first, required, Cards, root)
+          == LayoutSize { .width = (2 * (400 + 6)) + 12, .height = 300 + 6 + 22 + 12 });
+    CHECK(contentSizeForLeaf(*second, required, Cards, root)
+          == LayoutSize { .width = (2 * (400 + 6 + 6)) + 12, .height = 300 + 6 + 22 + 12 });
+    for (auto const* leaf: { first, second })
+        CHECK(simulateAllocation(root, *leaf, contentSizeForLeaf(*leaf, required, Cards, root), Cards)
+              == required);
+
+    // A leaf alone is edge to edge: no card, no inset.
+    auto lone = Pane { PaneId { 9 }, SessionId { 9 } };
+    CHECK(contentSizeForLeaf(lone, required, Cards, lone) == required);
 }
 
 TEST_CASE("PaneLayout: the stacked gap is the stacked axis's", "[vtworkspace][layout]")

@@ -38,6 +38,15 @@ class HeldModifierReveal
             _state = HoldState::Disarmed;
     }
 
+    /// A pointer button went down. It disarms a hold still pending, as other input does, but leaves a reveal
+    /// that has already fired alone: a click on a revealed header's button is what the reveal is for.
+    /// @param now When it happened.
+    void pointerPressed(std::chrono::steady_clock::time_point now) noexcept
+    {
+        if (_state == HoldState::Armed && at(now) == HeaderReveal::None)
+            _state = HoldState::Disarmed;
+    }
+
     /// The modifier went up.
     void modifierReleased() noexcept { _state = HoldState::Released; }
 

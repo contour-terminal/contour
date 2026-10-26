@@ -3,6 +3,8 @@
 
 #include <contour/config/ChromeTokenGroups.hpp>
 
+#include <numbers>
+
 #include <vtworkspace/PaneLayout.hpp>
 
 namespace contour::window
@@ -36,6 +38,23 @@ namespace detail
     return static_cast<double>(devicePixels > 1 ? devicePixels : 1) / devicePixelRatio;
 }
 
+/// How far a rounded card keeps its terminal in from every edge, in logical pixels, as PaneCard.qml draws it.
+///
+/// The depth of the corner arc at 45 degrees, r(1 - 1/sqrt 2): a grid inset that far has its corner exactly
+/// on the arc, so no cell background, selection, cursor or image reaches outside the rounded border.
+/// Rounded UP to whole device pixels, so the grid's origin stays on the device grid (#2040) and still clears
+/// the arc.
+/// @param radius           The card's corner radius, in logical pixels.
+/// @param devicePixelRatio The window's device pixels per logical pixel; positive.
+/// @return The inset per edge; 0 for a square card.
+[[nodiscard]] constexpr double cardContentInset(double radius, double devicePixelRatio) noexcept
+{
+    if (radius <= 0.0)
+        return 0.0;
+    auto const depth = radius * (1.0 - (1.0 / std::numbers::sqrt2));
+    return static_cast<double>(detail::ceilOf(depth * devicePixelRatio)) / devicePixelRatio;
+}
+
 /// What a split tree spends around its leaves, in logical pixels, for the pane-tree size solver.
 ///
 /// The same tokens PaneNode.qml draws the gap, the header and the inset with, so the solver and the
@@ -46,7 +65,7 @@ namespace detail
 /// @param unitWidth        One horizontal token unit, in logical pixels: a cell's width on Terminal, else 1.
 /// @param unitHeight       One vertical token unit, in logical pixels: a cell's height on Terminal, else 1.
 /// @param devicePixelRatio The window's device pixels per logical pixel; positive.
-/// @return The gaps per axis, the header height and the root inset.
+/// @return The gaps per axis, the header height, the root inset and the cards' content inset.
 [[nodiscard]] constexpr vtworkspace::SplitChrome splitChromeOf(config::ChromeTokenRow const& tokens,
                                                                double unitWidth,
                                                                double unitHeight,
@@ -60,6 +79,8 @@ namespace detail
         .stackedGap = drawn(tokens.space.paneGapRows, unitHeight),
         .leafHeader = detail::ceilOf(static_cast<double>(tokens.size.paneHeader) * unitHeight),
         .rootInset = drawn(tokens.space.paneInset, unitWidth),
+        .leafInset = detail::ceilOf(
+            cardContentInset(static_cast<double>(tokens.radii.paneCard) * unitWidth, devicePixelRatio)),
     };
 }
 

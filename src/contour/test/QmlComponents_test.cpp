@@ -4256,7 +4256,7 @@ TEST_CASE("pane card: a split's cards have headers (offscreen)", "[contour][gui]
         auto const& header = PaneTreeHost::partOf(card, "paneHeader");
         CHECK(header.isVisible());
         CHECK(header.height() == 22);
-        CHECK(PaneTreeHost::terminalOf(card).y() == 22);
+        CHECK(PaneTreeHost::terminalOf(card).y() == 22 + host.style().paneCardContentInset(1.0));
         CHECK(card.width() >= contour::window::CwdMinPaneWidth);
         CHECK(PaneTreeHost::partOf(card, "paneHeaderCwd").isVisible());
     }
@@ -4277,6 +4277,55 @@ TEST_CASE("pane card: a split's cards have headers (offscreen)", "[contour][gui]
         CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeaderCwd").isVisible());
         CHECK(PaneTreeHost::partOf(card, "paneHeaderName").isVisible());
     }
+}
+
+TEST_CASE("pane card: the grid keeps clear of a rounded card's corners (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(row));
+    auto setup = paneCardSetup();
+    setup.row = row;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    // What the window-size solver counts for the card is what the card spends.
+    auto& style = host.style();
+    auto const counted = contour::window::splitChromeOf(
+        style.resolvedRow(), style.units().horizontal, style.units().vertical, 1.0);
+    auto const inset = style.paneCardContentInset(1.0);
+    CHECK(inset == counted.leafInset);
+    CHECK((row == ChromeStyle::MacOS ? inset == 3.0 : inset == 0.0));
+
+    for (auto const* leaf: { &panes.left(), &panes.right() })
+    {
+        auto const& card = host.cardOf(*leaf);
+        auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+        auto const& terminal = PaneTreeHost::terminalOf(card);
+        CHECK(terminal.x() == inset);
+        CHECK(terminal.y() == header.height() + inset);
+        CHECK(card.width() - (terminal.x() + terminal.width()) == inset);
+        CHECK(card.height() - (terminal.y() + terminal.height()) == inset);
+    }
+}
+
+TEST_CASE("pane card: only a soft shadow lifts the active card (offscreen)", "[contour][gui][qml][panecard]")
+{
+    using contour::config::ChromeStyle;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(row));
+    auto setup = paneCardSetup();
+    setup.row = row;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    // The Terminal row's e1 is a hard offset copy, which would shade the gap beside the card.
+    CHECK(PaneTreeHost::partOf(host.cardOf(panes.left()), "paneCardShadow").isVisible()
+          == (row == ChromeStyle::MacOS));
+    CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.right()), "paneCardShadow").isVisible());
 }
 
 TEST_CASE("pane card: focus is emphasis and dim, never an outline (offscreen)",
@@ -4459,6 +4508,35 @@ TEST_CASE("pane card: Minimal shows no headers until the modifier is held (offsc
             CHECK(terminal.y() == 0);
             CHECK(terminal.height() == card.height());
         }
+    }
+
+    SECTION("a click on a revealed action reaches the action, not the terminal beneath")
+    {
+        host.show(
+            panes.split, /*visiblePanes*/ 2, static_cast<int>(contour::window::HeaderReveal::HeldModifier));
+        auto const& card = host.cardOf(panes.left());
+        auto& terminal = PaneTreeHost::terminalOf(card);
+        auto const tapped = QSignalSpy { &terminal, SIGNAL(activated()) };
+        auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+        auto const& actions = PaneTreeHost::partOf(card, "paneHeaderActions");
+        QTest::mouseMove(&host.window,
+                         header.mapToScene({ header.width() / 2, header.height() / 2 }).toPoint());
+        REQUIRE(QTest::qWaitFor([&actions] { return actions.opacity() == 1.0; }));
+
+        auto const& zoom = PaneTreeHost::partOf(card, "paneHeaderAction2");
+        QTest::mouseClick(&host.window,
+                          Qt::LeftButton,
+                          Qt::AltModifier,
+                          zoom.mapToScene({ zoom.width() / 2, zoom.height() / 2 }).toPoint());
+        CHECK(panes.left().headerActions == std::vector<int> { 2 });
+
+        // The header's own background takes its click too: the terminal beneath sees neither.
+        QTest::mouseClick(&host.window,
+                          Qt::LeftButton,
+                          Qt::AltModifier,
+                          header.mapToScene({ header.width() / 2, header.height() / 2 }).toPoint());
+        CHECK(panes.left().activateCalls >= 1);
+        CHECK(tapped.count() == 0);
     }
 
     SECTION("a single pane")

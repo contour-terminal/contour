@@ -2331,7 +2331,8 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
     h.pump();
 
     // Split side by side at one half, the harness session staying in the FIRST card: the window must now
-    // hold twice the leaf's width, its header, and the cards' inset on every edge. The single-pane answer
+    // hold twice the leaf's width with its card's content inset, its header, and the cards' inset on every
+    // edge. The single-pane answer
     // for the same page is the leaf's own extent (the identity case above), so it is the yardstick.
     auto const page = vtbackend::PageSize { vtbackend::LineCount(30), vtbackend::ColumnCount(100) };
     REQUIRE(controller.resizeWindowForPage(*h.display, page));
@@ -2345,8 +2346,9 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
     auto const chrome = h.testApp.app().splitChrome(h.window->devicePixelRatio());
     REQUIRE(controller.resizeWindowForPage(*h.display, page));
     h.pump();
-    CHECK(h.window->width() == (2 * leafExtent.width()) + (2 * chrome.rootInset));
-    CHECK(h.window->height() == leafExtent.height() + chrome.leafHeader + (2 * chrome.rootInset));
+    CHECK(h.window->width() == (2 * (leafExtent.width() + (2 * chrome.leafInset))) + (2 * chrome.rootInset));
+    CHECK(h.window->height()
+          == leafExtent.height() + (2 * chrome.leafInset) + chrome.leafHeader + (2 * chrome.rootInset));
 
     // And what the solver counted is what the cards draw: the first card's terminal -- below its header,
     // inside the inset, beside the gap -- holds exactly the requested page.
