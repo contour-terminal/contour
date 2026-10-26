@@ -45,13 +45,12 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last update: 2026-10-25, Step 1b done (`c8fe3124`). Its ledger, with every ruling, the
-controller-added Task 12a (⌘H, ⌥⌘H and ⌘M stay with the macOS menu; Minimize and Zoom; "Settings…"),
-the final review and its fix wave, and the parked findings, is
-`docs/superpowers/ledgers/2026-10-25-native-redesign-step-1b.md`. Next: write the Step 4a plan.
-Carry into it from that ledger: About and Settings… open on a minimised window after ⌘M (Step 4a's
-Settings window should raise or own its window), and the design canvas's macOS ⌘ chords (⌘N, ⌘T,
-⌘W, ⌥⌘W, ⇧⌘W, ⌘D, …), which no edition binds yet (issue #2175).
+Last update: 2026-10-27, Step 3d done (the command palette: groups, drill-in levels, the footer, motion
+and the focus hand-back). Its ledger, with every ruling, the task reviews, the final review and its fix wave, is
+`docs/superpowers/ledgers/2026-10-25-native-redesign-step-3d.md`. Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
+1d), 4a, 2, 3a and 3d. Steps 3b and 3c run in parallel worktrees; 3e and 3f follow. Carry into 3b: its
+`SearchSelection` action needs a row in 3d's category table, and its find colour roles append after
+`PaletteColorRoleEnd`.
 
 ## Rules for every step
 
@@ -85,14 +84,14 @@ Settings window should raise or own its window), and the design canvas's macOS �
 | 1d | macOS title-band material and safe area (spike first) | 1c | 3.5 | `2026-10-25-native-redesign-step-1d.md` (done) |
 | 2 | Pane cards, headers, gap and hit area, densities, pane states | 1d | 3.6 | `2026-10-25-native-redesign-step-2.md` (done) |
 | 3a | Status line placeholders, flags, role colours, collapse, final template | 2 | 3.7 | `2026-10-25-native-redesign-step-3a.md` (done) |
-| 3b | Find bar: regex, whole word, chunked search, placement | 2 | 3.8 | `2026-10-25-native-redesign-step-2.md` (written) |
-| 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-2.md` (written) |
-| 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-2.md` (written) |
-| 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-2.md` (written) |
+| 3b | Find bar: regex, whole word, chunked search, placement | 2 | 3.8 | `2026-10-25-native-redesign-step-3b.md` (written) |
+| 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-3c.md` (written) |
+| 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-3d.md` (done) |
+| 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-3e.md` (written) |
 | 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (written) |
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (written) |
-| 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-4b.md` (written) |
-| 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-4b.md` (written) |
+| 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (written) |
+| 5b | Linux: ContourLinux style, header bar, portal backends | 4b | 3.15 | `2026-10-25-native-redesign-step-5b.md` (written) |
 | 6.1–6.10 | Moments: one PR each | 5a, 5b | 3.16 | `2026-10-25-native-redesign-step-6-1.md` … `-6-10.md` (written) |
 
 Steps 3a to 3e may run in any order, or in parallel worktrees, each with its own board.
