@@ -1224,7 +1224,8 @@ TEST_CASE("chromeStyle names the pane colour roles and the badge kinds in QML", 
         return static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
     };
     CHECK(propertiesOf(contour::window::ChromePaneRoleNames::staticMetaObject)
-          == contour::config::PaneColorRoleEnd - static_cast<size_t>(ChromeColorRole::PaneGapFill));
+          == (contour::config::PaneColorRoleEnd - static_cast<size_t>(ChromeColorRole::PaneGapFill))
+                 + (contour::config::FindColorRoleEnd - contour::config::PaletteColorRoleEnd));
     CHECK(propertiesOf(contour::window::ChromeBadgeKindNames::staticMetaObject)
           == contour::window::TabBadgeKindCount);
 }
@@ -1847,5 +1848,91 @@ TEST_CASE("UiStyleProvider: the command palette's inks read on every row, appear
                     }
                 });
         }
+    }
+}
+
+TEST_CASE("UiStyleProvider publishes the find bar's tokens and placement", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "size", "findBar").toReal() == 32.0);
+    CHECK(tokenOf(mac, "size", "findBarWidth").toReal() == 380.0);
+    CHECK(tokenOf(mac, "radii", "findBar").toReal() == 8.0);
+    CHECK(tokenOf(mac, "layout", "findBar").toInt() == tokenOf(mac, "layout", "overlay").toInt());
+    auto const placement = mac.findBarPlacement(0, 800, 400, 10, 30);
+    CHECK(placement.value("anchor").toString() == QStringLiteral("bottomRight"));
+    CHECK(placement.value("x").toReal() == 412.0);
+    CHECK(placement.value("y").toReal() == 360.0);
+    CHECK(placement.value("width").toReal() == 380.0);
+    // No current match (bottom not below top): the top right.
+    CHECK(mac.findBarPlacement(0, 800, 400, 0, 0).value("anchor").toString() == QStringLiteral("topRight"));
+    // An out-of-range header presence answers nothing.
+    CHECK(mac.findBarPlacement(2, 800, 400, 0, 0).isEmpty());
+    CHECK(mac.property("findPreviousGlyph").toString() == QStringLiteral("▴"));
+    CHECK(mac.property("findNextGlyph").toString() == QStringLiteral("▾"));
+
+    auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+    CHECK(tokenOf(terminal, "size", "findBar").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "size", "findBarWidth").toReal() == Catch::Approx(48 * terminal.widthQuantum()));
+    // The two insets are a cell across and a row down (F16).
+    CHECK(tokenOf(terminal, "space", "findBarInset").toReal() == Catch::Approx(terminal.widthQuantum()));
+    CHECK(tokenOf(terminal, "space", "findBarInsetRows").toReal() == Catch::Approx(terminal.cellHeight()));
+    CHECK(tokenOf(terminal, "layout", "findBar").toInt()
+          == tokenOf(terminal, "layout", "paneHeaderRow").toInt());
+    CHECK(terminal.findBarPlacement(1, 800, 400, 0, 0).value("anchor").toString()
+          == QStringLiteral("headerRow"));
+    CHECK(terminal.property("findPreviousGlyph").toString() == QStringLiteral("↑"));
+    CHECK(terminal.property("findNextGlyph").toString() == QStringLiteral("↓"));
+    // The toggles' brackets are the chips' (F22).
+    CHECK(terminal.property("chipOpenGlyph").toString() == QStringLiteral("["));
+    CHECK(terminal.property("chipCloseGlyph").toString() == QStringLiteral("]"));
+}
+
+TEST_CASE("UiStyleProvider: the find bar's text reads on what it sits on", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::SchemeSlot;
+
+    // Native rows: a lit toggle's accent glyph on its 22 % wash, and the unlit glyphs and the count on the
+    // bar, on a light and a dark chrome.
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        CAPTURE(static_cast<int>(row));
+        auto const provider =
+            contour::window::UiStyleProvider(contour::window::chromeInputsFor(row, QGuiApplication::font()));
+        auto const role = [&provider](char const* name) {
+            return tokenOf(provider, "colors", name).value<QColor>();
+        };
+        for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+            withWindowColor(window, [&] {
+                INFO("chrome: " << window.name().toStdString());
+                auto const lit = over(role("findToggleOnFill"), window);
+                CHECK(contrastOf(over(role("findToggleOnText"), lit), lit) >= 4.5);
+                CHECK(contrastOf(over(role("findToggleText"), window), window) >= 4.5);
+                CHECK(contrastOf(over(role("findCountText"), window), window) >= 4.5);
+            });
+    }
+
+    // The Terminal row: on the bar, over every bundled scheme.
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto inputs = contour::window::chromeInputsFor(ChromeStyle::Terminal, QGuiApplication::font());
+        inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
+        auto const terminal = contour::window::UiStyleProvider(inputs);
+        auto const role = [&terminal](char const* roleName) {
+            return tokenOf(terminal, "colors", roleName).value<QColor>();
+        };
+        auto const bar =
+            contour::platform::toQColor(inputs.scheme.bySlot[static_cast<size_t>(SchemeSlot::Bar)]);
+        CHECK(contrastOf(role("findToggleOnText"), role("findToggleOnFill")) >= 4.5);
+        CHECK(contrastOf(role("findToggleText"), bar) >= 4.5);
+        CHECK(contrastOf(role("findCountText"), bar) >= 4.5);
     }
 }

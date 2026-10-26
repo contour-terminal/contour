@@ -73,6 +73,13 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal paletteRow READ paletteRow CONSTANT)
     Q_PROPERTY(qreal paletteGroupHeader READ paletteGroupHeader CONSTANT)
     Q_PROPERTY(qreal paletteFooter READ paletteFooter CONSTANT)
+    Q_PROPERTY(qreal findBar READ findBar CONSTANT)
+    Q_PROPERTY(qreal findBarWidth READ findBarWidth CONSTANT)
+    Q_PROPERTY(qreal findToggleWidth READ findToggleWidth CONSTANT)
+    Q_PROPERTY(qreal findToggleHeight READ findToggleHeight CONSTANT)
+    Q_PROPERTY(qreal findButtonWidth READ findButtonWidth CONSTANT)
+    Q_PROPERTY(qreal findButtonHeight READ findButtonHeight CONSTANT)
+    Q_PROPERTY(qreal findIcon READ findIcon CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -171,13 +178,40 @@ class ChromeSizeTokens: public QObject
     /// @return The height of the palette's footer in logical pixels.
     [[nodiscard]] qreal paletteFooter() const noexcept { return _tokens.paletteFooter * _units.vertical; }
 
+    /// @return The find bar's height in logical pixels.
+    [[nodiscard]] qreal findBar() const noexcept { return _tokens.findBar * _units.vertical; }
+    /// @return The find bar's width in logical pixels.
+    [[nodiscard]] qreal findBarWidth() const noexcept { return _tokens.findBarWidth * _units.horizontal; }
+    /// @return A find option toggle's width in logical pixels.
+    [[nodiscard]] qreal findToggleWidth() const noexcept
+    {
+        return _tokens.findToggleWidth * _units.horizontal;
+    }
+    /// @return A find option toggle's height in logical pixels.
+    [[nodiscard]] qreal findToggleHeight() const noexcept
+    {
+        return _tokens.findToggleHeight * _units.vertical;
+    }
+    /// @return The width of the find bar's previous, next and close buttons in logical pixels.
+    [[nodiscard]] qreal findButtonWidth() const noexcept
+    {
+        return _tokens.findButtonWidth * _units.horizontal;
+    }
+    /// @return Their height in logical pixels.
+    [[nodiscard]] qreal findButtonHeight() const noexcept
+    {
+        return _tokens.findButtonHeight * _units.vertical;
+    }
+    /// @return The magnifier's edge in logical pixels; 0 draws none.
+    [[nodiscard]] qreal findIcon() const noexcept { return _tokens.findIcon * _units.horizontal; }
+
   private:
     config::SizeTokens _tokens {};
     ChromeUnits _units {};
 };
 
-/// Gaps and the spacing scale, `chromeStyle.space`. Every value but @c revealEdge and @c paneGapRows is
-/// horizontal.
+/// Gaps and the spacing scale, `chromeStyle.space`. Every value but @c revealEdge, @c paneGapRows and
+/// @c findBarInsetRows is horizontal.
 class ChromeSpaceTokens: public QObject
 {
     Q_OBJECT
@@ -201,6 +235,8 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal paneHeaderGap READ paneHeaderGap CONSTANT)
     Q_PROPERTY(qreal footerLeading READ footerLeading CONSTANT)
     Q_PROPERTY(qreal paletteInset READ paletteInset CONSTANT)
+    Q_PROPERTY(qreal findBarInset READ findBarInset CONSTANT)
+    Q_PROPERTY(qreal findBarInsetRows READ findBarInsetRows CONSTANT)
 
   public:
     /// @param tokens The resolved space group.
@@ -253,6 +289,13 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal footerLeading() const noexcept { return _tokens.footerLeading * _units.horizontal; }
     /// @return The palette rows' horizontal inset and the list's side padding, in logical pixels.
     [[nodiscard]] qreal paletteInset() const noexcept { return _tokens.paletteInset * _units.horizontal; }
+    /// @return The find bar's inset from the pane's right edge in logical pixels.
+    [[nodiscard]] qreal findBarInset() const noexcept { return _tokens.findBarInset * _units.horizontal; }
+    /// @return Its inset from the pane's top edge in logical pixels (vertical: one row on Terminal).
+    [[nodiscard]] qreal findBarInsetRows() const noexcept
+    {
+        return _tokens.findBarInsetRows * _units.vertical;
+    }
 
   private:
     config::SpaceTokens _tokens {};
@@ -276,6 +319,7 @@ class ChromeRadiusTokens: public QObject
     Q_PROPERTY(qreal hostChip READ hostChip CONSTANT)
     Q_PROPERTY(qreal toolbarChip READ toolbarChip CONSTANT)
     Q_PROPERTY(qreal grabber READ grabber CONSTANT)
+    Q_PROPERTY(qreal findBar READ findBar CONSTANT)
 
   public:
     /// @param tokens The resolved radius group.
@@ -309,6 +353,8 @@ class ChromeRadiusTokens: public QObject
     [[nodiscard]] qreal toolbarChip() const noexcept { return _tokens.toolbarChip * _units.horizontal; }
     /// @return The radius of the split grabber.
     [[nodiscard]] qreal grabber() const noexcept { return _tokens.grabber * _units.horizontal; }
+    /// @return The radius of the find bar.
+    [[nodiscard]] qreal findBar() const noexcept { return _tokens.findBar * _units.horizontal; }
 
   private:
     config::RadiusTokens _tokens {};
@@ -615,6 +661,9 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int onHover READ onHover CONSTANT)
     Q_PROPERTY(int onHoverOrFocus READ onHoverOrFocus CONSTANT)
     Q_PROPERTY(int paletteTopPercent READ paletteTopPercent CONSTANT)
+    Q_PROPERTY(int findBar READ findBar CONSTANT)
+    Q_PROPERTY(int overlay READ overlay CONSTANT)
+    Q_PROPERTY(int paneHeaderRow READ paneHeaderRow CONSTANT)
 
   public:
     /// @param tokens The resolved layout group.
@@ -681,6 +730,18 @@ class ChromeLayoutTokens: public QObject
     /// @return The command palette's top edge, in percent of the window's height.
     [[nodiscard]] int paletteTopPercent() const noexcept { return _tokens.paletteTopPercent; }
 
+    /// @return Where the find bar sits, a config::FindBarHost as its underlying value.
+    [[nodiscard]] int findBar() const noexcept { return static_cast<int>(_tokens.findBar); }
+    /// @return The QML names of config::FindBarHost's enumerators.
+    [[nodiscard]] static constexpr int overlay() noexcept
+    {
+        return static_cast<int>(config::FindBarHost::Overlay);
+    }
+    [[nodiscard]] static constexpr int paneHeaderRow() noexcept
+    {
+        return static_cast<int>(config::FindBarHost::PaneHeaderRow);
+    }
+
   private:
     config::LayoutTokens _tokens {};
 };
@@ -727,6 +788,10 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor paletteSelectionFill READ paletteSelectionFill NOTIFY changed)
     Q_PROPERTY(QColor paletteSelectionText READ paletteSelectionText NOTIFY changed)
     Q_PROPERTY(QColor paletteSeparator READ paletteSeparator NOTIFY changed)
+    Q_PROPERTY(QColor findToggleOnFill READ findToggleOnFill NOTIFY changed)
+    Q_PROPERTY(QColor findToggleOnText READ findToggleOnText NOTIFY changed)
+    Q_PROPERTY(QColor findToggleText READ findToggleText NOTIFY changed)
+    Q_PROPERTY(QColor findCountText READ findCountText NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -813,6 +878,10 @@ class ChromeColorTokens: public QObject
         return color(config::ChromeColorRole::PaletteSelectionText);
     }
     [[nodiscard]] QColor paletteSeparator() const { return color(config::ChromeColorRole::PaletteSeparator); }
+    [[nodiscard]] QColor findToggleOnFill() const { return color(config::ChromeColorRole::FindToggleOnFill); }
+    [[nodiscard]] QColor findToggleOnText() const { return color(config::ChromeColorRole::FindToggleOnText); }
+    [[nodiscard]] QColor findToggleText() const { return color(config::ChromeColorRole::FindToggleText); }
+    [[nodiscard]] QColor findCountText() const { return color(config::ChromeColorRole::FindCountText); }
 
   signals:
     /// Every role may have changed colour.
@@ -828,7 +897,8 @@ class ChromeColorTokens: public QObject
 /// The QML names of the pane colour roles, `chromeStyle.roles`, for UiStyleProvider::colorOn().
 ///
 /// Properties rather than an exported enum: a Q_ENUM is not reachable through a context-property instance
-/// (see UiStyleProvider::statusDanger). One property per pane role, @c PaneGapFill up to @c PaneColorRoleEnd.
+/// (see UiStyleProvider::statusDanger). One property per pane role, @c PaneGapFill up to @c PaneColorRoleEnd,
+/// and per find bar role, @c PaletteColorRoleEnd up to @c FindColorRoleEnd: the find bar sits on the pane.
 class ChromePaneRoleNames: public QObject
 {
     Q_OBJECT
@@ -842,6 +912,10 @@ class ChromePaneRoleNames: public QObject
     Q_PROPERTY(int paneFooterFill READ paneFooterFill CONSTANT)
     Q_PROPERTY(int paneFooterText READ paneFooterText CONSTANT)
     Q_PROPERTY(int paneHeaderActionHover READ paneHeaderActionHover CONSTANT)
+    Q_PROPERTY(int findToggleOnFill READ findToggleOnFill CONSTANT)
+    Q_PROPERTY(int findToggleOnText READ findToggleOnText CONSTANT)
+    Q_PROPERTY(int findToggleText READ findToggleText CONSTANT)
+    Q_PROPERTY(int findCountText READ findCountText CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -887,6 +961,22 @@ class ChromePaneRoleNames: public QObject
     [[nodiscard]] static constexpr int paneHeaderActionHover() noexcept
     {
         return of(config::ChromeColorRole::PaneHeaderActionHover);
+    }
+    [[nodiscard]] static constexpr int findToggleOnFill() noexcept
+    {
+        return of(config::ChromeColorRole::FindToggleOnFill);
+    }
+    [[nodiscard]] static constexpr int findToggleOnText() noexcept
+    {
+        return of(config::ChromeColorRole::FindToggleOnText);
+    }
+    [[nodiscard]] static constexpr int findToggleText() noexcept
+    {
+        return of(config::ChromeColorRole::FindToggleText);
+    }
+    [[nodiscard]] static constexpr int findCountText() noexcept
+    {
+        return of(config::ChromeColorRole::FindCountText);
     }
 
   private:

@@ -146,6 +146,16 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              row.type.shortcut,
              double(row.motion.popoverScalePercent),
              double(row.layout.paletteTopPercent) });
+    append({ double(size.findBar),
+             double(size.findBarWidth),
+             double(size.findToggleWidth),
+             double(size.findToggleHeight),
+             double(size.findButtonWidth),
+             double(size.findButtonHeight),
+             double(size.findIcon),
+             double(row.space.findBarInset),
+             double(row.space.findBarInsetRows),
+             double(radii.findBar) });
     return out;
 }
 
@@ -172,6 +182,7 @@ struct ExpectedRow
     contour::config::TabColorSource tabColors = contour::config::TabColorSource::Palette;
     contour::config::ActiveTabWeight activeTabWeight = contour::config::ActiveTabWeight::Regular;
     contour::config::PaneActionsReveal paneActions = contour::config::PaneActionsReveal::OnHover;
+    contour::config::FindBarHost findBar = contour::config::FindBarHost::Overlay;
 };
 } // namespace
 
@@ -190,6 +201,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
     // ... e3, separator ring dim opacity tint, pane.dim 15/10, Minimal { 0, 1, 1, 8, 0, 0 }
     auto const nativeTail = std::vector<double> { 0,  0,  0, 0,  0,   1,  2,  12, 0, 4, 16, 25, 0, 12, 40,
                                                   35, 10, 0, -1, 1.0, 20, 15, 10, 0, 1, 1,  8,  0, 0 };
+    // the find bar: size(7) inset(2) radius(1), mac-find-menu
+    auto const nativeFind = std::vector<double> { 32, 380, 24, 22, 22, 22, 14, 8, 8, 8 };
     auto const rows = std::vector<ExpectedRow> {
         { ChromeStyle::MacOS,
           joined({ { 38, 28, 24, 28, 22, 36, 280, 16, 16, 960, 820, 720, 480 },
@@ -205,7 +218,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 10, 11, 13, 12, 15, 11, 500, 15 },
                    nativeMotion,
                    nativeTail,
-                   { 640, 420, 44, 32, 24, 28, 8, 17, 12, 97, 18 } }),
+                   { 640, 420, 44, 32, 24, 28, 8, 17, 12, 97, 18 },
+                   nativeFind }),
           Material::Solid,
           Material::Glass,
           ToastStyle::Floating,
@@ -229,7 +243,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 12, 12, 14, 12, 20, 12, 600, 15 },
                    nativeMotion,
                    nativeTail,
-                   { 640, 420, 44, 36, 24, 28, 8, 16, 12, 97, 18 } }),
+                   { 640, 420, 44, 36, 24, 28, 8, 16, 12, 97, 18 },
+                   nativeFind }),
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
@@ -253,7 +268,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 12, 12.5, 14, 13.5, 15, 12.5, 600, 15 },
                    nativeMotion,
                    nativeTail,
-                   { 640, 420, 44, 38, 24, 28, 8, 16, 12.5, 97, 18 } }),
+                   { 640, 420, 44, 38, 24, 28, 8, 16, 12.5, 97, 18 },
+                   nativeFind }),
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
@@ -277,7 +293,9 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 100, 160, 220, 0, 1200, 700, 500 },
                    { 0, 0, 0, 0, 1, 1, 0, 60, 1, 1, 0, 60, 1, 1, 0, 60, 10, 0.0, -1, 0.62, 0 },
                    { 15, 10, 0, 1, 1, 1, 0, 0 },
-                   { 48, 20, 1, 1, 1, 1, 1, 0, 0, 100, 18 } }),
+                   { 48, 20, 1, 1, 1, 1, 1, 0, 0, 100, 18 },
+                   // the find bar, in cells and rows (tui)
+                   { 1, 48, 4, 1, 2, 1, 0, 1, 1, 0 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,
@@ -287,7 +305,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
           ProfileMenuAffordance::Caret,
           TabColorSource::Roles,
           ActiveTabWeight::Bold,
-          PaneActionsReveal::OnHoverOrFocus },
+          PaneActionsReveal::OnHoverOrFocus,
+          FindBarHost::PaneHeaderRow },
     };
 
     for (auto const& expected: rows)
@@ -311,6 +330,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
         CHECK(row.layout.tabColors == expected.tabColors);
         CHECK(row.layout.activeTabWeight == expected.activeTabWeight);
         CHECK(row.layout.paneActions == expected.paneActions);
+        CHECK(row.layout.findBar == expected.findBar);
 
         auto const& fill = row.colors[static_cast<size_t>(ChromeColorRole::BannerFill)];
         auto const& text = row.colors[static_cast<size_t>(ChromeColorRole::BannerText)];
@@ -1156,6 +1176,48 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
     CHECK(schemeShade(SchemeSlot::Background, -4).kind == ColorSourceKind::SchemeShade);
     CHECK(schemeShade(SchemeSlot::Background, -4).level == -4);
     CHECK(separator().kind == ColorSourceKind::Separator);
+}
+
+TEST_CASE("chromeTokens.findColourRoles", "[chrometokens]")
+{
+    using namespace contour::config;
+    using contour::config::detail::label;
+    using contour::config::detail::schemeColor;
+    using contour::config::detail::schemeOnBar;
+    using enum ChromeColorRole;
+    auto const rows = std::array {
+        // The find bar (F13): a lit toggle is an accent wash under the primary label, or a selected run of
+        // cells; an unlit one and the count, the secondary label or the bar's inks.
+        PaneColorRow { .role = FindToggleOnFill,
+                       .native = ChromeColorSource { .kind = ColorSourceKind::StatusMark,
+                                                     .rgb = 0,
+                                                     .status = StatusColorRole::Running,
+                                                     .slot = SchemeSlot::Background,
+                                                     .alphaPercent = 22,
+                                                     .level = 0 },
+                       .terminal = schemeColor(SchemeSlot::Selection) },
+        PaneColorRow { .role = FindToggleOnText,
+                       .native = label(1),
+                       .terminal = schemeColor(SchemeSlot::SelectionText) },
+        PaneColorRow {
+            .role = FindToggleText, .native = label(2), .terminal = schemeOnBar(SchemeSlot::Secondary) },
+        PaneColorRow {
+            .role = FindCountText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarInk) },
+    };
+    // Every find bar role, PaletteColorRoleEnd up to FindColorRoleEnd, has a row here.
+    CHECK(rows.size() == FindColorRoleEnd - PaletteColorRoleEnd);
+
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        for (auto const& row: rows)
+        {
+            CAPTURE(static_cast<int>(row.role));
+            auto const& expected = style == ChromeStyle::Terminal ? row.terminal : row.native;
+            CHECK(ChromeTokenRows[index].colors[static_cast<size_t>(row.role)] == expected);
+        }
+    }
 }
 
 TEST_CASE("chromeTokens.legibleOnBarReadsOnEveryScheme", "[chrometokens]")

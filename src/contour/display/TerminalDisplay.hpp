@@ -430,6 +430,13 @@ class TerminalDisplay: public QQuickItem, public session::DisplaySurface
         return _session->historyLineCount();
     }
 
+    /// The band viewport rows @p first to @p last take in this item: where the find bar asks whether the
+    /// current match lies under it (window::placeFindBar).
+    /// @param first The first row.
+    /// @param last  The last row.
+    /// @return `{ top, bottom }` in item coordinates; empty before the renderer exists.
+    Q_INVOKABLE [[nodiscard]] QVariantMap rowBand(int first, int last) const;
+
   private:
     // helper methods
     //

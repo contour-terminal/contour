@@ -17,6 +17,7 @@
 #include <contour/platform/QtPath.hpp>
 #include <contour/session/FontControl.hpp>
 #include <contour/session/SessionInput.hpp>
+#include <contour/window/FindBarPlacement.hpp>
 
 #include <vtbackend/core/Color.hpp>
 
@@ -2251,5 +2252,19 @@ void TerminalDisplay::discardImage(vtbackend::Image const& image)
 }
 
 // }}}
+
+QVariantMap TerminalDisplay::rowBand(int first, int last) const
+{
+    if (!_renderer)
+        return {};
+    // The grid's metrics are device pixels; the item's coordinates are logical ones.
+    auto const metrics = gridMetrics();
+    auto const dpr = devicePixelRatio();
+    auto const band = window::rowBandOf(first,
+                                        last,
+                                        static_cast<double>(metrics.pageMargin.top) / dpr,
+                                        unbox<double>(metrics.cellSize.height) / dpr);
+    return { { QStringLiteral("top"), band.top }, { QStringLiteral("bottom"), band.bottom } };
+}
 
 } // namespace contour::display

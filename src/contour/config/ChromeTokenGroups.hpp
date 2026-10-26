@@ -160,6 +160,12 @@ enum class ChromeColorRole : uint8_t
     PaletteSelectionFill, //!< The selected row's fill.
     PaletteSelectionText, //!< The selected row's title and accessory.
     PaletteSeparator,     //!< The rules below the query and above the footer.
+
+    // The find bar.
+    FindToggleOnFill, //!< A lit option toggle's fill.
+    FindToggleOnText, //!< A lit option toggle's glyph.
+    FindToggleText,   //!< An unlit option toggle's glyph.
+    FindCountText,    //!< The match count beside the field.
 };
 
 /// Where a chrome colour comes from.
@@ -212,7 +218,7 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::BarSelectionText) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::FindCountText) + 1;
 
 /// One past the last pane colour role: the pane roles run from @c PaneGapFill to here.
 inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
@@ -220,6 +226,9 @@ inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::
 /// One past the last command palette colour role: the palette roles run from @c PaneColorRoleEnd to here,
 /// so a family appended after them does not shift their count.
 inline constexpr size_t PaletteColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
+
+/// One past the last find bar colour role: the find bar's roles run from @c PaletteColorRoleEnd to here.
+inline constexpr size_t FindColorRoleEnd = static_cast<size_t>(ChromeColorRole::FindCountText) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -285,6 +294,13 @@ struct ChromeSchemeColors
     [[nodiscard]] bool operator==(ChromeSchemeColors const&) const = default;
 };
 
+/// Where a style hosts the find bar.
+enum class FindBarHost : uint8_t
+{
+    Overlay = 0,   //!< Floating over the pane's terminal, at its top right.
+    PaneHeaderRow, //!< In the pane header's row, where the pane has one (the Terminal row).
+};
+
 /// Component extents. Logical pixels for the native rows, character cells for the Terminal row.
 struct SizeTokens
 {
@@ -332,6 +348,15 @@ struct SizeTokens
     int paletteGroupHeader = 0; ///< Height of a group header (vertical units).
     int paletteFooter = 0;      ///< Height of the footer (vertical units).
 
+    // The find bar.
+    int findBar = 0;          ///< Height of the find bar.
+    int findBarWidth = 0;     ///< Width of the find bar.
+    int findToggleWidth = 0;  ///< Width of a find option toggle.
+    int findToggleHeight = 0; ///< Height of a find option toggle.
+    int findButtonWidth = 0;  ///< Width of the previous, next and close buttons.
+    int findButtonHeight = 0; ///< Height of the previous, next and close buttons.
+    int findIcon = 0;         ///< Edge of the magnifier; 0 draws none.
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -356,6 +381,10 @@ struct SpaceTokens
 
     int paletteInset = 0; ///< The palette rows' horizontal inset and the list's side padding.
 
+    // The find bar.
+    int findBarInset = 0;     ///< The find bar's inset from the pane's right edge.
+    int findBarInsetRows = 0; ///< Its inset from the pane's top edge, in vertical units (a row on Terminal).
+
     [[nodiscard]] bool operator==(SpaceTokens const&) const = default;
 };
 
@@ -378,6 +407,7 @@ struct RadiusTokens
     int toolbarChip = 0; ///< A toolbar chip.
 
     int grabber = 0; ///< The split handle's grabber.
+    int findBar = 0; ///< The find bar.
 
     [[nodiscard]] bool operator==(RadiusTokens const&) const = default;
 };
@@ -489,6 +519,7 @@ struct LayoutTokens
     ActiveTabWeight activeTabWeight = ActiveTabWeight::Regular;       ///< How the active label stands out.
     PaneActionsReveal paneActions = PaneActionsReveal::OnHover; ///< When a pane header shows its actions.
     int paletteTopPercent = 0; ///< The command palette's top edge, in percent of the window's height.
+    FindBarHost findBar = FindBarHost::Overlay; ///< Where the find bar sits.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -611,7 +642,9 @@ namespace detail
                              .paneGapRows = paneGap,
                              .paneHeaderGap = paneHeaderGap,
                              .footerLeading = 14,
-                             .paletteInset = 8 };
+                             .paletteInset = 8,
+                             .findBarInset = 8,
+                             .findBarInsetRows = 8 };
     }
 
     inline constexpr MotionTokens NativeMotion { .fastMs = 100,
@@ -827,6 +860,18 @@ namespace detail
         sourceOf(ColorSourceKind::PaletteHighlight),       // PaletteSelectionFill
         sourceOf(ColorSourceKind::PaletteHighlightedText), // PaletteSelectionText
         separator(),                                       // PaletteSeparator
+        // A lit toggle is accent-tinted, its 22 % wash a mark (1c's text/mark split). Its glyph is the
+        // primary label, not the accent: the accent is the user's, and a dark one on its own wash on a dark
+        // chrome falls to 1.3:1.
+        ChromeColorSource { .kind = ColorSourceKind::StatusMark,
+                            .rgb = 0,
+                            .status = StatusColorRole::Running,
+                            .slot = SchemeSlot::Background,
+                            .alphaPercent = 22,
+                            .level = 0 }, // FindToggleOnFill
+        label(1),                         // FindToggleOnText
+        label(2),                         // FindToggleText
+        label(2),                         // FindCountText
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -881,7 +926,14 @@ namespace detail
                   .paletteField = 44,
                   .paletteRow = 32,
                   .paletteGroupHeader = 24,
-                  .paletteFooter = 28 },
+                  .paletteFooter = 28,
+                  .findBar = 32,
+                  .findBarWidth = 380,
+                  .findToggleWidth = 24,
+                  .findToggleHeight = 22,
+                  .findButtonWidth = 22,
+                  .findButtonHeight = 22,
+                  .findIcon = 14 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -895,7 +947,8 @@ namespace detail
                    .badge = 7,
                    .hostChip = 12,
                    .toolbarChip = 11,
-                   .grabber = 1 },
+                   .grabber = 1,
+                   .findBar = 8 },
         .type = { .caption = 10,
                   .footnote = 11,
                   .body = 13,
@@ -921,7 +974,8 @@ namespace detail
                     .tabColors = TabColorSource::Roles,
                     .activeTabWeight = ActiveTabWeight::Regular,
                     .paneActions = PaneActionsReveal::OnHover,
-                    .paletteTopPercent = 18 },
+                    .paletteTopPercent = 18,
+                    .findBar = FindBarHost::Overlay },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -964,7 +1018,14 @@ namespace detail
                   .paletteField = 44,
                   .paletteRow = 36,
                   .paletteGroupHeader = 24,
-                  .paletteFooter = 28 },
+                  .paletteFooter = 28,
+                  .findBar = 32,
+                  .findBarWidth = 380,
+                  .findToggleWidth = 24,
+                  .findToggleHeight = 22,
+                  .findButtonWidth = 22,
+                  .findButtonHeight = 22,
+                  .findIcon = 14 },
         .space = nativeSpace(4, 8),
         .radii = { .control = 4,
                    .popover = 8,
@@ -978,7 +1039,8 @@ namespace detail
                    .badge = 7,
                    .hostChip = 12,
                    .toolbarChip = 11,
-                   .grabber = 1 },
+                   .grabber = 1,
+                   .findBar = 8 },
         .type = { .caption = 12,
                   .footnote = 12,
                   .body = 14,
@@ -1001,7 +1063,8 @@ namespace detail
                     .tabColors = TabColorSource::Palette,
                     .activeTabWeight = ActiveTabWeight::Regular,
                     .paneActions = PaneActionsReveal::OnHover,
-                    .paletteTopPercent = 18 },
+                    .paletteTopPercent = 18,
+                    .findBar = FindBarHost::Overlay },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -1044,7 +1107,14 @@ namespace detail
                   .paletteField = 44,
                   .paletteRow = 38,
                   .paletteGroupHeader = 24,
-                  .paletteFooter = 28 },
+                  .paletteFooter = 28,
+                  .findBar = 32,
+                  .findBarWidth = 380,
+                  .findToggleWidth = 24,
+                  .findToggleHeight = 22,
+                  .findButtonWidth = 22,
+                  .findButtonHeight = 22,
+                  .findIcon = 14 },
         .space = nativeSpace(6, 8),
         .radii = { .control = 8,
                    .popover = 12,
@@ -1058,7 +1128,8 @@ namespace detail
                    .badge = 7,
                    .hostChip = 12,
                    .toolbarChip = 11,
-                   .grabber = 1 },
+                   .grabber = 1,
+                   .findBar = 8 },
         .type = { .caption = 12,
                   .footnote = 12.5,
                   .body = 14,
@@ -1081,7 +1152,8 @@ namespace detail
                     .tabColors = TabColorSource::Palette,
                     .activeTabWeight = ActiveTabWeight::Regular,
                     .paneActions = PaneActionsReveal::OnHover,
-                    .paletteTopPercent = 18 },
+                    .paletteTopPercent = 18,
+                    .findBar = FindBarHost::Overlay },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -1128,7 +1200,14 @@ namespace detail
                   .paletteField = 1,
                   .paletteRow = 1,
                   .paletteGroupHeader = 1,
-                  .paletteFooter = 1 },
+                  .paletteFooter = 1,
+                  .findBar = 1,
+                  .findBarWidth = 48,
+                  .findToggleWidth = 4,
+                  .findToggleHeight = 1,
+                  .findButtonWidth = 2,
+                  .findButtonHeight = 1,
+                  .findIcon = 0 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,
@@ -1139,7 +1218,9 @@ namespace detail
                    .paneGapRows = 1,
                    .paneHeaderGap = 1,
                    .footerLeading = 1,
-                   .paletteInset = 1 },
+                   .paletteInset = 1,
+                   .findBarInset = 1,
+                   .findBarInsetRows = 1 },
         .radii = { .control = 0,
                    .popover = 0,
                    .menu = 0,
@@ -1152,7 +1233,8 @@ namespace detail
                    .badge = 0,
                    .hostChip = 0,
                    .toolbarChip = 0,
-                   .grabber = 0 },
+                   .grabber = 0,
+                   .findBar = 0 },
         .type = { .caption = 0,
                   .footnote = 0,
                   .body = 0,
@@ -1187,7 +1269,8 @@ namespace detail
                     .tabColors = TabColorSource::Roles,
                     .activeTabWeight = ActiveTabWeight::Bold,
                     .paneActions = PaneActionsReveal::OnHoverOrFocus,
-                    .paletteTopPercent = 18 },
+                    .paletteTopPercent = 18,
+                    .findBar = FindBarHost::PaneHeaderRow },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         .colors = { schemeColor(SchemeSlot::Bar),
@@ -1230,7 +1313,12 @@ namespace detail
                     // A selected row on the bar-coloured surface must also stand off it (BarSelection).
                     schemeColor(SchemeSlot::BarSelection),     // PaletteSelectionFill
                     schemeColor(SchemeSlot::BarSelectionText), // PaletteSelectionText
-                    schemeColor(SchemeSlot::Secondary) },      // PaletteSeparator
+                    schemeColor(SchemeSlot::Secondary),        // PaletteSeparator
+                    // A lit toggle is a selected run of cells; an unlit one and the count, the bar's inks.
+                    schemeColor(SchemeSlot::Selection),     // FindToggleOnFill
+                    schemeColor(SchemeSlot::SelectionText), // FindToggleOnText
+                    schemeOnBar(SchemeSlot::Secondary),     // FindToggleText
+                    schemeColor(SchemeSlot::BarInk) },      // FindCountText
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

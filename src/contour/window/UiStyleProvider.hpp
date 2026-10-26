@@ -95,6 +95,8 @@ struct ChromeGlyphs
     QString restart;         ///< Marks the exited footer's Restart button.
     QString drillIn;         ///< Marks a command palette row that opens a list.
     QString palettePrompt;   ///< Drawn before the palette's query; empty where there is none.
+    QString findPrevious;    ///< The find bar's previous-match button.
+    QString findNext;        ///< The find bar's next-match button.
 };
 
 /// Everything a UiStyleProvider is built from.
@@ -245,6 +247,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QStringList paneActionGlyphs READ paneActionGlyphs CONSTANT)
     Q_PROPERTY(QStringList splitLineGlyphs READ splitLineGlyphs CONSTANT)
     Q_PROPERTY(QString restartGlyph READ restartGlyph CONSTANT)
+    Q_PROPERTY(QString findPreviousGlyph READ findPreviousGlyph CONSTANT)
+    Q_PROPERTY(QString findNextGlyph READ findNextGlyph CONSTANT)
     /// What assistive technology announces for each header action, indexed by config::PaneHeaderAction.
     Q_PROPERTY(QStringList paneHeaderActionNames READ paneHeaderActionNames CONSTANT)
     /// The QML names of the pane colour roles, for colorOn().
@@ -309,6 +313,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QStringList const& paneActionGlyphs() const noexcept { return _glyphs.paneActions; }
     [[nodiscard]] QStringList const& splitLineGlyphs() const noexcept { return _glyphs.splitLines; }
     [[nodiscard]] QString const& restartGlyph() const noexcept { return _glyphs.restart; }
+    [[nodiscard]] QString const& findPreviousGlyph() const noexcept { return _glyphs.findPrevious; }
+    [[nodiscard]] QString const& findNextGlyph() const noexcept { return _glyphs.findNext; }
     /// @return The header actions' accessible names, indexed by config::PaneHeaderAction.
     [[nodiscard]] QStringList paneHeaderActionNames() const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
@@ -339,6 +345,17 @@ class UiStyleProvider: public QObject
     /// @param title       The pane's title.
     /// @return @p processName unless empty, else @p title.
     [[nodiscard]] Q_INVOKABLE QString paneHeaderName(QString const& processName, QString const& title) const;
+
+    /// Where the find bar goes in a pane (window::placeFindBar), with this row's tokens.
+    /// @param header      Whether the pane shows an inline header (a window::PaneHeaderPresence's value).
+    /// @param paneWidth   The pane's width in logical pixels.
+    /// @param paneHeight  The pane's height in logical pixels.
+    /// @param matchTop    The top of the current match's rows, in the pane's coordinates.
+    /// @param matchBottom Their bottom; not below @p matchTop means there is no current match.
+    /// @return `{ anchor, x, y, width }`, the anchor as window::findBarAnchorName names it; empty for an
+    ///         out-of-range @p header.
+    [[nodiscard]] Q_INVOKABLE QVariantMap
+    findBarPlacement(int header, qreal paneWidth, qreal paneHeight, qreal matchTop, qreal matchBottom) const;
 
     /// The colour of @p role on a pane whose own background is @p background.
     ///

@@ -1218,6 +1218,7 @@ if(CONTOUR_TESTING)
         platform/NotificationOccasion_test.cpp
         platform/SessionVisibility_test.cpp
         window/HeldModifierReveal_test.cpp
+        window/FindBarPlacement_test.cpp
         window/PaneHeaderPolicy_test.cpp
         window/PaneState_test.cpp
         window/PalettePlacement_test.cpp

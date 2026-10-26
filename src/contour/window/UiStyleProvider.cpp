@@ -3,6 +3,7 @@
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
+#include <contour/window/FindBarPlacement.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
@@ -199,6 +200,8 @@ namespace
             .restart = QString::fromUtf8(tokens.restartGlyph),
             .drillIn = QString::fromUtf8(tokens.drillInGlyph),
             .palettePrompt = QString::fromUtf8(tokens.palettePromptGlyph),
+            .findPrevious = QString::fromUtf8(tokens.findPreviousGlyph),
+            .findNext = QString::fromUtf8(tokens.findNextGlyph),
         };
     }
 
@@ -573,6 +576,29 @@ QVariantMap UiStyleProvider::paneHeader(
 QString UiStyleProvider::paneHeaderName(QString const& processName, QString const& title) const
 {
     return QString::fromStdString(window::paneHeaderName(processName.toStdString(), title.toStdString()));
+}
+
+QVariantMap UiStyleProvider::findBarPlacement(
+    int header, qreal paneWidth, qreal paneHeight, qreal matchTop, qreal matchBottom) const
+{
+    if (!inRange(header, PaneHeaderPresenceCount))
+        return {};
+    auto const currentMatch = matchBottom > matchTop
+                                  ? std::optional { RowBand { .top = matchTop, .bottom = matchBottom } }
+                                  : std::nullopt;
+    auto const placement = placeFindBar(FindBarInputs { .host = _groups.layout.findBar,
+                                                        .header = static_cast<PaneHeaderPresence>(header),
+                                                        .paneWidth = paneWidth,
+                                                        .paneHeight = paneHeight,
+                                                        .barWidth = _size.findBarWidth(),
+                                                        .barHeight = _size.findBar(),
+                                                        .insetX = _space.findBarInset(),
+                                                        .insetY = _space.findBarInsetRows(),
+                                                        .currentMatch = currentMatch });
+    return { { QStringLiteral("anchor"), nameOf(findBarAnchorName(placement.anchor)) },
+             { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y },
+             { QStringLiteral("width"), placement.width } };
 }
 
 // colorOn() picks a pane's tone by toneOf(); the chrome's own scheme follows the terminal background by
