@@ -44,11 +44,24 @@ Item {
     readonly property color washColor: chromeStyle.paletteRevision < 0 ? "transparent"
         : chromeStyle.colorOn(chromeStyle.roles.paneFooterFill, footer.background)
 
+    // Whether Close can name its chord: the buttons, Close with its chord, fit between the footer's leading
+    // and trailing margins. A narrow pane's Close says only "Close" -- the chord stays in the description.
+    readonly property bool chordFits: {
+        if (footer.closeChord === "")
+            return false
+        const closeWidth = chordedClose.advanceWidth + (footer.bracketed ? 0 : 2 * chromeStyle.space.s5)
+        const restartWidth = footer.restartOffered ? restartButton.width + chromeStyle.space.s4 : 0
+        return closeWidth + restartWidth <= footer.width - chromeStyle.space.footerLeading - chromeStyle.space.s5
+    }
+
     /// A click on the footer outside its buttons.
     signal activated()
 
     visible: footer.ended
     height: chromeStyle.size.paneFooter
+    // Nothing reaches past the pane's own edge, however narrow the pane: not into the gap, not into the
+    // neighbour.
+    clip: true
 
     Accessible.role: Accessible.AlertMessage
     Accessible.name: footer.message
@@ -115,6 +128,7 @@ Item {
         spacing: chromeStyle.space.s4
 
         FooterButton {
+            id: restartButton
             objectName: "exitedFooterRestart"
             visible: footer.restartOffered
             label: qsTr("Restart %1").arg(chromeStyle.restartGlyph)
@@ -127,13 +141,21 @@ Item {
 
         FooterButton {
             objectName: "exitedFooterClose"
-            label: qsTr("Close %1").arg(footer.closeChord).trim()
+            label: footer.chordFits ? qsTr("Close %1").arg(footer.closeChord) : qsTr("Close")
             accessibleName: qsTr("Close")
             // The footer's own wash once more: a step above the footer, as the kit's fill.3 is.
             fill: footer.washColor
             ink: footer.textColor
             onClicked: if (footer.session) footer.session.dismiss()
         }
+    }
+
+    // Close as it reads with its chord, measured to decide whether it fits (chordFits).
+    TextMetrics {
+        id: chordedClose
+        font: chromeStyle.type.tab
+        text: footer.bracketed ? chromeStyle.chipOpenGlyph + qsTr("Close %1").arg(footer.closeChord) + chromeStyle.chipCloseGlyph
+                               : qsTr("Close %1").arg(footer.closeChord)
     }
 
     // A footer button: its label in the tab type on a control-rounded fill, `size.footerButton` high.

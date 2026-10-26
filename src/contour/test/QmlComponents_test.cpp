@@ -8199,6 +8199,36 @@ TEST_CASE("pane end: the Terminal row's footer is one cell row with bracketed bu
           == QStringLiteral("[Close Ctrl+Shift+X]"));
 }
 
+TEST_CASE("pane end: a narrow pane's footer keeps its buttons inside the pane (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto setup = paneCardSetup();
+    auto const terminalRow = GENERATE(false, true);
+    if (terminalRow)
+        setup.row = contour::config::ChromeStyle::Terminal;
+    CAPTURE(terminalRow);
+    // Two panes in a window too narrow for Restart and "Close Ctrl+Shift+X" side by side.
+    auto host = PaneTreeHost { setup, QSize { 360, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    endWithExitCode(panes.rightSession);
+    host.settle();
+
+    auto const& card = host.cardOf(panes.right());
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    REQUIRE(footer.isVisible());
+    CHECK(footer.clip());
+    // Close drops its chord rather than push Restart past the pane's leading edge.
+    auto const& close = PaneTreeHost::partOf(card, "exitedFooterClose");
+    CHECK_FALSE(close.property("text").toString().contains(QStringLiteral("Ctrl")));
+    auto const& restart = PaneTreeHost::partOf(card, "exitedFooterRestart");
+    CHECK(restart.mapToItem(&footer, QPointF {}).x() >= 0);
+
+    // Wide enough again, it names the chord.
+    host.resize(QSize { 1200, 400 });
+    CHECK(close.property("text").toString().contains(QStringLiteral("Ctrl+Shift+X")));
+}
+
 TEST_CASE("pane end: a local reconnect names no host (offscreen)", "[contour][gui][qml][paneend]")
 {
     auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
