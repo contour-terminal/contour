@@ -54,7 +54,8 @@ namespace
         RGBColor selection;                  ///< The selection's background.
         RGBColor idleForeground;             ///< Text of the inactive and insert indicators.
         RGBColor idleBackground;             ///< Bar of the inactive and insert indicators.
-        RGBColor searchMatch;                ///< The fill of a search match: system yellow, as a mark.
+        RGBColor searchMatch;                ///< The fill of a search match: system yellow, as a tint.
+        RGBColor searchCurrentMatch;         ///< The current match's fill: a mark against the others' tint.
         RGBColor searchMatchInk;             ///< The text of the current match, on its stronger fill.
         std::array<RGBColor, 16> ansiColors; ///< Palette entries 0..15: normal, then bright.
     };
@@ -67,6 +68,7 @@ namespace
         .idleForeground = 0xC5CAD3_rgb, // palette white
         .idleBackground = 0x2A2D35_rgb, // palette black
         .searchMatch = 0xFFD60A_rgb,
+        .searchCurrentMatch = 0xFFD60A_rgb,
         .searchMatchInk = 0x1C1E24_rgb, // its background
         .ansiColors = { 0x2A2D35_rgb,
                         0xF0757A_rgb,
@@ -95,7 +97,10 @@ namespace
         .idleForeground = 0x2B2E35_rgb,
         .idleBackground = 0xECEDEA_rgb,
         .searchMatch = 0xFFD60A_rgb,
-        .searchMatchInk = 0x2B2E35_rgb, // its foreground
+        // On a light page the two yellows read as one (1.15:1): the current match is dark amber, in light
+        // text.
+        .searchCurrentMatch = 0x6B4B00_rgb,
+        .searchMatchInk = 0xFAFAF8_rgb, // its background
         .ansiColors = { 0x2B2E35_rgb,
                         0xB42D35_rgb,
                         0x2A7A1F_rgb,
@@ -137,15 +142,15 @@ namespace
                                                   .background = palette.palette[Magenta] };
         palette.blockStatus[static_cast<size_t>(CommandBlockOutcome::Running)] = palette.palette[Blue];
 
-        // Yellow means search: a match at 35 % over the cell's own text, the current one at 85 % with ink of
-        // its own, which the cell's text color would not reach on so strong a fill.
-        palette.searchHighlight = { .foreground = CellForegroundColor {},
+        // Yellow means search: a match at 35 %, the current one at 85 %. Both set their own ink: the cell's
+        // own colour does not read on either -- the sixteen ANSI colours fall to 2:1 on contour-dark's tint.
+        palette.searchHighlight = { .foreground = scheme.foreground,
                                     .foregroundAlpha = 1.0f,
                                     .background = scheme.searchMatch,
                                     .backgroundAlpha = 0.35f };
         palette.searchHighlightFocused = { .foreground = scheme.searchMatchInk,
                                            .foregroundAlpha = 1.0f,
-                                           .background = scheme.searchMatch,
+                                           .background = scheme.searchCurrentMatch,
                                            .backgroundAlpha = 0.85f };
     }
 

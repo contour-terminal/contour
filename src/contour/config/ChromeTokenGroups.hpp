@@ -541,8 +541,9 @@ struct ChromeTokenRow
 /// scope that sees both namespaces finds no ambiguity.
 using vtbackend::MinimumTextContrast;
 
-/// The WCAG 1.4.11 ratio a chrome mark (a dot, a status glyph) must reach against what it sits on.
-inline constexpr double MinimumMarkContrast = 3.0;
+/// The WCAG 1.4.11 ratio a chrome mark (a dot, a status glyph) must reach against what it sits on: the
+/// terminal's own, one entity, as MinimumTextContrast is.
+using vtbackend::MinimumMarkContrast;
 
 namespace detail
 {

@@ -7,6 +7,7 @@
 #include <array>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 using namespace vtbackend;
 using namespace std::string_view_literals;
@@ -388,45 +389,79 @@ TEST_CASE("ColorPalette.contourSchemes.areListed", "[ColorPalette]")
 
 namespace
 {
-/// The two Contour schemes that paint search matches in system yellow, and the ink each puts on the current
-/// one.
+/// The Contour schemes that paint search matches in system yellow, the fill of their current match, and the
+/// ink each puts on it.
+struct YellowScheme
+{
+    std::string_view name;
+    RGBColor currentFill;
+    RGBColor currentInk;
+};
+
 constexpr auto YellowSchemes = std::array {
-    std::pair { "contour-dark"sv, RGBColor { 0x1C, 0x1E, 0x24 } },  // its background
-    std::pair { "contour-light"sv, RGBColor { 0x2B, 0x2E, 0x35 } }, // its foreground
+    YellowScheme { .name = "contour-dark"sv,
+                   .currentFill = RGBColor { 0xFF, 0xD6, 0x0A },
+                   .currentInk = RGBColor { 0x1C, 0x1E, 0x24 } }, // its background
+    YellowScheme { .name = "contour-light"sv,
+                   .currentFill = RGBColor { 0x6B, 0x4B, 0x00 },
+                   .currentInk = RGBColor { 0xFA, 0xFA, 0xF8 } }, // its background
 };
 constexpr auto SearchYellow = RGBColor { 0xFF, 0xD6, 0x0A };
+
+/// What a fill at @p pair's alpha looks like over the page of @p palette.
+RGBColor composited(ColorPalette const& palette, CellRGBColorAndAlphaPair const& pair)
+{
+    return mixColor(palette.defaultBackground, std::get<RGBColor>(pair.background), pair.backgroundAlpha);
+}
 } // namespace
 
 TEST_CASE("ColorPalette.searchMatchIsYellowInTheContourSchemes", "[ColorPalette]")
 {
-    for (auto const& [name, ink]: YellowSchemes)
+    for (auto const& scheme: YellowSchemes)
     {
-        INFO("scheme: " << name);
+        INFO("scheme: " << scheme.name);
         auto palette = ColorPalette {};
-        REQUIRE(defaultColorPalettes(name, palette));
+        REQUIRE(defaultColorPalettes(scheme.name, palette));
         CHECK(palette.searchHighlight.background == CellRGBColor { SearchYellow });
         CHECK(palette.searchHighlight.backgroundAlpha == 0.35f);
-        CHECK(palette.searchHighlight.foreground == CellRGBColor { CellForegroundColor {} });
-        CHECK(palette.searchHighlightFocused.background == CellRGBColor { SearchYellow });
+        CHECK(palette.searchHighlight.foreground == CellRGBColor { palette.defaultForeground });
+        CHECK(palette.searchHighlightFocused.background == CellRGBColor { scheme.currentFill });
         CHECK(palette.searchHighlightFocused.backgroundAlpha == 0.85f);
-        CHECK(palette.searchHighlightFocused.foreground == CellRGBColor { ink });
+        CHECK(palette.searchHighlightFocused.foreground == CellRGBColor { scheme.currentInk });
     }
 }
 
 TEST_CASE("ColorPalette.searchMatchTextReadsAtFourAndAHalfToOne", "[ColorPalette]")
 {
-    // The yellow is drawn at its alpha over the page; the text on it must still read.
-    for (auto const& [name, ink]: YellowSchemes)
+    // Each fill is drawn at its alpha over the page. Both set their own ink, which the renderer substitutes
+    // for the cell's colour (RenderBufferBuilder::paintSearchHighlight), so no ANSI colour has to read on
+    // them.
+    for (auto const& scheme: YellowSchemes)
     {
-        INFO("scheme: " << name);
+        INFO("scheme: " << scheme.name);
         auto palette = ColorPalette {};
-        REQUIRE(defaultColorPalettes(name, palette));
-        auto const match =
-            mixColor(palette.defaultBackground, SearchYellow, palette.searchHighlight.backgroundAlpha);
-        auto const current =
-            mixColor(palette.defaultBackground, SearchYellow, palette.searchHighlightFocused.backgroundAlpha);
-        CHECK(contrastRatio(palette.defaultForeground, match) >= MinimumTextContrast);
-        CHECK(contrastRatio(ink, current) >= MinimumTextContrast);
+        REQUIRE(defaultColorPalettes(scheme.name, palette));
+        auto const match = composited(palette, palette.searchHighlight);
+        auto const current = composited(palette, palette.searchHighlightFocused);
+        CHECK(contrastRatio(std::get<RGBColor>(palette.searchHighlight.foreground), match)
+              >= MinimumTextContrast);
+        CHECK(contrastRatio(std::get<RGBColor>(palette.searchHighlightFocused.foreground), current)
+              >= MinimumTextContrast);
+    }
+}
+
+TEST_CASE("ColorPalette.theCurrentSearchMatchStandsOutFromTheOthers", "[ColorPalette]")
+{
+    // The current match is a mark against the other matches around it: 3:1 against their fill. The other
+    // matches' fill is a tint, carried by its text, and exempt from the mark rule against the page.
+    for (auto const& scheme: YellowSchemes)
+    {
+        INFO("scheme: " << scheme.name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme.name, palette));
+        CHECK(contrastRatio(composited(palette, palette.searchHighlightFocused),
+                            composited(palette, palette.searchHighlight))
+              >= MinimumMarkContrast);
     }
 }
 

@@ -558,6 +558,10 @@ inline constexpr double MinimumTextContrast = 4.5;
 /// The WCAG AA ratio large or secondary text must reach against its ground: the large-text tier.
 inline constexpr double MinimumLargeTextContrast = 3.0;
 
+/// The WCAG 1.4.11 ratio a mark (a dot, a status glyph, the current search match's fill) must reach against
+/// what it sits on.
+inline constexpr double MinimumMarkContrast = 3.0;
+
 /// Where the ink for text on a ground comes from, in the order legibleInkOn() tries it.
 enum class InkSource : uint8_t
 {
