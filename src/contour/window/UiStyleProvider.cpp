@@ -11,6 +11,8 @@
 
 #include <vtbackend/vt/ProgressState.hpp>
 
+#include <text_shaper/Font.hpp>
+
 #include <core/log/LogStore.hpp>
 
 #include <QtCore/QCoreApplication>
@@ -30,6 +32,14 @@ namespace contour::window
 
 namespace
 {
+    /// The family a cell-counting chrome asks Qt for, given the configured @p family: the one the grid's
+    /// font locator draws in. Qt knows the generic `monospace` only where fontconfig does, and elsewhere
+    /// substitutes its own pick (Courier New on Windows) -- a cell that lines up with nothing below it.
+    [[nodiscard]] QString chromeFamilyOf(std::string_view family)
+    {
+        return QString::fromUtf8(text::platformFontFamily(family));
+    }
+
     /// The width of one character cell of @p metrics, in logical pixels.
     ///
     /// The advance of a single glyph rather than QFontMetricsF::averageCharWidth(): for the monospace
@@ -444,7 +454,7 @@ QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, s
     if (auto const* profile = config.findProfile(profileName))
     {
         auto const& fonts = profile->fonts.value();
-        font.setFamily(QString::fromStdString(fonts.regular.familyName));
+        font.setFamily(chromeFamilyOf(fonts.regular.familyName));
         font.setPointSizeF(static_cast<qreal>(fonts.size.pt));
     }
     else
@@ -458,7 +468,7 @@ QFont resolveChromeFont(config::Config const& config, config::ChromeStyle row, s
     }
 
     if (auto const& family = config.uiFontFamily.value(); !family.empty())
-        font.setFamily(QString::fromStdString(family));
+        font.setFamily(chromeFamilyOf(family));
 
     if (auto const size = config.uiFontSize.value(); size > 0.0)
         font.setPointSizeF(size);

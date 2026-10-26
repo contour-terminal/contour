@@ -165,6 +165,15 @@ TEST_CASE("resolveChromeFont: ui_font_* override the profile's font", "[contour]
         CHECK(size.pointSizeF() == 9.5);
     }
 
+    SECTION("a generic family is the one the grid is drawn in")
+    {
+        // Qt knows `monospace` only through fontconfig; elsewhere it picks a substitute of its own,
+        // which is not the grid's, and a chrome counting in that font's cells would not line up.
+        config.uiFontFamily = "monospace";
+        auto const font = resolveChromeFont(config, chromeRowOf(config), "main");
+        CHECK(font.family() == QString::fromUtf8(text::platformFontFamily("monospace")));
+    }
+
     SECTION("the unset values inherit rather than clearing the font")
     {
         // Empty and 0 are the documented "inherit" values, so they must not reach QFont -- an empty

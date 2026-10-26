@@ -65,11 +65,8 @@ namespace
     [[nodiscard]] CFObject<CTFontRef> matchFamily(std::string const& family,
                                                   FontDescription const& description)
     {
-        auto nativeFamily = family;
-        if (family == "emoji")
-            nativeFamily = "Apple Color Emoji";
-        else if (family == "monospace")
-            nativeFamily = "Menlo";
+        auto nativeFamily = family == "emoji" ? std::string("Apple Color Emoji")
+                                              : std::string(platformFontFamily(family));
         auto const name = CFObject<CFStringRef>(
             CFStringCreateWithCString(kCFAllocatorDefault, nativeFamily.c_str(), kCFStringEncodingUTF8));
         if (!name)
