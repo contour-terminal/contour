@@ -291,17 +291,21 @@ QVariantMap UiStyleProvider::hostChipLook(int state) const
              { QStringLiteral("accessibleState"), nameOf(look.accessibleState) } };
 }
 
-QVariantMap UiStyleProvider::titleBand(int frame, int mode, int strip, int position) const
+QVariantMap UiStyleProvider::titleBand(
+    int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const
 {
     if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount)
-        || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount))
+        || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount)
+        || !inRange(hostChipState, HostChipStateCount))
         return {};
-    auto const band =
-        resolveTitleBand(TitleBandInputs { .shape = _groups.layout.tabShape,
-                                           .frame = static_cast<WindowFrame>(frame),
-                                           .mode = static_cast<WindowMode>(mode),
-                                           .strip = static_cast<TabStripGate>(strip),
-                                           .position = static_cast<config::TabBarPosition>(position) });
+    auto const band = resolveTitleBand(
+        TitleBandInputs { .shape = _groups.layout.tabShape,
+                          .frame = static_cast<WindowFrame>(frame),
+                          .mode = static_cast<WindowMode>(mode),
+                          .strip = static_cast<TabStripGate>(strip),
+                          .position = static_cast<config::TabBarPosition>(position),
+                          .notice = hostNoticeOf(hostChipPresence(hostLabel.toStdString()),
+                                                 static_cast<HostChipState>(hostChipState)) });
     return { { QStringLiteral("band"), nameOf(barPresenceName(band.band)) },
              { QStringLiteral("bandEdge"), nameOf(barEdgeName(band.bandEdge)) },
              { QStringLiteral("centre"), nameOf(barCentreName(band.centre)) },

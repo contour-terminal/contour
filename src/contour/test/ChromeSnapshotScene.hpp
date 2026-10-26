@@ -124,6 +124,21 @@ enum class SnapshotFontError : uint8_t
 class ChromeSnapshotScene
 {
   public:
+    /// The chip state a script's connection column shows.
+    /// @param connection The script's host connection.
+    /// @return Its HostChipState; Connected for a local window, which shows no chip.
+    [[nodiscard]] static constexpr window::HostChipState hostChipStateFor(HostConnection connection) noexcept
+    {
+        switch (connection)
+        {
+            case HostConnection::Local:
+            case HostConnection::Connected: break;
+            case HostConnection::Reconnecting: return window::HostChipState::Reconnecting;
+            case HostConnection::Disconnected: return window::HostChipState::Disconnected;
+        }
+        return window::HostChipState::Connected;
+    }
+
     /// @param variant The picture to build: its script, chrome row, defaults edition and appearance.
     explicit ChromeSnapshotScene(SnapshotVariant variant):
         _appearance { variant.appearance },
@@ -363,21 +378,6 @@ class ChromeSnapshotScene
     [[nodiscard]] static constexpr qreal nativeControlsInsetFor(config::ChromeStyle row) noexcept
     {
         return rowHost(row).host == config::HostPlatform::MacOS ? SnapshotTrafficLightInset : 0;
-    }
-
-    /// The chip state a script's connection column shows.
-    /// @param connection The script's host connection.
-    /// @return Its HostChipState; Connected for a local window, which shows no chip.
-    [[nodiscard]] static constexpr window::HostChipState hostChipStateFor(HostConnection connection) noexcept
-    {
-        switch (connection)
-        {
-            case HostConnection::Local:
-            case HostConnection::Connected: break;
-            case HostConnection::Reconnecting: return window::HostChipState::Reconnecting;
-            case HostConnection::Disconnected: return window::HostChipState::Disconnected;
-        }
-        return window::HostChipState::Connected;
     }
 
     /// Shows the window in full screen and rests the pointer on the band's reveal edge, waiting until the

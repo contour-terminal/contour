@@ -101,13 +101,52 @@ constexpr auto FullScreenCases = std::array {
                { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
 };
 
+constexpr auto Interrupted = HostNotice::Interrupted;
+
+// A remote window whose connection is not up: wherever the band is the strip, it shows whatever the gate
+// says, since it is the host chip's home (R-d). The Pill band on a client band shows anyway.
+constexpr auto InterruptedCases = std::array {
+    BandCase { { Pill, ClientBand, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    BandCase { { Pill, ClientBand, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateShown, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateHidden, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateShown, Top, Interrupted },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+};
+
 /// @return Whether @p cases holds a row for @p inputs.
 [[nodiscard]] bool hasRowFor(std::span<BandCase const> cases, TitleBandInputs const& inputs)
 {
     return std::ranges::any_of(cases, [&](BandCase const& row) {
         return row.inputs.shape == inputs.shape && row.inputs.frame == inputs.frame
                && row.inputs.mode == inputs.mode && row.inputs.strip == inputs.strip
-               && row.inputs.position == inputs.position;
+               && row.inputs.position == inputs.position && row.inputs.notice == inputs.notice;
     });
 }
 
@@ -129,9 +168,25 @@ TEST_CASE("titleBand.casesCoverEveryInput", "[titleband]")
     // Every windowed input has a row above: a rule change cannot slip past the table.
     detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
         INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
-                      << int(inputs.strip) << ", position " << int(inputs.position));
-        CHECK(hasRowFor(BandCases, inputs));
+                      << int(inputs.strip) << ", position " << int(inputs.position) << ", notice "
+                      << int(inputs.notice));
+        CHECK(hasRowFor(inputs.notice == HostNotice::None ? std::span<BandCase const> { BandCases }
+                                                          : std::span<BandCase const> { InterruptedCases },
+                        inputs));
     });
+}
+
+TEST_CASE("titleBand.anInterruptedConnectionShowsTheStrip", "[titleband]")
+{
+    for (auto const& [inputs, expected]: InterruptedCases)
+    {
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position));
+        CHECK(resolveTitleBand(inputs) == expected);
+    }
+    // In full screen the forced band reveals on the edge, as any band at the top does (D3).
+    CHECK(resolveTitleBand({ Flat, ClientBand, FullScreen, GateHidden, Top, Interrupted }).band
+          == BarPresence::RevealOnEdge);
 }
 
 TEST_CASE("titleBand.fullScreenReveals", "[titleband]")

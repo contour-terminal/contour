@@ -361,14 +361,19 @@ class UiStyleProvider: public QObject
 
     /// Where the title band and the tabs go, for this row's tab shape (window::resolveTitleBand).
     ///
-    /// Four ints rather than enums: this is the QML-facing carve-out, whose one caller (Main.qml) passes
-    /// the enumerators' underlying values; a value out of range answers an empty map.
-    /// @param frame    A window::WindowFrame.
-    /// @param mode     A window::WindowMode.
-    /// @param strip    A window::TabStripGate.
-    /// @param position A config::TabBarPosition.
+    /// Ints rather than enums: this is the QML-facing carve-out, whose one caller (Main.qml) passes the
+    /// enumerators' underlying values; a value out of range answers an empty map.
+    /// @param frame         A window::WindowFrame.
+    /// @param mode          A window::WindowMode.
+    /// @param strip         A window::TabStripGate.
+    /// @param position      A config::TabBarPosition.
+    /// @param hostLabel     The window's host label; empty for a local window.
+    /// @param hostChipState A window::HostChipState: what the host chip shows, which a remote window's
+    ///                      band carries whatever the gate says while it is not Connected
+    ///                      (window::hostNoticeOf).
     /// @return `{ band, bandEdge, centre, tabBar }` as their names.
-    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(int frame, int mode, int strip, int position) const;
+    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(
+        int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const;
 
     /// The tab well's widths for @p tabCount tabs in @p available logical pixels (window::layoutTabWell).
     /// @param available The width the band leaves the well.

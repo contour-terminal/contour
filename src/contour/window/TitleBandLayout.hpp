@@ -3,11 +3,12 @@
 
 /// @file
 /// Where the title band and the tabs go: one table matched on the tab shape, the window frame, the tab-bar
-/// gate and the tab-bar position, followed by one full-screen step. Pure and Qt-free, so the band, its
-/// snapshot rows and the tests read the same rows.
+/// gate, the host chip's notice and the tab-bar position, followed by one full-screen step. Pure and Qt-free,
+/// so the band, its snapshot rows and the tests read the same rows.
 
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/TabBarMode.hpp>
+#include <contour/window/HostChipState.hpp>
 
 #include <algorithm>
 #include <array>
@@ -91,6 +92,7 @@ struct TitleBandInputs
     WindowMode mode = WindowMode::Windowed;                        ///< Windowed or full screen.
     TabStripGate strip = TabStripGate::Shown;                      ///< The tab-bar gate's answer.
     config::TabBarPosition position = config::TabBarPosition::Top; ///< The configured tab-bar edge.
+    HostNotice notice = HostNotice::None;                          ///< Whether the host chip must show.
 };
 
 /// Where the band and the tabs go.
@@ -111,6 +113,7 @@ struct TitleBandRule
     std::optional<config::TabShape> shape; ///< The tab shape, or any.
     std::optional<WindowFrame> frame;      ///< The frame, or any.
     std::optional<TabStripGate> strip;     ///< The tab-bar gate, or any.
+    std::optional<HostNotice> notice;      ///< The host chip's notice, or any.
     config::TabBarPosition position;       ///< The configured tab-bar edge.
     TitleBand answer;                      ///< The windowed answer.
 };
@@ -123,11 +126,13 @@ inline constexpr auto TitleBandRules = std::array {
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Shown,
+                    .notice = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Hidden,
+                    .notice = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // Pill with the tabs at the bottom: the band stays on top with the title, the tabs get a bar of their
@@ -135,33 +140,53 @@ inline constexpr auto TitleBandRules = std::array {
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Shown,
+                    .notice = std::nullopt,
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Hidden,
+                    .notice = std::nullopt,
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
-    // Flat on a client band, and every shape under a native frame: the band is the strip.
+    // Flat on a client band, and every shape under a native frame: the band is the strip. A remote window
+    // whose connection is not up shows it whatever the gate says: it is the host chip's home (R-d), and the
+    // strip appearing is itself what tells the user the window is remote.
     TitleBandRule { .shape = std::nullopt,
                     .frame = std::nullopt,
-                    .strip = TabStripGate::Shown,
+                    .strip = TabStripGate::Hidden,
+                    .notice = HostNotice::Interrupted,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
                     .frame = std::nullopt,
                     .strip = TabStripGate::Hidden,
+                    .notice = HostNotice::Interrupted,
+                    .position = config::TabBarPosition::Bottom,
+                    .answer = { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    TitleBandRule { .shape = std::nullopt,
+                    .frame = std::nullopt,
+                    .strip = TabStripGate::Shown,
+                    .notice = std::nullopt,
+                    .position = config::TabBarPosition::Top,
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    TitleBandRule { .shape = std::nullopt,
+                    .frame = std::nullopt,
+                    .strip = TabStripGate::Hidden,
+                    .notice = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
                     .frame = std::nullopt,
                     .strip = TabStripGate::Shown,
+                    .notice = std::nullopt,
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule {
         .shape = std::nullopt,
         .frame = std::nullopt,
         .strip = TabStripGate::Hidden,
+        .notice = std::nullopt,
         .position = config::TabBarPosition::Bottom,
         .answer = { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
 };
@@ -183,7 +208,8 @@ namespace detail
 {
     for (auto const& rule: TitleBandRules)
         if (detail::columnMatches(rule.shape, inputs.shape) && detail::columnMatches(rule.frame, inputs.frame)
-            && detail::columnMatches(rule.strip, inputs.strip) && rule.position == inputs.position)
+            && detail::columnMatches(rule.strip, inputs.strip)
+            && detail::columnMatches(rule.notice, inputs.notice) && rule.position == inputs.position)
             return &rule;
     return nullptr;
 }
@@ -198,11 +224,13 @@ namespace detail
             for (auto const frame: std::views::iota(size_t { 0 }, WindowFrameCount))
                 for (auto const strip: std::views::iota(size_t { 0 }, TabStripGateCount))
                     for (auto const position: std::views::iota(size_t { 0 }, config::TabBarPositionCount))
-                        visit(TitleBandInputs { .shape = static_cast<config::TabShape>(shape),
-                                                .frame = static_cast<WindowFrame>(frame),
-                                                .mode = WindowMode::Windowed,
-                                                .strip = static_cast<TabStripGate>(strip),
-                                                .position = static_cast<config::TabBarPosition>(position) });
+                        for (auto const notice: std::views::iota(size_t { 0 }, HostNoticeCount))
+                            visit(TitleBandInputs { .shape = static_cast<config::TabShape>(shape),
+                                                    .frame = static_cast<WindowFrame>(frame),
+                                                    .mode = WindowMode::Windowed,
+                                                    .strip = static_cast<TabStripGate>(strip),
+                                                    .position = static_cast<config::TabBarPosition>(position),
+                                                    .notice = static_cast<HostNotice>(notice) });
     }
 
     /// @return Whether every input matches a rule.

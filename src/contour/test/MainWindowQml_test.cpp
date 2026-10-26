@@ -1643,6 +1643,63 @@ TEST_CASE("the tab bar at the bottom on macOS keeps the band at the top (offscre
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("a one-tab remote window shows its band while its connection is interrupted (offscreen)",
+          "[contour][gui][qml][mainwindow][band][hosts]")
+{
+    // tab_bar_visibility Multiple hides a one-tab strip on the Flat rows, and the strip is the host chip's
+    // home: a remote window whose connection is not up shows it anyway (R-d), chip and all.
+    using contour::window::HostChipState;
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux, ChromeStyle::Terminal })
+    {
+        for (auto const state:
+             { HostChipState::Connected, HostChipState::Reconnecting, HostChipState::Disconnected })
+        {
+            auto const& look = contour::window::hostChipLook(state);
+            INFO("row " << int(row) << ", " << look.accessibleState);
+            QQmlEngine engine;
+            MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                              .hostLabel = QStringLiteral("home"),
+                                                              .tabBarVisibility = TabBarVisibility::Multiple,
+                                                              .hostChipState = state } };
+            contour::test::QmlMessageCapture warnings;
+            auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+
+            auto& titleBar = named(*root, QStringLiteral("titleBar"));
+            auto const interrupted = state != HostChipState::Connected;
+            CHECK(titleBar.isVisible() == interrupted);
+            auto& chip = named(*root, QStringLiteral("hostChip"));
+            CHECK(isInside(&chip, &titleBar));
+            CHECK(chip.isVisible() == interrupted);
+            if (interrupted)
+            {
+                CHECK(titleBar.height() > 0);
+                CHECK(part(chip, QStringLiteral("hostChipStatus")).property("text").toString()
+                      == QString::fromUtf8(look.status));
+            }
+            CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+        }
+    }
+
+    SECTION("the band follows the connection live")
+    {
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                          .hostLabel = QStringLiteral("home"),
+                                                          .tabBarVisibility = TabBarVisibility::Multiple } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        auto& titleBar = named(*root, QStringLiteral("titleBar"));
+        CHECK_FALSE(titleBar.isVisible());
+        controller.setHostChipState(static_cast<int>(HostChipState::Disconnected));
+        QCoreApplication::processEvents();
+        CHECK(titleBar.isVisible());
+        controller.setHostChipState(static_cast<int>(HostChipState::Connected));
+        QCoreApplication::processEvents();
+        CHECK_FALSE(titleBar.isVisible());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
 TEST_CASE("the macOS + opens profiles on a secondary click (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {

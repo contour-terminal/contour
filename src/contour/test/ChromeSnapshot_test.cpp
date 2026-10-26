@@ -96,6 +96,8 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                          ? TabStripGate::Shown
                          : TabStripGate::Hidden,
             .position = contour::config::TabBarPosition::Top,
+            .notice = contour::window::hostNoticeOf(contour::window::hostChipPresence(row.hostLabel),
+                                                    ChromeSnapshotScene::hostChipStateFor(row.connection)),
         });
         CHECK(titleBar->isVisible() == (band.band != contour::window::BarPresence::Hidden));
         switch (variant.script)

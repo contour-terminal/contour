@@ -58,3 +58,13 @@ TEST_CASE("hostChip.presence", "[hostchip]")
     CHECK(hostChipPresence("") == HostChipPresence::Hidden);
     CHECK(hostChipPresence("build-01") == HostChipPresence::Shown);
 }
+
+TEST_CASE("hostChip.notice", "[hostchip]")
+{
+    // Only a remote window whose connection is not up has news the band must carry.
+    for (auto const i: std::views::iota(size_t { 0 }, HostChipStateCount))
+        CHECK(hostNoticeOf(HostChipPresence::Hidden, HostChipState(i)) == HostNotice::None);
+    CHECK(hostNoticeOf(HostChipPresence::Shown, HostChipState::Connected) == HostNotice::None);
+    CHECK(hostNoticeOf(HostChipPresence::Shown, HostChipState::Reconnecting) == HostNotice::Interrupted);
+    CHECK(hostNoticeOf(HostChipPresence::Shown, HostChipState::Disconnected) == HostNotice::Interrupted);
+}

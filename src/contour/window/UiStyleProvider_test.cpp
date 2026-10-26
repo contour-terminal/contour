@@ -829,17 +829,30 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
           == mac.statusInk(static_cast<int>(contour::config::StatusColorRole::Warning)));
     CHECK(mac.hostChipLook(99).isEmpty());
 
-    auto const macBand = mac.titleBand(0, 0, 0, 0);
+    auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0);
     CHECK(macBand.value("band").toString() == QStringLiteral("shown"));
     CHECK(macBand.value("bandEdge").toString() == QStringLiteral("top"));
     CHECK(macBand.value("centre").toString() == QStringLiteral("title"));
     CHECK(macBand.value("tabBar").toString() == QStringLiteral("hidden"));
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
-    CHECK(fluent.titleBand(0, 0, 0, 0).value("band").toString() == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 1, 0).value("centre").toString() == QStringLiteral("tabs"));
-    CHECK(mac.titleBand(0, 1, 1, 0).value("band").toString() == QStringLiteral("reveal"));
-    CHECK(mac.titleBand(2, 0, 0, 0).isEmpty());
-    CHECK(mac.titleBand(0, 0, 0, -1).isEmpty());
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("hidden"));
+    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
+    CHECK(mac.titleBand(0, 1, 1, 0, {}, 0).value("band").toString() == QStringLiteral("reveal"));
+    CHECK(mac.titleBand(2, 0, 0, 0, {}, 0).isEmpty());
+    CHECK(mac.titleBand(0, 0, 0, -1, {}, 0).isEmpty());
+    // A remote window whose connection is not up shows the strip whatever the gate says; a local one, or a
+    // connected one, does not.
+    constexpr auto Reconnecting = static_cast<int>(contour::window::HostChipState::Reconnecting);
+    constexpr auto Disconnected = static_cast<int>(contour::window::HostChipState::Disconnected);
+    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting).value("band").toString()
+          == QStringLiteral("shown"));
+    CHECK(fluent.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected).value("bandEdge").toString()
+          == QStringLiteral("bottom"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0).value("band").toString()
+          == QStringLiteral("hidden"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, Disconnected).value("band").toString()
+          == QStringLiteral("hidden"));
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 3).isEmpty());
 
     auto const crowded = mac.tabWellLayout(300, 12);
     CHECK(crowded.value("scrolls").toBool());

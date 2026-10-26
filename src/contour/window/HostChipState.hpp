@@ -83,6 +83,26 @@ enum class HostChipPresence : uint8_t
     return hostLabel.empty() ? HostChipPresence::Hidden : HostChipPresence::Shown;
 }
 
+/// Whether the window's connection has news the band must carry, whatever the tab-bar gate says.
+enum class HostNotice : uint8_t
+{
+    None = 0,    ///< A local window, or a remote one whose connection is up.
+    Interrupted, ///< A remote window reconnecting or disconnected: its host chip must be on screen.
+};
+
+/// Number of @c HostNotice enumerators, derived from the last one.
+inline constexpr size_t HostNoticeCount = static_cast<size_t>(HostNotice::Interrupted) + 1;
+
+/// Decides whether the band must show for the chip's sake.
+/// @param presence Whether the window shows a chip at all (@c hostChipPresence).
+/// @param state    What the chip shows.
+/// @return Interrupted for a chip that shows a connection other than Connected.
+[[nodiscard]] constexpr HostNotice hostNoticeOf(HostChipPresence presence, HostChipState state) noexcept
+{
+    return presence == HostChipPresence::Shown && state != HostChipState::Connected ? HostNotice::Interrupted
+                                                                                    : HostNotice::None;
+}
+
 /// How one chip state looks.
 struct HostChipLook
 {

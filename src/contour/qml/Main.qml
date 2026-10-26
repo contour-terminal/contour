@@ -58,13 +58,16 @@ ThemedWindow
 
     // Where the title band and the tabs go -- { band, bandEdge, centre, tabBar }, each by name -- from the
     // row's tab shape (UiStyleProvider::titleBand): who draws the frame (show_title_bar), whether the window
-    // is in full screen, the tab-bar gate and the configured edge. The four arguments are the enumerators'
-    // underlying values: WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen },
-    // TabStripGate { Hidden, Shown } and TabBarPosition { Top, Bottom }. Main.qml is the only caller.
+    // is in full screen, the tab-bar gate, the configured edge and the host chip, whose interrupted
+    // connection shows the band whatever the gate says. The ints are the enumerators' underlying values:
+    // WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen }, TabStripGate { Hidden,
+    // Shown }, TabBarPosition { Top, Bottom } and HostChipState. Main.qml is the only caller.
     readonly property var band: chromeStyle.titleBand(appWindow.win && appWindow.win.titleBarVisible ? 1 : 0,
                                                       appWindow.visibility === Window.FullScreen ? 1 : 0,
                                                       appWindow.tabBarShouldShow ? 1 : 0,
-                                                      appWindow.tabBarPosition)
+                                                      appWindow.tabBarPosition,
+                                                      (appWindow.win && appWindow.win.hostLabel) || "",
+                                                      (appWindow.win && appWindow.win.hostChipState) || 0)
 
     // Whether a full-screen band should be revealed: while the pointer is on the reveal edge -- which,
     // once revealed, grows to the band's resting rectangle, so a band still sliding in is not lost to a
