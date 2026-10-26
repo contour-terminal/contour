@@ -24,6 +24,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -444,3 +445,53 @@ TEST_CASE("menuBar.useSelectionForFindFollowsFindPrevious", "[menubar]")
     REQUIRE(row != nullptr);
     CHECK(row->availability == RowAvailability::Disabled);
 }
+
+TEST_CASE("menuBar.aMacMenuShowsTheCommandKeyChord", "[menubar]")
+{
+    // A command bound to ⌃⇧F and ⌘F: a Mac menu shows the ⌘ one, whichever is bound first (F12).
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    auto const chordOf = [](Modifiers modifiers, char32_t input) {
+        return config::CharInputMapping {
+            .modes = {}, .modifiers = modifiers, .input = input, .binding = { { actions::SearchReverse {} } }
+        };
+    };
+    auto const mappings = config::InputMappings {
+        .keyMappings = {},
+        .charMappings = { chordOf(Modifiers { Modifier::Control, Modifier::Shift }, U'F'),
+                          chordOf(Modifiers { Modifier::Super }, U'F') },
+        .mouseMappings = {},
+    };
+    auto const shown = [&](ChordPreference preference) {
+        auto const tree = buildMenuTree(
+            buildMenuBar(fullState()), chordIndex(mappings, preference), ShortcutStyle::MacGlyphs);
+        auto const* find = findNode(tree.nodes, "Find…");
+        REQUIRE(find != nullptr);
+        return find->shortcut;
+    };
+    CHECK(shown(ChordPreference::CommandKey) == "⌘F");
+    CHECK(shown(ChordPreference::FirstBound) == "⌃⇧F");
+    CHECK(chordPreferenceFor(config::HostPlatform::MacOS) == ChordPreference::CommandKey);
+    CHECK(chordPreferenceFor(config::HostPlatform::Other) == ChordPreference::FirstBound);
+}
+
+#ifdef __APPLE__
+TEST_CASE("menuBar.theFindRowsShowTheMacFindChords", "[menubar]")
+{
+    // The macOS find chords are fallbacks, after the defaults' Ctrl+Shift+F and F3: still the ones shown.
+    auto const tree =
+        buildMenuTree(buildMenuBar(fullState()), chordIndex(config::Config {}), ShortcutStyle::MacGlyphs);
+    for (auto const& [title, chord]: std::array {
+             std::pair { "Find…", "⌘F" },
+             std::pair { "Find Next", "⌘G" },
+             std::pair { "Find Previous", "⇧⌘G" },
+             std::pair { "Use Selection for Find", "⌘E" },
+         })
+    {
+        INFO(title);
+        auto const* node = findNode(tree.nodes, title);
+        REQUIRE(node != nullptr);
+        CHECK(node->shortcut == chord);
+    }
+}
+#endif

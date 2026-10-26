@@ -40,8 +40,25 @@ namespace
     /// Templated over the binding's input type so the two halves share this logic rather than
     /// restating it — the only thing that differs between them is which member of ShortcutInput the
     /// binding's `input` lands in, and the variant absorbs that.
+    /// Whether @p preference shows @p candidate rather than @p shown, for one command.
+    [[nodiscard]] bool prefers(ChordPreference preference,
+                               ShortcutChord const& candidate,
+                               ShortcutChord const& shown)
+    {
+        switch (preference)
+        {
+            case ChordPreference::FirstBound: return false;
+            case ChordPreference::CommandKey:
+                return candidate.modifiers.test(vtbackend::Modifier::Super)
+                       && !shown.modifiers.test(vtbackend::Modifier::Super);
+        }
+        return false;
+    }
+
     template <typename Input>
-    void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding, ChordIndex& target)
+    void indexBinding(vtbackend::InputBinding<Input, config::ActionList> const& binding,
+                      ChordPreference preference,
+                      ChordIndex& target)
     {
         // A chord that fires several actions is not "the" shortcut for any one of them: pressing it
         // would do all of the others too, so advertising it next to a single command would be a lie.
@@ -49,18 +66,22 @@ namespace
             return;
 
         // First binding wins, so a command bound twice renders under its first (config-order)
-        // shortcut rather than flip-flopping between them.
-        target.try_emplace(
-            commandId(binding.binding.front()),
-            ShortcutChord { .modifiers = binding.modifiers, .input = ShortcutInput { binding.input } });
+        // shortcut rather than flip-flopping between them -- unless the platform prefers a later one: a
+        // Mac menu shows the ⌘ chord where one is bound.
+        auto const chord =
+            ShortcutChord { .modifiers = binding.modifiers, .input = ShortcutInput { binding.input } };
+        auto const [entry, inserted] = target.try_emplace(commandId(binding.binding.front()), chord);
+        if (!inserted && prefers(preference, chord, entry->second))
+            entry->second = chord;
     }
 
     template <typename Input>
     void indexBindings(std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& bindings,
+                       ChordPreference preference,
                        ChordIndex& target)
     {
         for (auto const& binding: bindings)
-            indexBinding(binding, target);
+            indexBinding(binding, preference, target);
     }
 
     /// Indexes the enabled built-in rows of one table whose chord @p userBindings leaves unbound.
@@ -68,6 +89,7 @@ namespace
     void indexFallbacks(std::vector<config::FallbackMapping<Input>> const& rows,
                         std::vector<vtbackend::InputBinding<Input, config::ActionList>> const& userBindings,
                         config::Config const& config,
+                        ChordPreference preference,
                         ChordIndex& target)
     {
         for (auto const& row: rows)
@@ -76,7 +98,7 @@ namespace
                 return binding.modifiers == row.mapping.modifiers && binding.input == row.mapping.input;
             });
             if (row.enabled(config) && !shadowed)
-                indexBinding(row.mapping, target);
+                indexBinding(row.mapping, preference, target);
         }
     }
 } // namespace
@@ -110,24 +132,24 @@ std::string shortcutText(ShortcutChord const& chord, ShortcutStyle style)
     return shortcutText(chord.modifiers, chord.input, style);
 }
 
-ChordIndex chordIndex(config::InputMappings const& mappings)
+ChordIndex chordIndex(config::InputMappings const& mappings, ChordPreference preference)
 {
     auto result = ChordIndex {};
 
     // Mouse bindings are deliberately not indexed: the palette's shortcut column teaches the user what
     // to TYPE, and "Ctrl+Left-click" is not that.
-    indexBindings(mappings.keyMappings, result);
-    indexBindings(mappings.charMappings, result);
+    indexBindings(mappings.keyMappings, preference, result);
+    indexBindings(mappings.charMappings, preference, result);
 
     return result;
 }
 
-ChordIndex chordIndex(config::Config const& config)
+ChordIndex chordIndex(config::Config const& config, ChordPreference preference)
 {
     auto const& mappings = config.inputMappings.value();
-    auto result = chordIndex(mappings);
-    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, result);
-    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, result);
+    auto result = chordIndex(mappings, preference);
+    indexFallbacks(config::builtinFallbackKeyMappings(), mappings.keyMappings, config, preference, result);
+    indexFallbacks(config::builtinFallbackCharMappings(), mappings.charMappings, config, preference, result);
     return result;
 }
 

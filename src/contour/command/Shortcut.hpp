@@ -61,6 +61,41 @@ enum class ShortcutStyle : uint8_t
 #endif
 }
 
+/// Which of a command's chords a view shows, where the command has more than one.
+enum class ChordPreference : uint8_t
+{
+    FirstBound = 0, ///< The first one bound, in config order then the built-in fallbacks'.
+    CommandKey,     ///< One holding ⌘ (Modifier::Super), where any does: the chord a Mac menu shows.
+};
+
+/// The preference @p host's users expect: the ⌘ chord on macOS, the first bound elsewhere.
+/// @param host The host the chords are shown on.
+/// @return That host's preference.
+[[nodiscard]] constexpr ChordPreference chordPreferenceFor(config::HostPlatform host) noexcept
+{
+    switch (host)
+    {
+        case config::HostPlatform::MacOS: return ChordPreference::CommandKey;
+        case config::HostPlatform::Windows:
+        case config::HostPlatform::KdePlasma:
+        case config::HostPlatform::Other: break;
+    }
+    return ChordPreference::FirstBound;
+}
+
+/// The preference the platform this was built for expects. @see chordPreferenceFor.
+/// @return The platform's chord preference.
+[[nodiscard]] constexpr ChordPreference platformChordPreference() noexcept
+{
+#ifdef __APPLE__
+    return chordPreferenceFor(config::HostPlatform::MacOS);
+#elifdef _WIN32
+    return chordPreferenceFor(config::HostPlatform::Windows);
+#else
+    return chordPreferenceFor(config::HostPlatform::Other);
+#endif
+}
+
 /// One chord modifier and the name a UI shows it under.
 ///
 /// Separate from vtbackend::ChordModifierTable on purpose: that table is the wire vocabulary and the
@@ -163,16 +198,20 @@ using ChordIndex = std::unordered_map<std::string, ShortcutChord>;
 [[nodiscard]] std::string shortcutText(ShortcutChord const& chord, ShortcutStyle style);
 
 /// Indexes every single-action key/char binding in @p mappings by the id of the command it runs; the
-/// first binding of a command wins. This is the primitive shortcutIndex() renders.
-/// @param mappings The configured input mappings.
+/// first binding of a command wins, unless @p preference prefers a later one. This is the primitive
+/// shortcutIndex() renders.
+/// @param mappings   The configured input mappings.
+/// @param preference Which chord to show where a command has several.
 /// @return Command id -> chord.
-[[nodiscard]] ChordIndex chordIndex(config::InputMappings const& mappings);
+[[nodiscard]] ChordIndex chordIndex(config::InputMappings const& mappings,
+                                    ChordPreference preference = platformChordPreference());
 
-/// @copydoc chordIndex(config::InputMappings const&)
+/// @copydoc chordIndex(config::InputMappings const&, ChordPreference)
 ///
 /// Then the enabled built-in fallback rows @p config leaves unbound, as shortcutIndex(config, style) does.
 /// @param config The configuration.
-[[nodiscard]] ChordIndex chordIndex(config::Config const& config);
+[[nodiscard]] ChordIndex chordIndex(config::Config const& config,
+                                    ChordPreference preference = platformChordPreference());
 
 /// Indexes every key/char binding in @p mappings by the id of the command it runs, so a view can ask
 /// "what is the shortcut for this command?" in one lookup rather than re-scanning the bindings.
