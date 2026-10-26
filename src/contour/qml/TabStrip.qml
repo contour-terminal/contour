@@ -49,9 +49,23 @@ Row {
 
     // Brings the active tab into view, should the tabs have scrolled it out: the well's, or a Flat strip
     // that outgrew its width. Deferred, because it runs on changes the list has not laid out yet.
+    //
+    // positionViewAtIndex ends in Flickable's fixup, which settles a fractional contentX onto a whole pixel
+    // in either direction -- and a tab's edges are fractional wherever a cell or a text width is, so the
+    // tab could be left up to a pixel outside the strip. The scroll is rounded outward here instead: far
+    // enough that the whole tab is in view, onto a whole pixel the fixup then leaves alone.
     function revealActiveTab() {
-        if (root.controller)
-            list.positionViewAtIndex(root.controller.activeTabIndex, ListView.Contain)
+        if (!root.controller)
+            return
+        const index = root.controller.activeTabIndex
+        list.positionViewAtIndex(index, ListView.Contain)
+        const tab = list.itemAtIndex(index)
+        if (!tab)
+            return
+        if (tab.x + tab.width > list.contentX + list.width)
+            list.contentX = Math.ceil(tab.x + tab.width - list.width)
+        if (tab.x < list.contentX)
+            list.contentX = Math.floor(tab.x)
     }
     onWellLayoutChanged: Qt.callLater(root.revealActiveTab)
     onAvailableWidthChanged: Qt.callLater(root.revealActiveTab)

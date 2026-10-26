@@ -1938,6 +1938,30 @@ TEST_CASE("the Terminal row snaps the native inset to cells and brackets its chi
 TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs overflow (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
+    // A tab is a whole number of cells, a cell rarely a whole number of pixels, so where the last tab ends
+    // has a different fraction for every tab count -- and Flickable settles a fractional scroll onto a whole
+    // pixel, either way. Over a run of counts some land on each side, whatever the platform's font.
+    for (auto const tabCount: std::views::iota(12, 24))
+    {
+        INFO("tabs: " << tabCount);
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = tabCount, .activeTab = tabCount - 1 } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
+        showWindow(*root);
+
+        auto const& list = named(*root, QStringLiteral("tabList"));
+        auto const tabs = tabDelegates(*root);
+        REQUIRE(tabs.size() == static_cast<std::size_t>(tabCount));
+        auto const* active = tabs.back();
+        REQUIRE(active != nullptr);
+        auto const contentX = list.property("contentX").toReal();
+        CHECK(contentX > 0);
+        CHECK(active->x() >= contentX);
+        CHECK(active->x() + active->width() <= contentX + list.width());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
     constexpr auto TabCount = 20;
     QQmlEngine engine;
     MockMainController controller { MainWindowScene { .tabCount = TabCount, .activeTab = TabCount - 1 } };
@@ -1947,14 +1971,7 @@ TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs
 
     auto& titleBar = named(*root, QStringLiteral("titleBar"));
     auto const& list = named(*root, QStringLiteral("tabList"));
-    auto const tabs = tabDelegates(*root);
-    REQUIRE(tabs.size() == static_cast<std::size_t>(TabCount));
-    auto const* active = tabs.back();
-    REQUIRE(active != nullptr);
-    auto const contentX = list.property("contentX").toReal();
-    CHECK(contentX > 0);
-    CHECK(active->x() >= contentX);
-    CHECK(active->x() + active->width() <= contentX + list.width());
+    REQUIRE(tabDelegates(*root).size() == static_cast<std::size_t>(TabCount));
 
     // Back to the first tab: the strip scrolls it into view again.
     controller.setActiveTab(0);
