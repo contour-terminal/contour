@@ -447,6 +447,8 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
                     QDir::homePath().toStdString(),
                     *_taskbarProgressSink),
     _gpuInventory { display::makePlatformGpuInventory() },
+    _hostPlatform(config::detectHostPlatform(env)),
+    _chromeStyle(config::resolveChromeStyle(_config.uiStyle.value(), _hostPlatform)),
     _settingsWindowFactory { settingsWindowFactory ? std::move(settingsWindowFactory)
                                                    : engineSettingsWindowFactory() },
     _accessibilitySource(
@@ -456,7 +458,6 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _platformAppearance(appearanceServices.appearance(
         [this](platform::PlatformAppearance appearance) { onPlatformAppearanceChanged(appearance); })),
     _nativeMenus(appearanceServices.menus()),
-    _hostPlatform(config::detectHostPlatform(env)),
     _menuBarPlacement(command::menuBarPlacementFor(_hostPlatform)),
     _menuBarIntegration(appearanceServices.menuBar())
 {
@@ -1726,6 +1727,11 @@ void ContourGuiApp::applyGuiTheme(config::GuiTheme theme,
     else
         QGuiApplication::styleHints()->unsetColorScheme();
 #endif
+
+    // The title band's appearance is the scheme just forced, or the OS's again. The palette change above
+    // reaches every window too, but not when the palette came out the same (the OS already showed that
+    // scheme), and the band must not keep asking for the old one then.
+    _sessionManager.refreshChromeDependents();
 }
 
 QString ContourGuiApp::applicationVersion() const
@@ -1798,6 +1804,31 @@ config::MenuPresentation ContourGuiApp::menuPresentation() const noexcept
     return config::ChromeTokenRows[static_cast<size_t>(_chromeStyle)].layout.menu;
 }
 
+window::TitleBandTokens ContourGuiApp::titleBandTokens() const
+{
+    if (_chromeStyleHost)
+    {
+        auto const& provider = _chromeStyleHost->provider();
+        return window::TitleBandTokens {
+            .style = _chromeStyle,
+            .material = provider.resolvedRow().material.titleBand,
+            .height = provider.bandHeight(),
+            .cellHeight = _chromeStyle == config::ChromeStyle::Terminal ? provider.cellHeight() : 0.0,
+        };
+    }
+    // No provider yet: the Pill rows' band is their title-bar token; the Flat rows' is their measured strip,
+    // which nobody has measured, so 0 leaves the band to its own height.
+    auto const row =
+        config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), _config.chromeDensity.value());
+    return window::TitleBandTokens {
+        .style = _chromeStyle,
+        .material = row.material.titleBand,
+        .height =
+            row.layout.tabShape == config::TabShape::Pill ? static_cast<double>(row.size.titleBar) : 0.0,
+        .cellHeight = 0.0,
+    };
+}
+
 window::ChromeInputs ContourGuiApp::chromeInputs() const
 {
     auto const* palette = config::preferredColorPalette(defaultProfileColors(), _colorPreference);
@@ -1832,7 +1863,8 @@ void ContourGuiApp::refreshChromeStyle()
     // and a reload or an OS change may arrive before it (or without it, in a headless test).
     if (_chromeStyleHost)
         _chromeStyleHost->update(chromeInputs());
-    // Not behind the guard: which pane headers show (the density) is decided headless too.
+    // Not behind the guard: which pane headers show (the density) and each window's title band (its material
+    // under Reduce Transparency) are decided headless too.
     _sessionManager.refreshChromeDependents();
 }
 

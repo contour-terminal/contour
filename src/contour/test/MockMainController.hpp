@@ -103,6 +103,12 @@ class MockMainController: public MainWindowControllerMock
     // Mirrors WindowController's frame adapter: what the OS reserves for its own window controls, which
     // follows the frame (zero once show_title_bar hands the title area to the system).
     Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY titleBarVisibleChanged)
+    // Mirrors WindowController's macOS frame hints, which Main.qml's `flags` read; false (no hint) unless a
+    // test sets them, as it does to load the real Main.qml under Qt::ExpandedClientAreaHint.
+    Q_PROPERTY(bool needsExpandedClientArea READ needsExpandedClientArea WRITE setNeedsExpandedClientArea
+                   NOTIFY frameHintsChanged)
+    Q_PROPERTY(bool clearsTitleBarBackground READ clearsTitleBarBackground WRITE setClearsTitleBarBackground
+                   NOTIFY frameHintsChanged)
     // Tab-strip placement + resolved visibility, mirroring the production WindowController properties
     // Main.qml binds. Writable here so a test can flip them and re-load Main.qml to assert the layout.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition WRITE setTabBarPosition NOTIFY tabBarPositionChanged)
@@ -212,6 +218,25 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] qreal nativeControlsInset() const noexcept
     {
         return _titleBarVisible ? 0 : _scene.nativeControlsInset;
+    }
+
+    [[nodiscard]] bool needsExpandedClientArea() const noexcept { return _needsExpandedClientArea; }
+    void setNeedsExpandedClientArea(bool needed)
+    {
+        if (_needsExpandedClientArea != needed)
+        {
+            _needsExpandedClientArea = needed;
+            emit frameHintsChanged();
+        }
+    }
+    [[nodiscard]] bool clearsTitleBarBackground() const noexcept { return _clearsTitleBarBackground; }
+    void setClearsTitleBarBackground(bool clears)
+    {
+        if (_clearsTitleBarBackground != clears)
+        {
+            _clearsTitleBarBackground = clears;
+            emit frameHintsChanged();
+        }
     }
 
     [[nodiscard]] int tabBarPosition() const noexcept { return _tabBarPosition; }
@@ -387,6 +412,7 @@ class MockMainController: public MainWindowControllerMock
   signals:
     void activeTabIndexChanged();
     void titleBarVisibleChanged();
+    void frameHintsChanged();
     void contextMenuModelChanged();
     void titleBarContextMenuModelChanged();
     void tabBarPositionChanged();
@@ -426,9 +452,11 @@ class MockMainController: public MainWindowControllerMock
 
     MainWindowScene _scene;
     int _chromeHeight = 0;
-    int _tabBarPosition;    // seeded from the scene; 0 = Top, 1 = Bottom
-    bool _tabBarShouldShow; // seeded from the scene's tab-bar visibility
-    bool _titleBarVisible;  // seeded from the scene's frame
+    int _tabBarPosition;                    // seeded from the scene; 0 = Top, 1 = Bottom
+    bool _tabBarShouldShow;                 // seeded from the scene's tab-bar visibility
+    bool _titleBarVisible;                  // seeded from the scene's frame
+    bool _needsExpandedClientArea = false;  // Qt::ExpandedClientAreaHint, which a test sets
+    bool _clearsTitleBarBackground = false; // Qt::NoTitleBarBackgroundHint, which a test sets
     window::DaemonDriftModel _drift;
     bool _multimediaReady = false; // the background probe has not finished
     QString _hostingNotice;

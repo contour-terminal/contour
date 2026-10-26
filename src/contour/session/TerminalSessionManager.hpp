@@ -534,7 +534,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// What every window derives from the chrome's configuration, refreshed after it changed (a reload, an
     /// OS appearance or accessibility change): which pane headers show, and so which sessions follow the
-    /// program in front of them. The one fan-out ContourGuiApp::refreshChromeStyle() calls. GUI thread.
+    /// program in front of them; and the title band's material and geometry. The one fan-out
+    /// ContourGuiApp::refreshChromeStyle() calls. GUI thread.
     void refreshChromeDependents();
 
     void focusOnDisplay(display::TerminalDisplay* display);

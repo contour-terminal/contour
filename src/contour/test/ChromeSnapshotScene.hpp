@@ -165,7 +165,7 @@ class ChromeSnapshotScene
             .tabBarPosition = config::TabBarPosition::Top,
             .drift = scriptRow(variant.script).drift,
             .frame = scriptRow(variant.script).frame,
-            .nativeControlsInset = nativeControlsInsetFor(variant.row),
+            .nativeControlsInset = nativeControlsInsetFor(variant.row, scriptRow(variant.script).mode),
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -367,16 +367,22 @@ class ChromeSnapshotScene
         return model;
     }
 
-    /// What the macOS row's band leaves clear for AppKit's traffic lights: a placeholder of the frame
-    /// adapter's inset, which Step 1d replaces with the measured value.
-    static constexpr qreal SnapshotTrafficLightInset = 70;
+    /// What the macOS row's band leaves clear for AppKit's traffic lights: the frame adapter's inset as the
+    /// Step 1d spike measured it under the compact toolbar (spike-decisions.md §D2: 84 pt; 78 without). A
+    /// constant rather than a measurement: the scene's window is a mock's, with no AppKit title bar dressed
+    /// to measure, and the pictures must not differ by the machine that renders them.
+    static constexpr qreal SnapshotTrafficLightInset = 84;
 
     /// The inset the OS reserves for its own window controls on @p row's host, as the frame adapter reports
-    /// it.
-    /// @param row The chrome row.
-    /// @return SnapshotTrafficLightInset on the macOS host, 0 elsewhere.
-    [[nodiscard]] static constexpr qreal nativeControlsInsetFor(config::ChromeStyle row) noexcept
+    /// it: none in full screen, where AppKit hides the traffic lights from the window.
+    /// @param row  The chrome row.
+    /// @param mode The script's window mode.
+    /// @return SnapshotTrafficLightInset on the macOS host while windowed, 0 otherwise.
+    [[nodiscard]] static constexpr qreal nativeControlsInsetFor(config::ChromeStyle row,
+                                                                SnapshotWindowMode mode) noexcept
     {
+        if (mode == SnapshotWindowMode::FullScreenRevealed)
+            return 0;
         return rowHost(row).host == config::HostPlatform::MacOS ? SnapshotTrafficLightInset : 0;
     }
 

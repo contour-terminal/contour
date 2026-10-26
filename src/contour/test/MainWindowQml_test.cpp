@@ -27,12 +27,15 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/test/TestEnvironment.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+
+#include <core/Environment.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
@@ -2122,5 +2125,38 @@ TEST_CASE("the macOS + opens profiles on a long press, and says so (offscreen)",
     QTest::mouseRelease(window, Qt::LeftButton, {}, centreOf(plus));
     CHECK(controller.newTabMenuOpenings == 1);
     CHECK(controller.calls.count(QStringLiteral("createNewTab")) == 1); // only the startup tab
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml fills the title bar under the expanded client area", "[display][cocoa][mainwindow][band]")
+{
+    // F14 on the real root: under Qt::ExpandedClientAreaHint an ApplicationWindow pads its content by the
+    // safe area, which Main.qml zeroes, so the content and the band start at the window's top. Needs the
+    // cocoa platform plugin, which alone reports a title bar as the safe area.
+    if (QGuiApplication::platformName() != QStringLiteral("cocoa")
+        || !contour::test::displayTestsEnabled(core::LiveEnvironment {}))
+        SKIP("Needs CONTOUR_TEST_DISPLAY=1 and the cocoa platform plugin");
+    QQmlEngine engine;
+    MockMainController controller {};
+    controller.setNeedsExpandedClientArea(true);
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    CHECK(window->flags().testFlag(Qt::ExpandedClientAreaHint));
+    CHECK_FALSE(window->flags().testFlag(Qt::NoTitleBarBackgroundHint));
+    window->show();
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+
+    CHECK(window->safeAreaMargins().top() > 0);
+    auto* const content = window->property("contentItem").value<QQuickItem*>();
+    REQUIRE(content != nullptr);
+    CHECK(content->mapToScene({ 0, 0 }).y() == 0);
+    CHECK(named(*root, QStringLiteral("titleBar")).mapToScene({ 0, 0 }).y() == 0);
+
+    // The client backdrop clears the title bar's background through the same `flags`.
+    controller.setClearsTitleBarBackground(true);
+    QCoreApplication::processEvents();
+    CHECK(window->flags().testFlag(Qt::NoTitleBarBackgroundHint));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

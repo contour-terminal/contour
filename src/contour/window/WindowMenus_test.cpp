@@ -283,7 +283,7 @@ TEST_CASE("CloseTabsToRight on the last tab closes nothing", "[contour][windowme
 TEST_CASE("the tab menu is built for the right-clicked tab", "[contour][windowmenus]")
 {
     TestApp app;
-    ScopedController const window { app.manager() };
+    ScopedController const window { app.manager(), contour::config::MenuPresentation::InScene };
     auto const ids = createTabs(app.manager(), *window, 3);
     window->activateTab(0);
     auto requested = QSignalSpy { window.controller, &WindowController::tabContextMenuRequested };
@@ -306,7 +306,7 @@ TEST_CASE("the tab menu is built for the right-clicked tab", "[contour][windowme
 TEST_CASE("a pick against a tab that has gone is a no-op", "[contour][windowmenus]")
 {
     TestApp app;
-    ScopedController const window { app.manager() };
+    ScopedController const window { app.manager(), contour::config::MenuPresentation::InScene };
     std::ignore = createTabs(app.manager(), *window, 3);
 
     window->openTabContextMenu(2, {});
@@ -323,7 +323,7 @@ TEST_CASE("a pick against a tab that has gone is a no-op", "[contour][windowmenu
 TEST_CASE("Rename… names the right-clicked row", "[contour][windowmenus]")
 {
     TestApp app;
-    ScopedController const window { app.manager() };
+    ScopedController const window { app.manager(), contour::config::MenuPresentation::InScene };
     std::ignore = createTabs(app.manager(), *window, 3);
     auto titleSpy = QSignalSpy { window.controller, &WindowController::tabTitleEditRequested };
 
@@ -339,7 +339,7 @@ TEST_CASE("Rename… names the right-clicked row", "[contour][windowmenus]")
 TEST_CASE("the new-tab menu lists the profiles", "[contour][windowmenus]")
 {
     TestApp app;
-    ScopedController const window { app.manager() };
+    ScopedController const window { app.manager(), contour::config::MenuPresentation::InScene };
     auto requested = QSignalSpy { window.controller, &WindowController::newTabMenuRequested };
 
     window->openNewTabMenu({});
@@ -356,7 +356,7 @@ TEST_CASE("the new-tab menu lists the profiles", "[contour][windowmenus]")
 TEST_CASE("the pane and title-bar menus still pop in the scene", "[contour][windowmenus]")
 {
     TestApp app;
-    ScopedController const window { app.manager() };
+    ScopedController const window { app.manager(), contour::config::MenuPresentation::InScene };
     auto requested = QSignalSpy { window.controller, &WindowController::titleBarContextMenuRequested };
 
     window->openTitleBarContextMenu();

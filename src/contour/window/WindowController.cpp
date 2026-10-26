@@ -21,6 +21,8 @@
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabColorScheme.hpp>
 #include <contour/window/TabLabel.hpp>
+#include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 #include <contour/window/WindowActivation.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -79,12 +81,8 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
     // which is the answer Win32 needs for the border DWM draws around the rounded corners, and the
     // reason this is injected rather than read from a global at the point of use.
-    _nativeFrame = platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme {
-        // The scheme last forced onto the chrome, so the frame agrees with it after an OSC 11 too.
-        if (auto const applied = _manager.app().appliedGuiScheme())
-            return *applied;
-        return QGuiApplication::styleHints()->colorScheme();
-    });
+    _nativeFrame =
+        platform::makeNativeWindowFrame([this]() -> Qt::ColorScheme { return effectiveColorScheme(); });
 }
 
 WindowController::~WindowController() = default;
@@ -1015,9 +1013,12 @@ bool WindowController::needsClientFrameAffordances() const noexcept
 qreal WindowController::nativeControlsInset() const noexcept
 {
     // Only where the OS paints its controls over our chrome; elsewhere it has its own bar and costs
-    // us nothing. The number itself is the adapter's, not ours -- see the declaration.
+    // us nothing. The number itself is the adapter's, not ours -- see the declaration. In full screen
+    // AppKit hides the traffic lights from the window (they move to the revealed menu-bar strip), so the
+    // band's leading corner is free there.
     if (_osWindow == nullptr || !_nativeFrame
-        || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome)
+        || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome
+        || _osWindow->windowStates().testFlag(Qt::WindowFullScreen))
         return 0.0;
     return _nativeFrame->nativeControlsInset(*_osWindow);
 }
@@ -1041,8 +1042,15 @@ void WindowController::setTitleBarVisible(bool visible)
 
     if (_titleBarVisible == visible)
         return;
+    // A decoration change makes the band's request a new one to this window. Leaving the full-size
+    // content view, the default request takes back what the material set -- the toolbar, the appearance
+    // -- so the native title bar is an ordinary one; nothing is applied under it after that.
+    if (_appliedTitleBand && visible && _osWindow != nullptr)
+        _manager.app().titleBandMaterial().apply(*_osWindow, platform::TitleBandRequest {});
+    _appliedTitleBand.reset();
     _titleBarVisible = visible;
     emit titleBarVisibleChanged();
+    refreshTitleBand();
 
     // Which decoration is showing decides whether we publish a shadow at all: with the native frame
     // the window manager draws its own, and a second would stack on it. If setFlag() above recreated
@@ -1220,6 +1228,20 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             &WindowController::onWindowScaleMaybeChanged,
             Qt::UniqueConnection);
 
+    // The band is measured again wherever the native title bar may have moved: another screen, and -- on
+    // macOS, where Qt::ExpandedClientAreaHint reports the title bar as the safe area -- a new safe area
+    // (the toolbar attached, full screen). QWindow::safeAreaMarginsChanged is Qt 6.9's, which macOS builds
+    // require; elsewhere an older Qt is still supported and the band measures nothing native anyway.
+    connect(
+        osWindow, &QWindow::screenChanged, this, &WindowController::refreshTitleBand, Qt::UniqueConnection);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    connect(osWindow,
+            &QWindow::safeAreaMarginsChanged,
+            this,
+            &WindowController::refreshTitleBand,
+            Qt::UniqueConnection);
+#endif
+
     // OS window activation (alt-tab, clicking another application) moves terminal focus, so a shell
     // running under DECSET 1004 is told the window went away. Item-level Qt focus events usually cover
     // this, but not for a window whose panes hold no focused display -- and the manager, not Qt, is the
@@ -1277,6 +1299,87 @@ void WindowController::onWindowVisibilityChanged()
 void WindowController::onWindowStateChanged()
 {
     _manager.windowStateChanged(_windowId);
+    // Full screen asks for another backdrop and rests the band elsewhere, and hides the traffic lights.
+    refreshTitleBand();
+    emit nativeControlsInsetChanged();
+}
+
+Qt::ColorScheme WindowController::effectiveColorScheme() const
+{
+    // The scheme last forced onto the chrome, so the frame and the band agree with it after an OSC 11 too.
+    if (auto const applied = _manager.app().appliedGuiScheme())
+        return *applied;
+    return QGuiApplication::styleHints()->colorScheme();
+}
+
+bool WindowController::dressesTitleBand() const noexcept
+{
+    return framePolicy().shadow == platform::FrameShadowStrategy::FullSizeContent;
+}
+
+platform::TitleBandRequest WindowController::titleBandRequest() const
+{
+    auto const tokens = _manager.app().titleBandTokens();
+    auto const fullScreen = _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowFullScreen);
+    auto const surface = resolveTitleBandSurface(TitleBandSurfaceInputs {
+        .style = tokens.style,
+        .material = tokens.material,
+        .frame = _titleBarVisible ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
+        .mode = fullScreen ? WindowMode::FullScreen : WindowMode::Windowed,
+    });
+    return platform::TitleBandRequest { .backdrop = surface.backdrop,
+                                        .growth = surface.growth,
+                                        .scheme = effectiveColorScheme() };
+}
+
+TitleBandGeometry WindowController::titleBandGeometry() const
+{
+    auto const fullScreen = _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowFullScreen);
+    // Only the full-size content view has a native title bar under the band to make room for.
+    auto const native = _osWindow != nullptr && dressesTitleBand()
+                            ? _manager.app().titleBandMaterial().metrics(*_osWindow)
+                            : platform::NativeTitleBarMetrics {};
+    return resolveTitleBandGeometry(TitleBandGeometryInputs {
+        .tokens = _manager.app().titleBandTokens(),
+        .mode = fullScreen ? WindowMode::FullScreen : WindowMode::Windowed,
+        .devicePixelRatio = _osWindow != nullptr ? _osWindow->devicePixelRatio() : 1.0,
+        .nativeHeight = native.height,
+        .fullScreenTop = native.fullScreenTop,
+    });
+}
+
+void WindowController::refreshTitleBand()
+{
+    if (_osWindow == nullptr)
+        return;
+
+    auto const request = titleBandRequest();
+    // Applied only to a platform window that exists: the material leaves one without a handle alone, and
+    // recording such a request as applied would skip the first real apply at expose.
+    if (dressesTitleBand() && _osWindow->handle() != nullptr && request != _appliedTitleBand)
+    {
+        auto const growthChanged = !_appliedTitleBand || _appliedTitleBand->growth != request.growth;
+        _manager.app().titleBandMaterial().apply(*_osWindow, request);
+        _appliedTitleBand = request;
+        // The toolbar moves the traffic lights (78 -> 84 pt, spike-decisions.md §D2): the band's leading
+        // slot reads the inset again.
+        if (growthChanged)
+            emit nativeControlsInsetChanged();
+    }
+
+    // Measured after the apply: the title bar reaches its grown height only once the toolbar exists.
+    auto const geometry = titleBandGeometry();
+    if (geometry == _titleBandGeometry && request == _publishedTitleBand)
+        return;
+    _titleBandGeometry = geometry;
+    _publishedTitleBand = request;
+    emit titleBandChanged();
+}
+
+bool WindowController::clearsTitleBarBackground() const noexcept
+{
+    return needsExpandedClientArea() && _publishedTitleBand
+           && _publishedTitleBand->backdrop == config::BandBackdrop::Client;
 }
 
 void WindowController::onOSWindowActiveChanged()
@@ -1409,7 +1512,11 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
     {
         switch (event->type())
         {
-            case QEvent::DevicePixelRatioChange: onWindowScaleMaybeChanged(); break;
+            case QEvent::DevicePixelRatioChange:
+                // Measured first: the scale handler may return early (no session, an unchanged scale).
+                refreshTitleBand();
+                onWindowScaleMaybeChanged();
+                break;
 
             case QEvent::PlatformSurface:
                 // The shadow attachment holds the platform window's identity — an X11 window id, or a
@@ -1439,6 +1546,9 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                     platform::applyRowResizeHints(*_osWindow, rowResizeGrid());
                 }
                 refreshWindowShadow();
+                // After the frame, so the material's settings win; before the inset's emit, which the
+                // toolbar it may attach moves.
+                refreshTitleBand();
                 // The OS's own window controls exist only once the window is realized, so the inset
                 // measured from them is only answerable now -- long after titleBarVisibleChanged,
                 // which the other frame gates ride on, has been and gone.
@@ -1451,6 +1561,8 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // regenerates it -- so the frame re-reads the scheme it tints the OS border for. Cheap:
                 // the adapter only touches what the new scheme actually changed.
                 _nativeFrame->apply(*_osWindow, decoration());
+                // The band's appearance follows the scheme the palette now carries.
+                refreshTitleBand();
                 break;
 
             default: break;

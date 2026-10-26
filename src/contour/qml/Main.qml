@@ -33,14 +33,17 @@ ThemedWindow
     // and comes from the frame policy the controller applies (platform/NativeWindowFrame.hpp).
     // Qt.FramelessWindowHint is exactly what costs a window its system drop shadow and its rounded
     // corners, so Windows and macOS withhold it and keep a real frame instead -- Windows zeroes that
-    // frame in WM_NCCALCSIZE, macOS lets the content fill a transparent title bar. Only the
+    // frame in WM_NCCALCSIZE, macOS lets the content fill the title bar. Only the
     // Linux/BSD desktops go genuinely frameless, and there the shadow comes from the compositor
     // (platform/WindowShadow.hpp) rather than from the frame. On macOS, Qt.ExpandedClientAreaHint is what
     // lets the content fill that title bar: Qt owns the full-size content view and its safe area, the
     // frame adapter does not (needsExpandedClientArea is true there alone, so other platforms never
-    // evaluate the hint).
+    // evaluate the hint). Behind the band AppKit then draws its title-bar material, unless the band asks
+    // for its own paint (Reduce Transparency, full screen): then Qt.NoTitleBarBackgroundHint clears the
+    // title bar's background (clearsTitleBarBackground, true only under the hint above).
     flags: Qt.Window | ((win && win.needsFramelessHint) ? Qt.FramelessWindowHint : 0)
                      | ((win && win.needsExpandedClientArea) ? Qt.ExpandedClientAreaHint : 0)
+                     | ((win && win.clearsTitleBarBackground) ? Qt.NoTitleBarBackgroundHint : 0)
     // Under that hint the title bar becomes the window's safe area, and an ApplicationWindow (Qt >= 6.9) pads
     // its content by the safe area -- which would push the band below the very title bar it fills. Zeroed
     // while the hint is set alone; a Binding rather than `topPadding: 0`, because before Qt 6.9 (still

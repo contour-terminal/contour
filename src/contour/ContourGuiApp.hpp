@@ -27,6 +27,7 @@
 #include <contour/window/NewDefaultsNotice.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SplitChrome.hpp>
+#include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 #include <contour/window/WindowControlStyleProvider.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -570,9 +571,15 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The injected title-band material; the null one where the platform draws none.
     [[nodiscard]] platform::ITitleBandMaterial& titleBandMaterial() noexcept;
 
-    /// @return How the resolved chrome style presents menus; @c InScene until terminalGuiAction()
-    ///         resolves the style.
+    /// @return How the resolved chrome style presents menus.
     [[nodiscard]] config::MenuPresentation menuPresentation() const noexcept;
+
+    /// The title band's tokens: the chrome row, its resolved title-band material, the band's token height
+    /// and, on the Terminal row, one cell's height. From the published provider once the GUI built it; before
+    /// that (and in a headless test) from the row's tokens alone, with the Flat rows' height and the cell
+    /// unknown (0).
+    /// @return The tokens.
+    [[nodiscard]] window::TitleBandTokens titleBandTokens() const;
 
     /// @return Where this host's menu bar lives, resolved once from the host at construction.
     [[nodiscard]] command::MenuBarPlacement menuBarPlacement() const noexcept { return _menuBarPlacement; }
@@ -1026,7 +1033,13 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// when returning to System, and lets @c followLiveBackground skip a repaint that changes nothing.
     std::optional<Qt::ColorScheme> _appliedGuiScheme = std::nullopt;
 
-    /// The chrome token row, resolved once at startup from `ui_style` and the host platform.
+    // The host this process runs on, detected once from the environment at construction. Declared before
+    // the chrome row, which is resolved from it.
+    config::HostPlatform _hostPlatform = config::HostPlatform::Other;
+
+    /// The chrome token row, resolved from `ui_style` and the host platform at construction -- so the title
+    /// band's tokens are answerable before the GUI exists -- and again once terminalGuiAction() has loaded
+    /// the configuration.
     config::ChromeStyle _chromeStyle = config::ChromeStyle::ContourLinux;
 
     /// The chrome's design tokens, handed to QML as the `chromeStyle` context property and rebuilt
@@ -1069,8 +1082,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     std::unique_ptr<platform::IPlatformAppearance> _platformAppearance;
     // The native menu presenter, built from the same services; it holds no callback into this app.
     std::unique_ptr<platform::INativeMenuPresenter> _nativeMenus;
-    // The host this process runs on, detected once from the environment at construction.
-    config::HostPlatform _hostPlatform = config::HostPlatform::Other;
     // Where the menu bar lives on this host; it decides which chords a menu may take from the terminal.
     command::MenuBarPlacement _menuBarPlacement = command::MenuBarPlacement::None;
     // Hands the menu bar's Window and Help menus to the OS, built from the same services. Declared before

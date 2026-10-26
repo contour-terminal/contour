@@ -465,11 +465,11 @@ TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixe
           "[contour][app][splitchrome]")
 {
     // Before the GUI publishes a provider there is no cell to measure: the solver gets, at the window's
-    // device-pixel ratio, the row the app holds (ContourLinux until the GUI resolves the configured
-    // style) at the configured density.
+    // device-pixel ratio, the row the app resolved at construction from the configured style and the host
+    // (the one its title band reads) at the configured density.
     auto app = TestApp {};
     auto const expected = contour::window::splitChromeOf(
-        contour::config::resolveChromeTokens(contour::config::ChromeStyle::ContourLinux,
+        contour::config::resolveChromeTokens(app.app().titleBandTokens().style,
                                              app.app().accessibilityPreferences(),
                                              app.app().config().chromeDensity.value()),
         1.0,

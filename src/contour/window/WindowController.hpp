@@ -7,6 +7,7 @@
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
 #include <contour/platform/NativeWindowFrame.hpp>
+#include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/platform/WindowResizeGrid.hpp>
 #include <contour/platform/WindowShadowController.hpp>
 #include <contour/session/PaneProxy.hpp>
@@ -16,6 +17,7 @@
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -122,6 +124,11 @@ class WindowController:
     // NOT on titleBarVisibleChanged: this one is measured from the OS's own buttons, which only
     // exist once the window is realized -- long after the title-bar value is seeded.
     Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY nativeControlsInsetChanged)
+    // The title band's measured geometry and, on macOS, whether Qt clears the title bar's background
+    // behind it -- all three re-decided by refreshTitleBand().
+    Q_PROPERTY(qreal titleBandHeight READ titleBandHeight NOTIFY titleBandChanged)
+    Q_PROPERTY(qreal titleBandRevealTop READ titleBandRevealTop NOTIFY titleBandChanged)
+    Q_PROPERTY(bool clearsTitleBarBackground READ clearsTitleBarBackground NOTIFY titleBandChanged)
     // Tab-strip (tab bar) placement + visibility, exposed to Main.qml. `tabBarPosition` is an int
     // (0 = Top, 1 = Bottom) matching the TabBarPosition enumerator order. `tabBarShouldShow`
     // is the resolved gate (mode + live tab count) the QML binds its `visible` to.
@@ -504,6 +511,36 @@ class WindowController:
     [[nodiscard]] qreal nativeControlsInset() const noexcept;
     // }}}
 
+    // {{{ The title band's material and geometry
+
+    /// Re-decides the title band: applies its request through the app's title-band material when the
+    /// window's frame is the full-size content view and the request changed (or the platform window is new
+    /// to it), then measures the band and emits titleBandChanged() when its geometry or request moved. A
+    /// request whose title-bar growth changed also moves the traffic lights, so it emits
+    /// nativeControlsInsetChanged() as well. Cheap to repeat: every hook (expose, palette, scale, screen,
+    /// window state, safe area, a chrome refresh) calls it. GUI thread.
+    void refreshTitleBand();
+
+    /// @return What this window asks the OS to draw behind and around its band now: the chrome row's surface
+    ///         for the window's frame and mode, in the effective colour scheme.
+    [[nodiscard]] platform::TitleBandRequest titleBandRequest() const;
+
+    /// @return The band's height and full-screen resting place, from the app's band tokens and, where the
+    ///         frame is the full-size content view, the native title bar as measured now.
+    [[nodiscard]] TitleBandGeometry titleBandGeometry() const;
+
+    /// @return The band's height as last published by refreshTitleBand(), in logical pixels.
+    [[nodiscard]] qreal titleBandHeight() const noexcept { return _titleBandGeometry.height; }
+
+    /// @return Where a revealed full-screen band rests, window-relative, as last published; 0 when windowed.
+    [[nodiscard]] qreal titleBandRevealTop() const noexcept { return _titleBandGeometry.revealTop; }
+
+    /// Whether Main.qml sets Qt::NoTitleBarBackgroundHint: only under Qt::ExpandedClientAreaHint (macOS, our
+    /// own band), and only while the published request's backdrop is the client's own paint. A bool for
+    /// QML, the documented QML-facing carve-out, read as the question the `flags` binding asks.
+    [[nodiscard]] bool clearsTitleBarBackground() const noexcept;
+    // }}}
+
     // {{{ Tab strip (tab bar) placement + visibility
     // Like title-bar visibility, these are WINDOW state seeded once from the profile (first-write-wins),
     // so later session rebinds (tab switch, split collapse) never clobber them.
@@ -811,6 +848,8 @@ class WindowController:
     void activeTabRootPaneChanged();
     void titleBarVisibleChanged();
     void nativeControlsInsetChanged();
+    /// The band's published geometry or request changed (@see refreshTitleBand).
+    void titleBandChanged();
     void tabBarPositionChanged();
     void tabBarVisibilityChanged();
     void tabBarShouldShowChanged();
@@ -922,6 +961,12 @@ class WindowController:
     /// QWindow::windowStateChanged handler: minimising and restoring, which a window hidden from the
     /// screen also goes through without its visibility changing.
     void onWindowStateChanged();
+
+    /// @return The colour scheme the chrome shows: the one last forced onto it, else what Qt reports.
+    [[nodiscard]] Qt::ColorScheme effectiveColorScheme() const;
+
+    /// @return Whether this window's frame is the full-size content view the title-band material dresses.
+    [[nodiscard]] bool dressesTitleBand() const noexcept;
 
     /// The frame policy for this window's platform and current decoration.
     [[nodiscard]] platform::FramePolicy framePolicy() const noexcept;
@@ -1081,6 +1126,13 @@ class WindowController:
     // The OS-frame adapter. Never null: platforms with nothing to offer get a NullWindowFrame, so
     // every call site can apply the policy unconditionally rather than guarding on the platform.
     std::unique_ptr<platform::NativeWindowFrame> _nativeFrame;
+
+    // The title band request last applied to this window's platform window, if any; forgotten when the
+    // decoration changes, so the next refresh applies again.
+    std::optional<platform::TitleBandRequest> _appliedTitleBand;
+    // The request and the geometry refreshTitleBand() last published (the properties read these).
+    std::optional<platform::TitleBandRequest> _publishedTitleBand;
+    TitleBandGeometry _titleBandGeometry {};
 
     // Window-scoped native subscription; its geometry provider reads the live configuration.
     std::unique_ptr<QObject> _resizeGrid;

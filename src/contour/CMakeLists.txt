@@ -897,6 +897,7 @@ if(CONTOUR_FRONTEND_GUI)
             window/SettingsWindowHost_test.cpp
             window/SettingsWindowRouting_test.cpp
             window/TabListModel_test.cpp
+            window/TitleBandController_test.cpp
             window/UiStyleProvider_test.cpp
             window/WindowMenus_test.cpp
             window/WindowSizing_test.cpp

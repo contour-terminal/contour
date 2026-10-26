@@ -1208,7 +1208,10 @@ void TerminalSessionManager::updateMotionPreference(config::MotionPreference mot
 void TerminalSessionManager::refreshChromeDependents()
 {
     for (auto* controller: _controllersByWindow | std::views::values)
+    {
         controller->refreshHeaderFollowers();
+        controller->refreshTitleBand();
+    }
 }
 
 vtworkspace::Tab* TerminalSessionManager::tabAtRow(vtworkspace::WindowId window, int index) const noexcept
