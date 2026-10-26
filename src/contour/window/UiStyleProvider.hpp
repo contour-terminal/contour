@@ -480,14 +480,14 @@ class UiStyleProvider: public QObject
     /// the token table rather than a literal repeated in every popup surface.
     [[nodiscard]] Q_INVOKABLE QColor shadowTint(QColor const& base) const;
 
+    /// Watches the application object for QEvent::ApplicationPaletteChange and bumps paletteRevision.
+    /// An event filter rather than QGuiApplication::paletteChanged, which Qt 6 deprecates for the event.
+    /// Public as QObject declares it: an override does not narrow the visibility of what it overrides.
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
   signals:
     /// The application palette changed, so every palette-derived colour (statusColor()) may have too.
     void paletteRevisionChanged();
-
-  protected:
-    /// Watches the application object for QEvent::ApplicationPaletteChange and bumps paletteRevision.
-    /// An event filter rather than QGuiApplication::paletteChanged, which Qt 6 deprecates for the event.
-    bool eventFilter(QObject* watched, QEvent* event) override;
 
   private:
     // By value rather than by reference: the rows have static storage duration, but a reference member
