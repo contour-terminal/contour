@@ -100,6 +100,11 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                                                     ChromeSnapshotScene::hostChipStateFor(row.connection)),
         });
         CHECK(titleBar->isVisible() == (band.band != contour::window::BarPresence::Hidden));
+        // The macOS row's windowed band is drawn at the height measured beside the traffic lights' inset
+        // (S2).
+        if (variant.row == contour::config::ChromeStyle::MacOS && row.mode == SnapshotWindowMode::Windowed
+            && row.frame == SnapshotFrame::ClientBand && titleBar->isVisible())
+            CHECK(titleBar->height() == ChromeSnapshotScene::SnapshotNativeTitleBarHeight);
         switch (variant.script)
         {
             case SnapshotScript::ThreeTabs: {

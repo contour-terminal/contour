@@ -21,6 +21,8 @@
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
+#include <contour/window/TitleBandGeometry.hpp>
+#include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <core/platform/FileSystem.hpp>
@@ -124,6 +126,11 @@ enum class SnapshotFontError : uint8_t
 class ChromeSnapshotScene
 {
   public:
+    /// The native title bar the macOS row's band covers: AppKit's title bar grown by the empty compact
+    /// toolbar, as the Step 1d spike measured it (spike-decisions.md §D2, ruling S2: 40 pt; 32 bare). A
+    /// constant for the reason SnapshotTrafficLightInset is one (see there).
+    static constexpr qreal SnapshotNativeTitleBarHeight = 40;
+
     /// The chip state a script's connection column shows.
     /// @param connection The script's host connection.
     /// @return Its HostChipState; Connected for a local window, which shows no chip.
@@ -171,6 +178,7 @@ class ChromeSnapshotScene
         _settingsWindow { makeSettingsWindow() },
         _root { load() }
     {
+        measureBand();
     }
 
     ChromeSnapshotScene(ChromeSnapshotScene const&) = delete;
@@ -372,6 +380,36 @@ class ChromeSnapshotScene
     /// constant rather than a measurement: the scene's window is a mock's, with no AppKit title bar dressed
     /// to measure, and the pictures must not differ by the machine that renders them.
     static constexpr qreal SnapshotTrafficLightInset = 84;
+
+    /// Gives the mock the band geometry the controller measures in production on the row's host
+    /// (window::resolveTitleBandGeometry over the chrome's tokens and SnapshotNativeTitleBarHeight), so the
+    /// band is drawn at the height that sits beside SnapshotTrafficLightInset. Only on a macOS host,
+    /// windowed, with the client band: elsewhere there is no native title bar under the band (a native frame
+    /// draws its own above it), and in full screen the title bar leaves the window -- the band keeps its
+    /// token there, and a revealed band rests at the window's top.
+    void measureBand()
+    {
+        if (rowHost(_variant.row).host != config::HostPlatform::MacOS
+            || scriptRow(_variant.script).mode != SnapshotWindowMode::Windowed
+            || scriptRow(_variant.script).frame != SnapshotFrame::ClientBand)
+            return;
+        auto const* provider = qobject_cast<window::UiStyleProvider const*>(
+            _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
+        REQUIRE(provider != nullptr);
+        auto const geometry = window::resolveTitleBandGeometry(window::TitleBandGeometryInputs {
+            .tokens = { .style = _variant.row,
+                        .material = provider->resolvedRow().material.titleBand,
+                        .height = provider->bandHeight(),
+                        .cellHeight =
+                            _variant.row == config::ChromeStyle::Terminal ? provider->cellHeight() : 0.0 },
+            .mode = window::WindowMode::Windowed,
+            .devicePixelRatio = window().devicePixelRatio(),
+            .nativeHeight = SnapshotNativeTitleBarHeight,
+            .fullScreenTop = 0,
+        });
+        _controller.setTitleBandHeight(geometry.height);
+        _controller.setTitleBandRevealTop(geometry.revealTop);
+    }
 
     /// The inset the OS reserves for its own window controls on @p row's host, as the frame adapter reports
     /// it: none in full screen, where AppKit hides the traffic lights from the window.

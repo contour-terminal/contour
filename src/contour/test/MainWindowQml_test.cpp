@@ -1799,11 +1799,14 @@ TEST_CASE("the revealed band sits at the reveal top (offscreen)", "[contour][gui
     }
 }
 
-TEST_CASE("a pinned full-screen band rests at the reveal top too (offscreen)",
+TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar while the edge is hovered "
+          "(offscreen)",
           "[contour][gui][qml][mainwindow][band][hosts]")
 {
-    // 1c's Pinned presence (an interrupted remote connection in full screen) keeps working below the menu
-    // bar: it rests where a revealed band does, at the controller's measured height.
+    // 1c's Pinned presence (an interrupted remote connection in full screen) at the controller's measured
+    // height. AppKit's menu bar is hidden until the pointer reaches the screen edge, so the pinned band rests
+    // at the top, and moves below the menu bar only while the pointer is on the edge, as a native full-screen
+    // toolbar does (review I1, ruling a).
     constexpr auto RevealTop = 24.0;
     constexpr auto Measured = 40.0;
     QQmlEngine engine;
@@ -1827,10 +1830,29 @@ TEST_CASE("a pinned full-screen band rests at the reveal top too (offscreen)",
     auto const& titleBar = named(*root, QStringLiteral("titleBar"));
     CHECK(titleBar.property("presence").toString() == QStringLiteral("pinned"));
     CHECK(titleBar.isVisible());
-    CHECK(titleBar.y() == RevealTop);
+    CHECK(titleBar.y() == 0);
     CHECK(titleBar.height() == Measured);
-    CHECK(named(*root, QStringLiteral("content")).y() == 0);
+    auto const& content = named(*root, QStringLiteral("content"));
+    CHECK(content.y() == 0);
     CHECK(controller.chromeHeight() == 0);
+
+    // The pointer on the edge reveals AppKit's menu bar: the band makes room below it.
+    auto const& edge = named(*root, QStringLiteral("bandRevealEdge"));
+    REQUIRE(edge.isVisible());
+    QTest::mouseMove(window, centreOf(edge));
+    REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == RevealTop; }, 2000));
+    // Down onto the band keeps it there.
+    QTest::mouseMove(window, centreOf(titleBar));
+    QCoreApplication::processEvents();
+    CHECK(titleBar.y() == RevealTop);
+    CHECK(titleBar.isVisible());
+    CHECK(content.y() == 0);
+    CHECK(controller.chromeHeight() == 0);
+
+    // Away again: back at the top, still pinned.
+    QTest::mouseMove(window, QPoint { window->width() / 4, window->height() / 2 });
+    REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == 0; }, 2000));
+    CHECK(titleBar.isVisible());
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
     window->showNormal();
 }

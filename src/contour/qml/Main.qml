@@ -74,6 +74,13 @@ ThemedWindow
     property int tabBarPosition: win ? win.tabBarPosition : 0
     property bool tabBarShouldShow: win ? win.tabBarShouldShow : true
 
+    // Whether a full-screen band rests below the menu bar AppKit reveals over the window's top, as a native
+    // full-screen toolbar does: a revealed band always (the pointer at the edge has revealed the menu bar
+    // too), a pinned one (an interrupted remote connection) only while the pointer rests on the edge --
+    // otherwise the menu bar is hidden, and a band below its place would float over live rows.
+    readonly property bool bandBelowMenuBar: appWindow.band.band === "reveal"
+                                             || (appWindow.band.band === "pinned" && revealEdgeHover.hovered)
+
     // The band's WindowFrame and WindowMode, as the ints titleBand() and bandFill() take.
     readonly property int bandFrame: appWindow.win && appWindow.win.titleBarVisible ? 1 : 0
     readonly property int bandMode: appWindow.visibility === Window.FullScreen ? 1 : 0
@@ -190,11 +197,10 @@ ThemedWindow
         anchors.left: parent.left
         anchors.right: parent.right
         y: titleBar.restingTop + titleBar.slideOffset
-        // At the bottom edge, or at the top -- where a full-screen band (revealed or pinned) rests below the
-        // menu bar AppKit reveals over the window, as the controller measured it; 0 off macOS.
+        // At the bottom edge, or at the top -- where a full-screen band rests below the menu bar AppKit
+        // reveals over the window (bandBelowMenuBar), as the controller measured it; 0 off macOS.
         restingTop: appWindow.band.bandEdge === "bottom" ? parent.height - titleBar.height
-                  : (presence === "reveal" || presence === "pinned")
-                    ? ((appWindow.win && appWindow.win.titleBandRevealTop) || 0) : 0
+                  : appWindow.bandBelowMenuBar ? ((appWindow.win && appWindow.win.titleBandRevealTop) || 0) : 0
         Behavior on y {
             enabled: titleBar.presence === "reveal" && chromeStyle.motion.animates
             NumberAnimation { duration: chromeStyle.motion.standard }
@@ -264,7 +270,8 @@ ThemedWindow
         useCustomWindowControls: false
     }
 
-    // The strip along the top edge that reveals a full-screen band while the pointer rests on it.
+    // The strip along the top edge that reveals a full-screen band while the pointer rests on it, and moves a
+    // pinned one below the menu bar the pointer reveals there.
     Item {
         id: bandRevealEdge
         objectName: "bandRevealEdge" // so offscreen tests can findChild() it
@@ -274,8 +281,10 @@ ThemedWindow
         // Down to the band's resting rectangle while it is revealed, so the pointer keeps it however far it
         // has slid, and on its way down from the menu bar above it; passive, so every click still reaches
         // the band beneath.
-        height: titleBar.revealed ? titleBar.restingTop + titleBar.implicitHeight : chromeStyle.space.revealEdge
-        visible: appWindow.band.band === "reveal"
+        height: titleBar.revealed || (appWindow.band.band === "pinned" && revealEdgeHover.hovered)
+                ? titleBar.restingTop + titleBar.implicitHeight : chromeStyle.space.revealEdge
+        // A pinned band is shown already; its edge only moves it below the menu bar (bandBelowMenuBar).
+        visible: appWindow.band.band === "reveal" || appWindow.band.band === "pinned"
         z: 3
 
         HoverHandler {
