@@ -36,7 +36,8 @@ Item {
         anchors.fill: parent
         anchors.margins: -root.reach
         transform: Translate { x: root.level.offsetX; y: root.level.offsetY }
-        source: "image://popupshadow/" + Math.round(root.level.blur)
+        // Asked of the provider only for a soft shadow: it has no image for a level without blur.
+        source: !(root.hasShadow && root.level.blur > 0) ? "" : "image://popupshadow/" + Math.round(root.level.blur)
               + "/" + Math.round(root.level.offsetY)
               + "/" + Math.round(root.radius)
               + "/" + root.tint.toString().substring(1)

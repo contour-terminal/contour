@@ -244,6 +244,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* roles READ roles CONSTANT)
     /// The QML names of the tab badge kinds, for badgeLook().
     Q_PROPERTY(QObject* badgeKinds READ badgeKinds CONSTANT)
+    /// The QML names of an ended pane's ends and restart offers.
+    Q_PROPERTY(QObject* paneEnds READ paneEnds CONSTANT)
     /// The height of a pane header the held modifier reveals over its pane (Minimal).
     Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
     // }}}
@@ -302,6 +304,7 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QStringList paneHeaderActionNames() const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
     [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
+    [[nodiscard]] QObject* paneEnds() noexcept { return &_paneEnds; }
     /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
     /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
     /// @return The row's pane header height before the density applies, in logical pixels.
@@ -540,6 +543,15 @@ class UiStyleProvider: public QObject
     /// @return The legible text colour for that fill.
     [[nodiscard]] Q_INVOKABLE QColor onColor(QColor const& background) const;
 
+    /// The mark ink of @p role for a mark drawn on @p background, rather than on the chrome the palette
+    /// paints: the role's mark hue for the background's tone, or black or white (onColor()) where that hue
+    /// falls short of config::MinimumMarkContrast there. For a mark on a surface of its own, such as a
+    /// pane's pill on the toast fill. Running is the accent, as in statusColor().
+    /// @param role       A config::StatusColorRole as its underlying value.
+    /// @param background The opaque fill the mark is drawn on.
+    /// @return The ink; transparent for a role outside the table.
+    [[nodiscard]] Q_INVOKABLE QColor statusMarkOn(int role, QColor const& background) const;
+
     /// The text colour to draw on statusColor(@p role).
     /// @param role A config::StatusColorRole as its underlying value.
     /// @return Black or white, see onColor().
@@ -648,6 +660,7 @@ class UiStyleProvider: public QObject
     ChromeColorTokens _colors;
     ChromePaneRoleNames _paneRoles;
     ChromeBadgeKindNames _badgeKinds;
+    ChromePaneEndNames _paneEnds;
     int _paletteRevision = 0;
 };
 

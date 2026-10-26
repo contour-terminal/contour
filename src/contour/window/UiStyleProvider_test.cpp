@@ -11,6 +11,7 @@
 #include <contour/config/Config.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/window/ChromeStyleHost.hpp>
@@ -1225,6 +1226,61 @@ TEST_CASE("chromeStyle names the pane colour roles and the badge kinds in QML", 
           == contour::config::ChromeColorRoleCount - static_cast<size_t>(ChromeColorRole::PaneGapFill));
     CHECK(propertiesOf(contour::window::ChromeBadgeKindNames::staticMetaObject)
           == contour::window::TabBadgeKindCount);
+}
+
+TEST_CASE("UiStyleProvider: statusMarkOn inks a mark for the ground it sits on", "[contour][uistyle]")
+{
+    using contour::config::StatusColorRole;
+    using contour::config::StatusInkUse;
+    auto const style = contour::window::UiStyleProvider(rowOf(UiStyle::Native), QGuiApplication::font());
+    auto const warning = static_cast<int>(StatusColorRole::Warning);
+    auto const& hues = contour::config::StatusColors[static_cast<size_t>(warning)].hues(StatusInkUse::Mark);
+
+    // The tone of the ground picks the hue, not the palette's: a dark pill on a light chrome takes the
+    // dark-ground hue.
+    auto const black = QColor(Qt::black);
+    CHECK(style.statusMarkOn(warning, black) == QColor::fromRgb(hues.dark));
+    // Every answer reads at the mark ratio on its ground, falling back to black or white where the hue
+    // cannot.
+    for (auto const& ground:
+         { QColor(Qt::black), QColor(Qt::white), QColor(0xD9, 0xDC, 0xE3), QColor(0x80, 0x80, 0x80) })
+    {
+        INFO("ground " << ground.name().toStdString());
+        CHECK(vtbackend::contrastRatio(contour::platform::toRGBColor(style.statusMarkOn(warning, ground)),
+                                       contour::platform::toRGBColor(ground))
+              >= contour::config::MinimumMarkContrast);
+    }
+    CHECK(style.statusMarkOn(static_cast<int>(StatusColorRole::Running), black) == style.accentColor());
+    CHECK(style.statusMarkOn(-1, black) == QColor(Qt::transparent));
+}
+
+TEST_CASE("chromeStyle names an ended pane's ends and restart offers in QML", "[contour][uistyle][qml]")
+{
+    using contour::session::EndReason;
+    using contour::session::FooterRestart;
+    auto engine = QQmlEngine();
+    contour::test::installChromeStyle(engine);
+    auto const evaluate = [&engine](char const* expression) {
+        auto qmlExpression = QQmlExpression(engine.rootContext(), nullptr, QString::fromLatin1(expression));
+        auto const value = qmlExpression.evaluate();
+        REQUIRE(!qmlExpression.hasError());
+        return value;
+    };
+
+    CHECK(evaluate("chromeStyle.paneEnds.none").toInt() == static_cast<int>(EndReason::None));
+    CHECK(evaluate("chromeStyle.paneEnds.exited").toInt() == static_cast<int>(EndReason::Exited));
+    CHECK(evaluate("chromeStyle.paneEnds.signalled").toInt() == static_cast<int>(EndReason::Signalled));
+    CHECK(evaluate("chromeStyle.paneEnds.startFailed").toInt() == static_cast<int>(EndReason::StartFailed));
+    CHECK(evaluate("chromeStyle.paneEnds.disconnected").toInt() == static_cast<int>(EndReason::Disconnected));
+    CHECK(evaluate("chromeStyle.paneEnds.restartUnavailable").toInt()
+          == static_cast<int>(FooterRestart::Unavailable));
+    CHECK(evaluate("chromeStyle.paneEnds.restartOffered").toInt()
+          == static_cast<int>(FooterRestart::Offered));
+
+    // One name per end and per offer, so a new enumerator needs a QML name too.
+    auto const& meta = contour::window::ChromePaneEndNames::staticMetaObject;
+    CHECK(static_cast<size_t>(meta.propertyCount() - meta.propertyOffset())
+          == contour::session::PaneFooterRows.size() + contour::session::FooterRestartCount);
 }
 
 TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uistyle]")

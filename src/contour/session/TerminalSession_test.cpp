@@ -11068,6 +11068,9 @@ TEST_CASE("TerminalSession: a remote pane reconnects exactly while its window's 
                                                             contour::test::makeTestNotifier(),
                                                             contour::session::SessionRole::Shell,
                                                             contour::session::SessionHosting::Remote);
+    // A first connection is a reconnect too, as the chip says: Connecting reads as reconnecting.
+    remote->setHostConnection(ConnectionState::Connecting);
+    CHECK(remote->isReconnecting());
     // The pane's pill and the chip fold the connection the same way, so the two never disagree.
     for (auto const index: std::views::iota(size_t { 0 }, vthost::client::ConnectionStateCount))
     {

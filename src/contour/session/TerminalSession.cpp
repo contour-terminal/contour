@@ -975,6 +975,14 @@ void TerminalSession::noteOutputForTab(window::OutputOrigin origin)
 
 void TerminalSession::pageResized()
 {
+    // The first resize after the end is the footer laying out below the cells: what it took, a restart
+    // gives back. Later ones (the window, the font) change the page, not what the footer takes.
+    if (_linesAtEnd && !_footerLines)
+    {
+        auto const lines = _terminal.totalPageSize().lines;
+        _footerLines = *_linesAtEnd > lines ? *_linesAtEnd - lines : vtbackend::LineCount(0);
+    }
+
     // A window, font or split resize is followed by no output when the program in the pane is quiet, and
     // the reflow renamed every row a tick points at: without this the old ticks stayed, and every click on
     // one was refused, until the program next printed. Only a request: the resizer holds the lock.
@@ -1808,6 +1816,8 @@ void TerminalSession::focusTerminalWindow()
 
 void TerminalSession::announceSessionEnd()
 {
+    // Before the footer lays out and takes its rows (totalPageSize() reads lock-free).
+    _linesAtEnd = _terminal.totalPageSize().lines;
     // The footer stands where the program ran: its header has no program in front to name.
     stopFollowingForegroundProcess(ProcessNameFollower::Header);
     emit sessionEndChanged();
@@ -1829,6 +1839,13 @@ FooterRestart TerminalSession::restartOffer() const noexcept
 {
     return restartOf(
         _end, _hosting == SessionHosting::Local ? RestartSupport::Supported : RestartSupport::Unsupported);
+}
+
+vtbackend::PageSize TerminalSession::restartPageSize() const
+{
+    auto size = _terminal.totalPageSize();
+    size.lines += _footerLines.value_or(vtbackend::LineCount(0));
+    return size;
 }
 
 void TerminalSession::restart()

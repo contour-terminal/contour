@@ -805,6 +805,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Whether the ended pane offers Restart: its end allows one and this session is hosted locally.
     [[nodiscard]] FooterRestart restartOffer() const noexcept;
 
+    /// The page size a restart starts its session at: the pane's size once the ended pane's footer hides,
+    /// which is the page now with the rows the footer took given back. GUI thread.
+    /// @return The current page size, its lines grown by the footer's rows.
+    [[nodiscard]] vtbackend::PageSize restartPageSize() const;
+
     /// @return restartOffer() as its enumerator value, for QML.
     [[nodiscard]] int getRestartOffer() const noexcept { return static_cast<int>(restartOffer()); }
 
@@ -2012,6 +2017,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     EndReason _end = EndReason::None;
     /// What the footer names about _end: an exit code, a signal, a start failure. Guarded as _end is.
     std::string _endDetail;
+    /// The page's lines when the end was announced, before the footer took any of them. GUI thread.
+    std::optional<vtbackend::LineCount> _linesAtEnd;
+    /// The rows the footer took, measured at the first page resize after the end (the footer's own
+    /// layout); none before. GUI thread.
+    std::optional<vtbackend::LineCount> _footerLines;
     DisplaySurface* _display = nullptr;
 
     std::atomic<bool> _terminating { false };

@@ -5,7 +5,9 @@
 // PaneCard.qml places it below the cells, never over them: the terminal's bottom meets the footer's top, so
 // the ended program's last output stays readable above it. Return restarts the pane and the ClosePane
 // binding closes it (TerminalSession's ended-pane keys), so the buttons are the pointer's way to the same
-// two answers, and take no Tab focus; assistive technology presses them through their actions.
+// two answers, and take no Tab focus; assistive technology presses them through their actions, and hears
+// the keys in the footer's description. A click elsewhere on the footer makes the pane the active one, as
+// a click on its cells does, so that Return then reaches it.
 //
 // On the native rows it is a bar in the pane's own tone with a hairline above it; on the Terminal row it is
 // one cell row of the bar, its buttons bracketed by the chip glyphs: `[Restart ↩] [Close Ctrl+Shift+X]`.
@@ -25,17 +27,36 @@ Item {
     readonly property color background: session ? session.backgroundColor : "black"
     /// Whether the buttons are runs of bracketed cells (the Terminal row) rather than rounded shapes.
     readonly property bool bracketed: chromeStyle.chipOpenGlyph !== ""
+    /// Whether the session has ended, so the footer shows.
+    readonly property bool ended: session ? session.sessionEnd !== chromeStyle.paneEnds.none : false
+    /// Whether the end offers Restart.
+    readonly property bool restartOffered: session ? session.restartOffer === chromeStyle.paneEnds.restartOffered
+                                                   : false
     readonly property string message: session ? session.endMessage : ""
     // The window's controller (Main.qml's `win`), which spells the configured chords.
     readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
+    // ClosePane's chord, asked for only while the footer shows: read when it appears, so a binding
+    // reloaded meanwhile shows the next time a pane ends.
+    readonly property string closeChord: ended && controller ? controller.shortcutText("ClosePane") : ""
     readonly property color textColor: chromeStyle.paletteRevision < 0 ? "transparent"
         : chromeStyle.colorOn(chromeStyle.roles.paneFooterText, footer.background)
 
-    visible: session ? session.sessionEnd !== 0 : false
+    /// A click on the footer outside its buttons.
+    signal activated()
+
+    visible: footer.ended
     height: chromeStyle.size.paneFooter
 
     Accessible.role: Accessible.AlertMessage
     Accessible.name: footer.message
+    Accessible.description: [footer.restartOffered ? qsTr("Return restarts it.") : "",
+                             footer.closeChord !== "" ? qsTr("%1 closes it.").arg(footer.closeChord) : ""]
+                            .filter(sentence => sentence !== "").join(" ")
+
+    TapHandler {
+        gesturePolicy: TapHandler.ReleaseWithinBounds
+        onTapped: footer.activated()
+    }
 
     // The fill: the pane's background at the profile's opacity, as the terminal above it is, under the
     // footer's wash. Reaching one radius above the footer and clipped there, so the bottom corners follow
@@ -93,7 +114,7 @@ Item {
 
         FooterButton {
             objectName: "exitedFooterRestart"
-            visible: footer.session ? footer.session.restartOffer === 1 : false
+            visible: footer.restartOffered
             label: qsTr("Restart %1").arg(chromeStyle.restartGlyph)
             accessibleName: qsTr("Restart")
             fill: chromeStyle.accentColor
@@ -104,7 +125,7 @@ Item {
 
         FooterButton {
             objectName: "exitedFooterClose"
-            label: qsTr("Close %1").arg(footer.controller ? footer.controller.shortcutText("ClosePane") : "").trim()
+            label: qsTr("Close %1").arg(footer.closeChord).trim()
             accessibleName: qsTr("Close")
             // The footer's own wash once more: a step above the footer, as the kit's fill.3 is.
             fill: chromeStyle.paletteRevision < 0 ? "transparent"

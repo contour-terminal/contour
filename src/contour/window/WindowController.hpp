@@ -810,7 +810,9 @@ class WindowController:
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
 
     /// The chord the configuration binds to a command, as this host spells shortcuts (an ended pane's
-    /// footer names Close's). Read at each call, so a reloaded binding is the one shown.
+    /// footer names Close's). Each call reads the configuration as it is now, but nothing notifies a
+    /// binding over it: a label already showing keeps its chord until it is evaluated again (the footer
+    /// asks when it appears).
     /// @param commandName The command's id (command::commandId), such as "ClosePane".
     /// @return The chord, e.g. "Ctrl+Shift+X" or "⌃⇧X"; empty when nothing binds the command.
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const;

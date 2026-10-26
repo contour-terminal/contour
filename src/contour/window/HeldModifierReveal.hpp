@@ -40,7 +40,7 @@ class HeldModifierReveal
 
     /// A pointer button went down. It disarms a hold still pending, as other input does, but leaves a reveal
     /// that has already fired alone: a click on a revealed header's button is what the reveal is for.
-    /// So a click no longer ends a fired reveal; a key, the wheel, the release or deactivation does.
+    /// So a click does not end a fired reveal; a key, the wheel, the release or deactivation does.
     /// @param now When it happened.
     void pointerPressed(std::chrono::steady_clock::time_point now) noexcept
     {

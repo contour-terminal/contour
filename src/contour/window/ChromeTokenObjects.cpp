@@ -200,4 +200,8 @@ ChromeBadgeKindNames::ChromeBadgeKindNames(QObject* parent): QObject { parent }
 {
 }
 
+ChromePaneEndNames::ChromePaneEndNames(QObject* parent): QObject { parent }
+{
+}
+
 } // namespace contour::window

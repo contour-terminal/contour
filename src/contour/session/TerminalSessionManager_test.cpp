@@ -2657,6 +2657,37 @@ TEST_CASE("TerminalSessionManager: a remote-hosted pane offers no Restart", "[ma
     contour::test::closeAllTabs(*window);
 }
 
+TEST_CASE("TerminalSessionManager: a restarted pane starts at the size it has once the footer hides",
+          "[manager][paneend]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const ended = window->activeSession();
+    REQUIRE(ended != nullptr);
+    auto const running = ended->terminal().totalPageSize();
+    REQUIRE(running.lines > vtbackend::LineCount(4));
+
+    // The footer shows below the cells and takes two rows of the grid; a later window resize narrows it.
+    endEarly(*ended);
+    auto const resize = [&](vtbackend::PageSize size) {
+        auto const lock = std::scoped_lock { ended->terminal() };
+        ended->terminal().resizeScreen(size, std::nullopt);
+    };
+    resize(vtbackend::PageSize { .lines = running.lines - 2, .columns = running.columns });
+    resize(vtbackend::PageSize { .lines = running.lines - 2, .columns = running.columns - 10 });
+
+    // The new shell starts with the rows the footer gives back, at the width the pane has now: no
+    // SIGWINCH the moment the footer hides.
+    auto const restarted = manager.restartSession(*ended);
+    REQUIRE(restarted.has_value());
+    CHECK((*restarted)->terminal().totalPageSize()
+          == vtbackend::PageSize { .lines = running.lines, .columns = running.columns - 10 });
+
+    contour::test::closeAllTabs(*window);
+}
+
 TEST_CASE("TerminalSessionManager: restarting an ended pane repaints its tab's badge",
           "[manager][paneend][tabbadge]")
 {

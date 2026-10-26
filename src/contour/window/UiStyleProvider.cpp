@@ -262,7 +262,8 @@ UiStyleProvider::UiStyleProvider(ChromeInputs inputs, QObject* parent):
     _tint { _groups.tint, this },
     _colors { _groups.colors, _inputs.scheme, _groups.contrast.separatorPercent, *this },
     _paneRoles { this },
-    _badgeKinds { this }
+    _badgeKinds { this },
+    _paneEnds { this }
 {
     if (auto* application = QCoreApplication::instance())
         application->installEventFilter(this);
@@ -462,6 +463,28 @@ QColor UiStyleProvider::statusColor(config::StatusColorRole role, config::Status
     }
     auto const& hues = row.hues(use);
     return QColor::fromRgb(paletteIsDark() ? hues.dark : hues.light);
+}
+
+QColor UiStyleProvider::statusMarkOn(int role, QColor const& background) const
+{
+    if (!inRange(role, config::StatusColors.size()))
+        return { Qt::transparent };
+
+    auto const& row = config::StatusColors[static_cast<size_t>(role)];
+    auto const ground = platform::toRGBColor(background);
+    auto const mark = [&]() -> QColor {
+        switch (row.source)
+        {
+            case config::StatusColorSource::PaletteAccent: return accentColor();
+            case config::StatusColorSource::Fixed: break;
+        }
+        auto const& hues = row.hues(config::StatusInkUse::Mark);
+        auto const dark = platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark;
+        return QColor::fromRgb(dark ? hues.dark : hues.light);
+    }();
+    if (vtbackend::contrastRatio(platform::toRGBColor(mark), ground) >= config::MinimumMarkContrast)
+        return mark;
+    return onColor(background);
 }
 
 QColor UiStyleProvider::accentColor() const

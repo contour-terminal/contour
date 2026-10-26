@@ -2008,7 +2008,7 @@ std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSes
     auto const sessionId = vtworkspace::SessionId { _nextSessionId++ };
     auto* session = createBackingSession(sessionId,
                                          std::move(cwd),
-                                         ended.terminal().totalPageSize(),
+                                         ended.restartPageSize(),
                                          ended.launchedCommand(),
                                          ended.profileOverride(),
                                          ended.role());

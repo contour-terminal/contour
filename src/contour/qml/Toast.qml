@@ -19,6 +19,11 @@ Control {
     property string glyph
     /// Whether the toast is showing. QML-facing, so a host binds it directly.
     property bool shown: false
+    /// The glyph's colour: the text's unless the glyph is a mark with an ink of its own.
+    property color glyphColor: chromeStyle.colors.toastText
+    /// The elevation it lifts itself by: e2 as a transient notice; a host showing it as a steady state
+    /// in its own surface may lower it.
+    property var elevation: chromeStyle.elevation.e2
 
     /// How far the toast slides from while entering; zero when motion is reduced.
     readonly property real enterOffset: chromeStyle.motion.travel
@@ -53,7 +58,7 @@ Control {
         ElevationShadow {
             anchors.fill: parent
             z: -1
-            level: chromeStyle.elevation.e2
+            level: root.elevation
             radius: parent.radius
         }
     }
@@ -67,7 +72,7 @@ Control {
             Layout.alignment: Qt.AlignVCenter
             text: root.glyph
             font: chromeStyle.type.footnote
-            color: chromeStyle.colors.toastText
+            color: root.glyphColor
             Accessible.ignored: true
         }
 

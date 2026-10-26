@@ -100,7 +100,7 @@ Item {
         width: card.width
         height: card.height - y
         visible: card.session ? card.session.isReconnecting === true
-                                && card.session.sessionEnd === 0
+                                && card.session.sessionEnd === chromeStyle.paneEnds.none
                               : false
         clip: card.headerInline && card.cornerRadius > 0
         // The dim's colour, for the scene's own checks.
@@ -117,14 +117,20 @@ Item {
             color: reconnecting.color
         }
 
-        // Its glyph is the Working badge's, drawn still: the pill is a steady state, not a progress.
+        // Its glyph is the Working badge's, drawn still in the warning mark ink of the host chip's
+        // Reconnecting dot, resolved on the pill's own fill (on the Terminal row, the scheme inverted): the
+        // pill is a steady state, not a progress. Nor is it a popover, so it casts a shadow only where the
+        // row's shadow is soft; the Terminal row's hard offset copy would read as a second row beneath it.
         Toast {
             objectName: "reconnectingPill"
             anchors.centerIn: parent
             shown: true
+            elevation: chromeStyle.elevation.e2.blur > 0 ? chromeStyle.elevation.e2 : chromeStyle.elevation.e0
             text: reconnecting.hostLabel !== "" ? qsTr("Reconnecting to %1…").arg(reconnecting.hostLabel)
                                                 : qsTr("Reconnecting…")
             glyph: chromeStyle.paletteRevision < 0 ? "" : chromeStyle.badgeLook(chromeStyle.badgeKinds.working).glyph
+            glyphColor: chromeStyle.paletteRevision < 0 ? "transparent"
+                      : chromeStyle.statusMarkOn(chromeStyle.statusWarning, chromeStyle.colors.toastFill)
         }
     }
 
@@ -153,6 +159,9 @@ Item {
         width: card.width
         session: card.session
         cornerRadius: card.cornerRadius
+        // A click on the footer, as on the terminal, makes the ended pane the active one: Return then
+        // restarts it.
+        onActivated: { if (card.node) card.node.activate() }
     }
 
     // The card's edge, above what it holds: a border of one device pixel in the separator colour. Minimal

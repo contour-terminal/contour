@@ -13,6 +13,7 @@
 #include <contour/command/ContextMenu.hpp>
 #include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/display/TerminalDisplay.hpp>
@@ -8174,6 +8175,11 @@ TEST_CASE("pane end: a reconnecting pane dims below its header and shows the pil
     auto const look = host.style().badgeLook(static_cast<int>(contour::window::TabBadgeKind::Working));
     CHECK(pill.property("glyph").toString() == look.value("glyph").toString());
     auto const& glyph = PaneTreeHost::partOf(pill, "toastGlyph");
+    // In the warning mark ink of the host chip's Reconnecting dot, on the pill's own fill.
+    auto const warning = static_cast<int>(contour::config::StatusColorRole::Warning);
+    auto const& hues =
+        contour::config::StatusColors[static_cast<size_t>(warning)].hues(contour::config::StatusInkUse::Mark);
+    CHECK((colorOf(glyph) == QColor::fromRgb(hues.dark) || colorOf(glyph) == QColor::fromRgb(hues.light)));
     CHECK(std::ranges::none_of(glyph.findChildren<QObject*>(), [](QObject const* child) {
         return child->inherits("QQuickAbstractAnimation");
     }));
@@ -8251,6 +8257,88 @@ TEST_CASE("pane end: the reconnecting dim lies under the header and never over a
     QCoreApplication::processEvents();
     CHECK_FALSE(overlay.isVisible());
     CHECK_FALSE(PaneTreeHost::partOf(card, "reconnectingPill").isVisible());
+}
+
+TEST_CASE("pane end: the pill casts a shadow only where the row's shadow is soft (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto const row = GENERATE(contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::Terminal);
+    CAPTURE(static_cast<int>(row));
+    auto setup = paneCardSetup();
+    setup.row = row;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    panes.leftSession.setReconnecting(true);
+    QCoreApplication::processEvents();
+
+    // The pill is a steady state in the pane, not a popover: the Terminal row's hard offset copy would
+    // read as a second, empty row beneath it.
+    auto const& pill = PaneTreeHost::partOf(host.cardOf(panes.left()), "reconnectingPill");
+    REQUIRE(pill.isVisible());
+    CHECK_FALSE(PaneTreeHost::partOf(pill, "elevationHardShadow").isVisible());
+    CHECK(PaneTreeHost::partOf(pill, "elevationSoftShadow").isVisible()
+          == (row == contour::config::ChromeStyle::MacOS));
+}
+
+TEST_CASE("pane end: the footer tells assistive technology its keys, and a click on it activates the pane "
+          "(offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    // Nothing asks for a chord while no footer shows.
+    CHECK(host.window.controller().shortcutTextCalls == 0);
+
+    endWithExitCode(panes.rightSession);
+    host.settle();
+    auto const& card = host.cardOf(panes.right());
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    REQUIRE(footer.isVisible());
+    CHECK(host.window.controller().shortcutTextCalls > 0);
+
+    auto const* attached = [&]() -> QObject* {
+        for (auto* child: footer.children())
+            if (child->inherits("QQuickAccessibleAttached"))
+                return child;
+        return nullptr;
+    }();
+    REQUIRE(attached != nullptr);
+    auto const description = attached->property("description").toString();
+    CHECK(description.contains(QStringLiteral("Return")));
+    CHECK(description.contains(QStringLiteral("Ctrl+Shift+X")));
+
+    // A click beside the buttons makes the ended pane the active one, so Return then reaches it.
+    auto const before = panes.right().activateCalls;
+    clickOn(host, PaneTreeHost::partOf(card, "exitedFooterMessage"));
+    CHECK(panes.right().activateCalls == before + 1);
+    CHECK(panes.rightSession.restarts == 0);
+}
+
+TEST_CASE("pane end: the pill's mark reads on its own fill (offscreen)", "[contour][gui][qml][paneend]")
+{
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark");
+    auto const row = GENERATE(contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::Terminal);
+    INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
+    CAPTURE(static_cast<int>(row));
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    auto setup = terminalRowSetup(schemeName);
+    setup.row = row;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    panes.leftSession.setReconnecting(true);
+    QCoreApplication::processEvents();
+
+    // A mark, so WCAG 1.4.11's 3:1 against the pill it sits on, whichever way the row inks the pill.
+    auto const& pill = PaneTreeHost::partOf(host.cardOf(panes.left()), "reconnectingPill");
+    auto const* background = pill.property("background").value<QQuickItem*>();
+    REQUIRE(background != nullptr);
+    CHECK(contrastOf(colorOf(PaneTreeHost::partOf(pill, "toastGlyph")), colorOf(*background))
+          >= contour::config::MinimumMarkContrast);
 }
 // }}}
 

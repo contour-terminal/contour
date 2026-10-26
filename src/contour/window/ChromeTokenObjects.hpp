@@ -8,6 +8,7 @@
 /// pixels and the QML never learns which style is active.
 
 #include <contour/config/ChromeTokenGroups.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QObject>
@@ -851,6 +852,47 @@ class ChromeBadgeKindNames: public QObject
 
   private:
     [[nodiscard]] static constexpr int of(TabBadgeKind kind) noexcept { return static_cast<int>(kind); }
+};
+
+/// The QML names of an ended pane's ends and restart offers, `chromeStyle.paneEnds`, for what a
+/// TerminalSession's `sessionEnd` and `restartOffer` answer.
+class ChromePaneEndNames: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int none READ none CONSTANT)
+    Q_PROPERTY(int exited READ exited CONSTANT)
+    Q_PROPERTY(int signalled READ signalled CONSTANT)
+    Q_PROPERTY(int startFailed READ startFailed CONSTANT)
+    Q_PROPERTY(int disconnected READ disconnected CONSTANT)
+    Q_PROPERTY(int restartUnavailable READ restartUnavailable CONSTANT)
+    Q_PROPERTY(int restartOffered READ restartOffered CONSTANT)
+
+  public:
+    /// @param parent Qt ownership.
+    explicit ChromePaneEndNames(QObject* parent);
+
+    /// @return Each session::EndReason as its underlying value.
+    [[nodiscard]] static constexpr int none() noexcept { return of(session::EndReason::None); }
+    [[nodiscard]] static constexpr int exited() noexcept { return of(session::EndReason::Exited); }
+    [[nodiscard]] static constexpr int signalled() noexcept { return of(session::EndReason::Signalled); }
+    [[nodiscard]] static constexpr int startFailed() noexcept { return of(session::EndReason::StartFailed); }
+    [[nodiscard]] static constexpr int disconnected() noexcept
+    {
+        return of(session::EndReason::Disconnected);
+    }
+
+    /// @return Each session::FooterRestart as its underlying value.
+    [[nodiscard]] static constexpr int restartUnavailable() noexcept
+    {
+        return static_cast<int>(session::FooterRestart::Unavailable);
+    }
+    [[nodiscard]] static constexpr int restartOffered() noexcept
+    {
+        return static_cast<int>(session::FooterRestart::Offered);
+    }
+
+  private:
+    [[nodiscard]] static constexpr int of(session::EndReason end) noexcept { return static_cast<int>(end); }
 };
 
 } // namespace contour::window

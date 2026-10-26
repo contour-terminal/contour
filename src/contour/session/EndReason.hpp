@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <string>
@@ -30,6 +31,9 @@ enum class FooterRestart : uint8_t
     Unavailable = 0, ///< No Restart: only Close.
     Offered,         ///< Restart and Close.
 };
+
+/// Number of @c FooterRestart enumerators, derived from the last one.
+inline constexpr std::size_t FooterRestartCount = static_cast<std::size_t>(FooterRestart::Offered) + 1;
 
 /// Whether the hosting a session runs under can start a session again in the same pane.
 ///
