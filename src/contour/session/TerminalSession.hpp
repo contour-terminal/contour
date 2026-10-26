@@ -1072,11 +1072,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     /// The question this session asks now, for QML: empty while nothing is asked; else `id` (int, what
     /// answerPermission() is handed back; a new one for each question shown), `title` (QString),
-    /// `lines` (a list of `{text, strong, verbatim}` maps), `denyText`, `allowText`, `rememberText`,
-    /// `rememberScope`, `initialMemory`, `defaultDecision` (each its enum's underlying int, as QML compares
-    /// it with Permission.*) and `allowNeedsRemember`. The two line flags and allowNeedsRemember stay bool:
-    /// a QVariantMap read by QML is the documented carve-out. Changes are notified by
-    /// pendingPermissionChanged(). GUI thread.
+    /// `lines` (a list of `{text, weight, style}` maps), `denyText`, `allowText`, `rememberText`,
+    /// `rememberScope`, `initialMemory`, `defaultDecision`, `allowOnce`, and each line's `weight` and `style`
+    /// -- every enum as its underlying int, which QML compares with Permission.* (a uint8_t-based enum inside
+    /// a QVariant does not reach JavaScript as a number). Changes are notified by pendingPermissionChanged().
+    /// GUI thread.
     /// @return The question, as the dialog shows it.
     [[nodiscard]] QVariantMap pendingPermission() const { return _pendingPermission; }
 

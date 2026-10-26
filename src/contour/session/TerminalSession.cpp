@@ -1132,39 +1132,10 @@ std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
     return std::nullopt;
 }
 
-namespace
-{
-    /// @p prompt as QML reads it: see TerminalSession::pendingPermission().
-    [[nodiscard]] QVariantMap toVariantMap(PermissionPrompt const& prompt)
-    {
-        auto lines = QVariantList {};
-        lines.reserve(static_cast<qsizetype>(prompt.lines.size()));
-        for (auto const& line: prompt.lines)
-            lines.append(QVariantMap {
-                { QStringLiteral("text"), QString::fromStdString(line.text) },
-                { QStringLiteral("strong"), line.weight == PromptLineWeight::Strong },
-                { QStringLiteral("verbatim"), line.style == PromptLineStyle::Verbatim },
-            });
-        return QVariantMap {
-            { QStringLiteral("title"), QString::fromStdString(prompt.title) },
-            { QStringLiteral("lines"), lines },
-            { QStringLiteral("denyText"), QString::fromStdString(prompt.denyText) },
-            { QStringLiteral("allowText"), QString::fromStdString(prompt.allowText) },
-            { QStringLiteral("rememberText"), QString::fromStdString(prompt.rememberText) },
-            { QStringLiteral("rememberScope"), std::to_underlying(prompt.rememberScope) },
-            { QStringLiteral("initialMemory"), std::to_underlying(prompt.initialMemory) },
-            { QStringLiteral("defaultDecision"), std::to_underlying(prompt.defaultDecision) },
-            { QStringLiteral("allowNeedsRemember"), prompt.allowOnce == AllowOnce::Withheld },
-        };
-    }
-} // namespace
-
 void TerminalSession::publishPendingPermission()
 {
     auto const prompt = currentPermissionPrompt();
-    auto next = prompt ? toVariantMap(*prompt) : QVariantMap {};
-    if (prompt)
-        next.insert(QStringLiteral("id"), _shownQuestionId);
+    auto next = prompt ? permissionPromptMap(*prompt, _shownQuestionId) : QVariantMap {};
     if (next == _pendingPermission)
         return;
     _pendingPermission = std::move(next);

@@ -5345,7 +5345,8 @@ TEST_CASE("TerminalSession: the paste prompt's preview is bounded however large 
     for (auto const& line: lines | std::views::take(static_cast<qsizetype>(limits.lines)))
     {
         auto const map = line.toMap();
-        CHECK(map.value(QStringLiteral("verbatim")).toBool());
+        CHECK(map.value(QStringLiteral("style")).toInt()
+              == std::to_underlying(contour::session::PromptLineStyle::Verbatim));
         auto const shown = map.value(QStringLiteral("text")).toString();
         // Cut to its bound, and saying so.
         CHECK(shown.endsWith(ellipsis));

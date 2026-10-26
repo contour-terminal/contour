@@ -11,6 +11,7 @@
 // all. That remains a manual check — see docs/accessibility.md for the Accerciser recipe.
 
 #include <contour/session/EndReason.hpp>
+#include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
@@ -29,6 +30,7 @@
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
+#include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -41,6 +43,7 @@
 #include <utility>
 #include <vector>
 
+#include <QtTest/QTest>
 #include <vthost/client/ReleaseDrift.hpp>
 
 namespace
@@ -467,5 +470,51 @@ TEST_CASE("accessibility: the find bar names its field, its count, its toggles a
         CHECK(button->property("name").toString() == label);
     }
 
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the permission dialog's accessible tree", "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+    QQuickWindow window;
+    window.resize(1024, 640);
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+
+    auto const prompt = contour::session::bufferCapturePrompt("zsh", vtbackend::LineCount(24));
+    auto dialog = loadComponent(engine,
+                                QStringLiteral("qrc:/qt/qml/Contour/Ui/PermissionDialog.qml"),
+                                QVariantMap { { "prompt", contour::session::permissionPromptMap(prompt, 1) },
+                                              { "parent", QVariant::fromValue(window.contentItem()) } });
+    REQUIRE(QMetaObject::invokeMethod(dialog.get(), "open"));
+    REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+
+    // The content is the Dialog: a Popup carries no Accessible of its own.
+    auto* content = dialog->property("contentItem").value<QQuickItem*>();
+    auto* attached = accessibleAttachedOf(content);
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::Dialog);
+    CHECK(attached->property("name").toString() == QString::fromStdString(prompt.title));
+    CHECK(attached->property("description").toString() == QString::fromStdString(prompt.lines.front().text));
+
+    auto const boxes = partsNamed(*content, QStringLiteral("permissionRemember"));
+    REQUIRE(boxes.size() == 1);
+    auto* box = accessibleAttachedOf(boxes.front());
+    REQUIRE(box != nullptr);
+    CHECK(box->property("role").toInt() == QAccessible::CheckBox);
+    CHECK(box->property("name").toString() == QStringLiteral("Don't ask again in this session"));
+
+    for (auto const& [part, label]:
+         std::array { std::pair { QStringLiteral("kitDialogAccept"), prompt.allowText },
+                      std::pair { QStringLiteral("kitDialogReject"), prompt.denyText } })
+    {
+        auto const buttons = partsNamed(*content, part);
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("name").toString() == QString::fromStdString(label));
+    }
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

@@ -7,6 +7,8 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
+#include <QtCore/QVariant>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -19,20 +21,6 @@
 namespace contour::session
 {
 
-/// How heavily a prompt's line is set.
-enum class PromptLineWeight : uint8_t
-{
-    Regular = 0, ///< As the rest of the prompt.
-    Strong,      ///< Set apart: what the reader must not miss.
-};
-
-/// How a prompt's line is laid out.
-enum class PromptLineStyle : uint8_t
-{
-    Prose = 0, ///< Wrapped to the dialog's width.
-    Verbatim,  ///< One row, elided, never wrapped: text a program supplied, shown as it is.
-};
-
 /// One line of what a permission prompt says beneath its title.
 struct PromptLine
 {
@@ -41,13 +29,6 @@ struct PromptLine
     PromptLineStyle style = PromptLineStyle::Prose;
 
     bool operator==(PromptLine const&) const = default;
-};
-
-/// Whether a prompt lets Allow stand for this answer only.
-enum class AllowOnce : uint8_t
-{
-    Offered = 0, ///< Allow may be given once.
-    Withheld,    ///< Allow must be remembered: the box has to be ticked first.
 };
 
 /// Everything a permission dialog shows, as data: its title names the action, its lines give the detail.
@@ -163,5 +144,13 @@ inline constexpr std::string_view SessionRememberText = "Don't ask again in this
 /// The prompt asking whether a command runs again.
 /// @param displayedCommandLine The command line, already made safe to show.
 [[nodiscard]] PermissionPrompt rerunPrompt(std::string_view displayedCommandLine);
+
+/// @p prompt as QML reads it (TerminalSession::pendingPermission()): `id`, `title`, `lines` (`{text, weight,
+/// style}`), `denyText`, `allowText`, `rememberText`, `rememberScope`, `initialMemory`, `defaultDecision` and
+/// `allowOnce`, every enum as its underlying int.
+/// @param prompt The question.
+/// @param questionId The id an answer to it names.
+/// @return The map.
+[[nodiscard]] QVariantMap permissionPromptMap(PermissionPrompt const& prompt, int questionId);
 
 } // namespace contour::session

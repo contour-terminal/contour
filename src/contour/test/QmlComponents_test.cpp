@@ -20,6 +20,7 @@
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/session/EndReason.hpp>
+#include <contour/session/PermissionPrompt.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -9917,130 +9918,334 @@ TEST_CASE("Closing the palette over the find bar gives the find bar its focus ba
 namespace
 {
 
-/// A question as TerminalSession::pendingPermission() publishes it: a title, one line, and its id.
-[[nodiscard]] QVariantMap permissionQuestion(int id)
+using contour::session::PermissionDecision;
+using contour::session::PermissionMemory;
+
+/// What a 2.4 MB paste of two shown lines asks, as the session publishes it.
+[[nodiscard]] QVariantMap pasteQuestion(int id)
 {
-    return QVariantMap {
-        { QStringLiteral("id"), id },
-        { QStringLiteral("title"), QStringLiteral("Allow “zsh” to read the screen?") },
-        { QStringLiteral("lines"),
-          QVariantList { QVariantMap {
-              { QStringLiteral("text"),
-                QStringLiteral("It asks for the last 24 lines of the terminal, to read them back.") },
-              { QStringLiteral("strong"), false },
-              { QStringLiteral("verbatim"), false } } } },
-    };
+    auto const preview =
+        contour::session::PastePreview { .lines = { "line 0", "line 1" }, .moreLines = 48'211 };
+    return contour::session::permissionPromptMap(contour::session::bigPastePrompt("zsh", 2'400'000, preview),
+                                                 id);
 }
 
-/// A SessionChrome over @p session, and its permission dialog.
+/// What a capture of 24 lines asks, as the session publishes it.
+/// @param subject The session's title, as the program set it.
+[[nodiscard]] QVariantMap captureQuestion(int id, std::string_view subject = "zsh")
+{
+    return contour::session::permissionPromptMap(
+        contour::session::bufferCapturePrompt(subject, vtbackend::LineCount(24)), id);
+}
+
+/// Every item of @p dialog's content named @p name, top to bottom. The visual tree rather than
+/// findChildren(): a Repeater's delegates, and what a body slot holds, have a parent item but not always a
+/// QObject parent.
+[[nodiscard]] QList<QQuickItem*> dialogPartsNamed(QObject const& dialog, QString const& name)
+{
+    auto parts = QList<QQuickItem*> {};
+    auto pending = std::vector<QQuickItem*> {};
+    if (auto* content = dialog.property("contentItem").value<QQuickItem*>())
+        pending.push_back(content);
+    while (!pending.empty())
+    {
+        auto* item = pending.back();
+        pending.pop_back();
+        if (item->objectName() == name)
+            parts.append(item);
+        for (auto* child: item->childItems())
+            pending.push_back(child);
+    }
+    // In their parent's order -- the order a layout places them in, settled or not.
+    std::ranges::sort(parts, {}, [](QQuickItem* part) {
+        auto const* parent = part->parentItem();
+        return parent != nullptr ? parent->childItems().indexOf(part) : 0;
+    });
+    return parts;
+}
+
+/// A SessionChrome over @p session in a shown window, and its permission dialog.
 struct PermissionChrome
 {
+    QQuickWindow window;
     QQmlEngine engine;
     MockTabController controller;
     std::unique_ptr<QObject> chrome;
     QObject* dialog = nullptr;
 
-    explicit PermissionChrome(MockSession& session)
+    explicit PermissionChrome(MockSession& session,
+                              contour::test::ChromeSetup const& setup = contour::test::defaultChromeSetup())
     {
+        window.resize(1024, 640);
+        window.show();
+        REQUIRE(QTest::qWaitForWindowExposed(&window));
         engine.rootContext()->setContextProperty("terminalSessions", &controller);
-        contour::test::installChromeStyle(engine);
+        contour::test::installChromeStyle(engine, setup);
         QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
         while (component.status() == QQmlComponent::Loading)
             QCoreApplication::processEvents();
+        INFO(component.errorString().toStdString());
         REQUIRE(component.isReady());
         QVariantMap initial;
         initial.insert("session", QVariant::fromValue(static_cast<QObject*>(&session)));
+        initial.insert("parent", QVariant::fromValue(window.contentItem()));
         chrome.reset(component.createWithInitialProperties(initial));
         REQUIRE(chrome != nullptr);
         dialog = chrome->findChild<QObject*>(QStringLiteral("permissionDialog"));
         REQUIRE(dialog != nullptr);
         QCoreApplication::processEvents();
     }
+
+    /// Whether the dialog is open.
+    [[nodiscard]] bool opened() const { return dialog->property("opened").toBool(); }
+
+    /// Waits until the dialog opened, or closed.
+    [[nodiscard]] bool waitOpened(bool open) const
+    {
+        return QTest::qWaitFor(
+            [&] { return dialog->property("visible").toBool() == open && opened() == open; }, 2000);
+    }
+
+    /// The dialog's part named @p name.
+    [[nodiscard]] QQuickItem* part(QString const& name) const
+    {
+        auto const parts = dialogPartsNamed(*dialog, name);
+        REQUIRE(parts.size() == 1);
+        return parts.front();
+    }
+
+    /// The terminal the dialog hands the focus back to.
+    [[nodiscard]] QQuickItem* displayItem() const
+    {
+        return chrome->property("displayItem").value<QQuickItem*>();
+    }
 };
+
+/// The labels a dialog shows its lines in, top to bottom.
+[[nodiscard]] QList<QQuickItem*> permissionLines(QObject const& dialog)
+{
+    return dialogPartsNamed(dialog, QStringLiteral("permissionLine"));
+}
 
 } // namespace
 
-TEST_CASE("SessionChrome opens one dialog for the session's question (offscreen)",
+TEST_CASE("PermissionDialog: the dialog shows the session's question (offscreen)",
           "[contour][gui][qml][permission]")
 {
-    using contour::session::PermissionDecision;
-    using contour::session::PermissionMemory;
-
-    struct AnswerRow
-    {
-        char const* signal;
-        PermissionDecision decision;
-        PermissionMemory memory;
-    };
-    auto const row =
-        GENERATE(AnswerRow { "yesClicked", PermissionDecision::Allow, PermissionMemory::Once },
-                 AnswerRow { "yesToAllClicked", PermissionDecision::Allow, PermissionMemory::Session },
-                 AnswerRow { "noClicked", PermissionDecision::Deny, PermissionMemory::Once },
-                 AnswerRow { "noToAllClicked", PermissionDecision::Deny, PermissionMemory::Session },
-                 AnswerRow { "rejected", PermissionDecision::Deny, PermissionMemory::Once });
-    INFO(row.signal);
-
     auto const capture = contour::test::QmlMessageCapture {};
     MockSession session;
     auto host = PermissionChrome { session };
 
-    constexpr auto QuestionId = 7;
-    session.setPendingPermission(permissionQuestion(QuestionId));
-    QCoreApplication::processEvents();
-    auto const question = permissionQuestion(QuestionId);
-    CHECK(host.dialog->property("title").toString() == question.value(QStringLiteral("title")).toString());
-    CHECK(host.dialog->property("text").toString()
-          == question.value(QStringLiteral("lines")).toList().front().toMap().value(QStringLiteral("text")));
+    session.setPendingPermission(pasteQuestion(1));
+    REQUIRE(host.waitOpened(true));
+    CHECK(host.part("kitDialogHeading")->property("text").toString() == "Paste 2.4 MB into “zsh”?");
+    auto const lines = permissionLines(*host.dialog);
+    REQUIRE(lines.size() == 3);
+    for (auto const* line: lines | std::views::take(2))
+        CHECK(line->property("elide").toInt() == Qt::ElideRight);
+    CHECK(lines.back()->property("text").toString() == "… 48211 more lines");
+    CHECK(host.part("kitDialogReject")->property("text").toString() == "Cancel");
+    CHECK(host.part("kitDialogAccept")->property("text").toString() == "Paste");
+    CHECK(capture.count(contour::test::isQmlDiagnostic) == 0);
+}
 
-    REQUIRE(QMetaObject::invokeMethod(host.dialog, row.signal));
+TEST_CASE("PermissionDialog: every way to answer sends one answer, naming the question (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    enum class Way : uint8_t
+    {
+        Accept,
+        Reject,
+        Escape,
+    };
+    enum class Box : uint8_t
+    {
+        Unticked,
+        Ticked,
+    };
+    struct AnswerRow
+    {
+        Way way;
+        Box box;
+        PermissionDecision decision;
+        PermissionMemory memory;
+    };
+    auto const row =
+        GENERATE(AnswerRow { Way::Accept, Box::Unticked, PermissionDecision::Allow, PermissionMemory::Once },
+                 AnswerRow { Way::Accept, Box::Ticked, PermissionDecision::Allow, PermissionMemory::Session },
+                 AnswerRow { Way::Reject, Box::Unticked, PermissionDecision::Deny, PermissionMemory::Once },
+                 AnswerRow { Way::Reject, Box::Ticked, PermissionDecision::Deny, PermissionMemory::Session },
+                 AnswerRow { Way::Escape, Box::Ticked, PermissionDecision::Deny, PermissionMemory::Once });
+    CAPTURE(static_cast<int>(row.way), static_cast<int>(row.box));
+
+    MockSession session;
+    auto host = PermissionChrome { session };
+    constexpr auto QuestionId = 7;
+    session.setPendingPermission(captureQuestion(QuestionId));
+    REQUIRE(host.waitOpened(true));
+    host.part("permissionRemember")->setProperty("checked", row.box == Box::Ticked);
+
+    switch (row.way)
+    {
+        case Way::Accept: REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogAccept"), "clicked")); break;
+        case Way::Reject: REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogReject"), "clicked")); break;
+        case Way::Escape: QTest::keyClick(&host.window, Qt::Key_Escape); break;
+    }
+    REQUIRE(host.waitOpened(false));
+    // A second way out of the same dialog -- the reject that follows a button, a stray close -- answers
+    // nothing more.
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "rejected"));
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "accepted"));
+    REQUIRE(QMetaObject::invokeMethod(host.dialog, "close"));
+    QCoreApplication::processEvents();
+
+    CHECK(session.permissionAnswers == 1);
     REQUIRE(session.lastPermissionAnswer.has_value());
     CHECK(session.lastPermissionAnswer->id == QuestionId);
     CHECK(session.lastPermissionAnswer->decision == row.decision);
     CHECK(session.lastPermissionAnswer->memory == row.memory);
-    CHECK(session.permissionAnswers == 1);
-    // Offscreen, Qt Labs Platform has no native dialog to open and says so; that is no QML diagnostic.
-    CHECK(capture.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("SessionChrome shows a question asked before it bound the session (offscreen)",
+TEST_CASE("PermissionDialog: keyboard-only answering (offscreen)", "[contour][gui][qml][permission]")
+{
+    MockSession session;
+    auto host = PermissionChrome { session };
+    auto const answered = [&](PermissionDecision decision, PermissionMemory memory) {
+        REQUIRE(host.waitOpened(false));
+        REQUIRE(session.lastPermissionAnswer.has_value());
+        CHECK(session.lastPermissionAnswer->decision == decision);
+        CHECK(session.lastPermissionAnswer->memory == memory);
+        CHECK(QTest::qWaitFor([&] { return host.displayItem()->hasActiveFocus(); }, 2000));
+    };
+
+    SECTION("Return takes Paste, the paste prompt's default")
+    {
+        session.setPendingPermission(pasteQuestion(1));
+        REQUIRE(host.waitOpened(true));
+        QTest::keyClick(&host.window, Qt::Key_Return);
+        answered(PermissionDecision::Allow, PermissionMemory::Once);
+    }
+
+    SECTION("Return takes Deny, the capture prompt's default")
+    {
+        session.setPendingPermission(captureQuestion(1));
+        REQUIRE(host.waitOpened(true));
+        QTest::keyClick(&host.window, Qt::Key_Return);
+        answered(PermissionDecision::Deny, PermissionMemory::Once);
+    }
+
+    SECTION("Tab reaches the box, Space ticks it, and Deny remembers")
+    {
+        session.setPendingPermission(captureQuestion(1));
+        REQUIRE(host.waitOpened(true));
+        auto* const remember = host.part("permissionRemember");
+        for ([[maybe_unused]] auto const tab: std::views::iota(0, 4))
+        {
+            if (remember->hasActiveFocus())
+                break;
+            QTest::keyClick(&host.window, Qt::Key_Tab);
+        }
+        REQUIRE(remember->hasActiveFocus());
+        QTest::keyClick(&host.window, Qt::Key_Space);
+        CHECK(remember->property("checked").toBool());
+        host.part("kitDialogReject")->forceActiveFocus();
+        QTest::keyClick(&host.window, Qt::Key_Space);
+        answered(PermissionDecision::Deny, PermissionMemory::Session);
+    }
+
+    SECTION("Escape is Deny this once, even with the box ticked")
+    {
+        session.setPendingPermission(captureQuestion(1));
+        REQUIRE(host.waitOpened(true));
+        host.part("permissionRemember")->setProperty("checked", true);
+        QTest::keyClick(&host.window, Qt::Key_Escape);
+        answered(PermissionDecision::Deny, PermissionMemory::Once);
+    }
+}
+
+TEST_CASE("PermissionDialog: the dialog reopens for the next question (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    MockSession session;
+    auto host = PermissionChrome { session };
+    session.setPendingPermission(captureQuestion(1));
+    REQUIRE(host.waitOpened(true));
+
+    REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogAccept"), "clicked"));
+    // The session publishes the next question once the answer is in.
+    session.setPendingPermission(pasteQuestion(2));
+    QCoreApplication::processEvents();
+    REQUIRE(host.waitOpened(true));
+    CHECK(host.part("kitDialogHeading")->property("text").toString() == "Paste 2.4 MB into “zsh”?");
+    REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogReject"), "clicked"));
+    CHECK(session.permissionAnswers == 2);
+    CHECK(session.lastPermissionAnswer->id == 2);
+}
+
+TEST_CASE("PermissionDialog: a rebound session shows the question it owes (offscreen)",
           "[contour][gui][qml][permission]")
 {
     MockSession session;
     constexpr auto QuestionId = 3;
-    session.setPendingPermission(permissionQuestion(QuestionId));
+    session.setPendingPermission(captureQuestion(QuestionId));
     auto host = PermissionChrome { session };
-
-    CHECK(host.dialog->property("title").toString()
-          == permissionQuestion(QuestionId).value(QStringLiteral("title")).toString());
-    REQUIRE(QMetaObject::invokeMethod(host.dialog, "yesClicked"));
-    REQUIRE(session.lastPermissionAnswer.has_value());
-    CHECK(session.lastPermissionAnswer->id == QuestionId);
+    REQUIRE(host.waitOpened(true));
 
     // Rebound to a session that asks something else, the dialog answers that session's question.
     MockSession other;
     constexpr auto OtherId = 11;
-    other.setPendingPermission(permissionQuestion(OtherId));
+    other.setPendingPermission(pasteQuestion(OtherId));
     host.chrome->setProperty("session", QVariant::fromValue(static_cast<QObject*>(&other)));
     QCoreApplication::processEvents();
-    REQUIRE(QMetaObject::invokeMethod(host.dialog, "noClicked"));
+    REQUIRE(host.waitOpened(true));
+    CHECK(host.part("kitDialogHeading")->property("text").toString() == "Paste 2.4 MB into “zsh”?");
+    REQUIRE(QMetaObject::invokeMethod(host.part("kitDialogReject"), "clicked"));
     REQUIRE(other.lastPermissionAnswer.has_value());
     CHECK(other.lastPermissionAnswer->id == OtherId);
-    CHECK(session.permissionAnswers == 1);
+    CHECK(session.permissionAnswers == 0);
 }
 
-TEST_CASE("SessionChrome closes the dialog when the question goes (offscreen)",
+TEST_CASE("PermissionDialog: the dialog closes when the question goes (offscreen)",
           "[contour][gui][qml][permission]")
 {
     MockSession session;
     auto host = PermissionChrome { session };
-    session.setPendingPermission(permissionQuestion(5));
-    QCoreApplication::processEvents();
+    session.setPendingPermission(captureQuestion(5));
+    REQUIRE(host.waitOpened(true));
 
-    // Settled elsewhere (a reload, another answer): the dialog closes, and a late click answers nothing.
+    // Settled elsewhere (a reload, another answer): the dialog closes, answering nothing.
     session.setPendingPermission({});
-    QCoreApplication::processEvents();
-    REQUIRE(QMetaObject::invokeMethod(host.dialog, "yesClicked"));
+    REQUIRE(host.waitOpened(false));
     CHECK(session.permissionAnswers == 0);
+}
+
+TEST_CASE("PermissionDialog: a program-chosen title renders as text (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    MockSession session;
+    auto host = PermissionChrome { session };
+    session.setPendingPermission(captureQuestion(1, "<img src=x>"));
+    REQUIRE(host.waitOpened(true));
+    auto const* heading = host.part("kitDialogHeading");
+    CHECK(heading->property("text").toString() == "Allow “<img src=x>” to read the screen?");
+    CHECK(heading->property("textFormat").toInt() == Qt::PlainText);
+}
+
+TEST_CASE("PermissionDialog: the Terminal row's lines read on its surface (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-dark", "contour-light");
+    INFO("scheme: " << schemeName);
+    MockSession session;
+    auto host = PermissionChrome { session, terminalRowSetup(schemeName) };
+    session.setPendingPermission(pasteQuestion(1));
+    REQUIRE(host.waitOpened(true));
+    auto const* surface = host.dialog->property("background").value<QQuickItem*>();
+    REQUIRE(surface != nullptr);
+    auto const lines = permissionLines(*host.dialog);
+    REQUIRE_FALSE(lines.isEmpty());
+    for (auto const* line: lines)
+        CHECK(contrastOn(line, fillOf(surface)) >= 4.5);
 }
 // }}}
 

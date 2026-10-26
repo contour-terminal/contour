@@ -4,6 +4,7 @@
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <format>
+#include <utility>
 
 namespace contour::session
 {
@@ -118,6 +119,30 @@ PermissionPrompt rerunPrompt(std::string_view displayedCommandLine)
         GuardedRole::RerunCommand,
         "Run this command again?",
         { verbatim(std::string { displayedCommandLine }), prose("It is typed at the prompt and entered.") });
+}
+
+QVariantMap permissionPromptMap(PermissionPrompt const& prompt, int questionId)
+{
+    auto lines = QVariantList {};
+    lines.reserve(static_cast<qsizetype>(prompt.lines.size()));
+    for (auto const& line: prompt.lines)
+        lines.append(QVariantMap {
+            { QStringLiteral("text"), QString::fromStdString(line.text) },
+            { QStringLiteral("weight"), std::to_underlying(line.weight) },
+            { QStringLiteral("style"), std::to_underlying(line.style) },
+        });
+    return QVariantMap {
+        { QStringLiteral("id"), questionId },
+        { QStringLiteral("title"), QString::fromStdString(prompt.title) },
+        { QStringLiteral("lines"), lines },
+        { QStringLiteral("denyText"), QString::fromStdString(prompt.denyText) },
+        { QStringLiteral("allowText"), QString::fromStdString(prompt.allowText) },
+        { QStringLiteral("rememberText"), QString::fromStdString(prompt.rememberText) },
+        { QStringLiteral("rememberScope"), std::to_underlying(prompt.rememberScope) },
+        { QStringLiteral("initialMemory"), std::to_underlying(prompt.initialMemory) },
+        { QStringLiteral("defaultDecision"), std::to_underlying(prompt.defaultDecision) },
+        { QStringLiteral("allowOnce"), std::to_underlying(prompt.allowOnce) },
+    };
 }
 
 } // namespace contour::session

@@ -34,13 +34,40 @@ enum class PermissionMemory : uint8_t
 };
 Q_ENUM_NS(PermissionMemory)
 
+/// How heavily a permission prompt's line is set.
+enum class PromptLineWeight : uint8_t
+{
+    Regular = 0, ///< As the rest of the prompt.
+    Strong,      ///< Set apart: what the reader must not miss.
+};
+Q_ENUM_NS(PromptLineWeight)
+
+/// How a permission prompt's line is laid out.
+enum class PromptLineStyle : uint8_t
+{
+    Prose = 0, ///< Wrapped to the dialog's width.
+    Verbatim,  ///< One row, elided, never wrapped: text a program supplied, shown as it is.
+};
+Q_ENUM_NS(PromptLineStyle)
+
+/// Whether a permission prompt lets Allow stand for this answer only.
+enum class AllowOnce : uint8_t
+{
+    Offered = 0, ///< Allow may be given once.
+    Withheld,    ///< Allow must be remembered: the box has to be ticked first.
+};
+Q_ENUM_NS(AllowOnce)
+
 } // namespace contour::session::permission
 
 namespace contour::session
 {
 
+using permission::AllowOnce;
 using permission::PermissionDecision;
 using permission::PermissionMemory;
+using permission::PromptLineStyle;
+using permission::PromptLineWeight;
 
 /// A set of user-facing activities that are guarded behind a permission-check wall.
 enum class GuardedRole : uint8_t

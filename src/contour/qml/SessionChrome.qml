@@ -300,16 +300,17 @@ Item {
     // The session's permission question: one at a time, the next shown once this one is answered. What it
     // shows is the session's pendingPermission -- program-supplied text the session has already made safe to
     // show. An answer goes to the session that asked, naming the question it answers, so a late or doubled
-    // click (No, then the dialog's rejected) can never answer a question the user did not see.
-    RequestPermission {
+    // answer can never answer a question the user did not see.
+    PermissionDialog {
         id: permissionDialog
-        objectName: "permissionDialog"
+        prompt: ({})
+        focusTarget: chrome.displayItem
 
         // The session whose question is shown, and its id; null and -1 while none is.
         property var askingSession: null
         property int questionId: -1
 
-        function answer(decision, memory) {
+        onAnswered: (decision, memory) => {
             if (askingSession !== null && questionId >= 0)
                 askingSession.answerPermission(questionId, decision, memory);
             askingSession = null;
@@ -318,8 +319,8 @@ Item {
 
         // Shows what @p session asks now, or closes the dialog when it asks nothing.
         function follow(session) {
-            let prompt = session !== null && session.pendingPermission !== undefined ? session.pendingPermission : ({});
-            if (prompt.title === undefined) {
+            let asked = session !== null && session.pendingPermission !== undefined ? session.pendingPermission : ({});
+            if (asked.title === undefined) {
                 askingSession = null;
                 questionId = -1;
                 if (visible)
@@ -327,17 +328,9 @@ Item {
                 return;
             }
             askingSession = session;
-            questionId = prompt.id;
-            title = prompt.title;
-            text = prompt.lines.map(line => line.text).join("\n");
-            open();
+            questionId = asked.id;
+            present(asked);
         }
-
-        onYesClicked: answer(Permission.Allow, Permission.Once)
-        onYesToAllClicked: answer(Permission.Allow, Permission.Session)
-        onNoClicked: answer(Permission.Deny, Permission.Once)
-        onNoToAllClicked: answer(Permission.Deny, Permission.Session)
-        onRejected: answer(Permission.Deny, Permission.Once)
     }
 
     // Asked when a status-line extension first runs one of the commands its manifest declares, with

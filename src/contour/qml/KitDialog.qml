@@ -6,7 +6,8 @@
 // centred otherwise. Its width, insets, fonts and colours all come from the `chromeStyle` tokens, so this
 // file never learns which style is active.
 //
-// Keyboard: the modal popup keeps focus inside itself, Esc rejects it, and Enter takes the accept button.
+// Keyboard: the modal popup keeps focus inside itself, Esc rejects it, and Enter takes the default button
+// (the accept button, unless `defaultButton` names the reject one) -- never a disabled accept.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -25,6 +26,32 @@ Dialog {
     property string rejectText: qsTr("Cancel")
     /// The accept button's StatusColorRole; `chromeStyle.statusDanger` makes it destructive.
     property int acceptRole: chromeStyle.statusRunning
+    /// Whether the accept button can be pressed; while false, Enter does nothing either.
+    property bool acceptEnabled: true
+    /// What a screen reader reads as the dialog's description: the message, unless the body says more.
+    property string description: message
+    /// What sits between the message and the buttons: a dialog's own controls (a field, a checkbox, lines).
+    property alias bodyData: bodySlot.data
+
+    /// Which button takes the initial focus and Enter.
+    enum DefaultButton {
+        Accept,
+        Reject
+    }
+    /// A KitDialog.DefaultButton.
+    property int defaultButton: KitDialog.Accept
+
+    /// Escape was pressed while the dialog keeps it (its closePolicy has no CloseOnEscape): a dialog for
+    /// which Escape means something else than its reject button answers it here.
+    signal escaped()
+
+    /// Takes the default button, as Enter does.
+    function pressDefault() {
+        if (root.defaultButton === KitDialog.Reject)
+            root.reject();
+        else if (root.acceptEnabled)
+            root.accept();
+    }
 
     modal: true
     focus: true
@@ -61,10 +88,13 @@ Dialog {
 
         Accessible.role: Accessible.Dialog
         Accessible.name: root.heading
+        Accessible.description: root.description
 
-        // Enter takes the default (accept) button.
-        Keys.onReturnPressed: root.accept()
-        Keys.onEnterPressed: root.accept()
+        // Enter takes the default button.
+        Keys.onReturnPressed: root.pressDefault()
+        Keys.onEnterPressed: root.pressDefault()
+        // Reached only where the popup keeps Escape for itself (no CloseOnEscape).
+        Keys.onEscapePressed: root.escaped()
 
         Label {
             objectName: "kitDialogHeading"
@@ -73,6 +103,8 @@ Dialog {
             font: root._headingFont
             color: sys.windowText
             wrapMode: Text.Wrap
+            // A heading can name what a program chose (a title, an extension's name): text, never markup.
+            textFormat: Text.PlainText
         }
 
         Label {
@@ -82,6 +114,15 @@ Dialog {
             font: chromeStyle.type.footnote
             color: sys.windowText
             wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+        }
+
+        ColumnLayout {
+            id: bodySlot
+            objectName: "kitDialogBody"
+            Layout.fillWidth: true
+            spacing: chromeStyle.space.s3
+            visible: children.length > 0
         }
 
         RowLayout {
@@ -92,6 +133,7 @@ Dialog {
             Item { Layout.fillWidth: true }
 
             Button {
+                id: rejectButton
                 objectName: "kitDialogReject"
                 // A dialog with nothing to decline (About) names no reject text and shows one button.
                 visible: root.rejectText.length > 0
@@ -99,6 +141,7 @@ Dialog {
                 palette.buttonText: sys.buttonText
                 text: root.rejectText
                 font: chromeStyle.type.footnote
+                focus: root.defaultButton === KitDialog.Reject
                 Accessible.name: text
                 onClicked: root.reject()
             }
@@ -108,7 +151,8 @@ Dialog {
                 objectName: "kitDialogAccept"
                 text: root.acceptText
                 font: chromeStyle.type.footnote
-                focus: true
+                enabled: root.acceptEnabled
+                focus: root.defaultButton === KitDialog.Accept
                 Accessible.name: text
                 onClicked: root.accept()
 

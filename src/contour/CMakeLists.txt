@@ -447,6 +447,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/Toast.qml
         qml/ElevationShadow.qml
         qml/KitDialog.qml
+        qml/PermissionDialog.qml
     )
 
     # The files live in ui/ but the module is flat: without an alias each one would land at
