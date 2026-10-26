@@ -215,6 +215,7 @@ TEST_CASE("full screen keeps the solid band and moves only its resting place",
     auto fixture = TitleBandFixture {};
     fixture.useClientBand();
     auto const windowed = fixture.controller().titleBandRequest();
+    auto const windowedInset = fixture.controller().nativeControlsInset();
     auto const applied = fixture.record.applied.size();
     auto changes = QSignalSpy { &fixture.controller(), &contour::window::WindowController::titleBandChanged };
 
@@ -223,8 +224,9 @@ TEST_CASE("full screen keeps the solid band and moves only its resting place",
     CHECK(fixture.record.applied.size() == applied);
     CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
     CHECK(fixture.controller().titleBandRevealTop() == (hostDressesTitleBand() ? 24 : 0));
-    // AppKit hides the traffic lights in full screen: the band's leading corner is free.
-    CHECK(fixture.controller().nativeControlsInset() == 0);
+    // The traffic lights move into AppKit's revealed strip, over the revealed band: their inset is still
+    // published, and Main.qml applies it while the band rests below the menu bar.
+    CHECK(fixture.controller().nativeControlsInset() == windowedInset);
     CHECK(changes.count() == (hostDressesTitleBand() ? 1 : 0));
 
     fixture.setWindowStates(Qt::WindowNoState);

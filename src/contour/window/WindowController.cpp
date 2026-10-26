@@ -1038,12 +1038,12 @@ bool WindowController::needsClientFrameAffordances() const noexcept
 qreal WindowController::nativeControlsInset() const noexcept
 {
     // Only where the OS paints its controls over our chrome; elsewhere it has its own bar and costs
-    // us nothing. The number itself is the adapter's, not ours -- see the declaration. In full screen
-    // AppKit hides the traffic lights from the window (they move to the revealed menu-bar strip), so the
-    // band's leading corner is free there.
+    // us nothing. The number itself is the adapter's, not ours -- see the declaration. In full screen too:
+    // AppKit moves the traffic lights into the strip it reveals below the menu bar, where a revealed band
+    // rests under them, and the standard buttons still answer for their place. Main.qml applies it only
+    // while the band rests below the menu bar.
     if (_osWindow == nullptr || !_nativeFrame
-        || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome
-        || windowMode() == WindowMode::FullScreen)
+        || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome)
         return 0.0;
     return _nativeFrame->nativeControlsInset(*_osWindow);
 }
@@ -1328,7 +1328,7 @@ void WindowController::onWindowVisibilityChanged()
 void WindowController::onWindowStateChanged()
 {
     _manager.windowStateChanged(_windowId);
-    // Full screen asks for another backdrop and rests the band elsewhere, and hides the traffic lights.
+    // Full screen rests the band elsewhere, and moves the traffic lights into AppKit's revealed strip.
     refreshTitleBand();
     emit nativeControlsInsetChanged();
 }

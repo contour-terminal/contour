@@ -249,7 +249,17 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(leading->width() == 0);
                 break;
             }
-            case SnapshotScript::FullScreenReveal: CHECK(titleBar->property("revealed").toBool()); break;
+            case SnapshotScript::FullScreenReveal: {
+                CHECK(titleBar->property("revealed").toBool());
+                // Revealed under AppKit's strip, the macOS band clears the traffic lights drawn over it.
+                if (variantHost(variant) != contour::config::HostPlatform::MacOS)
+                    break;
+                auto const* leading =
+                    scene.root().findChild<QQuickItem*>(QStringLiteral("leadingWindowControls"));
+                REQUIRE(leading != nullptr);
+                CHECK(leading->width() == ChromeSnapshotScene::SnapshotTrafficLightInset);
+                break;
+            }
             case SnapshotScript::BandSolid: {
                 // Reduce Transparency: the band is the solid tint, opaque wherever it is drawn.
                 auto const* background =

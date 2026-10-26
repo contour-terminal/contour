@@ -1911,40 +1911,89 @@ TEST_CASE("the revealed band sits at the reveal top (offscreen)", "[contour][gui
 
 namespace
 {
-/// 1c's Pinned presence (an interrupted remote connection in full screen) at the controller's measured
-/// height, under @p motion. AppKit's menu bar is hidden until the pointer reaches the screen edge, so the
-/// pinned band rests at the top, and moves below the menu bar only while the pointer is on the edge, as a
-/// native full-screen toolbar does (review I1, ruling a): sliding there and back under full motion, at once
-/// under Reduce Motion.
+/// Where a pinned band rests below the menu bar, and the band height the controller measured, in these cases.
+constexpr auto PinnedRevealTop = 24.0;
+constexpr auto PinnedMeasured = 40.0;
+
+/// 1c's Pinned presence (an interrupted remote connection in full screen) on the macOS row at the
+/// controller's measured height, under a motion preference: loaded, taken into full screen, the pointer away
+/// from the band.
+struct PinnedFullScreenBand
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    std::unique_ptr<QObject> root;
+    QQuickWindow* window = nullptr;
+    QQuickItem* titleBar = nullptr;
+
+    /// @param motion The motion preference the band moves under.
+    /// @param inset  The traffic lights' inset the controller publishes.
+    explicit PinnedFullScreenBand(MotionPreference motion, qreal inset = 0):
+        controller { MainWindowScene { .tabCount = 1,
+                                       .hostLabel = QStringLiteral("home"),
+                                       .tabBarVisibility = TabBarVisibility::Multiple,
+                                       .hostChipState = contour::window::HostChipState::Disconnected,
+                                       .nativeControlsInset = inset } },
+        root { loadMainWindow(engine, controller, warnings, macOSSetup(motion)) },
+        window { qobject_cast<QQuickWindow*>(root.get()) }
+    {
+        REQUIRE(window != nullptr);
+        controller.setTitleBandHeight(PinnedMeasured);
+        controller.setTitleBandRevealTop(PinnedRevealTop);
+        window->showFullScreen();
+        REQUIRE(QTest::qWaitForWindowExposed(window));
+        REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
+        QTest::mouseMove(window, awayPoint());
+        QCoreApplication::processEvents();
+        titleBar = &named(*root, QStringLiteral("titleBar"));
+        REQUIRE(titleBar->property("presence").toString() == QStringLiteral("pinned"));
+    }
+
+    ~PinnedFullScreenBand()
+    {
+        if (window != nullptr)
+            window->showNormal();
+    }
+
+    PinnedFullScreenBand(PinnedFullScreenBand const&) = delete;
+    PinnedFullScreenBand& operator=(PinnedFullScreenBand const&) = delete;
+    PinnedFullScreenBand(PinnedFullScreenBand&&) = delete;
+    PinnedFullScreenBand& operator=(PinnedFullScreenBand&&) = delete;
+
+    /// A point on neither the band nor its reveal edge: the middle of the window's left half.
+    [[nodiscard]] QPoint awayPoint() const { return { window->width() / 4, window->height() / 2 }; }
+
+    /// Rests the pointer on the reveal edge, as on its way down from AppKit's menu bar.
+    void hoverEdge() const
+    {
+        auto const& edge = named(*root, QStringLiteral("bandRevealEdge"));
+        REQUIRE(edge.isVisible());
+        QTest::mouseMove(window, centreOf(edge));
+    }
+
+    /// @return The width the band leaves clear at its leading edge for the traffic lights.
+    [[nodiscard]] qreal leadingInset() const
+    {
+        return named(*root, QStringLiteral("leadingWindowControls")).width();
+    }
+};
+
+/// 1c's Pinned presence under @p motion. AppKit's menu bar is hidden until the pointer reaches the screen
+/// edge, so the pinned band rests at the top, and moves below the menu bar only while the pointer is on the
+/// edge, as a native full-screen toolbar does (review I1, ruling a): sliding there and back under full
+/// motion, at once under Reduce Motion.
 void checkPinnedBand(MotionPreference motion)
 {
-    constexpr auto RevealTop = 24.0;
-    constexpr auto Measured = 40.0;
-    QQmlEngine engine;
-    MockMainController controller { MainWindowScene { .tabCount = 1,
-                                                      .hostLabel = QStringLiteral("home"),
-                                                      .tabBarVisibility = TabBarVisibility::Multiple,
-                                                      .hostChipState =
-                                                          contour::window::HostChipState::Disconnected } };
-    controller.setTitleBandHeight(Measured);
-    controller.setTitleBandRevealTop(RevealTop);
-    contour::test::QmlMessageCapture warnings;
-    auto root = loadMainWindow(engine, controller, warnings, macOSSetup(motion));
-    auto* window = qobject_cast<QQuickWindow*>(root.get());
-    REQUIRE(window != nullptr);
-    window->showFullScreen();
-    REQUIRE(QTest::qWaitForWindowExposed(window));
-    REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
-    auto const awayPoint = QPoint { window->width() / 4, window->height() / 2 };
-    QTest::mouseMove(window, awayPoint);
-    QCoreApplication::processEvents();
-
-    auto const& titleBar = named(*root, QStringLiteral("titleBar"));
-    CHECK(titleBar.property("presence").toString() == QStringLiteral("pinned"));
+    constexpr auto RevealTop = PinnedRevealTop;
+    auto band = PinnedFullScreenBand { motion };
+    auto* const window = band.window;
+    auto& controller = band.controller;
+    auto const& titleBar = *band.titleBar;
     CHECK(titleBar.isVisible());
     CHECK(titleBar.y() == 0);
-    CHECK(titleBar.height() == Measured);
-    auto const& content = named(*root, QStringLiteral("content"));
+    CHECK(titleBar.height() == PinnedMeasured);
+    auto const& content = named(*band.root, QStringLiteral("content"));
     CHECK(content.y() == 0);
     CHECK(controller.chromeHeight() == 0);
 
@@ -1963,9 +2012,7 @@ void checkPinnedBand(MotionPreference motion)
     auto const slides = motion == MotionPreference::Full;
 
     // The pointer on the edge reveals AppKit's menu bar: the band makes room below it.
-    auto const& edge = named(*root, QStringLiteral("bandRevealEdge"));
-    REQUIRE(edge.isVisible());
-    QTest::mouseMove(window, centreOf(edge));
+    band.hoverEdge();
     CHECK(moveTo(RevealTop) == slides);
     // Down onto the band keeps it there.
     QTest::mouseMove(window, centreOf(titleBar));
@@ -1976,12 +2023,11 @@ void checkPinnedBand(MotionPreference motion)
     CHECK(controller.chromeHeight() == 0);
 
     // Away again: back at the top, still pinned, and never faded.
-    QTest::mouseMove(window, awayPoint);
+    QTest::mouseMove(window, band.awayPoint());
     CHECK(moveTo(0) == slides);
     CHECK(titleBar.isVisible());
     CHECK(titleBar.opacity() == 1);
-    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
-    window->showNormal();
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 } // namespace
 
@@ -1997,6 +2043,55 @@ TEST_CASE("a pinned full-screen band rests at the top, and below the menu bar wh
     {
         checkPinnedBand(MotionPreference::Reduced);
     }
+}
+
+namespace
+{
+/// The traffic lights' inset AppKit's revealed full-screen strip keeps (spike-decisions.md: the lights at
+/// x 12-70 in NSToolbarFullScreenWindow), as the controller publishes it in full screen too.
+constexpr auto FullScreenInset = 84.0;
+} // namespace
+
+TEST_CASE("a revealed full-screen band clears the traffic lights over it (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    // Revealed, the band rests under AppKit's revealed strip, which draws the traffic lights over its leading
+    // corner: Tab 1 starts past them.
+    auto band = FullScreenBand { MotionPreference::Full,
+                                 MainWindowScene { .tabCount = 3, .nativeControlsInset = FullScreenInset } };
+    band.revealFromEdge();
+    band.waitUntilIn();
+    CHECK(named(*band.root, QStringLiteral("leadingWindowControls")).width() == FullScreenInset);
+    auto const tabs = tabDelegates(*band.root);
+    REQUIRE_FALSE(tabs.empty());
+    CHECK(tabs.front()->mapToItem(band.titleBar, QPointF(0, 0)).x() >= FullScreenInset);
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a pinned full-screen band at the top leaves no room for the hidden traffic lights (offscreen)",
+          "[contour][gui][qml][mainwindow][band][hosts]")
+{
+    // Resting at y 0 while the menu bar is hidden, nothing of AppKit's is drawn over the band.
+    auto band = PinnedFullScreenBand { MotionPreference::Full, FullScreenInset };
+    CHECK(band.titleBar->y() == 0);
+    CHECK(band.leadingInset() == 0);
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a pinned full-screen band below the menu bar clears the traffic lights (offscreen)",
+          "[contour][gui][qml][mainwindow][band][hosts]")
+{
+    // The pointer on the edge reveals AppKit's strip with the traffic lights, and the band moves under it.
+    auto band = PinnedFullScreenBand { MotionPreference::Full, FullScreenInset };
+    band.hoverEdge();
+    REQUIRE(QTest::qWaitFor([&] { return band.titleBar->y() == PinnedRevealTop; }, 2000));
+    CHECK(band.leadingInset() == FullScreenInset);
+
+    // Away again: back at the top, and the corner is free.
+    QTest::mouseMove(band.window, band.awayPoint());
+    REQUIRE(QTest::qWaitFor([&] { return band.titleBar->y() == 0; }, 2000));
+    CHECK(band.leadingInset() == 0);
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 TEST_CASE("Fluent and ContourLinux bands keep today's colour (offscreen)",

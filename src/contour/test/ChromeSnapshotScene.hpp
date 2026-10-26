@@ -418,16 +418,19 @@ class ChromeSnapshotScene
     /// Gives the mock the band geometry and the traffic lights' inset the controller measures in production
     /// on the row's host: the title bar the row's resolved surface leaves AppKit with (nativeTitleBarFor --
     /// the grown one under the compact toolbar, the bare one for the Terminal row and Minimal's bare band),
-    /// and window::resolveTitleBandGeometry over the chrome's tokens and that height. Only on a macOS host,
-    /// windowed, with the client band: elsewhere there is no native title bar under the band (a native frame
-    /// draws its own above it), and in full screen the title bar leaves the window -- the band keeps its
-    /// token there, and a revealed band rests at the window's top.
+    /// and window::resolveTitleBandGeometry over the chrome's tokens and that height. Only on a macOS host
+    /// with the client band: elsewhere there is no native title bar under the band (a native frame draws its
+    /// own above it). In full screen the title bar leaves the window: the band keeps its token and a revealed
+    /// one rests at the window's top, but AppKit's revealed strip still draws the traffic lights over it, so
+    /// the inset stands.
     void measureBand()
     {
         if (variantHost(_variant) != config::HostPlatform::MacOS
-            || scriptRow(_variant.script).mode != SnapshotWindowMode::Windowed
             || scriptRow(_variant.script).frame != SnapshotFrame::ClientBand)
             return;
+        auto const mode = scriptRow(_variant.script).mode == SnapshotWindowMode::FullScreenRevealed
+                              ? window::WindowMode::FullScreen
+                              : window::WindowMode::Windowed;
         auto const* provider = qobject_cast<window::UiStyleProvider const*>(
             _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
         REQUIRE(provider != nullptr);
@@ -441,11 +444,14 @@ class ChromeSnapshotScene
             .style = tokens.style,
             .material = tokens.material,
             .frame = window::WindowFrame::ClientBand,
-            .mode = window::WindowMode::Windowed,
+            .mode = mode,
             .centre = centre,
             .density = tokens.density,
         });
         auto const native = nativeTitleBarFor(surface.growth);
+        _controller.setNativeControlsInset(native.trafficLightInset);
+        if (mode == window::WindowMode::FullScreen)
+            return;
         auto const geometry = window::resolveTitleBandGeometry(window::TitleBandGeometryInputs {
             .tokens = tokens,
             .mode = window::WindowMode::Windowed,
@@ -455,7 +461,6 @@ class ChromeSnapshotScene
         });
         _controller.setTitleBandHeight(geometry.height);
         _controller.setTitleBandRevealTop(geometry.revealTop);
-        _controller.setNativeControlsInset(native.trafficLightInset);
     }
 
     /// Shows the window in full screen and rests the pointer on the band's reveal edge, waiting until the
