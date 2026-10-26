@@ -6,6 +6,8 @@
 // the offscreen e2e app runs, not here.
 
 #include <contour/ContourGuiApp.hpp>
+#include <contour/config/UiStyle.hpp>
+#include <contour/config/WindowControlStyle.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/test/AppearanceFixtures.hpp>
@@ -465,13 +467,15 @@ TEST_CASE("Headless, the split chrome is the configured row's tokens at one pixe
           "[contour][app][splitchrome]")
 {
     // Before the GUI publishes a provider there is no cell to measure: the solver gets, at the window's
-    // device-pixel ratio, the row the app resolved at construction from the configured style and the host
-    // (the one its title band reads) at the configured density.
+    // device-pixel ratio, the row the configured style resolves to on this host -- the app resolves it at
+    // construction -- at the configured density.
     auto app = TestApp {};
+    auto const row = contour::config::resolveChromeStyle(
+        app.app().config().uiStyle.value(),
+        contour::config::detectHostPlatform(contour::test::TestEnvironment {}));
     auto const expected = contour::window::splitChromeOf(
-        contour::config::resolveChromeTokens(app.app().titleBandTokens().style,
-                                             app.app().accessibilityPreferences(),
-                                             app.app().config().chromeDensity.value()),
+        contour::config::resolveChromeTokens(
+            row, app.app().accessibilityPreferences(), app.app().config().chromeDensity.value()),
         1.0,
         1.0,
         1.25);

@@ -1277,6 +1277,10 @@ void WindowController::bindWindow(QQuickWindow* osWindow)
             this,
             &WindowController::onWindowStateChanged,
             Qt::UniqueConnection);
+
+    // Publishes the band's request now, so Main.qml's `flags` carry its hints before the first frame; with no
+    // platform window yet, nothing is applied until the first expose.
+    refreshTitleBand();
 }
 
 void WindowController::refreshWindowShadow()
@@ -1369,8 +1373,10 @@ void WindowController::refreshTitleBand()
     if (dressesTitleBand() && _osWindow->handle() != nullptr && request != _appliedTitleBand)
     {
         auto const growthChanged = !_appliedTitleBand || _appliedTitleBand->growth != request.growth;
-        _manager.app().titleBandMaterial().apply(*_osWindow, request);
+        // Recorded before the apply: attaching the toolbar changes Qt's safe area, and Qt may report that
+        // (safeAreaMarginsChanged -> here) before apply() returns; the nested refresh must find it applied.
         _appliedTitleBand = request;
+        _manager.app().titleBandMaterial().apply(*_osWindow, request);
         // The toolbar moves the traffic lights (78 -> 84 pt, spike-decisions.md §D2): the band's leading
         // slot reads the inset again.
         if (growthChanged)
@@ -1585,7 +1591,11 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // publish the next shadow against a dead handle. Expose below rebuilds it.
                 if (static_cast<QPlatformSurfaceEvent*>(event)->surfaceEventType()
                     == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
+                {
                     _windowShadow.reset();
+                    // The next platform window wears nothing yet: its first expose dresses it again.
+                    _appliedTitleBand.reset();
+                }
                 break;
 
             case QEvent::Expose:

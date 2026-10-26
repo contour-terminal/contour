@@ -20,6 +20,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
+#include <QtCore/QMargins>
 #include <QtGui/QExposeEvent>
 #include <QtGui/QRegion>
 #include <QtQuick/QQuickWindow>
@@ -28,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <ranges>
 
 #include <QtTest/QSignalSpy>
@@ -51,7 +53,14 @@ constexpr auto WindowStateTimeoutMs = 2000;
            == contour::platform::FrameShadowStrategy::FullSizeContent;
 }
 
-/// A test app over switched appearance sources and a recording material, and one bound window.
+/// How a TitleBandFixture leaves its window.
+enum class FixtureWindow : uint8_t
+{
+    CreatedAndBound = 0, //!< A platform window exists and the controller is bound to it.
+    Unbound,             //!< Neither: the case creates and binds it in the order it tests.
+};
+
+/// A test app over switched appearance sources and a recording material, and one window.
 struct TitleBandFixture
 {
     contour::test::TitleBandRecord record { .metrics = { .height = 28, .fullScreenTop = 24 } };
@@ -68,11 +77,21 @@ struct TitleBandFixture
                                  contour::test::appearanceServicesWith(accessibility, appearance, record) };
     contour::test::ScopedControllerWithOsWindow window { app.manager() };
 
-    TitleBandFixture()
+    /// @param state How the window is left; created and bound by default.
+    explicit TitleBandFixture(FixtureWindow state = FixtureWindow::CreatedAndBound)
     {
+        if (state == FixtureWindow::Unbound)
+            return;
         // A platform window, as an exposed one has: the controller applies nothing to a window without one.
         window.osWindow->create();
         window->bindWindow(window.osWindow.get());
+    }
+
+    /// Sends the window an expose, as the platform does once it is mapped.
+    void expose() const
+    {
+        auto event = QExposeEvent { QRegion { 0, 0, 640, 400 } };
+        QCoreApplication::sendEvent(window.osWindow.get(), &event);
     }
 
     /// @return The window's controller.
@@ -258,4 +277,98 @@ TEST_CASE("the band is at least the token tall", "[contour][titleband][controlle
     }
     else
         CHECK(fixture.controller().titleBandHeight() == tokens.height);
+}
+
+TEST_CASE("the first expose applies a request the bind could not", "[contour][titleband][controller]")
+{
+    // The seed may land before the platform window exists; then Expose is the one path to the first apply.
+    auto fixture = TitleBandFixture { FixtureWindow::Unbound };
+    fixture.window->bindWindow(fixture.window.osWindow.get());
+    fixture.useClientBand();
+    CHECK(fixture.record.applied.empty());
+
+    fixture.window.osWindow->create();
+    fixture.expose();
+
+    CHECK(fixture.record.applied.size() == (hostDressesTitleBand() ? 1U : 0U));
+}
+
+TEST_CASE("a window publishes its band request at bind, before it is shown",
+          "[contour][titleband][controller]")
+{
+    // Seeded before the bind, as a session's show_title_bar can be: the bind publishes the request, so
+    // Main.qml's `flags` carry the background hint before the first frame -- without applying anything to a
+    // window that has no platform window yet.
+    auto fixture = TitleBandFixture { FixtureWindow::Unbound };
+    fixture.useClientBand();
+    auto changes = QSignalSpy { &fixture.controller(), &contour::window::WindowController::titleBandChanged };
+
+    fixture.window->bindWindow(fixture.window.osWindow.get());
+
+    CHECK(changes.count() == 1);
+    CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
+    CHECK(fixture.record.applied.empty());
+}
+
+TEST_CASE("a request the OS answers during its apply is applied once", "[contour][titleband][controller]")
+{
+    // Attaching the toolbar changes Qt's safe area, and Qt may say so before apply() returns: the nested
+    // refresh must see the request as applied already.
+    auto fixture = TitleBandFixture {};
+    fixture.record.duringApply = [&] {
+        emit fixture.window.osWindow->safeAreaMarginsChanged(QMargins { 0, 40, 0, 0 });
+    };
+    auto changes = QSignalSpy { &fixture.controller(), &contour::window::WindowController::titleBandChanged };
+    auto insets =
+        QSignalSpy { &fixture.controller(), &contour::window::WindowController::nativeControlsInsetChanged };
+
+    fixture.useClientBand();
+
+    if (!hostDressesTitleBand())
+    {
+        CHECK(fixture.record.applied.empty());
+        return;
+    }
+    CHECK(fixture.record.applied.size() == 1);
+    CHECK(changes.count() == 1);
+    CHECK(insets.count() == 1);
+}
+
+TEST_CASE("a recreated platform window is dressed again", "[contour][titleband][controller]")
+{
+    auto fixture = TitleBandFixture {};
+    fixture.useClientBand();
+    auto const applied = fixture.record.applied.size();
+
+    fixture.window.osWindow->destroy();
+    fixture.window.osWindow->create();
+    fixture.expose();
+
+    CHECK(fixture.record.applied.size() == applied + (hostDressesTitleBand() ? 1U : 0U));
+}
+
+TEST_CASE("another screen and a new safe area measure the band again", "[contour][titleband][controller]")
+{
+    auto fixture = TitleBandFixture {};
+    fixture.useClientBand();
+
+    auto measured = fixture.record.measured;
+    fixture.record.metrics.height = 40;
+    emit fixture.window.osWindow->safeAreaMarginsChanged(QMargins { 0, 40, 0, 0 });
+    if (hostDressesTitleBand())
+    {
+        CHECK(fixture.record.measured > measured);
+        CHECK(fixture.controller().titleBandHeight() == 40);
+    }
+
+    measured = fixture.record.measured;
+    fixture.record.metrics.height = 44;
+    emit fixture.window.osWindow->screenChanged(fixture.window.osWindow->screen());
+    if (hostDressesTitleBand())
+    {
+        CHECK(fixture.record.measured > measured);
+        CHECK(fixture.controller().titleBandHeight() == 44);
+    }
+    else
+        CHECK(fixture.record.measured == measured);
 }

@@ -12,6 +12,7 @@
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -101,6 +102,9 @@ struct TitleBandRecord
     std::vector<platform::TitleBandRequest> applied {}; ///< Every request applied, in order.
     platform::NativeTitleBarMetrics metrics {};         ///< What metrics() answers.
     int measured = 0;                                   ///< How often metrics() was called.
+    /// Run inside apply(), after the request is recorded: what the OS may do synchronously in reply, such
+    /// as Qt reporting a new safe area while the toolbar attaches. Empty by default.
+    std::function<void()> duringApply {};
 };
 
 /// A title-band material that records into a TitleBandRecord instead of reaching the OS.
@@ -114,6 +118,8 @@ class RecordingTitleBandMaterial final: public platform::ITitleBandMaterial
     void apply(QWindow& /*window*/, platform::TitleBandRequest const& request) override
     {
         _record.applied.push_back(request);
+        if (_record.duringApply)
+            _record.duringApply();
     }
 
     /// Counts the call.

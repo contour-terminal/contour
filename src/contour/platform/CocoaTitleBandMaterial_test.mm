@@ -221,10 +221,35 @@ struct ShownBand
     return hit != nil && [hit isDescendantOf:window.contentView];
 }
 
+/// Sets the application's appearance for one scope and puts the previous one back on leaving it, a failed
+/// REQUIRE included, so no later case runs under it.
+class ScopedAppAppearance
+{
+  public:
+    /// @param name The appearance to set.
+    explicit ScopedAppAppearance(NSAppearanceName name): _previous { NSApp.appearance }
+    {
+        NSApp.appearance = [NSAppearance appearanceNamed:name];
+    }
+    ~ScopedAppAppearance() { NSApp.appearance = _previous; }
+
+    ScopedAppAppearance(ScopedAppAppearance const&) = delete;
+    ScopedAppAppearance& operator=(ScopedAppAppearance const&) = delete;
+    ScopedAppAppearance(ScopedAppAppearance&&) = delete;
+    ScopedAppAppearance& operator=(ScopedAppAppearance&&) = delete;
+
+  private:
+    NSAppearance* _previous;
+};
+
 } // namespace
 
-TEST_CASE("the native backdrop shows AppKit's material and keeps the shadow", "[display][cocoa][titleband]")
+TEST_CASE("Qt's background hint decides the title bar's transparency, and the material keeps the shadow",
+          "[display][cocoa][titleband]")
 {
+    // What the material owns here is the shadow; the transparency is Qt's NoTitleBarBackgroundHint, set as
+    // the controller sets it per backdrop. The NativeMaterial half guards the implemented, unselected path
+    // (ruling S6).
     REQUIRE_COCOA_OR_SKIP();
     auto band = ShownBand {};
     NSWindow* const nsWindow = band.nsWindow();
@@ -242,8 +267,7 @@ TEST_CASE("the native backdrop shows AppKit's material and keeps the shadow", "[
 TEST_CASE("a light request gives a light window under a dark app", "[display][cocoa][titleband]")
 {
     REQUIRE_COCOA_OR_SKIP();
-    NSAppearance* const appAppearance = NSApp.appearance;
-    NSApp.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    auto const darkApp = ScopedAppAppearance { NSAppearanceNameDarkAqua };
     auto band = ShownBand {};
     NSWindow* const nsWindow = band.nsWindow();
     REQUIRE(nsWindow != nil);
@@ -253,8 +277,6 @@ TEST_CASE("a light request gives a light window under a dark app", "[display][co
 
     band.apply({ .backdrop = BandBackdrop::NativeMaterial, .scheme = Qt::ColorScheme::Unknown });
     CHECK([effectiveAppearanceName(nsWindow) isEqualToString:NSAppearanceNameDarkAqua]);
-
-    NSApp.appearance = appAppearance;
 }
 
 TEST_CASE("metrics measure the title bar", "[display][cocoa][titleband]")
