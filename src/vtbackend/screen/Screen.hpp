@@ -14,6 +14,7 @@
 #include <vtbackend/grid/Grid.hpp>
 #include <vtbackend/screen/Cursor.hpp>
 #include <vtbackend/screen/SearchQuery.hpp>
+#include <vtbackend/screen/SearchTallyWalk.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/shell/LivePromptMarks.hpp>
 #include <vtbackend/shell/PromptRegion.hpp>
@@ -883,9 +884,9 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// Counts @p searchText's literal matches over the whole grid, scrollback included, and locates
     /// @p position among them.
     ///
-    /// Counted from the very matcher stepping uses (SearchQuery::matchesIn), so the count can never
-    /// disagree with what stepping through the matches actually visits -- including the overlapping ones,
-    /// which navigation reaches and a non-overlapping count would hide.
+    /// Counted by a SearchTallyWalk drained at once, over the very matcher stepping uses, so the count can
+    /// never disagree with what stepping through the matches actually visits -- including the overlapping
+    /// ones, which navigation reaches and a non-overlapping count would hide.
     ///
     /// @param searchText The needle.
     /// @param position   Reported back as @c ordinal when a match starts exactly there.
@@ -920,6 +921,16 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     /// @return The match's first cell, nothing where there is none, or SearchPatternError::TooComplex.
     [[nodiscard]] std::expected<std::optional<CellLocation>, SearchPatternError> searchReverseFrom(
         SearchQuery const& query, CellLocation startPosition) const;
+
+    /// searchReverseFrom(), stopping once @p budget rows of whole segments are read: the keystroke probe's
+    /// bound, so typing never walks a deep scrollback.
+    /// @param query         The compiled pattern.
+    /// @param startPosition Where to begin; a match starting exactly here is returned.
+    /// @param budget        The rows after which it gives up; a segment is read whole.
+    /// @return The match's first cell, nothing where there is none within the budget, or
+    ///         SearchPatternError::TooComplex.
+    [[nodiscard]] std::expected<std::optional<CellLocation>, SearchPatternError> searchReverseFrom(
+        SearchQuery const& query, CellLocation startPosition, LineCount budget) const;
 
     /// The match of @p query that begins at @p start.
     /// @param query The compiled pattern.

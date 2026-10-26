@@ -88,6 +88,7 @@ set(vtbackend_HEADERS
     core/Primitives.hpp
     core/Search.hpp
     screen/SearchQuery.hpp
+    screen/SearchTallyWalk.hpp
     vt/ProgressState.hpp
     shell/PromptRegion.hpp
     vt/RectangularAreaChecksum.hpp
@@ -197,6 +198,7 @@ set(vtbackend_SOURCES
     screen/PrintedLinks.cpp
     screen/Screen.cpp
     screen/SearchQuery.cpp
+    screen/SearchTallyWalk.cpp
     shell/SemanticBlockTracker.cpp
     vt/SemanticPrompt.cpp
     input/vi/Selector.cpp
@@ -367,6 +369,7 @@ if(LIBTERMINAL_TESTING)
         core/Image_test.cpp
         core/Search_test.cpp
         screen/SearchQuery_test.cpp
+        screen/SearchTallyWalk_test.cpp
         vt/SemanticPrompt_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp

@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <vtbackend/screen/SearchTallyWalk.hpp>
+
+#include <vtbackend/grid/Grid.hpp>
+
+#include <algorithm>
+#include <utility>
+
+namespace vtbackend
+{
+
+SearchTallyWalk::SearchTallyWalk(std::shared_ptr<SearchQuery const> query,
+                                 Grid const& grid,
+                                 CellLocation position,
+                                 size_t limit):
+    _query { std::move(query) }, _position { position }, _limit { limit }
+{
+    restart(grid);
+}
+
+void SearchTallyWalk::restart(Grid const& grid)
+{
+    _idGeneration = grid.stableIdGeneration();
+    _nextRow = grid.stableLineIdOf(-boxed_cast<LineOffset>(grid.historyLineCount()));
+    _lastRow = grid.stableLineIdOf(boxed_cast<LineOffset>(grid.pageSize().lines) - 1);
+    _stablePosition = StableCell { .row = grid.stableLineIdOf(_position.line), .column = _position.column };
+    _tally = SearchMatchTally {};
+    _nearest.reset();
+    _last.reset();
+    _progress = _limit == 0 ? WalkProgress::Finished : WalkProgress::Running;
+}
+
+std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const& grid, LineCount budget)
+{
+    _rowsLastStep = LineCount(0);
+    if (grid.stableIdGeneration() != _idGeneration)
+        restart(grid);
+    if (_progress == WalkProgress::Finished)
+        return _progress;
+
+    while (_progress == WalkProgress::Running && (_rowsLastStep < budget || _rowsLastStep == LineCount(0)))
+    {
+        // Rows evicted before the walk reached them are gone, and so are their matches.
+        _nextRow = std::max(_nextRow, grid.stableRangeFloor());
+        auto const row = grid.lineOffsetOf(_nextRow);
+        if (_nextRow > _lastRow || !row)
+        {
+            _progress = WalkProgress::Finished;
+            break;
+        }
+
+        auto const segment = searchSegmentAt(grid, *row);
+        auto const matches = _query->matchesIn(grid, segment);
+        if (!matches)
+            return std::unexpected { matches.error() };
+
+        for (auto const& match: *matches)
+        {
+            auto const cell =
+                StableCell { .row = grid.stableLineIdOf(match.first.line), .column = match.first.column };
+            // A segment's rows above the next row were read by the step before (its cuts move with the
+            // history's top), and its rows below the last one were appended since the walk began: neither is
+            // this walk's.
+            if (cell.row < _nextRow || cell.row > _lastRow)
+                continue;
+            if (_tally.total == _limit)
+            {
+                // A match exists beyond the limit, so the count is a floor rather than a total.
+                _tally.exactness = TallyExactness::Capped;
+                _progress = WalkProgress::Finished;
+                return _progress;
+            }
+            ++_tally.total;
+            if (cell == _stablePosition)
+                _tally.ordinal = _tally.total;
+            if (cell <= _stablePosition)
+                _nearest = cell;
+            _last = cell;
+        }
+
+        _rowsLastStep += boxed_cast<LineCount>(segment.last - *row) + LineCount(1);
+        _nextRow = grid.stableLineIdOf(segment.last) + 1;
+        if (_nextRow > _lastRow)
+            _progress = WalkProgress::Finished;
+    }
+    return _progress;
+}
+
+std::optional<CellLocation> SearchTallyWalk::locate(Grid const& grid, std::optional<StableCell> cell) noexcept
+{
+    if (!cell)
+        return std::nullopt;
+    auto const row = grid.lineOffsetOf(cell->row);
+    if (!row)
+        return std::nullopt;
+    return CellLocation { .line = *row, .column = cell->column };
+}
+
+std::optional<CellLocation> SearchTallyWalk::nearestAtOrBefore(Grid const& grid) const
+{
+    if (grid.stableIdGeneration() != _idGeneration)
+        return std::nullopt;
+    return locate(grid, _nearest);
+}
+
+std::optional<CellLocation> SearchTallyWalk::lastMatch(Grid const& grid) const
+{
+    if (grid.stableIdGeneration() != _idGeneration)
+        return std::nullopt;
+    return locate(grid, _last);
+}
+
+} // namespace vtbackend

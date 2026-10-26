@@ -8645,14 +8645,58 @@ std::optional<CellLocationRange> Terminal::focusedSearchMatch() const
 
 SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limit)
 {
-    if (!_search.query)
+    auto tally = beginSearchTally(position, limit);
+    if (!tally)
         return SearchMatchTally {};
-    auto const tally = displayedPage().tallyMatches(*_search.query, position, limit);
-    if (tally)
-        return *tally;
-    _search.problem = tally.error();
-    _search.query.reset();
-    return SearchMatchTally {};
+    auto const everyRow = boxed_cast<LineCount>(displayedPage().historyLineCount() + pageSize().lines);
+    auto progress = continueSearchTally(*tally, everyRow);
+    while (progress && *progress == WalkProgress::Running)
+        progress = continueSearchTally(*tally, everyRow);
+    return progress ? tally->walk.tally() : SearchMatchTally {};
+}
+
+std::optional<TerminalSearchTally> Terminal::beginSearchTally(CellLocation position, size_t limit) const
+{
+    if (!_search.query)
+        return std::nullopt;
+    return TerminalSearchTally {
+        .walk = SearchTallyWalk { _search.query, displayedPage().grid(), position, limit },
+        .page = displayedPageIndex(),
+    };
+}
+
+std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(TerminalSearchTally& tally,
+                                                                              LineCount budget)
+{
+    if (tally.page != displayedPageIndex())
+    {
+        auto const& walk = tally.walk;
+        tally = TerminalSearchTally {
+            .walk = SearchTallyWalk { walk.query(), displayedPage().grid(), walk.position(), walk.limit() },
+            .page = displayedPageIndex(),
+        };
+    }
+    auto const progress = tally.walk.step(displayedPage().grid(), budget);
+    // Only the query still active is ended: a walk of one the user has since replaced says nothing about it.
+    if (!progress && tally.walk.query() == _search.query)
+    {
+        _search.problem = progress.error();
+        _search.query.reset();
+    }
+    return progress;
+}
+
+std::optional<CellLocation> Terminal::probeSearchReverse(CellLocation from, LineCount budget)
+{
+    auto const matchLocation =
+        _search.query ? settleSearch(displayedPage().searchReverseFrom(*_search.query, from, budget))
+                      : std::nullopt;
+
+    if (matchLocation)
+        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
+
+    screenUpdated();
+    return matchLocation;
 }
 
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)

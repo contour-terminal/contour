@@ -8773,6 +8773,14 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchFrom(Sea
 std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseFrom(
     SearchQuery const& query, CellLocation startPosition) const
 {
+    // Bounded by the grid itself: every row it has.
+    auto const everyRow = boxed_cast<LineCount>(historyLineCount() + pageSize().lines);
+    return searchReverseFrom(query, startPosition, everyRow);
+}
+
+std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseFrom(
+    SearchQuery const& query, CellLocation startPosition, LineCount budget) const
+{
     auto const lastLine = boxed_cast<LineOffset>(pageSize().lines) - 1;
     if (startPosition.line > lastLine)
         startPosition =
@@ -8780,6 +8788,8 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseF
     if (startPosition.line < -boxed_cast<LineOffset>(historyLineCount()))
         return nullopt;
 
+    // Whole segments, so a match is found or missed as one: the budget is a floor on the rows read.
+    auto rowsRead = LineCount(0);
     auto segment = optional { searchSegmentAt(_grid, startPosition.line) };
     while (segment)
     {
@@ -8792,6 +8802,9 @@ std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseF
         });
         if (match != backwards.end())
             return match->first;
+        rowsRead += boxed_cast<LineCount>(segment->last - segment->first) + LineCount(1);
+        if (rowsRead >= budget)
+            break;
         segment = previousSearchSegment(_grid, *segment);
     }
     return nullopt;
@@ -8827,33 +8840,15 @@ std::expected<SearchMatchTally, SearchPatternError> Screen::tallyMatches(SearchQ
                                                                          CellLocation position,
                                                                          size_t limit) const
 {
-    auto tally = SearchMatchTally {};
-    if (limit == 0)
-        return tally;
-
-    auto const historyTop = -boxed_cast<LineOffset>(historyLineCount());
-    auto segment = optional { searchSegmentAt(_grid, historyTop) };
-    while (segment)
-    {
-        auto const matches = query.matchesIn(_grid, *segment);
-        if (!matches)
-            return std::unexpected { matches.error() };
-        for (auto const& match: *matches)
-        {
-            if (tally.total == limit)
-            {
-                // A match exists beyond the limit, so the count the caller gets is a floor rather than a
-                // total. Saying so is the whole point of the flag: "9999" and "9999+" mean different things.
-                tally.exactness = TallyExactness::Capped;
-                return tally;
-            }
-            ++tally.total;
-            if (match.first == position)
-                tally.ordinal = tally.total;
-        }
-        segment = nextSearchSegment(_grid, *segment);
-    }
-    return tally;
+    // A walk drained in one go: the count is the very one the find bar's stepped walk arrives at.
+    auto walk = SearchTallyWalk { std::make_shared<SearchQuery const>(query), _grid, position, limit };
+    auto const everyRow = boxed_cast<LineCount>(historyLineCount() + pageSize().lines);
+    auto progress = walk.step(_grid, everyRow);
+    while (progress && *progress == WalkProgress::Running)
+        progress = walk.step(_grid, everyRow);
+    if (!progress)
+        return std::unexpected { progress.error() };
+    return walk.tally();
 }
 
 bool Screen::isCursorInsideHorizontalMargins() const noexcept

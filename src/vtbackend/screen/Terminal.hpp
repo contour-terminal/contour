@@ -27,6 +27,7 @@
 #include <vtbackend/screen/LinkPresentation.hpp>
 #include <vtbackend/screen/ProgramStatusSet.hpp>
 #include <vtbackend/screen/SearchQuery.hpp>
+#include <vtbackend/screen/SearchTallyWalk.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -316,6 +317,13 @@ struct Search
 
     /// Why the pattern is not searched for, while it is not; nothing otherwise.
     std::optional<SearchPatternError> problem {};
+};
+
+/// A search tally walked in steps over one page, and the page it walks: a page switch restarts it.
+struct TerminalSearchTally
+{
+    SearchTallyWalk walk; ///< The walk.
+    PageIndex page;       ///< The page on display when the walk began.
 };
 
 /// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as
@@ -3753,10 +3761,36 @@ class Terminal: public IStatusLinePublishTarget
     /// @param limit    Stop after this many matches and report @c TallyExactness::Capped.
     /// @return The tally. All-zero and @c Exact when the pattern is empty.
     ///
-    /// @note Not const, only because Grid's logical-line iteration is not: search() walks it, and
-    ///       const-correcting that family is a refactor of its own rather than part of this one.
+    /// @note Not const: a pattern too complex to match ends the query (R-f).
     [[nodiscard]] SearchMatchTally tallySearchMatches(CellLocation position,
                                                       size_t limit = DefaultSearchMatchLimit);
+
+    /// Begins counting the active query's matches over the page on display, in steps. @see
+    /// continueSearchTally
+    /// @param position Where the caller is standing; reported back as @c SearchMatchTally::ordinal.
+    /// @param limit    Stop after this many matches and report @c TallyExactness::Capped.
+    /// @return The walk, and the page it walks; nothing without a query.
+    [[nodiscard]] std::optional<TerminalSearchTally> beginSearchTally(
+        CellLocation position, size_t limit = DefaultSearchMatchLimit) const;
+
+    /// Reads one step of @p tally: at least @p budget rows of whole segments. Meant to be called under the
+    /// terminal's lock, released between calls. A page switch since the last step restarts the walk on the
+    /// page now on display.
+    /// @param tally  The walk beginSearchTally() began.
+    /// @param budget The rows to read at least.
+    /// @return Whether rows remain; SearchPatternError::TooComplex, which also ends the active query where
+    /// the
+    ///         walk counts it (R-f).
+    [[nodiscard]] std::expected<WalkProgress, SearchPatternError> continueSearchTally(
+        TerminalSearchTally& tally, LineCount budget = SearchWalkStepLines);
+
+    /// searchReverse(), giving up after @p budget rows of whole segments: the per-keystroke probe (R-e). A
+    /// match it finds is revealed as searchReverse() reveals one.
+    /// @param from   Where to search backwards from.
+    /// @param budget The rows after which it gives up.
+    /// @return The match, or nothing where none lies within the budget.
+    [[nodiscard]] std::optional<CellLocation> probeSearchReverse(CellLocation from,
+                                                                 LineCount budget = SearchWalkStepLines);
 
     void clearSearch();
 
