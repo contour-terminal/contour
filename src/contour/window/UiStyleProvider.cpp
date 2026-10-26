@@ -342,11 +342,11 @@ bool UiStyleProvider::isHostChipShown(QString const& hostLabel) const
 }
 
 QVariantMap UiStyleProvider::titleBand(
-    int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState, int tabs) const
+    int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const
 {
     if (!inRange(frame, WindowFrameCount) || !inRange(mode, WindowModeCount)
         || !inRange(strip, TabStripGateCount) || !inRange(position, config::TabBarPositionCount)
-        || !inRange(hostChipState, HostChipStateCount) || !inRange(tabs, OpenTabsCount))
+        || !inRange(hostChipState, HostChipStateCount))
         return {};
     auto const band =
         titleBandOf(TitleBandInputs { .frame = static_cast<WindowFrame>(frame),
@@ -354,8 +354,7 @@ QVariantMap UiStyleProvider::titleBand(
                                       .strip = static_cast<TabStripGate>(strip),
                                       .position = static_cast<config::TabBarPosition>(position),
                                       .notice = hostNoticeOf(hostChipPresence(hostLabel.toStdString()),
-                                                             static_cast<HostChipState>(hostChipState)),
-                                      .tabs = static_cast<OpenTabs>(tabs) });
+                                                             static_cast<HostChipState>(hostChipState)) });
     return { { QStringLiteral("band"), nameOf(barPresenceName(band.band)) },
              { QStringLiteral("bandEdge"), nameOf(barEdgeName(band.bandEdge)) },
              { QStringLiteral("centre"), nameOf(barCentreName(band.centre)) },

@@ -279,7 +279,9 @@ class ChromeSnapshotScene
             case ScriptAction::OpenAbout: openAbout(); break;
             case ScriptAction::OpenTabColorFlyout: openTabColorFlyout(); break;
             case ScriptAction::HoverPaneHeader: hoverPaneHeader(); break;
-            case ScriptAction::HoldRevealModifier:
+            // The reveal itself, not the key: which presses reveal is HeldModifierReveal's, tested in
+            // TerminalSessionManager_test.
+            case ScriptAction::RevealHeaders:
                 _controller.setHeaderReveal(static_cast<int>(window::HeaderReveal::HeldModifier));
                 break;
         }
@@ -737,11 +739,13 @@ class ChromeSnapshotScene
         // The gap at the card's trailing edge.
         auto const cardRight = card->mapToScene(QPointF(card->width(), 0)).x();
         auto const handles = itemsNamed(*content, QStringLiteral("splitHandle"));
-        auto const nearest = std::ranges::min_element(handles, {}, [&](QQuickItem const* handle) {
-            return std::abs(handle->mapToScene(QPointF(0, 0)).x() - cardRight);
+        // The handle whose scene rectangle holds the point just past the card's edge, level with its header.
+        auto const target = QPointF(cardRight + 1, headerCentre.y());
+        auto const owner = std::ranges::find_if(handles, [&](QQuickItem const* handle) {
+            return handle->mapRectToScene(handle->boundingRect()).contains(target);
         });
-        REQUIRE(nearest != handles.end());
-        auto const* handle = *nearest;
+        REQUIRE(owner != handles.end());
+        auto const* handle = *owner;
         auto const* grabber = handle->findChild<QQuickItem*>(QStringLiteral("splitGrabber"));
         REQUIRE(grabber != nullptr);
         pointAt(QPointF(handle->mapToScene(QPointF(handle->width() / HalfDivisor, 0)).x(), headerCentre.y())

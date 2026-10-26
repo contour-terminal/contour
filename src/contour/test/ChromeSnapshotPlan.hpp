@@ -104,7 +104,7 @@ enum class ScriptAction : uint8_t
     OpenAbout,          //!< The About dialog, raised by the ShowAbout action.
     OpenTabColorFlyout, //!< The second tab's colour flyout, as the SetTabColor action opens it.
     HoverPaneHeader,    //!< The pointer over the active pane's header, then on the gap beside it.
-    HoldRevealModifier, //!< The reveal modifier held long enough: Minimal's headers over the panes.
+    RevealHeaders,      //!< Minimal's headers revealed over the panes, as the held modifier reveals them.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -160,7 +160,8 @@ enum class SnapshotPaneEnd : uint8_t
     Exited,   //!< The last pane's program exited: its footer offers Restart and Close.
 };
 
-/// What the footer of a script's ended pane says (SnapshotPaneEnd::Exited).
+/// What the footer of a script's ended pane says (SnapshotPaneEnd::Exited): session::PaneFooterRows' Exited
+/// row with exit code 1, which ChromeSnapshotPlan_test checks it against.
 inline constexpr std::string_view SnapshotExitMessage = "Process exited with code 1.";
 
 /// What one pane of a script's tab runs, as its header names it.
@@ -618,7 +619,7 @@ inline constexpr auto SnapshotScripts = std::array {
                         .tabCount = 1,
                         .panes = PaneShape::SplitThree,
                         .surface = SnapshotSurface::MainWindow,
-                        .action = ScriptAction::HoldRevealModifier,
+                        .action = ScriptAction::RevealHeaders,
                         .connection = HostConnection::Local,
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,

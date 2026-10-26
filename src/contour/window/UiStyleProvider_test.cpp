@@ -922,31 +922,30 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
     CHECK(mac.isHostChipShown(QStringLiteral("home")));
     CHECK_FALSE(mac.isHostChipShown({}));
 
-    auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0, 0);
+    auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0);
     CHECK(macBand.value("band").toString() == QStringLiteral("shown"));
     CHECK(macBand.value("bandEdge").toString() == QStringLiteral("top"));
     CHECK(macBand.value("centre").toString() == QStringLiteral("title"));
     CHECK(macBand.value("tabBar").toString() == QStringLiteral("hidden"));
     auto const fluent = UiStyleProvider(chromeInputsFor(ChromeStyle::Fluent, font));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0, 0).value("band").toString() == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0, 0).value("centre").toString() == QStringLiteral("tabs"));
-    CHECK(mac.titleBand(0, 1, 1, 0, {}, 0, 0).value("band").toString() == QStringLiteral("reveal"));
-    CHECK(mac.titleBand(2, 0, 0, 0, {}, 0, 0).isEmpty());
-    CHECK(mac.titleBand(0, 0, 0, -1, {}, 0, 0).isEmpty());
-    CHECK(mac.titleBand(0, 0, 0, 0, {}, 0, 2).isEmpty());
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 0).value("band").toString() == QStringLiteral("hidden"));
+    CHECK(fluent.titleBand(0, 0, 1, 0, {}, 0).value("centre").toString() == QStringLiteral("tabs"));
+    CHECK(mac.titleBand(0, 1, 1, 0, {}, 0).value("band").toString() == QStringLiteral("reveal"));
+    CHECK(mac.titleBand(2, 0, 0, 0, {}, 0).isEmpty());
+    CHECK(mac.titleBand(0, 0, 0, -1, {}, 0).isEmpty());
     // A remote window whose connection is not up shows the strip whatever the gate says; a local one, or a
     // connected one, does not.
     constexpr auto Reconnecting = static_cast<int>(contour::window::HostChipState::Reconnecting);
     constexpr auto Disconnected = static_cast<int>(contour::window::HostChipState::Disconnected);
-    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting, 0).value("band").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), Reconnecting).value("band").toString()
           == QStringLiteral("shown"));
-    CHECK(fluent.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected, 0).value("bandEdge").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 1, QStringLiteral("home"), Disconnected).value("bandEdge").toString()
           == QStringLiteral("bottom"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0, 0).value("band").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 0, QStringLiteral("home"), 0).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, Disconnected, 0).value("band").toString()
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, Disconnected).value("band").toString()
           == QStringLiteral("hidden"));
-    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 3, 0).isEmpty());
+    CHECK(fluent.titleBand(0, 0, 0, 0, {}, 3).isEmpty());
 
     auto const crowded = mac.tabWellLayout(300, 12);
     CHECK(crowded.value("scrolls").toBool());
@@ -1559,11 +1558,10 @@ TEST_CASE("UiStyleProvider: Minimal's band, from the provider", "[contour][uisty
     using contour::config::ChromeStyle;
     using contour::window::BarCentre;
     using contour::window::BarPresence;
-    using contour::window::OpenTabs;
     using contour::window::TabStripGate;
     using contour::window::TitleBandInputs;
     using contour::window::UiStyleProvider;
-    auto const oneTab = TitleBandInputs { .strip = TabStripGate::Hidden, .tabs = OpenTabs::One };
+    auto const oneTab = TitleBandInputs { .strip = TabStripGate::Hidden };
 
     // macOS: one tab under Multiple is the bare band, 32 pt (ruling P3); Comfortable centres the title.
     auto const mac = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Minimal));
@@ -1571,7 +1569,7 @@ TEST_CASE("UiStyleProvider: Minimal's band, from the provider", "[contour][uisty
     CHECK(mac.titleBandTokens(BarCentre::Empty).height == 32);
     CHECK(mac.titleBandTokens(BarCentre::Empty).density == ChromeDensity::Minimal);
     CHECK(mac.titleBandTokens(BarCentre::Tabs).height == mac.bandHeight());
-    CHECK(mac.titleBand(0, 0, 0, 0, {}, 0, 1).value("centre").toString() == QStringLiteral("empty"));
+    CHECK(mac.titleBand(0, 0, 0, 0, {}, 0).value("centre").toString() == QStringLiteral("empty"));
     auto const macComfortable =
         UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Comfortable));
     CHECK(macComfortable.titleBandOf(oneTab).centre == BarCentre::Title);
@@ -1586,18 +1584,6 @@ TEST_CASE("UiStyleProvider: Minimal's band, from the provider", "[contour][uisty
         shown.strip = TabStripGate::Shown;
         CHECK(provider.titleBandOf(shown).band == BarPresence::Shown);
     }
-
-    // The Terminal row under Minimal hides its bar row while there is one tab, whatever the gate says.
-    auto shownOneTab = oneTab;
-    shownOneTab.strip = TabStripGate::Shown;
-    auto const terminal = UiStyleProvider(densityInputs(ChromeStyle::Terminal, ChromeDensity::Minimal));
-    CHECK(terminal.titleBandOf(shownOneTab).band == BarPresence::Hidden);
-    auto severalTabs = shownOneTab;
-    severalTabs.tabs = OpenTabs::Several;
-    CHECK(terminal.titleBandOf(severalTabs).band == BarPresence::Shown);
-    auto const terminalComfortable =
-        UiStyleProvider(densityInputs(ChromeStyle::Terminal, ChromeDensity::Comfortable));
-    CHECK(terminalComfortable.titleBandOf(shownOneTab).band == BarPresence::Shown);
 }
 
 TEST_CASE("bandFill keeps Minimal's bare band legible on every bundled scheme", "[contour][uistyle]")
@@ -1607,17 +1593,6 @@ TEST_CASE("bandFill keeps Minimal's bare band legible on every bundled scheme", 
     using contour::window::ChromeTone;
     using contour::window::UiStyleProvider;
     auto const empty = QStringLiteral("empty");
-    // The band's ink is the chrome's (the host chip's text, the drift chip's): 92 % white on a dark chrome,
-    // 88 % black on a light one, as 1c's label(1).
-    auto const inkOver = [](vtbackend::RGBColor ground, ChromeTone tone) {
-        auto const dark = tone == ChromeTone::Dark;
-        auto const alpha = dark ? 0.92 : 0.88;
-        auto const ink = dark ? 255.0 : 0.0;
-        auto const mix = [&](uint8_t channel) {
-            return static_cast<uint8_t>(std::lround((ink * alpha) + (channel * (1 - alpha))));
-        };
-        return vtbackend::RGBColor { mix(ground.red), mix(ground.green), mix(ground.blue) };
-    };
     auto mismatched = 0;
     for (auto const name: vtbackend::defaultColorPaletteNames())
     {
@@ -1627,6 +1602,9 @@ TEST_CASE("bandFill keeps Minimal's bare band legible on every bundled scheme", 
         auto inputs = bandInputs(ChromeStyle::MacOS, palette.defaultBackground);
         inputs.density = ChromeDensity::Minimal;
         auto const provider = UiStyleProvider(inputs);
+        auto const role = [&provider](char const* roleName) {
+            return tokenOf(provider, "colors", roleName).value<QColor>();
+        };
         for (auto const& [chrome, tone]:
              { std::pair { DarkChrome, ChromeTone::Dark }, std::pair { LightChrome, ChromeTone::Light } })
         {
@@ -1640,13 +1618,12 @@ TEST_CASE("bandFill keeps Minimal's bare band legible on every bundled scheme", 
                     fill
                     == (sameTone ? contour::platform::toQColor(palette.defaultBackground) : QColor(chrome)));
                 mismatched += sameTone ? 0 : 1;
-                auto const ground = vtbackend::RGBColor { static_cast<uint8_t>(fill.red()),
-                                                          static_cast<uint8_t>(fill.green()),
-                                                          static_cast<uint8_t>(fill.blue()) };
-                CHECK(vtbackend::contrastRatio(ground, inkOver(ground, tone)) >= 4.5);
+                // The host chip as it is drawn on the band: its text over its fill over the band's fill.
+                auto const chip = over(role("chipFill"), fill);
+                CHECK(contrastOf(over(role("chipText"), chip), chip) >= 4.5);
             });
         }
     }
-    // The pass is not vacuous: every scheme is mismatched under one of the two chromes.
+    // The pass is not vacuous: schemes of the other tone take the fallback.
     CHECK(mismatched > 0);
 }

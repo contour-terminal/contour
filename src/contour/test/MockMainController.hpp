@@ -95,8 +95,6 @@ class MockMainController: public MainWindowControllerMock
 {
     Q_OBJECT
     Q_PROPERTY(int activeTabIndex READ activeTabIndex NOTIFY activeTabIndexChanged)
-    // Mirrors WindowController::count: the scene's tabs, which do not change.
-    Q_PROPERTY(int count READ count CONSTANT)
     // Writable here so a test can let multimedia become ready after the window loaded, as it does in
     // production once the background probe finishes.
     Q_PROPERTY(bool multimediaReady READ multimediaReady NOTIFY multimediaReadyChanged)
@@ -173,8 +171,6 @@ class MockMainController: public MainWindowControllerMock
     /// @return The drift model Main.qml reads as `daemonDrift` when the scene drifted.
     [[nodiscard]] window::DaemonDriftModel& daemonDrift() noexcept { return _drift; }
 
-    /// @return The scene's tab count. @see WindowController::count
-    [[nodiscard]] int count() const noexcept { return _scene.tabCount; }
     [[nodiscard]] int activeTabIndex() const noexcept { return _scene.activeTab; }
     /// Mirrors WindowController::activateTab(): makes tab @p index the active one.
     void setActiveTab(int index)

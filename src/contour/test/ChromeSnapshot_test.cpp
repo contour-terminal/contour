@@ -82,7 +82,6 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
         using contour::window::TabStripGate;
         auto const band = contour::window::resolveTitleBand(
             contour::window::TitleBandRow {
-                .style = variant.row,
                 .shape =
                     contour::config::ChromeTokenRows[static_cast<std::size_t>(variant.row)].layout.tabShape,
                 .density = row.density,
@@ -100,8 +99,6 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 .notice =
                     contour::window::hostNoticeOf(contour::window::hostChipPresence(row.hostLabel),
                                                   ChromeSnapshotScene::hostChipStateFor(row.connection)),
-                .tabs =
-                    row.tabCount == 1 ? contour::window::OpenTabs::One : contour::window::OpenTabs::Several,
             });
         CHECK(titleBar->isVisible() == (band.band != contour::window::BarPresence::Hidden));
         // The macOS row's windowed band is drawn at the height of the title bar it covers (S2): the one its
@@ -358,17 +355,15 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             }
             case SnapshotScript::SingleTabMinimal:
                 // One tab under Minimal: macOS keeps a bare band over the bare 32-pt title bar, in the
-                // terminal's background, wherever the strip is not asked for; the Terminal row hides its bar.
-                // Under Classic's tab_bar_visibility Always the strip holds the one tab, and the band its
-                // ordinary height.
+                // terminal's background, wherever the strip is not asked for. Under Classic's
+                // tab_bar_visibility Always the strip holds the one tab, and the band its ordinary height;
+                // every other row shows its bar as the gate says (the band table, checked above).
                 if (variant.row == contour::config::ChromeStyle::MacOS
                     && band.centre == contour::window::BarCentre::Empty)
                 {
                     CHECK(titleBar->isVisible());
                     CHECK(titleBar->height() == ChromeSnapshotScene::SnapshotBareTitleBarHeight);
                 }
-                if (variant.row == contour::config::ChromeStyle::Terminal)
-                    CHECK_FALSE(titleBar->isVisible());
                 break;
             case SnapshotScript::SingleTab: break;
         }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/command/Shortcut.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/TestEnvironment.hpp>
 
@@ -104,7 +105,7 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::SplitMinimal).name == "split-minimal");
     CHECK(scriptRow(SnapshotScript::SplitMinimal).panes == PaneShape::SplitThree);
     CHECK(scriptRow(SnapshotScript::SplitMinimal).density == ChromeDensity::Minimal);
-    CHECK(scriptRow(SnapshotScript::SplitMinimal).action == ScriptAction::HoldRevealModifier);
+    CHECK(scriptRow(SnapshotScript::SplitMinimal).action == ScriptAction::RevealHeaders);
     CHECK(scriptRow(SnapshotScript::SplitHeaderHover).name == "split-header-hover");
     CHECK(scriptRow(SnapshotScript::SplitHeaderHover).panes == PaneShape::SplitThree);
     CHECK(scriptRow(SnapshotScript::SplitHeaderHover).action == ScriptAction::HoverPaneHeader);
@@ -112,7 +113,11 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::PaneExited).name == "pane-exited");
     CHECK(scriptRow(SnapshotScript::PaneExited).panes == PaneShape::SplitThree);
     CHECK(scriptRow(SnapshotScript::PaneExited).paneEnd == SnapshotPaneEnd::Exited);
-    CHECK(SnapshotExitMessage == "Process exited with code 1.");
+    CHECK(SnapshotExitMessage
+          == std::format(
+              contour::session::PaneFooterRows[static_cast<size_t>(contour::session::EndReason::Exited)]
+                  .messageWithDetail,
+              1));
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).name == "single-tab-minimal");
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).tabCount == 1);
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).panes == PaneShape::SingleLeaf);

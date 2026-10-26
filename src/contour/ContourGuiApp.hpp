@@ -605,9 +605,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
 
     /// Where the title band and the tabs go (window::resolveTitleBand) for the chrome row: the published
     /// provider's (UiStyleProvider::titleBandOf) once the GUI built it; before that (and in a headless test)
-    /// the resolved row's style and tab shape and the configured density.
-    /// @param inputs A window's side of the decision: frame, mode, gate, tab count, edge and the host's
-    /// notice.
+    /// the resolved row's tab shape and the configured density.
+    /// @param inputs A window's side of the decision: frame, mode, gate, edge and the host's notice.
     /// @return The band.
     [[nodiscard]] window::TitleBand titleBandOf(window::TitleBandInputs const& inputs) const;
 

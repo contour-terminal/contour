@@ -478,28 +478,20 @@ class UiStyleProvider: public QObject
     /// @param hostChipState A window::HostChipState: what the host chip shows, which a remote window's
     ///                      band carries whatever the gate says while it is not Connected
     ///                      (window::hostNoticeOf).
-    /// @param tabs          A window::OpenTabs: whether the window holds one tab.
     /// @return `{ band, bandEdge, centre, tabBar }` as their names.
-    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(int frame,
-                                                    int mode,
-                                                    int strip,
-                                                    int position,
-                                                    QString const& hostLabel,
-                                                    int hostChipState,
-                                                    int tabs) const;
+    [[nodiscard]] Q_INVOKABLE QVariantMap titleBand(
+        int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const;
 
-    /// The chrome row's side of the band decision: this provider's row, its tab shape and its density.
+    /// The chrome row's side of the band decision: this provider's tab shape and density.
     /// @return The row window::resolveTitleBand(TitleBandRow const&, TitleBandInputs) takes.
     [[nodiscard]] TitleBandRow titleBandRow() const noexcept
     {
-        return TitleBandRow { .style = _inputs.row,
-                              .shape = _groups.layout.tabShape,
-                              .density = _inputs.density };
+        return TitleBandRow { .shape = _groups.layout.tabShape, .density = _inputs.density };
     }
 
     /// Where the title band and the tabs go (window::resolveTitleBand) for this provider's row.
-    /// @param inputs The window's side of the decision: frame, mode, gate, tab count, edge and the host's
-    ///               notice; its row fields are overridden by titleBandRow().
+    /// @param inputs The window's side of the decision: frame, mode, gate, edge and the host's notice; its
+    ///               row fields are overridden by titleBandRow().
     /// @return The band.
     [[nodiscard]] TitleBand titleBandOf(TitleBandInputs const& inputs) const noexcept
     {

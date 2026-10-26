@@ -2,15 +2,14 @@
 #pragma once
 
 /// @file
-/// Where the title band and the tabs go: one table matched on the chrome row (its style, tab shape and
-/// density), the window frame and mode, the tab-bar gate, the tab count, the host chip's notice and the
-/// tab-bar position, followed by one full-screen step. Pure and Qt-free, so the band, its snapshot rows and
+/// Where the title band and the tabs go: one table matched on the chrome row (its tab shape and density),
+/// the window frame and mode, the tab-bar gate, the host chip's notice and the tab-bar position, followed by
+/// one full-screen step. Pure and Qt-free, so the band, its snapshot rows and
 /// the tests read the same rows.
 
 #include <contour/config/ChromeDensity.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/TabBarMode.hpp>
-#include <contour/config/UiStyle.hpp>
 #include <contour/window/HostChipState.hpp>
 
 #include <algorithm>
@@ -89,16 +88,6 @@ enum class BarCentre : uint8_t
 /// Number of @c BarCentre enumerators, derived from the last one.
 inline constexpr size_t BarCentreCount = static_cast<size_t>(BarCentre::Title) + 1;
 
-/// How many tabs the window holds, as the band decision reads it.
-enum class OpenTabs : uint8_t
-{
-    Several = 0, ///< More than one (or none yet).
-    One,         ///< Exactly one.
-};
-
-/// Number of @c OpenTabs enumerators, derived from the last one.
-inline constexpr size_t OpenTabsCount = static_cast<size_t>(OpenTabs::One) + 1;
-
 /// Everything the band decision reads.
 struct TitleBandInputs
 {
@@ -109,14 +98,11 @@ struct TitleBandInputs
     config::TabBarPosition position = config::TabBarPosition::Top;      ///< The configured tab-bar edge.
     HostNotice notice = HostNotice::None;                               ///< Whether the host chip must show.
     config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
-    config::ChromeStyle style = config::ChromeStyle::ContourLinux;      ///< The chrome row.
-    OpenTabs tabs = OpenTabs::Several;                                  ///< How many tabs the window holds.
 };
 
 /// The chrome row's side of the band decision: what a window's inputs cannot say for themselves.
 struct TitleBandRow
 {
-    config::ChromeStyle style = config::ChromeStyle::ContourLinux;      ///< The chrome row.
     config::TabShape shape = config::TabShape::Flat;                    ///< The row's tab shape.
     config::ChromeDensity density = config::ChromeDensity::Comfortable; ///< The configured chrome density.
 };
@@ -142,8 +128,6 @@ struct TitleBandRule
     std::optional<TabStripGate> strip;            ///< The tab-bar gate, or any.
     std::optional<HostNotice> notice;             ///< The host chip's notice, or any.
     std::optional<config::ChromeDensity> density; ///< The chrome density, or any.
-    std::optional<config::ChromeStyle> style;     ///< The chrome row, or any.
-    std::optional<OpenTabs> tabs;                 ///< The tab count, or any.
     config::TabBarPosition position;              ///< The configured tab-bar edge.
     TitleBand answer; ///< The answer, before the full-screen step (resolveTitleBand).
 };
@@ -160,8 +144,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Hidden,
                     .notice = HostNotice::None,
                     .density = config::ChromeDensity::Minimal,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Hidden, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden } },
     // Minimal with the tab strip hidden (one tab under Multiple): a bare band, its middle empty -- the
@@ -177,34 +159,8 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Hidden,
                     .notice = std::nullopt,
                     .density = config::ChromeDensity::Minimal,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden } },
-    // Minimal on the Terminal row hides its bar row while there is one tab, whatever the gate says
-    // (tui.dc.html's Density note); Comfortable keeps it. A remote window whose connection is not up still
-    // shows it, for the host chip (below).
-    TitleBandRule { .shape = std::nullopt,
-                    .frame = std::nullopt,
-                    .mode = std::nullopt,
-                    .strip = std::nullopt,
-                    .notice = HostNotice::None,
-                    .density = config::ChromeDensity::Minimal,
-                    .style = config::ChromeStyle::Terminal,
-                    .tabs = OpenTabs::One,
-                    .position = config::TabBarPosition::Top,
-                    .answer = { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
-    TitleBandRule {
-        .shape = std::nullopt,
-        .frame = std::nullopt,
-        .mode = std::nullopt,
-        .strip = std::nullopt,
-        .notice = HostNotice::None,
-        .density = config::ChromeDensity::Minimal,
-        .style = config::ChromeStyle::Terminal,
-        .tabs = OpenTabs::One,
-        .position = config::TabBarPosition::Bottom,
-        .answer = { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     // Pill on a client band: the band carries the traffic lights, so it always shows (D1); its centre holds
     // the tabs when the gate shows them, else the title.
     TitleBandRule { .shape = config::TabShape::Pill,
@@ -213,8 +169,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Shown,
                     .notice = std::nullopt,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = config::TabShape::Pill,
@@ -223,8 +177,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Hidden,
                     .notice = std::nullopt,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // Pill with the tabs at the bottom: the band stays on top with the title, the tabs get a bar of their
@@ -235,8 +187,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Shown,
                     .notice = std::nullopt,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
     TitleBandRule { .shape = config::TabShape::Pill,
@@ -245,8 +195,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Hidden,
                     .notice = std::nullopt,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // Flat on a client band, and every shape under a native frame: the band is the strip. A remote window
@@ -258,8 +206,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Hidden,
                     .notice = HostNotice::Interrupted,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
@@ -268,8 +214,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Hidden,
                     .notice = HostNotice::Interrupted,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
@@ -278,8 +222,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Shown,
                     .notice = std::nullopt,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
@@ -288,8 +230,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Hidden,
                     .notice = std::nullopt,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Top,
                     .answer = { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
@@ -298,8 +238,6 @@ inline constexpr auto TitleBandRules = std::array {
                     .strip = TabStripGate::Shown,
                     .notice = std::nullopt,
                     .density = std::nullopt,
-                    .style = std::nullopt,
-                    .tabs = std::nullopt,
                     .position = config::TabBarPosition::Bottom,
                     .answer = { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule {
@@ -309,8 +247,6 @@ inline constexpr auto TitleBandRules = std::array {
         .strip = TabStripGate::Hidden,
         .notice = std::nullopt,
         .density = std::nullopt,
-        .style = std::nullopt,
-        .tabs = std::nullopt,
         .position = config::TabBarPosition::Bottom,
         .answer = { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
 };
@@ -335,9 +271,7 @@ namespace detail
             && detail::columnMatches(rule.mode, inputs.mode)
             && detail::columnMatches(rule.strip, inputs.strip)
             && detail::columnMatches(rule.notice, inputs.notice)
-            && detail::columnMatches(rule.density, inputs.density)
-            && detail::columnMatches(rule.style, inputs.style)
-            && detail::columnMatches(rule.tabs, inputs.tabs) && rule.position == inputs.position)
+            && detail::columnMatches(rule.density, inputs.density) && rule.position == inputs.position)
             return &rule;
     return nullptr;
 }
@@ -348,15 +282,10 @@ namespace detail
     template <typename Visit>
     constexpr void forEachTitleBandInput(Visit visit)
     {
-        constexpr auto Extents = std::array { config::TabShapeCount,
-                                              WindowFrameCount,
-                                              WindowModeCount,
-                                              TabStripGateCount,
-                                              config::TabBarPositionCount,
-                                              HostNoticeCount,
-                                              config::ChromeDensityCount,
-                                              config::detail::ChromeStyleCount,
-                                              OpenTabsCount };
+        constexpr auto Extents = std::array {
+            config::TabShapeCount,       WindowFrameCount, WindowModeCount,           TabStripGateCount,
+            config::TabBarPositionCount, HostNoticeCount,  config::ChromeDensityCount
+        };
         constexpr auto Total =
             std::accumulate(Extents.begin(), Extents.end(), size_t { 1 }, std::multiplies {});
         for (auto const index: std::views::iota(size_t { 0 }, Total))
@@ -375,9 +304,7 @@ namespace detail
                                     .strip = static_cast<TabStripGate>(next()),
                                     .position = static_cast<config::TabBarPosition>(next()),
                                     .notice = static_cast<HostNotice>(next()),
-                                    .density = static_cast<config::ChromeDensity>(next()),
-                                    .style = static_cast<config::ChromeStyle>(next()),
-                                    .tabs = static_cast<OpenTabs>(next()) });
+                                    .density = static_cast<config::ChromeDensity>(next()) });
         }
     }
 
@@ -425,14 +352,13 @@ static_assert(detail::titleBandRulesAreEachReachable(),
     return band;
 }
 
-/// Decides where the band and the tabs go for a chrome row: @p inputs with the row's style, tab shape and
-/// density, whatever @p inputs says of them -- the one place a provider or the app fills them in.
+/// Decides where the band and the tabs go for a chrome row: @p inputs with the row's tab shape and density,
+/// whatever @p inputs says of them -- the one place a provider or the app fills them in.
 /// @param row    The chrome row's side.
-/// @param inputs The window's side: frame, mode, gate, tab count, edge and the host's notice.
+/// @param inputs The window's side: frame, mode, gate, edge and the host's notice.
 /// @return The band.
 [[nodiscard]] constexpr TitleBand resolveTitleBand(TitleBandRow const& row, TitleBandInputs inputs) noexcept
 {
-    inputs.style = row.style;
     inputs.shape = row.shape;
     inputs.density = row.density;
     return resolveTitleBand(inputs);

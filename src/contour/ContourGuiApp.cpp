@@ -1843,8 +1843,7 @@ window::TitleBand ContourGuiApp::titleBandOf(window::TitleBandInputs const& inpu
     auto const density = _config.chromeDensity.value();
     auto const shape =
         config::resolveChromeTokens(_chromeStyle, accessibilityPreferences(), density).layout.tabShape;
-    return window::resolveTitleBand(
-        window::TitleBandRow { .style = _chromeStyle, .shape = shape, .density = density }, inputs);
+    return window::resolveTitleBand(window::TitleBandRow { .shape = shape, .density = density }, inputs);
 }
 
 window::ChromeInputs ContourGuiApp::chromeInputs() const
