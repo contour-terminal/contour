@@ -206,7 +206,10 @@ ThemedWindow
         Behavior on y {
             enabled: (titleBar.presence === "reveal" || titleBar.presence === "pinned")
                      && chromeStyle.motion.animates
-            NumberAnimation { duration: chromeStyle.motion.standard }
+            NumberAnimation {
+                id: bandSlide // so offscreen tests can tell a slide from a jump without sampling y
+                duration: chromeStyle.motion.standard
+            }
         }
         // Shown per the band table: on macOS always (it carries the traffic lights), elsewhere per the
         // profile's tab_bar_visibility resolved against the live tab count (Always / Never / Multiple). When

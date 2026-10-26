@@ -75,6 +75,7 @@
 #include <utility>
 #include <vector>
 
+#include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
 #include <vtworkspace/PaneLayout.hpp>
 
@@ -1997,23 +1998,25 @@ void checkPinnedBand(MotionPreference motion)
     CHECK(content.y() == 0);
     CHECK(controller.chromeHeight() == 0);
 
-    // Waits until the band rests at @p target, noting whether it passed through a place in between.
-    auto const moveTo = [&](double target) {
-        auto slid = false;
-        REQUIRE(QTest::qWaitFor(
-            [&] {
-                auto const y = titleBar.y();
-                slid = slid || (y > 0 && y < RevealTop);
-                return y == target;
-            },
-            2000));
-        return slid;
+    // Runs @p move, waits until the band rests at @p target, and says whether it slid there: whether the y
+    // Behavior's animation ran, which it reports synchronously as the move starts it and a jump never does.
+    // Asked of the animation rather than of y sampled mid-flight, which a stalled event-loop turn would let
+    // slip past between two polls. A Behavior's animation is no QObject child of the item, so it is found by
+    // its id in Main.qml's context.
+    auto const* context = QQmlEngine::contextForObject(band.root.get());
+    REQUIRE(context != nullptr);
+    auto* const slide = context->objectForName(QStringLiteral("bandSlide"));
+    REQUIRE(slide != nullptr);
+    auto const moveTo = [&](auto&& move, double target) {
+        auto runs = QSignalSpy { slide, SIGNAL(runningChanged(bool)) };
+        move();
+        REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == target; }, 2000));
+        return runs.count() > 0;
     };
     auto const slides = motion == MotionPreference::Full;
 
     // The pointer on the edge reveals AppKit's menu bar: the band makes room below it.
-    band.hoverEdge();
-    CHECK(moveTo(RevealTop) == slides);
+    CHECK(moveTo([&] { band.hoverEdge(); }, RevealTop) == slides);
     // Down onto the band keeps it there.
     QTest::mouseMove(window, centreOf(titleBar));
     QCoreApplication::processEvents();
@@ -2023,8 +2026,7 @@ void checkPinnedBand(MotionPreference motion)
     CHECK(controller.chromeHeight() == 0);
 
     // Away again: back at the top, still pinned, and never faded.
-    QTest::mouseMove(window, band.awayPoint());
-    CHECK(moveTo(0) == slides);
+    CHECK(moveTo([&] { QTest::mouseMove(window, band.awayPoint()); }, 0) == slides);
     CHECK(titleBar.isVisible());
     CHECK(titleBar.opacity() == 1);
     CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
