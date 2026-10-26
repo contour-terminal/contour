@@ -168,3 +168,27 @@ TEST_CASE("the native title bar is an ordinary one", "[display][cocoa][frame]")
     CHECK_FALSE(hasFullSizeContentView(nsWindow));
     CHECK(nsWindow.titleVisibility == NSWindowTitleVisible);
 }
+
+TEST_CASE("a runtime title-bar toggle keeps the full-size content view", "[display][cocoa][frame]")
+{
+    // Production's order (WindowController::setTitleBarVisible): the frame is applied BEFORE
+    // titleBarVisibleChanged, and only that signal makes Main.qml's `flags` add the hint. So Qt's
+    // setWindowFlags runs after apply(Client), and must not undo what the frame set.
+    REQUIRE_COCOA_OR_SKIP();
+    auto root = ShownRoot {};
+    root.window->setProperty("expanded", false);
+    QCoreApplication::processEvents();
+    auto const frame = contour::platform::makeCocoaWindowFrame();
+    REQUIRE(frame != nullptr);
+    frame->apply(*root.window, WindowDecoration::Server);
+
+    frame->apply(*root.window, WindowDecoration::Client);
+    root.window->setProperty("expanded", true);
+    QCoreApplication::processEvents();
+
+    NSWindow* const nsWindow = root.nsWindow();
+    REQUIRE(nsWindow != nil);
+    CHECK(hasFullSizeContentView(nsWindow));
+    CHECK(nsWindow.titleVisibility == NSWindowTitleHidden);
+    CHECK(nsWindow.hasShadow == YES);
+}

@@ -77,10 +77,10 @@ endif()
 # }}}
 
 # {{{ Optional features excluded from this build
-# The Qt version CI builds and validates against. Building against an older Qt is supported, but a
-# feature needing a newer Qt — or an optional Qt module that is not installed — is then silently left
-# out of the binary. Silently is the problem: a packager discovers it from a bug report rather than
-# from their build log.
+# The Qt version CI builds and validates against. Building against an older Qt is supported (on macOS
+# only down to Qt 6.9, which the GUI gate above enforces), but a feature needing a newer Qt — or an
+# optional Qt module that is not installed — is then silently left out of the binary. Silently is the
+# problem: a packager discovers it from a bug report rather than from their build log.
 #
 # So a gate does not print its own warning. It records itself here, and the single report at the
 # bottom of this file names every excluded feature at once. Adding a gated feature is adding one
