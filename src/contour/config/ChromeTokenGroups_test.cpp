@@ -28,7 +28,10 @@ TEST_CASE("chromeTokens.componentTokens", "[chrometokens]")
     CHECK(mac.radii.toast == 18);
     CHECK(mac.motion.fastMs == 100);
     CHECK(mac.motion.standardMs == 160);
-    CHECK(mac.material.titleBand == Material::Glass);
+    // Ruling S6: the band is the client's paint over the compact toolbar, so its tabs take clicks; the
+    // popovers keep the glass.
+    CHECK(mac.material.titleBand == Material::Solid);
+    CHECK(mac.material.popover == Material::Glass);
     CHECK(mac.layout.dialog == DialogPlacement::Sheet);
     auto const tui = resolveChromeTokens(Terminal, {});
     CHECK(tui.size.toast == 1);
@@ -188,7 +191,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 10, 11, 13, 12, 15, 11, 500 },
                    nativeMotion,
                    nativeTail }),
-          Material::Glass,
+          Material::Solid,
           Material::Glass,
           ToastStyle::Floating,
           DialogPlacement::Sheet,

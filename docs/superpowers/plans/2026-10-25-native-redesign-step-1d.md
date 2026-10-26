@@ -89,7 +89,9 @@ keep it current. The page is kept with `/status-board` (the `contour-workflows` 
     solid".
   - `mac-dark`: "AppKit's traffic lights, laid out with safeAreaMargins (Qt 6.9+) — never a hard-coded
     inset." "Title band: Liquid Glass (regular), tinted from the terminal background. Panes: opaque, the
-    user's scheme."
+    user's scheme." *Superseded for the band by ruling S6:* AppKit's material lets its `NSTitlebarView` take
+    the band's clicks, so the band ships as the tint alone (`material.titleBand = Solid`); Liquid Glass returns
+    with a within-window `NSVisualEffectView` of our own behind the Qt content (follow-up).
   - `mac-light`: "Inactive window (kit rule): grey traffic lights, no material, labels one level dimmer."
   - `tui`: "On macOS the TUI row keeps AppKit's real traffic lights, snapped to the first cells of the bar
     row".

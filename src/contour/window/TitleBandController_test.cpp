@@ -113,29 +113,29 @@ TEST_CASE("an expose applies once, and a resize re-applies nothing", "[contour][
     CHECK(fixture.record.applied.size() == expected);
 }
 
-TEST_CASE("Reduce Transparency switches the request live, and back", "[contour][titleband][controller]")
+TEST_CASE("Reduce Transparency leaves the solid band as it is", "[contour][titleband][controller]")
 {
+    // Ruling S6: the macOS row is already the client's own paint, which is what Reduce Transparency asks
+    // for, so the preference changes no request and applies nothing again.
     auto fixture = TitleBandFixture {};
     fixture.useClientBand();
     auto const height = fixture.controller().titleBandHeight();
+    auto const applied = fixture.record.applied.size();
+    REQUIRE(applied == (hostDressesTitleBand() ? 1U : 0U));
+    CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
+    if (hostDressesTitleBand())
+        CHECK(fixture.record.applied.back().backdrop == BandBackdrop::Client);
 
     fixture.accessibility.set({ .transparency = contour::config::TransparencyPreference::Reduced });
+    CHECK(fixture.record.applied.size() == applied);
+    CHECK(fixture.controller().titleBandRequest().backdrop == BandBackdrop::Client);
+    CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
     CHECK(fixture.controller().titleBandHeight() == height);
-    if (!hostDressesTitleBand())
-    {
-        CHECK(fixture.record.applied.empty());
-        CHECK_FALSE(fixture.controller().clearsTitleBarBackground());
-        return;
-    }
-    REQUIRE(fixture.record.applied.size() == 2);
-    CHECK(fixture.record.applied.front().backdrop == BandBackdrop::NativeMaterial);
-    CHECK(fixture.record.applied.back().backdrop == BandBackdrop::Client);
-    // The client's own paint: Qt clears the title bar's background under it (F4).
-    CHECK(fixture.controller().clearsTitleBarBackground());
 
     fixture.accessibility.set({});
-    CHECK(fixture.record.applied.back().backdrop == BandBackdrop::NativeMaterial);
-    CHECK_FALSE(fixture.controller().clearsTitleBarBackground());
+    CHECK(fixture.record.applied.size() == applied);
+    CHECK(fixture.controller().titleBandRequest().backdrop == BandBackdrop::Client);
+    CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
     CHECK(fixture.controller().titleBandHeight() == height);
 }
 
@@ -184,33 +184,32 @@ TEST_CASE("a scale change measures the title bar again", "[contour][titleband][c
         CHECK(fixture.record.measured == measured);
 }
 
-TEST_CASE("full screen asks for the client backdrop, and back", "[contour][titleband][controller]")
+TEST_CASE("full screen keeps the solid band and moves only its resting place",
+          "[contour][titleband][controller]")
 {
+    // Ruling S6: windowed and full screen ask for the same client backdrop, so entering full screen applies
+    // nothing and Main.qml's `flags` do not toggle during AppKit's transition; only the reveal top moves.
     auto fixture = TitleBandFixture {};
     fixture.useClientBand();
     auto const windowed = fixture.controller().titleBandRequest();
+    auto const applied = fixture.record.applied.size();
     auto changes = QSignalSpy { &fixture.controller(), &contour::window::WindowController::titleBandChanged };
 
     fixture.setWindowStates(Qt::WindowFullScreen);
+    CHECK(fixture.controller().titleBandRequest() == windowed);
+    CHECK(fixture.record.applied.size() == applied);
+    CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
     CHECK(fixture.controller().titleBandRevealTop() == (hostDressesTitleBand() ? 24 : 0));
     // AppKit hides the traffic lights in full screen: the band's leading corner is free.
     CHECK(fixture.controller().nativeControlsInset() == 0);
-    if (hostDressesTitleBand())
-    {
-        CHECK(fixture.record.applied.back().backdrop == BandBackdrop::Client);
-        CHECK(changes.count() == 1);
-    }
-    else
-    {
-        CHECK(fixture.record.applied.empty());
-        CHECK(changes.count() == 0);
-    }
+    CHECK(changes.count() == (hostDressesTitleBand() ? 1 : 0));
 
     fixture.setWindowStates(Qt::WindowNoState);
     CHECK(fixture.controller().titleBandRequest() == windowed);
+    CHECK(fixture.record.applied.size() == applied);
+    CHECK(fixture.controller().clearsTitleBarBackground() == hostDressesTitleBand());
     CHECK(fixture.controller().titleBandRevealTop() == 0);
-    if (hostDressesTitleBand())
-        CHECK(fixture.record.applied.back() == windowed);
+    CHECK(changes.count() == (hostDressesTitleBand() ? 2 : 0));
 }
 
 TEST_CASE("show_title_bar applies no material, and turning it off applies again",

@@ -56,13 +56,19 @@ struct TitleBandSurfaceRow
 /// The spike (spike-decisions.md, rulings S2 and S4) measured AppKit drawing a within-window material in
 /// the band and an empty compact toolbar making its title bar 40 pt: so macOS's glass is the native
 /// material under a tinted band, and either material grows the title bar by the toolbar.
+///
+/// The Glass row is data no shipped row selects (ruling S6): under the native material AppKit's
+/// NSTitlebarView takes the band's clicks, so the MacOS row resolves its band to Solid. It stays for the
+/// follow-up, glass from our own within-window NSVisualEffectView behind the Qt content, which keeps the
+/// clicks in Qt's view.
 inline constexpr auto TitleBandSurfaceRows = std::array {
     TitleBandSurfaceRow { .style = config::ChromeStyle::MacOS,
                           .material = config::Material::Glass,
                           .surface = { .backdrop = config::BandBackdrop::NativeMaterial,
                                        .fill = config::BandFill::Tint,
                                        .growth = config::TitleBarGrowth::CompactToolbar } },
-    // Reduce Transparency resolves Glass to Solid: the same band, with nothing behind it.
+    // The shipped macOS band (ruling S6), and what Reduce Transparency resolves Glass to: the client's own
+    // paint over the compact toolbar.
     TitleBandSurfaceRow { .style = config::ChromeStyle::MacOS,
                           .material = config::Material::Solid,
                           .surface = { .backdrop = config::BandBackdrop::Client,

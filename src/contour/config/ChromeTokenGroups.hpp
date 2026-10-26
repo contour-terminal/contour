@@ -822,7 +822,10 @@ namespace detail
                   .paneHeaderWeight = 500 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
-        .material = { .titleBand = Material::Glass, .popover = Material::Glass },
+        // The band is Solid, not Glass (ruling S6): under AppKit's title-bar material the NSTitlebarView
+        // takes the band's clicks, so the band is the client's paint over the compact toolbar. Glass behind
+        // it returns with a within-window NSVisualEffectView of our own, behind the Qt content.
+        .material = { .titleBand = Material::Solid, .popover = Material::Glass },
         .contrast = StandardContrast,
         .tui = { .inactivePaneOpacity = 1.0, .toastStyle = ToastStyle::Floating },
         .layout = { .dialog = DialogPlacement::Sheet,

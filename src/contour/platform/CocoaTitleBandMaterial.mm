@@ -101,10 +101,13 @@ namespace
         return std::max(0.0, static_cast<qreal>(screenTop - windowOffset));
     }
 
-    /// AppKit's material behind the macOS title band, and the measure of its title bar.
+    /// AppKit's title bar around the macOS title band -- its appearance, its toolbar, its shadow -- and the
+    /// measure of it.
     ///
-    /// Per the Step 1d spike (spike-decisions.md): Qt's ExpandedClientAreaHint owns the full-size content
-    /// view and reports the title bar as the safe area (D1 = Hint), so apply() leaves the title bar's
+    /// The shipped band asks for the client backdrop (ruling S6: under AppKit's own material, the
+    /// NativeMaterial backdrop, which stays implemented but unselected, the NSTitlebarView takes the band's
+    /// clicks). Per the Step 1d spike (spike-decisions.md): Qt's ExpandedClientAreaHint owns the full-size
+    /// content view and reports the title bar as the safe area (D1 = Hint), so apply() leaves the title bar's
     /// transparency to Qt's NoTitleBarBackgroundHint, which the controller sets for the client backdrop; an
     /// empty compact toolbar grows the title bar to 40 pt around centred traffic lights (D2 =
     /// CompactToolbar); and a full-screen title bar is revealed max(menuBarHeight, safeAreaInsets.top) below

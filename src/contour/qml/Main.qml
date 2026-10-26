@@ -38,9 +38,9 @@ ThemedWindow
     // (platform/WindowShadow.hpp) rather than from the frame. On macOS, Qt.ExpandedClientAreaHint is what
     // lets the content fill that title bar: Qt owns the full-size content view and its safe area, the
     // frame adapter does not (needsExpandedClientArea is true there alone, so other platforms never
-    // evaluate the hint). Behind the band AppKit then draws its title-bar material, unless the band asks
-    // for its own paint (Reduce Transparency, full screen): then Qt.NoTitleBarBackgroundHint clears the
-    // title bar's background (clearsTitleBarBackground, true only under the hint above).
+    // evaluate the hint). The band is the client's own paint (ruling S6: under AppKit's title-bar material
+    // the title bar would take the band's clicks), so Qt.NoTitleBarBackgroundHint clears the title bar's
+    // background behind it (clearsTitleBarBackground, true only under the hint above).
     flags: Qt.Window | ((win && win.needsFramelessHint) ? Qt.FramelessWindowHint : 0)
                      | ((win && win.needsExpandedClientArea) ? Qt.ExpandedClientAreaHint : 0)
                      | ((win && win.clearsTitleBarBackground) ? Qt.NoTitleBarBackgroundHint : 0)

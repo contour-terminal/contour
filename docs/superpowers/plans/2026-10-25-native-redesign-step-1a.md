@@ -233,12 +233,16 @@ kit — tokens* board, and §2.1's component tokens):
 | `type.caption · footnote · body · tab · title` | 10 · 11 · 13 · 12 · 15 | 12 · 12 · 14 · 12 · 20 | 12 · 12.5 · 14 · 13.5 · 15 | 0 everywhere |
 | `motion.fast · standard · emphasized · travel` | 100 · 160 · 220 · 8 | same | same | 100 · 160 · 220 · 0 |
 | `elevation` e0 · e1 · e2 · e3 as {x, y, blur, %} | {0,0,0,0} · {0,1,2,12} · {0,4,16,25} · {0,12,40,35} | same | same | {0,0,0,0} · {1,1,0,60} ×3 |
-| `material.titleBand · popover` | Glass · Glass | Mica · Solid | Solid · Solid | None · None |
+| `material.titleBand · popover` | Glass · Glass (titleBand Solid since 1d S6¹) | Mica · Solid | Solid · Solid | None · None |
 | `contrast` (Standard) | separator 10, ring 0.0, paneDim nullopt | same | same | same |
 | `tui.inactivePaneOpacity · toastStyle` | 1.0 · Floating | same | same | 0.62 · Inverse |
 | `layout.dialog` | Sheet | Centered | Centered | Centered |
 | `colors.BannerFill · BannerText · BannerGlyph` | PaletteWindow · PaletteWindowText · Status Warning | same | same | Scheme Bar · Scheme Foreground · Scheme Warning |
 | `colors.ToastFill · ToastText` | Fixed `0x28282C` @ 92 % · Fixed `0xFFFFFF` | same | same | Scheme Foreground · Scheme Background |
+
+¹ Step 1d ruling S6: under AppKit's title-bar material the `NSTitlebarView` takes the band's clicks, so the
+MacOS row's `material.titleBand` is `Solid` (the client's tint over the compact toolbar); the popovers keep
+Glass. Follow-up: glass from our own within-window `NSVisualEffectView` behind the Qt content.
 
 **Overrides** in `resolveChromeTokens`:
 - `MotionPreference::Reduced`: `fastMs`, `standardMs`, `emphasizedMs` all become `ReducedMotionCrossFadeMs`;

@@ -6,9 +6,12 @@
 // material does the rest. Needs the cocoa platform plugin, so every case runs in a display run
 // (CONTOUR_TEST_DISPLAY=1) alone.
 
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/platform/CocoaWindowFrame.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/test/TestEnvironment.hpp>
+#include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 
 #include <core/Environment.hpp>
 
@@ -151,6 +154,20 @@ struct ShownBand
     }
 };
 
+/// @return What the shipped macOS row asks for in @p mode: its resolved title-band material through the
+///         surface table (ruling S6: the Solid row, the client's paint over the compact toolbar).
+[[nodiscard]] TitleBandRequest selectedRequest(contour::window::WindowMode mode)
+{
+    using contour::config::ChromeStyle;
+    auto const surface = contour::window::resolveTitleBandSurface({
+        .style = ChromeStyle::MacOS,
+        .material = contour::config::resolveChromeTokens(ChromeStyle::MacOS, {}).material.titleBand,
+        .frame = contour::window::WindowFrame::ClientBand,
+        .mode = mode,
+    });
+    return TitleBandRequest { .backdrop = surface.backdrop, .growth = surface.growth };
+}
+
 [[nodiscard]] bool isFullScreen(NSWindow* window)
 {
     return (window.styleMask & NSWindowStyleMaskFullScreen) != 0;
@@ -160,6 +177,25 @@ struct ShownBand
 {
     return [window.effectiveAppearance
         bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+}
+
+/// Takes @p window into full screen (@p wanted) or out of it, and waits for AppKit to finish. A toggle that
+/// arrives while the previous window's Space animation is still running can be dropped, so one that has
+/// not taken effect within the timeout is sent once more.
+/// @return Whether the window reached the wanted state.
+[[nodiscard]] bool toggleFullScreenAndWait(NSWindow* window, bool wanted)
+{
+    for ([[maybe_unused]] auto const attempt: std::views::iota(0, 2))
+    {
+        [window toggleFullScreen:nil];
+        if (QTest::qWaitFor([&] { return isFullScreen(window) == wanted; }, FullScreenTimeoutMs))
+        {
+            // The transition's last frames settle after the style mask flips.
+            QTest::qWait(1000);
+            return true;
+        }
+    }
+    return false;
 }
 
 /// The revealed full-screen title bar's own window, if AppKit has one on screen.
@@ -262,28 +298,37 @@ TEST_CASE("the toolbar widens the traffic lights' inset, and detaching it restor
     CHECK(band.nsWindow().toolbar == nil);
 }
 
-TEST_CASE("under the client backdrop, a click in the band reaches the band", "[display][cocoa][titleband]")
+TEST_CASE("the shipped band takes its own clicks, windowed and in full screen", "[display][cocoa][titleband]")
 {
+    // F13 on the selected row: with the title bar's background cleared, AppKit hit-tests the band to Qt's
+    // view, so a tab label (centred near y 20) gets its click.
     REQUIRE_COCOA_OR_SKIP();
+    using contour::window::WindowMode;
     auto band = ShownBand {};
-    band.apply({ .backdrop = BandBackdrop::Client, .growth = TitleBarGrowth::CompactToolbar });
+    NSWindow* const nsWindow = band.nsWindow();
+    REQUIRE(nsWindow != nil);
+    REQUIRE(selectedRequest(WindowMode::Windowed).backdrop == BandBackdrop::Client);
+    band.apply(selectedRequest(WindowMode::Windowed));
     band.waitForSafeArea();
+    CHECK(contentReceivesClickAt(nsWindow, QPointF { 300, 20 }));
 
-    CHECK(contentReceivesClickAt(band.nsWindow(), QPointF { 300, 20 }));
+    REQUIRE(toggleFullScreenAndWait(nsWindow, true));
+    band.apply(selectedRequest(WindowMode::FullScreen));
+    CHECK(contentReceivesClickAt(nsWindow, QPointF { 300, 20 }));
+
+    REQUIRE(toggleFullScreenAndWait(nsWindow, false));
 }
 
-// [!mayfail]: F13's input check, measured failing on macOS 26 -- under titlebarAppearsTransparent = NO the
-// NSTitlebarView claims the band's top 32 pt (the compact toolbar's extra 8 pt stay Qt's). Kept as a case
-// so the owner's ruling (S4's stated cost: the Solid row) can be read off the run; it fails nothing.
-TEST_CASE("under AppKit's material, a click in the band reaches the band",
-          "[display][cocoa][titleband][!mayfail]")
+// Hidden ([.]): the record of why the native-material row is unselected (ruling S6) -- under
+// titlebarAppearsTransparent = NO the NSTitlebarView claims the band's top 32 pt. Run it by name.
+TEST_CASE("under AppKit's material, the title bar takes the band's clicks", "[.][display][cocoa][titleband]")
 {
     REQUIRE_COCOA_OR_SKIP();
     auto band = ShownBand {};
     band.apply({ .backdrop = BandBackdrop::NativeMaterial, .growth = TitleBarGrowth::CompactToolbar });
     band.waitForSafeArea();
 
-    CHECK(contentReceivesClickAt(band.nsWindow(), QPointF { 300, 20 }));
+    CHECK_FALSE(contentReceivesClickAt(band.nsWindow(), QPointF { 300, 20 }));
 }
 
 TEST_CASE("forty resizes keep the shadow and the title-bar setting", "[display][cocoa][titleband]")
@@ -292,7 +337,7 @@ TEST_CASE("forty resizes keep the shadow and the title-bar setting", "[display][
     auto band = ShownBand {};
     NSWindow* const nsWindow = band.nsWindow();
     REQUIRE(nsWindow != nil);
-    band.apply({ .backdrop = BandBackdrop::NativeMaterial, .growth = TitleBarGrowth::CompactToolbar });
+    band.apply(selectedRequest(contour::window::WindowMode::Windowed));
 
     for (auto const step: std::views::iota(0, 40))
     {
@@ -304,7 +349,7 @@ TEST_CASE("forty resizes keep the shadow and the title-bar setting", "[display][
     }
 
     CHECK(nsWindow.hasShadow == YES);
-    CHECK(nsWindow.titlebarAppearsTransparent == NO);
+    CHECK(nsWindow.titlebarAppearsTransparent == YES);
 }
 
 TEST_CASE("full screen and back", "[display][cocoa][titleband]")
@@ -313,13 +358,10 @@ TEST_CASE("full screen and back", "[display][cocoa][titleband]")
     auto band = ShownBand {};
     NSWindow* const nsWindow = band.nsWindow();
     REQUIRE(nsWindow != nil);
-    band.apply({ .backdrop = BandBackdrop::NativeMaterial, .growth = TitleBarGrowth::CompactToolbar });
+    band.apply(selectedRequest(contour::window::WindowMode::Windowed));
 
-    [nsWindow toggleFullScreen:nil];
-    REQUIRE(QTest::qWaitFor([&] { return isFullScreen(nsWindow); }, FullScreenTimeoutMs));
-    // The transition's last frames settle after the style mask flips.
-    QTest::qWait(1000);
-    band.apply({ .backdrop = BandBackdrop::Client, .growth = TitleBarGrowth::CompactToolbar });
+    REQUIRE(toggleFullScreenAndWait(nsWindow, true));
+    band.apply(selectedRequest(contour::window::WindowMode::FullScreen));
     auto const metrics = band.material->metrics(*band.window);
     // Window-relative (F3): 0 where the full-screen window already starts below the notch.
     CHECK(metrics.fullScreenTop >= 0);
@@ -327,12 +369,10 @@ TEST_CASE("full screen and back", "[display][cocoa][titleband]")
         CHECK(metrics.fullScreenTop
               == Catch::Approx(std::max(0.0, NSMaxY(nsWindow.frame) - NSMaxY(revealed.frame))).margin(0.5));
 
-    [nsWindow toggleFullScreen:nil];
-    REQUIRE(QTest::qWaitFor([&] { return !isFullScreen(nsWindow); }, FullScreenTimeoutMs));
-    QTest::qWait(1000);
-    band.apply({ .backdrop = BandBackdrop::NativeMaterial, .growth = TitleBarGrowth::CompactToolbar });
+    REQUIRE(toggleFullScreenAndWait(nsWindow, false));
+    band.apply(selectedRequest(contour::window::WindowMode::Windowed));
     CHECK(nsWindow.hasShadow == YES);
-    CHECK(nsWindow.titlebarAppearsTransparent == NO);
+    CHECK(nsWindow.titlebarAppearsTransparent == YES);
     CHECK(band.material->metrics(*band.window).fullScreenTop == 0);
 }
 
@@ -373,22 +413,22 @@ TEST_CASE("no window, no AppKit", "[display][cocoa][titleband]")
     CHECK(window.handle() == nullptr);
 }
 
-TEST_CASE("the glass under a tinted band, for the owner's eye", "[display][cocoa][titleband]")
+TEST_CASE("the shipped band, for the owner's eye", "[display][cocoa][titleband]")
 {
-    // Owner check 1 (F13): what Qt draws and what AppKit lays over it, written where CONTOUR_SNAPSHOT_DIR
-    // says. AppKit's own render cannot show the blur (spike-decisions.md, limits); the Qt half shows the
-    // labels the material sits on.
+    // Owner check 1 under ruling S6: what Qt draws and what AppKit lays over it on the selected row (the
+    // client's paint over the compact toolbar), written where CONTOUR_SNAPSHOT_DIR says. AppKit's own render
+    // draws no backdrop (spike-decisions.md, limits); it does show its title-bar views and any separator.
     REQUIRE_COCOA_OR_SKIP();
     auto const directory = core::LiveEnvironment {}.get("CONTOUR_SNAPSHOT_DIR");
     if (!directory || directory->empty())
         SKIP("Writes its pictures only where CONTOUR_SNAPSHOT_DIR says");
     auto band = ShownBand {};
-    band.apply({ .backdrop = BandBackdrop::NativeMaterial, .growth = TitleBarGrowth::CompactToolbar });
+    band.apply(selectedRequest(contour::window::WindowMode::Windowed));
     band.waitForSafeArea();
     QTest::qWait(500);
 
     auto const dir = QDir { QString::fromStdString(*directory) };
-    CHECK(band.window->grabWindow().save(dir.filePath(QStringLiteral("titleband-glass.qt.png"))));
+    CHECK(band.window->grabWindow().save(dir.filePath(QStringLiteral("titleband-solid.qt.png"))));
 
     NSView* const themeFrame = band.nsWindow().contentView.superview;
     NSBitmapImageRep* const bitmap = [themeFrame bitmapImageRepForCachingDisplayInRect:themeFrame.bounds];
@@ -396,6 +436,6 @@ TEST_CASE("the glass under a tinted band, for the owner's eye", "[display][cocoa
     [themeFrame cacheDisplayInRect:themeFrame.bounds toBitmapImageRep:bitmap];
     NSData* const png =
         [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:[NSDictionary dictionary]];
-    auto const path = dir.filePath(QStringLiteral("titleband-glass.appkit.png")).toNSString();
+    auto const path = dir.filePath(QStringLiteral("titleband-solid.appkit.png")).toNSString();
     CHECK([png writeToFile:path atomically:YES]);
 }

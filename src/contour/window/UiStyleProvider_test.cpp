@@ -503,7 +503,7 @@ TEST_CASE("UiStyleProvider publishes the 1a token groups per row", "[contour][ui
     CHECK(tokenOf(mac, "size", "settingsMinHeight").toReal() == 480.0);
     CHECK(tokenOf(mac, "motion", "standard").toInt() == 160);
     CHECK(tokenOf(mac, "space", "s10").toReal() == 32.0);
-    CHECK(tokenOf(mac, "material", "titleBand").toInt() == tokenOf(mac, "material", "glass").toInt());
+    CHECK(tokenOf(mac, "material", "titleBand").toInt() == tokenOf(mac, "material", "solid").toInt());
     CHECK(tokenOf(mac, "layout", "dialog").toInt() == tokenOf(mac, "layout", "sheet").toInt());
     CHECK(tokenOf(mac, "contrast", "separatorAlpha").toReal() == Catch::Approx(0.10));
     CHECK(tokenOf(mac, "type", "body").value<QFont>().pixelSize() == 13);
