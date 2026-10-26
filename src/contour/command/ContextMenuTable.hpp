@@ -160,6 +160,15 @@ struct MenuTable
             return enabled(state) ? RowAvailability::Enabled : RowAvailability::Disabled;
         }
 
+        /// Whether this row shows a check mark, against @p state.
+        /// @return None for a row that is not checkable, otherwise Checked or Unchecked.
+        [[nodiscard]] RowCheck checkFor(State const& state) const
+        {
+            if (checked == nullptr)
+                return RowCheck::None;
+            return checked(state) ? RowCheck::Checked : RowCheck::Unchecked;
+        }
+
         /// What this row runs, against @p state.
         [[nodiscard]] actions::Action actionFor(State const& state) const
         {
@@ -344,9 +353,7 @@ struct MenuTable
                         .title = row.title.empty() ? commandTitle(action) : std::string(row.title),
                         .action = std::move(action),
                         .availability = row.availabilityFor(state),
-                        .check = row.checked == nullptr ? RowCheck::None
-                                 : row.checked(state)   ? RowCheck::Checked
-                                                        : RowCheck::Unchecked,
+                        .check = row.checkFor(state),
                         .role = row.role,
                         .swatch = std::nullopt,
                         .children = {},
