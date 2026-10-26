@@ -18,6 +18,7 @@
 #include <vtbackend/core/CommandBlockOutcome.hpp>
 #include <vtbackend/links/LinkPatterns.hpp>
 #include <vtbackend/screen/GutterSettings.hpp>
+#include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/shell/Folding.hpp>
 #include <vtbackend/shell/ScrollbarMarks.hpp>
 #include <vtbackend/shell/StickyHeader.hpp>
@@ -1714,6 +1715,66 @@ TEST_CASE("SettingsController: the indicator bridge keeps role colours", "[setti
     auto broken = clock;
     broken["color"] = QString("#zz");
     CHECK(fx.controller->serializeIndicatorSegment({ broken }) == "{Clock}");
+}
+
+TEST_CASE("SettingsController: the indicator bridge keeps every payload", "[settings][statusline]")
+{
+    // Every item is round-tripped through the bridge on every edit of its segment, so a payload the reader
+    // does not hand to QML is one the writer deletes from the user's profile.
+    auto fx = Fixture(BasicConfig);
+    for (auto const& text: { QString("{InputMode:Chip,Hide=Insert}"),
+                             QString("{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}"),
+                             QString("{Cwd:MaxWidth=20}"),
+                             QString("{LastCommand:MaxWidth=50}"),
+                             QString("{Context:Verbosity=Full,MaxWidth=10}") })
+    {
+        INFO(text.toStdString());
+        CHECK(fx.controller->serializeIndicatorSegment(fx.controller->parseIndicatorSegment(text)) == text);
+    }
+
+    // The keys QML reads: hide names the mode, chip is the look, maxWidth the column budget.
+    auto const inputMode =
+        fx.controller->parseIndicatorSegment("{InputMode:Chip,Hide=Insert}").first().toMap();
+    CHECK(inputMode.value("hide").toString() == "Insert");
+    CHECK(inputMode.value("chip").toBool());
+    auto const plain = fx.controller->parseIndicatorSegment("{InputMode}").first().toMap();
+    CHECK(plain.value("hide").toString().isEmpty());
+    CHECK_FALSE(plain.value("chip").toBool());
+    CHECK(fx.controller->parseIndicatorSegment("{Cwd:MaxWidth=20}").first().toMap().value("maxWidth").toInt()
+          == 20);
+
+    // The roles the colour fields accept, in the table's order.
+    auto const roles = fx.controller->indicatorColorRoles();
+    REQUIRE(static_cast<std::size_t>(roles.size())
+            == vtbackend::StatusLineDefinitions::ColorRoleNames.size());
+    CHECK(roles.first() == "accent");
+}
+
+TEST_CASE("SettingsController: the indicator bridge resolves role colours for the preview",
+          "[settings][statusline]")
+{
+    // A role is a word, and a QML colour property cannot take "accent": the preview reads the resolved
+    // hex the bridge hands it beside the role, from the profile's own scheme.
+    auto fx = Fixture(R"(
+default_profile: main
+profiles:
+    main:
+        colors: contour-light
+)");
+    fx.controller->editProfile("main");
+
+    auto scheme = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes("contour-light", scheme));
+
+    auto const rows = fx.controller->parseIndicatorSegment(
+        "{Clock:Color=muted,BackgroundColor=accent}{VTType:Color=#C0C030}");
+    REQUIRE(rows.size() == 2);
+    auto const clock = rows[0].toMap();
+    CHECK(clock.value("colorPreview").toString() == hexOf(scheme.indexedColor(8)));
+    CHECK(clock.value("bgColorPreview").toString() == hexOf(scheme.indexedColor(4)));
+    CHECK(rows[1].toMap().value("colorPreview").toString() == "#c0c030");
+    // Unset stays unset: no preview colour to paint.
+    CHECK(rows[1].toMap().value("bgColorPreview").toString().isEmpty());
 }
 
 TEST_CASE("SettingsController: the indicator placeholder catalog matches what parsing produces", "[settings]")

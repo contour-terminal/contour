@@ -21,6 +21,13 @@ Popup {
 
     /// Every cell flag an item may carry, as [{ key, label }], from SettingsController::indicatorFlags.
     property var flagCatalog: []
+    /// The colour roles a colour field accepts beside a hex value, from
+    /// SettingsController::indicatorColorRoles.
+    property var colorRoles: []
+    /// The item edit() was opened with, untouched. apply() starts from a copy of it, so a payload the
+    /// dialog has no control for -- InputMode's Hide= and Chip, a MaxWidth=, Context's Verbosity= -- is
+    /// carried through an edit instead of being deleted by it.
+    property var original: ({})
 
     /// Emitted with the edited item when the user accepts.
     signal applied(int segmentIndex, int itemIndex, var item)
@@ -93,6 +100,7 @@ Popup {
         root.segmentIndex = segmentIndex
         root.itemIndex = itemIndex
         root.segmentLength = segmentLength
+        root.original = item
         root.itemType = item.type !== undefined ? item.type : ""
         root.itemLabel = item.label !== undefined ? item.label : root.itemType
         root.itemText = item.text !== undefined ? item.text : ""
@@ -122,9 +130,9 @@ Popup {
         root.open()
     }
 
-    /// Assembles the edited properties back into an item and reports it.
+    /// Assembles the edited properties over a copy of the original item and reports it.
     function apply() {
-        var item = {
+        var item = Object.assign({}, root.original, {
             "type": root.itemType,
             "label": root.itemLabel,
             "displayName": root.itemLabel,
@@ -135,7 +143,7 @@ Popup {
             "bgColor": root.bgColorHex,
             "textLeft": root.textLeft,
             "textRight": root.textRight
-        }
+        })
         // A Text, Command or Extension item is named by its own content, the way parseIndicatorSegment names it.
         if (root.isText) {
             item.text = root.itemText
@@ -300,9 +308,11 @@ Popup {
             }
         }
 
-        // Colours. Each is a hex field plus a swatch; clearing the field unsets the colour.
+        // Colours. Each is a hex or role field plus a swatch; clearing the field unsets the colour.
         ColorSlotField {
             Layout.fillWidth: true
+            fieldName: "foregroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Foreground")
             isSet: root.hasColor
             value: root.colorHex
@@ -310,6 +320,8 @@ Popup {
         }
         ColorSlotField {
             Layout.fillWidth: true
+            fieldName: "backgroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Background")
             isSet: root.hasBgColor
             value: root.bgColorHex
@@ -318,6 +330,8 @@ Popup {
         ColorSlotField {
             Layout.fillWidth: true
             visible: root.isTabs
+            fieldName: "activeTabForegroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Active tab foreground")
             isSet: root.hasActiveColor
             value: root.activeColorHex
@@ -326,6 +340,8 @@ Popup {
         ColorSlotField {
             Layout.fillWidth: true
             visible: root.isTabs
+            fieldName: "activeTabBackgroundColorField"
+            roleNames: root.colorRoles
             label: qsTr("Active tab background")
             isSet: root.hasActiveBackground
             value: root.activeBackgroundHex

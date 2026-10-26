@@ -40,12 +40,16 @@ Rectangle {
 
     implicitWidth: label.implicitWidth
     implicitHeight: label.implicitHeight
-    color: root.item && root.item.hasBgColor === true ? root.item.bgColor : "transparent"
+    // The resolved preview colours, not color/bgColor: those may be a role's name ("accent"), which a
+    // QML colour property cannot take. The bridge resolves a role against the profile's scheme.
+    color: root.item && root.item.hasBgColor === true && root.item.bgColorPreview ? root.item.bgColorPreview
+                                                                                   : "transparent"
 
     Label {
         id: label
         text: root.previewText
-        color: root.item && root.item.hasColor === true ? root.item.color : sys.windowText
+        color: root.item && root.item.hasColor === true && root.item.colorPreview ? root.item.colorPreview
+                                                                                   : sys.windowText
         font.pointSize: 9
         font.bold: root.flagOf("Bold")
         font.italic: root.flagOf("Italic")

@@ -2085,6 +2085,101 @@ ApplicationWindow {
     CHECK(applied.value("displayName").toString() == "clock");
 }
 
+TEST_CASE("StatusLineItemDialog keeps an item's roles and payload (offscreen)",
+          "[contour][gui][qml][statusline]")
+{
+    // Apply used to rebuild the item from the handful of fields the dialog edits, so a payload it has no
+    // control for -- Hide=, Chip, MaxWidth -- was deleted by any edit, and a role read as no colour at all.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+import Contour.Ui
+ApplicationWindow {
+    width: 480
+    height: 640
+    property var appliedItem: null
+    property alias dialog: dialog
+    StatusLineItemDialog {
+        id: dialog
+        colorRoles: ["accent", "danger"]
+        onApplied: (segmentIndex, itemIndex, item) => appliedItem = item
+    }
+})",
+                      QUrl());
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO(component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> window(component.create());
+    REQUIRE(window != nullptr);
+    auto* const dialog = window->property("dialog").value<QObject*>();
+    REQUIRE(dialog != nullptr);
+
+    auto const item = QVariantMap { { "type", "InputMode" }, { "label", "Input mode" }, { "hide", "Insert" },
+                                    { "chip", true },        { "maxWidth", 7 },         { "hasColor", true },
+                                    { "color", "accent" } };
+    REQUIRE(QMetaObject::invokeMethod(
+        dialog, "edit", Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, 1), Q_ARG(QVariant, item)));
+    QCoreApplication::processEvents();
+
+    auto* const field = dialog->findChild<QObject*>(QStringLiteral("foregroundColorField"));
+    REQUIRE(field != nullptr);
+    CHECK(field->property("text").toString() == "accent");
+
+    REQUIRE(QMetaObject::invokeMethod(dialog, "apply"));
+    auto applied = window->property("appliedItem").toMap();
+    CHECK(applied.value("hide").toString() == "Insert");
+    CHECK(applied.value("chip").toBool());
+    CHECK(applied.value("maxWidth").toInt() == 7);
+    CHECK(applied.value("hasColor").toBool());
+    CHECK(applied.value("color").toString() == "accent");
+
+    // A role typed into the field is taken like a hex colour.
+    REQUIRE(QMetaObject::invokeMethod(
+        dialog, "edit", Q_ARG(QVariant, 0), Q_ARG(QVariant, 0), Q_ARG(QVariant, 1), Q_ARG(QVariant, item)));
+    QCoreApplication::processEvents();
+    field->setProperty("text", QStringLiteral("danger"));
+    REQUIRE(QMetaObject::invokeMethod(dialog, "apply"));
+    applied = window->property("appliedItem").toMap();
+    CHECK(applied.value("color").toString() == "danger");
+    CHECK(applied.value("hide").toString() == "Insert");
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("StatusLinePreviewItem paints a role from its resolved colour (offscreen)",
+          "[contour][gui][qml][statusline]")
+{
+    // A role name in a QML colour property is an "Unable to assign" warning and no colour; the preview
+    // paints the hex the bridge resolved beside it instead.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import Contour.Ui
+StatusLinePreviewItem {
+    item: ({ type: "Clock", sample: "12:34", hasColor: true, color: "muted", colorPreview: "#123456",
+             hasBgColor: true, bgColor: "accent", bgColorPreview: "#654321" })
+})",
+                      QUrl());
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    INFO(component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    std::unique_ptr<QObject> preview(component.create());
+    REQUIRE(preview != nullptr);
+    QCoreApplication::processEvents();
+
+    CHECK(preview->property("color").value<QColor>() == QColor(QStringLiteral("#654321")));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("SessionChrome scrollbar renders as a styled grabbable overlay (offscreen)", "[contour][gui][qml]")
 {
     // Regression guard for the "barely visible / hard to grab" scrollbar. After the app-wide Fusion

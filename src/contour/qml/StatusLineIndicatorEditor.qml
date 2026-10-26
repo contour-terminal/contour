@@ -305,6 +305,7 @@ ColumnLayout {
     StatusLineItemDialog {
         id: stylePopup
         flagCatalog: root.flagCatalog
+        colorRoles: root.controller ? root.controller.indicatorColorRoles() : []
         onApplied: (segmentIndex, itemIndex, item) => root.replaceItem(segmentIndex, itemIndex, item)
         onRemoved: (segmentIndex, itemIndex) => root.removeItem(segmentIndex, itemIndex)
         onMoved: (segmentIndex, itemIndex, delta) => root.moveItem(segmentIndex, itemIndex, delta)

@@ -2670,21 +2670,53 @@ namespace
         return styles;
     }
 
+    /// Exposes what @p color paints as, for the editor's preview: "#rrggbb", with a role resolved against
+    /// @p scheme; empty while the colour is unset. A QML colour property cannot take a role's name, so the
+    /// preview reads this beside the role it keeps for saving.
+    void writeColorPreview(QVariantMap& row,
+                           QString const& key,
+                           std::optional<vtbackend::StatusLineDefinitions::ItemColor> const& color,
+                           vtbackend::ColorPalette const& scheme)
+    {
+        row[key] = color ? rgbToHex(vtbackend::StatusLineDefinitions::resolveItemBackground(*color, scheme))
+                         : QString {};
+    }
+
+    /// The scheme a profile's status-line roles resolve against when the editor previews them. A
+    /// light/dark pair previews with its dark scheme: the page shows one preview, not two.
+    [[nodiscard]] vtbackend::ColorPalette const& previewScheme(config::TerminalProfile const& profile)
+    {
+        return std::visit(
+            [](auto const& colors) -> vtbackend::ColorPalette const& {
+                if constexpr (std::same_as<std::decay_t<decltype(colors)>, config::SimpleColorConfig>)
+                    return colors.colors;
+                else
+                    return colors.darkMode;
+            },
+            profile.colors.value());
+    }
+
 } // namespace
 
 QVariantList SettingsController::parseIndicatorSegment(QString const& templateStr) const
 {
     using namespace vtbackend::StatusLineDefinitions;
 
+    // Without a profile open there is no scheme to speak of; the default palette stands in.
+    auto const defaultScheme = vtbackend::ColorPalette {};
+    auto const& scheme = _hasDraft ? previewScheme(_draft) : defaultScheme;
+
     auto items = QVariantList {};
     for (auto const& item: vtbackend::parseStatusLineSegment(templateStr.toStdString()))
     {
         std::visit(
-            [&items](auto const& v) {
+            [&items, &scheme](auto const& v) {
                 using T = std::decay_t<decltype(v)>;
 
                 auto row = QVariantMap {};
                 readStyles(row, v);
+                writeColorPreview(row, QStringLiteral("colorPreview"), v.foregroundColor, scheme);
+                writeColorPreview(row, QStringLiteral("bgColorPreview"), v.backgroundColor, scheme);
                 row[QStringLiteral("type")] = toQString(ItemTraits<T>::Name);
                 row[QStringLiteral("label")] = toQString(ItemTraits<T>::Label);
                 row[QStringLiteral("sample")] = toQString(ItemTraits<T>::Sample);
@@ -2732,11 +2764,24 @@ QVariantList SettingsController::parseIndicatorSegment(QString const& templateSt
                     row[QStringLiteral("verbosity")] = toQString(contextVerbosityName(v.verbosity));
                     row[QStringLiteral("separator")] =
                         QString::fromStdString(v.separator.value_or(std::string {}));
-                    row[QStringLiteral("maxWidth")] = unbox<int>(v.maxWidth);
+                    row[QStringLiteral("displayName")] = toQString(ItemTraits<T>::Label);
+                }
+                else if constexpr (std::same_as<T, InputMode>)
+                {
+                    // `hide` is the mode's template spelling, empty when the item always shows. `chip`
+                    // is a QVariantMap bool -- QML reads the look as a yes/no, the documented carve-out.
+                    row[QStringLiteral("hide")] =
+                        v.hiddenIn ? toQString(inputModeName(*v.hiddenIn)) : QString {};
+                    row[QStringLiteral("chip")] = v.look == InputModeLook::Chip;
                     row[QStringLiteral("displayName")] = toQString(ItemTraits<T>::Label);
                 }
                 else
                     row[QStringLiteral("displayName")] = toQString(ItemTraits<T>::Label);
+
+                // Every item with a column budget, not only Context's: {Cwd:MaxWidth=20} has no control in
+                // the page either, and has to survive an edit of its segment all the same.
+                if constexpr (requires { v.maxWidth; })
+                    row[QStringLiteral("maxWidth")] = unbox<int>(v.maxWidth);
 
                 items.push_back(row);
             },
@@ -2764,49 +2809,64 @@ QString SettingsController::serializeIndicatorSegment(QVariantList const& items)
                 return;
 
             auto const styles = writeStyles(row);
-            if constexpr (std::same_as<T, Text>)
-                segment.emplace_back(
-                    Text { styles, row.value(QStringLiteral("text")).toString().toStdString() });
-            else if constexpr (std::same_as<T, Command>)
-            {
-                auto item = Command { styles, row.value(QStringLiteral("command")).toString().toStdString() };
-                // A missing or non-positive interval (e.g. a row QML built without one) keeps the default.
-                if (auto const seconds = row.value(QStringLiteral("interval")).toInt(); seconds > 0)
-                    item.interval = std::chrono::seconds { seconds };
-                segment.emplace_back(std::move(item));
-            }
-            else if constexpr (std::same_as<T, Extension>)
-                segment.emplace_back(
-                    Extension { styles, row.value(QStringLiteral("name")).toString().toStdString() });
-            else if constexpr (std::same_as<T, Tabs>)
-            {
-                auto const separator = row.value(QStringLiteral("separator")).toString();
-                segment.emplace_back(Tabs {
-                    styles,
-                    optionalColor(row, QStringLiteral("hasActiveColor"), QStringLiteral("activeColor")),
-                    optionalColor(
-                        row, QStringLiteral("hasActiveBackground"), QStringLiteral("activeBackground")),
-                    // An empty separator is "unset", so Tabs falls back to its built-in "|" rather than
-                    // rendering the tabs run together.
-                    separator.isEmpty() ? std::nullopt : std::optional { separator.toStdString() },
-                });
-            }
-            else if constexpr (std::same_as<T, Context>)
-            {
-                auto item = Context { styles };
-                item.verbosity =
-                    contextVerbosityFrom(row.value(QStringLiteral("verbosity")).toString().toStdString());
-                auto const separator = row.value(QStringLiteral("separator")).toString();
-                if (!separator.isEmpty())
-                    item.separator = separator.toStdString();
-                // A missing or nonsensical width keeps the default rather than collapsing the
-                // breadcrumb to nothing.
+            auto item = [&]() -> T {
+                if constexpr (std::same_as<T, Text>)
+                    return Text { styles, row.value(QStringLiteral("text")).toString().toStdString() };
+                else if constexpr (std::same_as<T, Command>)
+                {
+                    auto command =
+                        Command { styles, row.value(QStringLiteral("command")).toString().toStdString() };
+                    // A missing or non-positive interval (e.g. a row QML built without one) keeps the
+                    // default.
+                    if (auto const seconds = row.value(QStringLiteral("interval")).toInt(); seconds > 0)
+                        command.interval = std::chrono::seconds { seconds };
+                    return command;
+                }
+                else if constexpr (std::same_as<T, Extension>)
+                    return Extension { styles, row.value(QStringLiteral("name")).toString().toStdString() };
+                else if constexpr (std::same_as<T, Tabs>)
+                {
+                    auto const separator = row.value(QStringLiteral("separator")).toString();
+                    return Tabs {
+                        styles,
+                        optionalColor(row, QStringLiteral("hasActiveColor"), QStringLiteral("activeColor")),
+                        optionalColor(
+                            row, QStringLiteral("hasActiveBackground"), QStringLiteral("activeBackground")),
+                        // An empty separator is "unset", so Tabs falls back to its built-in "|" rather than
+                        // rendering the tabs run together.
+                        separator.isEmpty() ? std::nullopt : std::optional { separator.toStdString() },
+                    };
+                }
+                else if constexpr (std::same_as<T, Context>)
+                {
+                    auto context = Context { styles };
+                    context.verbosity =
+                        contextVerbosityFrom(row.value(QStringLiteral("verbosity")).toString().toStdString());
+                    auto const separator = row.value(QStringLiteral("separator")).toString();
+                    if (!separator.isEmpty())
+                        context.separator = separator.toStdString();
+                    return context;
+                }
+                else if constexpr (std::same_as<T, InputMode>)
+                {
+                    auto inputMode = InputMode { styles };
+                    // An unknown or empty mode name always shows, as the template parser reads it.
+                    inputMode.hiddenIn =
+                        inputModeFrom(row.value(QStringLiteral("hide")).toString().toStdString());
+                    if (row.value(QStringLiteral("chip")).toBool())
+                        inputMode.look = InputModeLook::Chip;
+                    return inputMode;
+                }
+                else
+                    return T { styles };
+            }();
+
+            // A missing or nonsensical width keeps the default rather than collapsing the item to nothing.
+            if constexpr (requires { item.maxWidth; })
                 if (auto const width = row.value(QStringLiteral("maxWidth")).toInt(); width > 0)
                     item.maxWidth = vtbackend::ColumnCount(width);
-                segment.emplace_back(std::move(item));
-            }
-            else
-                segment.emplace_back(T { styles });
+
+            segment.emplace_back(std::move(item));
         });
     }
 
@@ -2840,6 +2900,14 @@ QVariantList SettingsController::indicatorFlags() const
         catalog.push_back(row);
     }
     return catalog;
+}
+
+QStringList SettingsController::indicatorColorRoles() const
+{
+    auto roles = QStringList {};
+    for (auto const& role: vtbackend::StatusLineDefinitions::ColorRoleNames)
+        roles.push_back(toQString(role.name));
+    return roles;
 }
 
 QString SettingsController::indicatorSegment(int segmentIndex) const

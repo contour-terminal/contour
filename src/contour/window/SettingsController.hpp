@@ -6,6 +6,7 @@
 #include <contour/display/GpuInventory.hpp>
 
 #include <QtCore/QObject>
+#include <QtCore/QStringList>
 #include <QtCore/QVariantList>
 #include <QtCore/QVariantMap>
 #include <QtQml/qqmlregistration.h>
@@ -207,9 +208,13 @@ class SettingsController: public QObject
     /// Each returned map holds: `type` (the template's placeholder name), `label` and `sample` from
     /// vtbackend::StatusLineDefinitions::ItemTraits, `displayName` (the label, or the item's own text
     /// where it has some), `hasColor`/`color` and `hasBgColor`/`bgColor`, `textLeft`/`textRight`, and
-    /// `flags` -- a map from each template flag name to whether it is set. Items carrying more than
-    /// styles add their own keys: `text`, `command`, or Tabs' `hasActiveColor`/`activeColor`,
-    /// `hasActiveBackground`/`activeBackground` and `separator`.
+    /// `flags` -- a map from each template flag name to whether it is set. A colour is `"#RRGGBB"` or a
+    /// role's name (@ref indicatorColorRoles); `colorPreview`/`bgColorPreview` give what it paints as,
+    /// `"#rrggbb"` with a role resolved against the draft profile's scheme, empty while unset. Items
+    /// carrying more than styles add their own keys: `text`, `command`, `interval`, `name`, Tabs'
+    /// `hasActiveColor`/`activeColor`, `hasActiveBackground`/`activeBackground` and `separator`, Context's
+    /// `verbosity` and `separator`, InputMode's `hide` (a mode's name, or empty) and `chip` (whether it
+    /// draws as a chip), and `maxWidth` on every item with a column budget.
     ///
     /// Everything the template can express is present, so @ref serializeIndicatorSegment can put all of
     /// it back: a segment that goes through this pair unedited comes out unchanged.
@@ -223,6 +228,11 @@ class SettingsController: public QObject
     /// Read from vtbackend, so the picker cannot offer a placeholder the parser rejects -- nor omit one
     /// it accepts.
     [[nodiscard]] Q_INVOKABLE QVariantList indicatorPlaceholders() const;
+
+    /// The colour roles an indicator item's colour may name instead of a hex value, in
+    /// vtbackend::StatusLineDefinitions::ColorRoleNames' order.
+    /// @return The roles' names as a template spells them.
+    [[nodiscard]] Q_INVOKABLE QStringList indicatorColorRoles() const;
 
     /// Every cell flag an indicator item can carry, as `{ key, label }`. `key` indexes the `flags` map
     /// of @ref parseIndicatorSegment.
