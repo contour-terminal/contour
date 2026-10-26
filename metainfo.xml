@@ -164,6 +164,9 @@
           <li>Adds <code>chrome_density: comfortable | minimal</code>; Minimal draws 1-pt split lines without headers (hold Option or Alt to show them over the panes) and, on macOS, a bare band in the terminal background for a single tab</li>
           <li>Replaces the 'press any key' notice of a pane whose shell ended early, failed to start or lost the daemon with a footer offering Restart and Close; Return restarts the pane in place</li>
           <li>Shows a reconnecting pane as dimmed with a 'Reconnecting to …' pill</li>
+          <li>Groups the command palette's rows (Pane, Tab, Window, Layouts, Blocks, Profiles, Hosts, Edit, View, Shell, Contour), most recently used first.</li>
+          <li>Collapses commands that take a name, such as Change Profile, Launch Layout, Attach to Host and Switch to Tab, into one row that opens their list; typing a name at the top still finds and runs it directly. Escape steps back.</li>
+          <li>Redraws the palette at 640 points with one-line rows and the selected command's description in a footer, and opens it with a short scale and fade, a fade only under Reduce Motion.</li>
         </ul>
       </description>
     </release>
