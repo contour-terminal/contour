@@ -27,6 +27,7 @@
 #include <QtQuick/QQuickItem>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <cstddef>
@@ -298,7 +299,11 @@ TEST_CASE("accessibility: a pane header names its pane and its four buttons", "[
     contour::test::QmlMessageCapture const warnings;
 
     contour::test::MockSession session;
-    session.setForegroundProcessName(QStringLiteral("vim"));
+    auto const titled = GENERATE(false, true);
+    if (titled)
+        session.setTitle(QStringLiteral("50%2 done"));
+    else
+        session.setForegroundProcessName(QStringLiteral("vim"));
     session.setDisplayWorkingDirectory(QStringLiteral("~/repo"));
     contour::test::MockPaneProxy node { /*leaf*/ true };
     node.setSession(&session);
@@ -316,7 +321,9 @@ TEST_CASE("accessibility: a pane header names its pane and its four buttons", "[
     auto* attached = accessibleAttachedOf(header.get());
     REQUIRE(attached != nullptr);
     CHECK(attached->property("role").toInt() == QAccessible::StaticText);
-    CHECK(attached->property("name").toString() == QStringLiteral("vim, ~/repo"));
+    // A title is the application's text: a "%2" in it stays itself.
+    CHECK(attached->property("name").toString()
+          == (titled ? QStringLiteral("50%2 done, ~/repo") : QStringLiteral("vim, ~/repo")));
 
     auto const names = std::array { QStringLiteral("Split right"),
                                     QStringLiteral("Split down"),
@@ -332,6 +339,7 @@ TEST_CASE("accessibility: a pane header names its pane and its four buttons", "[
         REQUIRE(button != nullptr);
         CHECK(button->property("role").toInt() == QAccessible::Button);
         CHECK(button->property("name").toString() == names[index]);
+        CHECK(button->property("focusable").toBool());
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

@@ -2202,6 +2202,8 @@ void TerminalSessionManager::runPaneHeaderAction(vtworkspace::TabId tab,
                                                  vtworkspace::PaneId leaf,
                                                  window::PaneHeaderAction action)
 {
+    if (static_cast<size_t>(action) >= window::PaneHeaderActions.size())
+        return;
     auto* const model = _model->findTab(tab);
     auto* const pane = model != nullptr ? model->rootPane()->findPane(leaf) : nullptr;
     auto* const session = pane != nullptr && pane->isLeaf() ? sessionForId(pane->session()) : nullptr;

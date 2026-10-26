@@ -562,6 +562,8 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The gaps per axis, the pane header and the cards' inset, in logical pixels.
     [[nodiscard]] vtworkspace::SplitChrome splitChrome(double devicePixelRatio) const;
 
+    /// Public for the display tests, which draw the pane tree with the app's own chrome to check the
+    /// window-size solver against what QML lays out; nothing in the app outside this class reads it.
     /// @return What the chrome is built from now: the row, the resolved chrome font, both OS sources'
     ///         current values, and the scheme of the terminal palette in effect.
     [[nodiscard]] window::ChromeInputs chromeInputs() const;

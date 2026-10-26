@@ -4354,43 +4354,6 @@ TEST_CASE("pane card: focus is emphasis and dim, never an outline (offscreen)",
     CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.left()), "dimOverlay").isVisible());
 }
 
-TEST_CASE("pane card: header text reads at 4.5:1 on its card", "[contour][gui][qml][panecard]")
-{
-    using contour::config::ChromeStyle;
-    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
-    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-dark", "contour-light");
-    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux);
-    INFO("Qt palette: " << (appearance == vtbackend::ColorPreference::Light ? "light" : "dark"));
-    INFO("scheme: " << schemeName);
-    INFO("row: " << contour::config::chromeStyleName(row));
-    contour::test::ScopedChromeAppearance const forced { appearance };
-
-    auto palette = vtbackend::ColorPalette {};
-    REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
-    auto const background = palette.defaultBackground;
-    auto setup = contour::test::defaultChromeSetup();
-    setup.row = row;
-    auto const provider = contour::window::UiStyleProvider { contour::window::ChromeInputs {
-        .row = setup.row, .font = setup.font, .scheme = setup.scheme } };
-
-    for (auto const role: { HeaderTextRole, HeaderTextDimmedRole })
-    {
-        auto const ink = provider.colorOn(role, contour::platform::toQColor(background));
-        // The ink composited over the card, as the header paints it.
-        auto const alpha = static_cast<double>(ink.alphaF());
-        auto const over = [alpha](int inkChannel, int backgroundChannel) {
-            return static_cast<uint8_t>(
-                std::lround((static_cast<double>(inkChannel) * alpha)
-                            + (static_cast<double>(backgroundChannel) * (1.0 - alpha))));
-        };
-        auto const seen = vtbackend::RGBColor { over(ink.red(), background.red),
-                                                over(ink.green(), background.green),
-                                                over(ink.blue(), background.blue) };
-        INFO("role: " << role);
-        CHECK(vtbackend::contrastRatio(seen, background) >= 4.5);
-    }
-}
-
 TEST_CASE("pane card: the actions show on hover and act on their pane (offscreen)",
           "[contour][gui][qml][panecard]")
 {
@@ -4416,6 +4379,37 @@ TEST_CASE("pane card: the actions show on hover and act on their pane (offscreen
                       split.mapToScene({ split.width() / 2, split.height() / 2 }).toPoint());
     CHECK(panes.left().headerActions == std::vector<int> { 0 });
     CHECK(panes.right().headerActions.empty());
+
+    // The keyboard reaches a shown button too: focused, Space clicks it.
+    auto& down = PaneTreeHost::partOf(card, "paneHeaderAction1");
+    CHECK(down.activeFocusOnTab());
+    down.forceActiveFocus();
+    QTest::keyClick(&host.window, Qt::Key_Space);
+    CHECK(panes.left().headerActions == std::vector<int> { 0, 1 });
+}
+
+TEST_CASE("pane card: the header buttons are the kit's glyph, on a fill by the pane's own tone (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    // A dark pane under a light chrome: the band's hover fill (black, by the chrome) would not show on it.
+    contour::test::ScopedChromeAppearance const lightChrome { vtbackend::ColorPreference::Light };
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes { QColor(0x1c, 0x1e, 0x24) };
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto& button = PaneTreeHost::partOf(host.cardOf(panes.left()), "paneHeaderAction0");
+    auto const& glyph = PaneTreeHost::partOf(button, "toolbarButtonGlyph");
+    CHECK(glyph.property("font").value<QFont>().pixelSize() == 15);
+
+    button.forceActiveFocus();
+    auto const& background = PaneTreeHost::partOf(button, "toolbarButtonBackground");
+    auto const fill = background.property("color").value<QColor>();
+    auto const pane = panes.leftSession.backgroundColor();
+    CHECK(
+        fill.rgba()
+        == host.style().colorOn(contour::window::ChromePaneRoleNames::paneHeaderActionHover(), pane).rgba());
+    CHECK(fill.alpha() > 0);
+    CHECK(fill.lightness() > pane.lightness()); // light on the dark pane, whatever the chrome's tone
 }
 
 TEST_CASE("pane card: a long cwd elides in the middle (offscreen)", "[contour][gui][qml][panecard]")
@@ -4601,11 +4595,18 @@ TEST_CASE("pane card: under Reduce Motion the actions cross-fade and the overlay
     CHECK(motion.property("style").toInt() == motion.property("crossFade").toInt());
 
     host.paneNode->setProperty("headerReveal", static_cast<int>(contour::window::HeaderReveal::HeldModifier));
-    // Shown where it belongs at once: nothing slides it in.
     auto const& header = PaneTreeHost::partOf(host.cardOf(panes.left()), "paneHeader");
     CHECK(header.isVisible());
-    CHECK(header.y() == 0);
-    CHECK(header.x() == 0);
+
+    // The header's only animation is the actions' fade, over motion.fast (the cross-fade's duration
+    // here); nothing moves it.
+    auto const animations = header.findChildren<QObject*>();
+    auto const fades = std::ranges::count_if(
+        animations, [](QObject const* object) { return object->inherits("QQuickNumberAnimation"); });
+    CHECK(fades == 1);
+    for (auto const* animation: animations)
+        if (animation->inherits("QQuickPropertyAnimation"))
+            CHECK(animation->property("duration").toInt() == motion.property("fast").toInt());
 }
 
 TEST_CASE("pane card: the Terminal row draws a header of one cell row (offscreen)",
@@ -4630,8 +4631,11 @@ TEST_CASE("pane card: the Terminal row draws a header of one cell row (offscreen
               == expected[index]);
     }
 
-    CHECK(inactive.opacity() == Catch::Approx(0.62));
-    CHECK(active.opacity() == 1.0);
+    // The inactive card fades its content, not its header.
+    CHECK(PaneTreeHost::partOf(inactive, "paneCardContent").opacity() == Catch::Approx(0.62));
+    CHECK(PaneTreeHost::partOf(inactive, "paneHeader").opacity() == 1.0);
+    CHECK(inactive.opacity() == 1.0);
+    CHECK(PaneTreeHost::partOf(active, "paneCardContent").opacity() == 1.0);
 
     // The row shows a focused pane's actions without hover.
     auto const& actions = PaneTreeHost::partOf(active, "paneHeaderActions");

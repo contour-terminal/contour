@@ -68,7 +68,8 @@ ChromeTypeTokens::ChromeTypeTokens(config::TypeTokens tokens, QFont const& font,
     _tab { sizedFont(font, tokens.tab) },
     _title { sizedFont(font, tokens.title) },
     _paneHeader { weightedFont(sizedFont(font, tokens.paneHeader), tokens.paneHeaderWeight) },
-    _paneHeaderWeight { tokens.paneHeaderWeight }
+    _paneHeaderWeight { tokens.paneHeaderWeight },
+    _paneHeaderAction { sizedFont(font, tokens.paneHeaderAction) }
 {
 }
 

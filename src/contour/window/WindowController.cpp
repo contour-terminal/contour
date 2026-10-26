@@ -1441,6 +1441,8 @@ void WindowController::followHeldModifier(QEvent const& event)
         }
         // A click on a revealed header's button must reach it, so a press hides nothing already shown.
         case QEvent::MouseButtonPress: _heldModifier.pointerPressed(_clock.now()); break;
+        // Alt+wheel is a gesture of its own (a scroll, a zoom), not a hold.
+        case QEvent::Wheel: _heldModifier.otherInput(); break;
         default: return;
     }
     refreshHeaderReveal();
@@ -1638,7 +1640,8 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
 
             case QEvent::KeyPress:
             case QEvent::KeyRelease:
-            case QEvent::MouseButtonPress: followHeldModifier(*event); break;
+            case QEvent::MouseButtonPress:
+            case QEvent::Wheel: followHeldModifier(*event); break;
 
             default: break;
         }

@@ -5,6 +5,10 @@
 // the working directory only on a pane wide enough, the actions on hover (or as the row's rule says for a
 // focused pane), the text's emphasis by focus.
 //
+// The buttons are the pointer's way to the pane actions, and take Tab focus while shown. The keyboard's
+// way is the actions' own key bindings, which every button runs: SplitVertical (split right),
+// SplitHorizontal (split down), TogglePaneZoom and ClosePane (window::PaneHeaderActions).
+//
 // The name is never elided before the working directory, which elides in the middle so that both the
 // root and the leaf of a long path survive; assistive technology always hears the whole path.
 //
@@ -47,7 +51,8 @@ Item {
     readonly property real gap: chromeStyle.space.paneHeaderGap
 
     Accessible.role: Accessible.StaticText
-    Accessible.name: workingDirectory !== "" ? qsTr("%1, %2").arg(name).arg(workingDirectory) : name
+    // Concatenated, not formatted: a title the application set may itself contain "%2".
+    Accessible.name: workingDirectory !== "" ? name + qsTr(", ") + workingDirectory : name
 
     // A click on the header, as on the terminal, makes the pane the active one. It takes the press for
     // itself: an overlay header lies over the terminal, which must not see the click as its own.
@@ -142,8 +147,13 @@ Item {
                 required property string modelData
                 objectName: "paneHeaderAction" + index
                 extent: chromeStyle.size.paneHeaderAction
+                activeFocusOnTab: true
                 glyph: modelData
+                glyphFont: chromeStyle.type.paneHeaderAction
                 glyphColor: header.text
+                // By the pane's own tone, as the text is: the band's hover fill follows the chrome's.
+                hoverFill: chromeStyle.paletteRevision < 0 ? "transparent"
+                         : chromeStyle.colorOn(chromeStyle.roles.paneHeaderActionHover, header.background)
                 accessibleName: chromeStyle.paneHeaderActionNames[index]
                 onClicked: if (header.node) header.node.runHeaderAction(index)
             }

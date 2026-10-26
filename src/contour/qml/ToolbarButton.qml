@@ -1,6 +1,9 @@
 // vim:syntax=qml
 // The kit's ToolbarButton: a square glyph button in the title band, such as the band's new-tab "+".
 //
+// It takes keyboard focus where its host lets it (activeFocusOnTab), and Space or Return clicks it then;
+// focused, it wears its hover fill.
+//
 // An Item with handlers rather than an AbstractButton, so its own `clicked` signal is the only one (a
 // button root would already declare it). A left click is `clicked`; a right click or a press-and-hold is
 // `secondaryClicked`, which is how the macOS "+" reaches the profiles (layout.profileMenu). Rest, hover
@@ -24,6 +27,8 @@ Item {
     property color glyphColor: chromeStyle.colors.tabText
     /// The edge of the button's square.
     property real extent: chromeStyle.size.toolbarButton
+    /// The fill under a hovered or focused button: the band's unless the host sits on a surface of its own.
+    property color hoverFill: chromeStyle.colors.tabHoverFill
 
     /// A left click, or the accessibility press action.
     signal clicked()
@@ -34,6 +39,14 @@ Item {
     Accessible.name: root.accessibleName
     Accessible.description: root.accessibleDescription
     Accessible.onPressAction: root.clicked()
+    Accessible.focusable: root.activeFocusOnTab
+
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            root.clicked()
+            event.accepted = true
+        }
+    }
 
     implicitWidth: root.extent
     implicitHeight: root.extent
@@ -64,7 +77,7 @@ Item {
         anchors.fill: parent
         radius: chromeStyle.radii.control
         color: primary.pressed || secondary.pressed ? chromeStyle.colors.controlPressedFill
-             : hover.hovered ? chromeStyle.colors.tabHoverFill
+             : hover.hovered || root.activeFocus ? root.hoverFill
              : "transparent"
     }
 

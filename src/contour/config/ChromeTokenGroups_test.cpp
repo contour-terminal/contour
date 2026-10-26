@@ -106,7 +106,7 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(radii.toolbarChip) });
     out.push_back(radii.grabber);
     append({ row.type.caption, row.type.footnote, row.type.body, row.type.tab, row.type.title });
-    append({ row.type.paneHeader, double(row.type.paneHeaderWeight) });
+    append({ row.type.paneHeader, double(row.type.paneHeaderWeight), row.type.paneHeaderAction });
     append({ double(row.motion.fastMs),
              double(row.motion.standardMs),
              double(row.motion.emphasizedMs),
@@ -188,7 +188,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 6, 6, 14 },
                    { 6, 14, 10, 10, 18, 12, 14 },
                    nativeRadii,
-                   { 10, 11, 13, 12, 15, 11, 500 },
+                   { 10, 11, 13, 12, 15, 11, 500, 15 },
                    nativeMotion,
                    nativeTail }),
           Material::Solid,
@@ -211,7 +211,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 4, 8, 14 },
                    { 4, 8, 8, 4, 18, 6, 0 },
                    nativeRadii,
-                   { 12, 12, 14, 12, 20, 12, 600 },
+                   { 12, 12, 14, 12, 20, 12, 600, 15 },
                    nativeMotion,
                    nativeTail }),
           Material::Mica,
@@ -234,7 +234,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 6, 8, 14 },
                    { 8, 12, 10, 6, 18, 8, 0 },
                    nativeRadii,
-                   { 12, 12.5, 14, 13.5, 15, 12.5, 600 },
+                   { 12, 12.5, 14, 13.5, 15, 12.5, 600, 15 },
                    nativeMotion,
                    nativeTail }),
           Material::Solid,
@@ -256,7 +256,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 1, 1, 1 },
                    { 0, 0, 0, 0, 0, 0, 0 },
                    { 0, 0, 0, 0, 0, 0 },
-                   { 0, 0, 0, 0, 0, 0, 400 },
+                   { 0, 0, 0, 0, 0, 0, 400, 0 },
                    { 100, 160, 220, 0, 1200, 700, 500 },
                    { 0, 0, 0, 0, 1, 1, 0, 60, 1, 1, 0, 60, 1, 1, 0, 60, 10, 0.0, -1, 0.62, 0 },
                    { 15, 10, 0, 1, 1, 1, 0, 0 } }),
@@ -1115,6 +1115,7 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
         PaneColorRow { .role = PaneFooterFill, .native = fill(3), .terminal = schemeColor(SchemeSlot::Bar) },
         PaneColorRow {
             .role = PaneFooterText, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
+        PaneColorRow { .role = PaneHeaderActionHover, .native = fill(1), .terminal = transparent },
     };
     // Every role from PaneGapFill to the end of the enumeration has a row here.
     CHECK(rows.size() == ChromeColorRoleCount - static_cast<size_t>(PaneGapFill));

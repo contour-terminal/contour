@@ -292,6 +292,7 @@ class ChromeTypeTokens: public QObject
     Q_PROPERTY(QFont title READ title CONSTANT)
     Q_PROPERTY(QFont paneHeader READ paneHeader CONSTANT)
     Q_PROPERTY(int paneHeaderWeight READ paneHeaderWeight CONSTANT)
+    Q_PROPERTY(QFont paneHeaderAction READ paneHeaderAction CONSTANT)
 
   public:
     /// @param tokens The resolved type group; a size of 0 keeps @p font's own.
@@ -313,6 +314,8 @@ class ChromeTypeTokens: public QObject
     [[nodiscard]] QFont const& paneHeader() const noexcept { return _paneHeader; }
     /// @return The pane header's weight on the CSS 100-900 scale.
     [[nodiscard]] int paneHeaderWeight() const noexcept { return _paneHeaderWeight; }
+    /// @return The font a pane header button's glyph is drawn in.
+    [[nodiscard]] QFont const& paneHeaderAction() const noexcept { return _paneHeaderAction; }
 
   private:
     QFont _caption {};
@@ -322,6 +325,7 @@ class ChromeTypeTokens: public QObject
     QFont _title {};
     QFont _paneHeader {};
     int _paneHeaderWeight = 0;
+    QFont _paneHeaderAction {};
 };
 
 /// Animation durations and travel, `chromeStyle.motion`.
@@ -667,6 +671,7 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor paneGrabber READ paneGrabber NOTIFY changed)
     Q_PROPERTY(QColor paneFooterFill READ paneFooterFill NOTIFY changed)
     Q_PROPERTY(QColor paneFooterText READ paneFooterText NOTIFY changed)
+    Q_PROPERTY(QColor paneHeaderActionHover READ paneHeaderActionHover NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -734,6 +739,10 @@ class ChromeColorTokens: public QObject
     [[nodiscard]] QColor paneGrabber() const { return color(config::ChromeColorRole::PaneGrabber); }
     [[nodiscard]] QColor paneFooterFill() const { return color(config::ChromeColorRole::PaneFooterFill); }
     [[nodiscard]] QColor paneFooterText() const { return color(config::ChromeColorRole::PaneFooterText); }
+    [[nodiscard]] QColor paneHeaderActionHover() const
+    {
+        return color(config::ChromeColorRole::PaneHeaderActionHover);
+    }
 
   signals:
     /// Every role may have changed colour.
@@ -762,6 +771,7 @@ class ChromePaneRoleNames: public QObject
     Q_PROPERTY(int paneGrabber READ paneGrabber CONSTANT)
     Q_PROPERTY(int paneFooterFill READ paneFooterFill CONSTANT)
     Q_PROPERTY(int paneFooterText READ paneFooterText CONSTANT)
+    Q_PROPERTY(int paneHeaderActionHover READ paneHeaderActionHover CONSTANT)
 
   public:
     /// @param parent Qt ownership.
@@ -803,6 +813,10 @@ class ChromePaneRoleNames: public QObject
     [[nodiscard]] static constexpr int paneFooterText() noexcept
     {
         return of(config::ChromeColorRole::PaneFooterText);
+    }
+    [[nodiscard]] static constexpr int paneHeaderActionHover() noexcept
+    {
+        return of(config::ChromeColorRole::PaneHeaderActionHover);
     }
 
   private:

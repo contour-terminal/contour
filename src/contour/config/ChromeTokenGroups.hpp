@@ -141,15 +141,16 @@ enum class ChromeColorRole : uint8_t
     ChipTextStrong, //!< A chip's emphasised text (the host name).
 
     // The pane cards (resolved against the card's own background, see UiStyleProvider::colorOn).
-    PaneGapFill,          //!< The backdrop the cards and the gap between them sit on.
-    PaneCardBorder,       //!< A card's one-device-pixel border.
-    PaneHeaderFill,       //!< A pane header's fill.
-    PaneHeaderText,       //!< The focused pane's header text.
-    PaneHeaderTextDimmed, //!< An unfocused pane's header text, and the working directory.
-    PaneSplitLine,        //!< The line a split is drawn with where the gap does not draw it.
-    PaneGrabber,          //!< The split handle's grabber, and the Terminal row's engaged split line.
-    PaneFooterFill,       //!< The exited footer's fill.
-    PaneFooterText,       //!< The exited footer's text.
+    PaneGapFill,           //!< The backdrop the cards and the gap between them sit on.
+    PaneCardBorder,        //!< A card's one-device-pixel border.
+    PaneHeaderFill,        //!< A pane header's fill.
+    PaneHeaderText,        //!< The focused pane's header text.
+    PaneHeaderTextDimmed,  //!< An unfocused pane's header text, and the working directory.
+    PaneSplitLine,         //!< The line a split is drawn with where the gap does not draw it.
+    PaneGrabber,           //!< The split handle's grabber, and the Terminal row's engaged split line.
+    PaneFooterFill,        //!< The exited footer's fill.
+    PaneFooterText,        //!< The exited footer's text.
+    PaneHeaderActionHover, //!< A hovered or focused pane header button's fill.
 };
 
 /// Where a chrome colour comes from.
@@ -195,7 +196,8 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::Warning) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::PaneFooterText) + 1;
+inline constexpr size_t ChromeColorRoleCount =
+    static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -357,8 +359,9 @@ struct TypeTokens
     double tab = 0.0;      ///< Tab titles.
     double title = 0.0;    ///< Titles.
 
-    double paneHeader = 0.0;    ///< A pane header's text.
-    int paneHeaderWeight = 400; ///< A pane header's font weight, on the CSS 100-900 scale.
+    double paneHeader = 0.0;       ///< A pane header's text.
+    int paneHeaderWeight = 400;    ///< A pane header's font weight, on the CSS 100-900 scale.
+    double paneHeaderAction = 0.0; ///< A pane header button's glyph.
 
     [[nodiscard]] bool operator==(TypeTokens const&) const = default;
 };
@@ -659,6 +662,17 @@ namespace detail
                                    .level = level };
     }
 
+    /// @return A source that paints nothing.
+    constexpr ChromeColorSource noColor() noexcept
+    {
+        return ChromeColorSource { .kind = ColorSourceKind::Fixed,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = 0,
+                                   .level = 0 };
+    }
+
     /// @return A @c Separator source: the kit's separator ink, by the ground's tone.
     constexpr ChromeColorSource separator() noexcept
     {
@@ -735,21 +749,18 @@ namespace detail
         label(2),   // ChipText
         label(1),   // ChipTextStrong
         // The gap is the chrome scheme's background 4 L points darker (mac-dark: #101216 under #1C1E24).
-        schemeShade(SchemeSlot::Background, -4),            // PaneGapFill
-        separator(),                                        // PaneCardBorder
-        ChromeColorSource { .kind = ColorSourceKind::Fixed, // PaneHeaderFill: the card shows through.
-                            .rgb = 0,
-                            .status = StatusColorRole::Danger,
-                            .slot = SchemeSlot::Background,
-                            .alphaPercent = 0,
-                            .level = 0 },
-        label(1),    // PaneHeaderText
-        label(2),    // PaneHeaderTextDimmed
-        separator(), // PaneSplitLine
+        schemeShade(SchemeSlot::Background, -4), // PaneGapFill
+        separator(),                             // PaneCardBorder
+        noColor(),                               // PaneHeaderFill: the card shows through.
+        label(1),                                // PaneHeaderText
+        label(2),                                // PaneHeaderTextDimmed
+        separator(),                             // PaneSplitLine
         // The canvas's 28 % grabber and 8 % footer are not kit steps; the nearest ones are.
         fill(1),  // PaneGrabber
         fill(3),  // PaneFooterFill
         label(1), // PaneFooterText
+        // The kit's strongest fill, by the pane's own tone: the band's tabHoverFill follows the chrome's.
+        fill(1), // PaneHeaderActionHover
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -819,7 +830,8 @@ namespace detail
                   .tab = 12,
                   .title = 15,
                   .paneHeader = 11,
-                  .paneHeaderWeight = 500 },
+                  .paneHeaderWeight = 500,
+                  .paneHeaderAction = 15 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         // The band is Solid, not Glass (ruling S6): under AppKit's title-bar material the NSTitlebarView
@@ -892,7 +904,8 @@ namespace detail
                   .tab = 12,
                   .title = 20,
                   .paneHeader = 12,
-                  .paneHeaderWeight = 600 },
+                  .paneHeaderWeight = 600,
+                  .paneHeaderAction = 15 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Mica, .popover = Material::Solid },
@@ -962,7 +975,8 @@ namespace detail
                   .tab = 13.5,
                   .title = 15,
                   .paneHeader = 12.5,
-                  .paneHeaderWeight = 600 },
+                  .paneHeaderWeight = 600,
+                  .paneHeaderAction = 15 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Solid, .popover = Material::Solid },
@@ -1101,7 +1115,9 @@ namespace detail
                     schemeColor(SchemeSlot::Secondary), // PaneSplitLine
                     schemeColor(SchemeSlot::Accent),    // PaneGrabber
                     schemeColor(SchemeSlot::Bar),       // PaneFooterFill
-                    schemeColor(SchemeSlot::BarInk) },  // PaneFooterText
+                    schemeColor(SchemeSlot::BarInk),    // PaneFooterText
+                    // A cell row has no hover: the button is its glyph.
+                    detail::noColor() }, // PaneHeaderActionHover
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),

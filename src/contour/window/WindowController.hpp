@@ -950,9 +950,9 @@ class WindowController:
     void onOSWindowActiveChanged();
 
     /// Feeds one input event of the bound window to the held-modifier reveal: a lone press of the reveal
-    /// modifier arms it, a release or a window deactivation releases it, any other key disarms it, and a
-    /// button press disarms a hold still pending (not a reveal already shown, whose buttons it may be
-    /// clicking). Auto-repeated presses are not presses: a held key repeats on some platforms.
+    /// modifier arms it, a release or a window deactivation releases it, any other key or a wheel turn
+    /// disarms it, and a button press disarms a hold still pending (not a reveal already shown, whose buttons
+    /// it may be clicking). Auto-repeated presses are not presses: a held key repeats on some platforms.
     /// @param event The event the window is about to deliver; it is not consumed.
     void followHeldModifier(QEvent const& event);
 

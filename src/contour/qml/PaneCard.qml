@@ -6,7 +6,8 @@
 // edge to edge.
 //
 // Focus is told by the header's emphasis and the inactive panes' dim, never by an outline; the Terminal
-// row also lowers an inactive card's opacity (tui.inactivePaneOpacity).
+// row also lowers an inactive card's content (tui.inactivePaneOpacity; a lone pane is always active, so
+// only a card can be inactive), not its header.
 //
 // The card's fill is the terminal's own background, painted by the header and the terminal it holds: a
 // fill of its own beneath them would composite a translucent profile twice.
@@ -43,9 +44,6 @@ Item {
     readonly property bool headerShown: policy.content !== undefined && policy.content !== "hidden"
     readonly property bool headerInline: headerShown && policy.placement === "inline"
 
-    // A lone pane is the active one, so only a card can be inactive.
-    opacity: isCard && !isActive ? chromeStyle.tui.inactivePaneOpacity : 1.0
-
     HoverHandler {
         id: hover
     }
@@ -59,20 +57,28 @@ Item {
         radius: card.cornerRadius
     }
 
-    TerminalPane {
-        id: terminal
-        // The grid, contentInset in from the card's edges and below an inline header.
-        x: card.contentInset
-        y: (card.headerInline ? header.height : 0) + card.contentInset
-        width: card.width - x - card.contentInset
-        height: card.height - y - card.contentInset
-        backgroundOutset: card.contentInset
-        session: card.session
-        paneActive: card.isActive
-        visiblePanes: card.visiblePanes
-        cornerRadius: card.cornerRadius
-        squareTop: card.headerInline ? card.cornerRadius : 0
-        onActivated: { if (card.node) card.node.activate() }
+    // The pane's content: what the Terminal row fades on an inactive card, its header staying legible.
+    Item {
+        id: content
+        objectName: "paneCardContent"
+        anchors.fill: parent
+        opacity: card.isCard && !card.isActive ? chromeStyle.tui.inactivePaneOpacity : 1.0
+
+        TerminalPane {
+            id: terminal
+            // The grid, contentInset in from the card's edges and below an inline header.
+            x: card.contentInset
+            y: (card.headerInline ? header.height : 0) + card.contentInset
+            width: content.width - x - card.contentInset
+            height: content.height - y - card.contentInset
+            backgroundOutset: card.contentInset
+            session: card.session
+            paneActive: card.isActive
+            visiblePanes: card.visiblePanes
+            cornerRadius: card.cornerRadius
+            squareTop: card.headerInline ? card.cornerRadius : 0
+            onActivated: { if (card.node) card.node.activate() }
+        }
     }
 
     PaneHeader {

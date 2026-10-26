@@ -40,6 +40,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPalette>
+#include <QtGui/QWheelEvent>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -1880,6 +1881,15 @@ class KeyRecorder: public QQuickItem
 
 /// Longer than the reveal's 500 ms hold, for a wait that must see it.
 constexpr auto RevealWaitMs = 1000;
+
+/// How often a held key repeats, roughly as Windows repeats it.
+constexpr auto RepeatIntervalMs = 50;
+
+/// The reveal cases' window edge: room for a click at (10, 10).
+constexpr auto RevealWindowSize = 200;
+
+/// One notch of a mouse wheel, in eighths of a degree.
+constexpr auto WheelStep = 120;
 } // namespace
 
 TEST_CASE("WindowController: holding the reveal modifier alone reveals the headers",
@@ -1890,6 +1900,8 @@ TEST_CASE("WindowController: holding the reveal modifier alone reveals the heade
     window->bindWindow(window.osWindow.get());
     window->createNewTab();
     auto* const osWindow = window.osWindow.get();
+    // Room for the clicks below: an unsized window holds no point.
+    osWindow->resize(RevealWindowSize, RevealWindowSize);
     auto recorder = KeyRecorder {};
     recorder.setParentItem(osWindow->contentItem());
     recorder.forceActiveFocus();
@@ -1929,6 +1941,64 @@ TEST_CASE("WindowController: holding the reveal modifier alone reveals the heade
         QTest::mouseClick(osWindow, Qt::LeftButton, Qt::AltModifier, QPoint { 10, 10 });
         CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
         QTest::keyRelease(osWindow, Qt::Key_Alt);
+    }
+
+    SECTION("other input before the delay never reveals")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        QTest::keyClick(osWindow, Qt::Key_X, Qt::AltModifier);
+        CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+    }
+
+    SECTION("Alt with another modifier, or AltGr, never arms")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt, Qt::ControlModifier);
+        CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::keyRelease(osWindow, Qt::Key_Alt, Qt::ControlModifier);
+
+        QTest::keyPress(osWindow, Qt::Key_AltGr);
+        CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::keyRelease(osWindow, Qt::Key_AltGr);
+    }
+
+    SECTION("an auto-repeated press neither re-arms nor disarms")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        auto const pressedAt = std::chrono::steady_clock::now();
+        // Windows repeats a held Alt as further presses: they must leave the first press's time alone.
+        auto repeat =
+            QKeyEvent { QEvent::KeyPress, Qt::Key_Alt, Qt::AltModifier, QString {}, /*autorep*/ true };
+        while (!revealed(*window)
+               && std::chrono::steady_clock::now() - pressedAt < std::chrono::milliseconds { RevealWaitMs })
+        {
+            QCoreApplication::sendEvent(osWindow, &repeat);
+            QTest::qWait(RepeatIntervalMs);
+        }
+        CHECK(revealed(*window));
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+    }
+
+    SECTION("a wheel turn while held never reveals")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        auto wheel =
+            QWheelEvent { QPointF { 10, 10 }, QPointF { 10, 10 }, QPoint {},         QPoint { 0, WheelStep },
+                          Qt::NoButton,       Qt::AltModifier,    Qt::NoScrollPhase,
+                          /*inverted*/ false };
+        QCoreApplication::sendEvent(osWindow, &wheel);
+        CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+    }
+
+    SECTION("the window losing focus counts as the release")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        REQUIRE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        // The window was never activated, so its activeChanged reads as a deactivation.
+        REQUIRE_FALSE(osWindow->isActive());
+        REQUIRE(QMetaObject::invokeMethod(osWindow, "activeChanged"));
+        CHECK_FALSE(revealed(*window));
     }
 
     SECTION("a release hides")
