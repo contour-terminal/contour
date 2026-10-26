@@ -428,7 +428,11 @@ QColor UiStyleProvider::bandFill(int frame, int mode, QString const& centre) con
                 legibleBandTint(background, paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
             return tint ? platform::toQColor(*tint) : paletteWindow;
         }
-        case config::BandFill::Background: return platform::toQColor(background);
+        case config::BandFill::Background: {
+            auto const ground =
+                legibleBandBackground(background, paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
+            return ground ? platform::toQColor(*ground) : paletteWindow;
+        }
     }
     return paletteWindow;
 }

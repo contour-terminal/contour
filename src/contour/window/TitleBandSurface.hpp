@@ -175,4 +175,18 @@ inline constexpr int BandTintPoints = 4;
     return bandTintOf(background);
 }
 
+/// The terminal background the bare band paints on a chrome of tone @p chrome, where the band's ink -- the
+/// host chip's text, the drift chip's -- stays legible (R-d), as legibleBandTint() decides for the tint.
+/// @param background The terminal's default background.
+/// @param chrome     The tone the chrome's labels are inked for.
+/// @return @p background when it has the chrome's tone, else @c std::nullopt (the caller paints the palette
+///         window colour instead).
+[[nodiscard]] inline std::optional<vtbackend::RGBColor> legibleBandBackground(vtbackend::RGBColor background,
+                                                                              ChromeTone chrome) noexcept
+{
+    if (toneOf(background) != chrome)
+        return std::nullopt;
+    return background;
+}
+
 } // namespace contour::window

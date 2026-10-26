@@ -170,6 +170,15 @@ TEST_CASE("tint.values", "[titlebandsurface]")
     }
 }
 
+TEST_CASE("background.legibility", "[titlebandsurface]")
+{
+    // The bare band paints the terminal background only where it has the chrome's tone.
+    CHECK(legibleBandBackground(0x1E1E1E_rgb, ChromeTone::Light) == std::nullopt);
+    CHECK(legibleBandBackground(0x1E1E1E_rgb, ChromeTone::Dark) == 0x1E1E1E_rgb);
+    CHECK(legibleBandBackground(0xFAFAFA_rgb, ChromeTone::Light) == 0xFAFAFA_rgb);
+    CHECK(legibleBandBackground(0xFAFAFA_rgb, ChromeTone::Dark) == std::nullopt);
+}
+
 TEST_CASE("tint.legibility", "[titlebandsurface]")
 {
     CHECK(legibleBandTint(0x1E1E1E_rgb, ChromeTone::Light) == std::nullopt);

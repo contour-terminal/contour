@@ -1780,6 +1780,8 @@ struct BarGeometry
 
 TEST_CASE("Minimal with one tab is a bare band (offscreen)", "[contour][gui][qml][mainwindow][band][density]")
 {
+    // A dark chrome over the default (dark) scheme: the tones agree, so the band is the scheme's background.
+    auto const appearance = contour::test::ScopedChromeAppearance { vtbackend::ColorPreference::Dark };
     QQmlEngine engine;
     MockMainController controller { MainWindowScene { .tabCount = 1,
                                                       .tabBarVisibility = TabBarVisibility::Multiple } };
@@ -1798,6 +1800,9 @@ TEST_CASE("Minimal with one tab is a bare band (offscreen)", "[contour][gui][qml
     CHECK_FALSE(named(*root, QStringLiteral("bandTitle")).isVisible());
     auto const* well = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
     CHECK((well == nullptr || !well->isVisible()));
+    // Traffic lights only: no "+" either (the Minimal board).
+    auto const* bareNewTab = root->findChild<QQuickItem*>(QStringLiteral("newTabButton"));
+    CHECK((bareNewTab == nullptr || !bareNewTab->isVisible()));
     // Painted in the terminal background, opaque.
     auto const background = contour::platform::toQColor(
         setup.scheme.bySlot[static_cast<size_t>(contour::config::SchemeSlot::Background)]);
@@ -1811,6 +1816,9 @@ TEST_CASE("Minimal with one tab is a bare band (offscreen)", "[contour][gui][qml
     auto const* shownWell = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
     REQUIRE(shownWell != nullptr);
     CHECK(shownWell->isVisible());
+    auto const* newTab = root->findChild<QQuickItem*>(QStringLiteral("newTabButton"));
+    REQUIRE(newTab != nullptr);
+    CHECK(newTab->isVisible());
     CHECK(titleBar.height() == 38);
     CHECK(controller.chromeHeight() == 38);
     CHECK(bandBackgroundOf(*root) != background);

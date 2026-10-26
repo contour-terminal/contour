@@ -287,10 +287,11 @@ Item {
         }
 
         // The band's new-tab button, under the Pill shape (Flat draws its own in the strip). A secondary
-        // click or a long press opens the profiles, as the macOS "+" does (layout.profileMenu).
+        // click or a long press opens the profiles, as the macOS "+" does (layout.profileMenu). Not on a
+        // bare band (Minimal, one tab): it holds the traffic lights only.
         Loader {
             id: newTabSlot
-            active: root.isBand && root.isPill
+            active: root.isBand && root.isPill && root.centre !== "empty"
             Layout.alignment: Qt.AlignVCenter
             Layout.preferredWidth: active ? implicitWidth : 0
             Layout.rightMargin: active ? chromeStyle.space.s4 : 0

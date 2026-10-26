@@ -537,7 +537,8 @@ class UiStyleProvider: public QObject
     /// - @c Clear: transparent, so a material behind the band shows;
     /// - @c Tint: window::legibleBandTint of the chrome scheme's background for the chrome's tone (decided
     ///   as statusColor() decides it), else the palette's window colour.
-    /// - @c Background: the chrome scheme's background itself (Minimal's bare band).
+    /// - @c Background: window::legibleBandBackground, the chrome scheme's background itself (Minimal's bare
+    ///   band) where it has the chrome's tone, else the palette's window colour.
     ///
     /// Reads the palette, so a binding over it also reads @ref paletteRevision. Ints and a name rather than
     /// enums: the QML-facing carve-out, whose one caller (Main.qml) passes the values it passes titleBand()

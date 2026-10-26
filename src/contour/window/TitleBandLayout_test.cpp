@@ -181,6 +181,8 @@ TEST_CASE("titleBand.casesCoverEveryInput", "[titleband]")
 {
     // Every windowed input has a row above: a rule change cannot slip past the table.
     detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
+        if (inputs.mode != Windowed)
+            return;
         INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
                       << int(inputs.strip) << ", position " << int(inputs.position) << ", notice "
                       << int(inputs.notice));
@@ -225,11 +227,16 @@ TEST_CASE("titleBand.minimalBareBand", "[titleband]")
                                         .density = ChromeDensity::Minimal };
     CHECK(resolveTitleBand(bare)
           == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
-    // In full screen it reveals on the edge like any top band.
+    // In full screen there are no traffic lights to carry: the empty band stays hidden rather than sliding a
+    // strip of nothing over the top rows (M1)...
     auto full = bare;
     full.mode = FullScreen;
     CHECK(resolveTitleBand(full)
-          == TitleBand { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
+          == TitleBand { BarPresence::Hidden, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
+    // ...unless the connection is interrupted: then it stays pinned, for the host chip.
+    full.notice = Interrupted;
+    CHECK(resolveTitleBand(full)
+          == TitleBand { BarPresence::Pinned, BarEdge::Top, BarCentre::Empty, BarPresence::Hidden });
 
     // With the gate shown, Minimal resolves as Comfortable.
     auto shown = bare;

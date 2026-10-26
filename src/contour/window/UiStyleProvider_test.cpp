@@ -1551,3 +1551,54 @@ TEST_CASE("bandFill follows the material, the mode and the tone", "[contour][uis
         CHECK(mac.bandFill(0, 1, tabs) == QColor(LightChrome));
     });
 }
+
+TEST_CASE("bandFill keeps Minimal's bare band legible on every bundled scheme", "[contour][uistyle]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    using contour::window::ChromeTone;
+    using contour::window::UiStyleProvider;
+    auto const empty = QStringLiteral("empty");
+    // The band's ink is the chrome's (the host chip's text, the drift chip's): 92 % white on a dark chrome,
+    // 88 % black on a light one, as 1c's label(1).
+    auto const inkOver = [](vtbackend::RGBColor ground, ChromeTone tone) {
+        auto const dark = tone == ChromeTone::Dark;
+        auto const alpha = dark ? 0.92 : 0.88;
+        auto const ink = dark ? 255.0 : 0.0;
+        auto const mix = [&](uint8_t channel) {
+            return static_cast<uint8_t>(std::lround((ink * alpha) + (channel * (1 - alpha))));
+        };
+        return vtbackend::RGBColor { mix(ground.red), mix(ground.green), mix(ground.blue) };
+    };
+    auto mismatched = 0;
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto inputs = bandInputs(ChromeStyle::MacOS, palette.defaultBackground);
+        inputs.density = ChromeDensity::Minimal;
+        auto const provider = UiStyleProvider(inputs);
+        for (auto const& [chrome, tone]:
+             { std::pair { DarkChrome, ChromeTone::Dark }, std::pair { LightChrome, ChromeTone::Light } })
+        {
+            CAPTURE(QColor(chrome).name().toStdString());
+            withWindowColor(QColor(chrome), [&] {
+                auto const fill = provider.bandFill(0, 0, empty);
+                auto const sameTone = contour::window::toneOf(palette.defaultBackground) == tone;
+                // The terminal background where it has the chrome's tone; else the palette window colour,
+                // as the tint falls back.
+                CHECK(
+                    fill
+                    == (sameTone ? contour::platform::toQColor(palette.defaultBackground) : QColor(chrome)));
+                mismatched += sameTone ? 0 : 1;
+                auto const ground = vtbackend::RGBColor { static_cast<uint8_t>(fill.red()),
+                                                          static_cast<uint8_t>(fill.green()),
+                                                          static_cast<uint8_t>(fill.blue()) };
+                CHECK(vtbackend::contrastRatio(ground, inkOver(ground, tone)) >= 4.5);
+            });
+        }
+    }
+    // The pass is not vacuous: every scheme is mismatched under one of the two chromes.
+    CHECK(mismatched > 0);
+}
