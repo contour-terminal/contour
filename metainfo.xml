@@ -109,6 +109,13 @@
         <ul>
           <li>Changes Settings to open in a window of its own, one per app, from Settings… in the Contour menu (⌘, on macOS, Ctrl+Shift+, elsewhere), the command palette or the <code>OpenConfiguration</code> binding. It opens with or without a terminal window, is brought forward when asked for again, and keeps its place and unsaved edits when closed</li>
           <li>Removes the Settings tab from the tab strip and the Settings entry from the new-tab menu</li>
+          <li>Adds macOS tabs as pills in a tab well within the title band, with a centred title while there is one tab</li>
+          <li>Adds one badge per tab for unseen output, finished commands and OSC 7501 program status, by priority: waiting, failed, working, done, new output. 'Working' and progress now use the accent colour</li>
+          <li>Changes the remote host label into a host chip that shows when the connection is reconnecting or lost</li>
+          <li>Moves the daemon version notice from over the terminal into the title bar</li>
+          <li>Reveals the tab bar in full screen when the pointer reaches the top edge, as a cross-fade under Reduce Motion</li>
+          <li>Shows the foreground process's name on a tab whose title is empty</li>
+          <li>Fixes a background remote tab showing new output when it reconnects or resyncs; a program's own screen switch or clear in it still marks it</li>
           <li>Adds a native macOS menu bar of six menus: Contour, Shell, Edit, View, Window and Help. The Window menu lists the open windows, and Help carries the system's search field</li>
           <li>Adds native context menus on macOS: with the default <code>ui_style: native</code>, the terminal, title bar, tab and new-tab menus open as system menus; <code>ui_style: terminal</code> keeps the in-window menus</li>
           <li>Adds a row of color swatches and Move Tab to New Window to the tab's context menu</li>
