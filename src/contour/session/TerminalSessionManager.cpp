@@ -36,6 +36,8 @@
 #include <filesystem>
 #include <format>
 #include <initializer_list>
+#include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <utility>
@@ -2119,9 +2121,14 @@ void TerminalSessionManager::focusPane(vtworkspace::FocusDirection direction, Te
     {
         // Only a move that lands reads as the keyboard's: activePaneChanged() records how the pane it fires
         // for was reached, and a move with no neighbour fires nothing.
+        // Cleared on the way out however it is left, or a throw from the model's observers would leave every
+        // later activation of this tab keyboard-made.
         _keyboardPaneMove = tab->id();
+        auto const clear =
+            std::unique_ptr<std::optional<vtworkspace::TabId>, decltype([](auto* move) { move->reset(); })> {
+                &_keyboardPaneMove
+            };
         _model->focusDirection(tab->id(), direction);
-        _keyboardPaneMove.reset();
     }
 }
 

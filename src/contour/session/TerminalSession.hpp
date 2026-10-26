@@ -2019,8 +2019,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     std::string _endDetail;
     /// The page's lines when the end was announced, before the footer took any of them. GUI thread.
     std::optional<vtbackend::LineCount> _linesAtEnd;
-    /// The rows the footer took, measured at the first page resize after the end (the footer's own
-    /// layout); none before. GUI thread.
+    /// The rows the footer took, measured at the first page resize on the GUI thread after the end (the
+    /// footer's own layout); none before. GUI thread: pageResized() may run on the parser thread too.
     std::optional<vtbackend::LineCount> _footerLines;
     DisplaySurface* _display = nullptr;
 

@@ -977,7 +977,11 @@ void TerminalSession::pageResized()
 {
     // The first resize after the end is the footer laying out below the cells: what it took, a restart
     // gives back. Later ones (the window, the font) change the page, not what the footer takes.
-    if (_linesAtEnd && !_footerLines)
+    // Only the GUI thread's: the footer's layout resizes from there, while a resize on the parser thread --
+    // a program's DECSSDT in output still being parsed as the device closes, local or daemon-mirrored -- is
+    // not the footer's, and the two members are the GUI thread's alone. Checked first, so that thread
+    // reads neither.
+    if (QThread::currentThread() == thread() && _linesAtEnd && !_footerLines)
     {
         auto const lines = _terminal.totalPageSize().lines;
         _footerLines = *_linesAtEnd > lines ? *_linesAtEnd - lines : vtbackend::LineCount(0);

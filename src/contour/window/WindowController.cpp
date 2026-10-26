@@ -2145,7 +2145,16 @@ void WindowController::notifyPaneSessionReplaced(vtworkspace::TabId tab, vtworks
         // The new session is followed as the one it replaced was.
         refreshHeaderFollowers();
     }
-    notifyTabRowChanged(tab, { Roles::SessionIdRole, Roles::TitleRole });
+    // Every role read through the tab's active session: the new one starts with no progress and no
+    // records, and the ended one's must not linger in the strip.
+    notifyTabRowChanged(tab,
+                        { Roles::SessionIdRole,
+                          Roles::TitleRole,
+                          Roles::ProgressStateRole,
+                          Roles::ProgressPercentageRole,
+                          Roles::BadgeRole,
+                          Roles::BadgeTextRole,
+                          Roles::BadgeProgressRole });
 }
 
 void WindowController::refreshActiveTabLayoutRoot()

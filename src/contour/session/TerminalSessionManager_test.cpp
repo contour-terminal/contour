@@ -36,6 +36,7 @@
 #include <core/testing/ScopedTempDir.hpp>
 
 #include <QtCore/QPointer>
+#include <QtCore/QSet>
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
@@ -1573,6 +1574,25 @@ TEST_CASE("TerminalSessionManager: only a FocusPane move leaves a pane keyboard-
         CHECK(focusOf(right) == PaneFocus::Focused);
     }
 
+    SECTION("a swap after a keyboard move")
+    {
+        manager.focusPane(vtworkspace::FocusDirection::Left, right);
+        REQUIRE(focusOf(left) == PaneFocus::KeyboardFocused);
+        manager.swapPane(vtworkspace::FocusDirection::Right, left);
+        REQUIRE(window->activeSession() == left);
+        CHECK(focusOf(left) == PaneFocus::Focused);
+    }
+
+    SECTION("a revealed session after a keyboard move")
+    {
+        manager.focusPane(vtworkspace::FocusDirection::Left, right);
+        REQUIRE(focusOf(left) == PaneFocus::KeyboardFocused);
+        manager.revealSession(*right);
+        REQUIRE(window->activeSession() == right);
+        CHECK(focusOf(right) == PaneFocus::Focused);
+        CHECK(focusOf(left) == PaneFocus::Unfocused);
+    }
+
     contour::test::closeAllTabs(*window);
 }
 
@@ -2480,6 +2500,7 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
     auto proxyChanges = QSignalSpy(proxy, &contour::session::PaneProxy::changed);
     auto activeSessionChanges =
         QSignalSpy(&*window, &contour::window::WindowController::activeSessionChanged);
+    auto rowChanges = QSignalSpy(&*window, &contour::window::WindowController::dataChanged);
 
     pressReturn(*ended);
 
@@ -2507,6 +2528,21 @@ TEST_CASE("TerminalSessionManager: Return restarts an ended pane in place", "[ma
     CHECK(proxyChanges.count() == 1);
     CHECK(proxy->session() == restarted);
     CHECK(activeSessionChanges.count() == 1);
+
+    // The tab strip re-reads every role its active session feeds, not only the id and the label.
+    auto announced = QSet<int> {};
+    for (auto const& change: rowChanges)
+        for (auto const role: change.at(2).value<QList<int>>())
+            announced.insert(role);
+    using Roles = contour::window::WindowController::Roles;
+    for (auto const role: { Roles::SessionIdRole,
+                            Roles::TitleRole,
+                            Roles::ProgressStateRole,
+                            Roles::ProgressPercentageRole,
+                            Roles::BadgeRole,
+                            Roles::BadgeTextRole,
+                            Roles::BadgeProgressRole })
+        CHECK(announced.contains(static_cast<int>(role)));
 
     // The ended session is let go once the call that ended it has returned.
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
@@ -2675,6 +2711,11 @@ TEST_CASE("TerminalSessionManager: a restarted pane starts at the size it has on
         auto const lock = std::scoped_lock { ended->terminal() };
         ended->terminal().resizeScreen(size, std::nullopt);
     };
+    // A resize on another thread -- the parser's, finishing the output that ended -- is not the footer's:
+    // it measures nothing, and the footer's own resize below still does.
+    std::thread { [&] {
+        resize(vtbackend::PageSize { .lines = running.lines - 1, .columns = running.columns });
+    } }.join();
     resize(vtbackend::PageSize { .lines = running.lines - 2, .columns = running.columns });
     resize(vtbackend::PageSize { .lines = running.lines - 2, .columns = running.columns - 10 });
 
