@@ -112,6 +112,10 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(QString displayWorkingDirectory READ displayWorkingDirectory CONSTANT)
     Q_PROPERTY(QString foregroundProcessName READ foregroundProcessName CONSTANT)
     Q_PROPERTY(int programStatus READ programStatus CONSTANT)
+    // What an ended pane's footer reads: a running session.
+    Q_PROPERTY(int sessionEnd READ sessionEnd CONSTANT)
+    Q_PROPERTY(QString endMessage READ endMessage CONSTANT)
+    Q_PROPERTY(int restartOffer READ restartOffer CONSTANT)
 
   public:
     [[nodiscard]] int pageLineCount() const { return 25; }
@@ -122,6 +126,9 @@ class RoutingMockSession: public QObject
     [[nodiscard]] float opacity() const { return 1.0F; }
     [[nodiscard]] float dimUnfocused() const { return 0.0F; }
     [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
+    [[nodiscard]] int sessionEnd() const { return 0; }
+    [[nodiscard]] QString endMessage() const { return {}; }
+    [[nodiscard]] int restartOffer() const { return 0; }
     [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return true; }
     [[nodiscard]] bool isScrollbarVisible() const { return false; }

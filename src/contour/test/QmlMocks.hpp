@@ -63,6 +63,11 @@ class MockSession: public QObject
     Q_PROPERTY(int programStatus READ programStatus NOTIFY paneProgramStatusChanged)
     Q_PROPERTY(QString programStatusText READ programStatusText NOTIFY paneProgramStatusChanged)
     // }}}
+    // {{{ The ended pane: what its footer reads, mirroring TerminalSession's properties and their signal.
+    Q_PROPERTY(int sessionEnd READ sessionEnd NOTIFY sessionEndChanged)
+    Q_PROPERTY(QString endMessage READ endMessage NOTIFY sessionEndChanged)
+    Q_PROPERTY(int restartOffer READ restartOffer NOTIFY sessionEndChanged)
+    // }}}
 
   public:
     /// @param background The session background colour; configuration, hence fixed for the lifetime.
@@ -207,6 +212,32 @@ class MockSession: public QObject
     }
     // }}}
 
+    // {{{ The ended pane
+    [[nodiscard]] int sessionEnd() const noexcept { return _sessionEnd; }
+    [[nodiscard]] QString const& endMessage() const noexcept { return _endMessage; }
+    [[nodiscard]] int restartOffer() const noexcept { return _restartOffer; }
+
+    /// The session ended and its pane waits, as TerminalSession::recordEndLocked() tells.
+    /// @param end     A session::EndReason's value; 0 for a running session.
+    /// @param message What the footer says.
+    /// @param restart A session::FooterRestart's value.
+    void setEnd(int end, QString message, int restart)
+    {
+        _sessionEnd = end;
+        _endMessage = std::move(message);
+        _restartOffer = restart;
+        emit sessionEndChanged();
+    }
+
+    /// Counts the footer's Restart, as TerminalSession::restart() would start the session again.
+    Q_INVOKABLE void restart() { ++restarts; }
+    /// Counts the footer's Close, as TerminalSession::dismiss() would close the pane.
+    Q_INVOKABLE void dismiss() { ++dismissals; }
+
+    int restarts = 0;   ///< How often restart() ran.
+    int dismissals = 0; ///< How often dismiss() ran.
+    // }}}
+
     // Permission dialog stubs (SessionChrome connects these signals to dialog .open slots).
     Q_INVOKABLE void applyPendingFontChange(bool, bool) {}
     Q_INVOKABLE void applyPendingPaste(bool, bool) {}
@@ -239,6 +270,7 @@ class MockSession: public QObject
     void foregroundProcessNameChanged();
     void titleChanged();
     void paneProgramStatusChanged();
+    void sessionEndChanged();
     void onBell();
     void onAlert();
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);
@@ -270,6 +302,9 @@ class MockSession: public QObject
     QString _title;
     int _programStatus = 0; ///< window::TabBadgeKind::None.
     QString _programStatusText;
+    int _sessionEnd = 0; ///< session::EndReason::None.
+    QString _endMessage;
+    int _restartOffer = 0; ///< session::FooterRestart::Unavailable.
 };
 
 /// A DYNAMIC stand-in for a PaneProxy (one node of the split tree). Unlike the old static mock, session /

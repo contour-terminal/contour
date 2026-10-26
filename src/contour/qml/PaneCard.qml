@@ -9,6 +9,9 @@
 // row also lowers an inactive card's content (tui.inactivePaneOpacity; a lone pane is always active, so
 // only a card can be inactive), not its header.
 //
+// An ended pane shows its ExitedFooter below the cells, which end where it starts; a pane whose host
+// connection is being sought again dims below its header and shows a pill naming the host.
+//
 // The card's fill is the terminal's own background, painted by the header and the terminal it holds: a
 // fill of its own beneath them would composite a translucent profile twice.
 import QtQuick
@@ -66,11 +69,12 @@ Item {
 
         TerminalPane {
             id: terminal
-            // The grid, contentInset in from the card's edges and below an inline header.
+            // The grid, contentInset in from the card's edges, below an inline header and above an ended
+            // pane's footer, which it meets edge to edge: the footer is never over cells.
             x: card.contentInset
             y: (card.headerInline ? header.height : 0) + card.contentInset
             width: content.width - x - card.contentInset
-            height: content.height - y - card.contentInset
+            height: content.height - y - (footer.visible ? footer.height : card.contentInset)
             backgroundOutset: card.contentInset
             session: card.session
             paneActive: card.isActive
@@ -95,6 +99,53 @@ Item {
         cornerRadius: card.cornerRadius
         // A hidden header button drops the keyboard focus; typing goes back to this pane's grid.
         onFocusReleased: terminal.forceActiveFocus()
+    }
+
+    // An ended pane's footer: how it ended, Restart where it may, and Close.
+    ExitedFooter {
+        id: footer
+        x: 0
+        y: card.height - height
+        z: 1
+        width: card.width
+        session: card.session
+        cornerRadius: card.cornerRadius
+    }
+
+    // While the connection to the host this pane mirrors is sought again, the grid below the header dims by
+    // the kit's pane dim and a pill says so, centred on it. The window's host chip says the same of the
+    // whole window (Reconnecting…); this names the host, and nothing here contradicts it.
+    Item {
+        id: reconnecting
+        objectName: "reconnectingOverlay"
+        x: 0
+        y: card.headerInline ? header.height : 0
+        z: 1
+        width: card.width
+        height: card.height - y
+        visible: card.session ? card.session.isReconnecting === true : false
+        clip: card.headerInline && card.cornerRadius > 0
+        // The dim's colour, for the scene's own checks.
+        readonly property color color: chromeStyle.paneDimColor
+        // The window's controller (Main.qml's `win`), which names the host.
+        readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
+
+        // The card's corners below an inline header, square where it meets the header.
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: card.headerInline ? -card.cornerRadius : 0
+            radius: card.cornerRadius
+            color: reconnecting.color
+        }
+
+        // Its glyph is the Working badge's, drawn still: the pill is a steady state, not a progress.
+        Toast {
+            objectName: "reconnectingPill"
+            anchors.centerIn: parent
+            shown: true
+            text: qsTr("Reconnecting to %1…").arg(reconnecting.controller ? reconnecting.controller.hostLabel : "")
+            glyph: chromeStyle.paletteRevision < 0 ? "" : chromeStyle.badgeLook(chromeStyle.badgeKinds.working).glyph
+        }
     }
 
     // The card's edge, above what it holds: a border of one device pixel in the separator colour. Minimal

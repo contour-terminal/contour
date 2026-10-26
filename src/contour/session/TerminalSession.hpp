@@ -18,6 +18,7 @@
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/CommandBlockId.hpp>
@@ -815,10 +816,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// no-op while the session runs; idempotent once it has ended.
     Q_INVOKABLE void dismiss();
 
-    /// @return Whether this pane's connection to its host is lost and being sought again.
+    /// Whether this pane's connection to its host is being sought, folded as the window's host chip folds
+    /// it (window::hostChipStateOf), so the pane's pill and the chip never disagree.
+    /// @return Whether the chip would say Reconnecting.
     [[nodiscard]] bool isReconnecting() const noexcept
     {
-        return _hostConnection == vthost::client::ConnectionState::Reconnecting;
+        return window::hostChipStateOf(_hostConnection) == window::HostChipState::Reconnecting;
     }
 
     /// The name of the program in front of this session's shell, which a tab with an empty label shows, asked

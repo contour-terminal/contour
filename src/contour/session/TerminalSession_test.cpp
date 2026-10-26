@@ -27,6 +27,7 @@
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/WindowController.hpp>
 
 #include <vtbackend/core/Hyperlink.hpp>
@@ -11050,6 +11051,32 @@ TEST_CASE("TerminalSession: a mirrored pane follows its host connection, a local
     local->setHostConnection(ConnectionState::Reconnecting);
     CHECK_FALSE(local->isReconnecting());
     CHECK(localChanges == 0);
+}
+
+TEST_CASE("TerminalSession: a remote pane reconnects exactly while its window's host chip says so",
+          "[contour][session][reconnect]")
+{
+    using vthost::client::ConnectionState;
+    TestApp testApp;
+    auto const remote =
+        std::make_unique<contour::session::TerminalSession>(&testApp.app().sessionsManager(),
+                                                            std::make_unique<vtpty::MockPty>(TestPageSize),
+                                                            testApp.app(),
+                                                            std::string {},
+                                                            std::nullopt,
+                                                            std::nullopt,
+                                                            contour::test::makeTestNotifier(),
+                                                            contour::session::SessionRole::Shell,
+                                                            contour::session::SessionHosting::Remote);
+    // The pane's pill and the chip fold the connection the same way, so the two never disagree.
+    for (auto const index: std::views::iota(size_t { 0 }, vthost::client::ConnectionStateCount))
+    {
+        auto const state = static_cast<ConnectionState>(index);
+        CAPTURE(index);
+        remote->setHostConnection(state);
+        CHECK(remote->isReconnecting()
+              == (contour::window::hostChipStateOf(state) == contour::window::HostChipState::Reconnecting));
+    }
 }
 
 TEST_CASE("TerminalSessionManager: the host connection reaches every remotely hosted session",

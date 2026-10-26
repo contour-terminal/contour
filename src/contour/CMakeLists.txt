@@ -409,6 +409,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/PaneNode.qml
         qml/PaneCard.qml
         qml/PaneHeader.qml
+        qml/ExitedFooter.qml
         qml/TerminalPane.qml
         qml/ActionContextMenu.qml
         qml/MenuSwatchRow.qml

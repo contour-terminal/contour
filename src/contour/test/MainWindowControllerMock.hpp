@@ -142,6 +142,13 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::applicationVersion() with a fixed test value.
     [[nodiscard]] QString applicationVersion() const { return QStringLiteral("0.0.0-test"); }
 
+    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, Ctrl+Shift+X, and nothing for
+    /// any other command (an ended pane's footer names Close's).
+    [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
+    {
+        return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
+    }
+
     /// Mirrors WindowController::showAbout(): asks the window for its About dialog.
     Q_INVOKABLE void showAbout() { emit aboutRequested(); }
 

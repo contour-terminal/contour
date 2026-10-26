@@ -525,3 +525,17 @@ TEST_CASE("a native pick runs on the menu it was shown for, though another has o
     REQUIRE(window->count() == 1);
     CHECK(native.app.manager().model().findTab(ids[0]) != nullptr);
 }
+
+TEST_CASE("shortcutText spells a command's configured chord as the host does", "[contour][windowmenus]")
+{
+    TestApp app;
+    ScopedController const window { app.manager() };
+
+    // ClosePane's Classic default, Ctrl+Shift+X, in this platform's spelling.
+    auto const expected =
+        contour::command::platformShortcutStyle() == contour::command::ShortcutStyle::MacGlyphs
+            ? QStringLiteral("⌃⇧X")
+            : QStringLiteral("Ctrl+Shift+X");
+    CHECK(window->shortcutText(QStringLiteral("ClosePane")) == expected);
+    CHECK(window->shortcutText(QStringLiteral("NoSuchCommand")).isEmpty());
+}

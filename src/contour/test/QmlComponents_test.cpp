@@ -18,6 +18,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
@@ -3276,51 +3277,6 @@ TEST_CASE("PaneNode renders a SINGLE leaf as the whole window without TypeErrors
           == 0);
 }
 
-TEST_CASE("The reconnecting overlay shows only while the pane's session is reconnecting (offscreen)",
-          "[contour][gui][qml][reconnect]")
-{
-    QQmlEngine engine;
-    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
-    MockTabController controller;
-    MockSession session;
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    engine.rootContext()->setContextProperty("mockSession", &session);
-    contour::test::installChromeStyle(engine);
-
-    QQmlComponent component(&engine);
-    component.setData(
-        QByteArrayLiteral("import QtQuick\n"
-                          "import QtQuick.Window\n"
-                          "import Contour.Ui\n"
-                          "Window {\n"
-                          "  width: 400; height: 300; visible: true\n"
-                          "  property var win: terminalSessions\n"
-                          "  property alias pane: paneItem\n"
-                          "  TerminalPane { id: paneItem; anchors.fill: parent; session: mockSession }\n"
-                          "}\n"),
-        QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/TestWrapper.qml")));
-    while (component.status() == QQmlComponent::Loading)
-        QCoreApplication::processEvents();
-    INFO(component.errorString().toStdString());
-    REQUIRE(component.isReady());
-    std::unique_ptr<QObject> const obj(component.create());
-    REQUIRE(obj != nullptr);
-    auto* pane = obj->property("pane").value<QQuickItem*>();
-    REQUIRE(pane != nullptr);
-    auto* overlay = pane->findChild<QQuickItem*>("reconnectingOverlay");
-    REQUIRE(overlay != nullptr);
-    QCoreApplication::processEvents();
-
-    CHECK_FALSE(overlay->isVisible());
-    session.setReconnecting(true);
-    QCoreApplication::processEvents();
-    CHECK(overlay->isVisible());
-    CHECK(overlay->property("text").toString() == QStringLiteral("Reconnecting…"));
-    session.setReconnecting(false);
-    QCoreApplication::processEvents();
-    CHECK_FALSE(overlay->isVisible());
-}
-
 TEST_CASE("TerminalPane.onTerminated closes the window only when it is the last session (offscreen)",
           "[contour][gui][qml][split][close]")
 {
@@ -4190,13 +4146,48 @@ namespace
     return setup;
 }
 
+/// What a pane reads of its window's controller (Main.qml's `win`): the attached host and the chords.
+class MockPaneWindowController: public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
+
+  public:
+    /// The host the window is attached to.
+    [[nodiscard]] QString hostLabel() const { return _hostLabel; }
+    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, nothing for any other.
+    [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
+    {
+        return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
+    }
+    /// Mirrors WindowController::canCloseWindow(): a pane's end never closes the test's window.
+    [[nodiscard]] Q_INVOKABLE bool canCloseWindow() const { return _closable; }
+
+  private:
+    QString _hostLabel = QStringLiteral("home");
+    bool _closable = false;
+};
+
+/// A window that carries its controller as `win`, as Main.qml's does.
+class PaneTestWindow: public QQuickWindow
+{
+    Q_OBJECT
+    Q_PROPERTY(QObject* win READ win CONSTANT)
+
+  public:
+    [[nodiscard]] QObject* win() noexcept { return &_controller; }
+
+  private:
+    MockPaneWindowController _controller;
+};
+
 /// A pane tree shown as Main.qml shows the active tab's: PaneNode.qml filling a window, told the tab's
 /// visible pane count and the window's header reveal.
 struct PaneTreeHost
 {
     QQmlEngine engine;
     MockTabController controller;
-    QQuickWindow window;
+    PaneTestWindow window;
     std::unique_ptr<QObject> paneNode;
 
     /// @param setup The chrome the tree is drawn with.
@@ -7973,5 +7964,207 @@ TEST_CASE("the Terminal row's menu rows read on the menu surface (offscreen)", "
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
+
+// {{{ An ended pane's footer and a reconnecting pane
+namespace
+{
+/// @return @p top composited over the opaque @p ground.
+[[nodiscard]] QColor over(QColor const& top, QColor const& ground)
+{
+    auto const alpha = top.alphaF();
+    auto const mix = [alpha](float a, float b) {
+        return (a * alpha) + (b * (1.0F - alpha));
+    };
+    return QColor::fromRgbF(
+        mix(top.redF(), ground.redF()), mix(top.greenF(), ground.greenF()), mix(top.blueF(), ground.blueF()));
+}
+
+/// The contrast ratio of the opaque colours @p a and @p b.
+[[nodiscard]] double contrastOf(QColor const& a, QColor const& b)
+{
+    return vtbackend::contrastRatio(contour::platform::toRGBColor(a), contour::platform::toRGBColor(b));
+}
+
+/// The `color` property of @p item.
+[[nodiscard]] QColor colorOf(QQuickItem const& item)
+{
+    return item.property("color").value<QColor>();
+}
+
+/// Ends @p session the way an exited shell does: its code named, Restart offered.
+void endWithExitCode(contour::test::MockSession& session)
+{
+    session.setEnd(static_cast<int>(contour::session::EndReason::Exited),
+                   QStringLiteral("Process exited with code 1."),
+                   static_cast<int>(contour::session::FooterRestart::Offered));
+}
+
+/// Clicks the middle of @p item in @p host's window.
+void clickOn(PaneTreeHost& host, QQuickItem const& item)
+{
+    auto const centre = item.mapToScene(QPointF { item.width() / 2, item.height() / 2 }).toPoint();
+    QTest::mouseClick(&host.window, Qt::LeftButton, {}, centre);
+    QCoreApplication::processEvents();
+}
+} // namespace
+
+TEST_CASE("pane end: an ended pane shows the footer below its cells (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    auto const& card = host.cardOf(panes.left());
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    CHECK_FALSE(footer.isVisible());
+
+    endWithExitCode(panes.leftSession);
+    host.settle();
+    REQUIRE(footer.isVisible());
+    CHECK(footer.height() == 34);
+    CHECK(footer.y() + footer.height() == card.height());
+
+    // The cells end where the footer starts: it is never over them.
+    auto const& terminal = PaneTreeHost::terminalOf(card);
+    CHECK(terminal.mapToItem(&card, QPointF { 0, terminal.height() }).y() == footer.y());
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterMessage").property("text").toString()
+          == QStringLiteral("Process exited with code 1."));
+
+    auto const& restart = PaneTreeHost::partOf(card, "exitedFooterRestart");
+    CHECK(restart.isVisible());
+    clickOn(host, restart);
+    CHECK(panes.leftSession.restarts == 1);
+
+    auto const& close = PaneTreeHost::partOf(card, "exitedFooterClose");
+    CHECK(close.property("text").toString() == QStringLiteral("Close Ctrl+Shift+X"));
+    clickOn(host, close);
+    CHECK(panes.leftSession.dismissals == 1);
+    CHECK(panes.leftSession.restarts == 1);
+
+    // The other pane runs on, footless.
+    CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.right()), "exitedFooter").isVisible());
+}
+
+TEST_CASE("pane end: a Disconnected pane offers no Restart (offscreen)", "[contour][gui][qml][paneend]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+
+    session.setEnd(static_cast<int>(contour::session::EndReason::Disconnected),
+                   QStringLiteral("Disconnected from the Contour daemon."),
+                   static_cast<int>(contour::session::FooterRestart::Unavailable));
+    host.settle();
+    auto const& card = host.cardOf(leaf);
+    CHECK(PaneTreeHost::partOf(card, "exitedFooter").isVisible());
+    CHECK_FALSE(PaneTreeHost::partOf(card, "exitedFooterRestart").isVisible());
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterClose").isVisible());
+}
+
+TEST_CASE("pane end: the footer reads at 4.5:1 (offscreen)", "[contour][gui][qml][paneend]")
+{
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-light", "contour-dark");
+    auto const row = GENERATE(contour::config::ChromeStyle::MacOS, contour::config::ChromeStyle::Terminal);
+    INFO("Qt palette: " << appearanceName(appearance));
+    INFO("scheme: " << schemeName);
+    CAPTURE(static_cast<int>(row));
+    contour::test::ScopedChromeAppearance const forced { appearance };
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
+    auto setup = terminalRowSetup(schemeName);
+    setup.row = row;
+    auto const background = contour::platform::toQColor(palette.defaultBackground);
+
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    MockSession session { background };
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    endWithExitCode(session);
+    host.settle();
+
+    auto const& card = host.cardOf(leaf);
+    auto const footerFill = over(colorOf(PaneTreeHost::partOf(card, "exitedFooterFill")), background);
+    CHECK(contrastOf(colorOf(PaneTreeHost::partOf(card, "exitedFooterMessage")), footerFill) >= 4.5);
+    for (auto const* name: { "exitedFooterRestart", "exitedFooterClose" })
+    {
+        INFO("button: " << name);
+        auto const& button = PaneTreeHost::partOf(card, name);
+        auto const fill = over(colorOf(button), footerFill);
+        auto const& label = PaneTreeHost::partOf(button, (std::string { name } + "Label").c_str());
+        CHECK(contrastOf(colorOf(label), fill) >= 4.5);
+    }
+}
+
+TEST_CASE("pane end: a reconnecting pane dims below its header and shows the pill (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto const contrast = GENERATE(contour::config::ContrastPreference::Standard,
+                                   contour::config::ContrastPreference::Increased);
+    CAPTURE(static_cast<int>(contrast));
+    auto setup = paneCardSetup();
+    setup.accessibility.contrast = contrast;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    auto const& card = host.cardOf(panes.left());
+    auto const& overlay = PaneTreeHost::partOf(card, "reconnectingOverlay");
+    auto const& pill = PaneTreeHost::partOf(card, "reconnectingPill");
+    CHECK_FALSE(overlay.isVisible());
+
+    panes.leftSession.setReconnecting(true);
+    QCoreApplication::processEvents();
+    REQUIRE(overlay.isVisible());
+    CHECK(colorOf(overlay) == host.style().paneDimColor());
+    if (contrast == contour::config::ContrastPreference::Increased)
+        CHECK(colorOf(overlay).alphaF() == Catch::Approx(0.05).margin(0.005));
+    // Over the grid only: the header above it stays as it is.
+    auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+    CHECK(overlay.y() == header.y() + header.height());
+    CHECK(overlay.y() + overlay.height() == card.height());
+
+    CHECK(pill.isVisible());
+    CHECK(pill.property("text").toString() == QStringLiteral("Reconnecting to home…"));
+    // The Working badge's glyph, drawn still: nothing in the pill animates it.
+    auto const look = host.style().badgeLook(static_cast<int>(contour::window::TabBadgeKind::Working));
+    CHECK(pill.property("glyph").toString() == look.value("glyph").toString());
+    auto const& glyph = PaneTreeHost::partOf(pill, "toastGlyph");
+    CHECK(std::ranges::none_of(glyph.findChildren<QObject*>(), [](QObject const* child) {
+        return child->inherits("QQuickAbstractAnimation");
+    }));
+    CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.right()), "reconnectingOverlay").isVisible());
+
+    panes.leftSession.setReconnecting(false);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(overlay.isVisible());
+    CHECK_FALSE(pill.isVisible());
+}
+
+TEST_CASE("pane end: the Terminal row's footer is one cell row with bracketed buttons (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    endWithExitCode(panes.leftSession);
+    host.settle();
+
+    auto const& card = host.cardOf(panes.left());
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    REQUIRE(footer.isVisible());
+    CHECK(footer.height() == host.style().cellHeight());
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterRestart").property("text").toString()
+          == QStringLiteral("[Restart %1]").arg(host.style().restartGlyph()));
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterClose").property("text").toString()
+          == QStringLiteral("[Close Ctrl+Shift+X]"));
+}
+// }}}
 
 #include <QmlComponents_test.moc>

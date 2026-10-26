@@ -809,6 +809,12 @@ class WindowController:
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
 
+    /// The chord the configuration binds to a command, as this host spells shortcuts (an ended pane's
+    /// footer names Close's). Read at each call, so a reloaded binding is the one shown.
+    /// @param commandName The command's id (command::commandId), such as "ClosePane".
+    /// @return The chord, e.g. "Ctrl+Shift+X" or "⌃⇧X"; empty when nothing binds the command.
+    [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const;
+
     /// Drops what this window remembers of @p session, which was removed: its cached process name.
     /// @param session The removed session.
     void forgetSession(vtworkspace::SessionId session) { _processNames.erase(session.value); }

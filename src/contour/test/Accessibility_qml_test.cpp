@@ -10,6 +10,7 @@
 // What this canNOT assert is what a bridge would DELIVER; offscreen QPA has no accessibility bridge at
 // all. That remains a manual check — see docs/accessibility.md for the Accerciser recipe.
 
+#include <contour/session/EndReason.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
@@ -34,6 +35,7 @@
 #include <memory>
 #include <ranges>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <vthost/client/ReleaseDrift.hpp>
@@ -340,6 +342,41 @@ TEST_CASE("accessibility: a pane header names its pane and its four buttons", "[
         CHECK(button->property("role").toInt() == QAccessible::Button);
         CHECK(button->property("name").toString() == names[index]);
         CHECK(button->property("focusable").toBool());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: an ended pane's footer is an alert named by its message, with two buttons",
+          "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    session.setEnd(static_cast<int>(contour::session::EndReason::Exited),
+                   QStringLiteral("Process exited with code 1."),
+                   static_cast<int>(contour::session::FooterRestart::Offered));
+    auto footer =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/ExitedFooter.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) } });
+    auto* attached = accessibleAttachedOf(footer.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::AlertMessage);
+    CHECK(attached->property("name").toString() == QStringLiteral("Process exited with code 1."));
+
+    for (auto const& [part, name]: std::array { std::pair { "exitedFooterRestart", "Restart" },
+                                                std::pair { "exitedFooterClose", "Close" } })
+    {
+        INFO("button " << part);
+        auto const buttons = partsNamed(*footer, QString::fromLatin1(part));
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == QString::fromLatin1(name));
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

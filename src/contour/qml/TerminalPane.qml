@@ -248,27 +248,6 @@ ContourTerminal {
         }
     }
 
-    // While the connection to the daemon this pane mirrors is sought again, the pane says so instead of
-    // showing a grid that merely stopped: the grid dimmed, and the word centred on it. Above the unfocused
-    // dimming.
-    Rectangle {
-        objectName: "reconnectingOverlay"
-        anchors.fill: parent
-        z: 6
-        visible: pane.session ? pane.session.isReconnecting === true : false
-        color: chromeStyle.paneDimColor
-        property alias text: reconnectingLabel.text
-
-        Text {
-            id: reconnectingLabel
-            anchors.centerIn: parent
-            text: qsTr("Reconnecting\u2026")
-            // The kit's dim is a light scrim, so the label inks by the pane's own background.
-            color: chromeStyle.onColor(pane.session ? pane.session.backgroundColor : "black")
-            font: chromeStyle.headlineFont
-        }
-    }
-
     TapHandler {
         onTapped: pane.activated()
     }

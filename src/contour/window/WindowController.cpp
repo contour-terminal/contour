@@ -301,6 +301,15 @@ QString WindowController::hostLabel() const
     return QString::fromStdString(_manager.app().attachedHostLabel());
 }
 
+QString WindowController::shortcutText(QString const& commandName) const
+{
+    auto const chords = command::chordIndex(_manager.app().config());
+    auto const chord = chords.find(commandName.toStdString());
+    if (chord == chords.end())
+        return {};
+    return QString::fromStdString(command::shortcutText(chord->second, command::platformShortcutStyle()));
+}
+
 int WindowController::hostChipState() const noexcept
 {
     return static_cast<int>(std::to_underlying(hostChipStateOf(_manager.hostConnection())));
