@@ -290,6 +290,7 @@ Terminal::Terminal(Events& eventListener,
     _eventListener { eventListener },
     _homeDirectory { env.get("HOME").value_or("") },
     _fileSystem { fileSystem },
+    _gitHead { fileSystem },
     _linkServices { std::move(linkServices) },
     // Read here rather than per reply: what it names is how this terminal was launched, and a
     // configuration value re-read on every DA/DSR/CPR is a lookup on a path that answers thousands
@@ -843,14 +844,7 @@ bool Terminal::indicatorStatusLineDrivenByExtensions() const noexcept
         return false;
     if (_takeOverName)
         return true;
-    auto const namesAnExtension = [](StatusLineSegment const& segment) {
-        return std::ranges::any_of(segment, [](StatusLineDefinitions::Item const& item) {
-            return std::holds_alternative<StatusLineDefinitions::Extension>(item);
-        });
-    };
-    auto const& definition = _indicatorStatusLineDefinition;
-    return namesAnExtension(definition.left) || namesAnExtension(definition.middle)
-           || namesAnExtension(definition.right);
+    return containsItem<StatusLineDefinitions::Extension>(_indicatorStatusLineDefinition);
 }
 
 void Terminal::setMirroredIndicatorStatusLine(std::optional<Line> row)
@@ -1667,6 +1661,8 @@ void Terminal::updateIndicatorStatusLine()
         }
         return;
     }
+
+    refreshGitHead();
 
     // Every {Extension} item of this repaint reads one frame per name, so that two slots, and the measuring
     // of a slot, cannot see two generations.
@@ -6633,6 +6629,8 @@ void Terminal::endCommand(int exitCode, ContextOutcome outcome)
     // Raised from inside the parse, under _stateMutex, exactly as progressChanged() is.
     if (auto const summary = _commandBlocks.commandFinished(exitCode, outcome))
         _eventListener.commandBlockFinished(*summary);
+    // The command may have switched branches; the next frame looks.
+    _gitHead.invalidate();
 }
 
 void Terminal::commandContextStarted(ContextId started)
@@ -6665,6 +6663,8 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
                       core::escape(url));
         return;
     }
+    // Changed or not: a shell re-reports at every prompt, which is when a branch switch shows.
+    _gitHead.invalidate();
     auto const changed = *parsed != _currentWorkingDirectory;
     _currentWorkingDirectory = *std::move(parsed);
     recordForeignDirectory();
@@ -6672,6 +6672,22 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
         _eventListener.workingDirectoryChanged();
     _extensionEvents.post(
         [&] { return StatusLineEvents::CwdChanged { .cwd = _currentWorkingDirectory.path }; });
+}
+
+void Terminal::refreshGitHead()
+{
+    if (!containsItem<StatusLineDefinitions::Git>(_indicatorStatusLineDefinition))
+        return;
+    // Only a directory provably on this machine: another machine's path names another repository, or none.
+    _gitHead.refresh(
+        resolveWorkingDirectory(CwdPurpose::OpenLocally)
+            .and_then([](ResolvedWorkingDirectory const& resolved) -> std::optional<std::filesystem::path> {
+                // A path this platform cannot spell has no branch rather than a wrong one.
+                auto path = core::pathFromUtf8(resolved.path);
+                if (!path)
+                    return std::nullopt;
+                return *std::move(path);
+            }));
 }
 
 optional<ResolvedWorkingDirectory> Terminal::resolveWorkingDirectory(CwdPurpose purpose) const

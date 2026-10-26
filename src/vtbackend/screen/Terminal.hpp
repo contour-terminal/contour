@@ -21,6 +21,7 @@
 #include <vtbackend/links/ScanText.hpp>
 #include <vtbackend/render/RenderBuffer.hpp>
 #include <vtbackend/screen/Cursor.hpp>
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Gutter.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/LinkPresentation.hpp>
@@ -3518,6 +3519,11 @@ class Terminal: public IStatusLinePublishTarget
     ///         none.
     [[nodiscard]] std::string_view homeDirectory() const noexcept { return _homeDirectory; }
 
+    /// @return The branch `{Git}` shows for the shell's directory, as last read; empty for none. Reads no
+    ///         file: the indicator status line's repaint refreshes it, and only after a command ended or the
+    ///         shell reported a directory.
+    [[nodiscard]] std::string const& gitBranch() const noexcept { return _gitHead.branch(); }
+
     /// @returns either an empty string or a file:// URL of the last set working directory, as reported.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
     {
@@ -4123,6 +4129,11 @@ class Terminal: public IStatusLinePublishTarget
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
 
+    /// Brings gitBranch() up to date for the shell's local directory, when the template shows `{Git}`.
+    /// Called by updateIndicatorStatusLine() on the render thread under the state lock; reads files only
+    /// after endCommand() or setCurrentWorkingDirectory() invalidated the branch, so not per frame.
+    void refreshGitHead();
+
     /// The indicator status line's colors for the focus and the input mode as they are now.
     [[nodiscard]] RGBColorPair indicatorStatusLineColors() const;
 
@@ -4399,6 +4410,9 @@ class Terminal: public IStatusLinePublishTarget
 
     /// Where the paths this terminal recognizes on screen are looked up. @see Terminal()
     core::platform::FileSystem const& _fileSystem;
+
+    /// The `{Git}` branch, read through @ref _fileSystem. Guarded by the state lock.
+    GitHeadCache _gitHead;
 
     /// What passive link detection runs on; nullopt detects nothing. Fixed at construction.
     std::optional<LinkDetectionServices> _linkServices;

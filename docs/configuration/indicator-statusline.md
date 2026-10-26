@@ -28,6 +28,7 @@ Variable             | Description
 `{Cwd}`              | the working directory the shell reports, with the home directory as `~` when it is on this machine; at most `MaxWidth=` columns (default `40`), eliding the middle directories (`/…/d59`)
 `{Command}`          | yields the output of the given command, as specified via parameter `Program=...` (or the `{Command:<command>}` shorthand), re-run every `Interval=...` seconds
 `{Extension}`        | what the [status-line extension](../extensions.md) named by parameter `Name=...` (or the `{Extension:<name>}` shorthand) draws
+`{Git}`              | the branch of the Git repository the shell's directory is in (a ref outside `refs/heads/` as `remotes/origin/x`, a detached HEAD as its first 7 hex digits), read from `.git/HEAD` or a worktree's `.git` file; empty outside a repository or in a directory on another machine. It is read again only after a command ends or the shell reports its directory, never per frame
 `{HistoryLineCount}` | number of lines in history (only available in primary screen)
 `{Hyperlink}`        | reveals the hyperlink at the given mouse location
 `{InputMode}`        | current input mode (e.g. INSERT, NORMAL, VISUAL)

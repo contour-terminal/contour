@@ -7,6 +7,7 @@
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -190,6 +191,9 @@ namespace StatusLineDefinitions
         ColumnCount maxWidth { 40 };
     };
 
+    /// The branch, ref or short commit of the repository the shell is in, read from its `.git/HEAD`.
+    struct Git: Styles {};
+
     struct Tabs: Styles
     {
         std::optional<ItemColor> activeColor;
@@ -217,7 +221,8 @@ namespace StatusLineDefinitions
         VTType,
         Tabs,
         Context,
-        Cwd
+        Cwd,
+        Git
     >;
     // clang-format on
 
@@ -312,6 +317,9 @@ namespace StatusLineDefinitions
     template <> struct ItemTraits<Cwd>
     { static constexpr std::string_view Name = "Cwd", Label = "Working directory", Sample = "~/repo/contour"; };
 
+    template <> struct ItemTraits<Git>
+    { static constexpr std::string_view Name = "Git", Label = "Git branch", Sample = "main"; };
+
     template <> struct ItemTraits<Text>
     { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; };
 
@@ -355,6 +363,20 @@ struct StatusLineDefinition
     StatusLineSegment middle;
     StatusLineSegment right;
 };
+
+/// Whether any segment of @p definition holds an item of type @p T.
+/// @tparam T The @ref StatusLineDefinitions::Item alternative to look for.
+/// @param definition The status line.
+/// @return Whether its left, middle or right segment names a @p T.
+template <typename T>
+[[nodiscard]] bool containsItem(StatusLineDefinition const& definition) noexcept
+{
+    auto const holdsOne = [](StatusLineSegment const& segment) {
+        return std::ranges::any_of(
+            segment, [](StatusLineDefinitions::Item const& item) { return std::holds_alternative<T>(item); });
+    };
+    return holdsOne(definition.left) || holdsOne(definition.middle) || holdsOne(definition.right);
+}
 
 // "{Clock:Bold,Italic,Color=#FFFF00} | {VTType} | {InputMode} {SearchPrompt:Bold,Color=Yellow}"
 StatusLineSegment parseStatusLineSegment(std::string_view text);

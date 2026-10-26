@@ -106,6 +106,7 @@ set(vtbackend_HEADERS
     grid/SoAClusterWriter.hpp
     shell/StableIdSet.hpp
     screen/StatusLineBuilder.hpp
+    screen/GitHead.hpp
     core/SteadyClockRef.hpp
     shell/StickyHeader.hpp
     core/StickyHeaderKind.hpp
@@ -202,6 +203,7 @@ set(vtbackend_SOURCES
     graphics/regis/ReGISTextRasterizer.cpp
     graphics/regis/ReGISParser.cpp
     screen/StatusLineBuilder.cpp
+    screen/GitHead.cpp
     screen/StatusLineCommandCache.cpp
     screen/StatusLineExtensions.cpp
     screen/Terminal.cpp
@@ -360,6 +362,7 @@ if(LIBTERMINAL_TESTING)
         vt/SemanticPrompt_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
+        screen/GitHead_test.cpp
         screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp
         screen/Terminal_test.cpp

@@ -5,9 +5,11 @@
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+#include <vtbackend/testing/TestHelpers.hpp>
 
 #include <core/Environment.hpp>
 #include <core/Utils.hpp>
+#include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
@@ -777,5 +779,47 @@ TEST_CASE("parseStatusLineSegment.maxWidthIsGeneric", "[statusline][cwd]")
     REQUIRE(zero.size() == 1);
     REQUIRE(std::holds_alternative<StatusLineDefinitions::Cwd>(zero[0]));
     CHECK(std::get<StatusLineDefinitions::Cwd>(zero[0]).maxWidth == ColumnCount(40));
+}
+// }}}
+
+// {{{ {Git}
+namespace
+{
+/// The indicator status line's text, trailing blanks dropped, after a fresh frame.
+[[nodiscard]] std::string indicatorTextAfterRefresh(Terminal& terminal)
+{
+    terminal.refreshRenderBuffer();
+    auto text = terminal.indicatorStatusLineDisplay().renderMainPageText();
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\n'))
+        text.pop_back();
+    return text;
+}
+} // namespace
+
+TEST_CASE("serializeToVT.gitFollowsTheShell", "[statusline][git]")
+{
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    REQUIRE(files.createDirectories("/r/src"));
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };
+    mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+
+    mc.writeToScreen("\033]7;file:///r/src\033\\");
+    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+
+    // A frame reads nothing: only a command's end or a directory report makes it look again.
+    REQUIRE(files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+
+    test::typeAtPrompt(mc, "git switch next");
+    mc.writeToScreen("\033]133;C\033\\");
+    mc.writeToScreen("\033]133;D;0\033\\");
+    CHECK(indicatorTextAfterRefresh(mc.terminal) == "next");
+
+    // Another machine's directory has no branch here, whatever this machine holds at that path.
+    mc.writeToScreen("\033]7;file://elsewhere.example/r/src\033\\");
+    CHECK(indicatorTextAfterRefresh(mc.terminal).empty());
 }
 // }}}

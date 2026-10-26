@@ -77,6 +77,20 @@ class MockTerm: public Terminal::NullEvents
                       std::optional<LinkDetectionServices> linkServices = std::nullopt,
                       std::optional<StatusLineExtensionServices> extensionServices = std::nullopt);
 
+    /// A terminal that reads printed paths and Git metadata from @p fileSystem; everything else as
+    /// `MockTerm { size }`.
+    /// @param size The page size.
+    /// @param fileSystem The terminal's filesystem. Borrowed: it must outlive the terminal.
+    MockTerm(PageSize size, core::platform::FileSystem const& fileSystem):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   fileSystem,
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt }
+    {
+    }
+
     /// A terminal showing the status-line extensions @p extensionServices names.
     MockTerm(PageSize size, StatusLineExtensionServices extensionServices):
         MockTerm { createSettings(size, HistoryLimits {}, 1024),
@@ -461,6 +475,16 @@ class MockTerm: public Terminal::NullEvents
     {
         terminal.primaryScreen().captureBuffer(lines, logical);
     }
+
+  private:
+    /// What every public constructor comes down to: the Settings one's parameters, plus the terminal's
+    /// filesystem, which must be @p linkServices' own when it is given (as Terminal() asks).
+    MockTerm(vtbackend::Settings settings,
+             core::platform::FileSystem const& fileSystem,
+             std::optional<StatusLineCommandServices> commandServices,
+             LocalTimeConverter localTime,
+             std::optional<LinkDetectionServices> linkServices,
+             std::optional<StatusLineExtensionServices> extensionServices);
 };
 
 template <typename PtyDevice>
@@ -483,9 +507,25 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      LocalTimeConverter localTime,
                                      std::optional<LinkDetectionServices> linkServices,
                                      std::optional<StatusLineExtensionServices> extensionServices):
+    MockTerm { std::move(settings),
+               linkServices ? linkServices->fileSystem : core::platform::NativeFileSystem::instance(),
+               std::move(commandServices),
+               localTime,
+               std::move(linkServices),
+               std::move(extensionServices) }
+{
+}
+
+template <typename PtyDevice>
+inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
+                                     core::platform::FileSystem const& fileSystem,
+                                     std::optional<StatusLineCommandServices> commandServices,
+                                     LocalTimeConverter localTime,
+                                     std::optional<LinkDetectionServices> linkServices,
+                                     std::optional<StatusLineExtensionServices> extensionServices):
     terminal { *this,
                core::defaultEnvironment(),
-               linkServices ? linkServices->fileSystem : core::platform::NativeFileSystem::instance(),
+               fileSystem,
                std::make_unique<PtyDevice>(settings.pageSize),
                std::move(settings),
                std::move(commandServices),

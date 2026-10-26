@@ -818,6 +818,12 @@ namespace
             return elideMiddle(parts, "/", item.maxWidth);
         }
 
+        /// The branch the terminal last read for the shell's directory: no I/O here, as on every frame.
+        [[nodiscard]] std::string visit(StatusLineDefinitions::Git const&) const
+        {
+            return vt.gitBranch();
+        }
+
         std::string visit(StatusLineDefinitions::Tabs const& tabs)
         {
             auto const tabsInfo = vt.guiTabsInfoForStatusLine();
