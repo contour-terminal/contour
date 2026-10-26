@@ -44,6 +44,18 @@ Item {
     /// tab's colour flyout or rename -- which a HoverHandler cannot see, since popups live in the overlay.
     readonly property bool engaged: (newTabMenuLoader.item !== null && newTabMenuLoader.item.visible)
                                     || (tabStripLoader.item !== null && tabStripLoader.item.engaged)
+    /// Whether keyboard focus is on one of the bar's own controls, such as the "+" or the host chip, so a
+    /// full-screen band a keyboard user is on does not hide under them (see Main.qml). Popups are not
+    /// beneath the bar (they live in the overlay); `engaged` covers those.
+    readonly property bool holdsFocus: {
+        let item = root.window ? root.window.activeFocusItem : null;
+        while (item) {
+            if (item === root)
+                return true;
+            item = item.parent;
+        }
+        return false;
+    }
     /// The trailing slot the drift chip is placed in while the band is shown (see Main.qml).
     readonly property Item driftSlot: driftSlotItem
 

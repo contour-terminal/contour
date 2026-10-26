@@ -68,12 +68,14 @@ ThemedWindow
 
     // Whether a full-screen band should be revealed: while the pointer is on the reveal edge -- which,
     // once revealed, grows to the band's resting rectangle, so a band still sliding in is not lost to a
-    // pointer moving down onto it -- or on the band, and while the band has a popup or an editor of its
-    // own open, which live in the overlay where no hover reaches.
+    // pointer moving down onto it -- or on the band, while the band has a popup or an editor of its own
+    // open, which live in the overlay where no hover reaches, and while keyboard focus is on one of its
+    // controls.
     function bandRevealWanted() {
         return appWindow.band.band === "reveal"
                && (revealEdgeHover.hovered
-                   || (titleBar.revealed && (titleBar.hovered || titleBar.engaged || titleBarContextMenu.visible)));
+                   || (titleBar.revealed && (titleBar.hovered || titleBar.engaged || titleBar.holdsFocus
+                                             || titleBarContextMenu.visible)));
     }
 
     // Reveals the band at once, and conceals it only after a short grace, which forgives a pointer that
@@ -184,6 +186,7 @@ ThemedWindow
         readonly property real effectiveHeight: presence === "shown" ? implicitHeight : 0
         onHoveredChanged: appWindow.updateBandReveal()
         onEngagedChanged: appWindow.updateBandReveal()
+        onHoldsFocusChanged: appWindow.updateBandReveal()
         // Declared after the content area below, so a positive z keeps the bar above it. The terminal now
         // renders through a scene-graph node (TerminalRenderNode) and composites in z-order like any item,
         // so this is ordinary stacking — no longer a workaround for the terminal painting over siblings.
