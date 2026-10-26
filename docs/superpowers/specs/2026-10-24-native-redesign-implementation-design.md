@@ -526,8 +526,8 @@ serializer overload (`StatusLineBuilder.hpp:25-258`, `.cpp:366-780`).
 | Placeholder | Source | Notes |
 |---|---|---|
 | `Cwd` | `currentWorkingDirectory()` (`Terminal.hpp:3496`) | |
-| `Git` | `.git/HEAD` | Read through the `core::platform::FileSystem` the `Terminal` already takes (`Terminal.hpp:826`): `readFile`, with `lastWriteTime` for the cache key. The cache key is the cwd plus `.git/HEAD`'s mtime, invalidated on OSC 133 D. It is never read per frame. Tested with `core::platform::testing::InMemoryFileSystem`. No new interface. |
-| `LastCommand` | `finishedBlocks(CommandBlockStore const&, …)` (`SemanticBlockTracker.hpp:98`) | Reads `exitCode` and `duration`. The command text goes through `CommandLineText`'s display accessor (`CommandBlock.hpp:145`). |
+| `Git` | `.git/HEAD` | Read through a `GitFileSystem` seam, a narrow interface added beside the `core::platform::FileSystem` the `Terminal` takes, because core-cpp's `FileSystem` has no device id; widening it is a follow-up. Every invalidation (cwd change, OSC 133 D) re-reads `HEAD` on an executor, off the terminal's lock; there is no mtime cache key. The upward walk for `.git` stops at a mount boundary. It is never read per frame. Tested with an in-memory `GitFileSystem`. |
+| `LastCommand` | `finishedBlocks(CommandBlockStore const&, …)` (`SemanticBlockTracker.hpp:98`) | Reads `lastFinished()`, with its `exitCode` and `duration`. The command text goes through `CommandLineText`'s display accessor (`CommandBlock.hpp:145`). |
 | `Selection` | new `Selection::extent()` | Always reports lines. Reports characters only when the selection is below 10 000 cells; above that, lines only. Never O(selection) per frame. |
 | `Scroll` | `viewport().scrollOffset()` against the history size | Empty at the bottom. |
 
@@ -834,7 +834,7 @@ built the way `ContourTui` is.
 | The title-band material flickers, or loses the shadow | The supported `titlebarAppearsTransparent = NO` route comes first. The shadow is re-asserted. A `Solid` fallback exists |
 | Per-pane properties cost redraws | They notify only on change, and process polling runs only for visible headers |
 | Regex search on 10 000 lines blocks the GUI thread | Chunked walk with the lock released between chunks (3b), and a compiled regex |
-| The `Git` placeholder reads files every frame | It is cached on cwd plus HEAD mtime, and invalidated on OSC 133 D |
+| The `Git` placeholder reads files every frame | It is cached and invalidated on cwd change and OSC 133 D, re-reading HEAD off-thread |
 | Live-apply Settings writes too often | Debounced 300 ms, with atomic writes |
 | Partial user configs change look | The `DefaultsEdition` gate (§2.7), the opt-in banner and a fixture test |
 | Snap Layouts break the QML caption buttons | The NC mouse messages are handled, with a hit-test table |
