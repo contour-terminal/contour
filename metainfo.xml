@@ -149,6 +149,11 @@
           <li>Daemon: mirrors each pane's OSC 7501 program status to attached clients, lists it in contour ls --json and emits pane.programStatusChanged events.</li>
           <li>The tab strip shows a badge for a tab whose program is working, waiting for the user, done or failed (OSC 7501), with the program's message as its tooltip, invisible formatting characters removed.</li>
           <li>DEC mode 2034's SBQUERY answers an older command block by its id (Ps 4), and its JSON, now version 2, gives each block its id, working directory, start time and duration; every version 1 field is unchanged.</li>
+          <li>Adds the status-line placeholders <code>{Cwd}</code>, <code>{Git}</code> (read from <code>.git/HEAD</code>, no process spawned), <code>{LastCommand}</code>, <code>{Selection}</code> and <code>{Scroll}</code></li>
+          <li>Adds color roles to the status line: a color may name a scheme role (<code>Color=accent|success|danger|warning|muted</code>), so one template reads well in every scheme; hex colors still work</li>
+          <li>Adds <code>Hide=&lt;mode&gt;</code> and <code>Chip</code> to <code>{InputMode}</code>, and <code>MaxWidth=</code> to <code>{Cwd}</code> and <code>{LastCommand}</code></li>
+          <li>Changes a status line too wide for its pane to drop its least important items first, right to left</li>
+          <li>Changes the new default status line to show where you are, the branch, how the last command went and the scroll position</li>
         </ul>
       </description>
     </release>
