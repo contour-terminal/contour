@@ -24,9 +24,12 @@ RowLayout {
     /// The objectName of the text field, so a form holding several of these can tell them apart.
     property string fieldName: "colorSlotField"
 
-    /// Whether @p text is a colour the field reports: a complete hex colour, or one of roleNames.
-    function isColor(text) {
-        return /^#[0-9a-fA-F]{6}$/.test(text) || root.roleNames.indexOf(text) >= 0
+    /// The role @p text names, in any case as the template parser reads it, spelled as roleNames has it;
+    /// "" when it names none.
+    function roleNamed(text) {
+        var wanted = text.toLowerCase()
+        var found = root.roleNames.find(name => name.toLowerCase() === wanted)
+        return found !== undefined ? found : ""
     }
 
     /// Emitted when the user sets or clears the colour; @p hex is the hex colour or the role's name.
@@ -61,8 +64,10 @@ RowLayout {
             var trimmed = text.trim()
             if (trimmed.length === 0)
                 root.changed(false, "")
-            else if (root.isColor(trimmed))
+            else if (/^#[0-9a-fA-F]{6}$/.test(trimmed))
                 root.changed(true, trimmed)
+            else if (root.roleNamed(trimmed).length > 0)
+                root.changed(true, root.roleNamed(trimmed))
         }
     }
 

@@ -19,6 +19,19 @@ This is the default of a configuration with `defaults_edition: native2026`: the 
 (hidden while typing), the directory and Git branch, how the last command went, the selection and
 search, and the scroll position and clock. Its colours are roles, so it follows the color scheme.
 
+A configuration with `defaults_edition: classic` (one written before the redesign) keeps the earlier
+default, with the tabs, the title and fixed colors:
+
+```
+profiles:
+    your_profile:
+        status_line:
+            indicator:
+                left: " {InputMode:Bold,Color=#FFFF00}{TraceMode:Bold,Color=#FFFF00,Left= │ }{Tabs:ActiveColor=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }{Context:Left= │ }"
+                middle: "« {Title} »"
+                right: "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}"
+```
+
 Each segment, `left`, `middle`, and `right` may contain text to be displayed in the
 left, middle, or right segment of the indicator statusline.
 

@@ -119,12 +119,21 @@ class SettingsController: public QObject
     /// @param store  Where side files are written/removed (injected for testability).
     /// @param apply  Invoked after a successful save/delete so the change takes effect immediately.
     /// @param gpuInventory The machine's GPUs for the "Rendering GPU" row; null lists none.
+    /// @param appearance The appearance (light or dark) the terminals are drawn in now: a light/dark
+    ///                   profile's preview takes the scheme of this mode, as the terminal does.
     /// @param parent Optional QObject parent.
     SettingsController(ConfigAccessor config,
                        std::shared_ptr<config::GuiConfigStore> store,
                        ApplyCallback apply,
                        std::shared_ptr<display::IGpuInventory const> gpuInventory,
+                       vtbackend::ColorPreference appearance,
                        QObject* parent = nullptr);
+
+    /// Follows a change of the OS appearance, as the sessions do (TerminalSessionManager::
+    /// updateColorPreference). Live state driven from outside, not configuration: the light/dark switch
+    /// happens while the page is open, and its previews must repaint. Emits draftChanged on a change.
+    /// @param appearance The appearance the terminals are drawn in from now on.
+    void setColorPreference(vtbackend::ColorPreference appearance);
 
     [[nodiscard]] bool locked() const noexcept { return _locked; }
     [[nodiscard]] QString linkGesture() const { return _linkGesture; }
@@ -305,11 +314,19 @@ class SettingsController: public QObject
     /// problem (a descriptor's `validate`) is no reason: the reader keeps it, and its row shows the problem.
     /// @return The first link pattern's problem; nullopt when none has one.
     [[nodiscard]] std::optional<std::string> draftProblem() const;
+    /// The palette the scheme named @p name stands for: a `color_schemes:` entry of contour.yml, a GUI side
+    /// file, or a built-in scheme, in that order; the default palette for a name none answers to.
+    [[nodiscard]] vtbackend::ColorPalette schemePalette(std::string const& name) const;
+    /// The palette the draft profile's status-line roles preview against: its scheme, or for a light/dark
+    /// pair the one of the current appearance -- by name, so a scheme switched in the draft previews before
+    /// it is saved. The default palette while no profile is open.
+    [[nodiscard]] vtbackend::ColorPalette previewPalette() const;
 
     ConfigAccessor _config;
     std::shared_ptr<config::GuiConfigStore> _store;
     ApplyCallback _apply;
     std::shared_ptr<display::IGpuInventory const> _gpuInventory;
+    vtbackend::ColorPreference _appearance;   ///< Which scheme of a light/dark profile the previews use.
     std::vector<display::GpuCandidate> _gpus; ///< Listed by refresh(), not on every property read.
 
     bool _locked = false;

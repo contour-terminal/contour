@@ -53,7 +53,8 @@ struct ControllerFixture
                                                              cfg = config::Config {};
                                                              config::loadConfigFromFile(cfg, configPath);
                                                          },
-                                                         nullptr);
+                                                         nullptr,
+                                                         vtbackend::ColorPreference::Dark);
         QObject::connect(controller.get(),
                          &window::SettingsController::errorOccurred,
                          [this](QString const& message) { errors.push_back(message); });

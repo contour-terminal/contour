@@ -2148,6 +2148,22 @@ ApplicationWindow {
     CHECK(applied.value("color").toString() == "danger");
     CHECK(applied.value("hide").toString() == "Insert");
 
+    // In any case, as the template parser reads a role; kept as the role's own spelling.
+    auto hexItem = item;
+    hexItem["color"] = QStringLiteral("#102030");
+    REQUIRE(QMetaObject::invokeMethod(dialog,
+                                      "edit",
+                                      Q_ARG(QVariant, 0),
+                                      Q_ARG(QVariant, 0),
+                                      Q_ARG(QVariant, 1),
+                                      Q_ARG(QVariant, hexItem)));
+    QCoreApplication::processEvents();
+    field->setProperty("text", QStringLiteral("Accent"));
+    REQUIRE(QMetaObject::invokeMethod(dialog, "apply"));
+    applied = window->property("appliedItem").toMap();
+    CHECK(applied.value("hasColor").toBool());
+    CHECK(applied.value("color").toString() == "accent");
+
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 

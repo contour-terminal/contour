@@ -1944,14 +1944,54 @@ SettingsController::SettingsController(ConfigAccessor config,
                                        std::shared_ptr<config::GuiConfigStore> store,
                                        ApplyCallback apply,
                                        std::shared_ptr<display::IGpuInventory const> gpuInventory,
+                                       vtbackend::ColorPreference appearance,
                                        QObject* parent):
     QObject { parent },
     _config { std::move(config) },
     _store { std::move(store) },
     _apply { std::move(apply) },
-    _gpuInventory { std::move(gpuInventory) }
+    _gpuInventory { std::move(gpuInventory) },
+    _appearance { appearance }
 {
     refresh();
+}
+
+void SettingsController::setColorPreference(vtbackend::ColorPreference appearance)
+{
+    if (_appearance == appearance)
+        return;
+    _appearance = appearance;
+    // The previews are derived from the draft on every draftChanged; nothing else depends on the mode.
+    emit draftChanged();
+}
+
+vtbackend::ColorPalette SettingsController::schemePalette(std::string const& name) const
+{
+    auto const& cfg = _config();
+    if (auto const it = cfg.colorschemes.value().find(name); it != cfg.colorschemes.value().end())
+        return it->second;
+    if (auto const loaded = config::loadColorSchemeFile(cfg.configFile.parent_path() / "colorschemes"
+                                                        / config::sideFileName(name)))
+        return *loaded;
+    auto palette = vtbackend::ColorPalette {};
+    (void) vtbackend::defaultColorPalettes(name, palette);
+    return palette;
+}
+
+vtbackend::ColorPalette SettingsController::previewPalette() const
+{
+    if (!_hasDraft)
+        return {};
+    auto const& colors = _draft.colors.value();
+    if (auto const* const simple = std::get_if<config::SimpleColorConfig>(&colors))
+        return schemePalette(simple->colorScheme);
+    auto const& dual = std::get<config::DualColorConfig>(colors);
+    switch (_appearance)
+    {
+        case vtbackend::ColorPreference::Light: return schemePalette(dual.colorSchemeLight);
+        case vtbackend::ColorPreference::Dark: return schemePalette(dual.colorSchemeDark);
+    }
+    return schemePalette(dual.colorSchemeDark);
 }
 
 SettingsOrigin SettingsController::profileOrigin(std::string const& name) const
@@ -2670,30 +2710,24 @@ namespace
         return styles;
     }
 
-    /// Exposes what @p color paints as, for the editor's preview: "#rrggbb", with a role resolved against
-    /// @p scheme; empty while the colour is unset. A QML colour property cannot take a role's name, so the
-    /// preview reads this beside the role it keeps for saving.
+    /// Exposes what @p color paints as, for the editor's preview: "#rrggbb", a role taken as the scheme's
+    /// own colour for it (roleColor()); empty while the colour is unset. Deliberately not the bar's
+    /// legibility fallback (resolveItemColor()): the preview has no bar under it, and shows which colour the
+    /// role names. A QML colour property cannot take a role's name, so the preview reads this beside the
+    /// role it keeps for saving.
     void writeColorPreview(QVariantMap& row,
                            QString const& key,
                            std::optional<vtbackend::StatusLineDefinitions::ItemColor> const& color,
                            vtbackend::ColorPalette const& scheme)
     {
-        row[key] = color ? rgbToHex(vtbackend::StatusLineDefinitions::resolveItemBackground(*color, scheme))
-                         : QString {};
-    }
-
-    /// The scheme a profile's status-line roles resolve against when the editor previews them. A
-    /// light/dark pair previews with its dark scheme: the page shows one preview, not two.
-    [[nodiscard]] vtbackend::ColorPalette const& previewScheme(config::TerminalProfile const& profile)
-    {
-        return std::visit(
-            [](auto const& colors) -> vtbackend::ColorPalette const& {
-                if constexpr (std::same_as<std::decay_t<decltype(colors)>, config::SimpleColorConfig>)
-                    return colors.colors;
-                else
-                    return colors.darkMode;
-            },
-            profile.colors.value());
+        if (!color)
+        {
+            row[key] = QString {};
+            return;
+        }
+        auto const* const role = std::get_if<vtbackend::StatusLineDefinitions::ColorRole>(&*color);
+        row[key] = rgbToHex(role ? vtbackend::StatusLineDefinitions::roleColor(*role, scheme)
+                                 : std::get<vtbackend::RGBColor>(*color));
     }
 
 } // namespace
@@ -2702,9 +2736,7 @@ QVariantList SettingsController::parseIndicatorSegment(QString const& templateSt
 {
     using namespace vtbackend::StatusLineDefinitions;
 
-    // Without a profile open there is no scheme to speak of; the default palette stands in.
-    auto const defaultScheme = vtbackend::ColorPalette {};
-    auto const& scheme = _hasDraft ? previewScheme(_draft) : defaultScheme;
+    auto const scheme = previewPalette();
 
     auto items = QVariantList {};
     for (auto const& item: vtbackend::parseStatusLineSegment(templateStr.toStdString()))

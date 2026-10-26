@@ -96,7 +96,9 @@ struct Fixture
     std::unique_ptr<SettingsController> controller;
     QStringList errors; ///< What the controller reported through errorOccurred, in order.
 
-    explicit Fixture(std::string_view yaml, std::shared_ptr<display::IGpuInventory const> gpus = nullptr)
+    explicit Fixture(std::string_view yaml,
+                     std::shared_ptr<display::IGpuInventory const> gpus = nullptr,
+                     vtbackend::ColorPreference appearance = vtbackend::ColorPreference::Dark)
     {
         configPath = writeConfig(dir, yaml);
         // Through the path overload, as production loads: it reads the file's defaults_edition first.
@@ -107,7 +109,8 @@ struct Fixture
             std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
                                                  store,
                                                  [this]() { cfg = config::loadConfigFromFile(configPath); },
-                                                 std::move(gpus));
+                                                 std::move(gpus),
+                                                 appearance);
         QObject::connect(controller.get(),
                          &SettingsController::errorOccurred,
                          [this](QString const& message) { errors.push_back(message); });
@@ -1775,6 +1778,116 @@ profiles:
     CHECK(rows[1].toMap().value("colorPreview").toString() == "#c0c030");
     // Unset stays unset: no preview colour to paint.
     CHECK(rows[1].toMap().value("bgColorPreview").toString().isEmpty());
+}
+
+TEST_CASE("SettingsController: a light/dark profile previews its roles in the appearance you are in",
+          "[settings][statusline]")
+{
+    // The terminal draws a light/dark profile with the scheme of the current appearance, so the preview has
+    // to as well: the dark scheme's colours on a light page are what the terminal never shows.
+    auto constexpr Yaml = std::string_view { R"(
+default_profile: main
+profiles:
+    main:
+        colors:
+            light: contour-light
+            dark: contour-dark
+)" };
+    auto const segment = QString("{Cwd:Color=success}{SearchPrompt:Color=warning}");
+    auto const previewsOf = [&](SettingsController const& controller) {
+        auto const rows = controller.parseIndicatorSegment(segment);
+        REQUIRE(rows.size() == 2);
+        return std::pair { rows[0].toMap().value("colorPreview").toString(),
+                           rows[1].toMap().value("colorPreview").toString() };
+    };
+    auto const schemeColors = [](std::string_view name) {
+        auto scheme = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, scheme));
+        return std::pair { hexOf(scheme.indexedColor(2)), hexOf(scheme.indexedColor(3)) };
+    };
+
+    SECTION("light")
+    {
+        auto fx = Fixture(Yaml, nullptr, vtbackend::ColorPreference::Light);
+        fx.controller->editProfile("main");
+        CHECK(previewsOf(*fx.controller) == schemeColors("contour-light"));
+        CHECK(previewsOf(*fx.controller) == std::pair { QString("#2a7a1f"), QString("#8a6100") });
+    }
+
+    SECTION("dark")
+    {
+        auto fx = Fixture(Yaml, nullptr, vtbackend::ColorPreference::Dark);
+        fx.controller->editProfile("main");
+        CHECK(previewsOf(*fx.controller) == schemeColors("contour-dark"));
+    }
+
+    SECTION("a change of appearance repaints the preview")
+    {
+        auto fx = Fixture(Yaml, nullptr, vtbackend::ColorPreference::Dark);
+        fx.controller->editProfile("main");
+        auto changes = 0;
+        QObject::connect(fx.controller.get(), &SettingsController::draftChanged, [&changes] { ++changes; });
+        fx.controller->setColorPreference(vtbackend::ColorPreference::Light);
+        CHECK(changes == 1);
+        CHECK(previewsOf(*fx.controller) == schemeColors("contour-light"));
+        // The same appearance again is no change.
+        fx.controller->setColorPreference(vtbackend::ColorPreference::Light);
+        CHECK(changes == 1);
+    }
+}
+
+TEST_CASE("SettingsController: a draft scheme switch previews the newly named scheme",
+          "[settings][statusline]")
+{
+    // The draft names a scheme before it is saved; the preview follows the name, not the palette the
+    // profile was loaded with.
+    auto fx = Fixture(R"(
+default_profile: main
+profiles:
+    main:
+        colors: contour-dark
+)",
+                      nullptr,
+                      vtbackend::ColorPreference::Light);
+    fx.controller->editProfile("main");
+    auto const successPreview = [&] {
+        return fx.controller->parseIndicatorSegment("{Cwd:Color=success}")
+            .first()
+            .toMap()
+            .value("colorPreview")
+            .toString();
+    };
+    auto const successOf = [](std::string_view name) {
+        auto scheme = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, scheme));
+        return hexOf(scheme.indexedColor(2));
+    };
+    REQUIRE(successOf("contour-light") != successOf("contour-dark"));
+    CHECK(successPreview() == successOf("contour-dark"));
+
+    fx.controller->setColorScheme("contour-light");
+    CHECK(successPreview() == successOf("contour-light"));
+
+    // A light/dark pair made from it previews the light one, the appearance being light.
+    fx.controller->setColorSchemeMode("dual");
+    fx.controller->setColorSchemeDark("contour-dark");
+    CHECK(successPreview() == successOf("contour-light"));
+    fx.controller->setColorSchemeLight("contour-dark");
+    CHECK(successPreview() == successOf("contour-dark"));
+}
+
+TEST_CASE("SettingsController: the native2026 default goes through the bridge unchanged",
+          "[settings][statusline]")
+{
+    // A first launch's status line, opened and saved in the editor, must come back byte for byte.
+    auto fx = Fixture(BasicConfig);
+    auto const& segments = config::editionDefaults(config::DefaultsEdition::Native2026).statusLine;
+    for (auto const segment: { segments.left, segments.middle, segments.right })
+    {
+        auto const text = QString::fromUtf8(segment.data(), static_cast<qsizetype>(segment.size()));
+        INFO(text.toStdString());
+        CHECK(fx.controller->serializeIndicatorSegment(fx.controller->parseIndicatorSegment(text)) == text);
+    }
 }
 
 TEST_CASE("SettingsController: the indicator placeholder catalog matches what parsing produces", "[settings]")

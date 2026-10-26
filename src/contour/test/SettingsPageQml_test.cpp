@@ -825,7 +825,8 @@ TEST_CASE("SettingRow shows the GPU titles in full, and an absent GPU as the cur
         contour::window::SettingsController([&]() -> config::Config const& { return cfg; },
                                             std::make_shared<config::FileGuiConfigStore>(configDir),
                                             [&]() {},
-                                            std::make_shared<FakeGpuInventory>());
+                                            std::make_shared<FakeGpuInventory>(),
+                                            vtbackend::ColorPreference::Dark);
     auto const row = globalRow(controller, "renderer.gpu");
     REQUIRE(!row.isEmpty());
 

@@ -2378,6 +2378,9 @@ int ContourGuiApp::terminalGuiAction()
             _colorPreference = newValue;
             display::displayLog()("Color preference changed to {} mode\n", _colorPreference);
             sessionsManager().updateColorPreference(_colorPreference);
+            // The settings page previews a light/dark profile in the appearance the terminals now use.
+            if (_settingsController)
+                _settingsController->setColorPreference(_colorPreference);
             // The Terminal row paints with the scheme the new preference selects.
             refreshChromeStyle();
         });
@@ -2882,7 +2885,8 @@ window::SettingsController& ContourGuiApp::settingsController()
                 // are QML bindings on their provider, so re-applying their style makes every window follow.
                 applyWindowControlStyle(_config.windowControlStyle.value());
             },
-            _gpuInventory);
+            _gpuInventory,
+            _colorPreference);
     return *_settingsController;
 }
 

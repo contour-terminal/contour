@@ -465,7 +465,8 @@ class ChromeSnapshotScene
                     std::make_shared<config::FileGuiConfigStore>(
                         std::filesystem::path(_settingsDir.path().toStdU16String())),
                     [] {},
-                    nullptr);
+                    nullptr,
+                    vtbackend::ColorPreference::Dark);
         }
         return nullptr;
     }
