@@ -475,13 +475,18 @@ class ChromeSnapshotScene
         return model;
     }
 
-    /// Opens the palette, as the OpenCommandPalette action does, and waits until it has finished opening.
+    /// Opens the palette, as the OpenCommandPalette action does, waits until it has finished opening, and
+    /// lets the list finish building its rows.
     void openPalette()
     {
         auto const* palette = root().findChild<QObject*>(QStringLiteral("commandPalette"));
         REQUIRE(palette != nullptr);
         _controller.openCommandPalette();
         waitForPopupOpened(*palette);
+        // Let the list finish building the rows it shows, so a filter or a level right after does not
+        // cancel a row still incubating ("DelegateModel::cancel: index out range").
+        _incubation.settle();
+        QCoreApplication::processEvents();
     }
 
     /// Types @p text into the open palette's filter field.
