@@ -4153,13 +4153,17 @@ class MockPaneWindowController: public QObject
     Q_PROPERTY(QString hostLabel READ hostLabel CONSTANT)
 
   public:
-    /// The host the window is attached to.
+    /// The host the window is attached to; empty for the local daemon.
     [[nodiscard]] QString hostLabel() const { return _hostLabel; }
-    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, nothing for any other.
+    /// Names another host, or none; before the pane tree is shown, as the property is constant.
+    void setHostLabel(QString label) { _hostLabel = std::move(label); }
+    /// Mirrors WindowController::shortcutText(): ClosePane's default chord, nothing for any other; counted.
     [[nodiscard]] Q_INVOKABLE QString shortcutText(QString const& commandName) const
     {
+        ++shortcutTextCalls;
         return commandName == QStringLiteral("ClosePane") ? QStringLiteral("Ctrl+Shift+X") : QString {};
     }
+    mutable int shortcutTextCalls = 0; ///< How often a pane asked for a chord.
     /// Mirrors WindowController::canCloseWindow(): a pane's end never closes the test's window.
     [[nodiscard]] Q_INVOKABLE bool canCloseWindow() const { return _closable; }
 
@@ -4176,6 +4180,8 @@ class PaneTestWindow: public QQuickWindow
 
   public:
     [[nodiscard]] QObject* win() noexcept { return &_controller; }
+    /// @return The controller the window carries, for a test to configure and inspect.
+    [[nodiscard]] MockPaneWindowController& controller() noexcept { return _controller; }
 
   private:
     MockPaneWindowController _controller;
@@ -4755,6 +4761,29 @@ TEST_CASE("pane card: a translucent profile's card is composited once (offscreen
     CHECK(PaneTreeHost::partOf(card, "paneCardSurface").property("color").value<QColor>().alpha() == 0);
     CHECK(PaneTreeHost::partOf(card, "paneHeaderBackground").opacity() == Catch::Approx(0.5));
     CHECK(PaneTreeHost::terminalOf(card).opacity() == Catch::Approx(0.5));
+
+    SECTION("and an ended pane's footer too")
+    {
+        panes.leftSession.setEnd(static_cast<int>(contour::session::EndReason::Exited),
+                                 QStringLiteral("Process exited with code 1."),
+                                 static_cast<int>(contour::session::FooterRestart::Offered));
+        host.settle();
+        auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+        REQUIRE(footer.isVisible());
+        CHECK(PaneTreeHost::partOf(card, "exitedFooterBackground").opacity() == Catch::Approx(0.5));
+
+        // The terminal's background and dim stop square at the footer's top: no rounded corner of theirs
+        // reaches into it (a wedge of backdrop beside it) and no strip of theirs lies under it (composited
+        // twice with the footer's own).
+        auto const footerTop = footer.mapToScene(QPointF {}).y();
+        for (auto const* name: { "paneBackground", "dimOverlay" })
+        {
+            INFO("layer: " << name);
+            auto const& layer = PaneTreeHost::partOf(card, name);
+            CHECK(layer.mapToScene(QPointF { 0, layer.height() }).y() == footerTop);
+            CHECK(layer.clip());
+        }
+    }
 }
 
 TEST_CASE("pane card: under Reduce Motion the actions cross-fade and the overlay does not move (offscreen)",
@@ -8175,6 +8204,53 @@ TEST_CASE("pane end: the Terminal row's footer is one cell row with bracketed bu
           == QStringLiteral("[Restart %1]").arg(host.style().restartGlyph()));
     CHECK(PaneTreeHost::partOf(card, "exitedFooterClose").property("text").toString()
           == QStringLiteral("[Close Ctrl+Shift+X]"));
+}
+
+TEST_CASE("pane end: a local reconnect names no host (offscreen)", "[contour][gui][qml][paneend]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    // The local daemon (and --connect-tcp) attaches with no host label, and no host chip shows.
+    host.window.controller().setHostLabel({});
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+    panes.leftSession.setReconnecting(true);
+    QCoreApplication::processEvents();
+
+    auto const& pill = PaneTreeHost::partOf(host.cardOf(panes.left()), "reconnectingPill");
+    REQUIRE(pill.isVisible());
+    CHECK(pill.property("text").toString() == QStringLiteral("Reconnecting…"));
+    CHECK(accessibleNameOf(pill) == QStringLiteral("Reconnecting…"));
+}
+
+TEST_CASE("pane end: the reconnecting dim lies under the header and never over an ended pane (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto setup = paneCardSetup();
+    setup.density = contour::config::ChromeDensity::Minimal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2, static_cast<int>(contour::window::HeaderReveal::HeldModifier));
+    auto& card = host.cardOf(panes.left());
+    auto const& overlay = PaneTreeHost::partOf(card, "reconnectingOverlay");
+    auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+    REQUIRE(header.isVisible());
+
+    // Minimal's revealed header lies over the grid; the dim lies under the header, so its buttons stay
+    // as they are.
+    panes.leftSession.setReconnecting(true);
+    QCoreApplication::processEvents();
+    REQUIRE(overlay.isVisible());
+    auto const children = card.childItems();
+    auto const indexOf = [&](QQuickItem const& item) {
+        return std::ranges::find(children, &item) - children.begin();
+    };
+    CHECK((overlay.z() < header.z() || (overlay.z() == header.z() && indexOf(overlay) < indexOf(header))));
+
+    // A pane that ended before its connection dropped keeps its footer undimmed and says nothing more.
+    endWithExitCode(panes.leftSession);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(overlay.isVisible());
+    CHECK_FALSE(PaneTreeHost::partOf(card, "reconnectingPill").isVisible());
 }
 // }}}
 

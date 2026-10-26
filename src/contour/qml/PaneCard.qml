@@ -81,7 +81,50 @@ Item {
             visiblePanes: card.visiblePanes
             cornerRadius: card.cornerRadius
             squareTop: card.headerInline ? card.cornerRadius : 0
+            squareBottom: footer.visible ? card.cornerRadius : 0
             onActivated: { if (card.node) card.node.activate() }
+        }
+    }
+
+    // While the connection to the host this pane mirrors is sought again, the grid dims by the kit's pane
+    // dim and a pill says so, centred on it. The window's host chip says the same of the whole window
+    // (Reconnecting…); this names the host where there is one, and nothing here contradicts it. Declared
+    // before the header at its z, so a header revealed over the grid (Minimal) stays above the dim; not
+    // over an ended pane, whose footer already says how it stands.
+    Item {
+        id: reconnecting
+        objectName: "reconnectingOverlay"
+        x: 0
+        y: card.headerInline ? header.height : 0
+        z: 1
+        width: card.width
+        height: card.height - y
+        visible: card.session ? card.session.isReconnecting === true
+                                && card.session.sessionEnd === 0
+                              : false
+        clip: card.headerInline && card.cornerRadius > 0
+        // The dim's colour, for the scene's own checks.
+        readonly property color color: chromeStyle.paneDimColor
+        // The window's controller (Main.qml's `win`), which names the host; empty for the local daemon.
+        readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
+        readonly property string hostLabel: controller ? controller.hostLabel : ""
+
+        // The card's corners below an inline header, square where it meets the header.
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: card.headerInline ? -card.cornerRadius : 0
+            radius: card.cornerRadius
+            color: reconnecting.color
+        }
+
+        // Its glyph is the Working badge's, drawn still: the pill is a steady state, not a progress.
+        Toast {
+            objectName: "reconnectingPill"
+            anchors.centerIn: parent
+            shown: true
+            text: reconnecting.hostLabel !== "" ? qsTr("Reconnecting to %1…").arg(reconnecting.hostLabel)
+                                                : qsTr("Reconnecting…")
+            glyph: chromeStyle.paletteRevision < 0 ? "" : chromeStyle.badgeLook(chromeStyle.badgeKinds.working).glyph
         }
     }
 
@@ -110,42 +153,6 @@ Item {
         width: card.width
         session: card.session
         cornerRadius: card.cornerRadius
-    }
-
-    // While the connection to the host this pane mirrors is sought again, the grid below the header dims by
-    // the kit's pane dim and a pill says so, centred on it. The window's host chip says the same of the
-    // whole window (Reconnecting…); this names the host, and nothing here contradicts it.
-    Item {
-        id: reconnecting
-        objectName: "reconnectingOverlay"
-        x: 0
-        y: card.headerInline ? header.height : 0
-        z: 1
-        width: card.width
-        height: card.height - y
-        visible: card.session ? card.session.isReconnecting === true : false
-        clip: card.headerInline && card.cornerRadius > 0
-        // The dim's colour, for the scene's own checks.
-        readonly property color color: chromeStyle.paneDimColor
-        // The window's controller (Main.qml's `win`), which names the host.
-        readonly property var controller: Window.window && Window.window.win ? Window.window.win : null
-
-        // The card's corners below an inline header, square where it meets the header.
-        Rectangle {
-            anchors.fill: parent
-            anchors.topMargin: card.headerInline ? -card.cornerRadius : 0
-            radius: card.cornerRadius
-            color: reconnecting.color
-        }
-
-        // Its glyph is the Working badge's, drawn still: the pill is a steady state, not a progress.
-        Toast {
-            objectName: "reconnectingPill"
-            anchors.centerIn: parent
-            shown: true
-            text: qsTr("Reconnecting to %1…").arg(reconnecting.controller ? reconnecting.controller.hostLabel : "")
-            glyph: chromeStyle.paletteRevision < 0 ? "" : chromeStyle.badgeLook(chromeStyle.badgeKinds.working).glyph
-        }
     }
 
     // The card's edge, above what it holds: a border of one device pixel in the separator colour. Minimal

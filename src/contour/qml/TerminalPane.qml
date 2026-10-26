@@ -49,6 +49,10 @@ ContourTerminal {
     // header, whose own bottom edge is square, so the pane's top corners are square to meet it.
     property real squareTop: 0
 
+    // The same below: the card's radius above an ended pane's footer, which the pane meets edge to edge.
+    // The background and dim then stop square at the pane's bottom, reaching no backgroundOutset below it.
+    property real squareBottom: 0
+
     // How far the pane's background and dim reach beyond it on every side: a rounded card keeps the grid
     // in from its corners (window::cardContentInset), and its colour fills the card up to the edge.
     property real backgroundOutset: 0
@@ -104,17 +108,20 @@ ContourTerminal {
     // null-guarded (the session is transiently null during split rebinds).
     //
     // The two colour layers fill the card (backgroundOutset beyond the grid) and take its corners
-    // (cornerRadius, squared at the top by squareTop); the image and its blur keep to the grid, which a
-    // card keeps clear of its corners.
+    // (cornerRadius, squared at the top by squareTop and at the bottom by squareBottom); the image and its
+    // blur keep to the grid, which a card keeps clear of its corners.
     Item {
+        objectName: "paneBackground"
         anchors.fill: parent
         anchors.margins: -pane.backgroundOutset
+        anchors.bottomMargin: pane.squareBottom > 0 ? 0 : -pane.backgroundOutset
         z: -1
-        clip: pane.squareTop > 0
+        clip: pane.squareTop > 0 || pane.squareBottom > 0
 
         Rectangle {
             anchors.fill: parent
             anchors.topMargin: -pane.squareTop
+            anchors.bottomMargin: -pane.squareBottom
             radius: pane.cornerRadius
             color: pane.session ? pane.session.backgroundColor : "black"
             opacity: (pane.session && pane.session.isImageBackground && pane.session.isBlurBackground)
@@ -126,6 +133,7 @@ ContourTerminal {
             id: backgroundImage
             anchors.fill: parent
             anchors.margins: pane.backgroundOutset
+            anchors.bottomMargin: pane.squareBottom > 0 ? 0 : pane.backgroundOutset
             opacity: pane.session ? pane.session.opacityBackground : 1.0
             focus: false
             visible: pane.session ? pane.session.isImageBackground : false
@@ -142,6 +150,7 @@ ContourTerminal {
         Rectangle {
             anchors.fill: parent
             anchors.topMargin: -pane.squareTop
+            anchors.bottomMargin: -pane.squareBottom
             radius: pane.cornerRadius
             color: pane.session ? pane.session.backgroundColor : "black"
             opacity: (pane.session && pane.session.isImageBackground && pane.session.isBlurBackground)
@@ -226,13 +235,14 @@ ContourTerminal {
     // Minimal): blends the pane toward its own background color while it is not the focused pane — an
     // inactive pane of a split, or any pane of an unfocused window. Composited above the terminal
     // content; the renderer itself is untouched. Clipped like the background, so it follows the card's
-    // corners and stops square at an inline header.
+    // corners and stops square at an inline header and at an ended pane's footer.
     Item {
         objectName: "dimOverlay"
         anchors.fill: parent
         anchors.margins: -pane.backgroundOutset
+        anchors.bottomMargin: pane.squareBottom > 0 ? 0 : -pane.backgroundOutset
         z: 5
-        clip: pane.squareTop > 0
+        clip: pane.squareTop > 0 || pane.squareBottom > 0
         property color color: pane.dimOverlayColor(
             pane.unfocusedDim(pane.session ? pane.session.dimUnfocused : 0.0, pane.visiblePanes),
             pane.paneActive,
@@ -243,6 +253,7 @@ ContourTerminal {
         Rectangle {
             anchors.fill: parent
             anchors.topMargin: -pane.squareTop
+            anchors.bottomMargin: -pane.squareBottom
             radius: pane.cornerRadius
             color: parent.color
         }
