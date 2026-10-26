@@ -55,6 +55,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/QTextStream>
+#include <QtGui/QAccessible>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QMouseEvent>
@@ -83,6 +84,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -4957,6 +4959,29 @@ TEST_CASE("TerminalPane dim overlay follows the session's dimUnfocused live (off
 namespace
 {
 
+/// What a palette test's configuration and window hold: its profiles, its layouts and its tabs.
+struct PaletteInventory
+{
+    std::vector<std::string> profiles { "dark", "light" }; ///< The configured profiles (the whole map).
+    std::vector<std::string> layouts { "split-dev" };      ///< The saved layouts.
+    std::vector<std::string> tabs {};                      ///< The open tabs' titles.
+};
+
+/// The configuration @p inventory describes: its profile and layout maps assigned whole.
+[[nodiscard]] contour::config::Config paletteConfigOf(PaletteInventory const& inventory)
+{
+    auto config = contour::config::Config {};
+    auto profiles = std::remove_cvref_t<decltype(config.profiles.value())> {};
+    for (auto const& name: inventory.profiles)
+        profiles.insert_or_assign(name, contour::config::TerminalProfile {});
+    config.profiles.value() = std::move(profiles);
+    auto layouts = std::remove_cvref_t<decltype(config.layouts.value())> {};
+    for (auto const& name: inventory.layouts)
+        layouts.insert_or_assign(name, contour::config::Layout {});
+    config.layouts.value() = std::move(layouts);
+    return config;
+}
+
 /// A stand-in for WindowController exposing exactly the command-palette surface CommandPalette.qml
 /// binds: the model, and the runCommand() the popup calls when a row is picked.
 class MockPaletteController: public QObject
@@ -4965,11 +4990,18 @@ class MockPaletteController: public QObject
     Q_PROPERTY(QObject* commandPalette READ commandPalette CONSTANT)
 
   public:
-    MockPaletteController():
+    /// @param inventory The profiles, layouts and tabs the palette's live sources offer.
+    explicit MockPaletteController(PaletteInventory const& inventory = {}):
         _history { 5 },
+        _config { paletteConfigOf(inventory) },
+        _tabs { inventory.tabs },
+        _tabCommands { _tabs },
+        _profileCommands { _config },
+        _layoutCommands { _config },
         _model { std::make_unique<contour::window::CommandPaletteModel>(
             _history,
-            std::vector<contour::command::CommandSource const*> { &_actionCommands },
+            std::vector<contour::command::CommandSource const*> {
+                &_tabCommands, &_profileCommands, &_layoutCommands, &_actionCommands },
             contour::command::ShortcutStyle::Text) }
     {
         _history.record("TogglePaneZoom");
@@ -5007,6 +5039,11 @@ class MockPaletteController: public QObject
 
   private:
     contour::command::CommandHistory _history;
+    contour::config::Config _config;
+    contour::test::StubTabs _tabs;
+    contour::command::TabCommandSource _tabCommands;
+    contour::command::ProfileCommandSource _profileCommands;
+    contour::command::LayoutCommandSource _layoutCommands;
     contour::command::ActionCommandSource _actionCommands;
     std::unique_ptr<contour::window::CommandPaletteModel> _model;
 };
@@ -5025,55 +5062,71 @@ struct PaletteHost
     [[nodiscard]] int focusRestores() const { return window->property("focusRestores").toInt(); }
 };
 
+/// The host window's size when a test names none.
+constexpr auto DefaultPaletteHostSize = QSize { 800, 600 };
+
 /// Builds the host, opens the palette, and pumps the event loop so the Popup materializes its content.
-[[nodiscard]] PaletteHost openPalette(QQmlEngine& engine, MockPaletteController& controller)
+/// @param setup The chrome row the palette is drawn with.
+/// @param size  The host window's size.
+[[nodiscard]] PaletteHost openPalette(QQmlEngine& engine,
+                                      MockPaletteController& controller,
+                                      contour::test::ChromeSetup const& setup,
+                                      QSize size = DefaultPaletteHostSize)
 {
     // The popup's background is a PopupSurface, which takes its shape and its drop shadow from
     // the design tokens -- so the engine needs them, as every other chrome component's does.
-    contour::test::installChromeStyle(engine);
+    contour::test::installChromeStyle(engine, setup);
     engine.rootContext()->setContextProperty("paletteController", &controller);
 
     QQmlComponent component(&engine);
-    component.setData(QByteArrayLiteral("import QtQuick\n"
-                                        "import QtQuick.Window\n"
-                                        "import Contour.Ui\n"
-                                        "Window {\n"
-                                        "  id: host\n"
-                                        "  width: 800; height: 600; visible: true\n"
-                                        "  property int focusRestores: 0\n"
-                                        // NOT `palette`: a Window already has one (the Controls color
-                                        // group), and shadowing it is a QML warning — which the
-                                        // run-wide gate turns into a failure of the whole suite.
-                                        "  property alias commandPaletteItem: paletteItem\n"
-                                        "  function restoreTerminalFocus() { host.focusRestores++; }\n"
-                                        "  CommandPalette {\n"
-                                        "    id: paletteItem\n"
-                                        "    controller: paletteController\n"
-                                        "    window: host\n"
-                                        "  }\n"
-                                        // Main.qml's wiring, verbatim: the controller asks, the window
-                                        // opens the palette. Without it here, the one command that re-opens
-                                        // the palette (OpenCommandPalette) would look inert in a test and
-                                        // its re-entry could not be tested at all.
-                                        "  Connections {\n"
-                                        "    target: paletteController\n"
-                                        "    function onCommandPaletteRequested() { paletteItem.open(); }\n"
-                                        "  }\n"
-                                        "}\n"),
+    component.setData(QStringLiteral("import QtQuick\n"
+                                     "import QtQuick.Window\n"
+                                     "import Contour.Ui\n"
+                                     "Window {\n"
+                                     "  id: host\n"
+                                     "  width: %1; height: %2; visible: true\n"
+                                     "  property int focusRestores: 0\n"
+                                     // NOT `palette`: a Window already has one (the Controls color
+                                     // group), and shadowing it is a QML warning — which the
+                                     // run-wide gate turns into a failure of the whole suite.
+                                     "  property alias commandPaletteItem: paletteItem\n"
+                                     "  function restoreTerminalFocus() { host.focusRestores++; }\n"
+                                     "  CommandPalette {\n"
+                                     "    id: paletteItem\n"
+                                     "    controller: paletteController\n"
+                                     "    window: host\n"
+                                     "  }\n"
+                                     // Main.qml's wiring, verbatim: the controller asks, the window
+                                     // opens the palette. Without it here, the one command that re-opens
+                                     // the palette (OpenCommandPalette) would look inert in a test and
+                                     // its re-entry could not be tested at all.
+                                     "  Connections {\n"
+                                     "    target: paletteController\n"
+                                     "    function onCommandPaletteRequested() { paletteItem.open(); }\n"
+                                     "  }\n"
+                                     "}\n")
+                          .arg(size.width())
+                          .arg(size.height())
+                          .toUtf8(),
                       QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaletteTestHost.qml")));
     while (component.status() == QQmlComponent::Loading)
         QCoreApplication::processEvents();
 
     auto host = PaletteHost {};
     {
-        INFO("PaletteTestHost errors: " << component.errorString().toStdString());
         if (!component.isReady())
+        {
+            WARN("PaletteTestHost errors: " << component.errorString().toStdString());
             return host;
+        }
     }
 
     host.window.reset(component.create());
     if (host.window == nullptr)
+    {
+        WARN("PaletteTestHost create errors: " << component.errorString().toStdString());
         return host;
+    }
 
     host.palette = host.window->property("commandPaletteItem").value<QObject*>();
     if (host.palette == nullptr)
@@ -5084,6 +5137,12 @@ struct PaletteHost
     QMetaObject::invokeMethod(host.palette, "open");
     QCoreApplication::processEvents();
     return host;
+}
+
+/// Builds the host under the default chrome row (see the overload).
+[[nodiscard]] PaletteHost openPalette(QQmlEngine& engine, MockPaletteController& controller)
+{
+    return openPalette(engine, controller, contour::test::defaultChromeSetup());
 }
 
 } // namespace
@@ -5582,11 +5641,10 @@ TEST_CASE("Ctrl+J and Ctrl+K walk the palette selection, vim-style (offscreen)",
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }
 
-TEST_CASE("The palette bolds matched characters and tints only unselected rows (offscreen)",
-          "[contour][gui][qml][palette]")
+TEST_CASE("Matched characters are bold, in the row's own colour (offscreen)", "[contour][gui][qml][palette]")
 {
-    // The title label renders StyledText so the filter's matches stand out: bold everywhere, and accent
-    // coloured too — except on the selected row, whose accent background would swallow the tint.
+    // The title label renders StyledText so the filter's matches stand out: bold on every row, and never
+    // tinted (an accent tint does not read on the light surface with the default accent).
     contour::test::QmlMessageCapture const warnings;
     QQmlEngine engine;
     MockPaletteController controller;
@@ -5622,14 +5680,561 @@ TEST_CASE("The palette bolds matched characters and tints only unselected rows (
     REQUIRE_FALSE(selectedTitle.isEmpty());
     REQUIRE_FALSE(unselectedTitle.isEmpty());
 
-    // Both rows bold their matched characters...
     CHECK(selectedTitle.contains(QStringLiteral("<b>")));
     CHECK(unselectedTitle.contains(QStringLiteral("<b>")));
-    // ...but only the unselected row tints them with the accent colour.
-    CHECK(unselectedTitle.contains(QStringLiteral("<font color=\"")));
-    CHECK_FALSE(selectedTitle.contains(QStringLiteral("<font color=\"")));
+    CHECK_FALSE(selectedTitle.contains(QStringLiteral("<font color")));
+    CHECK_FALSE(unselectedTitle.contains(QStringLiteral("<font color")));
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
+}
+
+namespace
+{
+
+/// The palette part named @p name (a QObject child of the popup), or null.
+[[nodiscard]] QQuickItem* palettePart(PaletteHost const& host, QString const& name)
+{
+    return host.palette->findChild<QQuickItem*>(name);
+}
+
+/// The realized delegate of list row @p index, or null where the view has not built it.
+[[nodiscard]] QQuickItem* paletteRowAt(QQuickItem* list, int index)
+{
+    QQuickItem* rowItem = nullptr;
+    QMetaObject::invokeMethod(list, "itemAtIndex", Q_RETURN_ARG(QQuickItem*, rowItem), Q_ARG(int, index));
+    return rowItem;
+}
+
+/// The model row whose `commandId` is @p id, or -1. Rows are found by id, never by rank.
+[[nodiscard]] int paletteRowOf(contour::window::CommandPaletteModel const& model, QString const& id)
+{
+    for (auto const row: std::views::iota(0, model.rowCount()))
+        if (model
+                .data(model.index(row, 0),
+                      static_cast<int>(contour::window::CommandPaletteModel::Roles::IdRole))
+                .toString()
+            == id)
+            return row;
+    return -1;
+}
+
+/// Role @p role of model row @p row, as a string.
+[[nodiscard]] QString paletteRole(contour::window::CommandPaletteModel const& model,
+                                  int row,
+                                  contour::window::CommandPaletteModel::Roles role)
+{
+    return model.data(model.index(row, 0), static_cast<int>(role)).toString();
+}
+
+/// Gives the filter field the keyboard, as opening the palette does, and returns its window.
+[[nodiscard]] QQuickWindow* focusPaletteField(PaletteHost const& host)
+{
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    QMetaObject::invokeMethod(filter, "forceActiveFocus");
+    QCoreApplication::processEvents();
+    REQUIRE(filter->window() != nullptr);
+    return filter->window();
+}
+
+/// Presses @p key in the palette's window and lets the event loop settle.
+void pressPaletteKey(QQuickWindow* window, Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier)
+{
+    QTest::keyClick(window, key, modifiers);
+    QCoreApplication::processEvents();
+}
+
+/// The provider the palette's engine draws with.
+[[nodiscard]] contour::window::UiStyleProvider const& paletteStyleOf(QQmlEngine& engine)
+{
+    auto* provider = engine.rootContext()
+                         ->contextProperty(QStringLiteral("chromeStyle"))
+                         .value<contour::window::UiStyleProvider*>();
+    REQUIRE(provider != nullptr);
+    return *provider;
+}
+
+/// The MacOS row, which the canvas's numbers are given for.
+[[nodiscard]] contour::test::ChromeSetup macPaletteSetup()
+{
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    return setup;
+}
+
+/// The Accessible attached object of @p item, or null when the QML never attached one.
+[[nodiscard]] QObject* paletteAccessibleOf(QObject* item)
+{
+    if (item == nullptr)
+        return nullptr;
+    for (auto* child: item->findChildren<QObject*>(Qt::FindDirectChildrenOnly))
+        if (child->inherits("QQuickAccessibleAttached"))
+            return child;
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("The palette is 640 wide, 18 % down, with 32-tall rows (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller, macPaletteSetup(), QSize { 1280, 800 });
+    REQUIRE(host.palette != nullptr);
+
+    CHECK(host.palette->property("width").toReal() == 640.0);
+    CHECK(host.palette->property("x").toReal() == 320.0);
+    CHECK(host.palette->property("y").toReal() == 144.0);
+    CHECK(host.palette->property("height").toReal() <= 420.0);
+    CHECK(host.palette->property("height").toReal() > 0.0);
+
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+    auto* first = paletteRowAt(list, 0);
+    REQUIRE(first != nullptr);
+    auto* entry = first->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow"));
+    REQUIRE(entry != nullptr);
+    CHECK(entry->height() == 32.0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Rows are grouped, and only the first row of a group draws a header (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+
+    // The groups the model lists, in order: Recently used (the mock remembers TogglePaneZoom), then the
+    // table's groups that have a row.
+    auto expected = QStringList {};
+    auto const& model = controller.model();
+    for (auto const row: std::views::iota(0, model.rowCount()))
+        if (auto title = paletteRole(model, row, contour::window::CommandPaletteModel::Roles::GroupTitleRole);
+            !title.isEmpty())
+            expected << title;
+    REQUIRE(expected.size() > 2);
+    CHECK(expected.at(0) == QString::fromUtf8(contour::command::RecentGroupTitle));
+    CHECK(expected.at(1) == QString::fromUtf8(contour::command::PaletteGroups.front().title));
+
+    // The visible headers are a prefix of that sequence: a virtualized list builds only what it shows.
+    auto shown = QStringList {};
+    for (auto const row: std::views::iota(0, list->property("count").toInt()))
+    {
+        auto* item = paletteRowAt(list, row);
+        if (item == nullptr)
+            continue;
+        auto* header = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteGroupHeader"));
+        REQUIRE(header != nullptr);
+        if (header->isVisible())
+        {
+            CHECK(header->height() > 0.0);
+            shown << item->property("groupTitle").toString();
+        }
+        else
+            CHECK(header->height() == 0.0);
+    }
+    REQUIRE_FALSE(shown.isEmpty());
+    CHECK(shown == expected.mid(0, shown.size()));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The footer shows the selected row's description only (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    auto* description = palettePart(host, QStringLiteral("commandPaletteFooterDescription"));
+    auto* hints = palettePart(host, QStringLiteral("commandPaletteFooterHints"));
+    REQUIRE(list != nullptr);
+    REQUIRE(description != nullptr);
+    REQUIRE(hints != nullptr);
+
+    using Roles = contour::window::CommandPaletteModel::Roles;
+    auto const& model = controller.model();
+    REQUIRE(list->property("currentIndex").toInt() == 0);
+    CHECK(description->property("text").toString() == paletteRole(model, 0, Roles::DescriptionRole));
+    CHECK_FALSE(description->property("text").toString().isEmpty());
+    CHECK(hints->property("text").toString() == controller.model().footerHints(0));
+
+    pressPaletteKey(focusPaletteField(host), Qt::Key_Down);
+    REQUIRE(list->property("currentIndex").toInt() == 1);
+    CHECK(description->property("text").toString() == paletteRole(model, 1, Roles::DescriptionRole));
+
+    // No row repeats it: the footer is the one place a description shows.
+    CHECK(host.palette->findChildren<QQuickItem*>(QStringLiteral("commandPaletteDescription")).isEmpty());
+
+    SECTION("the shortcut stays on the row")
+    {
+        controller.model().setFilter(QStringLiteral("SplitVertical"));
+        QCoreApplication::processEvents();
+        auto const row = paletteRowOf(model, QStringLiteral("SplitVertical"));
+        REQUIRE(row >= 0);
+        auto* item = paletteRowAt(list, row);
+        REQUIRE(item != nullptr);
+        auto* shortcut = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteShortcut"));
+        REQUIRE(shortcut != nullptr);
+        CHECK(shortcut->property("text").toString() == QStringLiteral("Ctrl+Shift+E"));
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A drill-in row shows its glyph and Enter opens its level (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    auto* level = palettePart(host, QStringLiteral("commandPaletteLevel"));
+    REQUIRE(list != nullptr);
+    REQUIRE(filter != nullptr);
+    REQUIRE(level != nullptr);
+    auto const drillInGlyph = paletteStyleOf(engine).drillInGlyph();
+
+    filter->setProperty("text", QStringLiteral("profile"));
+    QCoreApplication::processEvents();
+    auto const parent = paletteRowOf(controller.model(), QStringLiteral("ChangeProfile"));
+    REQUIRE(parent >= 0);
+    list->setProperty("currentIndex", parent);
+    QCoreApplication::processEvents();
+    auto* parentItem = paletteRowAt(list, parent);
+    REQUIRE(parentItem != nullptr);
+    auto* glyph = parentItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteDrillIn"));
+    REQUIRE(glyph != nullptr);
+    CHECK(glyph->isVisible());
+    CHECK(glyph->property("text").toString() == drillInGlyph);
+    CHECK_FALSE(level->isVisible());
+
+    auto* window = focusPaletteField(host);
+    pressPaletteKey(window, Qt::Key_Return);
+
+    CHECK(controller.model().depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+    CHECK(level->isVisible());
+    CHECK(level->property("text").toString() == QStringLiteral("Change Profile ") + drillInGlyph);
+    CHECK(filter->property("text").toString().isEmpty());
+    REQUIRE(list->property("count").toInt() == 2);
+    using Roles = contour::window::CommandPaletteModel::Roles;
+    CHECK(paletteRole(controller.model(), 0, Roles::TitleRole) == QStringLiteral("dark"));
+    CHECK(paletteRole(controller.model(), 1, Roles::TitleRole) == QStringLiteral("light"));
+    CHECK(list->property("currentIndex").toInt() == 0);
+    CHECK(controller.ran.isEmpty());
+
+    pressPaletteKey(window, Qt::Key_Return);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(host.palette->property("opened").toBool());
+    CHECK(controller.ran == QStringList { QStringLiteral("ChangeProfile:dark") });
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Escape in a level goes back one level, then closes (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(list != nullptr);
+    REQUIRE(filter != nullptr);
+
+    filter->setProperty("text", QStringLiteral("profile"));
+    QCoreApplication::processEvents();
+    list->setProperty("currentIndex", paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
+    auto* window = focusPaletteField(host);
+    pressPaletteKey(window, Qt::Key_Return);
+    REQUIRE(controller.model().depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+
+    pressPaletteKey(window, Qt::Key_Escape);
+    CHECK(host.palette->property("opened").toBool());
+    CHECK(controller.model().depth() == controller.model().topDepth());
+    CHECK(filter->property("text").toString() == QStringLiteral("profile"));
+    CHECK(list->property("currentIndex").toInt()
+          == paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
+
+    pressPaletteKey(window, Qt::Key_Escape);
+    QCoreApplication::processEvents();
+    CHECK_FALSE(host.palette->property("opened").toBool());
+    CHECK(controller.ran.isEmpty());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Backspace in an empty field leaves the level (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+
+    controller.model().enter(paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
+    QCoreApplication::processEvents();
+    REQUIRE(controller.model().depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+    auto* window = focusPaletteField(host);
+
+    SECTION("with text, Backspace edits the text")
+    {
+        pressPaletteKey(window, Qt::Key_D);
+        REQUIRE(filter->property("text").toString() == QStringLiteral("d"));
+        pressPaletteKey(window, Qt::Key_Backspace);
+        CHECK(filter->property("text").toString().isEmpty());
+        CHECK(controller.model().depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+    }
+
+    SECTION("empty, Backspace goes back")
+    {
+        pressPaletteKey(window, Qt::Key_Backspace);
+        CHECK(controller.model().depth() == controller.model().topDepth());
+        CHECK(host.palette->property("opened").toBool());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A filter surfaces a child, which runs directly (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(list != nullptr);
+    REQUIRE(filter != nullptr);
+
+    filter->setProperty("text", QStringLiteral("split"));
+    QCoreApplication::processEvents();
+
+    using Roles = contour::window::CommandPaletteModel::Roles;
+    auto const& model = controller.model();
+    auto const child = paletteRowOf(model, QStringLiteral("LaunchLayout:split-dev"));
+    REQUIRE(child >= 0);
+    CHECK(paletteRole(model, child, Roles::TitleRole) == QStringLiteral("Launch Layout · split-dev"));
+    auto group = QString {};
+    for (auto const row: std::views::iota(0, child + 1))
+        if (auto title = paletteRole(model, row, Roles::GroupTitleRole); !title.isEmpty())
+            group = title;
+    CHECK(group == QStringLiteral("Layouts"));
+
+    list->setProperty("currentIndex", child);
+    QMetaObject::invokeMethod(list, "positionViewAtIndex", Q_ARG(int, child), Q_ARG(int, 0));
+    QCoreApplication::processEvents();
+    auto* childItem = paletteRowAt(list, child);
+    REQUIRE(childItem != nullptr);
+    auto* glyph = childItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteDrillIn"));
+    REQUIRE(glyph != nullptr);
+    CHECK_FALSE(glyph->isVisible());
+
+    pressPaletteKey(focusPaletteField(host), Qt::Key_Return);
+    QCoreApplication::processEvents();
+    CHECK(controller.ran == QStringList { QStringLiteral("LaunchLayout:split-dev") });
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A 200-row level keeps the selection in view (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    auto inventory = PaletteInventory {};
+    inventory.profiles.clear();
+    for (auto const index: std::views::iota(0, 200))
+        inventory.profiles.push_back(std::format("p{:03}", index));
+    MockPaletteController controller { inventory };
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+
+    controller.model().enter(paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
+    QCoreApplication::processEvents();
+    REQUIRE(list->property("count").toInt() == 200);
+
+    auto* window = focusPaletteField(host);
+    constexpr auto Steps = 150;
+    for ([[maybe_unused]] auto const step: std::views::iota(0, Steps))
+        QTest::keyClick(window, Qt::Key_Down);
+    QCoreApplication::processEvents();
+
+    REQUIRE(list->property("currentIndex").toInt() == Steps);
+    auto* current = list->property("currentItem").value<QQuickItem*>();
+    REQUIRE(current != nullptr);
+    auto const top = list->property("contentY").toReal();
+    auto const bottom = top + list->height();
+    CHECK(current->y() >= top);
+    CHECK(current->y() + current->height() <= bottom);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A long or right-to-left title elides inside its row (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    auto inventory = PaletteInventory {};
+    inventory.profiles = { "שלום" };
+    inventory.tabs = { std::string(300, 'q') };
+    MockPaletteController controller { inventory };
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(list != nullptr);
+    REQUIRE(filter != nullptr);
+
+    struct Case
+    {
+        QString filter;
+        QString id;
+    };
+    auto const cases =
+        std::array { Case { .filter = QStringLiteral("qqqq"), .id = QStringLiteral("SwitchToTab:1") },
+                     Case { .filter = QString::fromUtf8("של"),
+                            .id = QString::fromUtf8("ChangeProfile:שלום") } };
+    for (auto const& entry: cases)
+    {
+        INFO("row " << entry.id.toStdString());
+        filter->setProperty("text", entry.filter);
+        QCoreApplication::processEvents();
+        auto const row = paletteRowOf(controller.model(), entry.id);
+        REQUIRE(row >= 0);
+        QMetaObject::invokeMethod(list, "forceLayout");
+        QCoreApplication::processEvents();
+        auto* item = paletteRowAt(list, row);
+        REQUIRE(item != nullptr);
+        auto* entryItem = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow"));
+        auto* title = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteTitle"));
+        auto* accessory = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteAccessory"));
+        REQUIRE(entryItem != nullptr);
+        REQUIRE(title != nullptr);
+        REQUIRE(accessory != nullptr);
+
+        CHECK(title->x() + title->width() <= accessory->x());
+        CHECK(accessory->x() + accessory->width() <= entryItem->width());
+        CHECK(title->property("effectiveHorizontalAlignment").toInt() == Qt::AlignLeft);
+        if (entry.id.startsWith(QStringLiteral("SwitchToTab")))
+            CHECK(title->property("truncated").toBool());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The Terminal row draws the palette in cells (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto setup = contour::test::defaultChromeSetup(contour::config::UiStyle::Terminal);
+    REQUIRE(setup.row == contour::config::ChromeStyle::Terminal);
+    auto const host = openPalette(engine, controller, setup, QSize { 1280, 800 });
+    REQUIRE(host.palette != nullptr);
+    auto const& style = paletteStyleOf(engine);
+
+    CHECK(host.palette->property("width").toReal() == Catch::Approx(48 * style.widthQuantum()));
+    auto* background = host.palette->property("background").value<QQuickItem*>();
+    REQUIRE(background != nullptr);
+    CHECK(background->property("radius").toReal() == 0.0);
+    // A popover keeps its hard one-cell shadow (Step 2's I3).
+    auto* shadow = background->findChild<QQuickItem*>(QStringLiteral("elevationHardShadow"));
+    REQUIRE(shadow != nullptr);
+    CHECK(shadow->isVisible());
+
+    auto* prompt = palettePart(host, QStringLiteral("commandPalettePrompt"));
+    REQUIRE(prompt != nullptr);
+    CHECK(prompt->isVisible());
+    CHECK(prompt->property("text").toString() == QStringLiteral("❯"));
+
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+    auto* first = paletteRowAt(list, 0);
+    REQUIRE(first != nullptr);
+    auto* entry = first->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow"));
+    REQUIRE(entry != nullptr);
+    CHECK(entry->height() == Catch::Approx(style.cellHeight()));
+
+    controller.model().setFilter(QStringLiteral("ChangeProfile"));
+    QCoreApplication::processEvents();
+    auto const parent = paletteRowOf(controller.model(), QStringLiteral("ChangeProfile"));
+    REQUIRE(parent >= 0);
+    auto* parentItem = paletteRowAt(list, parent);
+    REQUIRE(parentItem != nullptr);
+    auto* glyph = parentItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteDrillIn"));
+    REQUIRE(glyph != nullptr);
+    CHECK(glyph->property("text").toString() == QStringLiteral("▸"));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: the palette's field, rows and group headers declare a role and a name",
+          "[contour][gui][qml][palette][a11y]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+
+    auto* query = paletteAccessibleOf(palettePart(host, QStringLiteral("commandPaletteQuery")));
+    REQUIRE(query != nullptr);
+    CHECK(query->property("role").toInt() == QAccessible::EditableText);
+    CHECK(query->property("name").toString() == QStringLiteral("Command"));
+
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    REQUIRE(list != nullptr);
+    auto* first = paletteRowAt(list, 0);
+    REQUIRE(first != nullptr);
+    auto* header =
+        paletteAccessibleOf(first->findChild<QQuickItem*>(QStringLiteral("commandPaletteGroupHeader")));
+    REQUIRE(header != nullptr);
+    CHECK(header->property("role").toInt() == QAccessible::Heading);
+    CHECK(header->property("name").toString() == first->property("groupTitle").toString());
+    auto* row = paletteAccessibleOf(first->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow")));
+    REQUIRE(row != nullptr);
+    CHECK(row->property("role").toInt() == QAccessible::ListItem);
+    CHECK(row->property("name").toString() == first->property("title").toString());
+
+    // A drill-in row says that it opens a list.
+    controller.model().setFilter(QStringLiteral("ChangeProfile"));
+    QCoreApplication::processEvents();
+    auto* parentItem = paletteRowAt(list, paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
+    REQUIRE(parentItem != nullptr);
+    auto* parentRow =
+        paletteAccessibleOf(parentItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow")));
+    REQUIRE(parentRow != nullptr);
+    CHECK(parentRow->property("description").toString() == QStringLiteral("Opens a list"));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
 TEST_CASE("SessionChrome shows the hyperlink tooltip only while there is a link under the pointer",

@@ -66,6 +66,20 @@ Rectangle {
     // cannot be seen is far worse than any shadow.
     readonly property color _tint: chromeStyle.shadowTint(root.palette.shadow)
 
+    // An elevation level (one of chromeStyle.elevation's e0..e3) to lift the surface by instead of the
+    // style's popup shadow: ElevationShadow draws it, soft where the level blurs and a hard offset copy
+    // where it does not (the Terminal row). Null keeps the popup shadow below.
+    property var elevation: null
+
+    ElevationShadow {
+        objectName: "popupElevationShadow"
+        visible: root.elevation !== null
+        anchors.fill: parent
+        z: -1
+        level: root.elevation !== null ? root.elevation : chromeStyle.elevation.e0
+        radius: root.radius
+    }
+
     // How far the shadow reaches beyond the surface, and the unstretched corner. Both are functions
     // of the same parameters the provider renders from, so the two cannot disagree.
     readonly property int _reach: chromeStyle.shadowBlur > 0
@@ -75,7 +89,7 @@ Rectangle {
     readonly property int _corner: root._margin + chromeStyle.radius
 
     BorderImage {
-        visible: chromeStyle.hasPopupShadow && root._margin > 0
+        visible: root.elevation === null && chromeStyle.hasPopupShadow && root._margin > 0
         // A child with negative z draws BEHIND its parent in Qt Quick, which is what puts this under
         // the opaque surface without a second item to hold it.
         z: -1
