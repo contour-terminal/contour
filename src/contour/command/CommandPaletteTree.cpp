@@ -67,15 +67,53 @@ namespace
         return std::nullopt;
     }
 
-    /// Ranks @p a before @p b: higher score, then more recent, then title. Unfiltered and outside the
-    /// recent list, that is title order alone.
+    /// Orders @p a before @p b with their runs of digits compared as numbers ("2" before "10"), so a parent's
+    /// children list tabs by position and "p9" before "p10"; everything else compares byte by byte.
+    [[nodiscard]] bool naturallyBefore(std::string_view a, std::string_view b) noexcept
+    {
+        auto const isDigit = [](char c) {
+            return c >= '0' && c <= '9';
+        };
+        auto i = std::size_t { 0 };
+        auto j = std::size_t { 0 };
+        while (i < a.size() && j < b.size())
+        {
+            if (isDigit(a[i]) && isDigit(b[j]))
+            {
+                auto const runOf = [&](std::string_view text, std::size_t& at) {
+                    auto const start = at;
+                    while (at < text.size() && isDigit(text[at]))
+                        ++at;
+                    auto run = text.substr(start, at - start);
+                    while (run.size() > 1 && run.front() == '0')
+                        run.remove_prefix(1);
+                    return run;
+                };
+                auto const left = runOf(a, i);
+                auto const right = runOf(b, j);
+                if (left.size() != right.size())
+                    return left.size() < right.size();
+                if (left != right)
+                    return left < right;
+                continue;
+            }
+            if (a[i] != b[j])
+                return a[i] < b[j];
+            ++i;
+            ++j;
+        }
+        return a.size() - i < b.size() - j;
+    }
+
+    /// Ranks @p a before @p b: higher score, then more recent, then title (naturallyBefore). Unfiltered and
+    /// outside the recent list, that is title order alone.
     [[nodiscard]] bool rankedBefore(Candidate const& a, Candidate const& b) noexcept
     {
         if (a.score != b.score)
             return a.score > b.score;
         if (a.recency != b.recency)
             return a.recency < b.recency;
-        return a.entry.title < b.entry.title;
+        return naturallyBefore(a.entry.title, b.entry.title);
     }
 
     /// The position of @p id in @p recent, or `recent.size()` when absent.
@@ -310,7 +348,7 @@ PaletteTree buildPaletteTree(std::vector<Command> commands)
         if (children.empty())
             continue;
         std::ranges::stable_sort(children, [&](std::size_t a, std::size_t b) {
-            return tree.commands[a].argument < tree.commands[b].argument;
+            return naturallyBefore(tree.commands[a].argument, tree.commands[b].argument);
         });
         auto const& entry = catalog[actionIndex];
         tree.parents.push_back(PaletteParent { .name = std::string(entry.name),

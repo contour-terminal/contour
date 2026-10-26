@@ -7,6 +7,7 @@
 #include <contour/command/CommandPaletteTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/test/CoreFixtures.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -426,5 +427,33 @@ TEST_CASE("paletteTree.footerHints", "[palettetree]")
         CHECK(paletteFooterHints(Command, Level, ShortcutStyle::Text)
               == std::format("{} Run · {} Back", key(vtbackend::Key::Enter), key(vtbackend::Key::Escape)));
         CHECK(paletteFooterHints(DrillIn, Level, ShortcutStyle::Text).empty());
+    }
+}
+
+TEST_CASE("paletteTree.childrenOrderNumbersByValue", "[palettetree]")
+{
+    // Twelve tabs list 1, 2, ..., 12 inside Switch To Tab, not 1, 10, 11, 12, 2, ...
+    auto titles = std::vector<std::string> {};
+    for (auto const index: std::views::iota(1, 13))
+        titles.push_back(std::format("t{}", index));
+    auto const tabs = test::StubTabs { titles };
+    auto const source = TabCommandSource { tabs };
+    auto const sources = std::array<CommandSource const*, 1> { &source };
+    auto const tree = buildPaletteTree(collectCommands(sources));
+
+    auto const rows = listPalette(
+        tree, PaletteQuery { .filter = {}, .level = parentIndex(tree, "SwitchToTab"), .recent = {} });
+    auto expected = std::vector<std::string> {};
+    for (auto const index: std::views::iota(1, 13))
+        expected.push_back(std::format("{}: t{}", index, index));
+    CHECK(titlesOf(rows) == expected);
+
+    SECTION("and a profile's digits too")
+    {
+        auto const profiles = treeOf({ .profiles = { "p10", "p9", "p1" }, .layouts = {}, .hosts = {} });
+        auto const level = listPalette(
+            profiles,
+            PaletteQuery { .filter = {}, .level = parentIndex(profiles, "ChangeProfile"), .recent = {} });
+        CHECK(titlesOf(level) == std::vector<std::string> { "p1", "p9", "p10" });
     }
 }
