@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <ranges>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -422,7 +423,8 @@ TEST_CASE("HostCommandSource offers one row per saved host", "[contour][palette]
     REQUIRE(home != nullptr);
     CHECK(home->title == "Attach To Host: home");
     CHECK(std::get<actions::AttachToHost>(home->action).name == "home");
-    CHECK(home->description == actions::documentation::AttachToHost);
+    // The row's footer names where the host is, not the action's generic sentence.
+    CHECK(home->description == config::toString(config::HostEntry {}.url));
     auto const* studio = find(commands, "AttachToHost:studio");
     REQUIRE(studio != nullptr);
     CHECK(studio->title == "Attach To Host: studio");
@@ -433,4 +435,95 @@ TEST_CASE("ActionCommandSource does not offer a nameless AttachToHost", "[contou
 {
     // "Attach to which host?" has no default; the saved hosts reach the palette through HostCommandSource.
     CHECK_FALSE(hasCommand(ActionCommandSource {}.commands(), "AttachToHost"));
+}
+
+TEST_CASE("commandCategory.everyCatalogueActionHasExactlyOneRow", "[contour][palette][commandcategory]")
+{
+    auto const& catalog = actions::actionCatalog();
+    auto const rows = actionCategories();
+    REQUIRE(rows.size() == catalog.size());
+
+    // Row i is catalogue row i, so commandCategory() may index rather than search; that also rules out
+    // a duplicate or an unknown name.
+    for (auto const index: std::views::iota(std::size_t { 0 }, rows.size()))
+    {
+        INFO("row " << index);
+        CHECK(rows[index].name == catalog[index].name);
+    }
+}
+
+TEST_CASE("commandCategory.theSpecsSevenGroups", "[contour][palette][commandcategory]")
+{
+    CHECK(commandCategory(actions::SplitVertical {}) == CommandCategory::Pane);
+    CHECK(commandCategory(actions::CreateNewTab {}) == CommandCategory::Tab);
+    CHECK(commandCategory(actions::ToggleFullscreen {}) == CommandCategory::Window);
+    CHECK(commandCategory(actions::LaunchLayout {}) == CommandCategory::Layouts);
+    CHECK(commandCategory(actions::CopyCommandBlock {}) == CommandCategory::Blocks);
+    CHECK(commandCategory(actions::ChangeProfile {}) == CommandCategory::Profiles);
+    CHECK(commandCategory(actions::AttachToHost {}) == CommandCategory::Hosts);
+
+    SECTION("and the four beyond them")
+    {
+        CHECK(commandCategory(actions::CopySelection {}) == CommandCategory::Edit);
+        CHECK(commandCategory(actions::IncreaseFontSize {}) == CommandCategory::View);
+        CHECK(commandCategory(actions::SoftReset {}) == CommandCategory::Shell);
+        CHECK(commandCategory(actions::Quit {}) == CommandCategory::Contour);
+    }
+}
+
+TEST_CASE("commandCategory.everyCategoryIsUsed", "[contour][palette][commandcategory]")
+{
+    for (auto const value: std::views::iota(std::size_t { 0 }, CommandCategoryCount))
+    {
+        auto const category = static_cast<CommandCategory>(value);
+        INFO("category " << value);
+        CHECK(std::ranges::any_of(
+            actionCategories(), [category](ActionCategory const& row) { return row.category == category; }));
+    }
+}
+
+TEST_CASE("commandCategory.commandsCarryTheirCategoryAndArgument", "[contour][palette][commandcategory]")
+{
+    auto config = config::Config {};
+    config.profiles.value() = { { "dark", config::TerminalProfile {} } };
+
+    auto const profiles = ProfileCommandSource { config }.commands();
+    REQUIRE(profiles.size() == 1);
+    CHECK(profiles.front().category == CommandCategory::Profiles);
+    CHECK(profiles.front().argument == "dark");
+    CHECK(profiles.front().title == "Change Profile: dark");
+
+    auto const actions = ActionCommandSource {}.commands();
+    auto const* split = find(actions, "SplitVertical");
+    REQUIRE(split != nullptr);
+    CHECK(split->category == CommandCategory::Pane);
+    CHECK(split->argument.empty());
+}
+
+TEST_CASE("commandCategory.aTabChildReadsItsPositionAndTitle", "[contour][palette][commandcategory]")
+{
+    auto const tabs = test::StubTabs { { "vim", "" } };
+    auto const commands = TabCommandSource { tabs }.commands();
+
+    REQUIRE(commands.size() == 2);
+    CHECK(commands[0].argument == "1: vim");
+    CHECK(commands[1].argument == "2");
+    CHECK(commands[0].category == CommandCategory::Tab);
+}
+
+TEST_CASE("commandCategory.aHostChildDescribesItsUrl", "[contour][palette][commandcategory]")
+{
+    auto const url = config::parseHostUrl("ssh://me@starfive");
+    REQUIRE(url.has_value());
+
+    auto entry = config::HostEntry {};
+    entry.url = *url;
+    auto config = config::Config {};
+    config.hosts.value() = { { "starfive", std::move(entry) } };
+
+    auto const commands = HostCommandSource { config }.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands.front().description == "ssh://me@starfive");
+    CHECK(commands.front().argument == "starfive");
+    CHECK(commands.front().category == CommandCategory::Hosts);
 }
