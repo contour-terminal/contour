@@ -217,6 +217,10 @@ inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRo
 /// One past the last pane colour role: the pane roles run from @c PaneGapFill to here.
 inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
 
+/// One past the last command palette colour role: the palette roles run from @c PaneColorRoleEnd to here,
+/// so a family appended after them does not shift their count.
+inline constexpr size_t PaletteColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
+
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
 {

@@ -1217,8 +1217,8 @@ TEST_CASE("chromeTokens.paletteColourRoles", "[chrometokens]")
         PaletteColorRow {
             .role = PaletteSeparator, .native = separator(), .terminal = schemeColor(SchemeSlot::Secondary) },
     };
-    // Every palette role, PaneColorRoleEnd up to the end of the enumeration, has a row here.
-    CHECK(rows.size() == ChromeColorRoleCount - PaneColorRoleEnd);
+    // Every palette role, PaneColorRoleEnd up to PaletteColorRoleEnd, has a row here.
+    CHECK(rows.size() == PaletteColorRoleEnd - PaneColorRoleEnd);
 
     for (auto const index: AllStyles())
     {

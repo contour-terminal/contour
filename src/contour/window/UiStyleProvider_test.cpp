@@ -1807,7 +1807,7 @@ TEST_CASE("UiStyleProvider: the command palette's inks read on every row, appear
     std::ranges::sort(covered);
     auto const [first, last] = std::ranges::unique(covered);
     covered.erase(first, last);
-    CHECK(covered.size() == contour::config::ChromeColorRoleCount - contour::config::PaneColorRoleEnd);
+    CHECK(covered.size() == contour::config::PaletteColorRoleEnd - contour::config::PaneColorRoleEnd);
 
     for (auto const name: vtbackend::defaultColorPaletteNames())
     {
