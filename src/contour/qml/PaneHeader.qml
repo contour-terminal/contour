@@ -5,9 +5,11 @@
 // the working directory only on a pane wide enough, the actions on hover (or as the row's rule says for a
 // focused pane), the text's emphasis by focus.
 //
-// The buttons are the pointer's way to the pane actions, and take Tab focus while shown. The keyboard's
-// way is the actions' own key bindings, which every button runs: SplitVertical (split right),
-// SplitHorizontal (split down), TogglePaneZoom and ClosePane (window::PaneHeaderActions).
+// The buttons are the pointer's way to the pane actions, and take Tab focus while shown; a button that
+// hides (the actions fade, or the header goes) with the focus on it hands the focus back through
+// focusReleased(), since Qt only drops it. The keyboard's way is the actions' own key bindings, which every
+// button runs: SplitVertical (split right), SplitHorizontal (split down), TogglePaneZoom and ClosePane
+// (window::PaneHeaderActions).
 //
 // The name is never elided before the working directory, which elides in the middle so that both the
 // root and the leaf of a long path survive; assistive technology always hears the whole path.
@@ -15,6 +17,7 @@
 // On the native rows the header is the card's own background (the row's header fill is transparent); on
 // the Terminal row it is one cell row of the bar.
 import QtQuick
+import QtQuick.Window
 
 Item {
     id: header
@@ -49,6 +52,38 @@ Item {
     readonly property real leading: chromeStyle.space.s5
     readonly property real trailing: chromeStyle.space.s3
     readonly property real gap: chromeStyle.space.paneHeaderGap
+
+    /// A header button held the keyboard focus and has hidden, leaving it nowhere: the card's terminal takes it.
+    signal focusReleased()
+
+    // Whether one of the buttons took the keyboard focus, and it has not moved on to something else since.
+    property bool actionHeldFocus: false
+
+    // Whether item is ancestor or lies within it.
+    function isWithin(item, ancestor) {
+        for (var each = item; each; each = each.parent)
+            if (each === ancestor)
+                return true
+        return false
+    }
+
+    // Settles where a button's focus went, once the hiding (or move) that took it has run its course: still
+    // on a shown button, moved on to another item, or dropped by a hide -- nothing holds it, a hidden item
+    // keeps it, or a scope above the header was left holding it -- which is the one case that hands it back.
+    function settleFocus() {
+        if (!actionHeldFocus)
+            return
+        var item = Window.activeFocusItem
+        var shown = header.visible && actions.visible
+        if (shown && item !== null && isWithin(item, actions))
+            return
+        actionHeldFocus = false
+        var dropped = item === null || !item.visible || (item !== header && isWithin(header, item))
+        if (dropped && !shown)
+            header.focusReleased()
+    }
+
+    onVisibleChanged: Qt.callLater(header.settleFocus)
 
     Accessible.role: Accessible.StaticText
     // Concatenated, not formatted: a title the application set may itself contain "%2".
@@ -138,6 +173,7 @@ Item {
         // One fade, on every row: under Reduce Motion motion.fast is already the cross-fade's duration.
         opacity: header.policy.actions === "shown" ? 1.0 : 0.0
         visible: opacity > 0
+        onVisibleChanged: Qt.callLater(header.settleFocus)
         Behavior on opacity { NumberAnimation { duration: chromeStyle.motion.fast } }
 
         Repeater {
@@ -156,6 +192,12 @@ Item {
                          : chromeStyle.colorOn(chromeStyle.roles.paneHeaderActionHover, header.background)
                 accessibleName: chromeStyle.paneHeaderActionNames[index]
                 onClicked: if (header.node) header.node.runHeaderAction(index)
+                onActiveFocusChanged: {
+                    if (activeFocus)
+                        header.actionHeldFocus = true
+                    else
+                        Qt.callLater(header.settleFocus)
+                }
             }
         }
     }

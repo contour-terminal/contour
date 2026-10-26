@@ -4652,6 +4652,48 @@ TEST_CASE("pane card: Minimal shows no headers until the modifier is held (offsc
     }
 }
 
+TEST_CASE("pane card: a header button that hides hands the focus back to its terminal (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    auto const [row, density] = GENERATE(std::pair { ChromeStyle::MacOS, ChromeDensity::Minimal },
+                                         std::pair { ChromeStyle::Terminal, ChromeDensity::Comfortable });
+    CAPTURE(static_cast<int>(row), static_cast<int>(density));
+    auto setup = paneCardSetup();
+    setup.row = row;
+    setup.density = density;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    host.window.requestActivate();
+    REQUIRE(QTest::qWaitForWindowActive(&host.window));
+    auto panes = TwoPanes {};
+    // Minimal shows the actions while the modifier is held; the Terminal row on the focused pane.
+    host.show(panes.split,
+              /*visiblePanes*/ 2,
+              static_cast<int>(density == ChromeDensity::Minimal ? contour::window::HeaderReveal::HeldModifier
+                                                                 : contour::window::HeaderReveal::None));
+
+    // The pointer rests on the other pane, so that no hover keeps the left pane's actions shown: moved
+    // twice, since the first move only tells the window where the pointer starts from.
+    QTest::mouseMove(&host.window, QPoint { host.window.width() - 2, host.window.height() - 2 });
+    QTest::mouseMove(&host.window, QPoint { host.window.width() - 1, host.window.height() - 1 });
+    auto const& card = host.cardOf(panes.left());
+    auto& button = PaneTreeHost::partOf(card, "paneHeaderAction0");
+    REQUIRE(QTest::qWaitFor([&] { return button.isVisible(); }));
+    button.forceActiveFocus();
+    REQUIRE(button.hasActiveFocus());
+
+    // The modifier goes up (the header hides), or the pane loses focus (the actions fade, the header stays).
+    if (density == ChromeDensity::Minimal)
+        host.paneNode->setProperty("headerReveal", static_cast<int>(contour::window::HeaderReveal::None));
+    else
+        panes.left().setFocus(static_cast<int>(contour::window::PaneFocus::Unfocused));
+    REQUIRE(QTest::qWaitFor([&] { return !button.isVisible(); }));
+    QCoreApplication::processEvents();
+
+    CHECK(PaneTreeHost::terminalOf(card).hasActiveFocus());
+}
+
 TEST_CASE("pane card: Increased Contrast rings the active card (offscreen)", "[contour][gui][qml][panecard]")
 {
     auto setup = paneCardSetup();

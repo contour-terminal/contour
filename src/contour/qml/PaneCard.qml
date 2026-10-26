@@ -93,6 +93,8 @@ Item {
         node: card.node
         policy: card.policy
         cornerRadius: card.cornerRadius
+        // A hidden header button drops the keyboard focus; typing goes back to this pane's grid.
+        onFocusReleased: terminal.forceActiveFocus()
     }
 
     // The card's edge, above what it holds: a border of one device pixel in the separator colour. Minimal
