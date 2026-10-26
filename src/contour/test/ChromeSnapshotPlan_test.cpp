@@ -156,6 +156,20 @@ TEST_CASE("snapshot.environment", "[snapshot]")
     CHECK_FALSE(snapshotDirectory(empty).has_value());
 }
 
+TEST_CASE("the offscreen platform on Windows is given the system's fonts", "[snapshot]")
+{
+    using contour::test::offscreenFontDirectory;
+    CHECK(offscreenFontDirectory(core::testing::FakeEnvironment { { { "WINDIR", "C:\\Windows" } } })
+          == "C:\\Windows/Fonts");
+    // A directory the run was given is kept.
+    CHECK_FALSE(
+        offscreenFontDirectory(core::testing::FakeEnvironment {
+                                   { { "WINDIR", "C:\\Windows" }, { "QT_QPA_FONTDIR", "D:/fonts" } } })
+            .has_value());
+    // Not Windows: nothing to point at.
+    CHECK_FALSE(offscreenFontDirectory(core::testing::FakeEnvironment {}).has_value());
+}
+
 TEST_CASE("snapshot.manifestLine", "[snapshot]")
 {
     using namespace contour::test::snapshot;

@@ -128,6 +128,8 @@ int main(int argc, char* argv[])
     {
 #ifdef _WIN32
         _putenv_s("QT_QPA_PLATFORM", "offscreen");
+        if (auto const fonts = contour::test::offscreenFontDirectory(core::LiveEnvironment {}))
+            _putenv_s(std::string(contour::test::QtFontDirectoryVariable).c_str(), fonts->c_str());
 #else
         qputenv("QT_QPA_PLATFORM", "offscreen");
 #endif
