@@ -7,6 +7,7 @@
 #include <QtCore/QString>
 #include <QtGui/QAccessible>
 
+#include <functional>
 #include <utility>
 
 namespace contour::platform
@@ -53,14 +54,20 @@ class QtAnnouncer final: public Announcer
 {
   public:
     /// @param anchor The object an assistive client already knows about. Must outlive this announcer.
-    explicit QtAnnouncer(QObject* anchor): _anchor { anchor } {}
+    explicit QtAnnouncer(QObject* anchor): QtAnnouncer { [anchor]() { return anchor; } } {}
+
+    /// For an anchor that comes and goes with the object it belongs to -- a window's, which exists only
+    /// while the window is shown.
+    /// @param anchor Resolved on every announcement, on the announcing thread; null says nothing then.
+    explicit QtAnnouncer(std::function<QObject*()> anchor): _anchor { std::move(anchor) } {}
 
     void announce(QString const& message, QAccessible::AnnouncementPoliteness politeness) override
     {
-        if (_anchor == nullptr || message.isEmpty())
+        auto* const anchor = _anchor ? _anchor() : nullptr;
+        if (anchor == nullptr || message.isEmpty())
             return;
 
-        postToObject(_anchor, [anchor = _anchor, message, politeness]() {
+        postToObject(anchor, [anchor, message, politeness]() {
             auto event = QAccessibleAnnouncementEvent(anchor, message);
             event.setPoliteness(politeness);
             QAccessible::updateAccessibility(&event);
@@ -68,7 +75,7 @@ class QtAnnouncer final: public Announcer
     }
 
   private:
-    QObject* _anchor;
+    std::function<QObject*()> _anchor;
 };
 
 /// An Announcer that says nothing.

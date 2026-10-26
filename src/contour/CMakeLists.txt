@@ -289,6 +289,8 @@ if(CONTOUR_FRONTEND_GUI)
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
+        window/NoticeModel.hpp
+        window/NoticeQueue.hpp
         window/ChromeTokenObjects.hpp
         window/MenuRouting.hpp
         window/SettingsWindowRules.hpp
@@ -337,6 +339,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsWindowHost.cpp
         session/Permission.cpp
         session/PermissionPrompt.cpp
+        window/NoticeModel.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
@@ -805,10 +808,12 @@ if(CONTOUR_FRONTEND_GUI)
             session/KeyboardRouting_test.cpp
             session/Permission_test.cpp
             session/PermissionPrompt_test.cpp
+            window/NoticeModel_test.cpp
             test/MainWindowQml_test.cpp
             test/MainWindowControllerMock.hpp
             test/MockMainController.hpp
             test/QmlMocks.hpp
+            test/RecordingAnnouncer.hpp
             platform/FreeDesktopNotifier_test.cpp
             platform/NotificationRouter_test.cpp
             platform/Notifier_test.cpp
@@ -1237,6 +1242,7 @@ if(CONTOUR_TESTING)
         window/HostChipState_test.cpp
         window/TabAttention_test.cpp
         window/TabBadge_test.cpp
+        window/NoticeQueue_test.cpp
         window/TabWellLayout_test.cpp
         window/TitleBandLayout_test.cpp
         window/TitleBandSurface_test.cpp

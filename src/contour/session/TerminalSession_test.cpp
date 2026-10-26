@@ -27,6 +27,7 @@
 #include <contour/test/AppearanceFixtures.hpp>
 #include <contour/test/FakeDisplaySurface.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/RecordingAnnouncer.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/PaneState.hpp>
 #include <contour/window/WindowController.hpp>
@@ -6273,27 +6274,7 @@ TEST_CASE("TerminalSession: a tab-strip swipe follows the finger while a wheel t
     contour::test::closeAllTabs(*controller);
 }
 
-namespace
-{
-/// An Announcer that records instead of speaking, so the DECISIONS are assertable with no
-/// accessibility bridge in sight (offscreen QPA has none).
-class RecordingAnnouncer final: public contour::platform::Announcer
-{
-  public:
-    struct Said
-    {
-        QString message;
-        QAccessible::AnnouncementPoliteness politeness;
-    };
-
-    void announce(QString const& message, QAccessible::AnnouncementPoliteness politeness) override
-    {
-        said.push_back({ message, politeness });
-    }
-
-    std::vector<Said> said;
-};
-} // namespace
+using contour::test::RecordingAnnouncer;
 
 TEST_CASE("TerminalSession: asking announces the title", "[contour][session][permission]")
 {
