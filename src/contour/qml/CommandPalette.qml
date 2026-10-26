@@ -105,7 +105,16 @@ Popup {
     // gets it back on close; anything else is the terminal, which restoreTerminalFocus() reaches.
     property Item _returnFocus: null
 
-    onAboutToShow: root._returnFocus = root.window ? root.window.activeFocusItem : null
+    // Refresh + focus on every open, not just the first: the model's rows are rebuilt by the controller
+    // (open tabs change), and the filter must start empty with the caret already in it. Here, as the popup
+    // starts to show, and not in onOpened, which waits out the enter transition: keys typed at once would
+    // otherwise be lost. What had the keyboard is captured first, before the field takes it.
+    onAboutToShow: {
+        root._returnFocus = root.window ? root.window.activeFocusItem : null;
+        filterField.clear();
+        filterField.forceActiveFocus();
+        root.select(list.count > 0 ? 0 : -1);
+    }
 
     // Whether @p item sits in the window's overlay layer, i.e. inside a popup or a dialog.
     function _isOverOverlay(item) {
@@ -114,15 +123,6 @@ Popup {
             if (node === overlay)
                 return true;
         return false;
-    }
-
-    // Refresh + focus on every open, not just the first: the model's rows are rebuilt by the
-    // controller (open tabs change), and the filter must start empty with the caret already in it so
-    // the user can type immediately.
-    onOpened: {
-        filterField.clear();
-        filterField.forceActiveFocus();
-        root.select(list.count > 0 ? 0 : -1);
     }
 
     // The command the user picked, held until this popup has actually closed — see onClosed.
@@ -142,7 +142,8 @@ Popup {
     // the close that is still unwinding, and the palette would need dismissing twice. Deferring to the
     // next event-loop turn dispatches the command with the popup's state machine at rest.
     onClosed: {
-        if (root._returnFocus && root._isOverOverlay(root._returnFocus))
+        // A target that has gone (the find bar closed under the palette) takes no focus: the terminal does.
+        if (root._returnFocus && root._returnFocus.visible && root._isOverOverlay(root._returnFocus))
             root._returnFocus.forceActiveFocus();
         else if (root.window)
             root.window.restoreTerminalFocus();
@@ -255,9 +256,6 @@ Popup {
             width: parent.width
             height: chromeStyle.size.paletteField
 
-            Accessible.role: Accessible.EditableText
-            Accessible.name: qsTr("Command")
-
             Row {
                 id: queryLead
                 x: chromeStyle.space.paletteInset
@@ -289,6 +287,9 @@ Popup {
                 width: parent.width - x - chromeStyle.space.paletteInset
                 anchors.verticalCenter: parent.verticalCenter
                 placeholderText: qsTr("Type a command or search…")
+                // The one editable node assistive technology sees.
+                Accessible.role: Accessible.EditableText
+                Accessible.name: qsTr("Command")
                 font: chromeStyle.type.paletteInput
                 color: chromeStyle.colors.paletteText
                 placeholderTextColor: chromeStyle.colors.paletteSecondaryText
@@ -522,9 +523,11 @@ Popup {
                 objectName: "commandPaletteFooterHints"
                 x: parent.width - width - root.textInset
                 anchors.verticalCenter: parent.verticalCenter
-                // Reads depth and count so the binding re-runs on a level change and a re-rank; the
+                // Reads the depth, the filter and the current row's kind, so the binding re-runs on a level
+                // change and on a re-rank that puts another kind of row under the same index; the
                 // invokable itself is opaque to the binding engine.
-                text: root.model && root.model.depth >= 0 && list.count >= 0
+                text: root.model && list.currentItem && root.model.depth >= 0 && root.model.filter !== undefined
+                      && list.currentItem.kind >= 0
                       ? root.model.footerHints(list.currentIndex) : ""
                 font: chromeStyle.type.footnote
                 color: chromeStyle.colors.paletteSecondaryText

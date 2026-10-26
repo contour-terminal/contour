@@ -231,6 +231,10 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal s9() const noexcept { return step(8); }
     [[nodiscard]] qreal s10() const noexcept { return step(9); }
 
+    /// @return The spacing scale's s7 in vertical units (a cell's height on the Terminal row): the command
+    ///         palette's margin to the window's bottom.
+    [[nodiscard]] qreal s7Rows() const noexcept { return _tokens.scale[6] * _units.vertical; }
+
     /// @return The band width that always stays draggable, in logical pixels.
     [[nodiscard]] qreal dragReserve() const noexcept { return _tokens.dragReserve * _units.horizontal; }
     /// @return The height of the full-screen reveal edge, in logical pixels (vertical, unlike the rest).

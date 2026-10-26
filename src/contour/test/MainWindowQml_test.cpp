@@ -2746,11 +2746,19 @@ struct MainWindowPalette
     return *window;
 }
 
-/// Waits until the popup @p popup is open (@p opened) or gone.
-void waitForPopup(QObject const& popup, bool opened)
+/// How long a case waits for a popup's transition at most, in milliseconds.
+constexpr auto PopupSettleMs = 2000;
+
+/// Waits until @p popup has finished opening.
+void waitForPopupOpened(QObject const& popup)
 {
-    REQUIRE(QTest::qWaitFor([&] { return popup.property(opened ? "opened" : "visible").toBool() == opened; },
-                            2000));
+    REQUIRE(QTest::qWaitFor([&] { return popup.property("opened").toBool(); }, PopupSettleMs));
+}
+
+/// Waits until @p popup has finished closing.
+void waitForPopupClosed(QObject const& popup)
+{
+    REQUIRE(QTest::qWaitFor([&] { return !popup.property("visible").toBool(); }, PopupSettleMs));
 }
 
 } // namespace
@@ -2770,7 +2778,7 @@ TEST_CASE("Closing the palette over a dialog gives the dialog its focus back (of
     REQUIRE(dialog != nullptr);
     REQUIRE(commandPalette != nullptr);
     controller.showAbout();
-    waitForPopup(*dialog, true);
+    waitForPopupOpened(*dialog);
     auto* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
     REQUIRE(accept != nullptr);
     accept->forceActiveFocus();
@@ -2778,11 +2786,11 @@ TEST_CASE("Closing the palette over a dialog gives the dialog its focus back (of
     REQUIRE(window.activeFocusItem() == accept);
 
     controller.openCommandPalette();
-    waitForPopup(*commandPalette, true);
+    waitForPopupOpened(*commandPalette);
     REQUIRE(window.activeFocusItem() != accept);
 
     QTest::keyClick(&window, Qt::Key_Escape);
-    waitForPopup(*commandPalette, false);
+    waitForPopupClosed(*commandPalette);
 
     CHECK(dialog->property("opened").toBool());
     CHECK(window.activeFocusItem() == accept);
@@ -2807,14 +2815,14 @@ TEST_CASE("A picked command that opens a dialog keeps that dialog focused (offsc
     REQUIRE(commandPalette != nullptr);
 
     controller.openCommandPalette();
-    waitForPopup(*commandPalette, true);
+    waitForPopupOpened(*commandPalette);
     auto* filter = commandPalette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
     REQUIRE(filter != nullptr);
     filter->setProperty("text", QStringLiteral("ShowAbout"));
     QCoreApplication::processEvents();
     QTest::keyClick(&window, Qt::Key_Return);
-    waitForPopup(*commandPalette, false);
-    waitForPopup(*dialog, true);
+    waitForPopupClosed(*commandPalette);
+    waitForPopupOpened(*dialog);
 
     CHECK(controller.ranCommands == QStringList { QStringLiteral("ShowAbout") });
     // The palette's own hand-back ran before the dispatch, so the dialog's focus is the last word.
@@ -2838,9 +2846,9 @@ TEST_CASE("Without a dialog, closing the palette hands the keyboard back to the 
     auto* commandPalette = root->findChild<QObject*>(QStringLiteral("commandPalette"));
     REQUIRE(commandPalette != nullptr);
     controller.openCommandPalette();
-    waitForPopup(*commandPalette, true);
+    waitForPopupOpened(*commandPalette);
     QTest::keyClick(&window, Qt::Key_Escape);
-    waitForPopup(*commandPalette, false);
+    waitForPopupClosed(*commandPalette);
 
     // restoreTerminalFocus() ran: the pane tree has the keyboard, nothing in the overlay keeps it.
     auto* focus = window.activeFocusItem();

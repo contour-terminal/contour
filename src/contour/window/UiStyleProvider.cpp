@@ -384,16 +384,14 @@ QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHei
 {
     // The margin is s7 in both directions, each in its own unit; one vertical unit is a cell's height on
     // the Terminal row and a pixel elsewhere, so it is also what the top edge snaps to.
-    constexpr auto MarginStep = std::size_t { 6 }; // s7
-    auto const placement =
-        placePalette(PaletteInputs { .windowWidth = windowWidth,
-                                     .windowHeight = windowHeight,
-                                     .width = _size.paletteWidth(),
-                                     .maxHeight = _size.paletteMaxHeight(),
-                                     .marginX = _space.step(MarginStep),
-                                     .marginY = _groups.space.scale[MarginStep] * _units.vertical,
-                                     .topPercent = _groups.layout.paletteTopPercent,
-                                     .rowQuantum = _units.vertical });
+    auto const placement = placePalette(PaletteInputs { .windowWidth = windowWidth,
+                                                        .windowHeight = windowHeight,
+                                                        .width = _size.paletteWidth(),
+                                                        .maxHeight = _size.paletteMaxHeight(),
+                                                        .marginX = _space.s7(),
+                                                        .marginY = _space.s7Rows(),
+                                                        .topPercent = _groups.layout.paletteTopPercent,
+                                                        .rowQuantum = _units.vertical });
     return { { QStringLiteral("x"), placement.x },
              { QStringLiteral("y"), placement.y },
              { QStringLiteral("width"), placement.width },

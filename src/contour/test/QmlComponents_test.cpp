@@ -6163,6 +6163,25 @@ TEST_CASE("A long or right-to-left title elides inside its row (offscreen)", "[c
             CHECK(title->property("truncated").toBool());
     }
 
+    SECTION("inside a level, a right-to-left title alone still starts at the row's leading edge")
+    {
+        // "Change Profile · שלום" is left-to-right by its first strong character; "שלום" alone is not, and
+        // without the explicit alignment Qt would set it against the row's right edge.
+        filter->setProperty("text", QString {});
+        QCoreApplication::processEvents();
+        controller.model().enter(paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
+        QCoreApplication::processEvents();
+        REQUIRE(list->property("count").toInt() == 1);
+        QMetaObject::invokeMethod(list, "forceLayout");
+        QCoreApplication::processEvents();
+        auto* item = paletteRowAt(list, 0);
+        REQUIRE(item != nullptr);
+        REQUIRE(item->property("title").toString() == QString::fromUtf8("שלום"));
+        auto* title = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteTitle"));
+        REQUIRE(title != nullptr);
+        CHECK(title->property("effectiveHorizontalAlignment").toInt() == Qt::AlignLeft);
+    }
+
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
@@ -6223,7 +6242,8 @@ TEST_CASE("accessibility: the palette's field, rows and group headers declare a 
     auto const host = openPalette(engine, controller);
     REQUIRE(host.palette != nullptr);
 
-    auto* query = paletteAccessibleOf(palettePart(host, QStringLiteral("commandPaletteQuery")));
+    // The field itself, so there is one editable node.
+    auto* query = paletteAccessibleOf(palettePart(host, QStringLiteral("commandPaletteFilter")));
     REQUIRE(query != nullptr);
     CHECK(query->property("role").toInt() == QAccessible::EditableText);
     CHECK(query->property("name").toString() == QStringLiteral("Command"));
@@ -6251,6 +6271,114 @@ TEST_CASE("accessibility: the palette's field, rows and group headers declare a 
         paletteAccessibleOf(parentItem->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow")));
     REQUIRE(parentRow != nullptr);
     CHECK(parentRow->property("description").toString() == QStringLiteral("Opens a list"));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Keys typed straight after open reach the field (offscreen)", "[contour][gui][qml][palette]")
+{
+    // The enter transition takes its time; the field must have the keyboard from the moment the palette
+    // starts to show, or the first keys of a fast typist are lost.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    auto* window = filter->window(); // taken while open: a closed popup's items leave the window
+    REQUIRE(window != nullptr);
+    QMetaObject::invokeMethod(host.palette, "close");
+    waitForPaletteClosed(*host.palette);
+
+    QMetaObject::invokeMethod(host.palette, "open");
+    REQUIRE_FALSE(host.palette->property("opened").toBool()); // the enter transition is still running
+    for (auto const key: { 's', 'p', 'l' })
+        QTest::keyClick(window, key);
+    CHECK(filter->property("text").toString() == QStringLiteral("spl"));
+    // ... and are still there once the palette has finished opening.
+    REQUIRE(QTest::qWaitFor([&] { return host.palette->property("opened").toBool(); }, PaletteSettleMs));
+    CHECK(filter->property("text").toString() == QStringLiteral("spl"));
+    CHECK(controller.model().filter() == QStringLiteral("spl"));
+
+    QTest::keyClick(window, Qt::Key_Escape);
+    waitForPaletteClosed(*host.palette);
+    CHECK(controller.ran.isEmpty());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("The footer's hints follow the row under the selection (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    auto* hints = palettePart(host, QStringLiteral("commandPaletteFooterHints"));
+    REQUIRE(filter != nullptr);
+    REQUIRE(hints != nullptr);
+
+    using contour::command::PaletteDepth;
+    using contour::command::PaletteEntryKind;
+    auto const text = [](PaletteEntryKind kind) {
+        return QString::fromStdString(contour::command::paletteFooterHints(
+            kind, PaletteDepth::Top, contour::command::ShortcutStyle::Text));
+    };
+
+    // One row each time, under the same index: a drill-in row, then a command row. The count does not
+    // change, so the hints must follow the row itself.
+    filter->setProperty("text", QStringLiteral("changeprofile"));
+    QCoreApplication::processEvents();
+    REQUIRE(controller.model().rowCount() == 1);
+    REQUIRE(paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")) == 0);
+    CHECK(hints->property("text").toString() == text(PaletteEntryKind::DrillIn));
+
+    filter->setProperty("text", QStringLiteral("splitvertical"));
+    QCoreApplication::processEvents();
+    REQUIRE(controller.model().rowCount() == 1);
+    REQUIRE(paletteRowOf(controller.model(), QStringLiteral("SplitVertical")) == 0);
+    CHECK(hints->property("text").toString() == text(PaletteEntryKind::Command));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A click on a drill-in row opens its level (offscreen)", "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    REQUIRE(filter != nullptr);
+    REQUIRE(list != nullptr);
+    filter->setProperty("text", QStringLiteral("ChangeProfile"));
+    QCoreApplication::processEvents();
+    auto const parent = paletteRowOf(controller.model(), QStringLiteral("ChangeProfile"));
+    REQUIRE(parent >= 0);
+    auto* item = paletteRowAt(list, parent);
+    REQUIRE(item != nullptr);
+    auto* entry = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow"));
+    REQUIRE(entry != nullptr);
+
+    auto* window = entry->window();
+    REQUIRE(window != nullptr);
+    QTest::mouseClick(window,
+                      Qt::LeftButton,
+                      Qt::NoModifier,
+                      entry->mapToScene(QPointF(entry->width() / 2, entry->height() / 2)).toPoint());
+    QCoreApplication::processEvents();
+
+    CHECK(controller.model().depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+    CHECK(list->property("count").toInt() == 2);
+    CHECK(host.palette->property("opened").toBool());
+    CHECK(controller.ran.isEmpty());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -9229,6 +9357,18 @@ TEST_CASE("Closing the palette over the find bar gives the find bar its focus ba
 
     CHECK(quickWindow->activeFocusItem() == field);
     CHECK(window->property("focusRestores").toInt() == 0);
+
+    SECTION("a find bar that closed under the palette hands over to the terminal")
+    {
+        QMetaObject::invokeMethod(palette, "open");
+        REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, PaletteSettleMs));
+        QMetaObject::invokeMethod(bar, "close");
+        REQUIRE(QTest::qWaitFor([&] { return !bar->property("visible").toBool(); }, PaletteSettleMs));
+        auto const before = window->property("focusRestores").toInt();
+        QMetaObject::invokeMethod(palette, "close");
+        waitForPaletteClosed(*palette);
+        CHECK(window->property("focusRestores").toInt() == before + 1);
+    }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
