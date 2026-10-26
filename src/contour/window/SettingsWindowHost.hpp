@@ -91,9 +91,8 @@ class SettingsWindowHost final: public QObject
 
     /// Builds the window on the first call; a hidden window then has the controller refreshed, is placed
     /// (R-c) unless it is maximised or full screen, whose geometry is left alone, and shown in the state it
-    /// closed in, while a visible one is left as it is, mid-edit draft
-    /// included. Either way a minimised state is cleared (keeping maximised), and the window is raised and
-    /// activated.
+    /// closed in, while a visible one is left as it is, mid-edit draft included. Either way a minimised
+    /// state is cleared (keeping maximised), and the window is raised and activated.
     /// @param anchor The screen of the window that asked; null for the primary screen.
     /// @return Nothing, or why the window could not be built. A failed build keeps no window, and the next
     ///         call tries again.

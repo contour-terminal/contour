@@ -132,23 +132,20 @@ Item {
         }
     }
 
-    // What the bar's parts other than the tabs take, from their preferred widths, which do not depend on
-    // the tabs: the tabs are left the rest, less the drag reserve.
-    readonly property real fixedPartsWidth: leadingSlot.Layout.preferredWidth
-                                            + hostChipSlot.Layout.preferredWidth
-                                            + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin
-                                            + driftSlotItem.Layout.preferredWidth + driftSlotItem.Layout.rightMargin
-                                            + newTabSlot.Layout.preferredWidth + newTabSlot.Layout.rightMargin
-                                            + trailingSlot.Layout.preferredWidth
+    // What the bar's parts before and after the tabs take, from their preferred widths, which do not
+    // depend on the tabs: the tabs are left the rest, less the drag reserve.
+    readonly property real leadingPartsWidth: leadingSlot.Layout.preferredWidth
+                                              + hostChipSlot.Layout.preferredWidth
+                                              + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin
+    readonly property real trailingPartsWidth: driftSlotItem.Layout.preferredWidth + driftSlotItem.Layout.rightMargin
+                                               + newTabSlot.Layout.preferredWidth + newTabSlot.Layout.rightMargin
+                                               + trailingSlot.Layout.preferredWidth
+    readonly property real fixedPartsWidth: root.leadingPartsWidth + root.trailingPartsWidth
 
     // The room the centred title has: the bar less twice the wider of its two ends, so it stays centred
     // on the bar without running under either end.
-    readonly property real titleRoom: {
-        const leading = leadingSlot.Layout.preferredWidth + hostChipSlot.Layout.preferredWidth
-                        + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin;
-        const trailing = root.fixedPartsWidth - leading;
-        return Math.max(0, root.width - 2 * Math.max(leading, trailing));
-    }
+    readonly property real titleRoom: Math.max(0, root.width - 2 * Math.max(root.leadingPartsWidth,
+                                                                            root.trailingPartsWidth))
 
     RowLayout {
         anchors.fill: parent

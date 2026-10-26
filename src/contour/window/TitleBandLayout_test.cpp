@@ -3,9 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <ranges>
+#include <span>
 
 using namespace contour::window;
 using contour::config::TabBarPosition;
@@ -64,7 +66,50 @@ constexpr auto BandCases = std::array {
                { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Flat, NativeFrame, Windowed, GateHidden, Top },
                { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateShown, Top },
+               { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, Windowed, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
 };
+
+constexpr auto FullScreen = WindowMode::FullScreen;
+
+// In full screen a band shown at the top reveals on the edge (D3); a bottom band and the tab bar stay as
+// they are windowed.
+constexpr auto FullScreenCases = std::array {
+    BandCase { { Pill, ClientBand, FullScreen, GateShown, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, FullScreen, GateHidden, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, FullScreen, GateShown, Bottom },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+    BandCase { { Pill, ClientBand, FullScreen, GateHidden, Bottom },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateShown, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Bottom },
+               { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, FullScreen, GateShown, Top },
+               { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, NativeFrame, FullScreen, GateShown, Bottom },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, NativeFrame, FullScreen, GateHidden, Top },
+               { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+};
+
+/// @return Whether @p cases holds a row for @p inputs.
+[[nodiscard]] bool hasRowFor(std::span<BandCase const> cases, TitleBandInputs const& inputs)
+{
+    return std::ranges::any_of(cases, [&](BandCase const& row) {
+        return row.inputs.shape == inputs.shape && row.inputs.frame == inputs.frame
+               && row.inputs.mode == inputs.mode && row.inputs.strip == inputs.strip
+               && row.inputs.position == inputs.position;
+    });
+}
 
 } // namespace
 
@@ -79,34 +124,24 @@ TEST_CASE("titleBand.rules", "[titleband]")
     static_assert(resolveTitleBand({}) == TitleBand { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs });
 }
 
-TEST_CASE("titleBand.everyInputMatchesARow", "[titleband]")
+TEST_CASE("titleBand.casesCoverEveryInput", "[titleband]")
 {
-    for (auto const shape: { Flat, Pill })
-        for (auto const frame: { ClientBand, NativeFrame })
-            for (auto const gate: { GateHidden, GateShown })
-                for (auto const position: { Top, Bottom })
-                    CHECK(findTitleBandRule({ shape, frame, Windowed, gate, position }) != nullptr);
+    // Every windowed input has a row above: a rule change cannot slip past the table.
+    detail::forEachTitleBandInput([](TitleBandInputs const& inputs) {
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position));
+        CHECK(hasRowFor(BandCases, inputs));
+    });
 }
 
 TEST_CASE("titleBand.fullScreenReveals", "[titleband]")
 {
-    for (auto const& [inputs, windowed]: BandCases)
+    for (auto const& [inputs, expected]: FullScreenCases)
     {
-        auto fullScreenInputs = inputs;
-        fullScreenInputs.mode = WindowMode::FullScreen;
-        auto expected = windowed;
-        if (windowed.band == BarPresence::Shown && windowed.bandEdge == BarEdge::Top)
-            expected.band = BarPresence::RevealOnEdge;
-        auto const actual = resolveTitleBand(fullScreenInputs);
-        CHECK(actual == expected);
-        if (windowed.bandEdge == BarEdge::Bottom)
-            CHECK(actual.band == windowed.band);
-        CHECK(actual.tabBar == windowed.tabBar);
+        INFO("shape " << int(inputs.shape) << ", frame " << int(inputs.frame) << ", gate "
+                      << int(inputs.strip) << ", position " << int(inputs.position));
+        CHECK(resolveTitleBand(inputs) == expected);
     }
-    CHECK(resolveTitleBand({ Pill, ClientBand, WindowMode::FullScreen, GateShown, Bottom })
-          == TitleBand { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Title, BarPresence::Shown });
-    CHECK(resolveTitleBand({ Flat, ClientBand, WindowMode::FullScreen, GateShown, Bottom })
-          == TitleBand { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden });
 }
 
 TEST_CASE("titleBand.names", "[titleband]")

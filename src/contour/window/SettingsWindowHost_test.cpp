@@ -329,7 +329,7 @@ TEST_CASE("closing the Settings window keeps the window, its pane and its draft"
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("a Settings window reopened maximised keeps its restore geometry",
+TEST_CASE("a Settings window closed maximised reopens maximised at its maximised frame",
           "[contour][gui][qml][settingswindow][host]")
 {
     // The offscreen platform pins a maximised window to the screen and keeps no restore rectangle, so

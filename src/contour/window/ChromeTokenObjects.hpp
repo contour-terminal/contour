@@ -291,7 +291,8 @@ class ChromeMotionTokens: public QObject
     Q_PROPERTY(int pulse READ pulse CONSTANT)
     Q_PROPERTY(int style READ style CONSTANT)
     Q_PROPERTY(int full READ full CONSTANT)
-    // A bool for QML, the documented QML-facing carve-out: whether anything spins or pulses at all.
+    // A bool for QML (the QML-facing carve-out): a read-only predicate over `style`, which stays the source
+    // of truth as a config::MotionStyle; QML would otherwise compare it to `full` at every use.
     Q_PROPERTY(bool animates READ animates CONSTANT)
     Q_PROPERTY(int crossFade READ crossFade CONSTANT)
 
@@ -503,8 +504,9 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int tabShape READ tabShape CONSTANT)
     Q_PROPERTY(int flat READ flat CONSTANT)
     Q_PROPERTY(int pill READ pill CONSTANT)
-    // A bool for QML, the documented QML-facing carve-out: the one place the shape is compared, so the
-    // tab, the strip and the badge slot cannot disagree on it.
+    // A bool for QML (the QML-facing carve-out): a read-only predicate over `tabShape`, which stays the
+    // source of truth as a config::TabShape; the one place the shape is compared, so the tab, the strip and
+    // the badge slot cannot disagree on it.
     Q_PROPERTY(bool isPill READ isPill CONSTANT)
     Q_PROPERTY(int profileMenu READ profileMenu CONSTANT)
     Q_PROPERTY(int caret READ caret CONSTANT)

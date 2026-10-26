@@ -298,6 +298,12 @@ namespace
         return list;
     }
 
+    /// @return The bit @p origin takes in a set of output origins gathered between two GUI-thread turns.
+    [[nodiscard]] constexpr uint8_t originBit(window::OutputOrigin origin) noexcept
+    {
+        return static_cast<uint8_t>(1U << std::to_underlying(origin));
+    }
+
 } // namespace
 
 #ifdef CONTOUR_EXTENSIONS
@@ -938,16 +944,14 @@ void TerminalSession::noteOutputForTab(window::OutputOrigin origin)
     // of the GUI thread's loop, not one per chunk; the origins seen meanwhile are gathered as bits, so live
     // output behind a replay is not lost in it. postToObject targets `this`, so Qt drops the call if the
     // session goes first.
-    auto const bit = static_cast<uint8_t>(1U << std::to_underlying(origin));
-    if (_pendingOutputOrigins.fetch_or(bit, std::memory_order_acq_rel) != 0)
+    if (_pendingOutputOrigins.fetch_or(originBit(origin), std::memory_order_acq_rel) != 0)
         return;
     platform::postToObject(this, [this]() {
         auto const origins = _pendingOutputOrigins.exchange(0, std::memory_order_acq_rel);
         if (_manager == nullptr)
             return;
-        auto const liveBit = static_cast<uint8_t>(1U << std::to_underlying(window::OutputOrigin::Live));
         auto origin = window::OutputOrigin::Resync;
-        if ((origins & liveBit) != 0)
+        if ((origins & originBit(window::OutputOrigin::Live)) != 0)
             // The grace is the fallback for a mirror that cannot tell its replay apart: the connection's
             // first moments after it came (back) up.
             origin = _hosting == SessionHosting::Remote

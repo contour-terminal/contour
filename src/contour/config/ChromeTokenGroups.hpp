@@ -79,6 +79,9 @@ enum class TabShape : uint8_t
     Pill,     //!< A well of pills inside the window's title band.
 };
 
+/// Number of @c TabShape enumerators, derived from the last one.
+inline constexpr size_t TabShapeCount = static_cast<size_t>(TabShape::Pill) + 1;
+
 /// Where a tab's fill and label colours come from.
 enum class TabColorSource : uint8_t
 {

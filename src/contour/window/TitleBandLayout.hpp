@@ -9,10 +9,13 @@
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/TabBarMode.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <ranges>
 #include <string_view>
 
 namespace contour::window
@@ -109,7 +112,7 @@ struct TitleBandRule
     std::optional<WindowFrame> frame;      ///< The frame, or any.
     std::optional<TabStripGate> strip;     ///< The tab-bar gate, or any.
     config::TabBarPosition position;       ///< The configured tab-bar edge.
-    TitleBand band;                        ///< The windowed answer.
+    TitleBand answer;                      ///< The windowed answer.
 };
 
 /// The band rules (R-e), first match wins. The Pill rows on a client band come first; the rest is the
@@ -121,45 +124,46 @@ inline constexpr auto TitleBandRules = std::array {
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Shown,
                     .position = config::TabBarPosition::Top,
-                    .band = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Hidden,
                     .position = config::TabBarPosition::Top,
-                    .band = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // Pill with the tabs at the bottom: the band stays on top with the title, the tabs get a bar of their
     // own at the bottom (D6).
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Shown,
                     .position = config::TabBarPosition::Bottom,
-                    .band = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Shown } },
     TitleBandRule { .shape = config::TabShape::Pill,
                     .frame = WindowFrame::ClientBand,
                     .strip = TabStripGate::Hidden,
                     .position = config::TabBarPosition::Bottom,
-                    .band = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Title, BarPresence::Hidden } },
     // Flat on a client band, and every shape under a native frame: the band is the strip.
     TitleBandRule { .shape = std::nullopt,
                     .frame = std::nullopt,
                     .strip = TabStripGate::Shown,
                     .position = config::TabBarPosition::Top,
-                    .band = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+                    .answer = { BarPresence::Shown, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
                     .frame = std::nullopt,
                     .strip = TabStripGate::Hidden,
                     .position = config::TabBarPosition::Top,
-                    .band = { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+                    .answer = { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
     TitleBandRule { .shape = std::nullopt,
                     .frame = std::nullopt,
                     .strip = TabStripGate::Shown,
                     .position = config::TabBarPosition::Bottom,
-                    .band = { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
-    TitleBandRule { .shape = std::nullopt,
-                    .frame = std::nullopt,
-                    .strip = TabStripGate::Hidden,
-                    .position = config::TabBarPosition::Bottom,
-                    .band = { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+                    .answer = { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
+    TitleBandRule {
+        .shape = std::nullopt,
+        .frame = std::nullopt,
+        .strip = TabStripGate::Hidden,
+        .position = config::TabBarPosition::Bottom,
+        .answer = { BarPresence::Hidden, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
 };
 
 namespace detail
@@ -186,20 +190,46 @@ namespace detail
 
 namespace detail
 {
+    /// Calls @p visit with every windowed input the band decision can be asked about.
+    template <typename Visit>
+    constexpr void forEachTitleBandInput(Visit visit)
+    {
+        for (auto const shape: std::views::iota(size_t { 0 }, config::TabShapeCount))
+            for (auto const frame: std::views::iota(size_t { 0 }, WindowFrameCount))
+                for (auto const strip: std::views::iota(size_t { 0 }, TabStripGateCount))
+                    for (auto const position: std::views::iota(size_t { 0 }, config::TabBarPositionCount))
+                        visit(TitleBandInputs { .shape = static_cast<config::TabShape>(shape),
+                                                .frame = static_cast<WindowFrame>(frame),
+                                                .mode = WindowMode::Windowed,
+                                                .strip = static_cast<TabStripGate>(strip),
+                                                .position = static_cast<config::TabBarPosition>(position) });
+    }
+
+    /// @return Whether every input matches a rule.
     [[nodiscard]] constexpr bool titleBandRulesCoverEveryInput() noexcept
     {
-        for (auto const shape: { config::TabShape::Flat, config::TabShape::Pill })
-            for (auto const frame: { WindowFrame::ClientBand, WindowFrame::NativeFrame })
-                for (auto const strip: { TabStripGate::Hidden, TabStripGate::Shown })
-                    for (auto const position: { config::TabBarPosition::Top, config::TabBarPosition::Bottom })
-                        if (findTitleBandRule({ shape, frame, WindowMode::Windowed, strip, position })
-                            == nullptr)
-                            return false;
-        return true;
+        auto covered = true;
+        forEachTitleBandInput([&](TitleBandInputs const& inputs) {
+            covered = covered && findTitleBandRule(inputs) != nullptr;
+        });
+        return covered;
+    }
+
+    /// @return Whether every rule is the first match for some input: no row is shadowed by the ones above it.
+    [[nodiscard]] constexpr bool titleBandRulesAreEachReachable() noexcept
+    {
+        auto reached = std::array<bool, TitleBandRules.size()> {};
+        forEachTitleBandInput([&](TitleBandInputs const& inputs) {
+            if (auto const* const rule = findTitleBandRule(inputs); rule != nullptr)
+                reached[static_cast<size_t>(rule - TitleBandRules.data())] = true;
+        });
+        return std::ranges::all_of(reached, std::identity {});
     }
 } // namespace detail
 
 static_assert(detail::titleBandRulesCoverEveryInput(), "TitleBandRules must match every input");
+static_assert(detail::titleBandRulesAreEachReachable(),
+              "every TitleBandRules row must be the first match for some input");
 
 /// Decides where the band and the tabs go.
 /// @param inputs What the decision reads.
@@ -210,7 +240,7 @@ static_assert(detail::titleBandRulesCoverEveryInput(), "TitleBandRules must matc
     auto const* const rule = findTitleBandRule(inputs);
     if (rule == nullptr)
         return {};
-    auto band = rule->band;
+    auto band = rule->answer;
     if (inputs.mode == WindowMode::FullScreen && band.band == BarPresence::Shown
         && band.bandEdge == BarEdge::Top)
         band.band = BarPresence::RevealOnEdge;

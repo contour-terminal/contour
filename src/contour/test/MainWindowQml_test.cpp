@@ -1470,86 +1470,145 @@ TEST_CASE("show_title_bar keeps the native frame and a strip (offscreen)",
 
 namespace
 {
-/// The full-screen reveal on the macOS row under @p motion; @see the two cases below.
-void checkFullScreenReveal(contour::config::MotionPreference motion)
+using contour::config::MotionPreference;
+
+/// The macOS row's setup under @p motion.
+[[nodiscard]] contour::test::ChromeSetup macOSSetup(MotionPreference motion)
+{
+    auto setup = rowSetup(ChromeStyle::MacOS);
+    setup.accessibility.motion = motion;
+    return setup;
+}
+
+/// Loads the macOS row with three tabs under a motion preference, takes the window into full screen and waits
+/// until the band is concealed: slid above the window, or under Reduce Motion faded out.
+struct FullScreenBand
 {
     QQmlEngine engine;
     MockMainController controller { MainWindowScene { .tabCount = 3 } };
     contour::test::QmlMessageCapture warnings;
-    auto setup = rowSetup(ChromeStyle::MacOS);
-    setup.accessibility.motion = motion;
-    auto root = loadMainWindow(engine, controller, warnings, setup);
-    auto* window = qobject_cast<QQuickWindow*>(root.get());
-    REQUIRE(window != nullptr);
-    window->showFullScreen();
-    REQUIRE(QTest::qWaitForWindowExposed(window));
-    REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
-    QTest::mouseMove(window, QPoint(window->width() / 2, window->height() / 2));
+    std::unique_ptr<QObject> root;
+    QQuickWindow* window;
+    QQuickItem* titleBar = nullptr;
+    MotionPreference motion;
 
-    auto const reduced = motion == contour::config::MotionPreference::Reduced;
-    auto& titleBar = named(*root, QStringLiteral("titleBar"));
-    auto& content = named(*root, QStringLiteral("content"));
-    auto& edge = named(*root, QStringLiteral("bandRevealEdge"));
+    /// @param motion The motion preference the band moves under.
+    explicit FullScreenBand(MotionPreference motion = MotionPreference::Full):
+        root { loadMainWindow(engine, controller, warnings, macOSSetup(motion)) },
+        window { qobject_cast<QQuickWindow*>(root.get()) },
+        motion { motion }
+    {
+        REQUIRE(window != nullptr);
+        window->showFullScreen();
+        REQUIRE(QTest::qWaitForWindowExposed(window));
+        REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
+        titleBar = &named(*root, QStringLiteral("titleBar"));
+        QTest::mouseMove(window, awayPoint());
+        REQUIRE(QTest::qWaitFor([&] { return concealed(); }, 2000));
+    }
+
+    ~FullScreenBand()
+    {
+        if (window != nullptr)
+            window->showNormal();
+    }
+
+    FullScreenBand(FullScreenBand const&) = delete;
+    FullScreenBand& operator=(FullScreenBand const&) = delete;
+    FullScreenBand(FullScreenBand&&) = delete;
+    FullScreenBand& operator=(FullScreenBand&&) = delete;
+
+    [[nodiscard]] bool revealed() const { return titleBar->property("revealed").toBool(); }
+
+    /// @return Whether the band has finished leaving: slid above the window, or faded out.
+    [[nodiscard]] bool concealed() const
+    {
+        return motion == MotionPreference::Reduced ? titleBar->opacity() == 0
+                                                   : titleBar->y() == -titleBar->height();
+    }
+
+    /// A point on neither the band nor anything it opens: the middle of the window's left half.
+    [[nodiscard]] QPoint awayPoint() const { return { window->width() / 4, window->height() / 2 }; }
+
+    /// Rests the pointer on the reveal edge until the band reveals.
+    void revealFromEdge() const
+    {
+        QTest::mouseMove(window, centreOf(named(*root, QStringLiteral("bandRevealEdge"))));
+        REQUIRE(QTest::qWaitFor([&] { return revealed(); }, 2000));
+    }
+
+    /// Waits until the band has finished sliding (or fading) in.
+    void waitUntilIn() const
+    {
+        REQUIRE(QTest::qWaitFor([&] { return titleBar->y() == 0 && titleBar->opacity() == 1; }, 2000));
+    }
+
+    /// Lets twice the slide's duration pass, long past any hide delay.
+    void linger() { QTest::qWait(2 * styleGroup(engine, "motion").property("standard").toInt()); }
+};
+} // namespace
+
+namespace
+{
+/// The full-screen reveal on the macOS row under @p motion; @see the two cases below.
+void checkFullScreenReveal(MotionPreference motion)
+{
+    auto band = FullScreenBand { motion };
+    auto const reduced = motion == MotionPreference::Reduced;
+    auto& titleBar = *band.titleBar;
+    auto& content = named(*band.root, QStringLiteral("content"));
+    auto const& edge = named(*band.root, QStringLiteral("bandRevealEdge"));
     auto const slideOffset = [&] {
         return titleBar.property("slideOffset").toReal();
     };
-    auto const revealed = [&] {
-        return titleBar.property("revealed").toBool();
-    };
 
     CHECK(edge.isVisible());
-    CHECK_FALSE(revealed());
+    CHECK_FALSE(band.revealed());
     // The band overlays the top rows: it takes nothing from the content, nor from the declared chrome.
-    CHECK(content.y() == named(*root, QStringLiteral("bannerStack")).y());
+    CHECK(content.y() == named(*band.root, QStringLiteral("bannerStack")).y());
     CHECK(content.y() == 0);
-    CHECK(controller.chromeHeight() == 0);
+    CHECK(band.controller.chromeHeight() == 0);
     // Concealed: slid above the window, or faded out.
-    REQUIRE(QTest::qWaitFor(
-        [&] { return reduced ? titleBar.opacity() == 0 : titleBar.y() == -titleBar.height(); }, 2000));
     CHECK(slideOffset() == (reduced ? 0 : -titleBar.height()));
     auto const contentY = content.y();
     auto const contentHeight = content.height();
 
-    QTest::mouseMove(window, centreOf(edge));
-    REQUIRE(QTest::qWaitFor(revealed, 2000));
-    REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == 0 && titleBar.opacity() == 1; }, 2000));
+    band.revealFromEdge();
+    band.waitUntilIn();
     CHECK(titleBar.isVisible());
     CHECK(slideOffset() == 0);
     CHECK(content.y() == contentY);
     CHECK(content.height() == contentHeight);
 
     // Down onto the band keeps it; away from both hides it again.
-    QTest::mouseMove(window, centreOf(titleBar));
+    QTest::mouseMove(band.window, centreOf(titleBar));
     QCoreApplication::processEvents();
-    CHECK(revealed());
-    QTest::mouseMove(window, QPoint(window->width() / 2, window->height() / 2));
-    REQUIRE(QTest::qWaitFor([&] { return !revealed(); }, 2000));
+    CHECK(band.revealed());
+    QTest::mouseMove(band.window, band.awayPoint());
+    REQUIRE(QTest::qWaitFor([&] { return !band.revealed(); }, 2000));
+    REQUIRE(QTest::qWaitFor([&] { return band.concealed(); }, 2000));
     if (reduced)
     {
-        REQUIRE(QTest::qWaitFor([&] { return titleBar.opacity() == 0; }, 2000));
+        // Faded in place, never slid.
         CHECK(titleBar.y() == 0);
         CHECK(slideOffset() == 0);
     }
-    else
-        REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == -titleBar.height(); }, 2000));
     CHECK(content.y() == contentY);
     CHECK(content.height() == contentHeight);
-
-    window->showNormal();
-    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 } // namespace
 
 TEST_CASE("full screen reveals the band without resizing the content (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
-    checkFullScreenReveal(contour::config::MotionPreference::Full);
+    checkFullScreenReveal(MotionPreference::Full);
 }
 
 TEST_CASE("full screen reveals the band by fading it under Reduce Motion (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
-    checkFullScreenReveal(contour::config::MotionPreference::Reduced);
+    checkFullScreenReveal(MotionPreference::Reduced);
 }
 
 TEST_CASE("the tab bar at the bottom on macOS keeps the band at the top (offscreen)",
@@ -1705,86 +1764,6 @@ TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
-
-namespace
-{
-using contour::config::MotionPreference;
-
-/// The macOS row's setup under @p motion.
-[[nodiscard]] contour::test::ChromeSetup macOSSetup(MotionPreference motion)
-{
-    auto setup = rowSetup(ChromeStyle::MacOS);
-    setup.accessibility.motion = motion;
-    return setup;
-}
-
-/// Loads the macOS row with three tabs under a motion preference, takes the window into full screen and waits
-/// until the band is concealed: slid above the window, or under Reduce Motion faded out.
-struct FullScreenBand
-{
-    QQmlEngine engine;
-    MockMainController controller { MainWindowScene { .tabCount = 3 } };
-    contour::test::QmlMessageCapture warnings;
-    std::unique_ptr<QObject> root;
-    QQuickWindow* window;
-    QQuickItem* titleBar = nullptr;
-    MotionPreference motion;
-
-    /// @param motion The motion preference the band moves under.
-    explicit FullScreenBand(MotionPreference motion = MotionPreference::Full):
-        root { loadMainWindow(engine, controller, warnings, macOSSetup(motion)) },
-        window { qobject_cast<QQuickWindow*>(root.get()) },
-        motion { motion }
-    {
-        REQUIRE(window != nullptr);
-        window->showFullScreen();
-        REQUIRE(QTest::qWaitForWindowExposed(window));
-        REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
-        titleBar = &named(*root, QStringLiteral("titleBar"));
-        QTest::mouseMove(window, awayPoint());
-        REQUIRE(QTest::qWaitFor([&] { return concealed(); }, 2000));
-    }
-
-    ~FullScreenBand()
-    {
-        if (window != nullptr)
-            window->showNormal();
-    }
-
-    FullScreenBand(FullScreenBand const&) = delete;
-    FullScreenBand& operator=(FullScreenBand const&) = delete;
-    FullScreenBand(FullScreenBand&&) = delete;
-    FullScreenBand& operator=(FullScreenBand&&) = delete;
-
-    [[nodiscard]] bool revealed() const { return titleBar->property("revealed").toBool(); }
-
-    /// @return Whether the band has finished leaving: slid above the window, or faded out.
-    [[nodiscard]] bool concealed() const
-    {
-        return motion == MotionPreference::Reduced ? titleBar->opacity() == 0
-                                                   : titleBar->y() == -titleBar->height();
-    }
-
-    /// A point on neither the band nor anything it opens: the middle of the window's left half.
-    [[nodiscard]] QPoint awayPoint() const { return { window->width() / 4, window->height() / 2 }; }
-
-    /// Rests the pointer on the reveal edge until the band reveals.
-    void revealFromEdge() const
-    {
-        QTest::mouseMove(window, centreOf(named(*root, QStringLiteral("bandRevealEdge"))));
-        REQUIRE(QTest::qWaitFor([&] { return revealed(); }, 2000));
-    }
-
-    /// Waits until the band has finished sliding (or fading) in.
-    void waitUntilIn() const
-    {
-        REQUIRE(QTest::qWaitFor([&] { return titleBar->y() == 0 && titleBar->opacity() == 1; }, 2000));
-    }
-
-    /// Lets twice the slide's duration pass, long past any hide delay.
-    void linger() { QTest::qWait(2 * styleGroup(engine, "motion").property("standard").toInt()); }
-};
-} // namespace
 
 TEST_CASE("a pointer that reaches the sliding band keeps it revealed (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
