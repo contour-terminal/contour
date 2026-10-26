@@ -172,6 +172,14 @@ TEST_CASE("FinishNotification.the body says how long, where and in which tab", "
               == "took 3m 12s · /home/bob/src/contour · build");
     }
 
+    SECTION("a directory not known to be on this machine is not shortened either")
+    {
+        // The rule of the pane header and the status line's {Cwd}: only a Local path is this home's.
+        summary.workingDirectory.locality = vtbackend::ContextLocality::Unknown;
+        CHECK(finishNotificationBody(summary, "build", Home)
+              == "took 3m 12s · /home/bob/src/contour · build");
+    }
+
     SECTION("an unknown home shortens nothing")
     {
         CHECK(finishNotificationBody(summary, "build", "") == "took 3m 12s · /home/bob/src/contour · build");

@@ -122,4 +122,15 @@ struct ResolvedWorkingDirectory
 [[nodiscard]] std::string homeAbbreviatedPath(ResolvedWorkingDirectory const& directory,
                                               std::string_view home);
 
+/// The path @p path reads as where it is shown, by the rule of the overload above, for a directory known
+/// only by its path and locality -- a command block's snapshot, as a finish notification shows it.
+///
+/// @param path The absolute path.
+/// @param locality Whether @p path names this machine; only a Local one is abbreviated.
+/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @return The path, home-abbreviated when @p locality is Local.
+[[nodiscard]] std::string homeAbbreviatedPath(std::string_view path,
+                                              ContextLocality locality,
+                                              std::string_view home);
+
 } // namespace vtbackend

@@ -156,7 +156,7 @@ inline constexpr std::string_view FallbackCommandName = "command";
 /// @see vtbackend::formatCommandDuration
 /// @param summary       The finished block.
 /// @param tabName       The tab strip's label for the session's tab; untrusted (it may be a window title).
-/// @param homeDirectory The local home, for `~`; a directory on another machine is never shortened.
+/// @param homeDirectory The local home, for `~`; only a directory known to be on this machine is shortened.
 /// @return The body, its segments joined by ` · `, each sanitised for display and cut to MaxBodySegmentBytes.
 [[nodiscard]] inline std::string finishNotificationBody(vtbackend::CommandBlockSummary const& summary,
                                                         std::string_view tabName,
@@ -175,10 +175,8 @@ inline constexpr std::string_view FallbackCommandName = "command";
 
     if (auto const& directory = summary.workingDirectory; !directory.path.empty())
     {
-        auto const shown = directory.locality == vtbackend::ContextLocality::Foreign
-                               ? directory.path
-                               : vtbackend::abbreviateHomePath(directory.path, homeDirectory);
-        segments.push_back(segmentOf(shown));
+        segments.push_back(
+            segmentOf(vtbackend::homeAbbreviatedPath(directory.path, directory.locality, homeDirectory)));
     }
 
     if (!tabName.empty())
