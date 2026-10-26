@@ -562,3 +562,24 @@ TEST_CASE("footerHints follows the row and the depth", "[contour][palette]")
     model.enter(rowOf(model, "ChangeProfile"));
     CHECK(hintsAt(0) == text(PaletteEntryKind::Command, PaletteDepth::Level));
 }
+
+TEST_CASE("A shown palette keeps its query and level through a refresh", "[contour][palette]")
+{
+    auto const config = configWithProfiles({ "dark", "light" });
+    auto const profiles = command::ProfileCommandSource { config };
+    auto history = command::CommandHistory { 3 };
+    auto model = CommandPaletteModel { history, Sources { &profiles }, command::ShortcutStyle::Text };
+    model.refresh({});
+    model.enter(rowOf(model, "ChangeProfile"));
+    model.setFilter(QStringLiteral("d"));
+
+    model.setShown(true);
+    model.refresh({});
+    CHECK(model.depth() == static_cast<int>(command::PaletteDepth::Level));
+    CHECK(model.filter() == QStringLiteral("d"));
+
+    model.setShown(false);
+    model.refresh({});
+    CHECK(model.depth() == model.topDepth());
+    CHECK(model.filter().isEmpty());
+}

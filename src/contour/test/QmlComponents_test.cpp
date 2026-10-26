@@ -6435,6 +6435,49 @@ TEST_CASE("A resting pointer does not take the selection after the list changes 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("The field and the list agree on the query whoever changes it (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    filter->setProperty("text", QStringLiteral("spl"));
+    QCoreApplication::processEvents();
+    REQUIRE(controller.model().filter() == QStringLiteral("spl"));
+
+    SECTION("a second open asked for while the palette is up keeps the query")
+    {
+        CHECK(controller.model().shown());
+        controller.model().refresh({});
+        QCoreApplication::processEvents();
+        CHECK(controller.model().filter() == QStringLiteral("spl"));
+        CHECK(filter->property("text").toString() == QStringLiteral("spl"));
+    }
+
+    SECTION("a query the model is given shows in the field")
+    {
+        controller.model().setFilter(QStringLiteral("profile"));
+        QCoreApplication::processEvents();
+        CHECK(filter->property("text").toString() == QStringLiteral("profile"));
+    }
+
+    SECTION("once closed, the next open starts afresh")
+    {
+        QMetaObject::invokeMethod(host.palette, "close");
+        waitForPopupClosed(*host.palette);
+        CHECK_FALSE(controller.model().shown());
+        controller.model().refresh({});
+        CHECK(controller.model().filter().isEmpty());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("A click on a drill-in row opens its level (offscreen)", "[contour][gui][qml][palette]")
 {
     contour::test::QmlMessageCapture const warnings;

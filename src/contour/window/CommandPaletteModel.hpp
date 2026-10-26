@@ -50,6 +50,10 @@ class CommandPaletteModel: public QAbstractListModel
     Q_PROPERTY(int drillInKind READ drillInKind CONSTANT)
     /// command::PaletteDepth::Top as an int, so QML compares `depth` by name.
     Q_PROPERTY(int topDepth READ topDepth CONSTANT)
+    /// Whether the palette is on screen; the QML sets it as the palette shows and closes. A bool for QML
+    /// (the QML-facing carve-out): while it holds, refresh() leaves the open palette's rows, level and query
+    /// alone, so a second OpenCommandPalette does not empty the list under a typed query.
+    Q_PROPERTY(bool shown READ shown WRITE setShown NOTIFY shownChanged)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the window controller")
 
@@ -77,7 +81,8 @@ class CommandPaletteModel: public QAbstractListModel
                         command::ShortcutStyle hintStyle,
                         QObject* parent = nullptr);
 
-    /// Re-queries the sources and rebuilds the tree, back at the top level with an empty filter.
+    /// Re-queries the sources and rebuilds the tree, back at the top level with an empty filter; does
+    /// nothing while the palette is shown.
     ///
     /// Called each time the palette opens, so the live rows and the recent group reflect the state the
     /// user is looking at, and every open starts at the top. One model reset.
@@ -118,10 +123,14 @@ class CommandPaletteModel: public QAbstractListModel
         return static_cast<int>(command::PaletteEntryKind::DrillIn);
     }
     [[nodiscard]] int topDepth() const noexcept { return static_cast<int>(command::PaletteDepth::Top); }
+    [[nodiscard]] bool shown() const noexcept { return _isShown; }
+    /// @param shown Whether the palette is on screen (the property is the parameter: QML's carve-out).
+    void setShown(bool shown);
 
   signals:
     void filterChanged();
     void levelChanged();
+    void shownChanged();
 
   private:
     /// Where the palette is, from _level.
@@ -141,6 +150,7 @@ class CommandPaletteModel: public QAbstractListModel
     QString _filter;                          //!< The current query.
     QString _topFilter;                       //!< The top-level query a level was entered from.
     int _anchorRow = 0;                       //!< See anchorRow.
+    bool _isShown = false;                    //!< See shown.
 };
 
 } // namespace contour::window

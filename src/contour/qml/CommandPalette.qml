@@ -112,6 +112,8 @@ Popup {
     // starts to show, and not in onOpened, which waits out the enter transition: keys typed at once would
     // otherwise be lost. What had the keyboard is captured first, before the field takes it.
     onAboutToShow: {
+        if (root.model)
+            root.model.shown = true;
         root._returnFocus = root.window ? root.window.activeFocusItem : null;
         filterField.clear();
         filterField.forceActiveFocus();
@@ -151,6 +153,12 @@ Popup {
     // OpenCommandPalette, a row this palette itself always offers — would re-enter Popup.open() on top of
     // the close that is still unwinding, and the palette would need dismissing twice. Deferring to the
     // next event-loop turn dispatches the command with the popup's state machine at rest.
+    // Off screen from the moment it starts to close, so an open asked for during the close refreshes.
+    onAboutToHide: {
+        if (root.model)
+            root.model.shown = false;
+    }
+
     onClosed: {
         const target = root._handBackTarget(root._returnFocus);
         if (target)
@@ -259,6 +267,12 @@ Popup {
         function onLevelChanged() {
             filterField.text = root.model.filter;
             root.select(root.model.anchorRow < list.count ? root.model.anchorRow : -1);
+        }
+        // The field shows the model's query whoever set it (a refresh, a test, the controller); setting it
+        // to what it already holds changes nothing.
+        function onFilterChanged() {
+            if (filterField.text !== root.model.filter)
+                filterField.text = root.model.filter;
         }
     }
 

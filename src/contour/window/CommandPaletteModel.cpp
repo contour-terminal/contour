@@ -74,8 +74,20 @@ CommandPaletteModel::CommandPaletteModel(command::CommandHistory const& history,
 {
 }
 
+void CommandPaletteModel::setShown(bool shown)
+{
+    if (_isShown == shown)
+        return;
+    _isShown = shown;
+    emit shownChanged();
+}
+
 void CommandPaletteModel::refresh(std::unordered_map<std::string, std::string> shortcuts)
 {
+    // An open palette keeps what the user is looking at: its query, its level and its rows.
+    if (_isShown)
+        return;
+
     _shortcuts = std::move(shortcuts);
     _tree = command::buildPaletteTree(command::collectCommands(_sources));
 
