@@ -15,6 +15,9 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
+#include <contour/command/CommandCatalog.hpp>
+#include <contour/command/CommandHistory.hpp>
+#include <contour/command/Shortcut.hpp>
 #include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/NewDefaultsOffer.hpp>
@@ -28,6 +31,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/TestEnvironment.hpp>
+#include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/HostChipState.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
@@ -2690,3 +2694,168 @@ TEST_CASE("Main.qml fills the title bar under the expanded client area", "[displ
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 #endif
 }
+
+// {{{ The command palette over a dialog: the keyboard goes back to what the palette opened over.
+namespace
+{
+
+/// A palette model over the action catalogue, for Main.qml's CommandPalette, and one terminal pane for
+/// restoreTerminalFocus() to give the keyboard to.
+struct MainWindowPalette
+{
+    MainWindowPalette()
+    {
+        pane.setSession(&session);
+        pane.setActive(true);
+        model.refresh({});
+    }
+
+    /// The scene Main.qml is loaded with: the pane and the palette.
+    [[nodiscard]] contour::test::MainWindowScene scene()
+    {
+        return { .rootPane = &pane, .commandPalette = &model };
+    }
+
+    contour::test::MockSession session;
+    contour::test::MockPaneProxy pane { /*leaf=*/true };
+    contour::command::CommandHistory history { 5 };
+    contour::command::ActionCommandSource actions {};
+    contour::window::CommandPaletteModel model { history,
+                                                 std::vector<contour::command::CommandSource const*> {
+                                                     &actions },
+                                                 contour::command::ShortcutStyle::Text };
+};
+
+/// Whether @p item is @p ancestor or lies beneath it in the visual tree.
+[[nodiscard]] bool isWithin(QQuickItem const* item, QQuickItem const* ancestor)
+{
+    for (auto const* node = item; node != nullptr; node = node->parentItem())
+        if (node == ancestor)
+            return true;
+    return false;
+}
+
+/// Shows and activates Main.qml's window, so it holds an active focus item.
+[[nodiscard]] QQuickWindow& activeMainWindow(QObject& root)
+{
+    showWindow(root);
+    auto* window = qobject_cast<QQuickWindow*>(&root);
+    REQUIRE(window != nullptr);
+    window->requestActivate();
+    REQUIRE(QTest::qWaitForWindowActive(window));
+    return *window;
+}
+
+/// Waits until the popup @p popup is open (@p opened) or gone.
+void waitForPopup(QObject const& popup, bool opened)
+{
+    REQUIRE(QTest::qWaitFor([&] { return popup.property(opened ? "opened" : "visible").toBool() == opened; },
+                            2000));
+}
+
+} // namespace
+
+TEST_CASE("Closing the palette over a dialog gives the dialog its focus back (offscreen)",
+          "[contour][gui][qml][mainwindow][palette]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    MockMainController controller { palette.scene() };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto& window = activeMainWindow(*root);
+
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("aboutDialog"));
+    auto* commandPalette = root->findChild<QObject*>(QStringLiteral("commandPalette"));
+    REQUIRE(dialog != nullptr);
+    REQUIRE(commandPalette != nullptr);
+    controller.showAbout();
+    waitForPopup(*dialog, true);
+    auto* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
+    REQUIRE(accept != nullptr);
+    accept->forceActiveFocus();
+    QCoreApplication::processEvents();
+    REQUIRE(window.activeFocusItem() == accept);
+
+    controller.openCommandPalette();
+    waitForPopup(*commandPalette, true);
+    REQUIRE(window.activeFocusItem() != accept);
+
+    QTest::keyClick(&window, Qt::Key_Escape);
+    waitForPopup(*commandPalette, false);
+
+    CHECK(dialog->property("opened").toBool());
+    CHECK(window.activeFocusItem() == accept);
+    CHECK(controller.ranCommands.isEmpty());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("A picked command that opens a dialog keeps that dialog focused (offscreen)",
+          "[contour][gui][qml][mainwindow][palette]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    MockMainController controller { palette.scene() };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto& window = activeMainWindow(*root);
+
+    auto* dialog = root->findChild<QObject*>(QStringLiteral("aboutDialog"));
+    auto* commandPalette = root->findChild<QObject*>(QStringLiteral("commandPalette"));
+    REQUIRE(dialog != nullptr);
+    REQUIRE(commandPalette != nullptr);
+
+    controller.openCommandPalette();
+    waitForPopup(*commandPalette, true);
+    auto* filter = commandPalette->findChild<QQuickItem*>(QStringLiteral("commandPaletteFilter"));
+    REQUIRE(filter != nullptr);
+    filter->setProperty("text", QStringLiteral("ShowAbout"));
+    QCoreApplication::processEvents();
+    QTest::keyClick(&window, Qt::Key_Return);
+    waitForPopup(*commandPalette, false);
+    waitForPopup(*dialog, true);
+
+    CHECK(controller.ranCommands == QStringList { QStringLiteral("ShowAbout") });
+    // The palette's own hand-back ran before the dispatch, so the dialog's focus is the last word.
+    auto* frame = dialog->property("contentItem").value<QQuickItem*>();
+    REQUIRE(frame != nullptr);
+    CHECK(isWithin(window.activeFocusItem(), frame->parentItem()));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Without a dialog, closing the palette hands the keyboard back to the terminal (offscreen)",
+          "[contour][gui][qml][mainwindow][palette]")
+{
+    QQmlEngine engine;
+    MainWindowPalette palette;
+    MockMainController controller { palette.scene() };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto& window = activeMainWindow(*root);
+
+    auto* commandPalette = root->findChild<QObject*>(QStringLiteral("commandPalette"));
+    REQUIRE(commandPalette != nullptr);
+    controller.openCommandPalette();
+    waitForPopup(*commandPalette, true);
+    QTest::keyClick(&window, Qt::Key_Escape);
+    waitForPopup(*commandPalette, false);
+
+    // restoreTerminalFocus() ran: the pane tree has the keyboard, nothing in the overlay keeps it.
+    auto* focus = window.activeFocusItem();
+    auto* overlayLayer = commandPalette->property("parent").value<QQuickItem*>();
+    auto const items = root->findChildren<QQuickItem*>();
+    auto const tree = std::ranges::find_if(items, [](QQuickItem const* item) {
+        return QByteArrayView(item->metaObject()->className()).startsWith("PaneNode");
+    });
+    auto* paneTree = tree != items.end() ? *tree : nullptr;
+    REQUIRE(overlayLayer != nullptr);
+    REQUIRE(paneTree != nullptr);
+    CHECK_FALSE(isWithin(focus, overlayLayer));
+    CHECK(isWithin(focus, paneTree));
+    CHECK(controller.ranCommands.isEmpty());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}

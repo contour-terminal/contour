@@ -66,6 +66,56 @@ Popup {
         elevation: chromeStyle.elevation.e3
     }
 
+    // Opens with a fade and a slight scale, ease-out; closes with a quicker fade, ease-in. Under Reduce Motion
+    // the tokens make the scale start at 1 and both durations the cross-fade's, so no branch is needed here.
+    enter: Transition {
+        NumberAnimation {
+            objectName: "commandPaletteEnterFade"
+            property: "opacity"
+            from: 0
+            to: 1
+            duration: chromeStyle.motion.standard
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            objectName: "commandPaletteEnterScale"
+            property: "scale"
+            from: chromeStyle.motion.popoverScale
+            to: 1
+            duration: chromeStyle.motion.standard
+            easing.type: Easing.OutCubic
+        }
+    }
+    exit: Transition {
+        NumberAnimation {
+            id: exitFade
+            objectName: "commandPaletteExitFade"
+            property: "opacity"
+            to: 0
+            duration: chromeStyle.motion.fast
+            easing.type: Easing.InCubic
+        }
+    }
+
+    // The exit transition's fade, for the tests: unlike the enter transition's, its animation is not a
+    // QObject child of the popup, so findChild() cannot reach it.
+    readonly property var _exitFade: exitFade
+
+    // What had the keyboard when the palette opened. A dialog or popup (the find bar, a flyout, About)
+    // gets it back on close; anything else is the terminal, which restoreTerminalFocus() reaches.
+    property Item _returnFocus: null
+
+    onAboutToShow: root._returnFocus = root.window ? root.window.activeFocusItem : null
+
+    // Whether @p item sits in the window's overlay layer, i.e. inside a popup or a dialog.
+    function _isOverOverlay(item) {
+        const overlay = root.Overlay.overlay;
+        for (let node = item; node; node = node.parent)
+            if (node === overlay)
+                return true;
+        return false;
+    }
+
     // Refresh + focus on every open, not just the first: the model's rows are rebuilt by the
     // controller (open tabs change), and the filter must start empty with the caret already in it so
     // the user can type immediately.
@@ -78,8 +128,9 @@ Popup {
     // The command the user picked, held until this popup has actually closed — see onClosed.
     property string pendingCommandId: ""
 
-    // Whatever closed the palette — Escape, a pick, a click outside — the terminal must get the keyboard
-    // back, or the user is left typing into nothing. Only THEN does the picked command run: a command
+    // Whatever closed the palette — Escape, a pick, a click outside — the keyboard must go back where it
+    // was: to the dialog or popup the palette opened over, else to the terminal, or the user is left typing
+    // into nothing. Only THEN does the picked command run: a command
     // that opens a keyboard-driven surface of its own (SetTabColor's swatch picker, SetTabTitle's rename
     // field) takes the focus as it opens, and running it any earlier means this restore takes that focus
     // straight back and the surface cannot be typed into at all. Same law, and the same shape, as
@@ -91,8 +142,11 @@ Popup {
     // the close that is still unwinding, and the palette would need dismissing twice. Deferring to the
     // next event-loop turn dispatches the command with the popup's state machine at rest.
     onClosed: {
-        if (root.window)
+        if (root._returnFocus && root._isOverOverlay(root._returnFocus))
+            root._returnFocus.forceActiveFocus();
+        else if (root.window)
             root.window.restoreTerminalFocus();
+        root._returnFocus = null;
         const commandId = root.pendingCommandId;
         root.pendingCommandId = ""; // cleared BEFORE dispatch: the command may re-open this palette
         if (commandId && root.controller)

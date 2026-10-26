@@ -280,7 +280,15 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] QObject* activeTabRootPane() const noexcept { return _scene.rootPane; }
     [[nodiscard]] QObject* activeSession() const noexcept { return nullptr; }
     [[nodiscard]] QObject* commandPalette() const noexcept { return _scene.commandPalette; }
-    Q_INVOKABLE void runCommand(QString const&) {}
+    /// Records what the palette ran. ShowAbout is dispatched for real (WindowController::runCommand ->
+    /// the manager -> showAbout()), so a test can watch a picked command open a dialog of its own.
+    Q_INVOKABLE void runCommand(QString const& id)
+    {
+        ranCommands << id;
+        if (id == QStringLiteral("ShowAbout"))
+            showAbout();
+    }
+    QStringList ranCommands; ///< The ids runCommand() was called with, oldest first.
     /// Mirrors WindowController::openCommandPalette(): what the manager calls for the
     /// OpenCommandPalette action, and what makes Main.qml's popup appear.
     Q_INVOKABLE void openCommandPalette() { emit commandPaletteRequested(); }
