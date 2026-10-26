@@ -240,11 +240,11 @@ inline constexpr auto SearchToggleRows = std::array {
     SearchToggleRow { .toggle = SearchToggle::Regex,
                       .objectName = "searchBarRegexToggle",
                       .glyph = ".*",
-                      .accessibleName = "Use regular expression" },
+                      .accessibleName = "Regular expression" },
     SearchToggleRow { .toggle = SearchToggle::WholeWord,
                       .objectName = "searchBarWordToggle",
                       .glyph = "ab",
-                      .accessibleName = "Match whole word" },
+                      .accessibleName = "Whole word" },
 };
 
 static_assert(

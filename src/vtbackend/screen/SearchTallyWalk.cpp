@@ -26,6 +26,7 @@ void SearchTallyWalk::restart(Grid const& grid)
     _stablePosition = StableCell { .row = grid.stableLineIdOf(_position.line), .column = _position.column };
     _tally = SearchMatchTally {};
     _nearest.reset();
+    _nearestOrdinal = 0;
     _last.reset();
     _progress = _limit == 0 ? WalkProgress::Finished : WalkProgress::Running;
 }
@@ -74,7 +75,10 @@ std::expected<WalkProgress, SearchPatternError> SearchTallyWalk::step(Grid const
             if (cell == _stablePosition)
                 _tally.ordinal = _tally.total;
             if (cell <= _stablePosition)
+            {
                 _nearest = cell;
+                _nearestOrdinal = _tally.total;
+            }
             _last = cell;
         }
 

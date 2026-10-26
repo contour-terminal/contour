@@ -296,6 +296,8 @@ TEST_CASE("searchWalk.remembersTheNearestMatchBehindThePosition", "[searchwalk]"
     CHECK(drained.walk.nearestAtOrBefore(grid)
           == CellLocation { .line = LineOffset(-300), .column = ColumnOffset(0) });
     CHECK(drained.walk.lastMatch(grid) == CellLocation { .line = LineOffset(5), .column = ColumnOffset(0) });
+    // Its ordinal, so a jump to it reads "2 of 3" at once.
+    CHECK(drained.walk.nearestAtOrBeforeOrdinal() == 2);
 }
 
 TEST_CASE("probe.stopsAtItsBudget", "[searchwalk]")
@@ -309,8 +311,38 @@ TEST_CASE("probe.stopsAtItsBudget", "[searchwalk]")
     auto const needle = CellLocation { .line = LineOffset(-791), .column = ColumnOffset(0) };
     REQUIRE(terminal.primaryScreen().grid().lineText(needle.line).starts_with("needle"));
 
-    CHECK_FALSE(terminal.probeSearchReverse(bottom, LineCount(500)).has_value());
-    CHECK(terminal.probeSearchReverse(bottom, LineCount(1000)) == needle);
+    auto const bounded = terminal.probeSearchReverse(bottom, LineCount(500));
+    CHECK(bounded.outcome == SearchProbeOutcome::Undecided);
+    CHECK_FALSE(bounded.match.has_value());
+
+    auto const wider = terminal.probeSearchReverse(bottom, LineCount(1000));
+    CHECK(wider.outcome == SearchProbeOutcome::Found);
+    CHECK(wider.match == needle);
+}
+
+TEST_CASE("probe.aGridWithinTheBudgetIsAnsweredWhole", "[searchwalk]")
+{
+    // F8: where the probe can read every row, "nothing behind the cursor" is not the end of it.
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(100) };
+    mock.writeToScreen("hay\r\nneedle\r\nhay");
+    auto& terminal = mock.terminal;
+    auto const top = CellLocation {};
+
+    SECTION("a match below the cursor is found: the last one, as a finished walk would wrap to")
+    {
+        REQUIRE(terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed).has_value());
+        auto const probe = terminal.probeSearchReverse(top);
+        CHECK(probe.outcome == SearchProbeOutcome::Found);
+        CHECK(probe.match == CellLocation { .line = LineOffset(1), .column = ColumnOffset(0) });
+    }
+
+    SECTION("no match anywhere is proved")
+    {
+        REQUIRE(terminal.setNewSearchTerm(U"haystack", SearchOrigin::Typed).has_value());
+        auto const probe = terminal.probeSearchReverse(top);
+        CHECK(probe.outcome == SearchProbeOutcome::Absent);
+        CHECK_FALSE(probe.match.has_value());
+    }
 }
 
 TEST_CASE("searchWalk.theTerminalRestartsTheWalkOnAnotherPage", "[searchwalk]")

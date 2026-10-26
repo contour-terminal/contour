@@ -897,16 +897,6 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
                                                 SearchCaseSensitivity mode,
                                                 size_t limit) const;
 
-    /// Counts @p query's matches over the whole grid, scrollback included, and locates @p position among
-    /// them. @see tallyMatches
-    /// @param query    The compiled pattern.
-    /// @param position Reported back as @c ordinal when a match starts exactly there.
-    /// @param limit    Stop after this many and report @c TallyExactness::Capped.
-    /// @return The tally, or SearchPatternError::TooComplex where the regex engine gave up.
-    [[nodiscard]] std::expected<SearchMatchTally, SearchPatternError> tallyMatches(SearchQuery const& query,
-                                                                                   CellLocation position,
-                                                                                   size_t limit) const;
-
     /// Finds the first match of @p query at or after @p startPosition, walking forward segment by segment.
     /// @param query         The compiled pattern.
     /// @param startPosition Where to begin; a match starting exactly here is returned. A column past the

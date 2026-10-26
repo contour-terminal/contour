@@ -86,6 +86,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -4076,7 +4077,7 @@ TEST_CASE("TerminalSession: search-match focus actions move the vi cursor onto a
     // Set a search pattern through the terminal, then the match-focus actions have somewhere to go.
     {
         auto const l = std::scoped_lock { session->terminal() };
-        (void) session->terminal().setNewSearchTerm(U"needle", vtbackend::SearchOrigin::Typed);
+        std::ignore = session->terminal().setNewSearchTerm(U"needle", vtbackend::SearchOrigin::Typed);
     }
     // At least one of next/prev must find a match now (position-dependent), and neither throws.
     auto const nextFound = (*session)(actions::FocusNextSearchMatch {});
@@ -4134,28 +4135,35 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
     {
         session->terminal().writeToScreen("NEEDLE upper\r\n");
         session->setSearchPattern(QStringLiteral("needle"));
+        auto const caseToggle = [&] {
+            return session->searchToggles().at(0).toMap();
+        };
+        auto constexpr Case = static_cast<int>(contour::session::SearchToggle::Case);
 
         // Smart, and unpinned: the glyph is the capitalised one and the button is not lit.
-        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
-        CHECK_FALSE(session->searchCasePinned());
+        CHECK(caseToggle()[QStringLiteral("glyph")] == QStringLiteral("Aa"));
+        CHECK_FALSE(caseToggle()[QStringLiteral("checked")].toBool());
         auto const smart = session->searchSummary();
 
         // Smart -> Sensitive. Still "Aa", now lit, and the uppercase line stops counting.
-        session->cycleSearchCaseSensitivity();
-        CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
-        CHECK(session->searchCasePinned());
+        session->toggleSearchOption(Case);
+        CHECK(caseToggle()[QStringLiteral("glyph")] == QStringLiteral("Aa"));
+        CHECK(caseToggle()[QStringLiteral("checked")].toBool());
         CHECK(session->searchSummary() != smart);
 
         // Sensitive -> Insensitive. THIS is the one that shows the lowercase glyph. An earlier
         // version had it the other way round, and a test asserting enumerator integers could not
         // tell -- which is why this asserts what the user actually sees.
-        session->cycleSearchCaseSensitivity();
-        CHECK(session->searchCaseGlyph() == QStringLiteral("aa"));
-        CHECK(session->searchCasePinned());
+        session->toggleSearchOption(Case);
+        CHECK(caseToggle()[QStringLiteral("glyph")] == QStringLiteral("aa"));
+        CHECK(caseToggle()[QStringLiteral("checked")].toBool());
         CHECK(session->searchHasMatches());
 
         // Insensitive -> Smart, closing the cycle.
-        session->cycleSearchCaseSensitivity();
+        session->toggleSearchOption(Case);
+        CHECK(caseToggle()[QStringLiteral("glyph")] == QStringLiteral("Aa"));
+        CHECK_FALSE(caseToggle()[QStringLiteral("checked")].toBool());
+        // The case button SearchBar.qml binds reads the same row.
         CHECK(session->searchCaseGlyph() == QStringLiteral("Aa"));
         CHECK_FALSE(session->searchCasePinned());
     }
@@ -4215,6 +4223,242 @@ TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given
             session->searchPrevious();
         CHECK(session->searchSummary().contains(QStringLiteral(" of ")));
     }
+}
+
+namespace
+{
+/// Runs the count's walk to its end, a step at a time, as the event loop would; returns how many steps.
+int drainSearchTally(contour::session::TerminalSession& session)
+{
+    auto steps = 0;
+    while (session.searchTallyRunning())
+    {
+        session.runSearchTallyStep();
+        ++steps;
+    }
+    return steps;
+}
+
+/// Writes @p count rows, row @p i reading @p rowText(i).
+template <typename RowText>
+void writeSearchRows(vtbackend::Terminal& terminal, int count, RowText rowText)
+{
+    auto text = std::string {};
+    for (auto const row: std::views::iota(0, count))
+        text += rowText(row) + "\r\n";
+    terminal.writeToScreen(text);
+}
+
+/// Gives @p session room for @p rows of history.
+void allowHistory(contour::session::TerminalSession& session, int rows)
+{
+    auto const _ = std::scoped_lock { session.terminal() };
+    session.terminal().setHistoryLimits(
+        vtbackend::HistoryLimits::plain(vtbackend::MaxHistoryLineCount(vtbackend::LineCount(rows))));
+}
+} // namespace
+
+TEST_CASE("TerminalSession: the count is walked in steps and the lock is free between them",
+          "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    allowHistory(*session, 3000);
+    writeSearchRows(
+        terminal, 2000, [](int row) { return row % 5 == 0 ? std::string("needle") : std::string("hay"); });
+
+    session->searchBarOpened();
+    session->setSearchPattern(QStringLiteral("needle"));
+    session->refreshSearchStatus(); // the debounce firing: the first step runs inline
+    REQUIRE(session->searchTallyRunning());
+    CHECK(session->searchSummary().endsWith(QStringLiteral("…")));
+
+    // Between two steps nothing holds the lock: output goes in, as it would from the parser thread.
+    session->runSearchTallyStep();
+    terminal.writeToScreen("hay\r\n");
+    REQUIRE(session->searchTallyRunning());
+
+    drainSearchTally(*session);
+    auto const expected = [&] {
+        auto const _ = std::scoped_lock { terminal };
+        return terminal.tallySearchMatches(terminal.normalModeCursorPosition());
+    }();
+    REQUIRE(expected.total == 400);
+    CHECK(session->searchSummary()
+          == (expected.ordinal != 0 ? QStringLiteral("%1 of %2").arg(expected.ordinal).arg(expected.total)
+                                    : QStringLiteral("%1 matches").arg(expected.total)));
+}
+
+TEST_CASE("TerminalSession: an invalid regex says so in the count slot", "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen("a(b\r\n");
+    session->searchBarOpened();
+
+    session->toggleSearchOption(static_cast<int>(contour::session::SearchToggle::Regex));
+    session->setSearchPattern(QStringLiteral("a("));
+    session->refreshSearchStatus();
+    CHECK(session->searchSummary() == QStringLiteral("Invalid pattern"));
+    CHECK_FALSE(session->searchHasMatches());
+    CHECK_FALSE(session->searchNavigable());
+    CHECK_FALSE(session->searchTallyRunning());
+
+    session->setSearchPattern(QStringLiteral("a"));
+    session->refreshSearchStatus();
+    CHECK(session->searchHasMatches());
+    CHECK(session->searchSummary().contains(QStringLiteral(" of ")));
+}
+
+TEST_CASE("TerminalSession: a catastrophic pattern ends in a word, not a hang", "[contour][session][search]")
+{
+    auto constexpr Rows = 10000;
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    allowHistory(*session, Rows + 100);
+    writeSearchRows(session->terminal(), Rows, [](int) { return std::string(60, 'a') + "b"; });
+    session->searchBarOpened();
+    session->toggleSearchOption(static_cast<int>(contour::session::SearchToggle::Regex));
+
+    session->setSearchPattern(QStringLiteral("(a+)+$"));
+    session->refreshSearchStatus();
+    auto const steps = drainSearchTally(*session);
+    CHECK(steps <= (Rows + 499) / 500);
+#ifdef __GLIBCXX__
+    CHECK(session->searchSummary() == QStringLiteral("No results"));
+#else
+    CHECK(session->searchSummary() == QStringLiteral("Pattern too complex"));
+#endif
+    CHECK_FALSE(session->searchHasMatches());
+}
+
+TEST_CASE("TerminalSession: a match far above the cursor is reached after the bounded probe",
+          "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    allowHistory(*session, 3000);
+    terminal.writeToScreen("needle\r\n");
+    writeSearchRows(terminal, 2000, [](int) { return std::string("hay"); });
+    session->searchBarOpened();
+    auto const cursorBefore = [&] {
+        auto const _ = std::scoped_lock { terminal };
+        return terminal.normalModeCursorPosition();
+    }();
+
+    session->setSearchPattern(QStringLiteral("needle"));
+    // Beyond the probe's reach: not known yet, which is neither red nor navigable.
+    CHECK(session->searchHasMatches());
+    CHECK_FALSE(session->searchNavigable());
+    {
+        auto const _ = std::scoped_lock { terminal };
+        CHECK(terminal.normalModeCursorPosition() == cursorBefore);
+    }
+
+    session->refreshSearchStatus();
+    drainSearchTally(*session);
+    auto const _ = std::scoped_lock { terminal };
+    auto const top = -boxed_cast<vtbackend::LineOffset>(terminal.primaryScreen().historyLineCount());
+    CHECK(terminal.normalModeCursorPosition() == vtbackend::CellLocation { .line = top, .column = {} });
+    CHECK(session->searchSummary() == QStringLiteral("1 of 1"));
+}
+
+TEST_CASE("TerminalSession: toggles cycle and re-run the search", "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    session->terminal().writeToScreen("foo foobar\r\n");
+    session->searchBarOpened();
+    session->setSearchPattern(QStringLiteral("foo"));
+    session->refreshSearchStatus();
+
+    auto const toggles = session->searchToggles();
+    REQUIRE(std::cmp_equal(toggles.size(), contour::session::SearchToggleRows.size()));
+    for (auto const& row: contour::session::SearchToggleRows)
+    {
+        auto const map = toggles.at(static_cast<int>(row.toggle)).toMap();
+        CHECK(map[QStringLiteral("objectName")]
+              == QString::fromUtf8(row.objectName.data(), static_cast<qsizetype>(row.objectName.size())));
+        CHECK(map[QStringLiteral("toggle")].toInt() == static_cast<int>(row.toggle));
+        CHECK_FALSE(map[QStringLiteral("accessibleName")].toString().isEmpty());
+        CHECK_FALSE(map[QStringLiteral("tooltip")].toString().isEmpty());
+    }
+    CHECK(session->searchSummary().contains(QStringLiteral("of 2")));
+
+    auto constexpr WholeWord = static_cast<int>(contour::session::SearchToggle::WholeWord);
+    session->toggleSearchOption(WholeWord);
+    {
+        auto const _ = std::scoped_lock { session->terminal() };
+        CHECK(session->terminal().search().options.wordBoundary == vtbackend::SearchWordBoundary::WholeWord);
+    }
+    CHECK(session->searchToggles().at(WholeWord).toMap()[QStringLiteral("checked")].toBool());
+    CHECK(session->searchSummary().contains(QStringLiteral("of 1")));
+
+    auto const before = session->searchToggles();
+    session->toggleSearchOption(99);
+    session->toggleSearchOption(-1);
+    CHECK(session->searchToggles() == before);
+}
+
+TEST_CASE("TerminalSession: searchFocusedRows names the current match's rows", "[contour][session][search]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    auto const columns = unbox<int>(terminal.pageSize().columns);
+    // Rows 0-2 of hay, then "needle" wrapped over rows 3 and 4.
+    terminal.writeToScreen("hay\r\nhay\r\nhay\r\n" + std::string(static_cast<size_t>(columns - 3), 'x')
+                           + "needle");
+    session->searchBarOpened();
+    auto rowsChanged =
+        QSignalSpy { session.get(), &contour::session::TerminalSession::searchFocusedRowsChanged };
+
+    session->setSearchPattern(QStringLiteral("needle"));
+    auto const rows = session->searchFocusedRows();
+    CHECK(rows[QStringLiteral("first")].toInt() == 3);
+    CHECK(rows[QStringLiteral("last")].toInt() == 4);
+    CHECK(rowsChanged.count() == 1);
+
+    // Scrolled off screen: no rows, and said so.
+    allowHistory(*session, 1000);
+    writeSearchRows(terminal, 100, [](int) { return std::string("hay"); });
+    session->refreshSearchFocusedRows();
+    CHECK(session->searchFocusedRows().isEmpty());
+    CHECK(rowsChanged.count() == 2);
+}
+
+TEST_CASE("TerminalSession: output scrolling a match from another thread refreshes its rows",
+          "[contour][session][search][threading]")
+{
+    // The scroll callback runs on the parser thread with the state mutex held; the rows are re-read on the
+    // GUI thread, from a posted call, never under that callback.
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    allowHistory(*session, 1000);
+    writeSearchRows(
+        terminal, 50, [](int row) { return row == 10 ? std::string("needle") : std::string("hay"); });
+    session->searchBarOpened();
+    session->setSearchPattern(QStringLiteral("needle"));
+    {
+        auto const _ = std::scoped_lock { terminal };
+        terminal.viewport().scrollUp(vtbackend::LineCount(5));
+    }
+
+    auto writer = std::thread { [&terminal] {
+        for ([[maybe_unused]] auto const i: std::views::iota(0, 200))
+            terminal.writeToScreen("hay\r\n");
+    } };
+    writer.join();
+    QCoreApplication::processEvents();
+
+    auto const expected = [&] {
+        auto const _ = std::scoped_lock { terminal };
+        return terminal.focusedSearchMatch().has_value();
+    }();
+    CHECK(expected);
 }
 
 TEST_CASE("TerminalSession: the find bar wraps to the top of the page on display",
@@ -10634,13 +10878,16 @@ TEST_CASE("TerminalSession: a selection report raised on the GUI thread reaches 
         Row { .site = "setSearchPattern",
               .prepare = enterVisualMode,
               .act = [](auto& s) { s.setSearchPattern(QStringLiteral("line 29")); } },
-        Row { .site = "cycleSearchCaseSensitivity",
+        Row { .site = "toggleSearchOption(Case)",
               .prepare =
                   [](auto& s) {
                       enterVisualMode(s);
                       s.setSearchPattern(QStringLiteral("line"));
                   },
-              .act = [](auto& s) { s.cycleSearchCaseSensitivity(); } },
+              .act =
+                  [](auto& s) {
+                      s.toggleSearchOption(static_cast<int>(contour::session::SearchToggle::Case));
+                  } },
         Row { .site = "searchNext, wrapping round from the only match",
               .prepare =
                   [](auto& s) {

@@ -62,6 +62,9 @@ class SearchTallyWalk
     /// @return The last match the walk found at or before the position, where it still is in @p grid.
     [[nodiscard]] std::optional<CellLocation> nearestAtOrBefore(Grid const& grid) const;
 
+    /// @return The 1-based ordinal of the match nearestAtOrBefore() names; 0 while there is none.
+    [[nodiscard]] size_t nearestAtOrBeforeOrdinal() const noexcept { return _nearestOrdinal; }
+
     /// @return The last match the walk found, where it still is in @p grid.
     [[nodiscard]] std::optional<CellLocation> lastMatch(Grid const& grid) const;
 
@@ -104,6 +107,7 @@ class SearchTallyWalk
     StableCell _stablePosition {}; ///< @ref _position by stable id.
     SearchMatchTally _tally {};    ///< So far.
     std::optional<StableCell> _nearest {}; ///< The last match at or before the position.
+    size_t _nearestOrdinal = 0;            ///< The ordinal of @ref _nearest.
     std::optional<StableCell> _last {};    ///< The last match.
     LineCount _rowsLastStep {};
     WalkProgress _progress = WalkProgress::Running;

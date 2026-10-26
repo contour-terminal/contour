@@ -2760,6 +2760,9 @@ void TerminalSession::searchBarClosed()
     // the flag exists to avoid. Told by the bar rather than inferred, because only the bar knows.
     _isSearchBarOpen.store(false, std::memory_order_relaxed);
     _searchTallyTimer.stop();
+    // And the count being walked: its posted steps find the ticket moved on.
+    _searchWalk.reset();
+    ++_searchWalkTicket;
 
     // Cleared BECAUSE the timer was just stopped: the flag is otherwise only cleared where the timer
     // fires, so stopping it mid-window would strand the flag set for the rest of the session -- and a
@@ -2784,6 +2787,14 @@ void TerminalSession::searchCleared()
     platform::postToObject(this, [this] { refreshSearchStatus(); });
 }
 
+void TerminalSession::searchQueryEnded()
+{
+    // A pattern too complex to match, met wherever: by a step of the walk, a count, or a frame being drawn --
+    // the last on the render thread, under the state mutex. Posted for that reason; the refresh reads
+    // Search::problem and says so in the count slot.
+    platform::postToObject(this, [this] { refreshSearchStatus(); });
+}
+
 void TerminalSession::setSearchPattern(QString const& pattern)
 {
     // Locked: in a Visual mode the vi cursor following the match extends the selection, whose report is sent
@@ -2792,47 +2803,67 @@ void TerminalSession::setSearchPattern(QString const& pattern)
         auto const _ = std::scoped_lock { _terminal };
         auto text = pattern.toStdU32String();
         if (text.empty())
-        {
             _terminal.clearSearch();
-            _searchStatus = {};
-        }
         else
-        {
-            // Two steps rather than searchReverse(text, pos): that overload short-circuits when the
-            // term is unchanged and hands back the position it was given, which is indistinguishable
-            // from a match. Here the result has to actually mean "found something".
-            auto const installed =
-                _terminal.setNewSearchTerm(std::move(text), vtbackend::SearchOrigin::Typed);
-
-            // Backwards from the cursor, which is what the terminal's search has always done and what
-            // makes an incremental search land on the nearest match behind you rather than jumping to
-            // the top of the scrollback on every keystroke.
-            // A pattern that does not compile has no query and so no match; Search::problem says why.
-            auto const match =
-                installed ? _terminal.searchReverse(_terminal.normalModeCursorPosition()) : std::nullopt;
-            if (match)
-            {
-                // The cursor MUST follow the match, exactly as the vi `/` flow did. Three things read
-                // it: the tally's ordinal (so "3 of 27" has a 3 at all), the renderer's choice of
-                // searchHighlightFocused (so one match reads as the current one), and Enter, which
-                // steps from wherever the cursor is. Dropping the location broke all three.
-                _terminal.moveNormalModeCursorTo(*match);
-            }
-
-            // NOT tallied here. Counting walks the whole grid, and this runs on every keystroke, on
-            // the GUI thread, with the terminal locked -- on a deep scrollback that is the difference
-            // between a find bar and a stutter. What is knowable WITHOUT the walk goes in right away:
-            // whether anything matched, which is what tints the field and enables the buttons. The
-            // count follows on the debounce below.
-            _searchStatus = describeSearchCounting(match ? MatchPresence::Some : MatchPresence::None);
-        }
-
+            // Its error, a pattern that does not compile, is held by Search::problem, which the probe reads.
+            std::ignore = _terminal.setNewSearchTerm(std::move(text), vtbackend::SearchOrigin::Typed);
+        probeSearchLocked();
         _searchPatternText = pattern;
         _searchSummary = renderSearchSummary(_searchStatus);
+        refreshSearchFocusedRowsLocked();
     }
 
-    emit searchStateChanged();
+    publishSearchState();
     scheduleSearchTally();
+}
+
+void TerminalSession::probeSearchLocked()
+{
+    // A new pattern or new options: whatever was being walked counted something else.
+    _searchWalk.reset();
+    ++_searchWalkTicket;
+    _pendingSearchJump = PendingSearchJump::None;
+
+    auto const& search = _terminal.search();
+    if (search.pattern.empty())
+    {
+        _searchStatus = {};
+        return;
+    }
+    if (search.problem)
+    {
+        _searchStatus = describeSearchError(*search.problem);
+        return;
+    }
+
+    // NOT tallied here. Counting walks the whole grid, and this runs on every keystroke, on the GUI thread,
+    // with the terminal locked. The probe reads backwards from the cursor for one step's rows at most (R-e)
+    // -- which is what makes an incremental search land on the nearest match behind you -- and that is enough
+    // to tint the field and enable the buttons. The count follows on the debounce.
+    auto const probe = _terminal.probeSearchReverse(_terminal.normalModeCursorPosition());
+    if (search.problem) // the probe itself found the pattern too complex
+    {
+        _searchStatus = describeSearchError(*search.problem);
+        return;
+    }
+    switch (probe.outcome)
+    {
+        case vtbackend::SearchProbeOutcome::Found:
+            // The cursor MUST follow the match: the tally's ordinal, the focused highlight and Enter's
+            // starting point all read it.
+            _terminal.moveNormalModeCursorTo(*probe.match);
+            _searchStatus = describeSearchCounting(MatchPresence::Some);
+            break;
+        case vtbackend::SearchProbeOutcome::Absent:
+            _searchStatus = describeSearchCounting(MatchPresence::None);
+            break;
+        case vtbackend::SearchProbeOutcome::Undecided:
+            // Beyond the probe's reach: the walk, which reads the whole grid anyway, moves the cursor there
+            // once it ends -- unless the user moved it meanwhile.
+            _pendingSearchJump = PendingSearchJump::ToNearest;
+            _searchStatus = describeSearchCounting(MatchPresence::Unknown);
+            break;
+    }
 }
 
 void TerminalSession::scheduleSearchTally()
@@ -2846,31 +2877,27 @@ void TerminalSession::scheduleSearchTally()
     _searchTallyTimer.start();
 }
 
-void TerminalSession::cycleSearchCaseSensitivity()
+void TerminalSession::toggleSearchOption(int toggle)
 {
-    // Locked, as setSearchPattern() above moves the vi cursor.
+    if (toggle < 0 || std::cmp_greater_equal(toggle, SearchToggleRows.size()))
+        return;
+
     {
         auto const _ = std::scoped_lock { _terminal };
-        // Unconditional: nextSearchCase() never answers with the policy it was given, so
-        // setSearchOptions() cannot report "already in effect" here and testing it would only
-        // suggest it could.
-        auto options = _terminal.search().options;
-        options.caseSensitivity = nextSearchCase(options.caseSensitivity);
-        // Its error, where the pattern does not compile under them, is held by Search::problem.
+        auto const options = nextSearchOptions(SearchToggleRows[static_cast<size_t>(toggle)].toggle,
+                                               _terminal.search().options);
+        // Its error, a pattern that does not compile under them, is held by Search::problem.
         std::ignore = _terminal.setSearchOptions(options);
-
-        // Only the RE-SEARCH is skipped without a pattern, never the refresh and the notify below: the
-        // glyph and the tooltip changed regardless, and the bar has to be told.
-        if (!_terminal.search().pattern.empty())
-        {
-            // Re-run in place: the old match may not be a match under the new policy.
-            if (auto const match = _terminal.searchReverse(_terminal.normalModeCursorPosition()))
-                _terminal.moveNormalModeCursorTo(*match);
-        }
-
+        // As for a new pattern: the old match may not be one under the new options.
+        probeSearchLocked();
         refreshSearchStatusLocked();
     }
-    emit searchStateChanged();
+    publishSearchState();
+}
+
+void TerminalSession::cycleSearchCaseSensitivity()
+{
+    toggleSearchOption(static_cast<int>(SearchToggle::Case));
 }
 
 void TerminalSession::searchNext()
@@ -2946,7 +2973,92 @@ void TerminalSession::refreshSearchStatus()
         auto const l = scoped_lock { _terminal };
         refreshSearchStatusLocked();
     }
+    publishSearchState();
+}
+
+void TerminalSession::publishSearchState()
+{
     emit searchStateChanged();
+    if (std::exchange(_isSearchFocusedRowsDirty, false))
+        emit searchFocusedRowsChanged();
+}
+
+void TerminalSession::runSearchTallyStep()
+{
+    auto outcome = WalkStepOutcome::Done;
+    {
+        auto const l = scoped_lock { _terminal };
+        outcome = stepSearchTallyLocked();
+        _searchSummary = renderSearchSummary(_searchStatus);
+        refreshSearchFocusedRowsLocked();
+    }
+    // The lock is released here, between steps, so the parser thread is never starved by a deep count.
+    publishSearchState();
+    if (outcome == WalkStepOutcome::More)
+        postSearchTallyStep();
+}
+
+void TerminalSession::postSearchTallyStep()
+{
+    // The next step goes through the event loop rather than a loop here: input, output and painting run in
+    // between. A walk replaced since, or a bar closed since, drops it.
+    platform::postToObject(this, [this, ticket = _searchWalkTicket]() {
+        if (ticket == _searchWalkTicket && _searchWalk && _isSearchBarOpen.load(std::memory_order_relaxed))
+            runSearchTallyStep();
+    });
+}
+
+void TerminalSession::startSearchTallyLocked()
+{
+    _searchWalkOrigin = _terminal.normalModeCursorPosition();
+    _searchWalk = _terminal.beginSearchTally(_searchWalkOrigin);
+    ++_searchWalkTicket;
+    // The first step inline, under the lock already held: a scrollback within one step settles at once, so
+    // stepping through a short one never flashes "…" between two counts.
+    if (stepSearchTallyLocked() == WalkStepOutcome::More)
+        postSearchTallyStep();
+}
+
+TerminalSession::WalkStepOutcome TerminalSession::stepSearchTallyLocked()
+{
+    if (!_searchWalk)
+        return WalkStepOutcome::Done;
+
+    auto const progress = _terminal.continueSearchTally(*_searchWalk);
+    if (!progress)
+    {
+        _searchWalk.reset();
+        _searchStatus = describeSearchError(progress.error());
+        return WalkStepOutcome::Done;
+    }
+
+    auto const& walk = _searchWalk->walk;
+    if (*progress == vtbackend::WalkProgress::Running)
+    {
+        _searchStatus = describeSearchProgress(walk.tally());
+        return WalkStepOutcome::More;
+    }
+
+    auto tally = walk.tally();
+    // The keystroke probe found nothing in its reach; the walk has read everything. Jump where it would have
+    // landed: the nearest match at or before the cursor, else the last one -- if the cursor is still where
+    // the walk began, so a jump never undoes a move the user made meanwhile.
+    if (std::exchange(_pendingSearchJump, PendingSearchJump::None) == PendingSearchJump::ToNearest
+        && _terminal.normalModeCursorPosition() == _searchWalkOrigin)
+    {
+        auto const& grid = _terminal.displayedPage().grid();
+        auto const nearest = walk.nearestAtOrBefore(grid);
+        auto const target = nearest ? nearest : walk.lastMatch(grid);
+        if (target)
+        {
+            _terminal.moveNormalModeCursorTo(*target);
+            _terminal.viewport().makeVisibleWithinSafeArea(target->line);
+            tally.ordinal = nearest ? walk.nearestAtOrBeforeOrdinal() : tally.total;
+        }
+    }
+    _searchWalk.reset();
+    _searchStatus = describeSearch(_terminal.search().pattern, tally);
+    return WalkStepOutcome::Done;
 }
 
 QString TerminalSession::renderSearchSummary(SearchStatus const& status) const
@@ -2964,9 +3076,15 @@ QString TerminalSession::renderSearchSummary(SearchStatus const& status) const
     }
 
     // The count is still being walked. Saying so beats both a stale number and a blank that fills in
-    // a moment later looking like a glitch.
+    // a moment later looking like a glitch; what has been counted so far is shown, marked as not final.
     if (status.readiness == CountReadiness::Counting)
-        return tr("…");
+    {
+        if (status.tally.empty())
+            return tr("…");
+        if (status.tally.ordinal != 0)
+            return tr("%1 of %2…").arg(status.tally.ordinal).arg(status.tally.total);
+        return tr("%n match(es)…", nullptr, static_cast<int>(status.tally.total));
+    }
 
     auto const capped = status.tally.exactness == vtbackend::TallyExactness::Capped;
 
@@ -2993,23 +3111,56 @@ QString TerminalSession::renderSearchCaseTooltip(vtbackend::SearchCaseSensitivit
     core::unreachable();
 }
 
+void TerminalSession::publishSearchToggles(vtbackend::SearchOptions options)
+{
+    _searchCase = describeSearchCase(options.caseSensitivity);
+    _searchCaseTooltip = renderSearchCaseTooltip(options.caseSensitivity);
+
+    auto const tooltipOf = [&](SearchToggle toggle, ToggleState state) -> QString {
+        auto const on = state == ToggleState::On;
+        switch (toggle)
+        {
+            case SearchToggle::Case: return _searchCaseTooltip;
+            case SearchToggle::Regex:
+                return on ? tr("Regular expression: on") : tr("Regular expression: off");
+            case SearchToggle::WholeWord: return on ? tr("Whole word: on") : tr("Whole word: off");
+        }
+        core::unreachable();
+    };
+
+    _searchToggles.clear();
+    for (auto const& row: SearchToggleRows)
+    {
+        auto const affordance = describeSearchToggle(row.toggle, options);
+        auto const fromView = [](std::string_view text) {
+            return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
+        };
+        _searchToggles.append(QVariantMap {
+            { QStringLiteral("toggle"), static_cast<int>(row.toggle) },
+            { QStringLiteral("glyph"), fromView(affordance.glyph) },
+            { QStringLiteral("checked"), affordance.state == ToggleState::On },
+            { QStringLiteral("tooltip"), tooltipOf(row.toggle, affordance.state) },
+            { QStringLiteral("accessibleName"), tr(std::string(row.accessibleName).c_str()) },
+            { QStringLiteral("objectName"), fromView(row.objectName) },
+        });
+    }
+}
+
 void TerminalSession::refreshSearchStatusLocked()
 {
     auto const& search = _terminal.search();
-    _searchCase = describeSearchCase(search.options.caseSensitivity);
-    _searchCaseTooltip = renderSearchCaseTooltip(search.options.caseSensitivity);
+    publishSearchToggles(search.options);
     // Cached rather than read through on demand: searchPattern() is a Q_PROPERTY whose NOTIFY is
     // searchStateChanged, so a binding woken by that signal reads it -- and if reading it took the
     // terminal lock, every emit made while holding that lock would deadlock. Caching it here makes
     // the whole property group lock-free to read, so the emit is safe wherever it happens.
     _searchPatternText = QString::fromStdU32String(search.pattern);
+    refreshSearchFocusedRowsLocked();
 
     // Skipped entirely while the bar is closed: nothing displays the answer, and walking the
     // scrollback to compute one nobody reads is the cost this guard exists to avoid. The LAST status
     // is left standing rather than replaced by an idle one, so nothing can publish a wrong label --
-    // except when the pattern itself is gone, where keeping it IS the wrong label: the pattern above
-    // has just been published as empty, and a leftover "3 of 27" beside it is a disagreement anyone
-    // rebinding or re-opening the bar would see before the first tally lands.
+    // except when the pattern itself is gone, where keeping it IS the wrong label.
     if (!_isSearchBarOpen.load(std::memory_order_relaxed))
     {
         if (search.pattern.empty())
@@ -3020,11 +3171,60 @@ void TerminalSession::refreshSearchStatusLocked()
         return;
     }
 
-    _searchStatus = describeSearch(search.pattern,
-                                   search.pattern.empty()
-                                       ? vtbackend::SearchMatchTally {}
-                                       : _terminal.tallySearchMatches(_terminal.normalModeCursorPosition()));
+    if (search.pattern.empty())
+    {
+        _searchWalk.reset();
+        _searchStatus = {};
+    }
+    else if (search.problem)
+    {
+        // Every refresh path reads it, so a query ended anywhere -- even while a frame was drawn -- says so.
+        _searchWalk.reset();
+        _searchStatus = describeSearchError(*search.problem);
+    }
+    else if (_searchWalk && _searchWalk->walk.query() == search.query
+             && _searchWalkOrigin == _terminal.normalModeCursorPosition())
+    {
+        // A walk of this very query from this very place is under way: output arriving meanwhile does not
+        // restart it, or a count longer than the debounce would never finish while output streams (Q4).
+    }
+    else
+        startSearchTallyLocked();
     _searchSummary = renderSearchSummary(_searchStatus);
+}
+
+void TerminalSession::refreshSearchFocusedRowsLocked()
+{
+    auto rows = QVariantMap {};
+    if (auto const match = _terminal.focusedSearchMatch())
+    {
+        // Grid lines to viewport rows: a line scrolled back by the offset shows that many rows lower.
+        auto const offset = unbox<int>(_terminal.viewport().scrollOffset());
+        auto const lastRow = unbox<int>(_terminal.pageSize().lines) - 1;
+        auto const first = unbox<int>(match->first.line) + offset;
+        auto const last = unbox<int>(match->second.line) + offset;
+        if (last >= 0 && first <= lastRow)
+        {
+            rows.insert(QStringLiteral("first"), std::max(first, 0));
+            rows.insert(QStringLiteral("last"), std::min(last, lastRow));
+        }
+    }
+    if (rows != _searchFocusedRows)
+    {
+        _searchFocusedRows = std::move(rows);
+        _isSearchFocusedRowsDirty = true;
+    }
+}
+
+void TerminalSession::refreshSearchFocusedRows()
+{
+    _searchFocusedRowsPostPending.clear(std::memory_order_release);
+    {
+        auto const l = scoped_lock { _terminal };
+        refreshSearchFocusedRowsLocked();
+    }
+    if (std::exchange(_isSearchFocusedRowsDirty, false))
+        emit searchFocusedRowsChanged();
 }
 // }}}
 
@@ -3037,6 +3237,10 @@ void TerminalSession::onScrollOffsetChanged(vtbackend::ScrollOffset value)
     // scrolls a scrolled-back viewport reports the move from the parser thread, and the hover state is the
     // GUI thread's. postToObject targets `this`, so Qt drops the call if the session dies first.
     platform::postToObject(this, [this]() { clearHovers(); });
+    // The current match's viewport rows move with the scroll. Posted for the same reason, and because this
+    // runs with the terminal's state mutex held: reading the match takes it. At most one post in flight.
+    if (!_searchFocusedRowsPostPending.test_and_set(std::memory_order_acq_rel))
+        platform::postToObject(this, [this]() { refreshSearchFocusedRows(); });
     emit scrollOffsetChanged(unbox(value));
 }
 // }}}
@@ -6333,7 +6537,7 @@ void TerminalSession::configureTerminal()
 
         // Posted rather than emitted: this runs under the lock, and a QML binding woken by this signal
         // reads back into the session.
-        platform::postToObject(this, [this]() { emit searchStateChanged(); });
+        platform::postToObject(this, [this]() { publishSearchState(); });
 
         // Assigned as they are, the engine reading each where it uses it -- folding's switch among them,
         // which every fold verb consults.

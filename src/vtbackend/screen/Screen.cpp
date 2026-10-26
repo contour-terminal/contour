@@ -8830,25 +8830,20 @@ SearchMatchTally Screen::tallyMatches(std::u32string_view searchText,
                                       SearchCaseSensitivity mode,
                                       size_t limit) const
 {
-    auto const query = literalQuery(searchText, mode);
-    if (!query)
+    if (searchText.empty())
         return SearchMatchTally {};
-    return tallyMatches(*query, position, limit).value_or(SearchMatchTally {});
-}
+    // A literal always compiles; built straight into the walk's shared query, so nothing is copied.
+    auto const query = std::make_shared<SearchQuery const>(
+        SearchQuery::compile(searchText, SearchOptions { .caseSensitivity = mode }, {}).value());
 
-std::expected<SearchMatchTally, SearchPatternError> Screen::tallyMatches(SearchQuery const& query,
-                                                                         CellLocation position,
-                                                                         size_t limit) const
-{
     // A walk drained in one go: the count is the very one the find bar's stepped walk arrives at.
-    auto walk = SearchTallyWalk { std::make_shared<SearchQuery const>(query), _grid, position, limit };
+    auto walk = SearchTallyWalk { query, _grid, position, limit };
     auto const everyRow = boxed_cast<LineCount>(historyLineCount() + pageSize().lines);
     auto progress = walk.step(_grid, everyRow);
     while (progress && *progress == WalkProgress::Running)
         progress = walk.step(_grid, everyRow);
-    if (!progress)
-        return std::unexpected { progress.error() };
-    return walk.tally();
+    // A literal never gives up: only a regex can be too complex.
+    return progress ? walk.tally() : SearchMatchTally {};
 }
 
 bool Screen::isCursorInsideHorizontalMargins() const noexcept

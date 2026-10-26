@@ -1309,10 +1309,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // A query the highlighter found too complex to match is ended here, under the lock this pass holds, so
     // the next frame runs no matcher at all and the find bar can say why (R-f).
     if (auto const failure = builder.searchFailure())
-    {
-        _search.problem = failure;
-        _search.query.reset();
-    }
+        endSearchQuery(*failure);
 
     // After both branches: the gutter and the fold labels belong to the main display whichever page it is
     // showing, and each is a no-op on a page folding does not apply to.
@@ -8629,9 +8626,15 @@ std::optional<CellLocation> Terminal::settleSearch(
 {
     if (result)
         return *result;
-    _search.problem = result.error();
-    _search.query.reset();
+    endSearchQuery(result.error());
     return std::nullopt;
+}
+
+void Terminal::endSearchQuery(SearchPatternError error)
+{
+    _search.problem = error;
+    _search.query.reset();
+    _eventListener.searchQueryEnded();
 }
 
 std::optional<CellLocationRange> Terminal::focusedSearchMatch() const
@@ -8679,24 +8682,37 @@ std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(Te
     auto const progress = tally.walk.step(displayedPage().grid(), budget);
     // Only the query still active is ended: a walk of one the user has since replaced says nothing about it.
     if (!progress && tally.walk.query() == _search.query)
-    {
-        _search.problem = progress.error();
-        _search.query.reset();
-    }
+        endSearchQuery(progress.error());
     return progress;
 }
 
-std::optional<CellLocation> Terminal::probeSearchReverse(CellLocation from, LineCount budget)
+SearchProbe Terminal::probeSearchReverse(CellLocation from, LineCount budget)
 {
-    auto const matchLocation =
-        _search.query ? settleSearch(displayedPage().searchReverseFrom(*_search.query, from, budget))
-                      : std::nullopt;
+    if (!_search.query)
+        return SearchProbe {};
 
-    if (matchLocation)
-        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
+    auto const& page = displayedPage();
+    auto match = settleSearch(page.searchReverseFrom(*_search.query, from, budget));
+    auto const wholeGridFits = boxed_cast<LineCount>(page.historyLineCount()) + pageSize().lines <= budget;
+    if (!match && wholeGridFits && _search.query)
+    {
+        // Small enough to answer for every row: the last match, below @p from, is where a finished walk
+        // would wrap to, and none at all is proved.
+        auto const bottomRight = CellLocation { .line = boxed_cast<LineOffset>(pageSize().lines) - 1,
+                                                .column = boxed_cast<ColumnOffset>(pageSize().columns) - 1 };
+        match = settleSearch(page.searchReverseFrom(*_search.query, bottomRight));
+    }
 
+    if (match)
+        viewport().makeVisibleWithinSafeArea(match->line);
     screenUpdated();
-    return matchLocation;
+
+    if (match)
+        return SearchProbe { .outcome = SearchProbeOutcome::Found, .match = match };
+    // A query ended by the probe itself is no proof of absence.
+    if (wholeGridFits && _search.query)
+        return SearchProbe { .outcome = SearchProbeOutcome::Absent, .match = std::nullopt };
+    return SearchProbe {};
 }
 
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)

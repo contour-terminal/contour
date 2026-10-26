@@ -319,6 +319,21 @@ struct Search
     std::optional<SearchPatternError> problem {};
 };
 
+/// What the per-keystroke probe learnt. @see Terminal::probeSearchReverse
+enum class SearchProbeOutcome : uint8_t
+{
+    Undecided = 0, //!< Nothing within the budget, and grid beyond it: not known until a walk reads it.
+    Found,         //!< A match; SearchProbe::match names it.
+    Absent,        //!< The probe read the whole grid: there is no match anywhere.
+};
+
+/// The per-keystroke probe's answer.
+struct SearchProbe
+{
+    SearchProbeOutcome outcome = SearchProbeOutcome::Undecided; //!< What it learnt.
+    std::optional<CellLocation> match {};                       //!< The match, under Found.
+};
+
 /// A search tally walked in steps over one page, and the page it walks: a page switch restarts it.
 struct TerminalSearchTally
 {
@@ -751,6 +766,12 @@ class Terminal: public IStatusLinePublishTarget
         /// anything displaying the pattern is now displaying one the terminal no longer has. A hook of
         /// its own rather than screenUpdated(), which reports that what is on screen changed.
         virtual void searchCleared() {}
+
+        /// The active search's query was ended because matching it proved too complex (R-f): Search::problem
+        /// says so, and nothing highlights or steps any more. Raised wherever matching met it -- a step, a
+        /// count, or a frame being drawn, which may be on another thread and with the state mutex held -- so
+        /// a frontend showing the search hears about it on every path, not only on the ones it drives itself.
+        virtual void searchQueryEnded() {}
 
         /// The user asked for the search prompt -- by the SearchReverse action, or by `/` in vi mode.
         ///
@@ -3778,19 +3799,21 @@ class Terminal: public IStatusLinePublishTarget
     /// page now on display.
     /// @param tally  The walk beginSearchTally() began.
     /// @param budget The rows to read at least.
-    /// @return Whether rows remain; SearchPatternError::TooComplex, which also ends the active query where
-    /// the
-    ///         walk counts it (R-f).
+    /// @return Whether rows remain; SearchPatternError::TooComplex, which also ends the active query
+    ///         where the walk counts it (R-f).
     [[nodiscard]] std::expected<WalkProgress, SearchPatternError> continueSearchTally(
         TerminalSearchTally& tally, LineCount budget = SearchWalkStepLines);
 
     /// searchReverse(), giving up after @p budget rows of whole segments: the per-keystroke probe (R-e). A
     /// match it finds is revealed as searchReverse() reveals one.
+    ///
+    /// Where the whole page on display fits in the budget, the probe also answers for the rows below
+    /// @p from: it finds the last match there, as a finished tally walk would jump to, or proves there is
+    /// none anywhere.
     /// @param from   Where to search backwards from.
     /// @param budget The rows after which it gives up.
-    /// @return The match, or nothing where none lies within the budget.
-    [[nodiscard]] std::optional<CellLocation> probeSearchReverse(CellLocation from,
-                                                                 LineCount budget = SearchWalkStepLines);
+    /// @return The match found, and whether its absence is proved or merely not yet known.
+    [[nodiscard]] SearchProbe probeSearchReverse(CellLocation from, LineCount budget = SearchWalkStepLines);
 
     void clearSearch();
 
@@ -4284,6 +4307,9 @@ class Terminal: public IStatusLinePublishTarget
     /// Compiles Search::pattern under the options its origin reads it with and the current word delimiters,
     /// into Search::query or, where it does not compile, Search::problem. An empty pattern leaves both empty.
     void compileSearch();
+
+    /// Ends the active query because matching it failed with @p error (R-f), and tells the listener.
+    void endSearchQuery(SearchPatternError error);
 
     /// A search's answer, with a failure to match (R-f) ending the query: Search::problem holds why, and
     /// nothing highlights or steps until the pattern or the options change.

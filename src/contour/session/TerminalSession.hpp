@@ -257,9 +257,17 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     // The case affordance as what it SHOWS, not as an enumerator QML would have to interpret. The
     // bar spoke raw ints before and inverted every one of them; a glyph and a lit flag cannot be
     // read backwards. @see contour::session::describeSearchCase.
+    // Derived from searchToggles' Case row: SearchBar.qml's case button still binds these three.
     Q_PROPERTY(QString searchCaseGlyph READ searchCaseGlyph NOTIFY searchStateChanged)
     Q_PROPERTY(QString searchCaseTooltip READ searchCaseTooltip NOTIFY searchStateChanged)
     Q_PROPERTY(bool searchCasePinned READ searchCasePinned NOTIFY searchStateChanged)
+    // The find bar's toggles, one map per SearchToggleRows row: toggle (int), glyph, checked, tooltip,
+    // accessibleName and objectName. Maps rather than an enum the QML would have to interpret, for the reason
+    // the case affordance above is a glyph and a lit flag.
+    Q_PROPERTY(QVariantList searchToggles READ searchToggles NOTIFY searchStateChanged)
+    // The viewport rows the current match covers, { first, last }; empty when there is none on screen. The
+    // find bar reads it to move out of the match's way (window::placeFindBar).
+    Q_PROPERTY(QVariantMap searchFocusedRows READ searchFocusedRows NOTIFY searchFocusedRowsChanged)
     // What the pane shows over and around its terminal (a window::PaneState's value, chromeStyle.paneStates
     // names them): window::paneStateOf over the session's end and its host connection, so the card's
     // reconnecting pill and the ended pane's footer read one decision instead of making it again. An int,
@@ -307,10 +315,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The label beside the field: "3 of 27", "No results", "" while idle.
     [[nodiscard]] QString searchSummary() const { return _searchSummary; }
 
-    /// Whether the active pattern matches anything. Drives the field's error tint.
+    /// Whether the active pattern may match anything: false once proved to match nothing, or refused. Drives
+    /// the field's error tint; a walk still under way is not an error.
     [[nodiscard]] bool searchHasMatches() const noexcept
     {
-        return _searchStatus.outcome != SearchOutcome::NoMatch;
+        return _searchStatus.outcome != SearchOutcome::NoMatch
+               && _searchStatus.outcome != SearchOutcome::Invalid;
     }
 
     /// Whether previous/next would go anywhere. @see MatchNavigation.
@@ -319,17 +329,31 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _searchStatus.navigation == MatchNavigation::Available;
     }
 
+    /// The case toggle's glyph. @see searchToggles
     [[nodiscard]] QString searchCaseGlyph() const
     {
         return QString::fromUtf8(_searchCase.glyph.data(), qsizetype(_searchCase.glyph.size()));
     }
+    /// The case toggle's tooltip. @see searchToggles
     [[nodiscard]] QString searchCaseTooltip() const { return _searchCaseTooltip; }
+    /// Whether the case toggle is lit. @see searchToggles
     [[nodiscard]] bool searchCasePinned() const noexcept { return _searchCase.pinned == CasePinned::Yes; }
+
+    /// The find bar's toggles, as maps. @see Q_PROPERTY searchToggles
+    [[nodiscard]] QVariantList searchToggles() const { return _searchToggles; }
+
+    /// The viewport rows of the current match, { first, last }, or an empty map. @see focusedSearchMatch
+    [[nodiscard]] QVariantMap searchFocusedRows() const { return _searchFocusedRows; }
 
     /// Installs @p pattern as the search term and moves to its nearest match, live as the user types.
     Q_INVOKABLE void setSearchPattern(QString const& pattern);
 
-    /// Moves to the next case policy and re-runs the search in place. @see nextSearchCase.
+    /// Presses the find bar's toggle @p toggle (a SearchToggle's value): its option moves on, and the search
+    /// re-runs as for a new pattern. Out-of-range values do nothing.
+    /// @param toggle A SearchToggle, as an int (QML-facing).
+    Q_INVOKABLE void toggleSearchOption(int toggle);
+
+    /// Presses the case toggle: toggleSearchOption(SearchToggle::Case). SearchBar.qml's case button calls it.
     Q_INVOKABLE void cycleSearchCaseSensitivity();
 
     /// The find bar opened, or closed. Told rather than inferred: only the bar knows, and a tally is
@@ -341,10 +365,37 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_INVOKABLE void searchNext();
     Q_INVOKABLE void searchPrevious();
 
-    /// Re-reads the tally and re-derives the summary. Called after anything that can change either.
+    /// Re-derives the summary and, where the pattern, the options or the cursor changed or no walk is under
+    /// way, starts the count over. Called after anything that can change either.
     void refreshSearchStatus();
 
+    /// Reads one step of the count's walk (the terminal locked for that step only), publishes what it found,
+    /// and posts the next step while rows remain. GUI thread; public so a test can drive the walk without an
+    /// event loop, as refreshSearchStatus() is.
+    void runSearchTallyStep();
+
+    /// @return Whether a count is being walked.
+    [[nodiscard]] bool searchTallyRunning() const noexcept { return _searchWalk.has_value(); }
+
+    /// Re-reads the current match's viewport rows, under the terminal's lock, and notifies a change. GUI
+    /// thread; the scroll callback posts it, because it runs with the lock held.
+    void refreshSearchFocusedRows();
+
   private:
+    /// Whether the count's walk has rows left after a step.
+    enum class WalkStepOutcome : uint8_t
+    {
+        Done = 0, ///< Finished, failed, or there is no walk.
+        More,     ///< Rows remain: post the next step.
+    };
+
+    /// Whether the cursor jumps once the walk ends: set when the keystroke probe found nothing (R-e).
+    enum class PendingSearchJump : uint8_t
+    {
+        None = 0,  ///< The cursor stays.
+        ToNearest, ///< To the nearest match at or before it, else the last one, if it has not moved since.
+    };
+
     /// Which end of the scrollback a wrapped search restarts from.
     enum class SearchWrapEdge : uint8_t
     {
@@ -355,6 +406,31 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The half of refreshSearchStatus() that reads the terminal, for callers already holding its
     /// lock -- so typing does not take the lock twice and walk the grid twice per keystroke.
     void refreshSearchStatusLocked();
+
+    /// Installs what the active search's pattern and options say into the bar's state, under the lock: a
+    /// refused pattern as Invalid, otherwise the bounded probe (R-e), moving the vi cursor onto what it
+    /// found.
+    void probeSearchLocked();
+
+    /// Begins the count's walk at the vi cursor and reads its first step inline, so a scrollback within one
+    /// step settles at once; posts the next step while rows remain. Under the lock; bar open only.
+    void startSearchTallyLocked();
+
+    /// Reads one step of _searchWalk under the lock and publishes it into _searchStatus.
+    /// @return Whether more steps remain.
+    [[nodiscard]] WalkStepOutcome stepSearchTallyLocked();
+
+    /// Posts the walk's next step, guarded by the current ticket and the bar being open.
+    void postSearchTallyStep();
+
+    /// Re-derives _searchToggles and the case affordance from @p options.
+    void publishSearchToggles(vtbackend::SearchOptions options);
+
+    /// Re-derives _searchFocusedRows under the lock; marks it to be notified when it changed.
+    void refreshSearchFocusedRowsLocked();
+
+    /// Emits searchStateChanged, and searchFocusedRowsChanged where the rows changed. Outside the lock.
+    void publishSearchState();
 
     /// Renders @p status as the label the bar shows, translated.
     ///
@@ -1130,6 +1206,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void userMarkRequested(vtbackend::UserMarkRequest const& request) override;
     void searchPromptRequested() override;
     void searchCleared() override;
+    void searchQueryEnded() override;
     void updateHighlights() override;
     void playSound(vtbackend::Sequence::Parameters const& params) override;
     void requestShowHostWritableStatusLine() override;
@@ -1450,8 +1527,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The find bar should open and take focus. Raised by searchPromptRequested(), the
     /// vtbackend::Terminal::Events hook -- which cannot itself be the signal, being an override.
     void searchBarRequested();
-    /// The pattern, its tally, or the case policy changed.
+    /// The pattern, its tally, or the toggles changed.
     void searchStateChanged();
+    /// searchFocusedRows() changed: the current match moved, or scrolled.
+    void searchFocusedRowsChanged();
     /// isReconnecting() changed.
     void reconnectingChanged();
     /// paneState() changed: the host connection was lost or regained, or the session ended.
@@ -1966,6 +2045,21 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     QString _searchPatternText;
     QString _searchSummary;
     QString _searchCaseTooltip;
+    QVariantList _searchToggles;
+    /// @see searchFocusedRows. GUI thread only.
+    QVariantMap _searchFocusedRows;
+    /// Whether _searchFocusedRows changed since searchFocusedRowsChanged was last emitted. GUI thread only.
+    bool _isSearchFocusedRowsDirty = false;
+    /// Collapses the scroll callback's refresh posts to at most one in flight.
+    std::atomic_flag _searchFocusedRowsPostPending = ATOMIC_FLAG_INIT;
+    /// The count being walked, between its steps; nothing while none is. GUI thread only.
+    std::optional<vtbackend::TerminalSearchTally> _searchWalk;
+    /// Bumped by every walk begun, so a posted step of an older walk does nothing.
+    uint64_t _searchWalkTicket = 0;
+    /// Where the vi cursor was when the walk began: a pending jump applies only if it is still there.
+    vtbackend::CellLocation _searchWalkOrigin {};
+    /// @see PendingSearchJump
+    PendingSearchJump _pendingSearchJump = PendingSearchJump::None;
     /// Coalesces re-tallying while output keeps arriving: a tally walks the whole scrollback, so it
     /// must never run once per frame. Armed by screenUpdated(), and only while the bar is open.
     QTimer _searchTallyTimer;
