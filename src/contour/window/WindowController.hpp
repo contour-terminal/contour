@@ -13,6 +13,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/MenuRouting.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowPositionStore.hpp>
@@ -432,6 +433,13 @@ class WindowController:
     [[nodiscard]] session::PaneProxy* activeTabRootPane() const noexcept { return _activeTabRootProxy; }
     /// @return The leaves under the active tab's layout root; 0 without a tab.
     [[nodiscard]] int visiblePaneCount() const noexcept { return _visiblePaneCount; }
+
+    /// Has the sessions whose pane header shows follow the program in front of them, and every other session
+    /// of this window stop (session::ProcessNameFollower::Header). A header shows for a leaf under the
+    /// active tab's layout root when resolvePaneHeader() says so for the density, the reveal and the
+    /// visible pane count; its geometry is QML's and is not consulted. Called on active-tab, structure,
+    /// zoom, density and reveal changes.
+    void refreshHeaderFollowers();
     [[nodiscard]] session::TerminalSession* activeSession() const noexcept;
     [[nodiscard]] bool titleBarVisible() const noexcept;
     [[nodiscard]] bool isMultimediaReady() const noexcept;
@@ -1045,6 +1053,9 @@ class WindowController:
     session::PaneProxy* _activeTabRootProxy = nullptr;
     // @see visiblePaneCount. Recounted with the layout root (refreshActiveTabLayoutRoot()).
     int _visiblePaneCount = 0;
+    // What, besides the density, reveals this window's pane headers (@see refreshHeaderFollowers). None
+    // until the held-modifier reveal drives it.
+    HeaderReveal _headerReveal = HeaderReveal::None;
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;

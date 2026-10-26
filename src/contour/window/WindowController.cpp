@@ -36,6 +36,7 @@
 #include <QtQml/QQmlEngine>
 
 #include <cstdlib>
+#include <limits>
 #include <mutex>
 #include <ranges>
 #include <utility>
@@ -1910,6 +1911,8 @@ void WindowController::notifyPaneSessionReplaced(vtworkspace::TabId tab, vtworks
             it->second->notifyChanged();
         if (active->activePane() != nullptr && active->activePane()->id() == leaf)
             emit activeSessionChanged();
+        // The new session is followed as the one it replaced was.
+        refreshHeaderFollowers();
     }
     notifyTabRowChanged(tab, { Roles::SessionIdRole, Roles::TitleRole });
 }
@@ -1938,6 +1941,46 @@ void WindowController::refreshActiveTabLayoutRoot()
     {
         _visiblePaneCount = visible;
         emit visiblePaneCountChanged();
+    }
+
+    // Every caller -- the active tab, a split or close, a zoom -- may have changed whose header shows.
+    refreshHeaderFollowers();
+}
+
+void WindowController::refreshHeaderFollowers()
+{
+    auto const* win = window();
+    if (win == nullptr)
+        return;
+
+    // Whether a header shows at all is the same for every visible leaf: what is left of the decision is the
+    // pane's geometry, which is QML's. A width that shows the directory and room for any height ask for
+    // nothing the rule could refuse a header for.
+    auto const header = resolvePaneHeader({
+        .density = _manager.app().config().chromeDensity.value(),
+        .reveal = _headerReveal,
+        .visiblePanes = _visiblePaneCount,
+        .width = CwdMinPaneWidth,
+        .height = std::numeric_limits<double>::max(),
+    });
+    auto const* active = activeModelTab();
+    auto const* shown =
+        active != nullptr && header.content != PaneHeaderContent::Hidden ? active->layoutRoot() : nullptr;
+
+    for (auto const row: std::views::iota(0, win->tabCount()))
+    {
+        auto* const tab = win->tabAt(row);
+        if (tab == nullptr || tab->rootPane() == nullptr)
+            continue;
+        tab->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+            auto* const session = pane.isLeaf() ? _manager.sessionForId(pane.session()) : nullptr;
+            if (session == nullptr)
+                return;
+            if (shown != nullptr && shown->contains(&pane))
+                session->startFollowingForegroundProcess(session::ProcessNameFollower::Header);
+            else
+                session->stopFollowingForegroundProcess(session::ProcessNameFollower::Header);
+        });
     }
 }
 

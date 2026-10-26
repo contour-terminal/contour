@@ -33,6 +33,8 @@
 
 #include <crispy/Point.hpp>
 
+#include <core/Flags.hpp>
+
 #include <QtCore/QAbstractItemModel>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
@@ -181,6 +183,14 @@ enum class LinkFollow : uint8_t
     Probing,          ///< A path is being looked for on the probe thread; it opens once found.
 };
 
+/// Who follows the program in front of a session's shell, which its foreground-process poll serves. A
+/// bitmask: the two combine freely, and the poll runs while any is set (core::Flags; empty is none).
+enum class ProcessNameFollower : uint8_t
+{
+    Extension = 0b01, ///< A status-line extension subscribed to the foreground process.
+    Header = 0b10,    ///< The pane's header is visible and shows the name.
+};
+
 /// Where a pointer over the gutter is: the row it names and the segment it is over.
 struct GutterHit
 {
@@ -265,6 +275,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         QString displayWorkingDirectory READ getDisplayWorkingDirectory NOTIFY displayWorkingDirectoryChanged)
     Q_PROPERTY(int programStatus READ getProgramStatus NOTIFY paneProgramStatusChanged)
     Q_PROPERTY(QString programStatusText READ getProgramStatusText NOTIFY paneProgramStatusChanged)
+    // The program in front of the shell, as the foreground-process poll last read it: notified on a change,
+    // and only while someone follows it (a visible header, an extension).
+    Q_PROPERTY(
+        QString foregroundProcessName READ getForegroundProcessName NOTIFY foregroundProcessNameChanged)
     // }}}
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
@@ -755,6 +769,28 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param kind The badge this pane's own records earn.
     /// @param text What it says.
     void setPaneProgramStatus(window::TabBadgeKind kind, QString text);
+
+    /// @return The program in front of the shell, as pollForegroundProcess() last read it; empty before it
+    ///         read one, and always for a remote-hosted pane. GUI thread.
+    [[nodiscard]] QString getForegroundProcessName() const
+    {
+        return QString::fromStdString(_polledForegroundProcessName);
+    }
+
+    /// Adds @p who to those following the program in front. The first follower makes the one-second poll
+    /// and polls at once, so a header never waits a second for its name. A remote-hosted pane follows
+    /// nothing: its program runs on the host, which this machine's device knows nothing of. GUI thread.
+    /// @param who The follower.
+    void startFollowingForegroundProcess(ProcessNameFollower who);
+
+    /// Removes @p who from those following the program in front; the poll stops with the last. GUI thread.
+    /// @param who The follower.
+    void stopFollowingForegroundProcess(ProcessNameFollower who);
+
+    /// Reads the program in front of the shell from the device. On a change it remembers it, notifies
+    /// foregroundProcessNameChanged() and, while an extension follows, tells the terminal. The poll's tick,
+    /// public for the tests to tick it. GUI thread.
+    void pollForegroundProcess();
     // }}}
 
     /// @return The ended pane's footer text; empty while the session runs.
@@ -780,9 +816,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
         return _hostConnection == vthost::client::ConnectionState::Reconnecting;
     }
 
-    /// The name of the program in front of this session's shell, which a tab with an empty label shows.
-    /// GUI thread. One query of the process table per call, so a caller asking often caches it.
-    /// @return The name; empty when the device is not a vtpty::Process (a mirrored pane) or it is unknown.
+    /// The name of the program in front of this session's shell, which a tab with an empty label shows, asked
+    /// of the device now (vtpty::Pty::foregroundProcessName). GUI thread. One query of the process table per
+    /// call, so a caller asking often caches it, or reads the polled getForegroundProcessName().
+    /// @return The name; empty for a remote-hosted pane, a device with no process group, or when unknown.
     [[nodiscard]] std::string foregroundProcessName() const;
 
     config::Config const& config() const noexcept { return _config; }
@@ -954,8 +991,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return Whether any status-line extension runs in the pane; false in a build without extensions.
     [[nodiscard]] bool runsStatusLineExtensions() const noexcept;
 
-    /// @return Whether the pane polls which program is in its foreground: only while one of its status-line
-    ///         extensions follows it. GUI thread.
+    /// @return Whether the pane polls which program is in its foreground: while one of its status-line
+    ///         extensions or its visible header follows it. GUI thread.
     [[nodiscard]] bool pollsForegroundProcess() const noexcept;
 
     void updateColorPreference(vtbackend::ColorPreference preference);
@@ -1379,6 +1416,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void displayWorkingDirectoryChanged();
     /// @see getProgramStatus. Not programStatusChanged(), which is the terminal event this session hears.
     void paneProgramStatusChanged();
+    /// @see getForegroundProcessName
+    void foregroundProcessNameChanged();
     void hyperlinkHoverChanged();
     /// The hovered command block changed, or the pointer left it: re-read commandBlockTooltip().
     void commandBlockHoverChanged();
@@ -1763,12 +1802,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Records the answer to the extension prompt, and asks the next question, if any.
     void answerExtensionConsent(vtextension::ConsentAnswer answer);
 
-    /// Tells the extensions when the program in the foreground changed. Ticks only while one follows it.
-    void pollForegroundProcess();
-
-    /// Starts the foreground poll if an extension follows the foreground process, and stops it if none does.
+    /// Has the extensions follow the foreground process while one subscribes to it, and stop when none does.
     /// GUI thread.
     void armForegroundProcessPoll();
+
+    /// Tells the terminal, and so the extensions, the program in front, once per name. Without
+    /// CONTOUR_EXTENSIONS, nothing. GUI thread.
+    void tellExtensionsForegroundProcess();
 
     /// Has the engines and modules that runners retired released a moment from now, once their lanes ran
     /// their last jobs.
@@ -2154,6 +2194,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     window::TabBadgeKind _paneProgramStatus = window::TabBadgeKind::None;
     /// @see getProgramStatusText. GUI thread.
     QString _paneProgramStatusText;
+    /// Asks the device which program is in front, once a second; exists only while someone follows it
+    /// (@ref _processNameFollowers). GUI thread.
+    std::unique_ptr<QTimer> _foregroundProcessTimer;
+    /// Who follows the program in front. GUI thread.
+    core::Flags<ProcessNameFollower> _processNameFollowers;
+    /// The program in front, as the poll last read it. GUI thread.
+    std::string _polledForegroundProcessName;
     /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
     /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingOutputOrigins = 0;

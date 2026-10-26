@@ -158,6 +158,7 @@ if(VTPTY_TESTING)
         EnvironmentBlock_test.cpp
         ErrnoText_test.cpp
         ImageSize_test.cpp
+        MockPty_test.cpp
         PlacementBreaker_test.cpp
         Process_test.cpp
         SandboxInfo_test.cpp

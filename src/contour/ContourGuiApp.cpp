@@ -1826,6 +1826,8 @@ void ContourGuiApp::refreshChromeStyle()
     // and a reload or an OS change may arrive before it (or without it, in a headless test).
     if (_chromeStyleHost)
         _chromeStyleHost->update(chromeInputs());
+    // Not behind the guard: which pane headers show (the density) is decided headless too.
+    _sessionManager.refreshChromeDependents();
 }
 
 window::WindowController* ContourGuiApp::focusedController() const noexcept

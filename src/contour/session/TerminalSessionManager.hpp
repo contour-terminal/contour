@@ -530,6 +530,11 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param motion The OS motion preference.
     void updateMotionPreference(config::MotionPreference motion);
 
+    /// What every window derives from the chrome's configuration, refreshed after it changed (a reload, an
+    /// OS appearance or accessibility change): which pane headers show, and so which sessions follow the
+    /// program in front of them. The one fan-out ContourGuiApp::refreshChromeStyle() calls. GUI thread.
+    void refreshChromeDependents();
+
     void focusOnDisplay(display::TerminalDisplay* display);
 
     /// Single authority for terminal (VT) focus: sends a focus-OUT to the previously focused session

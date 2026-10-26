@@ -1546,6 +1546,175 @@ TEST_CASE("TerminalSessionManager: visiblePaneCount follows splits and zoom", "[
     contour::test::closeAllTabs(*window);
 }
 
+namespace
+{
+
+/// The MockPty behind @p session: what a test names the program in front through.
+[[nodiscard]] vtpty::MockPty& mockPtyOf(contour::session::TerminalSession& session)
+{
+    return dynamic_cast<vtpty::MockPty&>(session.pty());
+}
+
+/// The sessions of tab @p row of @p window, in tree order.
+[[nodiscard]] std::vector<contour::session::TerminalSession*> sessionsOfTab(
+    contour::session::TerminalSessionManager& manager, contour::window::WindowController& window, int row)
+{
+    auto sessions = std::vector<contour::session::TerminalSession*> {};
+    manager.model().window(window.windowId())->tabAt(row)->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+        if (pane.isLeaf())
+            sessions.push_back(manager.sessionForId(pane.session()));
+    });
+    return sessions;
+}
+
+/// Whether every one of @p sessions polls the program in front of it.
+[[nodiscard]] bool allPoll(std::vector<contour::session::TerminalSession*> const& sessions)
+{
+    return std::ranges::all_of(sessions, &contour::session::TerminalSession::pollsForegroundProcess);
+}
+
+/// Whether none of @p sessions does.
+[[nodiscard]] bool nonePoll(std::vector<contour::session::TerminalSession*> const& sessions)
+{
+    return std::ranges::none_of(sessions, &contour::session::TerminalSession::pollsForegroundProcess);
+}
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: a single pane polls nothing", "[manager][processname]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const window { app.manager() };
+    window->createNewTab();
+    REQUIRE(window->activeSession() != nullptr);
+    CHECK_FALSE(window->activeSession()->pollsForegroundProcess());
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a split's visible panes poll, and only on change",
+          "[manager][processname]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    manager.splitActivePane(/*vertical*/ true, left);
+    auto* const right = window->activeSession();
+    REQUIRE(right != left);
+    CHECK(left->pollsForegroundProcess());
+    CHECK(right->pollsForegroundProcess());
+
+    auto const changed =
+        QSignalSpy { left, &contour::session::TerminalSession::foregroundProcessNameChanged };
+    mockPtyOf(*left).setForegroundProcessName("vim");
+    left->pollForegroundProcess();
+    CHECK(changed.count() == 1);
+    CHECK(left->getForegroundProcessName() == QStringLiteral("vim"));
+    CHECK(right->getForegroundProcessName().isEmpty());
+
+    left->pollForegroundProcess();
+    CHECK(changed.count() == 1);
+
+    SECTION("closing back to one pane stops the poll")
+    {
+        manager.closeActivePane(right, contour::session::SessionEnd::Destroy);
+        right->onClosed();
+        CHECK(window->visiblePaneCount() == 1);
+        CHECK_FALSE(left->pollsForegroundProcess());
+    }
+
+    SECTION("zooming one stops the poll, and unzooming starts it again")
+    {
+        manager.toggleActivePaneZoom(right);
+        CHECK_FALSE(left->pollsForegroundProcess());
+        CHECK_FALSE(right->pollsForegroundProcess());
+        manager.toggleActivePaneZoom(right);
+        CHECK(left->pollsForegroundProcess());
+        CHECK(right->pollsForegroundProcess());
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: only the active tab's pane headers poll", "[manager][processname]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+    {
+        window->createNewTab();
+        manager.splitActivePane(/*vertical*/ true, window->activeSession());
+        manager.splitActivePane(/*vertical*/ false, window->activeSession());
+    }
+    REQUIRE(window->activeTabIndex() == 3);
+    for (auto const row: std::views::iota(0, 4))
+        REQUIRE(sessionsOfTab(manager, *window, row).size() == 3);
+
+    CHECK(allPoll(sessionsOfTab(manager, *window, 3)));
+    for (auto const row: std::views::iota(0, 3))
+        CHECK(nonePoll(sessionsOfTab(manager, *window, row)));
+
+    window->activateTab(2);
+    CHECK(allPoll(sessionsOfTab(manager, *window, 2)));
+    CHECK(nonePoll(sessionsOfTab(manager, *window, 0)));
+    CHECK(nonePoll(sessionsOfTab(manager, *window, 1)));
+    CHECK(nonePoll(sessionsOfTab(manager, *window, 3)));
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: under Minimal, no pane header polls", "[manager][processname]")
+{
+    contour::test::ConfiguredTestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = testApp.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    manager.splitActivePane(/*vertical*/ true, window->activeSession());
+    REQUIRE(allPoll(sessionsOfTab(manager, *window, 0)));
+
+    // A density change refreshes who follows: the held modifier that would reveal the headers is not held.
+    contour::test::writeConfigFile(
+        testApp.configFile(),
+        contour::test::profileConfigYaml(testApp.app().profileName(), "chrome_density: minimal\n"));
+    REQUIRE(manager.reloadAllSessions());
+    REQUIRE(testApp.app().config().chromeDensity.value() == contour::config::ChromeDensity::Minimal);
+    CHECK(nonePoll(sessionsOfTab(manager, *window, 0)));
+
+    // And a split made under it starts none.
+    manager.splitActivePane(/*vertical*/ false, window->activeSession());
+    CHECK(nonePoll(sessionsOfTab(manager, *window, 0)));
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a remote-hosted pane has no process name", "[manager][processname]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    factoryOwned->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::test::TestApp app { std::move(factoryOwned) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    REQUIRE(left != nullptr);
+    manager.splitActivePane(/*vertical*/ true, left);
+    REQUIRE(sessionsOfTab(manager, *window, 0).size() == 2);
+
+    // Its program runs on the host, which names it there: this machine's device is asked nothing.
+    mockPtyOf(*left).setForegroundProcessName("vim");
+    auto const changed =
+        QSignalSpy { left, &contour::session::TerminalSession::foregroundProcessNameChanged };
+    CHECK(nonePoll(sessionsOfTab(manager, *window, 0)));
+    left->pollForegroundProcess();
+    CHECK(changed.count() == 0);
+    CHECK(left->getForegroundProcessName().isEmpty());
+    CHECK(left->foregroundProcessName().empty());
+
+    contour::test::closeAllTabs(*window);
+}
+
 // }}}
 
 TEST_CASE("TerminalSessionManager: revealing a session brings its tab and pane forward",

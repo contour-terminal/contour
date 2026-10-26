@@ -261,6 +261,10 @@ namespace
     /// scrollback, so recomputing them faster than a display can show them buys nothing.
     constexpr auto ScrollbarMarksFrameInterval = std::chrono::milliseconds { 16 };
 
+    /// How often the program in front of a followed session's shell is asked for: each ask is one query of
+    /// the process table, and a header or extension a second behind a program change is in time.
+    constexpr auto ForegroundProcessPollInterval = std::chrono::seconds { 1 };
+
     /// @p ticks as QML reads them: one { position, kind, targetLine } map per tick, top first.
     /// @param ticks The bucketed ticks.
     /// @param trackPixels The track they were bucketed for; each position is a fraction of it.
@@ -348,9 +352,6 @@ struct TerminalSession::ExtensionState
     /// The questions this session asks, one prompt at a time; made on the first question.
     std::unique_ptr<vtextension::ExtensionConsentQueue> consent;
 
-    /// Asks the pty which program is in the foreground; exists only while an extension follows it.
-    std::unique_ptr<QTimer> foregroundProcessTimer;
-
     /// Whether an extension follows the foreground process, as a worker last saw it: a published frame that
     /// changes it has the poll (dis)armed on the GUI thread, and one that does not posts nothing.
     vtbackend::StatusLineSubscriptionWatch foregroundProcessFollowing {
@@ -359,7 +360,7 @@ struct TerminalSession::ExtensionState
 
     /// The foreground program the extensions were last told of, so that each is told once; extensions that
     /// load or subscribe later hear it from the terminal, which remembers it.
-    std::string foregroundProcessName;
+    std::string toldForegroundProcessName;
 };
 #endif
 
@@ -1135,11 +1136,46 @@ vtextension::SessionExtensions const* TerminalSession::statusLineExtensions() co
 
 bool TerminalSession::pollsForegroundProcess() const noexcept
 {
-#ifdef CONTOUR_EXTENSIONS
-    return _extensionState && _extensionState->foregroundProcessTimer != nullptr;
-#else
-    return false;
-#endif
+    return _foregroundProcessTimer != nullptr;
+}
+
+void TerminalSession::startFollowingForegroundProcess(ProcessNameFollower who)
+{
+    // A mirrored pane's program runs on its host: this machine's device has no process group to ask.
+    if (_hosting == SessionHosting::Remote || _processNameFollowers.test(who))
+        return;
+    _processNameFollowers.enable(who);
+    if (!_foregroundProcessTimer)
+    {
+        _foregroundProcessTimer = std::make_unique<QTimer>();
+        _foregroundProcessTimer->setInterval(ForegroundProcessPollInterval);
+        connect(
+            _foregroundProcessTimer.get(), &QTimer::timeout, this, &TerminalSession::pollForegroundProcess);
+        _foregroundProcessTimer->start();
+    }
+    // At once, so that the new follower does not wait a tick: a name already known is told, not re-read.
+    pollForegroundProcess();
+}
+
+void TerminalSession::stopFollowingForegroundProcess(ProcessNameFollower who)
+{
+    _processNameFollowers.disable(who);
+    if (_processNameFollowers.none())
+        _foregroundProcessTimer.reset();
+}
+
+void TerminalSession::pollForegroundProcess()
+{
+    if (_processNameFollowers.none())
+        return;
+    // Unknown (the process table could not be read, or nothing leads the group) keeps the last name: a
+    // header does not blank for a missed tick.
+    if (auto name = _terminal.device().foregroundProcessName(); name && *name != _polledForegroundProcessName)
+    {
+        _polledForegroundProcessName = std::move(*name);
+        emit foregroundProcessNameChanged();
+    }
+    tellExtensionsForegroundProcess();
 }
 
 bool TerminalSession::runsStatusLineExtensions() const noexcept
@@ -1219,19 +1255,10 @@ void TerminalSession::reloadExtensions()
 
 void TerminalSession::armForegroundProcessPoll()
 {
-    auto& state = *_extensionState;
-    if (!state.extensions.subscriptions().test(vtbackend::StatusLineEventKind::ForegroundProcess))
-    {
-        state.foregroundProcessTimer.reset();
-        return;
-    }
-    if (state.foregroundProcessTimer)
-        return;
-    state.foregroundProcessTimer = std::make_unique<QTimer>();
-    state.foregroundProcessTimer->setInterval(std::chrono::seconds { 1 });
-    connect(
-        state.foregroundProcessTimer.get(), &QTimer::timeout, this, &TerminalSession::pollForegroundProcess);
-    state.foregroundProcessTimer->start();
+    if (_extensionState->extensions.subscriptions().test(vtbackend::StatusLineEventKind::ForegroundProcess))
+        startFollowingForegroundProcess(ProcessNameFollower::Extension);
+    else
+        stopFollowingForegroundProcess(ProcessNameFollower::Extension);
 }
 
 void TerminalSession::extensionFramePublished()
@@ -1302,17 +1329,16 @@ void TerminalSession::answerExtensionConsent(vtextension::ConsentAnswer answer)
             this, [this]() { emit requestPermissionForExtension(); }, Qt::QueuedConnection);
 }
 
-void TerminalSession::pollForegroundProcess()
+void TerminalSession::tellExtensionsForegroundProcess()
 {
+    // Only while an extension follows: a header's poll tells the extensions nothing they did not ask for.
     auto& state = *_extensionState;
-    if (!state.extensions.subscriptions().test(vtbackend::StatusLineEventKind::ForegroundProcess))
+    if (!_processNameFollowers.test(ProcessNameFollower::Extension) || _polledForegroundProcessName.empty()
+        || _polledForegroundProcessName == state.toldForegroundProcessName)
         return;
-    auto name = foregroundProcessName();
-    if (name.empty() || name == state.foregroundProcessName)
-        return;
-    state.foregroundProcessName = std::move(name);
+    state.toldForegroundProcessName = _polledForegroundProcessName;
     auto const lock = scoped_lock { _terminal };
-    _terminal.foregroundProcessChanged(state.foregroundProcessName);
+    _terminal.foregroundProcessChanged(state.toldForegroundProcessName);
 }
 
 void TerminalSession::scheduleRetiredRelease()
@@ -1328,13 +1354,19 @@ TerminalSession::ExtensionStatePtr TerminalSession::createExtensionState()
 void TerminalSession::extensionFramePublished()
 {
 }
+
+void TerminalSession::tellExtensionsForegroundProcess()
+{
+}
 #endif
 // }}}
 
 std::string TerminalSession::foregroundProcessName() const
 {
-    // Only a pty this process spawned has a process group to ask; a mirrored pane's runs elsewhere and
-    // answers none.
+    // Only a pty this process spawned has a process group to ask; a mirrored pane's runs elsewhere, and a
+    // remote-hosted pane's program is the host's to name.
+    if (_hosting == SessionHosting::Remote)
+        return {};
     return _terminal.device().foregroundProcessName().value_or(std::string {});
 }
 
