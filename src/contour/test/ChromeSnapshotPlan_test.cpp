@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <format>
 #include <vector>
@@ -91,6 +92,49 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
         CAPTURE(row.name);
         CHECK(row.activeTab >= 0);
         CHECK(row.activeTab < row.tabCount);
+    }
+}
+
+TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
+{
+    using contour::config::ChromeDensity;
+    using namespace contour::test::snapshot;
+    // The pane cards, Minimal, the header on hover and an ended pane, appended after the macOS host.
+    CHECK(static_cast<int>(SnapshotScript::SplitMinimal) == static_cast<int>(SnapshotScript::MacOSHost) + 1);
+    CHECK(scriptRow(SnapshotScript::SplitMinimal).name == "split-minimal");
+    CHECK(scriptRow(SnapshotScript::SplitMinimal).panes == PaneShape::SplitThree);
+    CHECK(scriptRow(SnapshotScript::SplitMinimal).density == ChromeDensity::Minimal);
+    CHECK(scriptRow(SnapshotScript::SplitMinimal).action == ScriptAction::HoldRevealModifier);
+    CHECK(scriptRow(SnapshotScript::SplitHeaderHover).name == "split-header-hover");
+    CHECK(scriptRow(SnapshotScript::SplitHeaderHover).panes == PaneShape::SplitThree);
+    CHECK(scriptRow(SnapshotScript::SplitHeaderHover).action == ScriptAction::HoverPaneHeader);
+    CHECK(scriptRow(SnapshotScript::SplitHeaderHover).density == ChromeDensity::Comfortable);
+    CHECK(scriptRow(SnapshotScript::PaneExited).name == "pane-exited");
+    CHECK(scriptRow(SnapshotScript::PaneExited).panes == PaneShape::SplitThree);
+    CHECK(scriptRow(SnapshotScript::PaneExited).paneEnd == SnapshotPaneEnd::Exited);
+    CHECK(SnapshotExitMessage == "Process exited with code 1.");
+    CHECK(scriptRow(SnapshotScript::SingleTabMinimal).name == "single-tab-minimal");
+    CHECK(scriptRow(SnapshotScript::SingleTabMinimal).tabCount == 1);
+    CHECK(scriptRow(SnapshotScript::SingleTabMinimal).panes == PaneShape::SingleLeaf);
+    CHECK(scriptRow(SnapshotScript::SingleTabMinimal).density == ChromeDensity::Minimal);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::SingleTabMinimal);
+    // Each pane of a split is named, as the canvas's split names them.
+    CHECK(paneCount(PaneShape::SingleLeaf) == 1);
+    CHECK(paneCount(PaneShape::SplitThree) == 3);
+    CHECK(SnapshotPaneLabels[0].process == "nvim");
+    CHECK(SnapshotPaneLabels[2].process == "cmake");
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        // Every row names a density, and only the two Minimal rows leave Comfortable.
+        CHECK(static_cast<std::size_t>(row.density) < contour::config::ChromeDensityCount);
+        CHECK((row.density == ChromeDensity::Minimal)
+              == (row.script == SnapshotScript::SplitMinimal
+                  || row.script == SnapshotScript::SingleTabMinimal));
+        // Only pane-exited ends a pane, and an ended pane is one of several.
+        CHECK((row.paneEnd == SnapshotPaneEnd::Exited) == (row.script == SnapshotScript::PaneExited));
+        if (row.paneEnd != SnapshotPaneEnd::None)
+            CHECK(row.panes != PaneShape::SingleLeaf);
     }
 }
 

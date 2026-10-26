@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/config/AccessibilityPreferences.hpp>
+#include <contour/config/ChromeDensity.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/DefaultsEdition.hpp>
 #include <contour/config/TabBarMode.hpp>
@@ -58,6 +59,11 @@ enum class SnapshotScript : uint8_t
     BandSolid,          //!< single-tab under Reduce Transparency: the band's opaque tint.
     MacOSHost,          //!< three-tabs with every row on a macOS host: the Terminal row's band grown
                         //!< to whole cells around the traffic lights.
+    SplitMinimal,       //!< split-three under Minimal, the held modifier revealing the headers over it.
+    SplitHeaderHover,   //!< split-three with the pointer over the active header, then the gap: the
+                        //!< header's actions and the split handle's grabber.
+    PaneExited,         //!< split-three with an ended pane: its footer below the cells.
+    SingleTabMinimal,   //!< One tab under Minimal: the bare band, or none (the Terminal row).
 };
 
 /// How a script's active tab is divided into panes.
@@ -66,6 +72,19 @@ enum class PaneShape : uint8_t
     SingleLeaf = 0, //!< One pane.
     SplitThree,     //!< `[ a | split(b, c) ]`, with `a` active.
 };
+
+/// How many panes @p shape divides a tab into.
+/// @param shape The pane shape.
+/// @return Its leaf count.
+[[nodiscard]] constexpr std::size_t paneCount(PaneShape shape) noexcept
+{
+    switch (shape)
+    {
+        case PaneShape::SingleLeaf: break;
+        case PaneShape::SplitThree: return 3;
+    }
+    return 1;
+}
 
 /// Which window a script's picture is of.
 enum class SnapshotSurface : uint8_t
@@ -84,6 +103,8 @@ enum class ScriptAction : uint8_t
     OpenTabMenu,        //!< The second tab's context menu, with its "Tab Color" sub-menu open.
     OpenAbout,          //!< The About dialog, raised by the ShowAbout action.
     OpenTabColorFlyout, //!< The second tab's colour flyout, as the SetTabColor action opens it.
+    HoverPaneHeader,    //!< The pointer over the active pane's header, then on the gap beside it.
+    HoldRevealModifier, //!< The reveal modifier held long enough: Minimal's headers over the panes.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -132,6 +153,31 @@ enum class SnapshotBanner : uint8_t
     NewDefaults, //!< The offer of the newest defaults.
 };
 
+/// Whether one of a script's panes has ended.
+enum class SnapshotPaneEnd : uint8_t
+{
+    None = 0, //!< Every pane runs.
+    Exited,   //!< The last pane's program exited: its footer offers Restart and Close.
+};
+
+/// What the footer of a script's ended pane says (SnapshotPaneEnd::Exited).
+inline constexpr std::string_view SnapshotExitMessage = "Process exited with code 1.";
+
+/// What one pane of a script's tab runs, as its header names it.
+struct SnapshotPaneLabel
+{
+    std::string_view process {};          ///< The foreground process: the header's name.
+    std::string_view workingDirectory {}; ///< The working directory, as the header shows it.
+};
+
+/// The panes' labels, leaf by leaf in tree order: the panes of the split the canvas boards draw
+/// (mac-dark.dc.html, tui.dc.html). A pane shape of fewer leaves takes the first ones.
+inline constexpr auto SnapshotPaneLabels = std::array {
+    SnapshotPaneLabel { .process = "nvim", .workingDirectory = "~/repo/contour/src/contour/config" },
+    SnapshotPaneLabel { .process = "zsh", .workingDirectory = "~/repo/contour" },
+    SnapshotPaneLabel { .process = "cmake", .workingDirectory = "out/appleclang-debug" },
+};
+
 /// The text of the hosting notice a script with SnapshotBanner::Hosting shows.
 inline constexpr std::string_view SnapshotHostingNotice =
     "Contour could not reach its daemon (refused). This window runs its shells itself; they end when it "
@@ -164,6 +210,9 @@ struct SnapshotScriptRow
     /// The Reduce Transparency setting the chrome is built under.
     config::TransparencyPreference transparency = config::TransparencyPreference::Allowed;
     SnapshotHost host = SnapshotHost::RowDefault; ///< The host each chrome row is rendered on.
+    /// The chrome density the window is built under.
+    config::ChromeDensity density = config::ChromeDensity::Comfortable;
+    SnapshotPaneEnd paneEnd = SnapshotPaneEnd::None; ///< Whether a pane has ended.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -183,7 +232,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::ThreeTabs,
                         .name = "three-tabs",
                         .tabCount = 3,
@@ -199,7 +250,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::SplitThree,
                         .name = "split-three",
                         .tabCount = 1,
@@ -215,7 +268,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::Palette,
                         .name = "palette",
                         .tabCount = 1,
@@ -231,7 +286,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::Settings,
                         .name = "settings",
                         .tabCount = 1,
@@ -247,7 +304,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::RemoteReconnecting,
                         .name = "remote-reconnecting",
                         .tabCount = 1,
@@ -263,7 +322,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::Toast,
                         .name = "toast",
                         .tabCount = 1,
@@ -279,7 +340,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::KitDialog,
                         .name = "kit-dialog",
                         .tabCount = 1,
@@ -295,7 +358,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::HostingBanner,
                         .name = "hosting-banner",
                         .tabCount = 1,
@@ -311,7 +376,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::NewDefaultsBanner,
                         .name = "new-defaults-banner",
                         .tabCount = 1,
@@ -327,7 +394,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::TabMenu,
                         .name = "tab-menu",
                         .tabCount = 3,
@@ -343,7 +412,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::About,
                         .name = "about",
                         .tabCount = 1,
@@ -359,7 +430,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::TabBadges,
                         .name = "tab-badges",
                         .tabCount = 6,
@@ -375,7 +448,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::TabOverflow,
                         .name = "tab-overflow",
                         .tabCount = 20,
@@ -391,7 +466,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::TabColorFlyout,
                         .name = "tab-color-flyout",
                         .tabCount = 3,
@@ -407,7 +484,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::RemoteConnected,
                         .name = "remote-connected",
                         .tabCount = 1,
@@ -423,7 +502,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::RemoteDisconnected,
                         .name = "remote-disconnected",
                         .tabCount = 1,
@@ -439,7 +520,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::DaemonDrift,
                         .name = "daemon-drift",
                         .tabCount = 3,
@@ -455,7 +538,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::NativeTitleBar,
                         .name = "native-title-bar",
                         .tabCount = 3,
@@ -471,7 +556,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::NativeFrame,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::FullScreenReveal,
                         .name = "full-screen-reveal",
                         .tabCount = 3,
@@ -487,7 +574,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::FullScreenRevealed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::BandSolid,
                         .name = "band-solid",
                         .tabCount = 1,
@@ -503,7 +592,9 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Reduced,
-                        .host = SnapshotHost::RowDefault },
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
     SnapshotScriptRow { .script = SnapshotScript::MacOSHost,
                         .name = "macos-host",
                         .tabCount = 3,
@@ -519,7 +610,81 @@ inline constexpr auto SnapshotScripts = std::array {
                         .frame = SnapshotFrame::ClientBand,
                         .mode = SnapshotWindowMode::Windowed,
                         .transparency = config::TransparencyPreference::Allowed,
-                        .host = SnapshotHost::MacOS },
+                        .host = SnapshotHost::MacOS,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
+    SnapshotScriptRow { .script = SnapshotScript::SplitMinimal,
+                        .name = "split-minimal",
+                        .tabCount = 1,
+                        .panes = PaneShape::SplitThree,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::HoldRevealModifier,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Minimal,
+                        .paneEnd = SnapshotPaneEnd::None },
+    SnapshotScriptRow { .script = SnapshotScript::SplitHeaderHover,
+                        .name = "split-header-hover",
+                        .tabCount = 1,
+                        .panes = PaneShape::SplitThree,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::HoverPaneHeader,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
+    SnapshotScriptRow { .script = SnapshotScript::PaneExited,
+                        .name = "pane-exited",
+                        .tabCount = 1,
+                        .panes = PaneShape::SplitThree,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::Exited },
+    SnapshotScriptRow { .script = SnapshotScript::SingleTabMinimal,
+                        .name = "single-tab-minimal",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Minimal,
+                        .paneEnd = SnapshotPaneEnd::None },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),
@@ -529,6 +694,12 @@ static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotSc
               "SnapshotScripts must list one row per SnapshotScript, in enumerator order");
 static_assert(SnapshotScripts.size() == static_cast<std::size_t>(SnapshotScripts.back().script) + 1,
               "every SnapshotScript needs a row");
+
+static_assert(std::ranges::all_of(SnapshotScripts,
+                                  [](SnapshotScriptRow const& row) {
+                                      return paneCount(row.panes) <= SnapshotPaneLabels.size();
+                                  }),
+              "every pane of every script needs a label");
 
 /// The row describing @p script.
 /// @param script The script to look up.

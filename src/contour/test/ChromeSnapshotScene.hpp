@@ -10,6 +10,7 @@
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/test/ChromeSnapshotPlan.hpp>
 #include <contour/test/MockMainController.hpp>
 #include <contour/test/QmlChromeStyle.hpp>
@@ -18,6 +19,7 @@
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
@@ -51,11 +53,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <vector>
@@ -272,6 +278,10 @@ class ChromeSnapshotScene
             case ScriptAction::OpenTabMenu: openTabMenu(); break;
             case ScriptAction::OpenAbout: openAbout(); break;
             case ScriptAction::OpenTabColorFlyout: openTabColorFlyout(); break;
+            case ScriptAction::HoverPaneHeader: hoverPaneHeader(); break;
+            case ScriptAction::HoldRevealModifier:
+                _controller.setHeaderReveal(static_cast<int>(window::HeaderReveal::HeldModifier));
+                break;
         }
         _incubation.settle();
         QCoreApplication::processEvents();
@@ -312,6 +322,29 @@ class ChromeSnapshotScene
     /// @return The font the chrome was configured with, as resolved for the variant's row.
     [[nodiscard]] QFont const& chromeFont() const noexcept { return _chromeFont; }
 
+    /// Every item named @p name in the visual tree beneath @p root, in tree order.
+    ///
+    /// The visual tree rather than findChildren(): a SplitView's handles have a parent item but no QObject
+    /// parent.
+    [[nodiscard]] static std::vector<QQuickItem*> itemsNamed(QQuickItem const& root, QString const& name)
+    {
+        auto found = std::vector<QQuickItem*> {};
+        for (auto* child: root.childItems())
+        {
+            if (child->objectName() == name)
+                found.push_back(child);
+            std::ranges::copy(itemsNamed(*child, name), std::back_inserter(found));
+        }
+        return found;
+    }
+
+    /// @return The AppKit title bar the band was measured over (see measureBand), or std::nullopt when the
+    ///         variant has none to measure: off a macOS host, under the native frame, or in full screen.
+    [[nodiscard]] std::optional<SnapshotNativeTitleBar> const& measuredTitleBar() const noexcept
+    {
+        return _measuredTitleBar;
+    }
+
   private:
     /// How many recent commands the palette remembers, as MockPaletteController remembers them.
     static constexpr std::size_t PaletteHistoryCapacity = 5;
@@ -345,30 +378,40 @@ class ChromeSnapshotScene
     /// The leaf that holds focus in every pane shape.
     static constexpr std::size_t ActiveLeaf = 0;
 
-    /// How many panes @p shape divides a tab into.
-    [[nodiscard]] static constexpr std::size_t leafCount(PaneShape shape) noexcept
+    /// The leaf whose session a script with an ended pane ends: the last, an inactive one beside the active.
+    [[nodiscard]] static constexpr std::size_t endedLeaf(PaneShape shape) noexcept
     {
-        switch (shape)
-        {
-            case PaneShape::SingleLeaf: break;
-            case PaneShape::SplitThree: return 3;
-        }
-        return 1;
+        return paneCount(shape) - 1;
     }
 
     /// One session per leaf of @p script's pane shape, in the look's background; every one but the
-    /// active leaf's dimmed as unfocused, and all of them reconnecting when the host connection is.
+    /// active leaf's dimmed as unfocused, each running what SnapshotPaneLabels names, all of them
+    /// reconnecting when the host connection is, and the last one ended -- its program exited, Restart
+    /// offered -- when the script ends a pane.
     [[nodiscard]] static std::vector<std::unique_ptr<MockSession>> makeSessions(
         SnapshotScriptRow const& script, SnapshotLook const& look)
     {
         auto sessions = std::vector<std::unique_ptr<MockSession>> {};
-        for (auto const leaf: std::views::iota(std::size_t { 0 }, leafCount(script.panes)))
+        for (auto const leaf: std::views::iota(std::size_t { 0 }, paneCount(script.panes)))
         {
             auto session = std::make_unique<MockSession>(platform::toQColor(look.terminalBackground));
             if (leaf != ActiveLeaf)
                 session->setDimUnfocused(static_cast<float>(look.dimUnfocused));
+            auto const& label = SnapshotPaneLabels[leaf];
+            session->setForegroundProcessName(QString::fromUtf8(label.process));
+            session->setDisplayWorkingDirectory(QString::fromUtf8(label.workingDirectory));
             if (script.connection == HostConnection::Reconnecting)
                 session->setReconnecting(true);
+            switch (script.paneEnd)
+            {
+                case SnapshotPaneEnd::None: break;
+                case SnapshotPaneEnd::Exited:
+                    if (leaf == endedLeaf(script.panes))
+                        session->setEnd(static_cast<int>(session::EndReason::Exited),
+                                        QString::fromUtf8(SnapshotExitMessage),
+                                        static_cast<int>(session::FooterRestart::Offered));
+                    break;
+            }
             sessions.push_back(std::move(session));
         }
         return sessions;
@@ -382,6 +425,9 @@ class ChromeSnapshotScene
             auto pane = std::make_unique<MockPaneProxy>(/*leaf=*/true);
             pane->setSession(sessions[index].get());
             pane->setActive(index == ActiveLeaf);
+            // The active pane has focus, by a click: its header reads primary, the others secondary.
+            pane->setFocus(static_cast<int>(index == ActiveLeaf ? window::PaneFocus::Focused
+                                                                : window::PaneFocus::Unfocused));
             return pane;
         };
         switch (shape)
@@ -452,6 +498,7 @@ class ChromeSnapshotScene
         _controller.setNativeControlsInset(native.trafficLightInset);
         if (mode == window::WindowMode::FullScreen)
             return;
+        _measuredTitleBar = native;
         auto const geometry = window::resolveTitleBandGeometry(window::TitleBandGeometryInputs {
             .tokens = tokens,
             .mode = window::WindowMode::Windowed,
@@ -649,6 +696,60 @@ class ChromeSnapshotScene
         _tabColorFlyout = flyout;
     }
 
+    /// Rests the pointer on @p point of the window. Two moves, because a move to where the pointer already
+    /// is sends nothing.
+    void pointAt(QPoint point) const
+    {
+        QTest::mouseMove(&window(), point + QPoint(0, 1));
+        QTest::mouseMove(&window(), point);
+    }
+
+    /// Rests the pointer on the active pane's header, waiting for its actions, and then on the gap beside the
+    /// pane, at the header's height, waiting for the split handle to engage and its grabber to fade in.
+    ///
+    /// The pane is first focused by keyboard, as a FocusPane* action reaches it: on the native rows the gap's
+    /// hit area reaches into the pane, and the handle takes the hover from it there, so a header shown by the
+    /// pointer alone would fade as the pointer reaches the gap. Keyboard focus keeps the actions shown.
+    void hoverPaneHeader()
+    {
+        auto const* content = window().contentItem();
+        auto const cards = itemsNamed(*content, QStringLiteral("paneCard"));
+        auto const active = std::ranges::find_if(
+            cards, [](QQuickItem const* card) { return card->property("isActive").toBool(); });
+        REQUIRE(active != cards.end());
+        auto const* card = *active;
+        auto* node = qobject_cast<MockPaneProxy*>(card->property("node").value<QObject*>());
+        REQUIRE(node != nullptr);
+        node->setFocus(static_cast<int>(window::PaneFocus::KeyboardFocused));
+        auto const* header = card->findChild<QQuickItem*>(QStringLiteral("paneHeader"));
+        REQUIRE(header != nullptr);
+        // The window was only just shown: the panes are laid out, and the header decided, over the next
+        // frames.
+        _incubation.settle();
+        REQUIRE(QTest::qWaitFor([&] { return header->isVisible(); }, 2000));
+        auto const* actions = header->findChild<QQuickItem*>(QStringLiteral("paneHeaderActions"));
+        REQUIRE(actions != nullptr);
+        auto const headerCentre =
+            header->mapToScene(QPointF(header->width() / HalfDivisor, header->height() / HalfDivisor));
+        pointAt(headerCentre.toPoint());
+        REQUIRE(QTest::qWaitFor([&] { return actions->opacity() == 1; }, 2000));
+
+        // The gap at the card's trailing edge.
+        auto const cardRight = card->mapToScene(QPointF(card->width(), 0)).x();
+        auto const handles = itemsNamed(*content, QStringLiteral("splitHandle"));
+        auto const nearest = std::ranges::min_element(handles, {}, [&](QQuickItem const* handle) {
+            return std::abs(handle->mapToScene(QPointF(0, 0)).x() - cardRight);
+        });
+        REQUIRE(nearest != handles.end());
+        auto const* handle = *nearest;
+        auto const* grabber = handle->findChild<QQuickItem*>(QStringLiteral("splitGrabber"));
+        REQUIRE(grabber != nullptr);
+        pointAt(QPointF(handle->mapToScene(QPointF(handle->width() / HalfDivisor, 0)).x(), headerCentre.y())
+                    .toPoint());
+        REQUIRE(QTest::qWaitFor([&] { return handle->property("engaged").toBool(); }, 2000));
+        REQUIRE(QTest::qWaitFor([&] { return grabber->opacity() == 1 && actions->opacity() == 1; }, 2000));
+    }
+
     /// The row of @p menu that opens the sub-menu titled @p title.
     /// @return The row, or null when @p menu has no such sub-menu.
     [[nodiscard]] static QQuickItem* subMenuRow(QObject& menu, QString const& title)
@@ -677,7 +778,10 @@ class ChromeSnapshotScene
             .appearance = {},
             .scheme = config::chromeSchemeColorsOf(
                 *config::preferredColorPalette(config::defaultColors(_variant.edition), _variant.appearance)),
+            .density = scriptRow(_variant.script).density,
         };
+        // The panes the active tab shows, as WindowController counts them: two or more make cards.
+        _controller.setVisiblePaneCount(static_cast<int>(paneCount(scriptRow(_variant.script).panes)));
         _engine.rootContext()->setContextProperty(QStringLiteral("newDefaults"), &_newDefaults);
         auto root = loadMainWindow(_engine, _controller, _warnings, chrome);
         REQUIRE(qobject_cast<QQuickWindow*>(root.get()) != nullptr);
@@ -707,6 +811,8 @@ class ChromeSnapshotScene
     std::unique_ptr<QObject> _root;           ///< The QML tree dies before everything it borrows.
     std::unique_ptr<QObject> _overlay;        ///< Last: the toast, parented into _root's tree, dies first.
     QObject const* _tabColorFlyout = nullptr; ///< The flyout openTabColorFlyout() opened; owned by _root.
+    std::optional<SnapshotNativeTitleBar>
+        _measuredTitleBar; ///< What measureBand() measured over, if anything.
 };
 
 } // namespace contour::test::snapshot

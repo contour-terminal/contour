@@ -51,19 +51,11 @@
 namespace
 {
 /// How many items named @p name beneath @p root, in the visual tree, are visible.
-///
-/// The visual tree rather than findChildren(): a Repeater's delegates, which a swatch is, have a parent
-/// item but no QObject parent.
 [[nodiscard]] int visibleItemsNamed(QQuickItem const& root, QString const& name)
 {
-    auto count = 0;
-    for (auto const* child: root.childItems())
-    {
-        if (child->objectName() == name && child->isVisible())
-            ++count;
-        count += visibleItemsNamed(*child, name);
-    }
-    return count;
+    return static_cast<int>(
+        std::ranges::count_if(contour::test::snapshot::ChromeSnapshotScene::itemsNamed(root, name),
+                              [](QQuickItem const* item) { return item->isVisible(); }));
 }
 } // namespace
 
@@ -88,26 +80,49 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
         // which always shows (1c D1). The band table decides, from the row's tab shape and the script's
         // frame and mode.
         using contour::window::TabStripGate;
-        auto const band = contour::window::resolveTitleBand({
-            .shape = contour::config::ChromeTokenRows[static_cast<std::size_t>(variant.row)].layout.tabShape,
-            .frame = row.frame == SnapshotFrame::NativeFrame ? contour::window::WindowFrame::NativeFrame
-                                                             : contour::window::WindowFrame::ClientBand,
-            .mode = row.mode == SnapshotWindowMode::FullScreenRevealed
-                        ? contour::window::WindowMode::FullScreen
-                        : contour::window::WindowMode::Windowed,
-            .strip = contour::config::isTabBarShown(look.tabBarVisibility, row.tabCount)
-                         ? TabStripGate::Shown
-                         : TabStripGate::Hidden,
-            .position = contour::config::TabBarPosition::Top,
-            .notice = contour::window::hostNoticeOf(contour::window::hostChipPresence(row.hostLabel),
-                                                    ChromeSnapshotScene::hostChipStateFor(row.connection)),
-        });
+        auto const band = contour::window::resolveTitleBand(
+            contour::window::TitleBandRow {
+                .style = variant.row,
+                .shape =
+                    contour::config::ChromeTokenRows[static_cast<std::size_t>(variant.row)].layout.tabShape,
+                .density = row.density,
+            },
+            {
+                .frame = row.frame == SnapshotFrame::NativeFrame ? contour::window::WindowFrame::NativeFrame
+                                                                 : contour::window::WindowFrame::ClientBand,
+                .mode = row.mode == SnapshotWindowMode::FullScreenRevealed
+                            ? contour::window::WindowMode::FullScreen
+                            : contour::window::WindowMode::Windowed,
+                .strip = contour::config::isTabBarShown(look.tabBarVisibility, row.tabCount)
+                             ? TabStripGate::Shown
+                             : TabStripGate::Hidden,
+                .position = contour::config::TabBarPosition::Top,
+                .notice =
+                    contour::window::hostNoticeOf(contour::window::hostChipPresence(row.hostLabel),
+                                                  ChromeSnapshotScene::hostChipStateFor(row.connection)),
+                .tabs =
+                    row.tabCount == 1 ? contour::window::OpenTabs::One : contour::window::OpenTabs::Several,
+            });
         CHECK(titleBar->isVisible() == (band.band != contour::window::BarPresence::Hidden));
-        // The macOS row's windowed band is drawn at the height measured beside the traffic lights' inset
-        // (S2).
+        // The macOS row's windowed band is drawn at the height of the title bar it covers (S2): the one its
+        // surface grows -- 40 pt under the compact toolbar, Minimal's bare band the bare 32 pt (P3).
         if (variant.row == contour::config::ChromeStyle::MacOS && row.mode == SnapshotWindowMode::Windowed
             && row.frame == SnapshotFrame::ClientBand && titleBar->isVisible())
-            CHECK(titleBar->height() == ChromeSnapshotScene::SnapshotNativeTitleBarHeight);
+        {
+            REQUIRE(scene.measuredTitleBar().has_value());
+            CHECK(titleBar->height() == scene.measuredTitleBar()->height);
+        }
+        // A split is drawn as cards, with headers -- or, under Minimal, as bare lines with none until the
+        // held modifier reveals them over the panes.
+        auto const& content = *scene.window().contentItem();
+        if (row.panes == PaneShape::SplitThree)
+        {
+            auto const panes =
+                static_cast<int>(scene.root().findChildren<contour::test::StubContourTerminal*>().size());
+            CHECK(visibleItemsNamed(content, QStringLiteral("paneHeader")) == panes);
+            CHECK(visibleItemsNamed(content, QStringLiteral("paneCardSurface"))
+                  == (row.density == contour::config::ChromeDensity::Minimal ? 0 : panes));
+        }
         switch (variant.script)
         {
             case SnapshotScript::ThreeTabs: {
@@ -136,6 +151,9 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                     scene.root().findChild<QQuickItem*>(QStringLiteral("reconnectingOverlay"));
                 REQUIRE(overlay != nullptr);
                 CHECK(overlay->isVisible());
+                auto const* pill = overlay->findChild<QQuickItem*>(QStringLiteral("reconnectingPill"));
+                REQUIRE(pill != nullptr);
+                CHECK(pill->isVisible());
                 break;
             }
             case SnapshotScript::Toast: {
@@ -295,6 +313,63 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                       == ChromeSnapshotScene::SnapshotBareTrafficLightInset);
                 break;
             }
+            case SnapshotScript::SplitMinimal: {
+                // The held modifier reveals the headers over the panes, which a bare line divides.
+                auto const* header = scene.root().findChild<QQuickItem*>(QStringLiteral("paneHeader"));
+                REQUIRE(header != nullptr);
+                CHECK(header->property("policy").toMap().value(QStringLiteral("placement")).toString()
+                      == QStringLiteral("overlay"));
+                CHECK(visibleItemsNamed(content, QStringLiteral("splitLine"))
+                          + visibleItemsNamed(content, QStringLiteral("splitLineGlyphs"))
+                      >= 2);
+                break;
+            }
+            case SnapshotScript::SplitHeaderHover: {
+                // The active header shows its actions; the gap beside it is engaged, its grabber shown
+                // wherever the row draws one (the Terminal row's is the engaged line of box glyphs).
+                auto const items = [&](QString const& name) {
+                    return ChromeSnapshotScene::itemsNamed(content, name);
+                };
+                CHECK(std::ranges::count_if(
+                          items(QStringLiteral("splitHandle")),
+                          [](QQuickItem const* handle) { return handle->property("engaged").toBool(); })
+                      == 1);
+                CHECK(std::ranges::count_if(items(QStringLiteral("paneHeaderActions")),
+                                            [](QQuickItem const* actions) { return actions->opacity() == 1; })
+                      == 1);
+                auto const grabberDrawn =
+                    contour::config::ChromeTokenRows[static_cast<std::size_t>(variant.row)].size.grabber > 0;
+                CHECK(visibleItemsNamed(content, QStringLiteral("splitGrabber")) == (grabberDrawn ? 1 : 0));
+                break;
+            }
+            case SnapshotScript::PaneExited: {
+                // The last pane ended: its footer says how, below its cells; no other pane has one.
+                CHECK(visibleItemsNamed(content, QStringLiteral("exitedFooter")) == 1);
+                auto const messages =
+                    ChromeSnapshotScene::itemsNamed(content, QStringLiteral("exitedFooterMessage"));
+                CHECK(std::ranges::count_if(messages,
+                                            [](QQuickItem const* message) {
+                                                return message->isVisible()
+                                                       && message->property("text").toString()
+                                                              == QString::fromUtf8(SnapshotExitMessage);
+                                            })
+                      == 1);
+                break;
+            }
+            case SnapshotScript::SingleTabMinimal:
+                // One tab under Minimal: macOS keeps a bare band over the bare 32-pt title bar, in the
+                // terminal's background, wherever the strip is not asked for; the Terminal row hides its bar.
+                // Under Classic's tab_bar_visibility Always the strip holds the one tab, and the band its
+                // ordinary height.
+                if (variant.row == contour::config::ChromeStyle::MacOS
+                    && band.centre == contour::window::BarCentre::Empty)
+                {
+                    CHECK(titleBar->isVisible());
+                    CHECK(titleBar->height() == ChromeSnapshotScene::SnapshotBareTitleBarHeight);
+                }
+                if (variant.row == contour::config::ChromeStyle::Terminal)
+                    CHECK_FALSE(titleBar->isVisible());
+                break;
             case SnapshotScript::SingleTab: break;
         }
     }
