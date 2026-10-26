@@ -261,10 +261,18 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
             }
             case SnapshotScript::MacOSHost: {
                 // On a macOS host the Terminal row's band grows by whole cells until it holds the native
-                // title bar (S3); the macOS row's is the title bar's height, checked above.
+                // title bar (S3); the macOS row's is the title bar's height, checked above. The Terminal
+                // row's material.titleBand is None, so its surface grows nothing: no compact toolbar, the
+                // bare 32-pt title bar, and the traffic lights where a bare title bar puts them.
                 REQUIRE(variantHost(variant) == contour::config::HostPlatform::MacOS);
+                auto const* win = scene.root().property("win").value<QObject*>();
+                REQUIRE(win != nullptr);
                 if (variant.row != contour::config::ChromeStyle::Terminal)
+                {
+                    CHECK(win->property("nativeControlsInset").toReal()
+                          == ChromeSnapshotScene::SnapshotTrafficLightInset);
                     break;
+                }
                 auto const* context = QQmlEngine::contextForObject(&scene.root());
                 REQUIRE(context != nullptr);
                 auto const* style = context->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
@@ -272,8 +280,10 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const cell = style->property("cellHeight").toReal();
                 REQUIRE(cell > 0);
                 CHECK(titleBar->height()
-                      == cell * std::ceil(ChromeSnapshotScene::SnapshotNativeTitleBarHeight / cell));
-                CHECK(titleBar->height() >= ChromeSnapshotScene::SnapshotNativeTitleBarHeight);
+                      == cell * std::ceil(ChromeSnapshotScene::SnapshotBareTitleBarHeight / cell));
+                CHECK(titleBar->height() >= ChromeSnapshotScene::SnapshotBareTitleBarHeight);
+                CHECK(win->property("nativeControlsInset").toReal()
+                      == ChromeSnapshotScene::SnapshotBareTrafficLightInset);
                 break;
             }
             case SnapshotScript::SingleTab: break;

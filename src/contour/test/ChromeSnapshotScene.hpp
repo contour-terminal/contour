@@ -133,12 +133,42 @@ class ChromeSnapshotScene
     /// constant for the reason SnapshotTrafficLightInset is one (see there).
     static constexpr qreal SnapshotNativeTitleBarHeight = 40;
 
-    /// AppKit's bare title bar, without the compact toolbar: what Minimal's bare band covers (ruling P3, the
-    /// spike's 32 pt).
+    /// AppKit's bare title bar, without the compact toolbar: what a band whose surface grows nothing covers
+    /// -- the Terminal row's, and Minimal's bare band (ruling P3, the spike's 32 pt).
     static constexpr qreal SnapshotBareTitleBarHeight = 32;
+
+    /// What the macOS row's band leaves clear for AppKit's traffic lights: the frame adapter's inset as the
+    /// Step 1d spike measured it under the compact toolbar (spike-decisions.md §D2: 84 pt; 78 without). A
+    /// constant rather than a measurement: the scene's window is a mock's, with no AppKit title bar dressed
+    /// to measure, and the pictures must not differ by the machine that renders them.
+    static constexpr qreal SnapshotTrafficLightInset = 84;
 
     /// The traffic lights' inset over a bare title bar (spike-decisions.md §D2: 78 pt; 84 with the toolbar).
     static constexpr qreal SnapshotBareTrafficLightInset = 78;
+
+    /// AppKit's title bar under a band, as the scene stands it in for the controller's measurement.
+    struct SnapshotNativeTitleBar
+    {
+        qreal height = 0;            ///< The title bar's height.
+        qreal trafficLightInset = 0; ///< The traffic lights' inset (WindowController::nativeControlsInset).
+    };
+
+    /// The title bar a band's surface leaves AppKit with: the surface's growth decides it, as it decides the
+    /// toolbar the controller attaches in production.
+    /// @param growth The resolved surface's title-bar growth.
+    /// @return The grown title bar and its inset under CompactToolbar, the bare ones otherwise.
+    [[nodiscard]] static constexpr SnapshotNativeTitleBar nativeTitleBarFor(
+        config::TitleBarGrowth growth) noexcept
+    {
+        switch (growth)
+        {
+            case config::TitleBarGrowth::CompactToolbar:
+                return { .height = SnapshotNativeTitleBarHeight,
+                         .trafficLightInset = SnapshotTrafficLightInset };
+            case config::TitleBarGrowth::None: break;
+        }
+        return { .height = SnapshotBareTitleBarHeight, .trafficLightInset = SnapshotBareTrafficLightInset };
+    }
 
     /// The chip state a script's connection column shows.
     /// @param connection The script's host connection.
@@ -181,8 +211,8 @@ class ChromeSnapshotScene
             .tabBarPosition = config::TabBarPosition::Top,
             .drift = scriptRow(variant.script).drift,
             .frame = scriptRow(variant.script).frame,
-            .nativeControlsInset =
-                nativeControlsInsetFor(variantHost(variant), scriptRow(variant.script).mode),
+            // measureBand() gives the macOS host's band its inset, from the row's surface; none elsewhere.
+            .nativeControlsInset = 0,
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -385,19 +415,13 @@ class ChromeSnapshotScene
         return model;
     }
 
-    /// What the macOS row's band leaves clear for AppKit's traffic lights: the frame adapter's inset as the
-    /// Step 1d spike measured it under the compact toolbar (spike-decisions.md §D2: 84 pt; 78 without). A
-    /// constant rather than a measurement: the scene's window is a mock's, with no AppKit title bar dressed
-    /// to measure, and the pictures must not differ by the machine that renders them.
-    static constexpr qreal SnapshotTrafficLightInset = 84;
-
-    /// Gives the mock the band geometry the controller measures in production on the row's host
-    /// (window::resolveTitleBandGeometry over the chrome's tokens and SnapshotNativeTitleBarHeight), so the
-    /// band is drawn at the height that sits beside SnapshotTrafficLightInset -- or, for Minimal's bare band,
-    /// which detaches the toolbar, over SnapshotBareTitleBarHeight beside SnapshotBareTrafficLightInset. Only
-    /// on a macOS host, windowed, with the client band: elsewhere there is no native title bar under the band
-    /// (a native frame draws its own above it), and in full screen the title bar leaves the window -- the
-    /// band keeps its token there, and a revealed band rests at the window's top.
+    /// Gives the mock the band geometry and the traffic lights' inset the controller measures in production
+    /// on the row's host: the title bar the row's resolved surface leaves AppKit with (nativeTitleBarFor --
+    /// the grown one under the compact toolbar, the bare one for the Terminal row and Minimal's bare band),
+    /// and window::resolveTitleBandGeometry over the chrome's tokens and that height. Only on a macOS host,
+    /// windowed, with the client band: elsewhere there is no native title bar under the band (a native frame
+    /// draws its own above it), and in full screen the title bar leaves the window -- the band keeps its
+    /// token there, and a revealed band rests at the window's top.
     void measureBand()
     {
         if (variantHost(_variant) != config::HostPlatform::MacOS
@@ -421,30 +445,17 @@ class ChromeSnapshotScene
             .centre = centre,
             .density = tokens.density,
         });
-        auto const grown = surface.growth == config::TitleBarGrowth::CompactToolbar;
+        auto const native = nativeTitleBarFor(surface.growth);
         auto const geometry = window::resolveTitleBandGeometry(window::TitleBandGeometryInputs {
             .tokens = tokens,
             .mode = window::WindowMode::Windowed,
             .devicePixelRatio = window().devicePixelRatio(),
-            .nativeHeight = grown ? SnapshotNativeTitleBarHeight : SnapshotBareTitleBarHeight,
+            .nativeHeight = native.height,
             .fullScreenTop = 0,
         });
         _controller.setTitleBandHeight(geometry.height);
         _controller.setTitleBandRevealTop(geometry.revealTop);
-        _controller.setNativeControlsInset(grown ? SnapshotTrafficLightInset : SnapshotBareTrafficLightInset);
-    }
-
-    /// The inset the OS reserves for its own window controls on @p host, as the frame adapter reports it:
-    /// none in full screen, where AppKit hides the traffic lights from the window.
-    /// @param host The host the picture is rendered on.
-    /// @param mode The script's window mode.
-    /// @return SnapshotTrafficLightInset on the macOS host while windowed, 0 otherwise.
-    [[nodiscard]] static constexpr qreal nativeControlsInsetFor(config::HostPlatform host,
-                                                                SnapshotWindowMode mode) noexcept
-    {
-        if (mode == SnapshotWindowMode::FullScreenRevealed)
-            return 0;
-        return host == config::HostPlatform::MacOS ? SnapshotTrafficLightInset : 0;
+        _controller.setNativeControlsInset(native.trafficLightInset);
     }
 
     /// Shows the window in full screen and rests the pointer on the band's reveal edge, waiting until the
