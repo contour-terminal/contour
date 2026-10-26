@@ -1876,6 +1876,32 @@ profiles:
     CHECK(successPreview() == successOf("contour-dark"));
 }
 
+TEST_CASE("SettingsController: a scheme saved under the preview's name repaints the preview",
+          "[settings][statusline]")
+{
+    // The preview reads a scheme once per name; a save of that scheme must not leave it on the old colours.
+    auto fx = Fixture(BasicConfig);
+    fx.controller->newColorScheme("");
+    fx.controller->setSchemeColor("normal_green", "#102030");
+    REQUIRE(fx.controller->saveColorScheme("midnight"));
+
+    fx.controller->editProfile("main");
+    fx.controller->setColorScheme("midnight");
+    auto const successPreview = [&] {
+        return fx.controller->parseIndicatorSegment("{Cwd:Color=success}")
+            .first()
+            .toMap()
+            .value("colorPreview")
+            .toString();
+    };
+    CHECK(successPreview() == "#102030");
+
+    fx.controller->editColorScheme("midnight");
+    fx.controller->setSchemeColor("normal_green", "#405060");
+    REQUIRE(fx.controller->saveColorScheme("midnight"));
+    CHECK(successPreview() == "#405060");
+}
+
 TEST_CASE("SettingsController: the native2026 default goes through the bridge unchanged",
           "[settings][statusline]")
 {

@@ -1967,14 +1967,18 @@ void SettingsController::setColorPreference(vtbackend::ColorPreference appearanc
 
 vtbackend::ColorPalette SettingsController::schemePalette(std::string const& name) const
 {
+    if (_previewPaletteCache && _previewPaletteCache->name == name)
+        return _previewPaletteCache->palette;
     auto const& cfg = _config();
-    if (auto const it = cfg.colorschemes.value().find(name); it != cfg.colorschemes.value().end())
-        return it->second;
-    if (auto const loaded = config::loadColorSchemeFile(cfg.configFile.parent_path() / "colorschemes"
-                                                        / config::sideFileName(name)))
-        return *loaded;
     auto palette = vtbackend::ColorPalette {};
-    (void) vtbackend::defaultColorPalettes(name, palette);
+    if (auto const it = cfg.colorschemes.value().find(name); it != cfg.colorschemes.value().end())
+        palette = it->second;
+    else if (auto const loaded = config::loadColorSchemeFile(cfg.configFile.parent_path() / "colorschemes"
+                                                             / config::sideFileName(name)))
+        palette = *loaded;
+    else
+        (void) vtbackend::defaultColorPalettes(name, palette);
+    _previewPaletteCache = CachedPalette { .name = name, .palette = palette };
     return palette;
 }
 
@@ -2046,6 +2050,7 @@ std::optional<std::string> SettingsController::draftProblem() const
 
 void SettingsController::refresh()
 {
+    _previewPaletteCache.reset(); // a scheme saved, renamed or deleted, or the configuration reloaded
     auto const& cfg = _config();
     _gpus = _gpuInventory ? _gpuInventory->list() : std::vector<display::GpuCandidate> {};
     _locked = cfg.guiConfigLocked.value();

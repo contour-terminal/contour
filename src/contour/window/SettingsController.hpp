@@ -315,7 +315,8 @@ class SettingsController: public QObject
     /// @return The first link pattern's problem; nullopt when none has one.
     [[nodiscard]] std::optional<std::string> draftProblem() const;
     /// The palette the scheme named @p name stands for: a `color_schemes:` entry of contour.yml, a GUI side
-    /// file, or a built-in scheme, in that order; the default palette for a name none answers to.
+    /// file, or a built-in scheme, in that order; the default palette for a name none answers to. Read once
+    /// per name until the next refresh() (@ref _previewPaletteCache).
     [[nodiscard]] vtbackend::ColorPalette schemePalette(std::string const& name) const;
     /// The palette the draft profile's status-line roles preview against: its scheme, or for a light/dark
     /// pair the one of the current appearance -- by name, so a scheme switched in the draft previews before
@@ -346,6 +347,18 @@ class SettingsController: public QObject
     vtbackend::ColorPalette _schemeDraft;
     QString _editingScheme; //!< "" while editing an unsaved new scheme.
     bool _hasSchemeDraft = false;
+
+    /// A scheme's palette as @ref schemePalette last read it, under the name it was read for.
+    struct CachedPalette
+    {
+        std::string name;                ///< The scheme name the palette was read for.
+        vtbackend::ColorPalette palette; ///< What @ref schemePalette returned for it.
+    };
+    /// The preview's palette, read once per scheme name rather than on every parse of a segment (a side
+    /// file's read and parse is not free, and the editor parses on every keystroke). A different draft
+    /// scheme or appearance names a different scheme and misses; refresh() -- which every scheme save,
+    /// rename, delete and configuration reload runs -- forgets it. Mutable: a cache behind a const read.
+    mutable std::optional<CachedPalette> _previewPaletteCache;
 };
 
 } // namespace contour::window
