@@ -52,6 +52,8 @@ Item {
             objectName: "hostChipOpen"
             visible: root.bracketed
             anchors.verticalCenter: parent.verticalCenter
+            // The chip's own name says it all.
+            Accessible.ignored: true
             text: chromeStyle.chipOpenGlyph
             font: chromeStyle.type.footnote
             color: chromeStyle.colors.chipText
@@ -63,6 +65,8 @@ Item {
             objectName: "hostChipDot"
             visible: chromeStyle.hostDotGlyph === ""
             anchors.verticalCenter: parent.verticalCenter
+            // The chip's own name says it all.
+            Accessible.ignored: true
             width: chromeStyle.size.hostDot
             height: chromeStyle.size.hostDot
             radius: chromeStyle.size.hostDot
@@ -73,6 +77,8 @@ Item {
             objectName: "hostChipDotGlyph"
             visible: chromeStyle.hostDotGlyph !== ""
             anchors.verticalCenter: parent.verticalCenter
+            // The chip's own name says it all.
+            Accessible.ignored: true
             text: chromeStyle.hostDotGlyph
             font: chromeStyle.type.footnote
             color: dot.color
@@ -81,6 +87,8 @@ Item {
         Text {
             objectName: "hostChipLabel"
             anchors.verticalCenter: parent.verticalCenter
+            // The chip's own name says it all.
+            Accessible.ignored: true
             // The room after the dot; padding, since a positioner skips an item without height.
             leftPadding: root.gap
             text: root.hostLabel
@@ -93,6 +101,8 @@ Item {
             objectName: "hostChipStatus"
             visible: root.statusText !== ""
             anchors.verticalCenter: parent.verticalCenter
+            // The chip's own name says it all.
+            Accessible.ignored: true
             leftPadding: root.gap
             text: root.statusText
             font: chromeStyle.type.footnote
@@ -103,6 +113,8 @@ Item {
             objectName: "hostChipClose"
             visible: root.bracketed
             anchors.verticalCenter: parent.verticalCenter
+            // The chip's own name says it all.
+            Accessible.ignored: true
             text: chromeStyle.chipCloseGlyph
             font: chromeStyle.type.footnote
             color: chromeStyle.colors.chipText

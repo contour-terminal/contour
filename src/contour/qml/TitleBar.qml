@@ -40,6 +40,10 @@ Item {
     readonly property real slideOffset: root.isConcealed && chromeStyle.motion.animates ? -root.height : 0
     /// Whether the pointer is over the bar.
     readonly property bool hovered: bandHover.hovered
+    /// Whether the bar has a popup or an editor of its own open -- the new-tab menu, the tab menu, a
+    /// tab's colour flyout or rename -- which a HoverHandler cannot see, since popups live in the overlay.
+    readonly property bool engaged: (newTabMenuLoader.item !== null && newTabMenuLoader.item.visible)
+                                    || (tabStripLoader.item !== null && tabStripLoader.item.engaged)
     /// The trailing slot the drift chip is placed in while the band is shown (see Main.qml).
     readonly property Item driftSlot: driftSlotItem
 
@@ -265,6 +269,7 @@ Item {
                 objectName: "newTabButton"
                 glyph: chromeStyle.newTabGlyph
                 accessibleName: qsTr("New tab")
+                accessibleDescription: qsTr("Right-click or press and hold for a new tab with a profile")
                 onClicked: if (root.controller) root.controller.createNewTab()
                 onSecondaryClicked: {
                     if (root.controller)

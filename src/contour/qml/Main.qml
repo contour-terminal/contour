@@ -66,14 +66,37 @@ ThemedWindow
                                                       appWindow.tabBarShouldShow ? 1 : 0,
                                                       appWindow.tabBarPosition)
 
-    // Reveals a full-screen band while the pointer is on the reveal edge, and keeps it while the pointer
-    // is on the band itself. Imperative rather than a binding: the band's own hover only counts while it
-    // is revealed, and a binding reading its own result would be a loop.
+    // Whether a full-screen band should be revealed: while the pointer is on the reveal edge -- which,
+    // once revealed, grows to the band's resting rectangle, so a band still sliding in is not lost to a
+    // pointer moving down onto it -- or on the band, and while the band has a popup or an editor of its
+    // own open, which live in the overlay where no hover reaches.
+    function bandRevealWanted() {
+        return appWindow.band.band === "reveal"
+               && (revealEdgeHover.hovered
+                   || (titleBar.revealed && (titleBar.hovered || titleBar.engaged || titleBarContextMenu.visible)));
+    }
+
+    // Reveals the band at once, and conceals it only after a short grace, which forgives a pointer that
+    // overshoots the band's edge. Imperative rather than a binding: whether the band's own hover counts
+    // depends on whether it is revealed, and a binding reading its own result would be a loop.
     function updateBandReveal() {
-        titleBar.revealed = appWindow.band.band === "reveal"
-                            && (revealEdgeHover.hovered || (titleBar.revealed && titleBar.hovered));
+        if (appWindow.bandRevealWanted()) {
+            bandHideDelay.stop();
+            titleBar.revealed = true;
+        } else if (appWindow.band.band !== "reveal") {
+            bandHideDelay.stop();
+            titleBar.revealed = false;
+        } else if (titleBar.revealed && !bandHideDelay.running) {
+            bandHideDelay.start();
+        }
     }
     onBandChanged: appWindow.updateBandReveal()
+
+    Timer {
+        id: bandHideDelay
+        interval: chromeStyle.motion.standard
+        onTriggered: if (!appWindow.bandRevealWanted()) titleBar.revealed = false
+    }
 
     // Diagnostic lifecycle/notification traces below are routed through a category that is off by
     // default (Warning floor), so they stay silent during normal use (closing a window and firing a
@@ -152,10 +175,15 @@ ThemedWindow
         // or still fading out.
         presence: appWindow.band.band
         centre: appWindow.band.centre
-        visible: presence === "shown" || (presence === "reveal" && (revealed || opacity > 0))
+        // A concealed "reveal" band leaves the screen and the accessibility tree once it has slid away (or,
+        // under Reduce Motion, faded out).
+        visible: presence === "shown"
+                 || (presence === "reveal"
+                     && (revealed || (chromeStyle.motion.animates ? y > -height : opacity > 0)))
         height: presence === "hidden" ? 0 : implicitHeight
         readonly property real effectiveHeight: presence === "shown" ? implicitHeight : 0
         onHoveredChanged: appWindow.updateBandReveal()
+        onEngagedChanged: appWindow.updateBandReveal()
         // Declared after the content area below, so a positive z keeps the bar above it. The terminal now
         // renders through a scene-graph node (TerminalRenderNode) and composites in z-order like any item,
         // so this is ordinary stacking — no longer a workaround for the terminal painting over siblings.
@@ -201,7 +229,9 @@ ThemedWindow
         anchors.left: parent.left
         anchors.right: parent.right
         y: 0
-        height: chromeStyle.space.revealEdge
+        // The band's resting rectangle while it is revealed, so the pointer keeps it however far it has
+        // slid; passive, so every click still reaches the band beneath.
+        height: titleBar.revealed ? titleBar.implicitHeight : chromeStyle.space.revealEdge
         visible: appWindow.band.band === "reveal"
         z: 3
 
@@ -339,6 +369,8 @@ ThemedWindow
     ActionContextMenu {
         id: titleBarContextMenu
         entries: appWindow.win ? appWindow.win.titleBarContextMenuModel : []
+        // A full-screen band stays while its own menu is open (see bandRevealWanted).
+        onVisibleChanged: appWindow.updateBandReveal()
         onPicked: (actionId) => {
             if (appWindow.win) appWindow.win.triggerTitleBarContextMenuAction(actionId);
         }

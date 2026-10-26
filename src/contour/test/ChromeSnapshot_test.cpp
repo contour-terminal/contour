@@ -25,6 +25,7 @@
 #include <core/platform/NativeFileSystem.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
+#include <QtCore/QPointF>
 #include <QtGui/QColor>
 #include <QtGui/QFontInfo>
 #include <QtGui/QGuiApplication>
@@ -215,6 +216,14 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 REQUIRE(status != nullptr);
                 CHECK(status->property("text").toString().isEmpty()
                       == (variant.script == SnapshotScript::RemoteConnected));
+                // The chip clears the leading window controls (macOS: the traffic lights' inset).
+                auto const* leading =
+                    scene.root().findChild<QQuickItem*>(QStringLiteral("leadingWindowControls"));
+                REQUIRE(leading != nullptr);
+                if (chip->isVisible())
+                    CHECK(chip->mapToItem(titleBar, QPointF(0, 0)).x() >= leading->width());
+                if (chip->isVisible() && variant.row == contour::config::ChromeStyle::MacOS)
+                    CHECK(leading->width() > 0);
                 break;
             }
             case SnapshotScript::DaemonDrift: {

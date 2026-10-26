@@ -47,6 +47,7 @@
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
+#include <QtGui/QStyleHints>
 #include <QtGui/QWindow>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
@@ -1316,6 +1317,14 @@ using contour::config::TabBarVisibility;
     return *item;
 }
 
+/// Whether an item named @p name lies beneath @p root in the visual tree.
+[[nodiscard]] bool isInVisualTree(QQuickItem const& root, QString const& name)
+{
+    return std::ranges::any_of(root.childItems(), [&](QQuickItem const* child) {
+        return child->objectName() == name || isInVisualTree(*child, name);
+    });
+}
+
 /// The centre of @p item, in its window's coordinates.
 [[nodiscard]] QPoint centreOf(QQuickItem const& item)
 {
@@ -1679,11 +1688,167 @@ TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs
     CHECK(active->x() >= contentX);
     CHECK(active->x() + active->width() <= contentX + list.width());
 
+    // Back to the first tab: the strip scrolls it into view again.
+    controller.setActiveTab(0);
+    auto const firstInView = [&] {
+        auto const first = tabDelegates(*root).front();
+        auto const x = list.property("contentX").toReal();
+        return first != nullptr && first->x() >= x && first->x() + first->width() <= x + list.width();
+    };
+    REQUIRE(QTest::qWaitFor(firstInView, 2000));
+
     auto& plus = named(*root, QStringLiteral("newTabButton"));
     CHECK(plus.isVisible());
     CHECK(plus.mapToItem(&titleBar, QPointF(plus.width(), 0)).x() <= titleBar.width());
     auto const& drag = named(*root, QStringLiteral("dragRegion"));
     CHECK(drag.width() >= styleGroup(engine, "space").property("dragReserve").toReal());
 
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// Loads the macOS row with three tabs, takes the window into full screen and reveals the band from its
+/// edge, waiting until it has slid (or faded) in when @p settle says so.
+struct FullScreenBand
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    std::unique_ptr<QObject> root { loadMainWindow(
+        engine, controller, warnings, rowSetup(ChromeStyle::MacOS)) };
+    QQuickWindow* window { qobject_cast<QQuickWindow*>(root.get()) };
+    QQuickItem* titleBar = nullptr;
+
+    FullScreenBand()
+    {
+        REQUIRE(window != nullptr);
+        window->showFullScreen();
+        REQUIRE(QTest::qWaitForWindowExposed(window));
+        REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
+        titleBar = &named(*root, QStringLiteral("titleBar"));
+        QTest::mouseMove(window, awayPoint());
+        REQUIRE(QTest::qWaitFor([&] { return titleBar->y() == -titleBar->height(); }, 2000));
+    }
+
+    ~FullScreenBand()
+    {
+        if (window != nullptr)
+            window->showNormal();
+    }
+
+    FullScreenBand(FullScreenBand const&) = delete;
+    FullScreenBand& operator=(FullScreenBand const&) = delete;
+    FullScreenBand(FullScreenBand&&) = delete;
+    FullScreenBand& operator=(FullScreenBand&&) = delete;
+
+    [[nodiscard]] bool revealed() const { return titleBar->property("revealed").toBool(); }
+
+    /// A point on neither the band nor anything it opens: the middle of the window's left half.
+    [[nodiscard]] QPoint awayPoint() const { return { window->width() / 4, window->height() / 2 }; }
+
+    /// Rests the pointer on the reveal edge until the band reveals.
+    void revealFromEdge() const
+    {
+        QTest::mouseMove(window, centreOf(named(*root, QStringLiteral("bandRevealEdge"))));
+        REQUIRE(QTest::qWaitFor([&] { return revealed(); }, 2000));
+    }
+
+    /// Waits until the band has finished sliding in.
+    void waitUntilIn() const
+    {
+        REQUIRE(QTest::qWaitFor([&] { return titleBar->y() == 0; }, 2000));
+    }
+
+    /// Lets twice the slide's duration pass, long past any hide delay.
+    void linger() { QTest::qWait(2 * styleGroup(engine, "motion").property("standard").toInt()); }
+};
+} // namespace
+
+TEST_CASE("a pointer that reaches the sliding band keeps it revealed (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    auto band = FullScreenBand {};
+    band.revealFromEdge();
+    // Down to where the band will rest, while it is still sliding in from above.
+    REQUIRE(band.titleBar->y() < 0);
+    QTest::mouseMove(band.window,
+                     QPoint(band.window->width() / 2, static_cast<int>(band.titleBar->implicitHeight() / 2)));
+    band.linger();
+    CHECK(band.revealed());
+    CHECK(band.titleBar->y() == 0);
+
+    // Away: it goes, after its short grace.
+    QTest::mouseMove(band.window, band.awayPoint());
+    REQUIRE(QTest::qWaitFor([&] { return !band.revealed(); }, 2000));
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("a full-screen band stays while its menu or a rename is open (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    SECTION("the + menu")
+    {
+        auto band = FullScreenBand {};
+        band.revealFromEdge();
+        band.waitUntilIn();
+        auto& plus = named(*band.root, QStringLiteral("newTabButton"));
+        QTest::mouseClick(band.window, Qt::RightButton, {}, centreOf(plus));
+        auto* menu = band.root->findChild<QObject*>(QStringLiteral("newTabMenu"));
+        REQUIRE(menu != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+        QTest::mouseMove(band.window, band.awayPoint());
+        band.linger();
+        CHECK(band.revealed());
+
+        // Once the menu has gone, so does the band.
+        REQUIRE(QMetaObject::invokeMethod(menu, "dismiss"));
+        REQUIRE(QTest::qWaitFor([&] { return !band.revealed(); }, 2000));
+        CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("an inline rename")
+    {
+        auto band = FullScreenBand {};
+        band.revealFromEdge();
+        band.waitUntilIn();
+        band.controller.beginActiveTabTitleEdit();
+        // A delegate has no QObject parent: the field is found in the visual tree.
+        REQUIRE(QTest::qWaitFor(
+            [&] { return isInVisualTree(*band.titleBar, QStringLiteral("tabRenameField")); }, 2000));
+        QTest::mouseMove(band.window, band.awayPoint());
+        band.linger();
+        CHECK(band.revealed());
+        CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("a concealed full-screen band is not on screen, nor in the accessibility tree (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    auto band = FullScreenBand {};
+    CHECK_FALSE(band.revealed());
+    CHECK_FALSE(band.titleBar->isVisible());
+    band.revealFromEdge();
+    CHECK(band.titleBar->isVisible());
+}
+
+TEST_CASE("the macOS + opens profiles on a long press, and says so (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    auto& plus = named(*root, QStringLiteral("newTabButton"));
+    CHECK_FALSE(evaluateIn(plus, QStringLiteral("Accessible.description")).toString().isEmpty());
+
+    QTest::mousePress(window, Qt::LeftButton, {}, centreOf(plus));
+    QTest::qWait(QGuiApplication::styleHints()->mousePressAndHoldInterval() * 2);
+    QTest::mouseRelease(window, Qt::LeftButton, {}, centreOf(plus));
+    CHECK(controller.newTabMenuOpenings == 1);
+    CHECK(controller.calls.count(QStringLiteral("createNewTab")) == 1); // only the startup tab
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

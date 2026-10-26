@@ -168,6 +168,16 @@ class MockMainController: public MainWindowControllerMock
     [[nodiscard]] window::DaemonDriftModel& daemonDrift() noexcept { return _drift; }
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _scene.activeTab; }
+    /// Mirrors WindowController::activateTab(): makes tab @p index the active one.
+    void setActiveTab(int index)
+    {
+        if (_scene.activeTab == index)
+            return;
+        _scene.activeTab = index;
+        emit dataChanged(
+            this->index(0), this->index(_scene.tabCount - 1), { static_cast<int>(Roles::IsActiveRole) });
+        emit activeTabIndexChanged();
+    }
     [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
     void setHostingNotice(QString notice)
     {

@@ -500,6 +500,10 @@ Item {
         }
     }
 
+    /// Whether the tab has its own popup or editor open: the colour flyout or an inline rename. A
+    /// full-screen band stays revealed while it does (see Main.qml).
+    readonly property bool engaged: colorFlyout.visible || renameLoader.active
+
     // Inline rename field, shown on double-click.
     Loader {
         id: renameLoader

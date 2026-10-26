@@ -150,7 +150,7 @@ class ChromeSnapshotScene
             .tabBarPosition = config::TabBarPosition::Top,
             .drift = scriptRow(variant.script).drift,
             .frame = scriptRow(variant.script).frame,
-            .nativeControlsInset = 0,
+            .nativeControlsInset = nativeControlsInsetFor(variant.row),
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -352,6 +352,19 @@ class ChromeSnapshotScene
         return model;
     }
 
+    /// What the macOS row's band leaves clear for AppKit's traffic lights: a placeholder of the frame
+    /// adapter's inset, which Step 1d replaces with the measured value.
+    static constexpr qreal SnapshotTrafficLightInset = 70;
+
+    /// The inset the OS reserves for its own window controls on @p row's host, as the frame adapter reports
+    /// it.
+    /// @param row The chrome row.
+    /// @return SnapshotTrafficLightInset on the macOS host, 0 elsewhere.
+    [[nodiscard]] static constexpr qreal nativeControlsInsetFor(config::ChromeStyle row) noexcept
+    {
+        return rowHost(row).host == config::HostPlatform::MacOS ? SnapshotTrafficLightInset : 0;
+    }
+
     /// The chip state a script's connection column shows.
     /// @param connection The script's host connection.
     /// @return Its HostChipState; Connected for a local window, which shows no chip.
@@ -369,7 +382,7 @@ class ChromeSnapshotScene
 
     /// Shows the window in full screen and rests the pointer on the band's reveal edge, waiting until the
     /// band is revealed.
-    void showFullScreenRevealed()
+    void showFullScreenRevealed() const
     {
         // Shown first: macOS takes a window into full screen from its frame, not from nothing.
         window().show();

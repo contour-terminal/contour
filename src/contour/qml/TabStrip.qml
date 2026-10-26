@@ -35,6 +35,10 @@ Row {
     readonly property real fixedWidth: newTabLoader.width + newTabMenuLoader.width
     // The "▾" the title bar pops the new-tab menu at, or null where the strip draws none.
     readonly property Item newTabMenuAnchor: newTabMenuLoader.item
+    // How many tabs have their flyout or a rename open; kept by the delegates.
+    property int engagedTabs: 0
+    /// Whether the strip has a popup or an editor of its own open: the tab menu, or a tab's.
+    readonly property bool engaged: tabContextMenu.visible || root.engagedTabs > 0
 
     // The QML-facing carve-out of the shape token: whether the tabs are pills in a well.
     readonly property bool pill: chromeStyle.layout.isPill
@@ -170,6 +174,8 @@ Row {
                 tabBadge: badge
                 tabBadgeText: badgeText
                 tabBadgeProgress: badgeProgress
+                onEngagedChanged: root.engagedTabs += engaged ? 1 : -1
+                Component.onDestruction: if (engaged) root.engagedTabs -= 1
             }
 
             // Animate reordering when a tab is moved.

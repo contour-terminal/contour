@@ -15,6 +15,8 @@ Item {
     property string glyph
     /// What assistive technology announces the button as.
     property string accessibleName
+    /// What else the button does, such as what its secondary click opens; empty for nothing more.
+    property string accessibleDescription
     /// The font the glyph is drawn in.
     property font glyphFont: chromeStyle.newTabFont
 
@@ -25,6 +27,7 @@ Item {
 
     Accessible.role: Accessible.Button
     Accessible.name: root.accessibleName
+    Accessible.description: root.accessibleDescription
     Accessible.onPressAction: root.clicked()
 
     implicitWidth: chromeStyle.size.toolbarButton
