@@ -2646,6 +2646,10 @@ TEST_CASE("Main.qml fills the title bar under the expanded client area", "[displ
     if (QGuiApplication::platformName() != QStringLiteral("cocoa")
         || !contour::test::displayTestsEnabled(core::LiveEnvironment {}))
         SKIP("Needs CONTOUR_TEST_DISPLAY=1 and the cocoa platform plugin");
+#if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
+    SKIP(
+        "Qt::ExpandedClientAreaHint, Qt::NoTitleBarBackgroundHint and QWindow::safeAreaMargins are Qt 6.9's");
+#else
     QQmlEngine engine;
     MockMainController controller {};
     controller.setNeedsExpandedClientArea(true);
@@ -2669,4 +2673,5 @@ TEST_CASE("Main.qml fills the title bar under the expanded client area", "[displ
     QCoreApplication::processEvents();
     CHECK(window->flags().testFlag(Qt::NoTitleBarBackgroundHint));
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+#endif
 }

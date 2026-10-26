@@ -321,6 +321,9 @@ TEST_CASE("a request the OS answers during its apply is applied once", "[contour
 {
     // Attaching the toolbar changes Qt's safe area, and Qt may say so before apply() returns: the nested
     // refresh must see the request as applied already.
+#if QT_VERSION < QT_VERSION_CHECK(6, 9, 0)
+    SKIP("QWindow::safeAreaMarginsChanged is Qt 6.9's");
+#else
     auto fixture = TitleBandFixture {};
     fixture.record.duringApply = [&] {
         emit fixture.window.osWindow->safeAreaMarginsChanged(QMargins { 0, 40, 0, 0 });
@@ -339,6 +342,7 @@ TEST_CASE("a request the OS answers during its apply is applied once", "[contour
     CHECK(fixture.record.applied.size() == 1);
     CHECK(changes.count() == 1);
     CHECK(insets.count() == 1);
+#endif
 }
 
 TEST_CASE("a recreated platform window is dressed again", "[contour][titleband][controller]")
@@ -360,6 +364,9 @@ TEST_CASE("another screen and a new safe area measure the band again", "[contour
     fixture.useClientBand();
 
     auto measured = fixture.record.measured;
+    // QWindow::safeAreaMarginsChanged is Qt 6.9's (the controller listens only there); the screen half holds
+    // on every Qt.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
     fixture.record.metrics.height = 40;
     emit fixture.window.osWindow->safeAreaMarginsChanged(QMargins { 0, 40, 0, 0 });
     if (hostDressesTitleBand())
@@ -367,6 +374,7 @@ TEST_CASE("another screen and a new safe area measure the band again", "[contour
         CHECK(fixture.record.measured > measured);
         CHECK(fixture.controller().titleBandHeight() == 40);
     }
+#endif
 
     measured = fixture.record.measured;
     fixture.record.metrics.height = 44;

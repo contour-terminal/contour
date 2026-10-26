@@ -449,6 +449,9 @@ native menu bar's "Settings…".
 - **Primary mechanism (supported AppKit behaviour):** keep `NSWindowStyleMaskFullSizeContentView`,
   and set `titlebarAppearsTransparent = NO`. AppKit then draws its own title-bar material beneath
   the content view.
+- **As shipped (ruling S6):** under that material AppKit's `NSTitlebarView` took the band's clicks, so the
+  band is the client's own tint over the compact toolbar (`Solid`). Glass is a follow-up: our own
+  within-window `NSVisualEffectView` behind the Qt content, as a new backdrop.
 - The QQuickWindow gets an alpha-capable format. The band area is cleared to transparent, and
   panes stay opaque.
 - Watch out: CocoaWindowFrame warns that an alpha surface can clear `hasShadow`

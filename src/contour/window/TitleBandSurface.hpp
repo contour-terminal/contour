@@ -62,9 +62,10 @@ struct TitleBandSurfaceRow
 /// material under a tinted band, and either material grows the title bar by the toolbar.
 ///
 /// The Glass row is data no shipped row selects (ruling S6): under the native material AppKit's
-/// NSTitlebarView takes the band's clicks, so the MacOS row resolves its band to Solid. It stays for the
-/// follow-up, glass from our own within-window NSVisualEffectView behind the Qt content, which keeps the
-/// clicks in Qt's view.
+/// NSTitlebarView takes the band's clicks, so the MacOS row resolves its band to Solid. It stays as the
+/// measured reason (F13) and as the full-screen step's fixture. The glass follow-up -- our own within-window
+/// NSVisualEffectView behind the Qt content, which keeps the clicks in Qt's view -- is a NEW BandBackdrop
+/// enumerator, not NativeMaterial: selecting NativeMaterial again re-opens F13.
 inline constexpr auto TitleBandSurfaceRows = std::array {
     TitleBandSurfaceRow { .style = config::ChromeStyle::MacOS,
                           .material = config::Material::Glass,
@@ -92,7 +93,7 @@ inline constexpr auto BareBandSurface = TitleBandSurface {
 /// Decides the band's surface.
 ///
 /// A native frame has no band of ours (R-e). Under Minimal, a row's band whose middle is empty is the bare
-/// band (BareBandSurface). In full screen no material sits behind terminal text (D2):
+/// band (BareBandSurface). In full screen no material sits behind terminal text (R-b, owner decision 2):
 /// the native material becomes the client's own paint, and a cleared band becomes the tint.
 /// @param inputs What the surface depends on.
 /// @return The surface; @c TitleBandSurface {} where no row matches or the frame is native.
