@@ -752,13 +752,51 @@ void TerminalSessionManager::openSettings(TerminalSession* acting)
     _app.openSettings(controller != nullptr ? controller->screen() : nullptr);
 }
 
+void TerminalSessionManager::postNotice(window::Notice notice, TerminalSession const* acting)
+{
+    if (auto* const controller = controllerHostingSession(acting); controller != nullptr)
+        controller->notices().post(std::move(notice));
+    else
+        managerLog()("No window to tell: {}", notice.text);
+}
+
+void TerminalSessionManager::postNoticeToEveryWindow(window::Notice const& notice)
+{
+    for (auto* const controller: _controllersByWindow | std::views::values)
+        if (controller != nullptr)
+            controller->notices().post(notice);
+}
+
+void TerminalSessionManager::clearNoticeInEveryWindow(window::NoticeKind kind)
+{
+    for (auto* const controller: _controllersByWindow | std::views::values)
+        if (controller != nullptr)
+            controller->notices().clear(kind);
+}
+
+void TerminalSessionManager::openConfigFile()
+{
+    auto const url = QUrl::fromLocalFile(QString::fromStdString(core::pathToUtf8(_app.config().configFile)));
+    if (auto const opened = _app.externalLauncher().openUrl(url); !opened)
+        errorLog()("Could not open the configuration file {}: {}.",
+                   core::pathToUtf8(_app.config().configFile),
+                   platform::describe(opened.error()));
+}
+
 std::expected<void, std::string> TerminalSessionManager::reloadAllSessions()
 {
     // Read once, into a Config of its own, so a file that fails to load leaves the app's configuration
     // and every session as they were rather than half-replaced.
     auto loaded = config::tryLoadConfigFromFile(_app.config().configFile);
     if (!loaded)
+    {
+        // Said in every window, until a reload succeeds: the file is the application's, not a session's.
+        postNoticeToEveryWindow(
+            window::Notice { .kind = window::NoticeKind::ConfigReloadFailed,
+                             .text = window::configReloadFailedNoticeText(loaded.error()) });
         return std::unexpected { std::move(loaded.error()) };
+    }
+    clearNoticeInEveryWindow(window::NoticeKind::ConfigReloadFailed);
 
     // The master config first, so the app — the next new tab, and the settings page that reads it — sees
     // the new file and side files immediately. Then each live session applies it under its own profile,

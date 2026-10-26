@@ -80,6 +80,8 @@ Control {
             objectName: "toastText"
             Layout.alignment: Qt.AlignVCenter
             text: root.text
+            // What a toast says can quote a name or an error a program or a file supplied: text, never markup.
+            textFormat: Text.PlainText
             font: chromeStyle.type.footnote
             color: chromeStyle.colors.toastText
         }

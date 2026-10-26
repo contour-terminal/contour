@@ -2470,7 +2470,7 @@ bool Terminal::pastesUnchanged(string_view text) const
     return isUnchangedBySanitizing(text, purpose);
 }
 
-void Terminal::sendPasteFromClipboard(unsigned count, bool strip)
+void Terminal::sendPasteFromClipboard(unsigned count, PasteStrip strip)
 {
     runOutsideStateLock([this, count, strip] { _eventListener.pasteFromClipboard(count, strip); });
 }

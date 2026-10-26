@@ -2867,3 +2867,127 @@ TEST_CASE("Without a dialog, closing the palette hands the keyboard back to the 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 // }}}
+
+// {{{ Notices
+namespace
+{
+
+/// Where @p item is laid out, in window coordinates: its own transform -- a toast's slide as it shows,
+/// which no animation advances offscreen -- left out.
+[[nodiscard]] QRectF sceneRectOf(QQuickItem const& item)
+{
+    auto const laidOut = QRectF { item.position(), QSizeF { item.width(), item.height() } };
+    return item.parentItem() != nullptr ? item.parentItem()->mapRectToScene(laidOut) : laidOut;
+}
+
+/// What a copy tells its window.
+[[nodiscard]] contour::window::Notice copiedNotice()
+{
+    return contour::window::Notice { .kind = contour::window::NoticeKind::Copied,
+                                     .text = contour::window::copiedNoticeText(3) };
+}
+
+} // namespace
+
+TEST_CASE("Main.qml notices: the toast sits in a band that holds it, else in the content (offscreen)",
+          "[contour][gui][qml][mainwindow][notices]")
+{
+    SECTION("the macOS row: in the title band")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        showWindow(*root);
+        REQUIRE(root->property("band").toMap().value("band").toString() == "shown");
+
+        controller.notices().post(copiedNotice());
+        QCoreApplication::processEvents();
+        auto* const toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        auto const* titleBar = root->findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(titleBar != nullptr);
+        CHECK(toast->property("shown").toBool());
+        CHECK(toast->property("text").toString() == "Copied 3 lines");
+        auto const* toastText = toast->findChild<QQuickItem*>(QStringLiteral("toastText"));
+        REQUIRE(toastText != nullptr);
+        CHECK(toastText->property("textFormat").toInt() == Qt::PlainText);
+        CHECK(sceneRectOf(*titleBar).contains(sceneRectOf(*toast).center()));
+        auto const* style = engine.rootContext()->contextProperty("chromeStyle").value<QObject*>();
+        REQUIRE(style != nullptr);
+        CHECK(toast->height()
+              == Catch::Approx(style->property("size").value<QObject*>()->property("toast").toDouble()));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("the Fluent row with the strip hidden: no band, so in the content")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        showWindow(*root);
+        controller.setTabBarShouldShow(false);
+        QCoreApplication::processEvents();
+        REQUIRE(root->property("band").toMap().value("band").toString() == "hidden");
+
+        controller.notices().post(copiedNotice());
+        QCoreApplication::processEvents();
+        auto* const toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        auto const* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
+        REQUIRE(toast != nullptr);
+        REQUIRE(content != nullptr);
+        CHECK(sceneRectOf(*content).contains(sceneRectOf(*toast)));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("the Terminal row: the one-row toast is the window's")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
+        controller.notices().post(copiedNotice());
+        QCoreApplication::processEvents();
+        auto const* toast = root->findChild<QQuickItem*>(QStringLiteral("noticeToast"));
+        REQUIRE(toast != nullptr);
+        CHECK(toast->property("shown").toBool());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("Main.qml notices: a banner pushes the content down, and shows its text as text (offscreen)",
+          "[contour][gui][qml][mainwindow][notices]")
+{
+    QQmlEngine engine;
+    MockMainController controller;
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings);
+    auto* const banner = root->findChild<QQuickItem*>(QStringLiteral("noticeBanner"));
+    auto const* content = root->findChild<QQuickItem*>(QStringLiteral("content"));
+    REQUIRE(banner != nullptr);
+    REQUIRE(content != nullptr);
+    CHECK_FALSE(banner->isVisible());
+    auto const contentTop = content->y();
+
+    auto const markup = QStringLiteral("<b>bold</b> <img src=x>");
+    controller.notices().post(contour::window::Notice {
+        .kind = contour::window::NoticeKind::ConfigReloadFailed, .text = markup.toStdString() });
+    QCoreApplication::processEvents();
+    REQUIRE(banner->isVisible());
+    CHECK(banner->height() > 0);
+    CHECK(content->y() == Catch::Approx(contentTop + banner->height()));
+
+    auto const* text = banner->findChild<QQuickItem*>(QStringLiteral("bannerText"));
+    REQUIRE(text != nullptr);
+    CHECK(text->property("text").toString() == markup);
+    CHECK(text->property("textFormat").toInt() == Qt::PlainText);
+
+    // Dismissed, it gives the room back.
+    REQUIRE(QMetaObject::invokeMethod(banner, "dismissed"));
+    QCoreApplication::processEvents();
+    CHECK(controller.notices().bannerText().isEmpty());
+    CHECK(content->y() == Catch::Approx(contentTop));
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}

@@ -31,6 +31,7 @@
 #include <vtpty/MockPty.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 
+#include <core/Utf8Path.hpp>
 #include <core/platform/FileUri.hpp>
 #include <core/platform/PathUtils.hpp>
 #include <core/testing/ScopedTempDir.hpp>
@@ -2769,3 +2770,32 @@ TEST_CASE("TerminalSessionManager: restarting an ended pane repaints its tab's b
 }
 
 // }}}
+
+TEST_CASE("TerminalSessionManager: a configuration that fails to reload says so in every window, until one "
+          "succeeds",
+          "[contour][session][manager][notices]")
+{
+    // Real file I/O, as every reload case: reloadAllSessions() reads the app's configuration file from disk.
+    contour::test::ConfiguredTestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const first { testApp.manager() };
+    contour::test::ScopedController const second { testApp.manager() };
+    auto const failure = QStringLiteral("Contour could not reload its configuration:");
+
+    contour::test::writeConfigFile(testApp.configFile(), "profiles: [\n");
+    REQUIRE_FALSE(testApp.manager().reloadAllSessions());
+    CHECK(first->notices().bannerText().startsWith(failure));
+    CHECK(second->notices().bannerText().startsWith(failure));
+    CHECK(first->notices().bannerActionText() == "Show in Editor");
+
+    // Its action opens the file it is about.
+    first->notices().triggerBannerAction();
+    REQUIRE(testApp.launcher().openedUrls.size() == 1);
+    CHECK(testApp.launcher().openedUrls.front()
+          == QUrl::fromLocalFile(QString::fromStdString(core::pathToUtf8(testApp.configFile()))));
+
+    contour::test::writeConfigFile(testApp.configFile(),
+                                   contour::test::profileConfigYaml(testApp.app().profileName(), ""));
+    REQUIRE(testApp.manager().reloadAllSessions());
+    CHECK(first->notices().bannerText().isEmpty());
+    CHECK(second->notices().bannerText().isEmpty());
+}

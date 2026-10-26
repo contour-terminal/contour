@@ -318,7 +318,7 @@ ThemedWindow
         // window next polishes, and the content below is anchored to this edge. Summed rather than
         // childrenRect, which keeps a collapsed banner's stale y -- dismiss the lower banner first and
         // the upper one second, and the stack would keep the upper one's height.
-        height: hostingNoticeBar.height + newDefaultsBanner.height
+        height: hostingNoticeBar.height + newDefaultsBanner.height + noticeBanner.height
         z: 1
 
         // Shown while this window runs its shells itself because the daemon the launch wanted could not be
@@ -345,6 +345,20 @@ ThemedWindow
             dismissText: qsTr("Keep Mine")
             onActionTriggered: newDefaultsBanner.notice.useNew()
             onDismissed: newDefaultsBanner.notice.keepMine()
+        }
+
+        // This window's notice banner (window::NoticeModel): a configuration that failed to reload, until a
+        // reload succeeds or the user dismisses it. Guarded as the hosting notice is: a mock `win` may lack it.
+        Banner {
+            id: noticeBanner
+            objectName: "noticeBanner" // so offscreen tests can findChild() it
+            readonly property var notices: appWindow.win && appWindow.win.notices ? appWindow.win.notices : null
+            width: parent.width
+            text: notices !== null ? notices.bannerText : ""
+            glyph: notices !== null ? notices.bannerGlyph : ""
+            actionText: notices !== null ? notices.bannerActionText : ""
+            onActionTriggered: noticeBanner.notices.triggerBannerAction()
+            onDismissed: noticeBanner.notices.dismissBanner()
         }
     }
 
@@ -383,6 +397,40 @@ ThemedWindow
             }
         }
 
+    }
+
+    // This window's toast (window::NoticeModel): centred, in the title band while a band at the top can hold
+    // it, else at the content's top -- or its bottom, while the cursor is in the rows the top one would
+    // cover. Where it goes is decided as it shows (WindowController.toastHost, a ToastHost's value:
+    // 0 TitleBand, 1 ContentTop, 2 ContentBottom); a hovered toast stays.
+    Toast {
+        id: noticeToast
+        objectName: "noticeToast" // so offscreen tests can findChild() it
+        readonly property var notices: appWindow.win && appWindow.win.notices ? appWindow.win.notices : null
+        property int host: 0
+        text: notices !== null ? notices.toastText : ""
+        glyph: notices !== null ? notices.toastGlyph : ""
+        shown: notices !== null && notices.toastShown
+        x: (parent.width - width) / 2
+        y: host === 0 ? titleBar.y + (titleBar.height - height) / 2
+                      : host === 1 ? content.y + chromeStyle.space.s4
+                                   : content.y + content.height - height - chromeStyle.space.s4
+        z: 20
+
+        function placeHost() {
+            if (noticeToast.shown && appWindow.win && appWindow.win.toastHost)
+                noticeToast.host = appWindow.win.toastHost(appWindow.band.band, appWindow.band.bandEdge,
+                                                           titleBar.height, chromeStyle.size.toast);
+        }
+
+        onShownChanged: placeHost()
+        onTextChanged: placeHost()
+
+        HoverHandler {
+            // Only while it shows: a faded toast is still there, and would hold the next one's time.
+            enabled: noticeToast.shown
+            onHoveredChanged: if (noticeToast.notices !== null) noticeToast.notices.setToastHovered(hovered)
+        }
     }
 
     // Shown only while the daemon runs another release than this client (see DaemonDriftModel): in the

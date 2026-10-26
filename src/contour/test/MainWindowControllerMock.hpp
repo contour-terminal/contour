@@ -6,10 +6,14 @@
 #include <contour/command/TabMenus.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/NoticeModel.hpp>
 #include <contour/window/RemoteChrome.hpp>
 #include <contour/window/TabColorScheme.hpp>
+#include <contour/window/ToastPlacement.hpp>
 
 #include <vtbackend/core/Color.hpp>
+
+#include <core/platform/Clock.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QPointF>
@@ -124,6 +128,8 @@ class MainWindowControllerMock: public QAbstractListModel
     Q_PROPERTY(qreal titleBandHeight READ titleBandHeight WRITE setTitleBandHeight NOTIFY titleBandChanged)
     Q_PROPERTY(
         qreal titleBandRevealTop READ titleBandRevealTop WRITE setTitleBandRevealTop NOTIFY titleBandChanged)
+    // Mirrors WindowController's notices: a real NoticeModel, on a clock the test moves, saying nothing.
+    Q_PROPERTY(contour::window::NoticeModel* notices READ noticesForQml CONSTANT)
 
   public:
     using QAbstractListModel::QAbstractListModel;
@@ -259,6 +265,32 @@ class MainWindowControllerMock: public QAbstractListModel
         emit titleBandChanged();
     }
 
+    // {{{ Notices
+    /// This window's notices, as WindowController::notices() gives them.
+    [[nodiscard]] window::NoticeModel& notices() noexcept { return _notices; }
+    /// @return The notices, as the `notices` property hands them to QML.
+    [[nodiscard]] window::NoticeModel* noticesForQml() noexcept { return &_notices; }
+
+    /// Mirrors WindowController::toastHost(), with the active pane's cursor row a test sets.
+    [[nodiscard]] Q_INVOKABLE int toastHost(QString const& band,
+                                            QString const& edge,
+                                            int bandHeight,
+                                            int toastHeight) const
+    {
+        return static_cast<int>(window::placeToast(window::ToastPlacementInputs {
+            .band = window::barPresenceNamed(band.toStdString()).value_or(window::BarPresence::Hidden),
+            .edge = window::barEdgeNamed(edge.toStdString()).value_or(window::BarEdge::Top),
+            .bandHeight = bandHeight,
+            .toastHeight = toastHeight,
+            .cursorRow = cursorRow,
+            .coveredRows = window::ToastCoveredRows,
+        }));
+    }
+
+    core::platform::ManualClock noticeClock {}; ///< What the notices' toasts are timed by.
+    int cursorRow = window::ToastCoveredRows;   ///< The active pane's cursor row toastHost() reads.
+    // }}}
+
     std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
     std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
     int newTabMenuOpenings = 0;          ///< How often the new-tab menu was asked for.
@@ -290,6 +322,8 @@ class MainWindowControllerMock: public QAbstractListModel
     int _headerReveal = 0;         ///< @see headerReveal; 0 = HeaderReveal::None.
     qreal _titleBandHeight = 0;    ///< @see titleBandHeight; 0 = not measured.
     qreal _titleBandRevealTop = 0; ///< @see titleBandRevealTop; 0 = the window's top.
+    platform::NullAnnouncer _noticeAnnouncer;
+    window::NoticeModel _notices { noticeClock, _noticeAnnouncer, [](window::NoticeAction) {} };
 };
 
 } // namespace contour::test

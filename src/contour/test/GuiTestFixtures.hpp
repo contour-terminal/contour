@@ -818,6 +818,9 @@ class ConfiguredTestApp
     /// @return The file the app's configuration is read from.
     [[nodiscard]] std::filesystem::path const& configFile() const noexcept { return _configFile; }
 
+    /// @return What the app opened URLs and programs with, as TestApp::launcher() gives it.
+    [[nodiscard]] RecordingExternalLauncher& launcher() noexcept { return _testApp.launcher(); }
+
   private:
     QTemporaryDir _configDir; ///< First, so it outlives the app that reads from it.
     TestApp _testApp;

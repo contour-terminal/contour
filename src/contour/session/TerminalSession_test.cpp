@@ -1317,20 +1317,20 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
     REQUIRE(clipboard != nullptr);
 
     clipboard->setText(QStringLiteral("pasted"));
-    session->pasteFromClipboard(1, /*strip*/ false);
+    session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
     CHECK(mockPtyOf(*session).stdinBuffer().contains("pasted"));
 
     // > 1 MB: hard-rejected — and (regression) must not crash on a display-less session.
     mockPtyOf(*session).stdinBuffer().clear();
     clipboard->setText(QString((1024 * 1024) + 1, QChar('x')));
-    CHECK_NOTHROW(session->pasteFromClipboard(1, false));
+    CHECK_NOTHROW(session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep));
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
     // > 512 KB: requires permission; nothing written until granted.
     int permissionRequests = 0;
     countAsks(*session, contour::session::GuardedRole::BigPaste, permissionRequests);
     clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
-    session->pasteFromClipboard(1, false);
+    session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
     CHECK(permissionRequests == 1);
     CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
@@ -1341,7 +1341,7 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
     CHECK(mockPtyOf(*session).stdinBuffer().contains("yyy"));
 
     mockPtyOf(*session).stdinBuffer().clear();
-    session->pasteFromClipboard(1, false);
+    session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
     CHECK(permissionRequests == 1);
     CHECK(mockPtyOf(*session).stdinBuffer().contains("yyy"));
 
@@ -1370,7 +1370,7 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
         auto const line = QStringLiteral("echo hello\r\n");
 
         clipboard->setText(line);
-        session->pasteFromClipboard(1, /*strip=*/false);
+        session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
         auto const smallPaste = mockPtyOf(*session).stdinBuffer();
         REQUIRE_FALSE(smallPaste.empty());
 
@@ -1380,7 +1380,7 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
         auto const repeats = static_cast<int>(((size_t { 1024 } * 512) / smallPaste.size()) + 1);
         mockPtyOf(*session).stdinBuffer().clear();
         clipboard->setText(line.repeated(repeats));
-        session->pasteFromClipboard(1, /*strip=*/false);
+        session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
         REQUIRE(mockPtyOf(*session).stdinBuffer().empty()); // held for the verdict, not sent
 
         session->applyPendingPaste(PermissionDecision::Allow, PermissionMemory::Once);
@@ -1400,7 +1400,7 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
     SECTION("swapping the clipboard while the dialog is up does not swap the paste")
     {
         clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
-        session->pasteFromClipboard(1, /*strip=*/false);
+        session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
 
         // The user is looking at a dialog about the 'y' payload; something else lands on the clipboard.
         clipboard->setText(QStringLiteral("substituted"));
@@ -1417,13 +1417,13 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
         countAsks(*session, contour::session::GuardedRole::BigPaste, asks);
 
         clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
-        session->pasteFromClipboard(1, /*strip=*/false);
+        session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
         REQUIRE(asks == 1);
 
         session->applyPendingPaste(PermissionDecision::Deny, PermissionMemory::Session);
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
 
-        session->pasteFromClipboard(1, /*strip=*/false);
+        session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
         CHECK(asks == 1); // remembered: no second dialog
         CHECK(mockPtyOf(*session).stdinBuffer().empty());
     }
@@ -3548,7 +3548,7 @@ TEST_CASE("TerminalSession: clipboard, selection and notification paths are disp
     {
         clipboard->setText(QStringLiteral("ab"));
         pty.stdinBuffer().clear();
-        session->pasteFromClipboard(3, /*strip*/ false);
+        session->pasteFromClipboard(3, vtbackend::PasteStrip::Keep);
         CHECK(pty.stdinBuffer().contains("ababab"));
     }
 }
@@ -5335,7 +5335,7 @@ TEST_CASE("TerminalSession: the paste prompt's preview is bounded however large 
     for ([[maybe_unused]] auto const i: std::views::iota(0, Lines))
         text += QString(LineBytes, QChar('w')) + QChar('\n');
     clipboard->setText(text);
-    session->pasteFromClipboard(1, /*strip=*/false);
+    session->pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
 
     auto const prompt = session->pendingPermission();
     auto const lines = prompt.value(QStringLiteral("lines")).toList();
@@ -12002,4 +12002,84 @@ TEST_CASE("TerminalSession: a configuration reload keeps Reduce Motion", "[conto
     reloadSessionWith(*session, "", "        screen_transition_duration: 333\n");
     CHECK(session->terminal().settings().screenTransitionDuration == 0ms);
     CHECK(session->profile().screenTransitionDuration.value() == 333ms);
+}
+
+namespace
+{
+
+/// A session in a window of its own, with a recording surface: what an explicit copy or a refused paste
+/// tells its window about. The surface is detached before the window goes.
+struct WindowedSession
+{
+    contour::test::ScopedController const& controller;
+    contour::session::TerminalSession& session;
+    contour::test::FakeDisplaySurface surface {};
+
+    explicit WindowedSession(contour::test::ScopedController const& c):
+        controller { c }, session { *(c->createNewTab(), c->activeSession()) }
+    {
+        surface.attachedSession = &session;
+        session.attachDisplay(surface);
+    }
+    ~WindowedSession()
+    {
+        if (session.display() == &surface)
+            session.detachDisplay(surface);
+    }
+    WindowedSession(WindowedSession const&) = delete;
+    WindowedSession& operator=(WindowedSession const&) = delete;
+    WindowedSession(WindowedSession&&) = delete;
+    WindowedSession& operator=(WindowedSession&&) = delete;
+};
+
+} // namespace
+
+TEST_CASE("TerminalSession: an explicit copy tells its window how many lines it copied",
+          "[contour][session][clipboard][notices]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const controller { testApp.manager() };
+    auto windowed = WindowedSession { controller };
+    auto const clipboard = ClipboardGuard { QStringLiteral("untouched") };
+
+    SECTION("a selection of two lines")
+    {
+        writeFinishedBlock(windowed.session, "make", "built\r\nlinked\r\n");
+        REQUIRE(windowed.session(
+            contour::actions::SelectCommandBlock { .part = vtbackend::CommandBlockPart::Output }));
+        CHECK(windowed.session(contour::actions::CopySelection {}));
+        CHECK(controller->notices().toastText() == "Copied 2 lines");
+    }
+
+    SECTION("an empty selection without a fallback posts nothing")
+    {
+        CHECK(windowed.session(contour::actions::CopySelection {}));
+        CHECK_FALSE(controller->notices().toastShown());
+    }
+
+    contour::test::closeAllTabs(*controller);
+}
+
+TEST_CASE("TerminalSession: a clipboard over the hard limit is refused with a toast, not a dialog",
+          "[contour][session][clipboard][notices]")
+{
+    TestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedController const controller { testApp.manager() };
+    auto windowed = WindowedSession { controller };
+    auto* clipboard = QGuiApplication::clipboard();
+    REQUIRE(clipboard != nullptr);
+
+    constexpr auto FiftyMegabytes = 50 * 1000 * 1000;
+    mockPtyOf(windowed.session).stdinBuffer().clear();
+    clipboard->setText(QString(FiftyMegabytes, QChar('z')));
+    windowed.session.pasteFromClipboard(1, vtbackend::PasteStrip::Keep);
+
+    CHECK_FALSE(windowed.session.pendingPermissionAsk().has_value());
+    CHECK(mockPtyOf(windowed.session).stdinBuffer().empty());
+    CHECK(
+        controller->notices().toastText().toStdString()
+        == contour::window::pasteTooLargeNoticeText(contour::session::TerminalSession::PasteHardLimitBytes));
+
+    clipboard->clear();
+    contour::test::closeAllTabs(*controller);
 }

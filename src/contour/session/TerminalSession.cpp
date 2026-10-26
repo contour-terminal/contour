@@ -204,9 +204,9 @@ namespace
 #endif
     }
 
-    string stripIf(string input, bool shouldStrip)
+    string stripIf(string input, vtbackend::PasteStrip strip)
     {
-        if (!shouldStrip)
+        if (strip == vtbackend::PasteStrip::Keep)
             return input;
 
         string output = input;
@@ -1820,6 +1820,28 @@ void TerminalSession::setPointerShape(std::string_view cssName)
         _display->post([display = _display, shape = *shape]() { display->setMouseCursorShape(shape); });
 }
 
+int TerminalSession::cursorLine() const
+{
+    auto const _ = std::scoped_lock { _terminal };
+    return unbox(_terminal.currentScreen().cursor().position.line);
+}
+
+void TerminalSession::copyExplicitly(std::string_view text)
+{
+    // Only what reached the clipboard is told: without a display copyToClipboard() copies nothing.
+    if (text.empty() || _display == nullptr || _manager == nullptr)
+    {
+        copyToClipboard(text);
+        return;
+    }
+    copyToClipboard(text);
+    // A line for every line feed, and one for a last line without one.
+    auto const lines =
+        static_cast<std::size_t>(std::ranges::count(text, '\n')) + (text.back() != '\n' ? 1 : 0);
+    _manager->postNotice(
+        window::Notice { .kind = window::NoticeKind::Copied, .text = window::copiedNoticeText(lines) }, this);
+}
+
 void TerminalSession::copyToClipboard(std::string_view data)
 {
     if (!_display)
@@ -2136,7 +2158,7 @@ void TerminalSession::handleDeviceClosedLocked()
         sessionLog()("Terminal device is closed. But no display available (yet).");
 }
 
-void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
+void TerminalSession::pasteFromClipboard(unsigned count, vtbackend::PasteStrip strip)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
@@ -2155,15 +2177,15 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         // deferred one all work from this one copy.
         auto const text = clipboard->text(QClipboard::Clipboard);
 
-        // 1 MB hard limit
-        if (text.size() > static_cast<qsizetype>(1024 * 1024))
+        // The hard limit: refused, never asked about, and the window says so.
+        if (std::cmp_greater(text.size(), PasteHardLimitBytes))
         {
             sessionLog()("Clipboard contains huge text. Ignoring.");
-            // A display-less session (background pane, headless test) has nowhere to toast the
-            // rejection; the paste is ignored either way.
-            if (_display)
-                _display->post(
-                    [this]() { emit showNotification(tr("Paste"), tr("The pasted content is too large.")); });
+            if (_manager != nullptr)
+                _manager->postNotice(
+                    window::Notice { .kind = window::NoticeKind::PasteTooLarge,
+                                     .text = window::pasteTooLargeNoticeText(PasteHardLimitBytes) },
+                    this);
             return;
         }
 
@@ -2171,8 +2193,8 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         // measured, must be the bytes that would actually reach the application.
         auto pasteText = stripIf(normalizeCrlf(text), strip);
 
-        // 512 KB soft limit to ask user for permission
-        if (pasteText.size() > static_cast<size_t>(1024 * 512))
+        // Over the soft limit, the user is asked first.
+        if (pasteText.size() > PasteAskLimitBytes)
         {
             auto preview = makePastePreview(pasteText);
             _pendingBigPaste = BigPasteRequest { .text = std::move(pasteText),
@@ -4521,7 +4543,8 @@ bool TerminalSession::operator()(actions::ClearToPrompt action)
 
 bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
-    core::locked(_terminal, [&]() { copyToClipboard(terminal().extractLastMarkRange()); });
+    // Extracted under the lock, copied and told once it is released.
+    copyExplicitly(core::locked(_terminal, [&]() { return terminal().extractLastMarkRange(); }));
     return true;
 }
 
@@ -4749,7 +4772,7 @@ std::expected<void, vtbackend::CommandBlockActionError> TerminalSession::copyBlo
     // empty. QClipboard::setText("") would replace the URL the user copied a minute ago with nothing at
     // all, and the menu row would look like it did nothing. Refusing leaves the clipboard alone, and tells
     // the caller the row had nothing to give.
-    return nonEmpty(std::move(text)).transform([this](std::string const& value) { copyToClipboard(value); });
+    return nonEmpty(std::move(text)).transform([this](std::string const& value) { copyExplicitly(value); });
 }
 
 bool TerminalSession::operator()(actions::SelectCommandBlock const& action)
@@ -4992,7 +5015,7 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
                                         vtbackend::CommandBlockId {})
                     .has_value();
 
-            copyToClipboard(text);
+            copyExplicitly(text);
             break;
         }
         case actions::CopyFormat::HTML:
@@ -5447,7 +5470,8 @@ bool TerminalSession::operator()(actions::OpenSelection)
 
 bool TerminalSession::operator()(actions::PasteClipboard paste)
 {
-    pasteFromClipboard(1, paste.strip);
+    // The action's `strip` is a configuration boolean; the session speaks PasteStrip.
+    pasteFromClipboard(1, paste.strip ? vtbackend::PasteStrip::Strip : vtbackend::PasteStrip::Keep);
     return true;
 }
 

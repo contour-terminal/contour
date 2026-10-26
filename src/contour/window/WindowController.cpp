@@ -23,6 +23,7 @@
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/TitleBandLayout.hpp>
 #include <contour/window/TitleBandSurface.hpp>
+#include <contour/window/ToastPlacement.hpp>
 #include <contour/window/WindowActivation.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -82,7 +83,15 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _menuPresentation { menuPresentation },
     _nativeMenus { manager.app().nativeMenuPresenter() },
     _clock { clock },
-    _heldModifier { manager.app().headerRevealDelay() }
+    _heldModifier { manager.app().headerRevealDelay() },
+    _noticeAnnouncer { [this]() -> QObject* { return _osWindow; } },
+    _notices { _clock, _noticeAnnouncer, [this](NoticeAction action) {
+                  switch (action)
+                  {
+                      case NoticeAction::None: break;
+                      case NoticeAction::OpenConfigFile: _manager.openConfigFile(); break;
+                  }
+              } }
 {
     _headerRevealTimer.setSingleShot(true);
     // A coarse timer may fire early, which would only re-arm it; the reveal is due when it is due.
@@ -1344,6 +1353,23 @@ Qt::ColorScheme WindowController::effectiveColorScheme() const
 bool WindowController::dressesTitleBand() const noexcept
 {
     return framePolicy().shadow == platform::FrameShadowStrategy::FullSizeContent;
+}
+
+int WindowController::toastHost(QString const& band,
+                                QString const& edge,
+                                int bandHeight,
+                                int toastHeight) const
+{
+    auto const* const session = activeSession();
+    auto const host = placeToast(ToastPlacementInputs {
+        .band = barPresenceNamed(band.toStdString()).value_or(BarPresence::Hidden),
+        .edge = barEdgeNamed(edge.toStdString()).value_or(BarEdge::Top),
+        .bandHeight = bandHeight,
+        .toastHeight = toastHeight,
+        .cursorRow = session != nullptr ? session->cursorLine() : 0,
+        .coveredRows = ToastCoveredRows,
+    });
+    return static_cast<int>(host);
 }
 
 TitleBand WindowController::titleBand() const

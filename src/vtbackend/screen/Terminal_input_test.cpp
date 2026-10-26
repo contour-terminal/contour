@@ -559,7 +559,7 @@ TEST_CASE("Terminal.a Vi paste reaches the frontend after the state lock is rele
     {
         using MockTerm<>::MockTerm;
 
-        void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override
+        void pasteFromClipboard(unsigned /*count*/, vtbackend::PasteStrip /*strip*/) override
         {
             atPaste.probe(terminal);
             terminal.sendPaste("pasted");

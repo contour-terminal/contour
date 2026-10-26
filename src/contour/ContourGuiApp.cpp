@@ -32,6 +32,7 @@
 #include <contour/session/Permission.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/NoticeModel.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
@@ -2439,6 +2440,7 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<session::PaneProxy>("Contour.Terminal", 1, 0, "PaneProxy", "Created by the session manager.");
     qmlRegisterUncreatableType<window::WindowController>("Contour.Terminal", 1, 0, "WindowController", "Created by the session manager.");
     qmlRegisterUncreatableType<window::CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
+    qmlRegisterUncreatableType<window::NoticeModel>("Contour.Terminal", 1, 0, "NoticeModel", "Created by the window controller.");
     qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the application.");
     qmlRegisterUncreatableType<window::SettingsWindowHost>("Contour.Terminal", 1, 0, "SettingsWindowHost", "Created by the application.");
     session::registerPermissionQmlTypes();
@@ -2446,6 +2448,7 @@ int ContourGuiApp::terminalGuiAction()
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<window::WindowController*>("WindowController*");
     qRegisterMetaType<window::CommandPaletteModel*>("CommandPaletteModel*");
+    qRegisterMetaType<window::NoticeModel*>("NoticeModel*");
     qRegisterMetaType<window::SettingsController*>("SettingsController*");
     qRegisterMetaType<window::SettingsWindowHost*>("SettingsWindowHost*");
     // clang-format on

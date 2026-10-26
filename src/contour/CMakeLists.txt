@@ -291,6 +291,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/ChromeStyleHost.hpp
         window/NoticeModel.hpp
         window/NoticeQueue.hpp
+        window/ToastPlacement.hpp
         window/ChromeTokenObjects.hpp
         window/MenuRouting.hpp
         window/SettingsWindowRules.hpp
@@ -1243,6 +1244,7 @@ if(CONTOUR_TESTING)
         window/TabAttention_test.cpp
         window/TabBadge_test.cpp
         window/NoticeQueue_test.cpp
+        window/ToastPlacement_test.cpp
         window/TabWellLayout_test.cpp
         window/TitleBandLayout_test.cpp
         window/TitleBandSurface_test.cpp

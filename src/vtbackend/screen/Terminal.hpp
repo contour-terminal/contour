@@ -6,6 +6,7 @@
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
+#include <vtbackend/core/PasteStrip.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/RowMove.hpp>
 #include <vtbackend/core/Search.hpp>
@@ -709,7 +710,7 @@ class Terminal: public IStatusLinePublishTarget
 
         virtual void focusTerminalWindow() {}
         virtual void onClosed() {}
-        virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
+        virtual void pasteFromClipboard(unsigned /*count*/, PasteStrip /*strip*/) {}
         virtual void onSelectionCompleted() {}
         virtual void requestWindowResize(LineCount, ColumnCount) {}
         virtual void requestWindowResize(Width, Height) {}
@@ -825,7 +826,7 @@ class Terminal: public IStatusLinePublishTarget
         }
         void focusTerminalWindow() override {}
         void onClosed() override {}
-        void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) override {}
+        void pasteFromClipboard(unsigned /*count*/, PasteStrip /*strip*/) override {}
         void onSelectionCompleted() override {}
         void requestWindowResize(LineCount, ColumnCount) override {}
         void requestWindowResize(Width, Height) override {}
@@ -1713,8 +1714,8 @@ class Terminal: public IStatusLinePublishTarget
     /// the frontend reads its clipboard, a round trip to whichever process owns it, and the parser thread
     /// must not wait for that.
     /// @param count How many times to paste it.
-    /// @param strip Whether to strip the text: a pre-existing bool, as the frontend's hook has it.
-    void sendPasteFromClipboard(unsigned count, bool strip);
+    /// @param strip Whether to strip the text first.
+    void sendPasteFromClipboard(unsigned count, PasteStrip strip);
     void sendRawInput(std::string_view text);
 
     void inputModeChanged(ViMode mode);

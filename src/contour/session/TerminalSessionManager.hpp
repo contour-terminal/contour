@@ -280,6 +280,21 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     ///         left as they were.
     [[nodiscard]] std::expected<void, std::string> reloadAllSessions();
 
+    /// Tells the user of @p notice in the window hosting @p acting; logs it when no window hosts it.
+    /// @param notice What to tell.
+    /// @param acting The session the notice is about.
+    void postNotice(window::Notice notice, TerminalSession const* acting);
+
+    /// Tells the user of @p notice in every window: what is about the application, not one session.
+    void postNoticeToEveryWindow(window::Notice const& notice);
+
+    /// Takes every notice of @p kind away, in every window.
+    void clearNoticeInEveryWindow(window::NoticeKind kind);
+
+    /// Opens the configuration file in the user's editor (a config-reload banner's action), through the
+    /// app's external launcher; a launch that fails is logged.
+    void openConfigFile();
+
     /// Opens the terminal context menu over the pane of @p acting (the OpenContextMenu action).
     ///
     /// Makes that pane active first, so the menu is built from the state of the pane the user actually

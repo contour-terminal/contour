@@ -773,6 +773,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The raw window title (empty if none has been set).
     [[nodiscard]] std::string resolvedWindowTitle() const { return terminal().resolvedWindowTitle(); }
 
+    /// @return The cursor's line on the cursor's page, counted from its top, read under the terminal lock:
+    ///         what keeps a toast at the content's top off the prompt row. GUI thread.
+    [[nodiscard]] int cursorLine() const;
+
     /// Starts the PTY device and, if it came up, the VT background threads.
     ///
     /// Total: a device that cannot be started is REPORTED into this session's screen, never
@@ -1187,7 +1191,12 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Called by the exit watcher on its own thread, strictly before it posts onClosed().
     void deviceClosed();
 
-    void pasteFromClipboard(unsigned count, bool strip) override;
+    void pasteFromClipboard(unsigned count, vtbackend::PasteStrip strip) override;
+
+    /// The most a paste may hold: anything larger is refused, and the window says so.
+    static constexpr auto PasteHardLimitBytes = std::size_t { 1024 } * 1024;
+    /// A paste larger than this asks first.
+    static constexpr auto PasteAskLimitBytes = std::size_t { 512 } * 1024;
     void onSelectionCompleted() override;
     void requestWindowResize(vtbackend::LineCount, vtbackend::ColumnCount) override;
     void requestWindowResize(vtbackend::Width, vtbackend::Height) override;
@@ -1570,6 +1579,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @p previous and the active profile's, and settles a question the configuration now answers.
     /// @param previous The permission settings before the profile was replaced.
     void reconcilePermissions(config::PermissionsConfig const& previous);
+
+    /// Copies @p text to the clipboard as an explicit copy action does, and tells the window "Copied N
+    /// lines"; copying nothing posts nothing. Copy-on-select and a program's own clipboard writes do not come
+    /// here.
+    void copyExplicitly(std::string_view text);
 
     /// Sends @p text to the application as one paste, repeated @p count times.
     void sendPasteRepeatedly(std::string const& text, unsigned count);

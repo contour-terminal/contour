@@ -6,6 +6,7 @@
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/display/WindowHost.hpp>
 #include <contour/input/HorizontalWheelGesture.hpp>
+#include <contour/platform/Announcer.hpp>
 #include <contour/platform/NativeWindowFrame.hpp>
 #include <contour/platform/TitleBandMaterial.hpp>
 #include <contour/platform/WindowResizeGrid.hpp>
@@ -15,6 +16,7 @@
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/HeldModifierReveal.hpp>
 #include <contour/window/MenuRouting.hpp>
+#include <contour/window/NoticeModel.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -110,6 +112,8 @@ class WindowController:
     /// selection are things the user is doing IN this window; the recently-used list behind it is
     /// app-wide and lives on the manager.
     Q_PROPERTY(contour::window::CommandPaletteModel* commandPalette READ commandPalette CONSTANT)
+    // This window's notices: the toast and the banner (never null; owned by this controller).
+    Q_PROPERTY(contour::window::NoticeModel* notices READ noticesForQml CONSTANT)
     Q_PROPERTY(QVariantList contextMenuModel READ contextMenuModel NOTIFY contextMenuModelChanged)
     Q_PROPERTY(QVariantList titleBarContextMenuModel READ titleBarContextMenuModel NOTIFY
                    titleBarContextMenuModelChanged)
@@ -350,6 +354,26 @@ class WindowController:
     // {{{ Command palette
     /// This window's palette list model (never null; owned by this controller).
     [[nodiscard]] CommandPaletteModel* commandPalette() const noexcept { return _commandPalette.get(); }
+    // }}}
+
+    // {{{ Notices
+    /// This window's notices: what posts to its toast and banner.
+    [[nodiscard]] NoticeModel& notices() noexcept { return _notices; }
+
+    /// @return This window's notices, as the `notices` property hands them to QML.
+    [[nodiscard]] NoticeModel* noticesForQml() noexcept { return &_notices; }
+
+    /// Where this window's toast goes now (placeToast()), from the band QML shows and the active pane's
+    /// cursor row: asked as a toast shows.
+    /// @param band The band's presence, by the name UiStyleProvider::titleBand() gives it ("shown", ...).
+    /// @param edge Its edge, by name ("top" or "bottom").
+    /// @param bandHeight The band's height, in logical pixels.
+    /// @param toastHeight The toast's height (size.toast), in logical pixels.
+    /// @return A ToastHost's value. The names are the band's QML vocabulary, read back at this boundary.
+    [[nodiscard]] Q_INVOKABLE int toastHost(QString const& band,
+                                            QString const& edge,
+                                            int bandHeight,
+                                            int toastHeight) const;
 
     /// Rebuilds the palette against the CURRENT state — live tabs, the configured profiles/layouts and
     /// the key bindings as they stand after any reload — and asks the QML to show it.
@@ -1161,6 +1185,12 @@ class WindowController:
     // Fires when a hold that is still armed reaches its delay, for refreshHeaderReveal() to show the
     // headers then: nothing else would ask while the modifier is merely held.
     QTimer _headerRevealTimer;
+
+    // Says this window's notices to a screen reader, against the window while it is shown. Declared before
+    // _notices, which speaks through it.
+    platform::QtAnnouncer _noticeAnnouncer;
+    // This window's toast and banner, timed by _clock.
+    NoticeModel _notices;
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;

@@ -70,6 +70,8 @@ Control {
             objectName: "bannerText"
             Layout.fillWidth: true
             text: root.text
+            // A banner can quote a configuration error, which quotes the file: text, never markup.
+            textFormat: Text.PlainText
             font: chromeStyle.type.footnote
             color: chromeStyle.colors.bannerText
             wrapMode: Text.Wrap
