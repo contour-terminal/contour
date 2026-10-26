@@ -36,7 +36,16 @@ inline constexpr std::uintmax_t MaxGitMetadataSize = 4096;
 /// How many hex digits of a detached HEAD's object id are shown, as `git log --oneline` does.
 inline constexpr std::size_t DetachedHeadDigits = 7;
 
+/// The branch a reftable repository's HEAD file names: a stub that is no branch, kept so that an older git
+/// refuses the repository rather than misreading it.
+inline constexpr std::string_view ReftableStubBranch = ".invalid";
+
 /// Reads a HEAD file's contents.
+///
+/// Only the files backend's HEAD is understood. A reftable repository (`git init --ref-format=reftable`,
+/// planned as git 3.0's default) keeps HEAD's target in `<gitdir>/reftable/`, whose binary records this does
+/// not decode: its stub `ref: refs/heads/.invalid` reads as nullopt, and GitHeadCache shows no branch for any
+/// repository with a `reftable` directory.
 /// @param contents The file's text; trailing whitespace is ignored.
 /// @return `ref: refs/heads/<n>` gives a Branch `<n>`, any other `ref: refs/<r>` an OtherRef `<r>`, and a
 ///         SHA-1 or SHA-256 object id (40 or 64 hex digits) a Detached head of its first

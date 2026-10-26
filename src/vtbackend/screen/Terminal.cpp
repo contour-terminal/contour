@@ -6022,7 +6022,12 @@ void Terminal::adoptCommandBlock(CommandBlockRecord record, AdoptMode mode)
                 directory->locality = ContextLocality::Foreign;
     // Not through publishActiveBlock(): the rows' ids arrive with the rows.
     if (auto const summary = commandBlocks().adopt(std::move(record), mode))
+    {
         _eventListener.commandBlockFinished(*summary);
+        // A live command the host saw end, as endCommand() is told of one here: it may have switched
+        // branches.
+        _gitHead.invalidate();
+    }
 }
 
 chrono::system_clock::time_point Terminal::sessionEpoch() const noexcept

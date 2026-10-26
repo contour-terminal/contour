@@ -36,6 +36,8 @@ TEST_CASE("GitHead.parsesEveryHeadForm", "[git]")
         { "", std::nullopt },
         { "ref:", std::nullopt },
         { "garbage", std::nullopt },
+        // reftable's stub: the real HEAD is in .git/reftable/, which this reader does not decode.
+        { "ref: refs/heads/.invalid\n", std::nullopt },
         { std::string { Sha1.substr(1) }, std::nullopt },
     }));
     INFO(contents);
@@ -103,6 +105,17 @@ TEST_CASE("GitHeadCache.isStaleUntilInvalidated", "[git]")
     cache.refresh(std::filesystem::path { "/r/src" });
     CHECK(cache.branch() == "next");
     cache.refresh(std::nullopt);
+    CHECK(cache.branch().empty());
+}
+
+TEST_CASE("GitHeadCache.readsAReftableRepositoryAsBranchless", "[git]")
+{
+    // Whatever HEAD says beside a reftable directory, it is not where the branch is kept.
+    auto files = InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    files.addDirectory("/r/.git/reftable");
+    auto cache = GitHeadCache { files };
+    cache.refresh(std::filesystem::path { "/r" });
     CHECK(cache.branch().empty());
 }
 

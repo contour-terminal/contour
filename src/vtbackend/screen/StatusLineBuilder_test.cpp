@@ -960,6 +960,42 @@ TEST_CASE("serializeToVT.gitFollowsTheShell", "[statusline][git]")
     mc.writeToScreen("\033]7;file://elsewhere.example/r/src\033\\");
     CHECK(indicatorTextAfterRefresh(mc.terminal).empty());
 }
+
+TEST_CASE("serializeToVT.gitFollowsADaemonClientsCommands", "[statusline][git]")
+{
+    // A daemon client runs no parser: a command's end reaches it as an adopted record, never as OSC 133 D.
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    REQUIRE(files.createDirectories("/r/src"));
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };
+    mc.writeToScreen("\033]7;file:///r/src\033\\");
+    mc.terminal.bindReplica(
+        ReplicaRole::SameMachine,
+        HostIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" });
+    mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+
+    REQUIRE(files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    mc.terminal.adoptCommandBlock(test::mirroredRecord(5, CommandBlockState::Running), AdoptMode::Live);
+    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+
+    mc.terminal.adoptCommandBlock(test::mirroredFinish(5, 0, CommandBlockEnd::Reported), AdoptMode::Live);
+    CHECK(indicatorTextAfterRefresh(mc.terminal) == "next");
+}
+
+TEST_CASE("serializeToVT.gitShowsNoBranchForAReftableRepository", "[statusline][git]")
+{
+    // reftable keeps HEAD in .git/reftable/ and leaves .git/HEAD naming the stub branch ".invalid".
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/.invalid\n");
+    files.addDirectory("/r/.git/reftable");
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };
+    mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    mc.writeToScreen("\033]7;file:///r\033\\");
+    CHECK(indicatorTextAfterRefresh(mc.terminal).empty());
+}
 // }}}
 
 // {{{ {LastCommand}

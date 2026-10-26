@@ -107,7 +107,13 @@ std::optional<GitHead> parseGitHead(std::string_view contents)
         auto const ref = trimStart(text.substr(RefPrefix.size()));
         for (auto const& form: RefForms)
             if (ref.starts_with(form.prefix) && ref.size() > form.prefix.size())
-                return GitHead { .kind = form.kind, .name = std::string { ref.substr(form.prefix.size()) } };
+            {
+                auto name = ref.substr(form.prefix.size());
+                // reftable's stub (see ReftableStubBranch): the branch is elsewhere, so there is none here.
+                if (form.kind == GitHeadKind::Branch && name == ReftableStubBranch)
+                    return std::nullopt;
+                return GitHead { .kind = form.kind, .name = std::string { name } };
+            }
         return std::nullopt;
     }
 
@@ -186,6 +192,10 @@ std::optional<GitHeadCache::HeadKey> GitHeadCache::keyFor(std::filesystem::path 
 
 std::string GitHeadCache::branchIn(std::filesystem::path const& head) const
 {
+    // A reftable repository keeps its refs, HEAD's target included, in <gitdir>/reftable/; its HEAD file is a
+    // stub that never changes. Decoding reftable is left for later: such a repository shows no branch.
+    if (_fileSystem.isDirectory(head.parent_path() / "reftable"))
+        return {};
     auto const contents = readGitMetadata(_fileSystem, head);
     if (!contents)
         return {};
