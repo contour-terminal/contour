@@ -8048,7 +8048,8 @@ void clickOn(PaneTreeHost& host, QQuickItem const& item)
 TEST_CASE("pane end: an ended pane shows the footer below its cells (offscreen)",
           "[contour][gui][qml][paneend]")
 {
-    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    // Wide enough for each half's footer to say its message, Restart, and Close with its chord.
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 1200, 400 } };
     auto panes = TwoPanes {};
     host.show(panes.split, /*visiblePanes*/ 2);
     auto const& card = host.cardOf(panes.left());
@@ -8236,6 +8237,57 @@ TEST_CASE("pane end: a narrow pane's footer keeps its buttons inside the pane (o
     // Wide enough again, it names the chord.
     host.resize(QSize { 1200, 400 });
     CHECK(close.property("text").toString().contains(QStringLiteral("Ctrl+Shift+X")));
+}
+
+TEST_CASE("pane end: a narrow pane's footer drops Close's chord before its message (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    // The order of sacrifice is the chord, then the message; the buttons stay. A pane wide enough for the
+    // message, Restart and a plain "Close" -- but not for "Close Ctrl+Shift+X" besides -- shows the
+    // message whole and Close without its chord, which assistive technology still hears.
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 1200, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    endWithExitCode(session);
+    host.settle();
+
+    auto const& card = host.cardOf(leaf);
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    auto const& message = PaneTreeHost::partOf(card, "exitedFooterMessage");
+    auto const& restart = PaneTreeHost::partOf(card, "exitedFooterRestart");
+    auto const& close = PaneTreeHost::partOf(card, "exitedFooterClose");
+    REQUIRE(footer.isVisible());
+    REQUIRE(close.property("text").toString().contains(QStringLiteral("Ctrl+Shift+X")));
+    auto const chordedClose = close.width();
+    auto const messageWidth = message.implicitWidth();
+
+    // Close's plain width, read where nothing but the buttons fits.
+    host.resize(QSize { 120, 400 });
+    REQUIRE_FALSE(close.property("text").toString().contains(QStringLiteral("Ctrl")));
+    auto const plainClose = close.width();
+
+    auto const* space = host.style().property("space").value<QObject*>();
+    REQUIRE(space != nullptr);
+    auto const tokenOf = [space](char const* name) {
+        return space->property(name).toReal();
+    };
+    auto const s4 = tokenOf("s4");
+    auto const room =
+        tokenOf("footerLeading") + messageWidth + s4 + restart.width() + s4 + plainClose + tokenOf("s5") + 2;
+    REQUIRE(room - plainClose + chordedClose > room + 1); // the chord would not fit beside the message
+    auto const chromeWidth = 120 - footer.width();
+    host.resize(QSize { static_cast<int>(std::ceil(room + chromeWidth)), 400 });
+    REQUIRE(footer.width() >= room);
+
+    CHECK_FALSE(close.property("text").toString().contains(QStringLiteral("Ctrl")));
+    CHECK(message.isVisible());
+    CHECK_FALSE(message.property("truncated").toBool());
+    CHECK(message.width() >= messageWidth);
+    CHECK(restart.isVisible());
+    CHECK(accessibleNameOf(footer).contains(QStringLiteral("exited")));
 }
 
 TEST_CASE("pane end: a local reconnect names no host (offscreen)", "[contour][gui][qml][paneend]")
