@@ -6368,6 +6368,73 @@ TEST_CASE("The footer's hints follow the row under the selection (offscreen)", "
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("A resting pointer does not take the selection after the list changes (offscreen)",
+          "[contour][gui][qml][palette]")
+{
+    // Qt sends a synthetic hover at the last pointer position after every model reset. The selection
+    // follows only a pointer that moves; a resting one leaves row 0 (or the anchor row) selected.
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockPaletteController controller;
+
+    auto const host = openPalette(engine, controller);
+    REQUIRE(host.palette != nullptr);
+    auto* list = palettePart(host, QStringLiteral("commandPaletteList"));
+    auto* filter = palettePart(host, QStringLiteral("commandPaletteFilter"));
+    REQUIRE(list != nullptr);
+    REQUIRE(filter != nullptr);
+    auto* window = focusPaletteField(host);
+
+    // Rest the pointer over the fourth row: a real move, so it selects that row.
+    auto const restOn = [&](int row) {
+        auto* item = paletteRowAt(list, row);
+        REQUIRE(item != nullptr);
+        auto* entry = item->findChild<QQuickItem*>(QStringLiteral("commandPaletteRow"));
+        REQUIRE(entry != nullptr);
+        // Two moves, because a move to where the pointer already is (an earlier case left it) sends nothing.
+        QTest::mouseMove(window, entry->mapToScene(QPointF(1, 1)).toPoint());
+        QTest::mouseMove(window,
+                         entry->mapToScene(QPointF(entry->width() / 2, entry->height() / 2)).toPoint());
+        QCoreApplication::processEvents();
+    };
+    constexpr auto RestingRow = 3;
+    restOn(RestingRow);
+    REQUIRE(list->property("currentIndex").toInt() == RestingRow);
+
+    // Let any synthetic hover the reset causes arrive before asserting.
+    auto const settle = [] {
+        QCoreApplication::processEvents();
+        QTest::qWait(contour::test::PopupSettleMs / 20);
+    };
+
+    SECTION("typing selects the best match, row 0")
+    {
+        for (auto const key: { 's', 'p', 'l' })
+            QTest::keyClick(window, key);
+        settle();
+        CHECK(list->property("currentIndex").toInt() == 0);
+    }
+
+    SECTION("entering a level selects its first row, and going back the parent's")
+    {
+        // The pointer rests over the level's second row as the level opens.
+        restOn(1);
+        controller.model().enter(paletteRowOf(controller.model(), QStringLiteral("ChangeProfile")));
+        settle();
+        REQUIRE(controller.model().depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+        CHECK(list->property("currentIndex").toInt() == 0);
+
+        restOn(1);
+        REQUIRE(list->property("currentIndex").toInt() == 1);
+        pressPaletteKey(window, Qt::Key_Escape);
+        settle();
+        REQUIRE(controller.model().depth() == controller.model().topDepth());
+        CHECK(list->property("currentIndex").toInt() == controller.model().anchorRow());
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("A click on a drill-in row opens its level (offscreen)", "[contour][gui][qml][palette]")
 {
     contour::test::QmlMessageCapture const warnings;

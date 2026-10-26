@@ -372,6 +372,26 @@ Popup {
             highlightMoveDuration: 0
             ScrollBar.vertical: ScrollBar {}
 
+            // Moving the pointer moves the selection, so the mouse and the keyboard agree on what "current"
+            // means and a click can never act on a row other than the highlighted one. One handler for the
+            // list, and only on a real move: after every model reset Qt sends a synthetic hover at the last
+            // pointer position, which would otherwise take the selection from row 0 or the anchor row.
+            HoverHandler {
+                id: listHover
+                property point lastPosition: Qt.point(-1, -1)
+                onPointChanged: {
+                    const position = listHover.point.position;
+                    if (position.x === listHover.lastPosition.x && position.y === listHover.lastPosition.y)
+                        return;
+                    listHover.lastPosition = Qt.point(position.x, position.y);
+                    const index = list.indexAt(position.x + list.contentX, position.y + list.contentY);
+                    const item = index >= 0 ? list.itemAtIndex(index) : null;
+                    // Over a group header, nothing: only the row below it is selectable.
+                    if (item && position.y + list.contentY >= item.y + item.headerHeight)
+                        list.currentIndex = index;
+                }
+            }
+
             delegate: Item {
                 id: row
 
@@ -392,6 +412,8 @@ Popup {
 
                 width: ListView.view.width
                 height: header.height + entry.height
+                // Where the row itself starts below its group header, for the list's hover.
+                readonly property real headerHeight: header.height
 
                 // {{{ Group header — drawn by the FIRST row of each group.
                 Item {
@@ -489,12 +511,6 @@ Popup {
                             color: entry.secondaryColor
                             Accessible.ignored: true
                         }
-                    }
-
-                    HoverHandler {
-                        // Hovering moves the selection, so the mouse and the keyboard agree on what
-                        // "current" means and a click can never act on a row other than the highlighted one.
-                        onHoveredChanged: if (hovered) list.currentIndex = row.index
                     }
 
                     TapHandler {
