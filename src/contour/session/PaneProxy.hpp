@@ -67,6 +67,10 @@ class PaneProxy: public QObject
     /// activePaneChanged().
     Q_INVOKABLE void activate();
 
+    /// Runs a pane header button's action on this pane: called by PaneHeader.qml's buttons.
+    /// @param action A window::PaneHeaderAction as its underlying value; one out of range does nothing.
+    Q_INVOKABLE void runHeaderAction(int action);
+
     // {{{ Manager-side wiring (not for QML)
     [[nodiscard]] vtworkspace::PaneId modelId() const noexcept { return _id; }
     void setChildren(PaneProxy* first, PaneProxy* second) noexcept

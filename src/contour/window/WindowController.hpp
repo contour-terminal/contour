@@ -13,6 +13,7 @@
 #include <contour/session/PaneProxy.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
+#include <contour/window/HeldModifierReveal.hpp>
 #include <contour/window/MenuRouting.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/ProgramStatusBadge.hpp>
@@ -22,11 +23,15 @@
 
 #include <vtbackend/core/Color.hpp>
 
+#include <core/platform/Clock.hpp>
+
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QTimer>
 #include <QtGui/QColor>
 #include <QtQml/QtQml>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -146,6 +151,9 @@ class WindowController:
     // The panes the active tab shows: the leaves under its layout root (1 while zoomed or unsplit, 0 without
     // a tab), which decides whether the panes wear headers.
     Q_PROPERTY(int visiblePaneCount READ visiblePaneCount NOTIFY visiblePaneCountChanged)
+    // A window::HeaderReveal as its underlying value: whether the reveal modifier, held alone long enough,
+    // shows this window's pane headers where the density hides them.
+    Q_PROPERTY(int headerReveal READ headerReveal NOTIFY headerRevealChanged)
     // }}}
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -182,10 +190,12 @@ class WindowController:
     /// @param menuPresentation Whether this window's menus open natively or in the scene: the app's
     ///                 ContourGuiApp::menuPresentation() in production, fixed for the window's life.
     /// @param initialPosition The first window's remembered location, absent for additional windows.
+    /// @param clock    What the held-modifier reveal measures its hold against.
     WindowController(session::TerminalSessionManager& manager,
                      vtworkspace::WindowId windowId,
                      config::MenuPresentation menuPresentation,
-                     std::optional<WindowPosition> initialPosition = std::nullopt);
+                     std::optional<WindowPosition> initialPosition = std::nullopt,
+                     core::platform::IClock const& clock = core::platform::defaultSteadyClock());
     ~WindowController() override;
 
     WindowController(WindowController const&) = delete;
@@ -201,7 +211,8 @@ class WindowController:
     [[nodiscard]] QHash<int, QByteArray> roleNames() const override;
     // }}}
 
-    /// Watches the bound window for QEvent::DevicePixelRatioChange (no QWindow signal exists for it).
+    /// Watches the bound window for QEvent::DevicePixelRatioChange (no QWindow signal exists for it), and
+    /// for the key and mouse input the held-modifier reveal follows. Consumes nothing.
     bool eventFilter(QObject* watched, QEvent* event) override;
 
     /// Tab count of this window (one row per tab).
@@ -441,6 +452,8 @@ class WindowController:
     [[nodiscard]] session::PaneProxy* activeTabRootPane() const noexcept { return _activeTabRootProxy; }
     /// @return The leaves under the active tab's layout root; 0 without a tab.
     [[nodiscard]] int visiblePaneCount() const noexcept { return _visiblePaneCount; }
+    /// @return The window's window::HeaderReveal, as its underlying value.
+    [[nodiscard]] int headerReveal() const noexcept { return static_cast<int>(_headerReveal); }
 
     /// Has the sessions whose pane header shows follow the program in front of them, and every other session
     /// of this window stop (session::ProcessNameFollower::Header). A header shows for a leaf under the
@@ -868,6 +881,8 @@ class WindowController:
     // {{{ Panes
     /// @see visiblePaneCount
     void visiblePaneCountChanged();
+    /// @see headerReveal
+    void headerRevealChanged();
     // }}}
 
   private:
@@ -933,6 +948,16 @@ class WindowController:
     /// when it becomes the active OS window and revokes it when it stops being active, so alt-tabbing
     /// away from Contour notifies the shell (DECSET 1004) even when no display holds Qt item focus.
     void onOSWindowActiveChanged();
+
+    /// Feeds one input event of the bound window to the held-modifier reveal: a lone press of the reveal
+    /// modifier arms it, a release or a window deactivation releases it, and any other key or a button
+    /// press disarms it. Auto-repeated presses are not presses: a held key repeats on some platforms.
+    /// @param event The event the window is about to deliver; it is not consumed.
+    void followHeldModifier(QEvent const& event);
+
+    /// Asks the held-modifier reveal where it stands now, re-arms the timer for a hold still pending, and
+    /// on a change publishes headerReveal and refreshes who follows the foreground process.
+    void refreshHeaderReveal();
 
     /// Which decoration this window is currently showing, as the frame policy names it.
     [[nodiscard]] platform::WindowDecoration decoration() const noexcept;
@@ -1106,9 +1131,15 @@ class WindowController:
     session::PaneProxy* _activeTabRootProxy = nullptr;
     // @see visiblePaneCount. Recounted with the layout root (refreshActiveTabLayoutRoot()).
     int _visiblePaneCount = 0;
-    // What, besides the density, reveals this window's pane headers (@see refreshHeaderFollowers). None
-    // until the held-modifier reveal drives it.
+    // What, besides the density, reveals this window's pane headers (@see refreshHeaderFollowers): what
+    // _heldModifier said when last asked (refreshHeaderReveal()).
     HeaderReveal _headerReveal = HeaderReveal::None;
+    // The reveal modifier's hold, fed by eventFilter() and measured against _clock.
+    core::platform::IClock const& _clock;
+    HeldModifierReveal _heldModifier;
+    // Fires when a hold that is still armed reaches its delay, for refreshHeaderReveal() to show the
+    // headers then: nothing else would ask while the modifier is merely held.
+    QTimer _headerRevealTimer;
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;

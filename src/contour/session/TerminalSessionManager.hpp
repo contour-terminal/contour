@@ -524,6 +524,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param tab The tab.
     /// @return How its active pane was last reached; Pointer for a tab never told.
     [[nodiscard]] window::PaneActivation lastPaneActivation(vtworkspace::TabId tab) const noexcept;
+
+    /// Runs a pane header button's action on leaf @p leaf of tab @p tab: makes the leaf the active pane, as
+    /// a click on it would (PaneActivation::Pointer), then runs the button's catalog action on its session.
+    /// Nothing happens for a tab or leaf that no longer exists, or a leaf without a session.
+    /// @param tab    The tab hosting the leaf.
+    /// @param leaf   The leaf whose header the button is on.
+    /// @param action The button.
+    void runPaneHeaderAction(vtworkspace::TabId tab,
+                             vtworkspace::PaneId leaf,
+                             window::PaneHeaderAction action);
     // }}}
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);

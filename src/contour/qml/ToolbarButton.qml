@@ -5,7 +5,8 @@
 // button root would already declare it). A left click is `clicked`; a right click or a press-and-hold is
 // `secondaryClicked`, which is how the macOS "+" reaches the profiles (layout.profileMenu). Rest, hover
 // and pressed follow the kit's states: transparent, colors.tabHoverFill (fill.3) and
-// colors.controlPressedFill (fill.2), on a radii.control square of size.toolbarButton.
+// colors.controlPressedFill (fill.2), on a radii.control square of `extent` (size.toolbarButton unless the
+// host is smaller, as a pane header's size.paneHeaderAction is).
 import QtQuick
 
 Item {
@@ -19,6 +20,10 @@ Item {
     property string accessibleDescription
     /// The font the glyph is drawn in.
     property font glyphFont: chromeStyle.newTabFont
+    /// The colour the glyph is drawn in: the band's tab text unless the host has a surface of its own.
+    property color glyphColor: chromeStyle.colors.tabText
+    /// The edge of the button's square.
+    property real extent: chromeStyle.size.toolbarButton
 
     /// A left click, or the accessibility press action.
     signal clicked()
@@ -30,8 +35,8 @@ Item {
     Accessible.description: root.accessibleDescription
     Accessible.onPressAction: root.clicked()
 
-    implicitWidth: chromeStyle.size.toolbarButton
-    implicitHeight: chromeStyle.size.toolbarButton
+    implicitWidth: root.extent
+    implicitHeight: root.extent
 
     HoverHandler {
         id: hover
@@ -68,6 +73,6 @@ Item {
         anchors.centerIn: parent
         text: root.glyph
         font: root.glyphFont
-        color: chromeStyle.colors.tabText
+        color: root.glyphColor
     }
 }

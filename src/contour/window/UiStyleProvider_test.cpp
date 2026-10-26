@@ -1131,10 +1131,13 @@ TEST_CASE("UiStyleProvider takes the density from its inputs", "[contour][uistyl
     CHECK(tokenOf(minimal, "space", "paneGap").toReal() == 1.0);
     CHECK(tokenOf(minimal, "space", "splitHit").toReal() == 8.0);
     CHECK(tokenOf(minimal, "radii", "paneCard").toReal() == 0.0);
+    // The held modifier's overlay takes no room, so Minimal still draws it at the row's header height.
+    CHECK(minimal.property("overlayPaneHeader").toReal() == 22.0);
 
     auto const comfortable = UiStyleProvider(comfortableInputs);
     CHECK(comfortable.property("density").toString() == QStringLiteral("comfortable"));
     CHECK(tokenOf(comfortable, "size", "paneHeader").toReal() == 22.0);
+    CHECK(comfortable.overlayPaneHeader() == 22.0);
 }
 
 TEST_CASE("UiStyleProvider publishes the pane tokens", "[contour][uistyle]")

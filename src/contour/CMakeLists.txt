@@ -407,6 +407,8 @@ if(CONTOUR_FRONTEND_GUI)
         qml/WindowControls.qml
         qml/ResizeBorder.qml
         qml/PaneNode.qml
+        qml/PaneCard.qml
+        qml/PaneHeader.qml
         qml/TerminalPane.qml
         qml/ActionContextMenu.qml
         qml/MenuSwatchRow.qml
@@ -432,6 +434,7 @@ if(CONTOUR_FRONTEND_GUI)
         qml/ColorSlotField.qml
         qml/Banner.qml
         qml/Toast.qml
+        qml/ElevationShadow.qml
         qml/KitDialog.qml
     )
 

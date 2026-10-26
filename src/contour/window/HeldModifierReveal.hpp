@@ -20,11 +20,13 @@ class HeldModifierReveal
     /// @param delay How long the modifier must be held alone before the headers are revealed.
     explicit constexpr HeldModifierReveal(std::chrono::milliseconds delay) noexcept: _delay { delay } {}
 
-    /// The modifier went down. Only a lone press arms the reveal.
+    /// The modifier went down. Only a lone press arms the reveal; a press while already armed (the other
+    /// side's key of the same modifier) keeps the first press's time, so the hold is measured from it.
     /// @param now When it happened.
     void modifierPressed(std::chrono::steady_clock::time_point now) noexcept
     {
-        _pressedAt = now;
+        if (_state != HoldState::Armed)
+            _pressedAt = now;
         _state = HoldState::Armed;
     }
 

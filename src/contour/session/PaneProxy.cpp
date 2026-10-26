@@ -3,6 +3,8 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 
+#include <utility>
+
 namespace contour::session
 {
 
@@ -53,6 +55,13 @@ void PaneProxy::activate()
 {
     _manager.notePaneActivation(_tab, window::PaneActivation::Pointer);
     _manager.activatePane(_tab, _id);
+}
+
+void PaneProxy::runHeaderAction(int action)
+{
+    if (action < 0 || std::cmp_greater_equal(action, config::PaneHeaderActionCount))
+        return;
+    _manager.runPaneHeaderAction(_tab, _id, static_cast<window::PaneHeaderAction>(action));
 }
 
 } // namespace contour::session

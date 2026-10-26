@@ -38,7 +38,9 @@
 #include <QtCore/QTemporaryDir>
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPalette>
+#include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
 #include <catch2/catch_test_macros.hpp>
@@ -60,6 +62,7 @@
 #include <vector>
 
 #include <QtTest/QSignalSpy>
+#include <QtTest/QTest>
 #include <vthost/client/LayoutReconstruction.hpp>
 #include <vthost/client/NativeClient.hpp>
 #include <vthost/client/ScreenMirror.hpp>
@@ -1810,6 +1813,141 @@ TEST_CASE("TerminalSessionManager: under Minimal, no pane header polls", "[manag
 
     // And a split made under it starts none.
     manager.splitActivePane(/*vertical*/ false, window->activeSession());
+    CHECK(nonePoll(sessionsOfTab(manager, *window, 0)));
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a pane header's button acts on its own pane", "[manager][panes]")
+{
+    using contour::window::PaneHeaderAction;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    manager.splitActivePane(/*vertical*/ true, left);
+    auto* const right = window->activeSession();
+    REQUIRE(right != left);
+    REQUIRE(window->visiblePaneCount() == 2);
+
+    // Out of range: nothing.
+    auto* const leftProxy = proxyShowing(window->activeTabRootPane(), left);
+    REQUIRE(leftProxy != nullptr);
+    leftProxy->runHeaderAction(-1);
+    leftProxy->runHeaderAction(static_cast<int>(contour::config::PaneHeaderActionCount));
+    CHECK(window->visiblePaneCount() == 2);
+    CHECK(window->activeSession() == right);
+
+    // The inactive pane's "split right" splits that pane, which the pointer has made the active one.
+    leftProxy->runHeaderAction(static_cast<int>(PaneHeaderAction::SplitRight));
+    CHECK(window->visiblePaneCount() == 3);
+    auto* const added = window->activeSession();
+    REQUIRE(added != nullptr);
+    CHECK(added != left);
+    CHECK(added != right);
+    auto const* const tab = manager.model().window(window->windowId())->tabAt(0);
+    auto const* const addedLeaf = tab->rootPane()->findLeaf(added->modelSessionId());
+    REQUIRE(addedLeaf != nullptr);
+    CHECK(addedLeaf->parent() == tab->rootPane()->findLeaf(left->modelSessionId())->parent());
+    CHECK(manager.lastPaneActivation(tab->id()) == contour::window::PaneActivation::Pointer);
+
+    contour::test::closeAllTabs(*window);
+}
+
+namespace
+{
+/// An item that holds keyboard focus in its window and records the keys pressed into it.
+class KeyRecorder: public QQuickItem
+{
+  public:
+    std::vector<int> pressed; ///< Every key pressed into the item, in order.
+
+  protected:
+    void keyPressEvent(QKeyEvent* event) override
+    {
+        pressed.push_back(event->key());
+        QQuickItem::keyPressEvent(event);
+    }
+};
+
+/// Whether @p window's headers are revealed by the held modifier.
+[[nodiscard]] bool revealed(contour::window::WindowController const& window)
+{
+    return window.headerReveal() == static_cast<int>(contour::window::HeaderReveal::HeldModifier);
+}
+
+/// Longer than the reveal's 500 ms hold, for a wait that must see it.
+constexpr auto RevealWaitMs = 1000;
+} // namespace
+
+TEST_CASE("WindowController: holding the reveal modifier alone reveals the headers",
+          "[contour][panes][reveal]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    contour::test::ScopedControllerWithOsWindow const window { app.manager() };
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    auto* const osWindow = window.osWindow.get();
+    auto recorder = KeyRecorder {};
+    recorder.setParentItem(osWindow->contentItem());
+    recorder.forceActiveFocus();
+    REQUIRE_FALSE(revealed(*window));
+
+    SECTION("a hold reveals, and other input hides")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        CHECK(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::keyClick(osWindow, Qt::Key_X);
+        CHECK_FALSE(revealed(*window));
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+
+        // The filter consumes nothing: the terminal still received the press.
+        CHECK(std::ranges::find(recorder.pressed, static_cast<int>(Qt::Key_Alt)) != recorder.pressed.end());
+    }
+
+    SECTION("a release before the delay never reveals")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+        CHECK_FALSE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+    }
+
+    SECTION("a release hides")
+    {
+        QTest::keyPress(osWindow, Qt::Key_Alt);
+        REQUIRE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+        QTest::keyRelease(osWindow, Qt::Key_Alt);
+        CHECK_FALSE(revealed(*window));
+    }
+
+    recorder.setParentItem(nullptr);
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("WindowController: under Minimal, the reveal makes the headers poll", "[contour][panes][reveal]")
+{
+    contour::test::ConfiguredTestApp testApp { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = testApp.manager();
+    contour::test::writeConfigFile(
+        testApp.configFile(),
+        contour::test::profileConfigYaml(testApp.app().profileName(), "chrome_density: minimal\n"));
+    REQUIRE(manager.reloadAllSessions());
+    REQUIRE(testApp.app().config().chromeDensity.value() == contour::config::ChromeDensity::Minimal);
+
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    manager.splitActivePane(/*vertical*/ true, window->activeSession());
+    REQUIRE(nonePoll(sessionsOfTab(manager, *window, 0)));
+
+    auto* const osWindow = window.osWindow.get();
+    QTest::keyPress(osWindow, Qt::Key_Alt);
+    REQUIRE(QTest::qWaitFor([&] { return revealed(*window); }, RevealWaitMs));
+    CHECK(allPoll(sessionsOfTab(manager, *window, 0)));
+
+    QTest::keyRelease(osWindow, Qt::Key_Alt);
     CHECK(nonePoll(sessionsOfTab(manager, *window, 0)));
 
     contour::test::closeAllTabs(*window);

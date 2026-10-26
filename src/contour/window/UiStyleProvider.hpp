@@ -244,6 +244,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QObject* roles READ roles CONSTANT)
     /// The QML names of the tab badge kinds, for badgeLook().
     Q_PROPERTY(QObject* badgeKinds READ badgeKinds CONSTANT)
+    /// The height of a pane header the held modifier reveals over its pane (Minimal).
+    Q_PROPERTY(qreal overlayPaneHeader READ overlayPaneHeader CONSTANT)
     // }}}
 
   public:
@@ -300,6 +302,10 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QStringList paneHeaderActionNames() const;
     [[nodiscard]] QObject* roles() noexcept { return &_paneRoles; }
     [[nodiscard]] QObject* badgeKinds() noexcept { return &_badgeKinds; }
+    /// An overlay takes no room from its pane, so Minimal, whose sub-row zeroes the inline header's
+    /// @c size.paneHeader for the size solver, still draws it at the row's own header height.
+    /// @return The row's pane header height before the density applies, in logical pixels.
+    [[nodiscard]] qreal overlayPaneHeader() const noexcept;
 
     /// Decides a pane's header (window::resolvePaneHeader) with this provider's density, its
     /// @c size.paneHeader, one chrome cell as the least content height, and its @c layout.paneActions.

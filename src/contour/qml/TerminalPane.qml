@@ -1,13 +1,14 @@
 // vim:syntax=qml
 // A single terminal pane: one ContourTerminal display bound to a leaf's session, plus the
-// per-pane chrome (background, scrollbar) and an active-pane focus border.
+// per-pane chrome (background, scrollbar) and the unfocused dim.
 //
-// This is instantiated once per leaf of the split tree (by PaneNode.qml). Clicking the pane makes
-// it the active pane of its tab (emitted via `activated`).
+// This is instantiated once per leaf of the split tree (by PaneCard.qml, which draws the card and the
+// header around it). Clicking the pane makes it the active pane of its tab (emitted via `activated`).
+// Focus is told by the header's emphasis and the dim, never by an outline.
 //
 // The per-session wiring (permission-wall dialogs, bell, window alert, the session's notices, and the
 // bidirectional scrollbar binding) is shared with the single-pane Terminal.qml via SessionChrome.qml;
-// this file only adds the pane-specific background and active-pane focus border. Without SessionChrome,
+// this file only adds the pane-specific background and the unfocused dim. Without SessionChrome,
 // terminals in a split pane would silently lose all of those (permission requests never shown, mute
 // bell, no urgency, dropped notifications, inert scrollbar).
 import QtQuick
@@ -35,16 +36,23 @@ ContourTerminal {
     // The TerminalSession this pane renders.
     // (Set by the caller: `session: node.session`.)
 
-    // Whether this pane is the active pane of its tab (drives the focus border).
+    // Whether this pane is the active pane of its tab (drives the unfocused dim).
     property bool paneActive: false
 
-    // Whether the active pane draws its focus frame: true only inside a split (set by PaneNode).
-    property bool showFocusFrame: false
+    // The panes the tab shows (set by PaneCard): Minimal's dim floor applies only between two or more.
+    property int visiblePanes: 1
+
+    // The card's corner radius, which the pane's background and dim follow (0 outside a card).
+    property real cornerRadius: 0
+
+    // How far the rounded background reaches above the pane, clipped: the card's radius under an inline
+    // header, whose own bottom edge is square, so the pane's top corners are square to meet it.
+    property real squareTop: 0
 
     // When this pane becomes the active pane (mouse click OR a keyboard FocusPane* action, which
     // flips node.active via the model's activePaneChanged), grab Qt keyboard focus so keystrokes go
-    // to this terminal — not just the focus border. Without this, keyboard pane navigation moved the
-    // highlight but left typing routed to the previously focused pane.
+    // to this terminal — not just the focus cue. Without this, keyboard pane navigation moved the
+    // cue but left typing routed to the previously focused pane.
     onPaneActiveChanged: if (paneActive) forceActiveFocus()
 
     // A split creates the NEW pane already active (paneActive bound to node.active, which the model sets
@@ -90,12 +98,18 @@ ContourTerminal {
     // 1 - opacityBackground under a blurred image), the image at opacityBackground, the blur pass, and
     // the color wash that restores text contrast over a blurred image. All session reads are
     // null-guarded (the session is transiently null during split rebinds).
+    //
+    // The two colour layers take the card's corners (cornerRadius, squared at the top by squareTop); the
+    // image and its blur stay rectangular.
     Item {
         anchors.fill: parent
         z: -1
+        clip: pane.squareTop > 0
 
         Rectangle {
             anchors.fill: parent
+            anchors.topMargin: -pane.squareTop
+            radius: pane.cornerRadius
             color: pane.session ? pane.session.backgroundColor : "black"
             opacity: (pane.session && pane.session.isImageBackground && pane.session.isBlurBackground)
                 ? 1.0 - pane.session.opacityBackground
@@ -120,6 +134,8 @@ ContourTerminal {
 
         Rectangle {
             anchors.fill: parent
+            anchors.topMargin: -pane.squareTop
+            radius: pane.cornerRadius
             color: pane.session ? pane.session.backgroundColor : "black"
             opacity: (pane.session && pane.session.isImageBackground && pane.session.isBlurBackground)
                 ? 1.0 - pane.session.opacityBackground
@@ -187,24 +203,46 @@ ContourTerminal {
         return Qt.alpha(base, dim)
     }
 
-    // Unfocused-pane dimming (dim_unfocused profile option, default off): blends the pane toward its
-    // own background color while it is not the focused pane — an inactive pane of a split, or any
-    // pane of an unfocused window. Composited above the terminal content but below the focus border;
-    // the renderer itself is untouched.
-    Rectangle {
+    // How strongly this pane dims while unfocused: the provider's unfocusedDim, which under Minimal floors
+    // the profile's dim_unfocused because dimming is the only focus cue between panes there -- so only
+    // between two or more. A lone pane dims only with its window, by the profile's own value (with the
+    // Increased Contrast cap unfocusedDim applies either way: min() keeps it and drops the floor).
+    // Reads the palette, hence the paletteRevision read.
+    function unfocusedDim(profileDim, panes) {
+        if (chromeStyle.paletteRevision < 0)
+            return 0.0
+        var dim = chromeStyle.unfocusedDim(profileDim)
+        return panes >= 2 ? dim : Math.min(profileDim, dim)
+    }
+
+    // Unfocused-pane dimming (dim_unfocused profile option, default off; at least the kit's dim under
+    // Minimal): blends the pane toward its own background color while it is not the focused pane — an
+    // inactive pane of a split, or any pane of an unfocused window. Composited above the terminal
+    // content; the renderer itself is untouched. Clipped like the background, so it follows the card's
+    // corners and stops square at an inline header.
+    Item {
         objectName: "dimOverlay"
         anchors.fill: parent
         z: 5
-        color: pane.dimOverlayColor(pane.session ? pane.session.dimUnfocused : 0.0,
-                                    pane.paneActive,
-                                    Window.active,
-                                    pane.session ? pane.session.backgroundColor : "black")
+        clip: pane.squareTop > 0
+        property color color: pane.dimOverlayColor(
+            pane.unfocusedDim(pane.session ? pane.session.dimUnfocused : 0.0, pane.visiblePanes),
+            pane.paneActive,
+            Window.active,
+            pane.session ? pane.session.backgroundColor : "black")
         visible: color.a > 0
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.topMargin: -pane.squareTop
+            radius: pane.cornerRadius
+            color: parent.color
+        }
     }
 
     // While the connection to the daemon this pane mirrors is sought again, the pane says so instead of
     // showing a grid that merely stopped: the grid dimmed, and the word centred on it. Above the unfocused
-    // dimming, below the focus border.
+    // dimming.
     Rectangle {
         objectName: "reconnectingOverlay"
         anchors.fill: parent
@@ -221,18 +259,6 @@ ContourTerminal {
             color: chromeStyle.onColor(pane.session ? pane.session.backgroundColor : "black")
             font: chromeStyle.headlineFont
         }
-    }
-
-    // Active-pane focus border. Only meaningful when the tab is split: a lone pane is always the
-    // active one, so framing it says nothing.
-    Rectangle {
-        objectName: "focusFrame"
-        anchors.fill: parent
-        color: "transparent"
-        visible: pane.showFocusFrame && pane.paneActive
-        border.width: 1
-        border.color: pane.palette.highlight
-        z: 10
     }
 
     TapHandler {

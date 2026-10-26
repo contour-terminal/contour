@@ -562,6 +562,16 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return The gaps per axis, the pane header and the cards' inset, in logical pixels.
     [[nodiscard]] vtworkspace::SplitChrome splitChrome(double devicePixelRatio) const;
 
+    /// @return What the chrome is built from now: the row, the resolved chrome font, both OS sources'
+    ///         current values, and the scheme of the terminal palette in effect.
+    [[nodiscard]] window::ChromeInputs chromeInputs() const;
+
+    /// How long the reveal modifier is held alone before Minimal's pane headers show: the published
+    /// provider's @c motion.headerRevealMs, or -- before the GUI exists -- the configured row's. Reduce
+    /// Motion leaves it be, so it is read once, by each window at its construction.
+    /// @return The delay.
+    [[nodiscard]] std::chrono::milliseconds headerRevealDelay() const;
+
     /// @return The OS appearance as the injected source reports it now.
     [[nodiscard]] platform::PlatformAppearance platformAppearance() const;
 
@@ -632,10 +642,6 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return What the menu bar reads and runs through: the focused window's state, or the configuration's
     ///         alone without one; the configured chords; and runMenuBarAction() to run a row with.
     [[nodiscard]] window::AppMenuBarSources appMenuBarSources();
-
-    /// @return What the chrome is built from now: the row, the resolved chrome font, both OS sources'
-    ///         current values, and the scheme of the terminal palette in effect.
-    [[nodiscard]] window::ChromeInputs chromeInputs() const;
 
     /// The OS reported new accessibility preferences.
     /// @param preferences The preferences now in effect.

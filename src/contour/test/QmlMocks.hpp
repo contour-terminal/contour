@@ -11,6 +11,7 @@
 #include <QtQuick/QQuickItem>
 
 #include <optional>
+#include <vector>
 
 namespace contour::test
 {
@@ -316,6 +317,9 @@ class MockPaneProxy: public QObject
     std::optional<double> lastRatio {}; ///< What the last divider drag wrote back; none before one.
     Q_INVOKABLE void activate() { ++activateCalls; }
     int activateCalls = 0;
+    /// Records each header button's action (PaneProxy::runHeaderAction), in order.
+    Q_INVOKABLE void runHeaderAction(int action) { headerActions.push_back(action); }
+    std::vector<int> headerActions; ///< Every window::PaneHeaderAction value a header button ran, in order.
 
     // Drivers used by the behavioral split tests to reproduce lifecycle transitions.
     void setSession(QObject* s)

@@ -49,40 +49,12 @@ Control {
         color: chromeStyle.colors.toastFill
         radius: chromeStyle.radii.toast
 
-        // The elevation: a soft nine-patch shadow when there is blur, otherwise (the Terminal row) a hard
-        // offset copy of the surface. No shadow at all when blur and both offsets are zero.
-        readonly property var _lift: chromeStyle.elevation.e2
-        readonly property color _tint: chromeStyle.shadowTint(Qt.rgba(0, 0, 0, _lift.opacity))
-        readonly property bool _hasShadow: _lift.blur > 0 || _lift.offsetX !== 0 || _lift.offsetY !== 0
-        readonly property int _reach: _lift.blur > 0
-                                      ? Math.max(1, Math.round((_lift.blur + 1) / 2)) * 3
-                                      : 0
-
-        Rectangle {
-            visible: parent._hasShadow && parent._lift.blur <= 0
-            z: -1
-            x: parent._lift.offsetX
-            y: parent._lift.offsetY
-            width: parent.width
-            height: parent.height
-            radius: parent.radius
-            color: parent._tint
-        }
-
-        BorderImage {
-            visible: parent._hasShadow && parent._lift.blur > 0
-            z: -1
+        // The elevation (ElevationShadow): soft where there is blur, a hard offset copy on the Terminal row.
+        ElevationShadow {
             anchors.fill: parent
-            anchors.margins: -parent._reach
-            transform: Translate { x: chromeStyle.elevation.e2.offsetX; y: chromeStyle.elevation.e2.offsetY }
-            source: "image://popupshadow/" + Math.round(parent._lift.blur)
-                  + "/" + Math.round(parent._lift.offsetY)
-                  + "/" + Math.round(parent.radius)
-                  + "/" + parent._tint.toString().substring(1)
-            border { left: parent._reach + parent.radius; top: parent._reach + parent.radius
-                     right: parent._reach + parent.radius; bottom: parent._reach + parent.radius }
-            horizontalTileMode: BorderImage.Stretch
-            verticalTileMode: BorderImage.Stretch
+            z: -1
+            level: chromeStyle.elevation.e2
+            radius: parent.radius
         }
     }
 

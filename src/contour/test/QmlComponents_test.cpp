@@ -31,6 +31,7 @@
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/ContextMenuModel.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TabColorScheme.hpp>
@@ -3582,55 +3583,6 @@ TEST_CASE("PaneNode: SplitView orientation follows node.orientation for both axe
 // divider drag..." above, and the model-layer clamp+emit in vtworkspace SessionModel_test's setPaneRatio
 // test.)
 
-TEST_CASE("TerminalPane: active-pane focus border follows node.active (offscreen)",
-          "[contour][gui][qml][split][behavior][focus]")
-{
-    // The border's visibility is a plain rendered bool: the RELIABLE focus-follows-active GUI oracle
-    // (replacing the unreliable offscreen keyboard-focus check). It is the GUI-observable proxy for "the
-    // right pane looks focused". The pane is put in a split, the only place the frame is drawn at all.
-    QQmlEngine engine;
-    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
-    MockTabController controller;
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::installChromeStyle(engine);
-    QQuickWindow window;
-    window.resize(400, 300);
-    window.show();
-
-    MockSession session;
-    MockPaneProxy leaf(/*leaf*/ true);
-    leaf.setSession(&session);
-    leaf.setActive(false);
-
-    auto paneNode = instantiatePaneNode(engine, window, leaf);
-    REQUIRE(paneNode != nullptr);
-
-    paneNode->setProperty("inSplit", true);
-    auto* rootItem = qobject_cast<QQuickItem*>(paneNode.get());
-    REQUIRE(rootItem != nullptr);
-    auto* pane = rootItem->findChild<StubContourTerminal*>();
-    REQUIRE(pane != nullptr);
-
-    // Find the focus-border Rectangle: the child Rectangle with a non-transparent border color and z==10.
-    auto findFocusBorder = [&]() -> QQuickItem* {
-        for (auto* r: pane->findChildren<QQuickItem*>())
-            if (QString(r->metaObject()->className()).contains("Rectangle") && r->property("z").toInt() == 10)
-                return r;
-        return nullptr;
-    };
-    auto* border = findFocusBorder();
-    REQUIRE(border != nullptr);
-
-    // Inactive -> no border.
-    CHECK_FALSE(border->property("visible").toBool());
-
-    // Active -> a one-pixel border (the focus highlight).
-    leaf.setActive(true);
-    QCoreApplication::processEvents();
-    CHECK(border->property("visible").toBool());
-    CHECK(border->property("border").value<QObject*>()->property("width").toInt() == 1);
-}
-
 TEST_CASE("PaneNode: tapping a leaf routes to node.activate(), guarded against a null node (offscreen)",
           "[contour][gui][qml][split][behavior]")
 {
@@ -4075,6 +4027,538 @@ TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fr
         CHECK(ceilOf(stackedGap) == chrome.stackedGap);
         CHECK(ceilOf(inset) == chrome.rootInset);
     }
+}
+
+// }}}
+
+// {{{ Step 2: pane cards and headers
+
+namespace
+{
+/// Every item beneath @p root (inclusive) named @p name, walking the visual tree so that Loader- and
+/// Repeater-made items are found too.
+[[nodiscard]] std::vector<QQuickItem*> itemsNamed(QQuickItem& root, QString const& name)
+{
+    auto found = std::vector<QQuickItem*> {};
+    auto pending = std::vector<QQuickItem*> { &root };
+    while (!pending.empty())
+    {
+        auto* item = pending.back();
+        pending.pop_back();
+        if (item->objectName() == name)
+            found.push_back(item);
+        for (auto* child: item->childItems())
+            pending.push_back(child);
+    }
+    return found;
+}
+
+/// The name an item announces, read from its `Accessible` attached object; empty without one.
+[[nodiscard]] QString accessibleNameOf(QObject const& item)
+{
+    for (auto const* child: item.findChildren<QObject*>(Qt::FindDirectChildrenOnly))
+        if (child->inherits("QQuickAccessibleAttached"))
+            return child->property("name").toString();
+    return {};
+}
+
+/// @return The chrome style installed on @p engine, as the provider it is.
+[[nodiscard]] contour::window::UiStyleProvider& providerOf(QQmlEngine& engine)
+{
+    auto* provider = qobject_cast<contour::window::UiStyleProvider*>(
+        engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
+    REQUIRE(provider != nullptr);
+    return *provider;
+}
+
+/// The chrome setup the pane card cases default to: the MacOS row, Comfortable.
+[[nodiscard]] contour::test::ChromeSetup paneCardSetup()
+{
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = contour::config::ChromeStyle::MacOS;
+    return setup;
+}
+
+/// A pane tree shown as Main.qml shows the active tab's: PaneNode.qml filling a window, told the tab's
+/// visible pane count and the window's header reveal.
+struct PaneTreeHost
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    QQuickWindow window;
+    std::unique_ptr<QObject> paneNode;
+
+    /// @param setup The chrome the tree is drawn with.
+    /// @param size  The window's size.
+    PaneTreeHost(contour::test::ChromeSetup const& setup, QSize size)
+    {
+        qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine, setup);
+        window.resize(size);
+        window.show();
+        REQUIRE(QTest::qWaitForWindowExposed(&window));
+    }
+
+    /// Shows @p tree, filling the window, and waits until the SplitViews have laid out @p leaves cards.
+    void show(MockPaneProxy& tree, int visiblePanes, int headerReveal = 0)
+    {
+        QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
+        while (component.status() == QQmlComponent::Loading)
+            QCoreApplication::processEvents();
+        INFO("PaneNode.qml: " << component.errorString().toStdString());
+        REQUIRE(component.isReady());
+        auto const initial = QVariantMap { { "node", QVariant::fromValue(static_cast<QObject*>(&tree)) },
+                                           { "visiblePanes", visiblePanes },
+                                           { "headerReveal", headerReveal } };
+        paneNode.reset(component.createWithInitialProperties(initial));
+        REQUIRE(paneNode != nullptr);
+        root().setParentItem(window.contentItem());
+        resize(window.size());
+    }
+
+    /// Gives the tree another size and waits for its layout to settle.
+    void resize(QSize size)
+    {
+        window.resize(size);
+        root().setSize(QSizeF(size));
+        settle();
+    }
+
+    /// Waits until the cards' geometry stops changing: the SplitViews lay out on polish, a frame later.
+    void settle()
+    {
+        auto const geometry = [this] {
+            auto rects = std::vector<QRectF> {};
+            for (auto* card: cards())
+                rects.push_back(card->mapRectToScene(QRectF { QPointF {}, card->size() }));
+            return rects;
+        };
+        auto last = geometry();
+        REQUIRE(QTest::qWaitFor(
+            [&] {
+                QTest::qWait(QuietFrameMs);
+                auto const now = geometry();
+                auto const stable = now == last && !now.empty();
+                last = now;
+                return stable;
+            },
+            SettleTimeoutMs));
+    }
+
+    [[nodiscard]] QQuickItem& root() const { return *qobject_cast<QQuickItem*>(paneNode.get()); }
+    [[nodiscard]] std::vector<QQuickItem*> cards() const
+    {
+        return itemsNamed(root(), QStringLiteral("paneCard"));
+    }
+
+    /// @return The card showing leaf @p leaf.
+    [[nodiscard]] QQuickItem& cardOf(MockPaneProxy const& leaf) const
+    {
+        for (auto* card: cards())
+            if (card->property("node").value<QObject*>() == &leaf)
+                return *card;
+        FAIL("no card shows the leaf");
+        return root();
+    }
+
+    /// @return The item named @p name inside @p card, which the test cannot go on without.
+    [[nodiscard]] static QQuickItem& partOf(QQuickItem const& card, char const* name)
+    {
+        auto* found = findItemNamed(card, QString::fromUtf8(name));
+        INFO("part: " << name);
+        REQUIRE(found != nullptr);
+        return *found;
+    }
+
+    /// @return The terminal inside @p card.
+    [[nodiscard]] static QQuickItem& terminalOf(QQuickItem const& card)
+    {
+        auto* terminal = card.findChild<StubContourTerminal*>();
+        REQUIRE(terminal != nullptr);
+        return *terminal;
+    }
+
+    [[nodiscard]] contour::window::UiStyleProvider& style() { return providerOf(engine); }
+
+    /// How long a frame without a layout change counts as settled, and how long settling may take.
+    static constexpr int QuietFrameMs = 20;
+    static constexpr int SettleTimeoutMs = 2000;
+};
+
+/// Two leaves side by side, the first active (focused by the pointer): "vim" in ~/repo, and a shell
+/// whose title is "zsh" in ~/notes.
+struct TwoPanes
+{
+    MockSession leftSession;
+    MockSession rightSession;
+    MockPaneProxy split { /*leaf*/ false,
+                          new MockPaneProxy(/*leaf*/ true),
+                          new MockPaneProxy(/*leaf*/ true) };
+
+    explicit TwoPanes(QColor background = QColor(Qt::black)):
+        leftSession { background }, rightSession { background }
+    {
+        leftSession.setForegroundProcessName(QStringLiteral("vim"));
+        leftSession.setTitle(QStringLiteral("vim"));
+        leftSession.setDisplayWorkingDirectory(QStringLiteral("~/repo"));
+        rightSession.setTitle(QStringLiteral("zsh"));
+        rightSession.setDisplayWorkingDirectory(QStringLiteral("~/notes"));
+        left().setSession(&leftSession);
+        right().setSession(&rightSession);
+        left().setActive(true);
+        left().setFocus(static_cast<int>(contour::window::PaneFocus::Focused));
+        split.setOrientation(static_cast<int>(vtworkspace::SplitState::Vertical));
+    }
+
+    [[nodiscard]] MockPaneProxy& left() const { return *split.first(); }
+    [[nodiscard]] MockPaneProxy& right() const { return *split.second(); }
+};
+
+/// How long the long-path case's working directory is.
+constexpr auto LongPathLength = 4096;
+
+/// How many nested splits the deep-tree case shows.
+constexpr auto DeepTreeSplits = 8;
+
+/// The pane header roles' indices, as QML names them (chromeStyle.roles).
+constexpr auto HeaderTextRole = contour::window::ChromePaneRoleNames::paneHeaderText();
+constexpr auto HeaderTextDimmedRole = contour::window::ChromePaneRoleNames::paneHeaderTextDimmed();
+} // namespace
+
+TEST_CASE("pane card: a single pane is edge to edge (offscreen)", "[contour][gui][qml][panecard]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+
+    auto const& card = host.cardOf(leaf);
+    CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeader").isVisible());
+    for (auto* surface: itemsNamed(host.root(), QStringLiteral("paneCardSurface")))
+        CHECK_FALSE(surface->isVisible());
+    auto const& terminal = PaneTreeHost::terminalOf(card);
+    CHECK(terminal.mapRectToScene(QRectF { QPointF {}, terminal.size() })
+          == QRectF { QPointF {}, QSizeF { host.window.size() } });
+}
+
+TEST_CASE("pane card: a split's cards have headers (offscreen)", "[contour][gui][qml][panecard]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    for (auto const* leaf: { &panes.left(), &panes.right() })
+    {
+        auto const& card = host.cardOf(*leaf);
+        auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+        CHECK(header.isVisible());
+        CHECK(header.height() == 22);
+        CHECK(PaneTreeHost::terminalOf(card).y() == 22);
+        CHECK(card.width() >= contour::window::CwdMinPaneWidth);
+        CHECK(PaneTreeHost::partOf(card, "paneHeaderCwd").isVisible());
+    }
+    // The program in front, else the title.
+    CHECK(PaneTreeHost::partOf(host.cardOf(panes.left()), "paneHeaderName").property("text").toString()
+          == QStringLiteral("vim"));
+    CHECK(PaneTreeHost::partOf(host.cardOf(panes.right()), "paneHeaderName").property("text").toString()
+          == QStringLiteral("zsh"));
+    CHECK(PaneTreeHost::partOf(host.cardOf(panes.left()), "paneHeaderCwd").property("text").toString()
+          == QStringLiteral("~/repo"));
+
+    // About 291 wide each: too narrow for the directory.
+    host.resize(QSize { 600, 400 });
+    for (auto const* leaf: { &panes.left(), &panes.right() })
+    {
+        auto const& card = host.cardOf(*leaf);
+        CHECK(card.width() < contour::window::CwdMinPaneWidth);
+        CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeaderCwd").isVisible());
+        CHECK(PaneTreeHost::partOf(card, "paneHeaderName").isVisible());
+    }
+}
+
+TEST_CASE("pane card: focus is emphasis and dim, never an outline (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes { QColor(0x1c, 0x1e, 0x24) };
+    panes.rightSession.setDimUnfocused(0.3F);
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    CHECK(itemsNamed(host.root(), QStringLiteral("focusFrame")).empty());
+
+    auto const background = panes.leftSession.backgroundColor();
+    auto const nameColour = [&](MockPaneProxy const& leaf) {
+        return PaneTreeHost::partOf(host.cardOf(leaf), "paneHeaderName").property("color").value<QColor>();
+    };
+    CHECK(nameColour(panes.left()).rgba() == host.style().colorOn(HeaderTextRole, background).rgba());
+    CHECK(nameColour(panes.right()).rgba() == host.style().colorOn(HeaderTextDimmedRole, background).rgba());
+
+    // The inactive pane dims below its header, not over it.
+    auto const& inactive = host.cardOf(panes.right());
+    auto const& header = PaneTreeHost::partOf(inactive, "paneHeader");
+    auto const& dim = PaneTreeHost::partOf(inactive, "dimOverlay");
+    CHECK(dim.isVisible());
+    CHECK(dim.mapToItem(&inactive, QPointF {}).y() >= header.y() + header.height());
+    CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.left()), "dimOverlay").isVisible());
+}
+
+TEST_CASE("pane card: header text reads at 4.5:1 on its card", "[contour][gui][qml][panecard]")
+{
+    using contour::config::ChromeStyle;
+    auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);
+    auto const schemeName = GENERATE(as<std::string_view> {}, "contour-dark", "contour-light");
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux);
+    INFO("Qt palette: " << (appearance == vtbackend::ColorPreference::Light ? "light" : "dark"));
+    INFO("scheme: " << schemeName);
+    INFO("row: " << contour::config::chromeStyleName(row));
+    contour::test::ScopedChromeAppearance const forced { appearance };
+
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(vtbackend::defaultColorPalettes(schemeName, palette));
+    auto const background = palette.defaultBackground;
+    auto setup = contour::test::defaultChromeSetup();
+    setup.row = row;
+    auto const provider = contour::window::UiStyleProvider { contour::window::ChromeInputs {
+        .row = setup.row, .font = setup.font, .scheme = setup.scheme } };
+
+    for (auto const role: { HeaderTextRole, HeaderTextDimmedRole })
+    {
+        auto const ink = provider.colorOn(role, contour::platform::toQColor(background));
+        // The ink composited over the card, as the header paints it.
+        auto const alpha = static_cast<double>(ink.alphaF());
+        auto const over = [alpha](int inkChannel, int backgroundChannel) {
+            return static_cast<uint8_t>(
+                std::lround((static_cast<double>(inkChannel) * alpha)
+                            + (static_cast<double>(backgroundChannel) * (1.0 - alpha))));
+        };
+        auto const seen = vtbackend::RGBColor { over(ink.red(), background.red),
+                                                over(ink.green(), background.green),
+                                                over(ink.blue(), background.blue) };
+        INFO("role: " << role);
+        CHECK(vtbackend::contrastRatio(seen, background) >= 4.5);
+    }
+}
+
+TEST_CASE("pane card: the actions show on hover and act on their pane (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    // The pointer starts over the other pane: the cursor outlives the windows of earlier cases.
+    auto const& other = PaneTreeHost::terminalOf(host.cardOf(panes.right()));
+    QTest::mouseMove(&host.window, other.mapToScene({ other.width() / 2, other.height() / 2 }).toPoint());
+    auto const& card = host.cardOf(panes.left());
+    auto const& actions = PaneTreeHost::partOf(card, "paneHeaderActions");
+    CHECK(QTest::qWaitFor([&actions] { return actions.opacity() == 0.0; }));
+
+    auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+    QTest::mouseMove(&host.window, header.mapToScene({ header.width() / 2, header.height() / 2 }).toPoint());
+    CHECK(QTest::qWaitFor([&actions] { return actions.opacity() == 1.0; }));
+
+    auto const& split = PaneTreeHost::partOf(card, "paneHeaderAction0");
+    QTest::mouseClick(&host.window,
+                      Qt::LeftButton,
+                      Qt::NoModifier,
+                      split.mapToScene({ split.width() / 2, split.height() / 2 }).toPoint());
+    CHECK(panes.left().headerActions == std::vector<int> { 0 });
+    CHECK(panes.right().headerActions.empty());
+}
+
+TEST_CASE("pane card: a long cwd elides in the middle (offscreen)", "[contour][gui][qml][panecard]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    auto const path = QStringLiteral("/") + QString(LongPathLength - 1, QLatin1Char('d'));
+    panes.leftSession.setDisplayWorkingDirectory(path);
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& card = host.cardOf(panes.left());
+    auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+    auto const& cwd = PaneTreeHost::partOf(card, "paneHeaderCwd");
+    auto const& name = PaneTreeHost::partOf(card, "paneHeaderName");
+    auto const& actions = PaneTreeHost::partOf(card, "paneHeaderActions");
+    CHECK(cwd.property("elide").toInt() == Qt::ElideMiddle);
+    CHECK(header.height() == 22);
+    CHECK(cwd.x() + cwd.width() <= actions.x());
+    CHECK_FALSE(name.property("truncated").toBool());
+    CHECK(accessibleNameOf(header).contains(path));
+}
+
+TEST_CASE("pane card: a deep tree in a small window (offscreen)", "[contour][gui][qml][panecard]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 320, 200 } };
+
+    // Eight nested splits, alternating their axis, each keeping a leaf and splitting the rest.
+    auto const leaves = static_cast<size_t>(DeepTreeSplits) + 1;
+    std::array<MockSession, static_cast<size_t>(DeepTreeSplits) + 1> sessions;
+    auto tree = MockPaneProxy { /*leaf*/ true };
+    auto* tip = &tree;
+    for (auto const depth: std::views::iota(0, DeepTreeSplits))
+    {
+        auto* kept = new MockPaneProxy(/*leaf*/ true);
+        kept->setSession(&sessions[static_cast<size_t>(depth)]);
+        auto* rest = new MockPaneProxy(/*leaf*/ true);
+        tip->becomeSplit(kept, rest);
+        tip->setOrientation(static_cast<int>(depth % 2 == 0 ? vtworkspace::SplitState::Vertical
+                                                            : vtworkspace::SplitState::Horizontal));
+        tip = rest;
+    }
+    tip->setSession(&sessions.back());
+    host.show(tree, /*visiblePanes*/ DeepTreeSplits + 1);
+
+    auto const cards = host.cards();
+    CHECK(cards.size() == leaves);
+    auto const leastWithHeader = 22 + host.style().cellHeight();
+    for (auto const* card: cards)
+    {
+        CHECK(card->width() >= 0);
+        CHECK(card->height() >= 0);
+        if (card->height() < leastWithHeader)
+            CHECK_FALSE(PaneTreeHost::partOf(*card, "paneHeader").isVisible());
+    }
+    for (auto const& w: warnings.messages())
+        INFO("QML warning: " << w.toStdString());
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("pane card: Minimal shows no headers until the modifier is held (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto setup = paneCardSetup();
+    setup.density = contour::config::ChromeDensity::Minimal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+
+    SECTION("a split")
+    {
+        host.show(panes.split, /*visiblePanes*/ 2);
+        for (auto const* leaf: { &panes.left(), &panes.right() })
+        {
+            auto const& card = host.cardOf(*leaf);
+            CHECK_FALSE(PaneTreeHost::partOf(card, "paneHeader").isVisible());
+            CHECK(PaneTreeHost::terminalOf(card).y() == 0);
+        }
+
+        host.paneNode->setProperty("headerReveal",
+                                   static_cast<int>(contour::window::HeaderReveal::HeldModifier));
+        host.settle();
+        for (auto const* leaf: { &panes.left(), &panes.right() })
+        {
+            auto const& card = host.cardOf(*leaf);
+            auto const& header = PaneTreeHost::partOf(card, "paneHeader");
+            auto const& terminal = PaneTreeHost::terminalOf(card);
+            CHECK(header.isVisible());
+            CHECK(header.height() == host.style().overlayPaneHeader());
+            CHECK(header.z() > terminal.z());
+            CHECK(terminal.y() == 0);
+            CHECK(terminal.height() == card.height());
+        }
+    }
+
+    SECTION("a single pane")
+    {
+        host.show(
+            panes.left(), /*visiblePanes*/ 1, static_cast<int>(contour::window::HeaderReveal::HeldModifier));
+        CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.left()), "paneHeader").isVisible());
+    }
+}
+
+TEST_CASE("pane card: Increased Contrast rings the active card (offscreen)", "[contour][gui][qml][panecard]")
+{
+    auto setup = paneCardSetup();
+    setup.accessibility.contrast = contour::config::ContrastPreference::Increased;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& ring = PaneTreeHost::partOf(host.cardOf(panes.left()), "activeCardRing");
+    CHECK(ring.isVisible());
+    CHECK(ring.property("border").value<QObject*>()->property("width").toReal() == 1.5);
+    CHECK_FALSE(PaneTreeHost::partOf(host.cardOf(panes.right()), "activeCardRing").isVisible());
+
+    SECTION("and standard contrast rings none")
+    {
+        auto plain = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+        auto others = TwoPanes {};
+        plain.show(others.split, /*visiblePanes*/ 2);
+        CHECK(itemsNamed(plain.root(), QStringLiteral("activeCardRing")).size() == 2);
+        for (auto const* other: itemsNamed(plain.root(), QStringLiteral("activeCardRing")))
+            CHECK_FALSE(other->isVisible());
+    }
+}
+
+TEST_CASE("pane card: a translucent profile's card is composited once (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    panes.leftSession.setOpacity(0.5F);
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    // The card paints no fill of its own: the header's background and the terminal's carry the
+    // profile's opacity, each over the backdrop alone.
+    auto const& card = host.cardOf(panes.left());
+    CHECK(PaneTreeHost::partOf(card, "paneCardSurface").property("color").value<QColor>().alpha() == 0);
+    CHECK(PaneTreeHost::partOf(card, "paneHeaderBackground").opacity() == Catch::Approx(0.5));
+    CHECK(PaneTreeHost::terminalOf(card).opacity() == Catch::Approx(0.5));
+}
+
+TEST_CASE("pane card: under Reduce Motion the actions cross-fade and the overlay does not move (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto setup = paneCardSetup();
+    setup.density = contour::config::ChromeDensity::Minimal;
+    setup.accessibility.motion = contour::config::MotionPreference::Reduced;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& motion = *host.style().motion();
+    CHECK(motion.property("style").toInt() == motion.property("crossFade").toInt());
+
+    host.paneNode->setProperty("headerReveal", static_cast<int>(contour::window::HeaderReveal::HeldModifier));
+    // Shown where it belongs at once: nothing slides it in.
+    auto const& header = PaneTreeHost::partOf(host.cardOf(panes.left()), "paneHeader");
+    CHECK(header.isVisible());
+    CHECK(header.y() == 0);
+    CHECK(header.x() == 0);
+}
+
+TEST_CASE("pane card: the Terminal row draws a header of one cell row (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    auto setup = paneCardSetup();
+    setup.row = contour::config::ChromeStyle::Terminal;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    auto const& active = host.cardOf(panes.left());
+    auto const& inactive = host.cardOf(panes.right());
+    CHECK(PaneTreeHost::partOf(active, "paneHeader").height() == host.style().cellHeight());
+
+    auto const expected =
+        std::array { QStringLiteral("⊞"), QStringLiteral("⊟"), QStringLiteral("Z"), QStringLiteral("×") };
+    for (auto const index: std::views::iota(size_t { 0 }, expected.size()))
+    {
+        auto const& button = PaneTreeHost::partOf(active, std::format("paneHeaderAction{}", index).c_str());
+        CHECK(PaneTreeHost::partOf(button, "toolbarButtonGlyph").property("text").toString()
+              == expected[index]);
+    }
+
+    CHECK(inactive.opacity() == Catch::Approx(0.62));
+    CHECK(active.opacity() == 1.0);
+
+    // The row shows a focused pane's actions without hover.
+    auto const& actions = PaneTreeHost::partOf(active, "paneHeaderActions");
+    CHECK(QTest::qWaitFor([&actions] { return actions.opacity() == 1.0; }));
+    CHECK(PaneTreeHost::partOf(inactive, "paneHeaderActions").opacity() == 0.0);
 }
 
 // }}}
@@ -7235,57 +7719,3 @@ TEST_CASE("the Terminal row's menu rows read on the menu surface (offscreen)", "
 }
 
 #include <QmlComponents_test.moc>
-
-namespace
-{
-/// Collect every visual item below @p root (inclusive) whose objectName equals @p name, walking childItems
-/// so items created by nested Loaders are found as well.
-void collectItemsNamed(QQuickItem* root, QString const& name, std::vector<QQuickItem*>& out)
-{
-    if (root->objectName() == name)
-        out.push_back(root);
-    for (auto* child: root->childItems())
-        collectItemsNamed(child, name, out);
-}
-} // namespace
-
-TEST_CASE("TerminalPane: no focus frame on a single pane", "[contour][gui][qml][split][focusframe]")
-{
-    QQmlEngine engine;
-    qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
-    MockTabController controller;
-    engine.rootContext()->setContextProperty("terminalSessions", &controller);
-    contour::test::installChromeStyle(engine);
-    QQuickWindow window;
-    window.resize(400, 300);
-    window.show();
-
-    SECTION("a root leaf shows no frame even when active")
-    {
-        MockPaneProxy leaf(/*leaf*/ true);
-        leaf.setActive(true);
-        auto root = instantiatePaneNode(engine, window, leaf);
-        REQUIRE(root != nullptr);
-        std::vector<QQuickItem*> frames;
-        collectItemsNamed(qobject_cast<QQuickItem*>(root.get()), QStringLiteral("focusFrame"), frames);
-        REQUIRE(frames.size() == 1);
-        CHECK_FALSE(frames.front()->property("visible").toBool());
-    }
-
-    SECTION("only the active leaf inside a split shows the frame")
-    {
-        auto* left = new MockPaneProxy(/*leaf*/ true);
-        auto* right = new MockPaneProxy(/*leaf*/ true);
-        left->setActive(true);
-        MockPaneProxy split(/*leaf*/ false, left, right);
-        auto root = instantiatePaneNode(engine, window, split);
-        REQUIRE(root != nullptr);
-        QCoreApplication::processEvents();
-        std::vector<QQuickItem*> frames;
-        collectItemsNamed(qobject_cast<QQuickItem*>(root.get()), QStringLiteral("focusFrame"), frames);
-        REQUIRE(frames.size() == 2);
-        auto const visibleCount =
-            std::ranges::count_if(frames, [](QQuickItem* f) { return f->property("visible").toBool(); });
-        CHECK(visibleCount == 1);
-    }
-}

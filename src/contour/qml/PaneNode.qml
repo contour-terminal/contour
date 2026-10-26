@@ -1,8 +1,9 @@
 // vim:syntax=qml
 // Recursive renderer for one node of a tab's split-pane tree.
 //
-// A leaf node renders a single terminal pane (a ContourTerminal bound to the leaf's session); a
-// split node renders a SplitView containing two child panes laid out along the node's orientation.
+// A leaf node renders a single terminal pane in its card (PaneCard.qml: the header, the border, the
+// terminal); a split node renders a SplitView containing two child panes laid out along the node's
+// orientation.
 // The structure follows the vtworkspace::Pane tree, surfaced to QML as PaneProxy objects.
 //
 // A QML component cannot instantiate itself by name (Qt rejects that as "instantiated
@@ -38,12 +39,26 @@ FocusScope {
     // top-level instance in Main.qml still sets `node:` declaratively at construction.
     property var node: null
 
-    // True when this node lives inside a split. Only then does the active leaf draw its focus frame;
-    // the root node of a tab starts false, and split children are told true by their parent's loaders.
-    property bool inSplit: false
+    // The panes the tab shows (WindowController.visiblePaneCount): two or more make every leaf a card with
+    // a header. Main.qml gives it to the root; each split hands its own to its children.
+    property int visiblePanes: 1
+
+    // A window::HeaderReveal's value (WindowController.headerReveal), handed down as visiblePanes is.
+    property int headerReveal: 0
+
+    // How deep in the tree this node sits: 0 for the tab's root, one more for each split above it.
+    property int depth: 0
 
     // Smallest first-child share a divider drag may persist; keeps both panes visible/grabbable.
     readonly property real minPaneRatio: 0.05
+
+    // What a split hands the child PaneNode it loads: its depth, and the tab's pane count and reveal as
+    // live bindings (the child is URL-loaded, so it cannot bind them declaratively; see `node`).
+    function handDown(child) {
+        child.depth = root.depth + 1
+        child.visiblePanes = Qt.binding(function() { return root.visiblePanes })
+        child.headerReveal = Qt.binding(function() { return root.headerReveal })
+    }
 
     // Clamp a raw drag ratio into [minPaneRatio, 1 - minPaneRatio]. Hoisted to the top-level item (and
     // kept a pure function) so the clamp arithmetic is unit-testable without synthesizing a drag.
@@ -91,7 +106,7 @@ FocusScope {
 
     // Only a split tree's root draws the gap behind its cards and insets them; a leaf root, and every
     // node inside a split, is edge to edge.
-    readonly property bool isSplitRoot: !inSplit && node !== null && !node.isLeaf
+    readonly property bool isSplitRoot: depth === 0 && node !== null && !node.isLeaf
     readonly property var backdropSession: firstLeafSession(node)
 
     // The gap's colour behind a split tree's cards, which the root's inset and every handle show.
@@ -103,15 +118,14 @@ FocusScope {
         opacity: root.backdropSession ? root.backdropSession.opacity : 1.0
     }
 
-    // Leaf branch: a single terminal pane.
+    // Leaf branch: a single terminal pane, in its card.
     Loader {
         anchors.fill: parent
         active: root.node !== null && root.node.isLeaf
-        sourceComponent: TerminalPane {
-            session: root.node ? root.node.session : null
-            paneActive: root.node ? root.node.active : false
-            showFocusFrame: root.inSplit
-            onActivated: { if (root.node) root.node.activate() }
+        sourceComponent: PaneCard {
+            node: root.node
+            visiblePanes: root.visiblePanes
+            headerReveal: root.headerReveal
         }
     }
 
@@ -238,7 +252,7 @@ FocusScope {
                 objectName: "splitFirst"
                 source: "PaneNode.qml"
                 onLoaded: {
-                    item.inSplit = true
+                    root.handDown(item)
                     item.node = Qt.binding(function() { return root.node ? root.node.first : null })
                 }
                 // Snapped to whole DEVICE pixels, not left fractional (#2040).
@@ -271,7 +285,7 @@ FocusScope {
                 objectName: "splitSecond"
                 source: "PaneNode.qml"
                 onLoaded: {
-                    item.inSplit = true
+                    root.handDown(item)
                     item.node = Qt.binding(function() { return root.node ? root.node.second : null })
                 }
                 SplitView.fillWidth: true

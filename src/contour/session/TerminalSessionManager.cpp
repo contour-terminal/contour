@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/ContourGuiApp.hpp>
+#include <contour/config/Actions.hpp>
 #include <contour/config/LayoutBuilder.hpp>
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/QtPath.hpp>
@@ -2195,6 +2196,24 @@ window::PaneActivation TerminalSessionManager::lastPaneActivation(vtworkspace::T
 {
     auto const found = _paneActivations.find(tab.value);
     return found != _paneActivations.end() ? found->second : window::PaneActivation::Pointer;
+}
+
+void TerminalSessionManager::runPaneHeaderAction(vtworkspace::TabId tab,
+                                                 vtworkspace::PaneId leaf,
+                                                 window::PaneHeaderAction action)
+{
+    auto* const model = _model->findTab(tab);
+    auto* const pane = model != nullptr ? model->rootPane()->findPane(leaf) : nullptr;
+    auto* const session = pane != nullptr && pane->isLeaf() ? sessionForId(pane->session()) : nullptr;
+    if (session == nullptr)
+        return;
+
+    // The button acts on its own pane, which a split or a zoom finds as the active one.
+    notePaneActivation(tab, window::PaneActivation::Pointer);
+    activatePane(tab, leaf);
+    auto const& row = window::PaneHeaderActions[static_cast<size_t>(action)];
+    if (auto const parsed = actions::fromString(std::string { row.commandName }))
+        session->executeAction(*parsed);
 }
 
 // }}}

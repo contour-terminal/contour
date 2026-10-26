@@ -58,6 +58,15 @@ TEST_CASE("heldModifier.aSecondPressRearms", "[heldmodifier]")
     CHECK(reveal.dueAt() == T0 + 2s + 500ms);
 }
 
+TEST_CASE("heldModifier.aPressWhileArmedKeepsTheFirstTime", "[heldmodifier]")
+{
+    auto reveal = HeldModifierReveal { 500ms };
+    reveal.modifierPressed(T0);
+    reveal.modifierPressed(T0 + 300ms);
+    CHECK(reveal.at(T0 + 500ms) == HeaderReveal::HeldModifier);
+    CHECK(reveal.dueAt() == T0 + 500ms);
+}
+
 TEST_CASE("heldModifier.otherInputWhileReleasedIsIgnored", "[heldmodifier]")
 {
     auto reveal = HeldModifierReveal { 500ms };

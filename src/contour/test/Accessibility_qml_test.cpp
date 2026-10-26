@@ -12,8 +12,10 @@
 
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/test/QmlMocks.hpp>
 #include <contour/window/DaemonDriftModel.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QCoreApplication>
@@ -29,6 +31,7 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <ranges>
 #include <string_view>
 #include <vector>
 
@@ -283,6 +286,52 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
             CHECK(partAttached->property("role").isValid());
             CHECK(partAttached->property("name").toString() == QStringLiteral("#EE6666"));
         }
+    }
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("accessibility: a pane header names its pane and its four buttons", "[contour][gui][qml][a11y]")
+{
+    QQmlEngine engine;
+    contour::test::installChromeStyle(engine);
+    contour::test::QmlMessageCapture const warnings;
+
+    contour::test::MockSession session;
+    session.setForegroundProcessName(QStringLiteral("vim"));
+    session.setDisplayWorkingDirectory(QStringLiteral("~/repo"));
+    contour::test::MockPaneProxy node { /*leaf*/ true };
+    node.setSession(&session);
+
+    auto const policy = QVariantMap { { "content", QStringLiteral("nameAndCwd") },
+                                      { "actions", QStringLiteral("shown") },
+                                      { "placement", QStringLiteral("inline") },
+                                      { "emphasis", QStringLiteral("primary") } };
+    auto header =
+        loadComponent(engine,
+                      QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneHeader.qml"),
+                      QVariantMap { { "session", QVariant::fromValue(static_cast<QObject*>(&session)) },
+                                    { "node", QVariant::fromValue(static_cast<QObject*>(&node)) },
+                                    { "policy", policy } });
+    auto* attached = accessibleAttachedOf(header.get());
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("role").toInt() == QAccessible::StaticText);
+    CHECK(attached->property("name").toString() == QStringLiteral("vim, ~/repo"));
+
+    auto const names = std::array { QStringLiteral("Split right"),
+                                    QStringLiteral("Split down"),
+                                    QStringLiteral("Zoom pane"),
+                                    QStringLiteral("Close pane") };
+    static_assert(names.size() == contour::config::PaneHeaderActionCount);
+    for (auto const index: std::views::iota(size_t { 0 }, names.size()))
+    {
+        auto const buttons = partsNamed(*header, QStringLiteral("paneHeaderAction%1").arg(index));
+        INFO("button " << index);
+        REQUIRE(buttons.size() == 1);
+        auto* button = accessibleAttachedOf(buttons.front());
+        REQUIRE(button != nullptr);
+        CHECK(button->property("role").toInt() == QAccessible::Button);
+        CHECK(button->property("name").toString() == names[index]);
     }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

@@ -455,6 +455,11 @@ QString UiStyleProvider::densityName() const
     return nameOf(config::chromeDensityName(_inputs.density));
 }
 
+qreal UiStyleProvider::overlayPaneHeader() const noexcept
+{
+    return config::ChromeTokenRows[static_cast<size_t>(_inputs.row)].size.paneHeader * _units.vertical;
+}
+
 QStringList UiStyleProvider::paneHeaderActionNames() const
 {
     auto names = QStringList {};

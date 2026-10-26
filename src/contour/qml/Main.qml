@@ -341,6 +341,8 @@ ThemedWindow
             active: appWindow.win !== null && appWindow.win.activeTabRootPane !== null
             sourceComponent: PaneNode {
                 node: appWindow.win ? appWindow.win.activeTabRootPane : null
+                visiblePanes: appWindow.win ? appWindow.win.visiblePaneCount : 1
+                headerReveal: appWindow.win ? appWindow.win.headerReveal : 0
             }
         }
 

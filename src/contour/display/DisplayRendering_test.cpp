@@ -29,6 +29,8 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
+#include <contour/test/QmlChromeStyle.hpp>
+#include <contour/test/QmlMocks.hpp>
 #include <contour/test/ScopedApplicationAttribute.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -49,6 +51,9 @@
 #include <QtGui/QColor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
+#include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
@@ -2220,6 +2225,67 @@ TEST_CASE("display: VT-driven window resize requests route through the bound con
     SUCCEED("VT resize requests routed through the controller without crashing");
 }
 
+namespace
+{
+/// The extent PaneNode.qml gives the FIRST card's terminal of a side-by-side split of two leaves, in a
+/// window of @p windowSize drawn with @p inputs: what the app's chrome makes of the space the window-size
+/// solver counted, measured from the QML itself.
+/// @param sessions The `terminalSessions` the panes' chrome reads, as Main.qml's engine has it.
+[[nodiscard]] QSizeF firstCardTerminalExtent(contour::window::ChromeInputs const& inputs,
+                                             QSize windowSize,
+                                             QObject& sessions)
+{
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("terminalSessions"), &sessions);
+    qmlRegisterType<contour::test::StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+    contour::test::installChromeStyle(engine,
+                                      contour::test::ChromeSetup { .row = inputs.row,
+                                                                   .font = inputs.font,
+                                                                   .windowControls = {},
+                                                                   .accessibility = inputs.accessibility,
+                                                                   .appearance = inputs.appearance,
+                                                                   .scheme = inputs.scheme,
+                                                                   .density = inputs.density });
+    contour::test::MockSession left;
+    contour::test::MockSession right;
+    auto split = contour::test::MockPaneProxy { /*leaf*/ false,
+                                                new contour::test::MockPaneProxy(/*leaf*/ true),
+                                                new contour::test::MockPaneProxy(/*leaf*/ true) };
+    split.first()->setSession(&left);
+    split.second()->setSession(&right);
+    split.setOrientation(static_cast<int>(vtworkspace::SplitState::Vertical));
+
+    QQuickWindow window;
+    window.resize(windowSize);
+    window.show();
+    REQUIRE(QTest::qWaitForWindowExposed(&window));
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/PaneNode.qml")));
+    INFO("PaneNode.qml: " << component.errorString().toStdString());
+    REQUIRE(component.isReady());
+    auto const paneNode = std::unique_ptr<QObject>(component.createWithInitialProperties(
+        { { "node", QVariant::fromValue(static_cast<QObject*>(&split)) }, { "visiblePanes", 2 } }));
+    auto* root = qobject_cast<QQuickItem*>(paneNode.get());
+    REQUIRE(root != nullptr);
+    root->setParentItem(window.contentItem());
+    root->setSize(QSizeF(windowSize));
+
+    // The SplitView lays out on polish: wait for the second card to be placed beside the first.
+    auto const terminals = [root] {
+        return root->findChildren<contour::test::StubContourTerminal*>();
+    };
+    REQUIRE(QTest::qWaitFor([&] {
+        auto const found = terminals();
+        return found.size() == 2
+               && std::ranges::any_of(found, [](auto const* t) { return t->mapToScene({}).x() > 0; })
+               && std::ranges::all_of(found, [](auto const* t) { return t->height() > 0; });
+    }));
+    auto const found = terminals();
+    auto const* first = *std::ranges::min_element(
+        found, {}, [](auto const* terminal) { return terminal->mapToScene({}).x(); });
+    return first->size();
+}
+} // namespace
+
 TEST_CASE("display: content-driven resize refuses, then resizes once the session is the active tab",
           "[display][controller][resize]")
 {
@@ -2281,6 +2347,16 @@ TEST_CASE("display: content-driven resize refuses, then resizes once the session
     h.pump();
     CHECK(h.window->width() == (2 * leafExtent.width()) + (2 * chrome.rootInset));
     CHECK(h.window->height() == leafExtent.height() + chrome.leafHeader + (2 * chrome.rootInset));
+
+    // And what the solver counted is what the cards draw: the first card's terminal -- below its header,
+    // inside the inset, beside the gap -- holds exactly the requested page.
+    h.display->setSize(firstCardTerminalExtent(
+        h.testApp.app().chromeInputs(), h.window->size(), h.testApp.app().sessionsManager()));
+    CHECK(QTest::qWaitFor([&] {
+        h.pump();
+        return h.session->terminal().totalPageSize() == page;
+    }));
+    CHECK(h.session->terminal().totalPageSize() == page);
 }
 
 TEST_CASE("display: releaseSession detaches the live session and clears the back-pointer",

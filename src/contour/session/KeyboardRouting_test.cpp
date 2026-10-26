@@ -108,6 +108,10 @@ class RoutingMockSession: public QObject
     Q_PROPERTY(float opacityBackground READ opacityBackground CONSTANT)
     Q_PROPERTY(QString pathToBackground READ pathToBackground CONSTANT)
     Q_PROPERTY(QString title READ title CONSTANT)
+    // What a pane header reads.
+    Q_PROPERTY(QString displayWorkingDirectory READ displayWorkingDirectory CONSTANT)
+    Q_PROPERTY(QString foregroundProcessName READ foregroundProcessName CONSTANT)
+    Q_PROPERTY(int programStatus READ programStatus CONSTANT)
 
   public:
     [[nodiscard]] int pageLineCount() const { return 25; }
@@ -126,6 +130,9 @@ class RoutingMockSession: public QObject
     [[nodiscard]] float opacityBackground() const { return 1.0F; }
     [[nodiscard]] QString pathToBackground() const { return {}; }
     [[nodiscard]] QString title() const { return QStringLiteral("mock"); }
+    [[nodiscard]] QString displayWorkingDirectory() const { return {}; }
+    [[nodiscard]] QString foregroundProcessName() const { return {}; }
+    [[nodiscard]] int programStatus() const { return 0; } // window::TabBadgeKind::None
 };
 
 /// Dynamic PaneProxy stand-in (leaf or split) with settable session/active/children, so a test can
@@ -140,6 +147,8 @@ class RoutingMockPane: public QObject
     Q_PROPERTY(RoutingMockPane* second READ second NOTIFY changed)
     Q_PROPERTY(QObject* session READ session NOTIFY changed)
     Q_PROPERTY(bool active READ active NOTIFY changed)
+    // A window::PaneFocus's value, as PaneProxy's focus gives it.
+    Q_PROPERTY(int focus READ focus NOTIFY changed)
 
   public:
     explicit RoutingMockPane(bool leaf = true): _leaf { leaf } {}
@@ -151,6 +160,7 @@ class RoutingMockPane: public QObject
     [[nodiscard]] RoutingMockPane* second() const { return _second; }
     [[nodiscard]] QObject* session() const { return _session; }
     [[nodiscard]] bool active() const { return _active; }
+    [[nodiscard]] int focus() const { return _active ? 1 : 0; } // Focused or Unfocused
 
     Q_INVOKABLE void activate()
     {

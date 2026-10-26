@@ -115,6 +115,9 @@ class MainWindowControllerMock: public QAbstractListModel
     // Mirrors WindowController's visible pane count; a test sets it to drive the pane headers.
     Q_PROPERTY(
         int visiblePaneCount READ visiblePaneCount WRITE setVisiblePaneCount NOTIFY visiblePaneCountChanged)
+    // Mirrors WindowController's held-modifier reveal (a window::HeaderReveal); a test sets it to show the
+    // headers Minimal hides.
+    Q_PROPERTY(int headerReveal READ headerReveal WRITE setHeaderReveal NOTIFY headerRevealChanged)
     // }}}
 
   public:
@@ -203,6 +206,19 @@ class MainWindowControllerMock: public QAbstractListModel
         _visiblePaneCount = count;
         emit visiblePaneCountChanged();
     }
+
+    /// Mirrors WindowController::headerReveal().
+    [[nodiscard]] int headerReveal() const noexcept { return _headerReveal; }
+
+    /// Holds or lets go of the reveal modifier, as WindowController's event filter decides.
+    /// @param reveal A window::HeaderReveal as its underlying value.
+    void setHeaderReveal(int reveal)
+    {
+        if (_headerReveal == reveal)
+            return;
+        _headerReveal = reveal;
+        emit headerRevealChanged();
+    }
     // }}}
 
     std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
@@ -225,12 +241,14 @@ class MainWindowControllerMock: public QAbstractListModel
     void newTabMenuRequested();
     void aboutRequested();
     void visiblePaneCountChanged();
+    void headerRevealChanged();
 
   private:
     QVariantList _tabContextMenuModel {};
     QVariantList _newTabMenuModel {};
     int _hostChipState = 0;    ///< @see hostChipState; 0 = HostChipState::Connected.
     int _visiblePaneCount = 1; ///< @see visiblePaneCount; one pane, unsplit.
+    int _headerReveal = 0;     ///< @see headerReveal; 0 = HeaderReveal::None.
 };
 
 } // namespace contour::test

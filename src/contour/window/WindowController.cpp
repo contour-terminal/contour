@@ -33,10 +33,12 @@
 
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QStyleHints>
 #include <QtQml/QQmlEngine>
 
+#include <chrono>
 #include <cstdlib>
 #include <limits>
 #include <mutex>
@@ -54,7 +56,8 @@ namespace contour::window
 WindowController::WindowController(session::TerminalSessionManager& manager,
                                    vtworkspace::WindowId windowId,
                                    config::MenuPresentation menuPresentation,
-                                   std::optional<WindowPosition> initialPosition):
+                                   std::optional<WindowPosition> initialPosition,
+                                   core::platform::IClock const& clock):
     _manager { manager },
     _windowId { windowId },
     _initialPosition { initialPosition },
@@ -68,8 +71,15 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _boundCommands { manager.app().config().inputMappings.value() },
     _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) },
     _menuPresentation { menuPresentation },
-    _nativeMenus { manager.app().nativeMenuPresenter() }
+    _nativeMenus { manager.app().nativeMenuPresenter() },
+    _clock { clock },
+    _heldModifier { manager.app().headerRevealDelay() }
 {
+    _headerRevealTimer.setSingleShot(true);
+    // A coarse timer may fire early, which would only re-arm it; the reveal is due when it is due.
+    _headerRevealTimer.setTimerType(Qt::PreciseTimer);
+    connect(&_headerRevealTimer, &QTimer::timeout, this, &WindowController::refreshHeaderReveal);
+
     _commandPalette->setSources({ &_tabCommands,
                                   &_profileCommands,
                                   &_layoutCommands,
@@ -1393,7 +1403,57 @@ void WindowController::onOSWindowActiveChanged()
     if (osWindow->isActive())
         _manager.setFocusedWindow(_windowId);
     else
+    {
         _manager.clearFocusedWindow(_windowId);
+        // The release of a modifier held while the window lost focus goes to another window.
+        _heldModifier.modifierReleased();
+        refreshHeaderReveal();
+    }
+}
+
+void WindowController::followHeldModifier(QEvent const& event)
+{
+    switch (event.type())
+    {
+        case QEvent::KeyPress: {
+            auto const& key = static_cast<QKeyEvent const&>(event);
+            if (key.isAutoRepeat())
+                return;
+            // The modifier's own press carries its modifier, so "alone" is "nothing else held".
+            if (key.key() == Qt::Key_Alt && (key.modifiers() & ~Qt::AltModifier) == Qt::NoModifier)
+                _heldModifier.modifierPressed(_clock.now());
+            else
+                _heldModifier.otherInput();
+            break;
+        }
+        case QEvent::KeyRelease: {
+            auto const& key = static_cast<QKeyEvent const&>(event);
+            if (key.isAutoRepeat() || key.key() != Qt::Key_Alt)
+                return;
+            _heldModifier.modifierReleased();
+            break;
+        }
+        case QEvent::MouseButtonPress: _heldModifier.otherInput(); break;
+        default: return;
+    }
+    refreshHeaderReveal();
+}
+
+void WindowController::refreshHeaderReveal()
+{
+    auto const now = _clock.now();
+    auto const reveal = _heldModifier.at(now);
+    if (auto const due = _heldModifier.dueAt(); due && reveal == HeaderReveal::None)
+        _headerRevealTimer.start(std::chrono::ceil<std::chrono::milliseconds>(*due - now));
+    else
+        _headerRevealTimer.stop();
+
+    if (reveal == _headerReveal)
+        return;
+    _headerReveal = reveal;
+    emit headerRevealChanged();
+    // A header the reveal shows names its program at once.
+    refreshHeaderFollowers();
 }
 
 void WindowController::rememberWindowPosition()
@@ -1564,6 +1624,10 @@ bool WindowController::eventFilter(QObject* watched, QEvent* event)
                 // The band's appearance follows the scheme the palette now carries.
                 refreshTitleBand();
                 break;
+
+            case QEvent::KeyPress:
+            case QEvent::KeyRelease:
+            case QEvent::MouseButtonPress: followHeldModifier(*event); break;
 
             default: break;
         }

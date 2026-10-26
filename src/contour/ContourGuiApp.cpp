@@ -1857,6 +1857,16 @@ vtworkspace::SplitChrome ContourGuiApp::splitChrome(double devicePixelRatio) con
         devicePixelRatio);
 }
 
+std::chrono::milliseconds ContourGuiApp::headerRevealDelay() const
+{
+    auto const milliseconds =
+        _chromeStyleHost ? _chromeStyleHost->provider().resolvedRow().motion.headerRevealMs
+                         : config::resolveChromeTokens(
+                               _chromeStyle, accessibilityPreferences(), _config.chromeDensity.value())
+                               .motion.headerRevealMs;
+    return std::chrono::milliseconds { milliseconds };
+}
+
 void ContourGuiApp::refreshChromeStyle()
 {
     // Guarded as applyWindowControlStyle() is: the host is built partway through terminalGuiAction(),
