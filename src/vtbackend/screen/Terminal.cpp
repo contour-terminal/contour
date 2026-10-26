@@ -1683,7 +1683,8 @@ void Terminal::updateIndicatorStatusLine()
         for (auto const& item: *segment)
             extents.push_back(StatusLineItemExtent { .side = side,
                                                      .width = widthOf(std::span { &item, 1 }),
-                                                     .priority = StatusLineDefinitions::priorityOf(item) });
+                                                     .priority = StatusLineDefinitions::priorityOf(item),
+                                                     .kind = StatusLineDefinitions::kindOf(item) });
     auto const fates = collapseStatusLine(extents, columns);
 
     // The segments as drawn: the template's own while nothing is dropped, which is every frame that fits.

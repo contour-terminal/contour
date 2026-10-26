@@ -1247,6 +1247,12 @@ namespace
     }
 } // namespace
 
+StatusLineItemKind StatusLineDefinitions::kindOf(Item const& item) noexcept
+{
+    auto const* const text = std::get_if<StatusLineDefinitions::Text>(&item);
+    return text && isUnstyled(*text) ? StatusLineItemKind::Separator : StatusLineItemKind::Item;
+}
+
 std::string serializeStatusLineSegment(StatusLineSegment const& segment)
 {
     auto result = std::string {};

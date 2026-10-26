@@ -1543,4 +1543,47 @@ TEST_CASE("Terminal.indicatorStatusLine.anyWidthDrawsWithoutOverlap", "[terminal
         }
     }
 }
+TEST_CASE("Terminal.indicatorStatusLine.aLongTitleCostsOnlyItself", "[terminal][statusline][collapse]")
+{
+    // A title too long for the middle takes nothing else with it: the right segment keeps its clock and its
+    // separator, and the middle leaves no lone «.
+    struct Template
+    {
+        std::string_view name;
+        std::string_view left;
+        std::string_view middle;
+        std::string_view right;
+    };
+    auto const shipped = std::array {
+        Template { .name = "Classic",
+                   .left =
+                       " {InputMode:Bold,Color=#FFFF00}{TraceMode:Bold,Color=#FFFF00,Left= │ }"
+                       "{Tabs:ActiveColor=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }{Context:Left= │ }",
+                   .middle = "« {Title} »",
+                   .right = "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" },
+        Template { .name = "Native2026",
+                   .left = " {InputMode:Bold}{Context:Left=  }",
+                   .middle = "{Title}",
+                   .right = "{HistoryLineCount:Faint}  {Clock:Faint} " },
+    };
+    for (auto const& shape: shipped)
+    {
+        INFO(shape.name);
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+        mc.writeToScreen(std::format("\033]2;{}\033\\", std::string(70, 't')));
+        mc.terminal.setStatusLineDefinition(parseStatusLineDefinition(shape.left, shape.middle, shape.right));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        REQUIRE(mc.terminal.refreshRenderBuffer());
+
+        auto const line = mc.terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0));
+        auto const right =
+            serializeToVT(mc.terminal, parseStatusLineSegment(shape.right), StatusLineStyling::Disabled);
+        INFO(line);
+        CHECK(line.ends_with(right));
+        CHECK(line.starts_with(" INSERT"));
+        CHECK_FALSE(line.contains('t'));
+        CHECK_FALSE(line.contains("«"));
+        CHECK_FALSE(line.contains("»"));
+    }
+}
 // }}}

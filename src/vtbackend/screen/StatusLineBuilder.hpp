@@ -479,6 +479,12 @@ namespace StatusLineDefinitions
         }(),
         "Every Item alternative needs an ItemTraits<T>::Priority.");
 
+    /// Whether @p item says something of its own or is a bare literal between items, which collapsing a
+    /// narrow line drops only with the items beside it.
+    /// @param item The item.
+    /// @return Separator for unstyled Text -- the literal between placeholders -- and Item for anything else.
+    [[nodiscard]] StatusLineItemKind kindOf(Item const& item) noexcept;
+
     /// How much @p item matters when the line is too narrow for all of it.
     /// @param item The item.
     /// @return Its type's @ref ItemTraits priority.

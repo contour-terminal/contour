@@ -21,6 +21,15 @@ constexpr auto Dropped = StatusLineItemFate::Dropped;
     return StatusLineItemExtent { .side = side, .width = ColumnCount(width), .priority = priority };
 }
 
+/// A bare literal on @p side, @p width columns wide: a separator such as " │ " or "« ".
+[[nodiscard]] constexpr StatusLineItemExtent separator(StatusLineSide side, int width)
+{
+    return StatusLineItemExtent { .side = side,
+                                  .width = ColumnCount(width),
+                                  .priority = StatusLinePriority::Normal,
+                                  .kind = StatusLineItemKind::Separator };
+}
+
 /// Where a segment of the placement starts, as a plain number, or -1 when it is not placed.
 [[nodiscard]] int startOf(std::optional<ColumnOffset> start)
 {
@@ -166,4 +175,131 @@ TEST_CASE("collapseStatusLine.neverDropsTheLastItem", "[statusline][collapse]")
         CHECK(collapseStatusLine(items, ColumnCount(20))
               == std::vector { Shown, Dropped, Dropped, Dropped, Dropped });
     }
+}
+
+TEST_CASE("collapseStatusLine.dropsOnlyWhatHelps", "[statusline][collapse]")
+{
+    using enum StatusLinePriority;
+
+    SECTION("a middle too wide on its own loses only its own items")
+    {
+        // 78 columns cannot be centred on an 80-column line whatever else goes, so the right's Low clock
+        // stays.
+        auto const items = std::vector {
+            item(StatusLineSide::Left, 8, Essential),
+            item(StatusLineSide::Middle, 78, Normal),
+            item(StatusLineSide::Right, 6, Low),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(80)) == std::vector { Shown, Dropped, Shown });
+    }
+
+    SECTION("a middle that overlaps the left may lose the left's items, never the right's")
+    {
+        auto const items = std::vector {
+            item(StatusLineSide::Left, 8, Essential),
+            item(StatusLineSide::Left, 4, Low),
+            item(StatusLineSide::Middle, 66, Normal),
+            item(StatusLineSide::Right, 6, Low),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(80)) == std::vector { Shown, Dropped, Dropped, Shown });
+    }
+
+    SECTION("the right's items never help the middle")
+    {
+        auto const items = std::vector {
+            item(StatusLineSide::Left, 10, Essential),
+            item(StatusLineSide::Middle, 4, Normal),
+            item(StatusLineSide::Right, 5, Low),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(20)) == std::vector { Shown, Dropped, Shown });
+    }
+
+    SECTION("a right segment as wide as the line loses only its own items")
+    {
+        auto const items = std::vector {
+            item(StatusLineSide::Left, 5, Low),
+            item(StatusLineSide::Right, 15, Normal),
+            item(StatusLineSide::Right, 10, Normal),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(20)) == std::vector { Shown, Shown, Dropped });
+    }
+
+    SECTION("nothing is dropped where nothing helps")
+    {
+        // Only separators, which are never dropped on their own account: the segment is not shown, as before.
+        auto const items = std::vector {
+            separator(StatusLineSide::Left, 10),
+            separator(StatusLineSide::Middle, 4),
+            separator(StatusLineSide::Right, 5),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(20)) == std::vector { Shown, Shown, Shown });
+    }
+}
+
+TEST_CASE("collapseStatusLine.aSeparatorGoesWithItsItem", "[statusline][collapse]")
+{
+    using enum StatusLinePriority;
+
+    SECTION("« … » losing its title leaves no lone «")
+    {
+        auto const items = std::vector {
+            item(StatusLineSide::Left, 8, Essential), separator(StatusLineSide::Middle, 2),
+            item(StatusLineSide::Middle, 70, Normal), separator(StatusLineSide::Middle, 2),
+            item(StatusLineSide::Right, 6, Normal),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(80))
+              == std::vector { Shown, Dropped, Dropped, Dropped, Shown });
+    }
+
+    SECTION("between two items, it goes with either")
+    {
+        auto const items = std::vector {
+            item(StatusLineSide::Left, 10, Essential),
+            item(StatusLineSide::Right, 4, Normal),
+            separator(StatusLineSide::Right, 3),
+            item(StatusLineSide::Right, 5, Low),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(20)) == std::vector { Shown, Shown, Dropped, Dropped });
+    }
+
+    SECTION("a leading one goes with the item after it, a trailing one with the item before it")
+    {
+        auto const items = std::vector {
+            item(StatusLineSide::Left, 10, Essential),
+            separator(StatusLineSide::Right, 1),
+            item(StatusLineSide::Right, 5, Low),
+            separator(StatusLineSide::Right, 1),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(14)) == std::vector { Shown, Dropped, Dropped, Dropped });
+    }
+
+    SECTION("it stays while both neighbours do")
+    {
+        auto const items = std::vector {
+            separator(StatusLineSide::Left, 1), item(StatusLineSide::Left, 6, Essential),
+            separator(StatusLineSide::Left, 3), item(StatusLineSide::Left, 6, Normal),
+            separator(StatusLineSide::Left, 1), item(StatusLineSide::Right, 5, Low),
+        };
+        CHECK(collapseStatusLine(items, ColumnCount(20))
+              == std::vector { Shown, Shown, Shown, Shown, Shown, Dropped });
+    }
+}
+
+TEST_CASE("collapseStatusLine.measuresSegmentsAsItIsTold", "[statusline][collapse]")
+{
+    // Two items that join into one cluster measure 1 + 0 alone and 2 together: the caller's measure decides.
+    auto const items = std::vector {
+        item(StatusLineSide::Left, 8, StatusLinePriority::Essential),
+        item(StatusLineSide::Right, 1, StatusLinePriority::Low),
+        item(StatusLineSide::Right, 0, StatusLinePriority::Low),
+    };
+    auto const joined = [&](StatusLineSide side, std::span<StatusLineItemFate const> fates) {
+        if (side == StatusLineSide::Left)
+            return ColumnCount(8);
+        if (side == StatusLineSide::Right && fates[1] == Shown)
+            return ColumnCount(2);
+        return ColumnCount(0);
+    };
+    CHECK(collapseStatusLine(items, ColumnCount(9)) == std::vector { Shown, Shown, Shown });
+    CHECK(collapseStatusLine(items, ColumnCount(9), joined) == std::vector { Shown, Dropped, Shown });
 }
