@@ -128,6 +128,10 @@ struct RecordingEvents final: vtbackend::Terminal::NullEvents
         shownNotifications.push_back(notification);
     }
     void copyToClipboard(std::string_view data) override { clipboard = data; }
+    int screenUpdates = 0; ///< Frames that brought output.
+    int screenReplays = 0; ///< Frames that repainted what the mirror showed already.
+    void screenUpdated() override { ++screenUpdates; }
+    void screenReplayed() override { ++screenReplays; }
     void commandBlockFinished(vtbackend::CommandBlockSummary const& summary) override
     {
         finishedBlocks.push_back(summary);
@@ -548,6 +552,56 @@ TEST_CASE("a restarted mirror applies a new connection's snapshot from scratch",
     CHECK(bare.terminal->primaryScreen().grid().renderMainPageText().contains("new"));
     CHECK_FALSE(bare.terminal->primaryScreen().grid().renderMainPageText().contains("old"));
     CHECK(bare.historyLines() == 0);
+}
+
+TEST_CASE("a mirror's replays are repaints, and only its deltas are output", "[vthost][mirror]")
+{
+    // A replay repaints what the host already showed -- the attach, a ResyncRequired snapshot, a resize --
+    // and must not read as news to whatever tracks unseen output (the GUI's tab badge).
+    auto bare = BareMirror { vtbackend::LineCount(10) };
+    auto screen = vthost::client::RemoteScreen {};
+    screen.columns = 5;
+    screen.lines = 1;
+
+    SECTION("the first replay into a fresh terminal")
+    {
+        auto seed = proto::Delta {};
+        seed.snapshot = 1;
+        seed.stableViewportBase = 1;
+        seed.stableFloor = 1;
+        seed.lines = { rowAt(1, "a") };
+        screen.apply(seed);
+        bare.mirror->apply(screen, seed);
+        CHECK(bare.events.screenReplays == 1);
+        CHECK(bare.events.screenUpdates == 0);
+
+        auto tick = proto::Delta {};
+        tick.stableViewportBase = 1;
+        tick.stableFloor = 1;
+        tick.lines = { rowAt(1, "b") };
+        screen.apply(tick);
+        bare.mirror->apply(screen, tick);
+        CHECK(bare.events.screenReplays == 1);
+        CHECK(bare.events.screenUpdates == 1);
+
+        // A server resync while connected: a snapshot delta.
+        auto resync = proto::Delta {};
+        resync.snapshot = 1;
+        resync.stableViewportBase = 1;
+        resync.stableFloor = 1;
+        resync.lines = { rowAt(1, "b") };
+        screen.apply(resync);
+        bare.mirror->apply(screen, resync);
+        CHECK(bare.events.screenReplays == 2);
+        CHECK(bare.events.screenUpdates == 1);
+    }
+
+    SECTION("an explicit full replay, as binding a pane makes")
+    {
+        bare.mirror->fullReplay(screen, vthost::client::LocalHistory::Discard);
+        CHECK(bare.events.screenReplays == 1);
+        CHECK(bare.events.screenUpdates == 0);
+    }
 }
 
 TEST_CASE("a server-side clear drops the mirror's local scrollback", "[vthost][mirror]")

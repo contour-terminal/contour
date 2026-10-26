@@ -525,6 +525,10 @@ class Terminal: public IStatusLinePublishTarget
         /// synchronously; hand the work to the thread that owns it instead.
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
+        /// As screenUpdated(), for a frame that repainted what the screen showed already rather than
+        /// output: a mirror's full replay (vthost::client::ScreenMirror::fullReplay) -- the attach, a resync.
+        /// A listener that does not tell the two apart need not override it.
+        virtual void screenReplayed() { screenUpdated(); }
 
         /// A status-line extension published a frame. Called on the extension's worker, holding no lock,
         /// under renderBufferUpdated()'s rules. For a host that renders nothing itself (the daemon), which
@@ -3176,6 +3180,8 @@ class Terminal: public IStatusLinePublishTarget
     ///                  rows went.
     void rowsDropped(LineCount pageShift);
     void screenUpdated();
+    /// As screenUpdated(), for a mirror's full replay: the listener hears Events::screenReplayed().
+    void screenReplayed();
 
     /// Brings a view scrolled back into the history down to the output just applied, as
     /// Settings::autoScrollOnUpdate asks in Insert mode, where the listener follows output
@@ -3845,6 +3851,18 @@ class Terminal: public IStatusLinePublishTarget
     TabsNamingMode getTabsNamingMode() const noexcept { return _settings.tabNamingMode; }
 
   private:
+    /// Whether a changed screen is announced to the listener now.
+    enum class ScreenNotification : uint8_t
+    {
+        Skipped = 0, ///< Rendering is suppressed, or the change only swapped the render buffers.
+        Due,         ///< The listener is told.
+    };
+
+    /// What screenUpdated() and screenReplayed() share: marks the screen dirty and swaps a pending render
+    /// buffer.
+    /// @return Due when the listener is to be told.
+    [[nodiscard]] ScreenNotification markScreenChanged();
+
     /// The frames one repaint of the indicator status line reads, at most one per extension name: what
     /// statusLineExtensionText() reads while updateIndicatorStatusLine() runs.
     struct StatusLineExtensionFrame

@@ -17,6 +17,7 @@
 #include <contour/session/HyperlinkTooltip.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
+#include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
@@ -904,6 +905,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void renderBufferUpdated() override;
     void extensionFramePublished() override;
     void screenUpdated() override;
+    void screenReplayed() override;
     void pageResized() override;
 
     /// New output brings a scrolled-back view down to it, except where the user parked the view on a search
@@ -1579,8 +1581,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param summary The finished block.
     void handleCommandBlockFinished(vtbackend::CommandBlockSummary const& summary);
     /// Tells the manager, on the GUI thread, that output arrived, for the tab badge's unseen-output dot.
-    /// Called on the parser thread by screenUpdated(); at most one call is queued at a time.
-    void noteOutputForTab();
+    /// Called on the parser (or mirror) thread by screenUpdated() and screenReplayed(); at most one call is
+    /// queued at a time.
+    /// @param origin Whether the frame was output or a mirror's replay.
+    void noteOutputForTab(window::OutputOrigin origin);
+    /// What a changed screen does to the display: the part of screenUpdated() and screenReplayed() that
+    /// needs one.
+    void repaintChangedScreen();
 
     /// Handles every block event gathered since the last call, in the order they were raised: each finish,
     /// then what the changes ask -- the hovered block's tooltip re-read, a `clear_on: next` notice
@@ -1745,8 +1752,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     SessionHosting _hosting;
     /// Where the connection to the host stands, for a mirrored pane. @see setHostConnection
     vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
-    /// When the resync grace armed by the connection's last return to Connected ends: output before then
-    /// repaints the mirror and is not news (window::outputOriginOf). Runtime state, GUI thread.
+    /// When the resync grace ends -- armed at construction for a mirrored pane, and by each return of the
+    /// connection to Connected: live-looking output before then repaints the mirror and is not news
+    /// (window::outputOriginOf). The fallback behind the mirror's own marking (screenReplayed(), a pty's
+    /// ReadOrigin::Replay). Runtime state, GUI thread.
     std::optional<std::chrono::steady_clock::time_point> _resyncGraceEnd;
     config::TerminalProfile _profile;
     ContourGuiApp& _app;
@@ -2038,9 +2047,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Whether a tab-strip refresh for this session's program status is queued on the GUI thread, so that
     /// a program reporting in a loop queues one. Set on the parser thread, cleared on the GUI thread.
     std::atomic<bool> _isProgramStatusRefreshPending = false;
-    /// Whether an output notice for the tab badge is queued on the GUI thread (@see noteOutputForTab). Set on
-    /// the parser thread, cleared on the GUI thread.
-    std::atomic<bool> _isOutputNoticePending = false;
+    /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
+    /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
+    std::atomic<uint8_t> _pendingOutputOrigins = 0;
 
     /// @see noteTransportLost.
     std::atomic<bool> _transportLost = false;

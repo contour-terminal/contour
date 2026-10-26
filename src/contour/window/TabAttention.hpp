@@ -84,6 +84,11 @@ inline constexpr auto ResyncGracePeriod = std::chrono::milliseconds { 500 };
 }
 
 /// The marks of every session, by id. Not thread-safe: the GUI thread's alone.
+///
+/// Output is every frame the session's terminal reports, whatever its bytes said: an OSC 7501 status
+/// report is a write like any other, so a background program that only reports its status marks unseen
+/// output too. The badge shows that dot only once the program's status is None, as every status kind
+/// outranks it (TabBadgeRules).
 class TabAttention
 {
   public:

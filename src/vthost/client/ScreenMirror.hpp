@@ -27,7 +27,8 @@
 ///    viewport, the Vi cursor and any live selection),
 ///  - command-block heads through `Screen::noteBlockRowChange` and `Terminal::placeCommandBlockHeads`
 ///    (the parser's erases and prompts keep them on the host, by a rule the mirror applies to its own rows),
-///  - the cursor through `Screen::moveCursorTo`, and the frame through `Terminal::screenUpdated`.
+///  - the cursor through `Screen::moveCursorTo`, and the frame through `Terminal::screenUpdated` -- or
+///    `Terminal::screenReplayed` for a full replay, which repaints rather than reports output.
 ///
 /// The mirror OWNS its terminal's screen, and its scrollback is real scrollback built by scrolling
 /// rows through the page — so a resync must not erase it unless the server actually discarded its
@@ -116,6 +117,9 @@ class ScreenMirror
     ///
     /// Not defaulted: erasing the user's scrollback is the kind of decision a caller should have to
     /// write down.
+    ///
+    /// Its frame is announced as Terminal::screenReplayed(), not screenUpdated(): a replay is not output,
+    /// so nothing that tracks unseen output (the GUI's tab badge) takes it for news.
     /// @param screen The mirrored screen to replay.
     /// @param history Whether to keep or erase the mirror's local scrollback.
     void fullReplay(RemoteScreen const& screen, LocalHistory history);

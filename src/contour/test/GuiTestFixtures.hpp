@@ -106,6 +106,8 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         requestedCommandOverrides.push_back(std::move(commandOverride));
         requestedProfileNames.push_back(std::move(profileName));
         auto const initialSize = pageSize.value_or(DefaultPageSize);
+        if (makePty)
+            return makePty(initialSize);
         auto pty = std::make_unique<vtpty::MockPty>(initialSize);
         createdPtys.push_back(pty.get());
         return pty;
@@ -146,8 +148,11 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
     std::vector<std::optional<vtpty::Process::ExecInfo>> requestedCommandOverrides;
     /// The @c profileName argument of each createPty() call.
     std::vector<std::optional<std::string>> requestedProfileNames;
-    /// Non-owning observation pointers; valid while the owning session lives.
+    /// Non-owning observation pointers; valid while the owning session lives. Empty for the ptys makePty
+    /// made.
     std::vector<vtpty::MockPty*> createdPtys;
+    /// Makes each pty instead of a MockPty when set -- a ChannelPty, for a test that feeds a mirror's bytes.
+    std::function<std::unique_ptr<vtpty::Pty>(vtbackend::PageSize)> makePty {};
 };
 
 /// A TerminalSession a test builds itself, outside any session factory: over @p pty, raising through

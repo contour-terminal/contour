@@ -1172,6 +1172,8 @@ void TerminalSessionManager::removeSession(TerminalSession& thatSession)
     _sessionsById.erase(sessionId.value);
     _tabBySession.erase(sessionId.value);
     _attention.forget(sessionId);
+    for (auto* controller: _controllersByWindow | std::views::values)
+        controller->forgetSession(sessionId);
     scheduleTaskbarProgress();
 
     // Session->display ownership is the pane tree's; there is no per-display map to scrub. The pane's
@@ -1412,6 +1414,9 @@ void TerminalSessionManager::paneSwapped(vtworkspace::TabId tab, vtworkspace::Pa
     // `session`, so the two affected panes render their new terminals.
     if (auto* c = controllerFor(_model->windowOfTab(tab)))
         c->rebuildActiveTabPaneProxies();
+    // In a zoomed tab the zoomed leaf keeps its id, so no zoom change is reported, yet the session in front
+    // is another one now: it is seen.
+    markVisibleSessionsSeen(_model->windowOfTab(tab));
 }
 
 void TerminalSessionManager::paneZoomChanged(vtworkspace::TabId tab, std::optional<vtworkspace::PaneId>)
@@ -1443,6 +1448,8 @@ void TerminalSessionManager::paneTreeRestructured(vtworkspace::TabId tab)
             { window::WindowController::Roles::TitleRole, window::WindowController::Roles::PaneCountRole });
         c->rebuildActiveTabPaneProxies();
     }
+    // A move may bring a covered pane in front, as a swap does.
+    markVisibleSessionsSeen(_model->windowOfTab(tab));
 }
 
 void TerminalSessionManager::tabTitleChanged(vtworkspace::TabId tab)
@@ -1534,6 +1541,10 @@ void TerminalSessionManager::noteSessionOutput(vtworkspace::SessionId session, w
 void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
                                                  vtbackend::CommandEnding ending)
 {
+    // A finish queued before the session was removed may arrive after, while it awaits deletion: it must not
+    // mark a session the ledger has forgotten.
+    if (sessionForId(session.modelSessionId()) != &session)
+        return;
     if (_attention.noteFinished(session.modelSessionId(), sessionVisibility(session), ending)
         == window::AttentionChange::Changed)
         refreshTabBadgeForSession(session.modelSessionId());

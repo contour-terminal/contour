@@ -24,8 +24,12 @@ class PaneSink
   public:
     virtual ~PaneSink() = default;
 
-    /// Feeds raw remote bytes (live %output or capture-pane replay).
+    /// Feeds raw remote bytes: live %output.
     virtual void feed(std::string_view bytes) = 0;
+
+    /// Feeds the capture-pane refill of what the pane showed before, which a consumer tracking unseen output
+    /// must not take for news. A sink that does not tell the two apart need not override it.
+    virtual void feedReplay(std::string_view bytes) { feed(bytes); }
 
     /// Applies a new layout extent for the pane.
     virtual void resize(int columns, int lines) = 0;

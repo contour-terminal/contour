@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtpty/ChannelPty.hpp>
+#include <vtpty/MockPty.hpp>
 
 #include <crispy/BufferObject.hpp>
 
@@ -185,4 +186,50 @@ TEST_CASE("feed preserves byte order across a compaction", "[vtpty][channelpty]"
         seen += std::string { result->data };
     }
     CHECK(seen == expected);
+}
+
+TEST_CASE("a replay reads as a replay until the live output behind it", "[vtpty][channelpty]")
+{
+    auto pty = ChannelPty { testPageSize() };
+    CHECK(pty.lastReadOrigin() == vtpty::ReadOrigin::Live); // nothing read yet: nothing to excuse
+
+    // What a mirror refills a pane with: bytes the user saw before, not news.
+    pty.feedReplay("history");
+    CHECK(readAll(pty, 100ms) == "history");
+    CHECK(pty.lastReadOrigin() == vtpty::ReadOrigin::Replay);
+
+    pty.feed("live");
+    CHECK(readAll(pty, 100ms) == "live");
+    CHECK(pty.lastReadOrigin() == vtpty::ReadOrigin::Live);
+
+    // A read that takes the end of a replay and live output behind it read live output.
+    pty.feedReplay("again");
+    pty.feed("+new");
+    CHECK(readAll(pty, 100ms) == "again+new");
+    CHECK(pty.lastReadOrigin() == vtpty::ReadOrigin::Live);
+}
+
+TEST_CASE("a replay read in pieces is a replay in every piece", "[vtpty][channelpty]")
+{
+    auto pty = ChannelPty { testPageSize() };
+    pty.feedReplay("abcdef");
+    auto pool = crispy::BufferObjectPool<char> { 4096 };
+    auto const storage = pool.allocateBufferObject();
+    auto const first = pty.read(*storage, 100ms, 3);
+    REQUIRE(first.has_value());
+    CHECK(first->data == "abc");
+    CHECK(pty.lastReadOrigin() == vtpty::ReadOrigin::Replay);
+    auto const second = pty.read(*storage, 100ms, 3);
+    REQUIRE(second.has_value());
+    CHECK(second->data == "def");
+    CHECK(pty.lastReadOrigin() == vtpty::ReadOrigin::Replay);
+}
+
+TEST_CASE("any other pty reads only live output", "[vtpty][channelpty]")
+{
+    // The default every device inherits: only a mirror's channel ever replays.
+    auto pty = vtpty::MockPty { testPageSize() };
+    pty.appendStdOutBuffer("output");
+    vtpty::Pty const& base = pty;
+    CHECK(base.lastReadOrigin() == vtpty::ReadOrigin::Live);
 }

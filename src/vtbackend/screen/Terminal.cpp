@@ -4966,21 +4966,33 @@ void Terminal::rowsDropped(LineCount pageShift)
 
 void Terminal::screenUpdated()
 {
+    if (markScreenChanged() == ScreenNotification::Due)
+        _eventListener.screenUpdated();
+}
+
+void Terminal::screenReplayed()
+{
+    if (markScreenChanged() == ScreenNotification::Due)
+        _eventListener.screenReplayed();
+}
+
+Terminal::ScreenNotification Terminal::markScreenChanged()
+{
     ZoneScoped;
     // The screen changed whatever is drawn next, and the display's next frame tells link detection so: set
     // ahead of the returns, which skip only the notification. The same one store as after them.
     _screenDirty = true;
 
     if (isRenderingSuppressed())
-        return;
+        return ScreenNotification::Skipped;
 
     if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
     {
         _renderBuffer.swapBuffers(_renderBuffer.lastUpdate.load(std::memory_order_relaxed));
-        return;
+        return ScreenNotification::Skipped;
     }
 
-    _eventListener.screenUpdated();
+    return ScreenNotification::Due;
 }
 
 void Terminal::followOutput()

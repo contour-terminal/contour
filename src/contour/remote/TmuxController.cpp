@@ -168,6 +168,20 @@ class TmuxController::PaneFeed final: public vthost::tmux::PaneSink
             _buffered.append(bytes);
     }
 
+    void feedReplay(std::string_view bytes) override
+    {
+        auto const lock = std::lock_guard { _mutex };
+        if (_pty != nullptr)
+            _pty->feedReplay(bytes);
+        else
+        {
+            // The model feeds the refill before any live output it held back, so a replay buffered here is
+            // the buffer's prefix.
+            _buffered.append(bytes);
+            _bufferedReplay = _buffered.size();
+        }
+    }
+
     void resize(int columns, int lines) override
     {
         // tmux is the authority on a mirrored pane's extent, so a pane not yet realized must be
@@ -192,8 +206,13 @@ class TmuxController::PaneFeed final: public vthost::tmux::PaneSink
         _pty = pty;
         if (_pty != nullptr && !_buffered.empty())
         {
-            _pty->feed(_buffered);
+            auto const buffered = std::string_view { _buffered };
+            if (_bufferedReplay > 0)
+                _pty->feedReplay(buffered.substr(0, _bufferedReplay));
+            if (_bufferedReplay < buffered.size())
+                _pty->feed(buffered.substr(_bufferedReplay));
             _buffered.clear();
+            _bufferedReplay = 0;
         }
     }
 
@@ -203,6 +222,7 @@ class TmuxController::PaneFeed final: public vthost::tmux::PaneSink
     std::mutex _mutex;
     vtpty::ChannelPty* _pty = nullptr;
     std::string _buffered;
+    std::size_t _bufferedReplay = 0; ///< How much of _buffered, from its start, is the capture-pane refill.
 };
 
 TmuxController::TmuxController(std::string tmuxSocket,

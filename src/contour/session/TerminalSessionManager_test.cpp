@@ -22,6 +22,7 @@
 
 #include <vtbackend/core/Primitives.hpp>
 
+#include <vtpty/ChannelPty.hpp>
 #include <vtpty/MockPty.hpp>
 #include <vtpty/test/NonAsciiSample.hpp>
 
@@ -51,6 +52,8 @@
 
 #include <QtTest/QSignalSpy>
 #include <vthost/client/LayoutReconstruction.hpp>
+#include <vthost/client/NativeClient.hpp>
+#include <vthost/client/ScreenMirror.hpp>
 #include <vthost/proto/Pdu.hpp>
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/Pane.hpp>
@@ -982,13 +985,14 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
               == QStringLiteral("Approve?"));
     }
 
-    SECTION("the OSC 7501 path repaints the badge and marks no output")
+    SECTION("refreshTabBadgeForSession repaints the program status and marks no output of its own")
     {
         background->terminal().writeToScreen("\033]7501;state=working:app=cargo\033\\");
         drainPosted();
         CHECK(badgeAt(*window, 0) == TabBadgeKind::Working);
 
-        // Seen, then sent to the back again: the report's bytes are forgotten.
+        // Seen, then sent to the back again: the report's bytes, which were a write like any other, are
+        // forgotten.
         window->activateTab(0);
         window->activateTab(1);
         REQUIRE(manager.tabAttention().of(background->modelSessionId())
@@ -1026,6 +1030,32 @@ TEST_CASE("TerminalSessionManager: a background tab's badge follows its output, 
 
         manager.toggleActivePaneZoom(sibling);
         CHECK(badgeAt(*window, 1) == TabBadgeKind::None);
+    }
+
+    SECTION("swapping a covered pane in a zoomed tab clears its dot")
+    {
+        manager.splitActivePane(/*vertical*/ true, active);
+        auto* const sibling = window->activeSession();
+        REQUIRE(sibling != nullptr);
+        manager.toggleActivePaneZoom(sibling);
+
+        active->terminal().writeToScreen("x");
+        drainPosted();
+        REQUIRE(badgeAt(*window, 1) == TabBadgeKind::Output);
+
+        // The swap puts `active` in front (vtworkspace::Tab ends the zoom so both swapped panes show), and
+        // whichever seam reports it -- the swap or the zoom change -- marks it seen.
+        manager.swapPane(vtworkspace::FocusDirection::Left, sibling);
+        CHECK(badgeAt(*window, 1) == TabBadgeKind::None);
+    }
+
+    SECTION("a finish posted after its session was removed marks nothing")
+    {
+        auto const id = background->modelSessionId();
+        manager.removeSession(*background);
+        // What a queued handlePendingBlockEvents() delivers between the removal and the deletion.
+        manager.noteCommandFinished(*background, vtbackend::CommandEnding::Failed);
+        CHECK(manager.tabAttention().of(id) == contour::window::SessionAttention {});
     }
 
     SECTION("a closed session's marks go with it")
@@ -1120,6 +1150,131 @@ TEST_CASE("TerminalSessionManager: a resync marks no unseen output", "[manager][
     }
 
     manager.setHostConnection(ConnectionState::Connected);
+    contour::test::closeAllTabs(*window);
+}
+
+namespace
+{
+
+/// A wire row of the session terminal's width at @p stableId carrying @p text.
+[[nodiscard]] vthost::proto::WireLine wireRow(int64_t stableId, std::string_view text)
+{
+    auto line = vthost::proto::WireLine {};
+    line.stableId = stableId;
+    line.columns = unbox<uint32_t>(contour::test::MockPtySessionFactory::DefaultPageSize.columns);
+    for (auto const ch: text)
+    {
+        auto cell = vthost::proto::WireCell {};
+        cell.codepoint = static_cast<char32_t>(ch);
+        line.cells.push_back(cell);
+    }
+    return line;
+}
+
+/// A delta of @p row alone on the page's top row; a snapshot when @p snapshot says so.
+[[nodiscard]] vthost::proto::Delta deltaOf(std::string_view row, bool snapshot)
+{
+    auto delta = vthost::proto::Delta {};
+    delta.snapshot = snapshot ? 1 : 0;
+    delta.stableViewportBase = 1;
+    delta.stableFloor = 1;
+    delta.lines = { wireRow(1, row) };
+    return delta;
+}
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: a remote pane's replays are not news", "[manager][tabbadge]")
+{
+    using contour::window::TabBadgeKind;
+
+    auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    contour::test::TestApp app { std::move(factory) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const background = sessionAtRow(manager, *window, 0);
+    REQUIRE(background != nullptr);
+    drainPosted();
+
+    SECTION("a remote session is born inside the resync grace")
+    {
+        background->terminal().writeToScreen("x");
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+    }
+
+    SECTION("the mirror classifies its replays, so the grace is only a fallback")
+    {
+        // Past the grace: what follows is told apart at its source alone.
+        app.steadyClock().advance(contour::window::ResyncGracePeriod);
+        auto screen = vthost::client::RemoteScreen {};
+        screen.columns = unbox<int>(contour::test::MockPtySessionFactory::DefaultPageSize.columns);
+        screen.lines = unbox<int>(contour::test::MockPtySessionFactory::DefaultPageSize.lines);
+        auto mirror = vthost::client::ScreenMirror { background->terminal(), vthost::DaemonMachine::Same };
+
+        // A fresh pane's first replay: the attach.
+        auto const first = deltaOf("prompt", /*snapshot*/ true);
+        screen.apply(first);
+        mirror.apply(screen, first);
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+
+        // A server resync while connected: a snapshot delta, as a resize or ResyncRequired sends.
+        auto const resync = deltaOf("prompt", /*snapshot*/ true);
+        screen.apply(resync);
+        mirror.apply(screen, resync);
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+
+        // An incremental delta is the program writing.
+        auto const tick = deltaOf("output", /*snapshot*/ false);
+        screen.apply(tick);
+        mirror.apply(screen, tick);
+        drainPosted();
+        CHECK(badgeAt(*window, 0) == TabBadgeKind::Output);
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a tmux pane's refill is not news", "[manager][tabbadge]")
+{
+    using contour::window::TabBadgeKind;
+
+    auto channels = std::vector<vtpty::ChannelPty*> {};
+    auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
+    factory->reportedHosting = contour::session::SessionHosting::Remote;
+    factory->makePty = [&channels](vtbackend::PageSize size) {
+        auto pty = std::make_unique<vtpty::ChannelPty>(size);
+        channels.push_back(pty.get());
+        return pty;
+    };
+    contour::test::TestApp app { std::move(factory) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab();
+    auto* const background = sessionAtRow(manager, *window, 0);
+    REQUIRE(background != nullptr);
+    REQUIRE(channels.size() == 2);
+    drainPosted();
+    // Past the grace: the refill is told apart at its source alone.
+    app.steadyClock().advance(contour::window::ResyncGracePeriod);
+
+    // capture-pane's replay, as the tmux pane feed hands it over, parsed as the session's parser would.
+    channels[0]->feedReplay("history-line\r\n");
+    REQUIRE(background->terminal().processInputOnce());
+    drainPosted();
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+
+    channels[0]->feed("live-line\r\n");
+    REQUIRE(background->terminal().processInputOnce());
+    drainPosted();
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::Output);
+
     contour::test::closeAllTabs(*window);
 }
 

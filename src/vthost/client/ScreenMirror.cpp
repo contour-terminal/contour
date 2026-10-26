@@ -683,7 +683,8 @@ void ScreenMirror::fullReplay(RemoteScreen const& screen, LocalHistory history)
         finish(screen);
         anchorPrimaryPage(screen);
     }
-    _terminal->screenUpdated();
+    // A repaint of what the host showed already, not output: the attach, a resync, a resize.
+    _terminal->screenReplayed();
 }
 
 std::optional<proto::RowAddress> ScreenMirror::hostRowOf(int64_t stableId, uint64_t generation) const

@@ -18,6 +18,7 @@
 #include <crispy/BufferObject.hpp>
 
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -58,6 +59,10 @@ class ChannelPty: public Pty
     /// Feeds output to the (possibly blocked) reader, as a peer's bytes.
     void feed(std::string_view data);
 
+    /// Feeds a refill of what the peer's program wrote before (a tmux pane's capture-pane), which the reader
+    /// learns of through lastReadOrigin(): a read that lies within it is a Replay.
+    void feedReplay(std::string_view data);
+
     /// @return Everything the terminal wrote while no write sink was set.
     [[nodiscard]] std::string stdinSnapshot() const;
 
@@ -89,8 +94,15 @@ class ChannelPty: public Pty
     void close() override;
     void waitForClosed() override;
     [[nodiscard]] bool isClosed() const noexcept override;
+    /// Replay when every byte of the last read lies within a replay fed (feedReplay), else Live.
+    [[nodiscard]] ReadOrigin lastReadOrigin() const override;
 
   private:
+    /// Appends @p data to the output the reader takes, under the lock, as feed() and feedReplay() do.
+    /// @param data   The bytes.
+    /// @param origin Whether they are a replay, whose end is then remembered.
+    void append(std::string_view data, ReadOrigin origin);
+
     /// How much consumed output prefix may accumulate before feed() reclaims it.
     ///
     /// A threshold rather than "compact every feed" so a burst of small chunks does not pay an
@@ -108,6 +120,10 @@ class ChannelPty: public Pty
     std::string _inputBuffer;
     std::string _outputBuffer;
     std::size_t _outputReadOffset = 0;
+    std::uint64_t _outputFed = 0;                  ///< Every output byte ever fed, replayed or not.
+    std::uint64_t _outputRead = 0;                 ///< Every output byte ever read.
+    std::uint64_t _replayEnd = 0;                  ///< Where the last replay fed ends, in fed bytes.
+    ReadOrigin _lastReadOrigin = ReadOrigin::Live; ///< @see lastReadOrigin
     int _resizesAfterClose = 0; ///< Resizes that arrived once _closed; see resizesAfterClose().
     bool _closed = false;
     bool _woken = false; ///< One-shot wakeupReader() flag (teardown wake), cleared on read.

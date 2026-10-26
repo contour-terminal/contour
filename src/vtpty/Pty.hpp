@@ -88,6 +88,13 @@ struct StartOutcome
 /// The result of starting a PTY and whatever is attached to it.
 using StartResult = std::expected<StartOutcome, StartFailure>;
 
+/// Where the output a pty last handed its reader came from.
+enum class ReadOrigin : std::uint8_t
+{
+    Live = 0, ///< The program on the other end wrote it.
+    Replay,   ///< A mirror refilled the pane with what its program wrote before: not news.
+};
+
 class Pty
 {
   public:
@@ -159,6 +166,11 @@ class Pty
 
     /// Resizes underlying window buffer by given character width and height.
     virtual void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) = 0;
+
+    /// Where the output the last read() returned came from. Asked by the reader, after the read.
+    /// @return Live, unless the device is fed by a mirror that marks its refills
+    /// (vtpty::ChannelPty::feedReplay).
+    [[nodiscard]] virtual ReadOrigin lastReadOrigin() const { return ReadOrigin::Live; }
 };
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);

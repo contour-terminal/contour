@@ -22,6 +22,16 @@ void ChannelPty::setResizeSink(ResizeSink sink)
 
 void ChannelPty::feed(std::string_view data)
 {
+    append(data, ReadOrigin::Live);
+}
+
+void ChannelPty::feedReplay(std::string_view data)
+{
+    append(data, ReadOrigin::Replay);
+}
+
+void ChannelPty::append(std::string_view data, ReadOrigin origin)
+{
     {
         auto const lock = std::lock_guard { _mutex };
         // Reclaim the already-read prefix before appending. Reclaiming ONLY on a full drain
@@ -41,6 +51,11 @@ void ChannelPty::feed(std::string_view data)
             _outputReadOffset = 0;
         }
         _outputBuffer.append(data);
+        _outputFed += data.size();
+        // Where a replay ends, not where it starts: one is fed ahead of the live output it refills for, so a
+        // read reaching past this end took live output too.
+        if (origin == ReadOrigin::Replay)
+            _replayEnd = _outputFed;
     }
     _wakeup.notify_all();
 }
@@ -92,8 +107,16 @@ std::optional<Pty::ReadResult> ChannelPty::read(crispy::BufferObject<char>& stor
     auto const n = std::min({ size, _outputBuffer.size() - _outputReadOffset, storage.bytesAvailable() });
     auto const chunk = std::string_view { _outputBuffer.data() + _outputReadOffset, n };
     _outputReadOffset += n;
+    _outputRead += n;
+    _lastReadOrigin = _outputRead <= _replayEnd ? ReadOrigin::Replay : ReadOrigin::Live;
     auto const pooled = storage.writeAtEnd(chunk);
     return ReadResult { .data = std::string_view(pooled.data(), pooled.size()), .fromStdoutFastPipe = false };
+}
+
+ReadOrigin ChannelPty::lastReadOrigin() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return _lastReadOrigin;
 }
 
 void ChannelPty::wakeupReader()

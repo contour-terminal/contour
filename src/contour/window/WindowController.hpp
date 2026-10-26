@@ -731,6 +731,10 @@ class WindowController:
     /// The manager's host connection changed what the chip shows. @see hostChipState
     void notifyHostConnectionChanged() { emit hostChipStateChanged(); }
 
+    /// Drops what this window remembers of @p session, which was removed: its cached process name.
+    /// @param session The removed session.
+    void forgetSession(vtworkspace::SessionId session) { _processNames.erase(session.value); }
+
     /// The application's version string, shown by the About dialog.
     /// @return The build constant, reached through the composition root.
     [[nodiscard]] QString applicationVersion() const;

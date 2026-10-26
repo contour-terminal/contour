@@ -373,6 +373,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
     _launchedCommand { std::move(launchedCommand) },
     _role { role },
     _hosting { hosting },
+    // A mirrored pane is born to a replay of what its host shows: the mirror marks its own replays, and this
+    // grace catches what it cannot tell apart.
+    _resyncGraceEnd { hosting == SessionHosting::Remote
+                          ? std::optional { app.terminalClocks().steady.now() + window::ResyncGracePeriod }
+                          : std::nullopt },
     _profile { *_config.profile(_profileName) },
     _app { app },
     _currentColorPreference { app.colorPreference() },
@@ -858,9 +863,25 @@ void TerminalSession::screenUpdated()
 {
     ZoneScoped;
     // Ahead of the display check: the tab badge's unseen-output dot is for the sessions that have no
-    // display -- a background tab's panes are not loaded at all.
-    noteOutputForTab();
+    // display -- a background tab's panes are not loaded at all. A tmux pane's capture-pane refill arrives
+    // as bytes like any other, so its device says where what the parser just read came from.
+    noteOutputForTab(_terminal.device().lastReadOrigin() == vtpty::ReadOrigin::Replay
+                         ? window::OutputOrigin::Resync
+                         : window::OutputOrigin::Live);
+    repaintChangedScreen();
+}
 
+void TerminalSession::screenReplayed()
+{
+    ZoneScoped;
+    // A daemon mirror's full replay -- the attach, a resync, a resize -- repaints what the host showed
+    // already.
+    noteOutputForTab(window::OutputOrigin::Resync);
+    repaintChangedScreen();
+}
+
+void TerminalSession::repaintChangedScreen()
+{
     if (!_display)
         return;
 
@@ -909,23 +930,30 @@ void TerminalSession::screenUpdated()
     scheduleRedraw();
 }
 
-void TerminalSession::noteOutputForTab()
+void TerminalSession::noteOutputForTab(window::OutputOrigin origin)
 {
     // On the parser thread, possibly with the state mutex held (see screenUpdated): where the session sits,
-    // and where its output comes from, are the GUI thread's to read, so this only posts. Coalesced as
+    // and the connection's state, are the GUI thread's to read, so this only posts. Coalesced as
     // programStatusChanged() is: one queued call at a time, so a stream of output costs one call per turn
-    // of the GUI thread's loop, not one per chunk. postToObject targets `this`, so Qt drops the call if the
+    // of the GUI thread's loop, not one per chunk; the origins seen meanwhile are gathered as bits, so live
+    // output behind a replay is not lost in it. postToObject targets `this`, so Qt drops the call if the
     // session goes first.
-    if (_isOutputNoticePending.exchange(true, std::memory_order_acq_rel))
+    auto const bit = static_cast<uint8_t>(1U << std::to_underlying(origin));
+    if (_pendingOutputOrigins.fetch_or(bit, std::memory_order_acq_rel) != 0)
         return;
     platform::postToObject(this, [this]() {
-        _isOutputNoticePending.store(false, std::memory_order_release);
+        auto const origins = _pendingOutputOrigins.exchange(0, std::memory_order_acq_rel);
         if (_manager == nullptr)
             return;
-        auto const origin =
-            _hosting == SessionHosting::Remote
-                ? window::outputOriginOf(_hostConnection, _app.terminalClocks().steady.now(), _resyncGraceEnd)
-                : window::OutputOrigin::Live;
+        auto const liveBit = static_cast<uint8_t>(1U << std::to_underlying(window::OutputOrigin::Live));
+        auto origin = window::OutputOrigin::Resync;
+        if ((origins & liveBit) != 0)
+            // The grace is the fallback for a mirror that cannot tell its replay apart: the connection's
+            // first moments after it came (back) up.
+            origin = _hosting == SessionHosting::Remote
+                         ? window::outputOriginOf(
+                               _hostConnection, _app.terminalClocks().steady.now(), _resyncGraceEnd)
+                         : window::OutputOrigin::Live;
         _manager->noteSessionOutput(modelSessionId(), origin);
     });
 }
@@ -1279,13 +1307,10 @@ void TerminalSession::pollForegroundProcess()
     auto& state = *_extensionState;
     if (!state.extensions.subscriptions().test(vtbackend::StatusLineEventKind::ForegroundProcess))
         return;
-    auto const* const process = dynamic_cast<vtpty::Process const*>(&_terminal.device());
-    if (process == nullptr)
+    auto name = foregroundProcessName();
+    if (name.empty() || name == state.foregroundProcessName)
         return;
-    auto name = process->foregroundProcessName();
-    if (!name || *name == state.foregroundProcessName)
-        return;
-    state.foregroundProcessName = std::move(*name);
+    state.foregroundProcessName = std::move(name);
     auto const lock = scoped_lock { _terminal };
     _terminal.foregroundProcessChanged(state.foregroundProcessName);
 }
