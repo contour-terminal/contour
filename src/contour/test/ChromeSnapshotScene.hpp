@@ -438,10 +438,9 @@ class ChromeSnapshotScene
         config::Config const& config,
         command::ShortcutStyle shortcuts)
     {
-        auto model = std::make_unique<window::CommandPaletteModel>(history);
-        model->setSources({ &actions });
-        model->setShortcuts(command::shortcutIndex(config, shortcuts));
-        model->refresh();
+        auto model = std::make_unique<window::CommandPaletteModel>(
+            history, std::vector<command::CommandSource const*> { &actions }, shortcuts);
+        model->refresh(command::shortcutIndex(config, shortcuts));
         return model;
     }
 

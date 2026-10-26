@@ -5,10 +5,11 @@
 // manager to this window's WindowController, whose `commandPaletteRequested` signal Main.qml connects
 // to open(). The rows come from the controller's CommandPaletteModel:
 //
-//   - with an empty filter the list is sectioned — RECENTLY USED (persisted across restarts) on top,
-//     then ALL COMMANDS alphabetically;
-//   - as soon as the user types, the model collapses both into one fuzzy-ranked list and clears
-//     `sectioned`, so the headers disappear on their own without this file deciding when.
+//   - with an empty filter the list is grouped — Recently used (persisted across restarts) on top,
+//     then the command groups (Pane, Tab, …), each alphabetically;
+//   - as soon as the user types, the model ranks across the groups and orders them by their best match.
+//   The model names each group on its first row (`groupTitle`), so this file never decides where a
+//   header goes.
 //
 // Each row shows the command's title, its key binding right-aligned (so the user learns the shortcut
 // for next time), and its documentation beneath.
@@ -148,8 +149,7 @@ Popup {
                 y: 6
                 width: parent.width - 16
                 placeholderText: qsTr("Type to search commands…")
-                // The model re-ranks on every keystroke; `sectioned` follows from the same write, so
-                // the section headers vanish as soon as there is a query.
+                // The model re-ranks (and regroups) on every keystroke.
                 onTextChanged: {
                     if (root.controller && root.controller.commandPalette)
                         root.controller.commandPalette.filter = text;
@@ -216,29 +216,28 @@ Popup {
                 required property string title
                 required property string description
                 required property string shortcut
-                required property int section
-                required property bool sectionStart
+                required property string groupTitle
+                required property int kind
                 required property var titleMatches
 
                 width: ListView.view.width
                 height: header.height + entry.height
 
-                // {{{ Section header — drawn by the FIRST row of each section.
+                // {{{ Group header — drawn by the FIRST row of each group.
                 //
-                // The model marks that row (`sectionStart`) rather than this delegate looking backwards
-                // at its predecessor, which a virtualized ListView cannot reliably do. Collapses to zero
-                // height when the list is filtered (the model reports one flat section then), so the
-                // headers disappear without this file re-deriving "is there a query?".
+                // The model names the group on that row (`groupTitle`) rather than this delegate looking
+                // backwards at its predecessor, which a virtualized ListView cannot reliably do; every
+                // other row's is empty and collapses the header to zero height.
                 Item {
                     id: header
                     width: parent.width
                     height: visible ? 24 : 0
-                    visible: row.sectionStart
+                    visible: row.groupTitle !== ""
 
                     Label {
                         x: 12
                         anchors.verticalCenter: parent.verticalCenter
-                        text: row.section === 0 ? qsTr("RECENTLY USED") : qsTr("ALL COMMANDS")
+                        text: row.groupTitle
                         font.pixelSize: 10
                         font.bold: true
                         color: systemPalette.mid

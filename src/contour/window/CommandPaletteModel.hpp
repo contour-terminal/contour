@@ -3,14 +3,19 @@
 
 #include <contour/command/Command.hpp>
 #include <contour/command/CommandCatalog.hpp>
+#include <contour/command/CommandPaletteTree.hpp>
+#include <contour/command/Shortcut.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QHash>
 #include <QtCore/QString>
 #include <QtCore/QVariant>
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -24,74 +29,81 @@ class CommandHistory;
 namespace contour::window
 {
 
-/// The list the command palette shows: every runnable command, filtered and ordered for display.
+/// The list the command palette shows: the grouped top level, or one parameterised action's level.
 ///
-/// It owns no commands and no history — it is handed its sources and the app-wide CommandHistory, and
-/// re-reads both on refresh(). That keeps the two orderings the palette has to get right in one place:
-///
-///   - no filter: the recently-used commands first (newest first, capped at the history's capacity),
-///     then every command alphabetically. Two sections, so the user can either grab what they just
-///     used or browse the whole set.
-///   - a filter: ONE flat list, best fuzzy match first, recency breaking ties. Sections would be noise
-///     here — the user has already said what they are looking for.
+/// A Qt adapter over command::listPalette(), which owns every ordering decision: the recently used
+/// commands and the groups when unfiltered, a ranking across the groups (children included) when
+/// filtered, and a parent's children inside its level. This class holds the sources, the level the
+/// user is in and the filter that level was entered from, and publishes the rows as roles.
 class CommandPaletteModel: public QAbstractListModel
 {
     Q_OBJECT
-    /// What the user typed. Writing it re-ranks the list (see the class comment).
+    /// What the user typed. Writing it re-ranks the list.
     Q_PROPERTY(QString filter READ filter WRITE setFilter NOTIFY filterChanged)
-    /// Whether the list is currently sectioned (i.e. the filter is empty). QML hides the section
-    /// headers when it is not, rather than re-deriving the same condition from the filter text.
-    Q_PROPERTY(bool sectioned READ sectioned NOTIFY filterChanged)
+    /// Where the palette is: a command::PaletteDepth, as an int.
+    Q_PROPERTY(int depth READ depth NOTIFY levelChanged)
+    /// The title of the parent drilled into; empty at the top.
+    Q_PROPERTY(QString levelTitle READ levelTitle NOTIFY levelChanged)
+    /// The row QML selects after a level change: 0 after enter(), the parent's row after back().
+    Q_PROPERTY(int anchorRow READ anchorRow NOTIFY levelChanged)
+    /// command::PaletteEntryKind::DrillIn as an int, so QML compares the `kind` role by name.
+    Q_PROPERTY(int drillInKind READ drillInKind CONSTANT)
+    /// command::PaletteDepth::Top as an int, so QML compares `depth` by name.
+    Q_PROPERTY(int topDepth READ topDepth CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the window controller")
 
   public:
-    /// Which section a row belongs to. Mirrored in QML by the `section` role.
-    enum class Section : std::uint8_t
-    {
-        Recent = 0, //!< Pinned above: the user ran this recently.
-        All = 1,    //!< The full alphabetical list.
-    };
-
     enum class Roles : std::uint16_t
     {
-        IdRole = Qt::UserRole + 1, //!< Stable command id; what runCommand() is called with.
-        TitleRole,                 //!< Display name, e.g. "Split Vertical".
-        DescriptionRole,           //!< What the command does (shown under the title).
-        ShortcutRole,              //!< Rendered key binding ("Ctrl+Shift+E"), or empty if unbound.
-        SectionRole,               //!< The row's Section, as an int.
-        SectionStartRole,          //!< True on the FIRST row of a section, so QML draws one header for it.
+        IdRole = Qt::UserRole + 1, //!< A command's id (what runCommand() takes); a parent's catalogue name.
+        TitleRole,                 //!< What the row reads, e.g. "Split Vertical", "Change Profile · dark".
+        DescriptionRole,           //!< What the command (or the parameterised action) does.
+        ShortcutRole,              //!< Rendered key binding ("Ctrl+Shift+E"); empty if unbound or a parent.
+        GroupTitleRole,            //!< The group's header on its first row; empty on every other row.
         TitleMatchesRole,          //!< Matched title indices (UTF-16 code units) for highlighting.
+        KindRole,                  //!< The row's command::PaletteEntryKind, as an int.
     };
 
-    /// @param history The app-wide most-recently-used list. Must outlive this model.
-    /// @param parent  Qt parent.
-    explicit CommandPaletteModel(command::CommandHistory const& history, QObject* parent = nullptr);
+    /// @param history   The app-wide most-recently-used list. Must outlive this model.
+    /// @param sources   The sources, in precedence order (see collectCommands()). Held as pointers
+    ///                  because the live sources (tabs, profiles) must report what is true at each
+    ///                  refresh(); every source must outlive this model.
+    /// @param hintStyle How the footer's key hints spell Enter and Escape.
+    /// @param parent    Qt parent.
+    CommandPaletteModel(command::CommandHistory const& history,
+                        std::vector<command::CommandSource const*> sources,
+                        command::ShortcutStyle hintStyle,
+                        QObject* parent = nullptr);
 
-    /// Points this model at the sources it draws commands from.
+    /// Re-queries the sources and rebuilds the tree, back at the top level with an empty filter.
     ///
-    /// Held as raw pointers rather than copied, because the dynamic sources (tabs, profiles, layouts)
-    /// must report LIVE state on each refresh(); a snapshot would go stale the moment a tab opened.
-    /// Every source must outlive this model.
-    ///
-    /// @param sources The sources, in precedence order (see collectCommands()).
-    void setSources(std::vector<command::CommandSource const*> sources);
+    /// Called each time the palette opens, so the live rows and the recent group reflect the state the
+    /// user is looking at, and every open starts at the top. One model reset.
+    /// @param shortcuts Command id -> rendered shortcut, from shortcutIndex(); re-read on every open so a
+    ///                  reloaded config's bindings show.
+    void refresh(std::unordered_map<std::string, std::string> shortcuts);
 
-    /// The shortcut to advertise per command id, from shortcutIndex().
-    /// @param shortcuts Command id -> rendered shortcut.
-    void setShortcuts(std::unordered_map<std::string, std::string> shortcuts);
-
-    /// Re-queries the sources and rebuilds the list. Called each time the palette opens, so the
-    /// dynamic rows (open tabs) and the recent section reflect the state the user is looking at.
-    void refresh();
-
-    /// The offered command whose id is @p id, or nullptr when none is.
+    /// The offered command whose id is @p id, children included; nullptr when none is.
     ///
-    /// Searches everything the sources offer, not just the filtered rows — a command is the same
-    /// command whether or not the current filter happens to be showing it.
-    ///
+    /// Searches everything the sources offer, not just the listed rows.
     /// @param id The command id to look up.
+    /// @return The command, or nullptr.
     [[nodiscard]] command::Command const* commandById(std::string_view id) const noexcept;
+
+    /// Enters the level of the drill-in row @p row: keeps the current filter for back(), then clears it.
+    /// Emits levelChanged() then filterChanged(). Does nothing on any other row or out of range.
+    /// @param row The row to enter.
+    Q_INVOKABLE void enter(int row);
+
+    /// Leaves the level, restoring the filter it was entered from; anchorRow becomes the parent's row.
+    /// Emits levelChanged() then filterChanged(). Does nothing at the top.
+    Q_INVOKABLE void back();
+
+    /// The footer's key hints for row @p row at the current depth, e.g. "↩ Run · ⎋ Close".
+    /// @param row The selected row.
+    /// @return The hints; empty out of range.
+    [[nodiscard]] Q_INVOKABLE QString footerHints(int row) const;
 
     // {{{ QAbstractListModel
     [[nodiscard]] QVariant data(QModelIndex const& index, int role = Qt::DisplayRole) const override;
@@ -102,39 +114,37 @@ class CommandPaletteModel: public QAbstractListModel
     [[nodiscard]] QString filter() const { return _filter; }
     void setFilter(QString const& filter);
 
-    [[nodiscard]] bool sectioned() const noexcept { return _filter.isEmpty(); }
+    [[nodiscard]] int depth() const noexcept { return static_cast<int>(paletteDepth()); }
+    [[nodiscard]] QString levelTitle() const;
+    [[nodiscard]] int anchorRow() const noexcept { return _anchorRow; }
+    [[nodiscard]] int drillInKind() const noexcept
+    {
+        return static_cast<int>(command::PaletteEntryKind::DrillIn);
+    }
+    [[nodiscard]] int topDepth() const noexcept { return static_cast<int>(command::PaletteDepth::Top); }
 
   signals:
     void filterChanged();
+    void levelChanged();
 
   private:
-    /// One displayed row: which command it shows, and which section it landed in.
-    ///
-    /// Points INTO _commands rather than copying the command: _commands is only ever reassigned by
-    /// refresh(), which rebuilds every row immediately afterwards, so a row can never outlive what it
-    /// points at. Copying instead would duplicate the whole command set (three strings apiece) on
-    /// every keystroke, for nothing.
-    struct Row
-    {
-        command::Command const* command;
-        Section section;
-        /// UTF-8 byte offsets into the command's title that the active filter matched, ascending. These
-        /// are converted to UTF-16 code-unit indices at the TitleMatchesRole boundary (what QML bolds).
-        /// Empty when there is no filter, or when the row matched only through its id (there is nothing in
-        /// the visible title to highlight then).
-        std::vector<int> titleMatches;
-    };
+    /// Where the palette is, from _level.
+    [[nodiscard]] command::PaletteDepth paletteDepth() const noexcept;
 
-    /// Rebuilds _rows from _commands, applying the current filter and ordering (see the class comment).
+    /// Rebuilds _rows from _tree for the current filter and level. One model reset.
     void rebuildRows();
 
     command::CommandHistory const& _history;
     std::vector<command::CommandSource const*> _sources;
+    command::ShortcutStyle _hintStyle;
     std::unordered_map<std::string, std::string> _shortcuts;
 
-    std::vector<command::Command> _commands; //!< Everything the sources offer; rebuilt by refresh().
-    std::vector<Row> _rows;                  //!< What is currently displayed; rebuilt by rebuildRows().
-    QString _filter;
+    command::PaletteTree _tree;               //!< Everything the sources offer; rebuilt by refresh().
+    std::vector<command::PaletteEntry> _rows; //!< What is listed; rebuilt by rebuildRows().
+    std::optional<std::size_t> _level;        //!< The parent drilled into; none at the top.
+    QString _filter;                          //!< The current query.
+    QString _topFilter;                       //!< The top-level query a level was entered from.
+    int _anchorRow = 0;                       //!< See anchorRow.
 };
 
 } // namespace contour::window

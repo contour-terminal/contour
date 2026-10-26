@@ -4966,13 +4966,15 @@ class MockPaletteController: public QObject
 
   public:
     MockPaletteController():
-        _history { 5 }, _model { std::make_unique<contour::window::CommandPaletteModel>(_history) }
+        _history { 5 },
+        _model { std::make_unique<contour::window::CommandPaletteModel>(
+            _history,
+            std::vector<contour::command::CommandSource const*> { &_actionCommands },
+            contour::command::ShortcutStyle::Text) }
     {
         _history.record("TogglePaneZoom");
-        _model->setSources({ &_actionCommands });
-        _model->setShortcuts(contour::command::shortcutIndex(contour::config::defaultInputMappings(),
-                                                             contour::command::ShortcutStyle::Text));
-        _model->refresh();
+        _model->refresh(contour::command::shortcutIndex(contour::config::defaultInputMappings(),
+                                                        contour::command::ShortcutStyle::Text));
     }
 
     [[nodiscard]] QObject* commandPalette() const noexcept { return _model.get(); }
@@ -5101,11 +5103,10 @@ TEST_CASE("The command palette lists commands with their shortcut and documentat
     auto* list = host.palette->findChild<QQuickItem*>(QStringLiteral("commandPaletteList"));
     REQUIRE(list != nullptr);
 
-    SECTION("the list is populated and sectioned before the user types")
+    SECTION("the list is populated before the user types")
     {
         CHECK(list->property("count").toInt() == controller.model().rowCount());
         CHECK(list->property("count").toInt() > 0);
-        CHECK(controller.model().sectioned());
     }
 
     SECTION("a row carries a title, a description and — when bound — a shortcut")
@@ -5161,8 +5162,6 @@ TEST_CASE("Typing in the palette filters the list through the model (offscreen)"
     CHECK(controller.model().filter() == QStringLiteral("spl"));
     CHECK(list->property("count").toInt() < unfiltered);
     CHECK(list->property("count").toInt() > 0);
-    // Sections collapse once there is a query; the delegate's header binds to this.
-    CHECK_FALSE(controller.model().sectioned());
 
     CHECK(warnings.count([](QString const& w) { return w.contains("TypeError"); }) == 0);
 }

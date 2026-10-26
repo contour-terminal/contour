@@ -69,7 +69,16 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     _layoutCommands { manager.app().config() },
     _hostCommands { manager.app().config() },
     _boundCommands { manager.app().config().inputMappings.value() },
-    _commandPalette { std::make_unique<CommandPaletteModel>(manager.commandHistory(), this) },
+    _commandPalette { std::make_unique<CommandPaletteModel>(
+        manager.commandHistory(),
+        std::vector<command::CommandSource const*> { &_tabCommands,
+                                                     &_profileCommands,
+                                                     &_layoutCommands,
+                                                     &_hostCommands,
+                                                     &_boundCommands,
+                                                     &_actionCommands },
+        command::platformShortcutStyle(),
+        this) },
     _menuPresentation { menuPresentation },
     _nativeMenus { manager.app().nativeMenuPresenter() },
     _clock { clock },
@@ -86,13 +95,6 @@ WindowController::WindowController(session::TerminalSessionManager& manager,
     connect(this, &WindowController::tabBarPositionChanged, this, &WindowController::refreshTitleBand);
     connect(this, &WindowController::hostChipStateChanged, this, &WindowController::refreshTitleBand);
 
-    _commandPalette->setSources({ &_tabCommands,
-                                  &_profileCommands,
-                                  &_layoutCommands,
-                                  &_hostCommands,
-                                  &_boundCommands,
-                                  &_actionCommands });
-
     // The OS-frame adapter, given a way to ask what the EFFECTIVE color scheme is. `theme: system`
     // resolves to nothing configured, so it falls back to what Qt reports the platform is doing --
     // which is the answer Win32 needs for the border DWM draws around the rounded corners, and the
@@ -105,14 +107,12 @@ WindowController::~WindowController() = default;
 
 void WindowController::openCommandPalette()
 {
-    // Re-read the bindings on every open, not once at construction: a ReloadConfig can have rebound a
-    // key since, and a shortcut column that advertises the OLD chord is worse than none at all.
-    _commandPalette->setShortcuts(
+    // Re-reads the bindings on every open, not once at construction: a ReloadConfig can have rebound a
+    // key since, and a shortcut column that advertises the OLD chord is worse than none at all. Also
+    // re-queries the sources (so the tab rows track the tabs that exist now) and returns to the top level
+    // with an empty filter.
+    _commandPalette->refresh(
         command::shortcutIndex(_manager.app().config(), command::platformShortcutStyle()));
-
-    // Re-queries the sources (so the tab rows track the tabs that exist now) and clears any filter the
-    // last open left behind.
-    _commandPalette->refresh();
 
     emit commandPaletteRequested();
 }

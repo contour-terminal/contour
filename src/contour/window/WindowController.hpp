@@ -1085,7 +1085,8 @@ class WindowController:
     // collectCommands(): first source wins a duplicate id). The live-state sources come first so their
     // richer rows beat the generic ones — "Switch To Tab 2: vim" from the tab source outranks the bare
     // "Switch To Tab 2" a key binding would contribute. The action catalog comes last: it is the floor
-    // that guarantees an unbound action is still reachable.
+    // that guarantees an unbound action is still reachable. Declared before _commandPalette, which is
+    // handed their addresses in the member-initializer list.
     command::TabCommandSource _tabCommands;
     command::ProfileCommandSource _profileCommands;
     command::LayoutCommandSource _layoutCommands;
