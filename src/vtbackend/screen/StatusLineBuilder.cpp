@@ -153,10 +153,14 @@ namespace StatusLineDefinitions
 {
     std::optional<ItemColor> parseItemColor(std::string_view text)
     {
-        auto const lower = core::toLower(text);
-        if (auto const row =
-                std::ranges::find_if(ColorRoleNames, [&](ColorRoleName const& r) { return r.name == lower; });
-            row != ColorRoleNames.end())
+        // An ASCII fold, not std::tolower: that reads the locale, and a Turkish one does not fold 'I' to 'i'.
+        auto const asciiLower = [](char c) {
+            return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+        };
+        auto const spells = [&](ColorRoleName const& r) {
+            return std::ranges::equal(text, r.name, {}, asciiLower);
+        };
+        if (auto const row = std::ranges::find_if(ColorRoleNames, spells); row != ColorRoleNames.end())
             return ItemColor { row->role };
         if (auto const rgb = parseColor(text))
             return ItemColor { *rgb };
@@ -856,8 +860,13 @@ namespace
             // escape.
             auto const shown = sanitizeCommandLine(homeAbbreviatedPath(*directory, vt.homeDirectory()),
                                                    SanitizePurpose::Display);
+            // A trailing separator names no further directory: without it, a long path would elide to "/…/",
+            // which names nothing. The root keeps its one.
+            auto path = std::string_view { shown };
+            while (path.size() > 1 && path.ends_with('/'))
+                path.remove_suffix(1);
             auto parts = std::vector<std::string> {};
-            for (auto const part: std::views::split(shown, '/'))
+            for (auto const part: std::views::split(path, '/'))
                 parts.emplace_back(std::string_view { part });
             return elideMiddle(parts, "/", item.maxWidth, vt.clusterWidthPolicy());
         }

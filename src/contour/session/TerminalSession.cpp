@@ -310,6 +310,17 @@ namespace
         return static_cast<uint8_t>(1U << std::to_underlying(origin));
     }
 
+    /// @p settings with @p home as the terminal's home directory: the one the composition root read for the
+    /// pane header, so the status line's `{Cwd}` and the header above it abbreviate alike.
+    /// @param settings The terminal's settings.
+    /// @param home The user's home directory.
+    /// @return The settings, with it.
+    [[nodiscard]] vtbackend::Settings withHomeDirectory(vtbackend::Settings settings, std::string home)
+    {
+        settings.homeDirectory = std::move(home);
+        return settings;
+    }
+
 } // namespace
 
 #ifdef CONTOUR_EXTENSIONS
@@ -400,9 +411,11 @@ TerminalSession::TerminalSession(TerminalSessionManager* manager,
                 app.processEnvironment(),
                 app.fileSystem(),
                 std::move(pty),
-                config::motionAdjusted(
-                    config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
-                    app.accessibilityPreferences().motion),
+                withHomeDirectory(
+                    config::motionAdjusted(
+                        config::sessionSettings(_config, _profile, _currentColorPreference, initialPageSize),
+                        app.accessibilityPreferences().motion),
+                    app.sessionsManager().homeDirectory()),
                 app.statusLineCommandServices(),
                 app.terminalClocks(),
                 vtbackend::randomSemanticBlockTokens(),

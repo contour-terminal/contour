@@ -25,6 +25,7 @@
 
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/screen/StatusLineBuilder.hpp>
 
 #include <vtpty/ChannelPty.hpp>
 #include <vtpty/MockPty.hpp>
@@ -1429,6 +1430,13 @@ TEST_CASE("TerminalSessionManager: a pane's working directory is abbreviated and
         reportWorkingDirectory(*session,
                                std::format("file://{}{}/repo", contour::test::TestApp::HostName, path));
         CHECK(session->getDisplayWorkingDirectory() == QStringLiteral("~/repo"));
+
+        // The status line's {Cwd} reads the same home as the header above it, not the environment's.
+        CHECK(session->terminal().homeDirectory() == home);
+        CHECK(vtbackend::serializeToVT(session->terminal(),
+                                       vtbackend::parseStatusLineSegment("{Cwd}"),
+                                       vtbackend::StatusLineStyling::Disabled)
+              == "~/repo");
     }
 
     SECTION("holding a bidi override")

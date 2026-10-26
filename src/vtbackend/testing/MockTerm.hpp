@@ -83,7 +83,31 @@ class MockTerm: public Terminal::NullEvents
     /// @param fileSystem The terminal's filesystem. Borrowed: it must outlive the terminal.
     MockTerm(PageSize size, core::platform::FileSystem const& fileSystem):
         MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   core::defaultEnvironment(),
                    fileSystem,
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt }
+    {
+    }
+
+    /// A terminal reading its environment (`HOME` and the like) from @p environment rather than the
+    /// process's, so that a test does not depend on the machine it runs on.
+    /// @param size The page size.
+    /// @param environment The terminal's environment. Read while the terminal is built.
+    MockTerm(PageSize size, core::Environment const& environment):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024), environment }
+    {
+    }
+
+    /// Builds the terminal from @p settings, reading its environment from @p environment.
+    /// @param settings The terminal's settings, exactly as given.
+    /// @param environment The terminal's environment. Read while the terminal is built.
+    MockTerm(vtbackend::Settings settings, core::Environment const& environment):
+        MockTerm { std::move(settings),
+                   environment,
+                   core::platform::NativeFileSystem::instance(),
                    std::nullopt,
                    &fixedOffsetLocalTime<>,
                    std::nullopt,
@@ -478,8 +502,10 @@ class MockTerm: public Terminal::NullEvents
 
   private:
     /// What every public constructor comes down to: the Settings one's parameters, plus the terminal's
-    /// filesystem, which must be @p linkServices' own when it is given (as Terminal() asks).
+    /// environment and its filesystem, which must be @p linkServices' own when it is given (as Terminal()
+    /// asks).
     MockTerm(vtbackend::Settings settings,
+             core::Environment const& environment,
              core::platform::FileSystem const& fileSystem,
              std::optional<StatusLineCommandServices> commandServices,
              LocalTimeConverter localTime,
@@ -508,6 +534,7 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      std::optional<LinkDetectionServices> linkServices,
                                      std::optional<StatusLineExtensionServices> extensionServices):
     MockTerm { std::move(settings),
+               core::defaultEnvironment(),
                linkServices ? linkServices->fileSystem : core::platform::NativeFileSystem::instance(),
                std::move(commandServices),
                localTime,
@@ -518,13 +545,14 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
 
 template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
+                                     core::Environment const& environment,
                                      core::platform::FileSystem const& fileSystem,
                                      std::optional<StatusLineCommandServices> commandServices,
                                      LocalTimeConverter localTime,
                                      std::optional<LinkDetectionServices> linkServices,
                                      std::optional<StatusLineExtensionServices> extensionServices):
     terminal { *this,
-               core::defaultEnvironment(),
+               environment,
                fileSystem,
                std::make_unique<PtyDevice>(settings.pageSize),
                std::move(settings),

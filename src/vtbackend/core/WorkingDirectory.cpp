@@ -44,6 +44,11 @@ optional<ResolvedWorkingDirectory> resolveWorkingDirectory(ContextStack const& c
 
 string abbreviateHomePath(std::string_view path, std::string_view home)
 {
+    // "/home/bob/" names the same directory as "/home/bob", and an environment may spell it either way;
+    // the root itself is kept, or it would read as no home at all.
+    while (home.size() > 1 && (home.ends_with('/') || home.ends_with('\\')))
+        home.remove_suffix(1);
+
     if (home.empty() || !path.starts_with(home))
         return string { path };
 

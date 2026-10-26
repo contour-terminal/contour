@@ -125,6 +125,12 @@ struct Settings
     PageSize pageSize = PageSize { LineCount(25), ColumnCount(80) };
 
     HistoryLimits historyLimits;
+
+    /// The user's home directory, for abbreviating and expanding `~` in the paths this terminal shows and
+    /// recognizes, as the composition root reads it (the GUI's QDir::homePath(), which the pane header
+    /// abbreviates with too). Empty takes the environment's `HOME`.
+    std::string homeDirectory {};
+
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
 

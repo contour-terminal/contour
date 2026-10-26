@@ -11,6 +11,7 @@
 #include <core/Environment.hpp>
 #include <core/Utils.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
+#include <core/testing/Environment.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
@@ -779,10 +780,14 @@ TEST_CASE("statusLine.colors.rolesReadOnEveryBar", "[statusline][colors]")
 // {{{ {Cwd}
 namespace
 {
-/// What `{Cwd}` shows once the shell has reported @p url (OSC 7).
+/// The home directory every `{Cwd}` case below runs with, whatever the machine's own.
+constexpr auto TestHome = "/home/bob"sv;
+
+/// What `{Cwd}` shows once the shell has reported @p url (OSC 7), with @ref TestHome as the home.
 [[nodiscard]] std::string cwdAfterReporting(std::string_view url)
 {
-    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) } };
+    auto const environment = core::testing::FakeEnvironment { { { "HOME", std::string { TestHome } } } };
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) }, environment };
     mc.writeToScreen(std::format("\033]7;{}\033\\", url));
     return serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled);
 }
@@ -817,13 +822,39 @@ TEST_CASE("serializeToVT.cwdShowsWhereTheShellIs", "[statusline][cwd]")
     // Shown though it is another machine's: the status line says where the user is.
     CHECK(cwdAfterReporting("file://elsewhere.example/srv/app") == "/srv/app");
 
-    if (auto const home = core::defaultEnvironment().get("HOME"); home && !home->empty())
-    {
-        CHECK(cwdAfterReporting(std::format("file://{}/repo/contour", *home)) == "~/repo/contour");
-        // This machine's home says nothing about another machine's paths, as the pane header has it.
-        CHECK(cwdAfterReporting(std::format("file://elsewhere.example{}/x", *home))
-              == std::format("{}/x", *home));
-    }
+    CHECK(cwdAfterReporting("file:///home/bob/repo/contour") == "~/repo/contour");
+    // This machine's home says nothing about another machine's paths, as the pane header has it.
+    CHECK(cwdAfterReporting("file://elsewhere.example/home/bob/x") == "/home/bob/x");
+}
+
+TEST_CASE("serializeToVT.cwdTakesTheHomeItIsGiven", "[statusline][cwd]")
+{
+    // The composition root's home (the GUI's QDir::homePath(), the pane header's) wins over the
+    // environment's, so the status line and the header above it abbreviate alike.
+    auto const environment = core::testing::FakeEnvironment { { { "HOME", "/elsewhere" } } };
+    auto settings = MockTerm<>::createSettings(PageSize { LineCount(3), ColumnCount(80) }, {}, 1024);
+    settings.homeDirectory = "/home/bob";
+    auto mc = MockTerm { std::move(settings), environment };
+    CHECK(mc.terminal.homeDirectory() == "/home/bob");
+    mc.writeToScreen("\033]7;file:///home/bob/src\033\\");
+    CHECK(serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled)
+          == "~/src");
+
+    // Without one, the environment's.
+    auto plain = MockTerm { PageSize { LineCount(3), ColumnCount(80) }, environment };
+    CHECK(plain.terminal.homeDirectory() == "/elsewhere");
+}
+
+TEST_CASE("serializeToVT.cwdWithATrailingSlash", "[statusline][cwd]")
+{
+    // A trailing separator names no further directory, so a long path elides to its last real one rather
+    // than to "/…/" or to nothing.
+    auto deep = std::string { "file://" };
+    for (auto const level: std::views::iota(0, 60))
+        deep += std::format("/d{}", level);
+    CHECK(cwdAfterReporting(deep + "/") == "/…/d59");
+    CHECK(cwdAfterReporting("file:///" + std::string(300, 'a') + "/").starts_with("…a"));
+    CHECK(cwdAfterReporting("file:///") == "/");
 }
 
 TEST_CASE("serializeToVT.cwdOfADeepOrBrokenPath", "[statusline][cwd]")

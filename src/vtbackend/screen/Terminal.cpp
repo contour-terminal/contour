@@ -288,7 +288,8 @@ Terminal::Terminal(Events& eventListener,
                    std::optional<LinkDetectionServices> linkServices,
                    std::optional<StatusLineExtensionServices> extensionServices):
     _eventListener { eventListener },
-    _homeDirectory { env.get("HOME").value_or("") },
+    _homeDirectory { !factorySettings.homeDirectory.empty() ? factorySettings.homeDirectory
+                                                            : env.get("HOME").value_or("") },
     _fileSystem { fileSystem },
     _gitHead { fileSystem },
     _linkServices { std::move(linkServices) },

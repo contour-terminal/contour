@@ -257,6 +257,15 @@ TEST_CASE("abbreviateHomePath.an empty path stays empty", "[cwd]")
     CHECK(abbreviateHomePath("", "/home/bob").empty());
 }
 
+TEST_CASE("abbreviateHomePath.a home with a trailing separator still matches", "[cwd]")
+{
+    // An environment may spell the home "/home/bob/"; the paths under it are the same paths.
+    CHECK(abbreviateHomePath("/home/bob/src", "/home/bob/") == "~/src");
+    CHECK(abbreviateHomePath("/home/bob", "/home/bob/") == "~");
+    CHECK(abbreviateHomePath("/home/bobby", "/home/bob//") == "/home/bobby");
+    CHECK(abbreviateHomePath("/etc", "/") == "/etc");
+}
+
 TEST_CASE("homeAbbreviatedPath.only a directory on this machine is abbreviated", "[cwd]")
 {
     // This machine's home says nothing about another machine's paths: an ssh shell's /home/bob is not ~.

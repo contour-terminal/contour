@@ -104,7 +104,8 @@ struct ResolvedWorkingDirectory
 /// path (`/home/bobby` against a home of `/home/bob`) is left alone rather than mangled into `~by`.
 ///
 /// @param path The absolute path to abbreviate.
-/// @param home The user's home directory. An empty value abbreviates nothing.
+/// @param home The user's home directory, with or without a trailing separator. An empty value
+///             abbreviates nothing.
 /// @return @p path with the home prefix replaced by `~`, or @p path unchanged.
 [[nodiscard]] std::string abbreviateHomePath(std::string_view path, std::string_view home);
 
