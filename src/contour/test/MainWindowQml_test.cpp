@@ -2168,6 +2168,34 @@ TEST_CASE("the Terminal row snaps the native inset to cells and brackets its chi
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
+TEST_CASE("the band grows to the title bar in whole cells (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    // D3 = GrowBandToCells (spike-decisions.md): AppKit re-places the traffic lights on every expose, resize
+    // and full-screen change, so the Terminal row's band is not snapped to them; the controller grows it to
+    // whole cell rows around them (resolveTitleBandGeometry), and the band takes that height as measured.
+    constexpr auto Inset = 70.0;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 2, .nativeControlsInset = Inset } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
+    showWindow(*root);
+
+    auto const cellHeight = chromeStyleOf(engine).property("cellHeight").toReal();
+    controller.setTitleBandHeight(2 * cellHeight);
+    QCoreApplication::processEvents();
+
+    auto const& titleBar = named(*root, QStringLiteral("titleBar"));
+    CHECK(titleBar.height() == 2 * cellHeight);
+    CHECK(controller.chromeHeight() == static_cast<int>(2 * cellHeight)); // a cell is whole pixels
+    // The leading slot still clears the lights in whole cells.
+    qreal snapped = 0;
+    REQUIRE(QMetaObject::invokeMethod(
+        &chromeStyleOf(engine), "snapToCells", Q_RETURN_ARG(qreal, snapped), Q_ARG(qreal, Inset)));
+    CHECK(named(*root, QStringLiteral("leadingWindowControls")).width() == snapped);
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
 TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs overflow (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {
