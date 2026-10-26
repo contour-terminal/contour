@@ -4308,6 +4308,14 @@ class Terminal: public IStatusLinePublishTarget
     /// into Search::query or, where it does not compile, Search::problem. An empty pattern leaves both empty.
     void compileSearch();
 
+    /// The last match of the active query at or before @p from, within @p budget rows of whole segments;
+    /// nothing without a query. Reveals nothing. @see probeSearchReverse
+    [[nodiscard]] std::optional<CellLocation> searchReverseWithin(CellLocation from, LineCount budget);
+
+    /// Brings @p match into view where there is one, and reports the screen updated, as every step does.
+    /// @return @p match.
+    std::optional<CellLocation> revealSearchMatch(std::optional<CellLocation> match);
+
     /// Ends the active query because matching it failed with @p error (R-f), and tells the listener.
     void endSearchQuery(SearchPatternError error);
 

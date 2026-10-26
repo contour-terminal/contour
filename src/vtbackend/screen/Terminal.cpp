@@ -8686,30 +8686,39 @@ std::expected<WalkProgress, SearchPatternError> Terminal::continueSearchTally(Te
     return progress;
 }
 
-SearchProbe Terminal::probeSearchReverse(CellLocation from, LineCount budget)
+std::optional<CellLocation> Terminal::searchReverseWithin(CellLocation from, LineCount budget)
 {
     if (!_search.query)
-        return SearchProbe {};
+        return std::nullopt;
+    return settleSearch(displayedPage().searchReverseFrom(*_search.query, from, budget));
+}
 
-    auto const& page = displayedPage();
-    auto match = settleSearch(page.searchReverseFrom(*_search.query, from, budget));
-    auto const wholeGridFits = boxed_cast<LineCount>(page.historyLineCount()) + pageSize().lines <= budget;
-    if (!match && wholeGridFits && _search.query)
+std::optional<CellLocation> Terminal::revealSearchMatch(std::optional<CellLocation> match)
+{
+    if (match)
+        viewport().makeVisibleWithinSafeArea(match->line);
+    screenUpdated();
+    return match;
+}
+
+SearchProbe Terminal::probeSearchReverse(CellLocation from, LineCount budget)
+{
+    auto match = searchReverseWithin(from, budget);
+    auto const wholeGridFits =
+        boxed_cast<LineCount>(displayedPage().historyLineCount()) + pageSize().lines <= budget;
+    if (!match && wholeGridFits)
     {
         // Small enough to answer for every row: the last match, below @p from, is where a finished walk
         // would wrap to, and none at all is proved.
         auto const bottomRight = CellLocation { .line = boxed_cast<LineOffset>(pageSize().lines) - 1,
                                                 .column = boxed_cast<ColumnOffset>(pageSize().columns) - 1 };
-        match = settleSearch(page.searchReverseFrom(*_search.query, bottomRight));
+        match = searchReverseWithin(bottomRight, budget);
     }
-
-    if (match)
-        viewport().makeVisibleWithinSafeArea(match->line);
-    screenUpdated();
+    revealSearchMatch(match);
 
     if (match)
         return SearchProbe { .outcome = SearchProbeOutcome::Found, .match = match };
-    // A query ended by the probe itself is no proof of absence.
+    // No query (none set, or ended by the probe itself) proves no absence.
     if (wholeGridFits && _search.query)
         return SearchProbe { .outcome = SearchProbeOutcome::Absent, .match = std::nullopt };
     return SearchProbe {};
@@ -8805,16 +8814,9 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
-    // Through the compiled query, for the reason Terminal::search() states.
-    auto const matchLocation =
-        _search.query ? settleSearch(displayedPage().searchReverseFrom(*_search.query, searchPosition))
-                      : std::nullopt;
-
-    if (matchLocation)
-        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
-
-    screenUpdated();
-    return matchLocation;
+    // The probe's search, bounded by the grid itself: every row it has.
+    auto const everyRow = boxed_cast<LineCount>(displayedPage().historyLineCount()) + pageSize().lines;
+    return revealSearchMatch(searchReverseWithin(searchPosition, everyRow));
 }
 
 CellLocation Terminal::clampDragWithinMulticellBlock(CellLocation anchor, CellLocation pointer) const noexcept

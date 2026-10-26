@@ -163,17 +163,68 @@ TEST_CASE("searchWalk.aStepReadsWholeSegmentsWithinItsBudget", "[searchwalk]")
 
 TEST_CASE("searchWalk.aMatchAcrossTheStepBoundaryCountsOnce", "[searchwalk]")
 {
-    // Rows 0-498 are single rows of hay; "nee" ends row 499 and "dle" begins row 500 on its soft wrap.
-    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(1000) };
-    writeRows(mock, 499, [](int) { return std::string("hay"); });
-    mock.writeToScreen("\r\n" + std::string(17, 'x') + "needle\r\nhay\r\nhay");
-    auto const& grid = mock.terminal.primaryScreen().grid();
-    REQUIRE(grid.lineText(rowWritten(grid, 499)).ends_with("nee"));
-    REQUIRE(grid.lineText(rowWritten(grid, 500)).starts_with("dle"));
+    SECTION("rows a moved cut hands back to the walk are not counted again")
+    {
+        // One logical line of 600 rows of 200 columns: cut every 36 864 / 200 = 184 rows from its head.
+        // Needles at its rows 100 and 200 and 500, and one across the first cut ("nee" ends row 183, "dle"
+        // begins 184).
+        auto constexpr Columns = std::size_t { 200 };
+        auto line = std::string(Columns * 600, 'x');
+        for (auto const row: { 100, 200, 500 })
+            line.replace((static_cast<std::size_t>(row) * Columns) + 10, 6, "needle");
+        line.replace((Columns * 184) - 3, 6, "needle");
 
-    auto const drained =
-        drain(SearchTallyWalk { compiled(U"needle"), grid, CellLocation {} }, grid, SearchWalkStepLines);
-    CHECK(drained.walk.tally().total == 1);
+        // 600 rows of history and 10 of page: the line and the row after it hold 601.
+        auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(200) }, LineCount(600) };
+        mock.writeToScreen(line + "\r\n");
+        auto const& grid = mock.terminal.primaryScreen().grid();
+        auto walk = SearchTallyWalk { compiled(U"needle"), grid, CellLocation {} };
+
+        // The first step reads the first segment, rows 0-183: the needle at 100 and the one across the cut.
+        REQUIRE(walk.step(grid, LineCount(1)) == WalkProgress::Running);
+        REQUIRE(walk.tally().total == 2);
+
+        // 59 more rows evict the oldest 50: the history's top passes the line's head but not row 184, where
+        // the walk resumes. The line's cuts now fall from its row 50, so the segment holding row 184 begins
+        // at row 50 and holds both needles counted already.
+        writeRows(mock, 59, [](int) { return std::string("hay"); });
+        REQUIRE(grid.lineText(-boxed_cast<LineOffset>(grid.historyLineCount())).starts_with("xx"));
+
+        auto const drained = drain(std::move(walk), grid, SearchWalkStepLines);
+        CHECK(drained.walk.tally().total == 4);
+    }
+
+    SECTION("rows appended to the walk's last line are the next walk's")
+    {
+        // The bottom row's line goes on after the walk began, wrapping a needle onto a new row.
+        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(100) };
+        mock.writeToScreen("hay\r\nhay\r\n" + std::string(17, 'x'));
+        auto const& grid = mock.terminal.primaryScreen().grid();
+        auto walk = SearchTallyWalk { compiled(U"needle"), grid, CellLocation {} };
+        mock.writeToScreen("abcdefg needle");
+        REQUIRE(grid.lineText(LineOffset(2)).starts_with("defg needle"));
+
+        auto const drained = drain(std::move(walk), grid, SearchWalkStepLines);
+        CHECK(drained.walk.tally().total == 0);
+    }
+}
+
+TEST_CASE("searchWalk.aLongWrappedLineIsReadSegmentBySegment", "[searchwalk]")
+{
+    // One logical line of 5 000 rows of 20 columns, cut every 1 843 rows: a step of 500 rows reads one
+    // segment, found from the one before it rather than by walking back to the line's head.
+    auto constexpr Columns = std::size_t { 20 };
+    auto line = std::string(Columns * 5000, 'x');
+    for (auto const at: std::views::iota(std::size_t { 1 }, std::size_t { 100 }))
+        line.replace(at * 997, 6, "needle");
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(6000) };
+    mock.writeToScreen(line);
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    auto const query = compiled(U"needle");
+
+    auto const drained = drain(SearchTallyWalk { query, grid, CellLocation {} }, grid, SearchWalkStepLines);
+    CHECK(drained.steps == 3);
+    CHECK(drained.walk.tally() == oracle(grid, *query, CellLocation {}));
 }
 
 TEST_CASE("searchWalk.finishesWhileOutputStreamsIn", "[searchwalk]")
