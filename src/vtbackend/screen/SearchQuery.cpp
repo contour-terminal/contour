@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/SearchQuery.hpp>
 
+#include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/RegexEngine.hpp>
+#include <vtbackend/grid/Grid.hpp>
+#include <vtbackend/grid/LineSoA.hpp>
+#include <vtbackend/links/ScanText.hpp>
 
 #include <libunicode/case_mapping.h>
 #include <libunicode/normalization.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <ranges>
+#include <span>
 #include <utility>
 
 namespace vtbackend
@@ -123,6 +131,164 @@ namespace
             });
         return units;
     }
+
+    /// The rows a segment holds at most, from its logical line's head: @ref MaxScanCells cells' worth.
+    [[nodiscard]] int rowsPerSegment(Grid const& grid) noexcept
+    {
+        return std::max(1, static_cast<int>(MaxScanCells) / std::max(1, unbox<int>(grid.pageSize().columns)));
+    }
+
+    /// One cell of a segment's subject: the units it spells and the columns it covers.
+    struct SubjectCell
+    {
+        std::size_t firstUnit = 0; ///< Its first unit in Subject::units.
+        std::size_t endUnit = 0;   ///< One past its last unit.
+        CellLocation first {};     ///< Its column.
+        CellLocation last {};      ///< Its last column: a wide character's second half.
+    };
+
+    /// A segment as the matcher reads it (R-a): its cells' text in order, and which cells spelled it.
+    struct Subject
+    {
+        std::wstring units;             ///< The text, in the regex engine's units.
+        std::vector<SubjectCell> cells; ///< Every cell that spelled units, in order.
+        std::size_t segmentCells = 0; ///< How many of @ref cells are the segment's; a match begins in those.
+    };
+
+    /// Whether @p line shows no text at all, and so reads as one line break: unmaterialized, or every cell
+    /// of it empty. A row of nothing but cells with no text of their own -- a tall block's lower part -- is
+    /// not one: those cells belong to the text above, and read as nothing.
+    [[nodiscard]] bool readsAsLineBreak(Line const& line)
+    {
+        if (line.isBlank())
+            return true;
+        auto const& storage = line.storage();
+        return std::ranges::all_of(std::views::iota(std::size_t { 0 }, unbox<std::size_t>(line.size())),
+                                   [&storage](std::size_t column) {
+                                       return storage.clusterSize[column] == 0
+                                              && !holdsNoText(storage, column);
+                                   });
+    }
+
+    /// Appends the cluster of cell @p column of @p storage to @p units: NFC, folded under @p comparison.
+    void appendCluster(std::wstring& units,
+                       LineSoA const& storage,
+                       std::size_t column,
+                       CaseComparison comparison)
+    {
+        // The common case, one codepoint below the combining marks, is already NFC.
+        if (auto const lead = storage.codepoints[column]; storage.clusterSize[column] == 1 && lead < 0x300)
+        {
+            appendUnits(units, foldedFor(lead, comparison));
+            return;
+        }
+        auto cluster = std::u32string {};
+        forEachCodepoint(storage, column, [&cluster](char32_t codepoint) { cluster.push_back(codepoint); });
+        for (auto const codepoint: unicode::to_nfc(cluster))
+            appendUnits(units, foldedFor(codepoint, comparison));
+    }
+
+    /// Reads @p segment of @p grid as the matcher's subject, and @p lookahead cells of its logical line past
+    /// its end: a literal match that begins in the segment may end beyond a cut (R-d).
+    [[nodiscard]] Subject subjectOf(Grid const& grid,
+                                    SearchSegment segment,
+                                    CaseComparison comparison,
+                                    std::size_t lookahead)
+    {
+        auto subject = Subject {};
+        // Where the text ends once the trailing empty cells and line breaks are dropped.
+        auto textUnits = std::size_t { 0 };
+        auto textCells = std::size_t { 0 };
+        auto const appendRow = [&](LineOffset row) {
+            auto const& line = grid.lineAt(row);
+            if (readsAsLineBreak(line))
+            {
+                subject.units.push_back(L'\n');
+                return;
+            }
+            auto const& storage = line.storage();
+            auto const columns = unbox<int>(line.size());
+            for (auto const column: std::views::iota(0, columns))
+            {
+                auto const index = static_cast<std::size_t>(column);
+                if (holdsNoText(storage, index))
+                    continue;
+                auto const firstUnit = subject.units.size();
+                auto const isEmpty = storage.clusterSize[index] == 0;
+                if (isEmpty)
+                    subject.units.push_back(L' ');
+                else
+                    appendCluster(subject.units, storage, index, comparison);
+                auto const width = std::max(1, static_cast<int>(storage.widths[index]));
+                subject.cells.push_back(SubjectCell {
+                    .firstUnit = firstUnit,
+                    .endUnit = subject.units.size(),
+                    .first = CellLocation { .line = row, .column = ColumnOffset(column) },
+                    .last = CellLocation { .line = row,
+                                           .column = ColumnOffset(std::min(column + width, columns) - 1) },
+                });
+                if (!isEmpty)
+                {
+                    textUnits = subject.units.size();
+                    textCells = subject.cells.size();
+                }
+            }
+        };
+
+        for (auto const row: std::views::iota(unbox<int>(segment.first), unbox<int>(segment.last) + 1))
+            appendRow(LineOffset(row));
+        subject.segmentCells = subject.cells.size();
+
+        // Each cell spells at least one unit, so as many cells as the needle has units are all it can reach.
+        auto const lastPageLine = boxed_cast<LineOffset>(grid.pageSize().lines) - 1;
+        for (auto const row: std::views::iota(unbox<int>(segment.last) + 1, unbox<int>(lastPageLine) + 1))
+        {
+            if (!grid.isLineWrapped(LineOffset(row))
+                || subject.cells.size() - subject.segmentCells >= lookahead)
+                break;
+            appendRow(LineOffset(row));
+        }
+
+        subject.units.resize(textUnits);
+        subject.cells.resize(textCells);
+        subject.segmentCells = std::min(subject.segmentCells, textCells);
+        return subject;
+    }
+
+    /// Whether @p unit ends a word for SearchWordBoundary::WholeWord (R-c).
+    [[nodiscard]] bool delimitsWord(wchar_t unit, std::u32string_view delimiters) noexcept
+    {
+        return unit == L' ' || unit == L'\n' || delimiters.contains(static_cast<char32_t>(unit));
+    }
+
+    /// The match of units [@p begin, @p end) of @p subject, where it begins and ends on cell boundaries, is
+    /// not empty, and stands as a whole word where @p boundary asks for one.
+    [[nodiscard]] std::optional<CellLocationRange> acceptedMatch(Subject const& subject,
+                                                                 std::size_t begin,
+                                                                 std::size_t end,
+                                                                 SearchWordBoundary boundary,
+                                                                 std::u32string_view delimiters)
+    {
+        if (begin >= end)
+            return std::nullopt;
+        auto const firstCell = std::ranges::lower_bound(subject.cells, begin, {}, &SubjectCell::firstUnit);
+        if (firstCell == subject.cells.end() || firstCell->firstUnit != begin)
+            return std::nullopt;
+        auto const lastCell = std::ranges::lower_bound(subject.cells, end, {}, &SubjectCell::endUnit);
+        if (lastCell == subject.cells.end() || lastCell->endUnit != end)
+            return std::nullopt;
+        switch (boundary)
+        {
+            case SearchWordBoundary::Any: break;
+            case SearchWordBoundary::WholeWord:
+                if (begin > 0 && !delimitsWord(subject.units[begin - 1], delimiters))
+                    return std::nullopt;
+                if (end < subject.units.size() && !delimitsWord(subject.units[end], delimiters))
+                    return std::nullopt;
+                break;
+        }
+        return CellLocationRange { .first = firstCell->first, .second = lastCell->last };
+    }
 } // namespace
 
 SearchQuery::SearchQuery(std::u32string pattern,
@@ -173,6 +339,81 @@ std::expected<SearchQuery, SearchPatternError> SearchQuery::compile(std::u32stri
     {
         return std::unexpected { SearchPatternError::InvalidSyntax };
     }
+}
+
+std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchQuery::matchesIn(
+    Grid const& grid, SearchSegment segment) const
+{
+    // A literal reads on past the segment's end by as many cells as it can span, so a match across a cut is
+    // found by the segment it begins in; a regex reads the segment alone (R-d).
+    auto const subject = subjectOf(grid, segment, _comparison, _regex ? 0 : _needle.size());
+    auto const boundary = _options.wordBoundary;
+    auto matches = std::vector<CellLocationRange> {};
+
+    if (!_regex)
+    {
+        // Every start, overlapping, as a literal search steps one cell at a time.
+        for (auto const& cell: std::span(subject.cells).first(subject.segmentCells))
+            if (subject.units.compare(cell.firstUnit, _needle.size(), _needle) == 0)
+                if (auto const match = acceptedMatch(
+                        subject, cell.firstUnit, cell.firstUnit + _needle.size(), boundary, _wordDelimiters))
+                    matches.push_back(*match);
+        return matches;
+    }
+
+    try
+    {
+        // The engine's own iteration, except that a match it finds off a cell boundary, empty, or not a whole
+        // word where one is asked for is dropped, and the search resumes one unit after where it began.
+        auto position = std::size_t { 0 };
+        while (position <= subject.units.size())
+        {
+            auto const from = subject.units.begin() + static_cast<std::ptrdiff_t>(position);
+            auto const flags =
+                position == 0 ? std::regex_constants::match_default : std::regex_constants::match_prev_avail;
+            auto found = std::wsmatch {};
+            if (!std::regex_search(from, subject.units.end(), found, *_regex, flags))
+                break;
+            auto const begin = position + static_cast<std::size_t>(found.position(0));
+            auto const end = begin + static_cast<std::size_t>(found.length(0));
+            if (auto const match = acceptedMatch(subject, begin, end, boundary, _wordDelimiters))
+            {
+                matches.push_back(*match);
+                position = end;
+            }
+            else
+                position = begin + 1;
+        }
+    }
+    catch (std::regex_error const&)
+    {
+        return std::unexpected { SearchPatternError::TooComplex };
+    }
+    return matches;
+}
+
+SearchSegment searchSegmentAt(Grid const& grid, LineOffset row)
+{
+    auto const head = grid.logicalLineHead(row);
+    auto const rows = rowsPerSegment(grid);
+    auto const first = head + LineOffset::cast_from(((unbox<int>(row) - unbox<int>(head)) / rows) * rows);
+    auto const lastPageLine = boxed_cast<LineOffset>(grid.pageSize().lines) - 1;
+    auto const limit = std::min(first + LineOffset::cast_from(rows - 1), lastPageLine);
+    return SearchSegment { .first = first, .last = grid.logicalLineEnd(first, limit) };
+}
+
+std::optional<SearchSegment> nextSearchSegment(Grid const& grid, SearchSegment segment)
+{
+    if (segment.last >= boxed_cast<LineOffset>(grid.pageSize().lines) - 1)
+        return std::nullopt;
+    return searchSegmentAt(grid, segment.last + 1);
+}
+
+std::optional<SearchSegment> previousSearchSegment(Grid const& grid, SearchSegment segment)
+{
+    if (segment.first <= -boxed_cast<LineOffset>(grid.historyLineCount()))
+        return std::nullopt;
+    return searchSegmentAt(grid, segment.first - 1);
 }
 
 std::u32string escapeSearchRegex(std::u32string_view text)
