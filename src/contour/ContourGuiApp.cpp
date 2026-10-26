@@ -29,6 +29,7 @@
 #include <contour/remote/RoutingSessionFactory.hpp>
 #include <contour/remote/TmuxController.hpp>
 #include <contour/session/PaneProxy.hpp>
+#include <contour/session/Permission.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/PopupShadowImageProvider.hpp>
@@ -2440,6 +2441,7 @@ int ContourGuiApp::terminalGuiAction()
     qmlRegisterUncreatableType<window::CommandPaletteModel>("Contour.Terminal", 1, 0, "CommandPaletteModel", "Created by the window controller.");
     qmlRegisterUncreatableType<window::SettingsController>("Contour.Terminal", 1, 0, "SettingsController", "Created by the application.");
     qmlRegisterUncreatableType<window::SettingsWindowHost>("Contour.Terminal", 1, 0, "SettingsWindowHost", "Created by the application.");
+    session::registerPermissionQmlTypes();
     qRegisterMetaType<session::TerminalSession*>("TerminalSession*");
     qRegisterMetaType<session::PaneProxy*>("PaneProxy*");
     qRegisterMetaType<window::WindowController*>("WindowController*");

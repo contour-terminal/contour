@@ -1100,8 +1100,9 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
         case config::Permission::Ask: {
             if (auto const i = _rememberedPermissions.find(role); i != _rememberedPermissions.end())
             {
-                executeRole(role, i->second, false);
-                if (!i->second)
+                auto const allowed = i->second == PermissionDecision::Allow;
+                executeRole(role, allowed, false);
+                if (!allowed)
                     sessionLog()("Permission for {} denied by user for this session.", role);
                 else
                     sessionLog()("Permission for {} allowed by user for this session.", role);
@@ -1484,7 +1485,8 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
 {
     if (remember)
-        _rememberedPermissions[GuardedRole::CaptureBuffer] = allow;
+        _rememberedPermissions[GuardedRole::CaptureBuffer] =
+            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
 
     // One verdict answers every request outstanding at this moment: the user was asked once, about
     // capturing this buffer, and each request still owes its own reply.
@@ -1530,7 +1532,8 @@ void TerminalSession::requestShowHostWritableStatusLine()
 void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remember)
 {
     if (remember)
-        _rememberedPermissions[GuardedRole::ShowHostWritableStatusLine] = allow;
+        _rememberedPermissions[GuardedRole::ShowHostWritableStatusLine] =
+            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
 
     // Under the lock: the parser thread reads what the answer leaves behind at DECSASD 0, and draws the
     // line it puts up. Denied, the line stays hidden, and status_line.sync_to_window_title may show what
@@ -1581,7 +1584,8 @@ void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
 void TerminalSession::applyPendingFontChange(bool allow, bool remember)
 {
     if (remember)
-        _rememberedPermissions[GuardedRole::ChangeFont] = allow;
+        _rememberedPermissions[GuardedRole::ChangeFont] =
+            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
 
     if (!_pendingFontChange)
         return;
@@ -2073,7 +2077,8 @@ void TerminalSession::applyPendingPaste(bool allow, bool remember)
 {
     sessionLog()("applyPendingPaste: allow={}, remember={}", allow, remember);
     if (remember)
-        _rememberedPermissions[GuardedRole::BigPaste] = allow;
+        _rememberedPermissions[GuardedRole::BigPaste] =
+            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
 
     if (!_pendingBigPaste)
         return;
@@ -2132,7 +2137,8 @@ void TerminalSession::applyPendingRerun(bool allow, bool remember)
 {
     sessionLog()("applyPendingRerun: allow={}, remember={}", allow, remember);
     if (remember)
-        _rememberedPermissions[GuardedRole::RerunCommand] = allow;
+        _rememberedPermissions[GuardedRole::RerunCommand] =
+            allow ? PermissionDecision::Allow : PermissionDecision::Deny;
 
     if (!_pendingRerun)
         return;

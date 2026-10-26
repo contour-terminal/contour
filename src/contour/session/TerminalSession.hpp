@@ -16,6 +16,7 @@
 #include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
+#include <contour/session/Permission.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -97,24 +98,6 @@ namespace contour::session
 {
 
 class TerminalSessionManager;
-
-/**
- * A set of user-facing activities that are guarded behind a permission-check wall.
- */
-enum class GuardedRole : uint8_t
-{
-    ChangeFont,
-    CaptureBuffer,
-    ShowHostWritableStatusLine,
-    BigPaste,
-    RerunCommand,
-};
-
-/**
- * Trivial cache to remember the interactive choice when the user has to be asked
- * and the user decided to permanently decide for the current session.
- */
-using PermissionCache = std::map<GuardedRole, bool>;
 
 /// Whether the gutter took an input event, and the grid must therefore not also see it.
 ///
@@ -2412,24 +2395,3 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 } // namespace contour::session
 
 Q_DECLARE_INTERFACE(contour::session::TerminalSession, "org.contour.TerminalSession")
-
-template <>
-struct std::formatter<contour::session::GuardedRole>: std::formatter<std::string_view>
-{
-    template <typename FormatContext>
-    auto format(contour::session::GuardedRole value, FormatContext& ctx) const
-    {
-        std::string_view output;
-        // clang-format off
-        switch (value)
-        {
-            case contour::session::GuardedRole::ChangeFont: output = "Change Font"; break;
-            case contour::session::GuardedRole::CaptureBuffer: output = "Capture Buffer"; break;
-            case contour::session::GuardedRole::ShowHostWritableStatusLine:  output = "show Host Writable Statusline"; break;
-            case contour::session::GuardedRole::BigPaste:  output = "paste large number of characters"; break;
-            case contour::session::GuardedRole::RerunCommand: output = "run a command again"; break;
-        }
-        // clang-format on
-        return formatter<string_view>::format(output, ctx);
-    }
-};

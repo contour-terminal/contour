@@ -282,6 +282,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionFactory.hpp
         window/SettingsController.hpp
         window/SettingsWindowHost.hpp
+        session/Permission.hpp
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
@@ -331,6 +332,7 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionFactory.cpp
         window/SettingsController.cpp
         window/SettingsWindowHost.cpp
+        session/Permission.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
@@ -797,6 +799,7 @@ if(CONTOUR_FRONTEND_GUI)
             display/ShortcutOverride_test.cpp
             display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
+            session/Permission_test.cpp
             test/MainWindowQml_test.cpp
             test/MainWindowControllerMock.hpp
             test/MockMainController.hpp

@@ -4,6 +4,7 @@
 // engine and scene graph run without a display server (CI-safe), then constructs the
 // QGuiApplication that the QML components need before running the Catch2 session.
 
+#include <contour/session/Permission.hpp>
 #include <contour/test/NotificationFixtures.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/TestEnvironment.hpp>
@@ -144,6 +145,10 @@ int main(int argc, char* argv[])
     auto const app = contour::test::displayTestsEnabled(core::LiveEnvironment {})
                          ? std::unique_ptr<QGuiApplication> { std::make_unique<QApplication>(argc, argv) }
                          : std::make_unique<QGuiApplication>(argc, argv);
+
+    // The QML types the application registers that the tested QML imports from Contour.Terminal: the
+    // permission enums (SessionChrome answers its question in them).
+    contour::session::registerPermissionQmlTypes();
 
     // Pin a Qt Quick Controls style the way the app itself does (ContourGuiApp: a Fusion fallback, then
     // the row's style). The tests instantiate real Controls (SessionChrome's customized ScrollBar, the
