@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <string_view>
+#include <utility>
 
 using namespace vtbackend;
 using namespace std::string_view_literals;
@@ -383,4 +384,60 @@ TEST_CASE("ColorPalette.contourSchemes.areListed", "[ColorPalette]")
     auto const names = defaultColorPaletteNames();
     for (auto const name: { "contour-dark"sv, "contour-light"sv, "contour-classic"sv })
         CHECK(std::ranges::find(names, name) != names.end());
+}
+
+namespace
+{
+/// The two Contour schemes that paint search matches in system yellow, and the ink each puts on the current
+/// one.
+constexpr auto YellowSchemes = std::array {
+    std::pair { "contour-dark"sv, RGBColor { 0x1C, 0x1E, 0x24 } },  // its background
+    std::pair { "contour-light"sv, RGBColor { 0x2B, 0x2E, 0x35 } }, // its foreground
+};
+constexpr auto SearchYellow = RGBColor { 0xFF, 0xD6, 0x0A };
+} // namespace
+
+TEST_CASE("ColorPalette.searchMatchIsYellowInTheContourSchemes", "[ColorPalette]")
+{
+    for (auto const& [name, ink]: YellowSchemes)
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        CHECK(palette.searchHighlight.background == CellRGBColor { SearchYellow });
+        CHECK(palette.searchHighlight.backgroundAlpha == 0.35f);
+        CHECK(palette.searchHighlight.foreground == CellRGBColor { CellForegroundColor {} });
+        CHECK(palette.searchHighlightFocused.background == CellRGBColor { SearchYellow });
+        CHECK(palette.searchHighlightFocused.backgroundAlpha == 0.85f);
+        CHECK(palette.searchHighlightFocused.foreground == CellRGBColor { ink });
+    }
+}
+
+TEST_CASE("ColorPalette.searchMatchTextReadsAtFourAndAHalfToOne", "[ColorPalette]")
+{
+    // The yellow is drawn at its alpha over the page; the text on it must still read.
+    for (auto const& [name, ink]: YellowSchemes)
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const match =
+            mixColor(palette.defaultBackground, SearchYellow, palette.searchHighlight.backgroundAlpha);
+        auto const current =
+            mixColor(palette.defaultBackground, SearchYellow, palette.searchHighlightFocused.backgroundAlpha);
+        CHECK(contrastRatio(palette.defaultForeground, match) >= MinimumTextContrast);
+        CHECK(contrastRatio(ink, current) >= MinimumTextContrast);
+    }
+}
+
+TEST_CASE("ColorPalette.otherSchemesKeepTheirSearchColours", "[ColorPalette]")
+{
+    for (auto const name: { "contour-classic"sv, "monokai"sv })
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        CHECK(palette.searchHighlight == ColorPalette {}.searchHighlight);
+        CHECK(palette.searchHighlightFocused == ColorPalette {}.searchHighlightFocused);
+    }
 }

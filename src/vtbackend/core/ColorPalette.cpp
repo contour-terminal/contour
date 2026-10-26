@@ -54,6 +54,8 @@ namespace
         RGBColor selection;                  ///< The selection's background.
         RGBColor idleForeground;             ///< Text of the inactive and insert indicators.
         RGBColor idleBackground;             ///< Bar of the inactive and insert indicators.
+        RGBColor searchMatch;                ///< The fill of a search match: system yellow, as a mark.
+        RGBColor searchMatchInk;             ///< The text of the current match, on its stronger fill.
         std::array<RGBColor, 16> ansiColors; ///< Palette entries 0..15: normal, then bright.
     };
 
@@ -64,6 +66,8 @@ namespace
         .selection = 0x3A4A6B_rgb,
         .idleForeground = 0xC5CAD3_rgb, // palette white
         .idleBackground = 0x2A2D35_rgb, // palette black
+        .searchMatch = 0xFFD60A_rgb,
+        .searchMatchInk = 0x1C1E24_rgb, // its background
         .ansiColors = { 0x2A2D35_rgb,
                         0xF0757A_rgb,
                         0x8FCB7A_rgb,
@@ -90,6 +94,8 @@ namespace
         // A light bar one step off the page (about 12:1), not palette white on black (2.3:1).
         .idleForeground = 0x2B2E35_rgb,
         .idleBackground = 0xECEDEA_rgb,
+        .searchMatch = 0xFFD60A_rgb,
+        .searchMatchInk = 0x2B2E35_rgb, // its foreground
         .ansiColors = { 0x2B2E35_rgb,
                         0xB42D35_rgb,
                         0x2A7A1F_rgb,
@@ -110,7 +116,7 @@ namespace
 
     /// Applies @p scheme to @p palette, including the colors that follow from it: the status-line
     /// indicators (inactive and insert: the scheme's idle pair; normal: page on blue; visual: page on
-    /// magenta) and a running block in blue, because yellow means search.
+    /// magenta), a running block in blue, and search matches in yellow, because yellow means search.
     void applyContourScheme(ColorPalette& palette, ContourScheme const& scheme) noexcept
     {
         std::ranges::copy(scheme.ansiColors, palette.palette.begin());
@@ -130,6 +136,17 @@ namespace
         palette.indicatorStatusLineVisualMode = { .foreground = scheme.background,
                                                   .background = palette.palette[Magenta] };
         palette.blockStatus[static_cast<size_t>(CommandBlockOutcome::Running)] = palette.palette[Blue];
+
+        // Yellow means search: a match at 35 % over the cell's own text, the current one at 85 % with ink of
+        // its own, which the cell's text color would not reach on so strong a fill.
+        palette.searchHighlight = { .foreground = CellForegroundColor {},
+                                    .foregroundAlpha = 1.0f,
+                                    .background = scheme.searchMatch,
+                                    .backgroundAlpha = 0.35f };
+        palette.searchHighlightFocused = { .foreground = scheme.searchMatchInk,
+                                           .foregroundAlpha = 1.0f,
+                                           .background = scheme.searchMatch,
+                                           .backgroundAlpha = 0.85f };
     }
 
     /// Every built-in color scheme, as one table.
