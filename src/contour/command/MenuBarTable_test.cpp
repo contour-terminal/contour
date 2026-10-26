@@ -424,3 +424,23 @@ TEST_CASE("menuBar.stateOfConfig", "[menubar]")
     CHECK(std::ranges::find(state.profileNames, "alpha") != state.profileNames.end());
     CHECK(std::ranges::find(state.profileNames, "zeta") != state.profileNames.end());
 }
+
+TEST_CASE("menuBar.useSelectionForFindFollowsFindPrevious", "[menubar]")
+{
+    auto const bar = buildMenuBar(fullState());
+    auto const& edit = bar[static_cast<std::size_t>(MenuBarMenu::Edit)].children;
+    auto const previous =
+        std::ranges::find(edit, std::string_view { "Find Previous" }, &ContextMenuEntry::title);
+    REQUIRE(previous != edit.end());
+    REQUIRE(std::next(previous) != edit.end());
+    CHECK(std::next(previous)->title == "Use Selection for Find");
+    CHECK(std::holds_alternative<actions::SearchSelection>(std::next(previous)->action));
+    CHECK(std::next(previous)->availability == RowAvailability::Enabled);
+
+    // Without a selection there is nothing to use.
+    auto state = fullState();
+    state.selection = SelectionPresence::Absent;
+    auto const* row = find(buildMenuBar(state), "Use Selection for Find");
+    REQUIRE(row != nullptr);
+    CHECK(row->availability == RowAvailability::Disabled);
+}

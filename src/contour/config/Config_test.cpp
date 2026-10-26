@@ -9066,3 +9066,52 @@ TEST_CASE("Config: motionAdjusted zeroes the motion durations under Reduce Motio
         CHECK(full.*setting == settings.*setting);
     CHECK(full.smoothScrolling);
 }
+
+TEST_CASE("Config: the find chords follow the platform", "[config][input-mapping]")
+{
+    using vtbackend::Modifier;
+    using vtbackend::Modifiers;
+    namespace actions = contour::actions;
+
+    // Fallbacks rather than defaults (F12): every edition, an existing config included, gets them, and an
+    // explicit binding of the same chord still wins. In every mode, so ⌘G with no search reaches the session.
+    auto const config = contour::config::Config {};
+    auto const super = Modifiers { Modifier::Super };
+    auto const shiftSuper = Modifiers { Modifier::Super, Modifier::Shift };
+    auto const rows = std::array {
+        std::tuple { super, U'F', actions::Action { actions::SearchReverse {} } },
+        std::tuple { super, U'G', actions::Action { actions::FocusNextSearchMatch {} } },
+        std::tuple { shiftSuper, U'G', actions::Action { actions::FocusPreviousSearchMatch {} } },
+        std::tuple { super, U'E', actions::Action { actions::SearchSelection {} } },
+    };
+    REQUIRE(contour::config::macFindChords().size() == rows.size());
+    for (auto const& [modifiers, input, action]: rows)
+    {
+        INFO(std::format("{}", static_cast<uint32_t>(input)));
+        for (auto const modeFlags: { uint8_t { 0 }, static_cast<uint8_t>(0xFF) })
+        {
+            auto const* bound = contour::config::applyBuiltinFallback(config, input, modifiers, modeFlags);
+#ifdef __APPLE__
+            REQUIRE(bound != nullptr);
+            REQUIRE(bound->size() == 1);
+            CHECK(bound->front().index() == action.index());
+#else
+            CHECK(bound == nullptr);
+#endif
+        }
+    }
+
+    // The existing chords stand: Ctrl+Shift+F and the two F3 rows.
+    for (auto const edition:
+         { contour::config::DefaultsEdition::Classic, contour::config::DefaultsEdition::Native2026 })
+    {
+        auto const mappings = contour::config::defaultInputMappings(edition);
+        CHECK(std::ranges::any_of(mappings.charMappings, [](auto const& m) {
+            return m.input == U'F' && m.modifiers == Modifiers { Modifier::Control, Modifier::Shift }
+                   && std::holds_alternative<actions::SearchReverse>(m.binding.front());
+        }));
+        CHECK(std::ranges::count_if(mappings.keyMappings,
+                                    [](auto const& m) { return m.input == vtbackend::Key::F3; })
+              == 2);
+    }
+}

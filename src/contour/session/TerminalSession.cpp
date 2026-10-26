@@ -43,6 +43,7 @@
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/LinkPresentation.hpp>
 #include <vtbackend/screen/PrintedLinks.hpp>
+#include <vtbackend/screen/SearchQuery.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 #include <vtbackend/shell/CommandLineText.hpp>
@@ -59,6 +60,8 @@
 #include <core/Utils.hpp>
 #include <core/async/IExecutor.hpp>
 #include <core/platform/PathUtils.hpp>
+
+#include <libunicode/convert.h>
 
 #include <QtCore/QDeadlineTimer>
 #include <QtCore/QDebug>
@@ -2917,10 +2920,7 @@ void TerminalSession::stepSearch(SearchWrapEdge edge)
         return _terminal.normalModeCursorPosition();
     }();
 
-    if (edge == SearchWrapEdge::Top)
-        (void) (*this)(actions::FocusNextSearchMatch {});
-    else
-        (void) (*this)(actions::FocusPreviousSearchMatch {});
+    std::ignore = focusAdjacentSearchMatch(edge); // whether it moved is read from the cursor below
 
     // Wrapped on "did the cursor actually move", not on the action's return value: at the very first
     // cell of the scrollback searchPrevMatch() cannot step back any further, so it re-finds the match
@@ -4912,49 +4912,76 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
-    // Locked: searchNextMatch() walks the grid and the Vi cursor moves with it. See ViNormalMode. Through
+    return focusOrOpenSearch(SearchWrapEdge::Top);
+}
+
+bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
+{
+    return focusOrOpenSearch(SearchWrapEdge::Bottom);
+}
+
+bool TerminalSession::focusOrOpenSearch(SearchWrapEdge edge)
+{
+    auto const hasPattern = core::locked(_terminal, [&]() { return !_terminal.search().pattern.empty(); });
+    if (!hasPattern)
+    {
+        // Find Next with nothing to find opens the find bar (Review Focus 5): nothing goes to the
+        // application, and the cursor stays. Posted, as searchPromptRequested() posts it.
+        platform::postToObject(this, [this]() { emit searchBarRequested(); });
+        return true;
+    }
+    // Through the bar's own stepping, so F3 and ⌘G wrap like Enter does (R-h).
+    stepSearch(edge);
+    return true;
+}
+
+bool TerminalSession::focusAdjacentSearchMatch(SearchWrapEdge edge)
+{
+    // Locked: the step walks the grid and the Vi cursor moves with it. See ViNormalMode. Through
     // runUnderStateLock(): in a Visual mode the cursor extends the selection, whose report is sent once the
     // lock is released, as SelectAll's is.
     return _terminal.runUnderStateLock([&]() {
-        // Set BEFORE the step, not after it: searchNextMatch() reveals the match and raises
-        // screenUpdated() from inside, so the guard has to already be up by then. @see _searchMatchRevealed.
+        // Set BEFORE the step, not after it: the step reveals the match and raises screenUpdated() from
+        // inside, so the guard has to already be up by then. @see _searchMatchRevealed.
         auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
 
-        auto const nextPosition = _terminal.searchNextMatch(_terminal.normalModeCursorPosition());
+        auto const cursor = _terminal.normalModeCursorPosition();
+        auto const nextPosition = edge == SearchWrapEdge::Top ? _terminal.searchNextMatch(cursor)
+                                                              : _terminal.searchPrevMatch(cursor);
         if (!nextPosition)
         {
-            // RESTORED, not cleared: this step revealed nothing, but a previous one may well have -- F3
-            // at the last match is exactly that case, and storing false there would un-park the very match
+            // RESTORED, not cleared: this step revealed nothing, but a previous one may well have -- a step
+            // with nowhere to go is exactly that case, and storing false there would un-park the very match
             // the user is standing on, so the next byte of output scrolls it away.
             _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
             return false;
         }
         _terminal.moveNormalModeCursorTo(nextPosition.value());
         _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
-        // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
         return true;
     });
 }
 
-bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
+bool TerminalSession::operator()(actions::SearchSelection)
 {
-    // Locked, through runUnderStateLock(), for the same reasons as FocusNextSearchMatch above, and parked for
-    // the same reason.
-    return _terminal.runUnderStateLock([&]() {
-        auto const wasRevealed = _searchMatchRevealed.exchange(true, std::memory_order_relaxed);
-
-        auto const nextPosition = _terminal.searchPrevMatch(_terminal.normalModeCursorPosition());
-        if (!nextPosition)
-        {
-            // Restored rather than cleared, for the reason FocusNextSearchMatch above states.
-            _searchMatchRevealed.store(wasRevealed, std::memory_order_relaxed);
-            return false;
-        }
-        _terminal.moveNormalModeCursorTo(nextPosition.value());
-        _terminal.viewport().makeVisibleWithinSafeArea(nextPosition->line);
-        // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
-        return true;
+    // The selection's first line (R-k): a pattern spans no line break. Under a regex its metacharacters are
+    // escaped, so it finds the selected text itself.
+    auto const pattern = core::locked(_terminal, [&]() -> std::optional<std::u32string> {
+        auto const text = _terminal.extractSelectionText();
+        if (text.empty())
+            return std::nullopt;
+        auto const firstLine = std::string_view(text).substr(0, std::string_view(text).find('\n'));
+        auto line = unicode::convert_to<char32_t>(firstLine);
+        if (_terminal.search().options.syntax == vtbackend::SearchSyntax::Regex)
+            return vtbackend::escapeSearchRegex(line);
+        return line;
     });
+    if (!pattern || pattern->empty())
+        return false;
+
+    setSearchPattern(QString::fromStdU32String(*pattern));
+    platform::postToObject(this, [this]() { emit searchBarRequested(); });
+    return true;
 }
 
 namespace

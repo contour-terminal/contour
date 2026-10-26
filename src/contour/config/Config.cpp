@@ -34,6 +34,7 @@
 #include <expected>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <ranges>
 
 #ifdef _WIN32
@@ -199,15 +200,41 @@ std::vector<FallbackCharMapping> const& builtinFallbackCharMappings()
     // Consumed when it declines (nothing finished, blank output, an attached session), as kitty does: the
     // shell would read it as ^G, which makes readline drop the line being typed. On the primary screen
     // only, where the blocks are; an alternate-screen application keeps the chord.
-    static auto const mappings = std::vector<FallbackCharMapping> {
-        FallbackCharMapping { .mapping = { .modes { PrimaryScreenOnly },
-                                           .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
-                                                                               vtbackend::Modifier::Shift } },
-                                           .input = U'G',
-                                           .binding = { { actions::OpenCommandOutput {} } } },
-                              .declined = DeclinedInput::Consume },
-    };
+    static auto const mappings = [] {
+        auto rows = std::vector<FallbackCharMapping> {
+            FallbackCharMapping {
+                .mapping = { .modes { PrimaryScreenOnly },
+                             .modifiers { vtbackend::Modifiers { vtbackend::Modifier::Control,
+                                                                 vtbackend::Modifier::Shift } },
+                             .input = U'G',
+                             .binding = { { actions::OpenCommandOutput {} } } },
+                .declined = DeclinedInput::Consume },
+        };
+#ifdef __APPLE__
+        std::ranges::copy(macFindChords(), std::back_inserter(rows));
+#endif
+        return rows;
+    }();
     return mappings;
+}
+
+std::array<FallbackCharMapping, 4> const& macFindChords()
+{
+    auto const chord = [](vtbackend::Modifiers modifiers, char32_t input, actions::Action action) {
+        return FallbackCharMapping { .mapping = { .modes {},
+                                                  .modifiers { modifiers },
+                                                  .input = input,
+                                                  .binding = { { std::move(action) } } } };
+    };
+    auto const super = vtbackend::Modifiers { vtbackend::Modifier::Super };
+    auto const shiftSuper = vtbackend::Modifiers { vtbackend::Modifier::Super, vtbackend::Modifier::Shift };
+    static auto const rows = std::array {
+        chord(super, U'F', actions::SearchReverse {}),
+        chord(super, U'G', actions::FocusNextSearchMatch {}),
+        chord(shiftSuper, U'G', actions::FocusPreviousSearchMatch {}),
+        chord(super, U'E', actions::SearchSelection {}),
+    };
+    return rows;
 }
 
 namespace

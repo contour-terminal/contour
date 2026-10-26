@@ -64,6 +64,7 @@ namespace
         ActionCategory { .name = "ToggleLastFold", .category = CommandCategory::Blocks },
         ActionCategory { .name = "ScrollUp", .category = CommandCategory::View },
         ActionCategory { .name = "SearchReverse", .category = CommandCategory::Edit },
+        ActionCategory { .name = "SearchSelection", .category = CommandCategory::Edit },
         ActionCategory { .name = "SendChars", .category = CommandCategory::Shell },
         ActionCategory { .name = "ToggleAllKeyMaps", .category = CommandCategory::Shell },
         ActionCategory { .name = "ToggleFullscreen", .category = CommandCategory::Window },

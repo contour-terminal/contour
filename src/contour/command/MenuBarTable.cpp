@@ -211,6 +211,7 @@ namespace
             Table::command(SearchReverse {}, "Find…"),
             Table::command(FocusNextSearchMatch {}, "Find Next"),
             Table::command(FocusPreviousSearchMatch {}, "Find Previous"),
+            Table::command(SearchSelection {}, "Use Selection for Find").enabledWhen(hasSelection),
             Table::command(NoSearchHighlight {}, "Clear Find Highlight"),
             Table::separator(),
             Table::command(OpenSelection {}, "Open Selection").enabledWhen(hasSelection),

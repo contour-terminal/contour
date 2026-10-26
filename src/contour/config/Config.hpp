@@ -237,6 +237,13 @@ using FallbackCharMapping = FallbackMapping<char32_t>;
 /// @see foldedBindingCodepoint
 [[nodiscard]] std::vector<FallbackCharMapping> const& builtinFallbackCharMappings();
 
+/// The macOS find chords (R-j): ⌘F opens the find bar, ⌘G and ⇧⌘G step to the next and previous match, ⌘E
+/// uses the selection. Fallbacks, in every mode -- so ⌘G with no search reaches the session, which opens the
+/// bar -- and an explicit binding of the same chord still wins. builtinFallbackCharMappings() holds them on
+/// macOS only; declared everywhere so the table can be tested everywhere.
+/// @return The four rows.
+[[nodiscard]] std::array<FallbackCharMapping, 4> const& macFindChords();
+
 namespace helper
 {
     inline bool testMatchMode(uint8_t actualModeFlags,

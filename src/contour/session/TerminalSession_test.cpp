@@ -4062,8 +4062,8 @@ TEST_CASE("TerminalSession: HintMode merges user patterns, skips invalid regex, 
 TEST_CASE("TerminalSession: search-match focus actions move the vi cursor onto a found match",
           "[contour][session][actions]")
 {
-    // FocusNextSearchMatch/FocusPreviousSearchMatch return true (and move the normal-mode cursor) only
-    // when a search has matches; with no active search they return false. Drive both paths.
+    // FocusNextSearchMatch/FocusPreviousSearchMatch claim their chord either way: with a search they step
+    // (wrapping), and with none they ask for the find bar (R-h).
     contour::test::TestApp testApp;
     auto session = makeDisplaylessSession(testApp.app());
     namespace actions = contour::actions;
@@ -4071,18 +4071,107 @@ TEST_CASE("TerminalSession: search-match focus actions move the vi cursor onto a
     for (int i = 0; i < 20; ++i)
         session->terminal().writeToScreen(std::format("needle row {} needle\r\n", i));
 
-    // No search set yet: nothing to focus.
-    CHECK_FALSE((*session)(actions::FocusNextSearchMatch {}));
+    auto barRequests = QSignalSpy { session.get(), &contour::session::TerminalSession::searchBarRequested };
+    CHECK((*session)(actions::FocusNextSearchMatch {}));
+    QCoreApplication::processEvents();
+    CHECK(barRequests.count() == 1);
 
     // Set a search pattern through the terminal, then the match-focus actions have somewhere to go.
     {
         auto const l = std::scoped_lock { session->terminal() };
         std::ignore = session->terminal().setNewSearchTerm(U"needle", vtbackend::SearchOrigin::Typed);
     }
-    // At least one of next/prev must find a match now (position-dependent), and neither throws.
-    auto const nextFound = (*session)(actions::FocusNextSearchMatch {});
-    auto const prevFound = (*session)(actions::FocusPreviousSearchMatch {});
-    CHECK((nextFound || prevFound));
+    auto const cursor = [&] {
+        auto const l = std::scoped_lock { session->terminal() };
+        return session->terminal().normalModeCursorPosition();
+    };
+    auto const before = cursor();
+    CHECK((*session)(actions::FocusNextSearchMatch {}));
+    CHECK(cursor() != before);
+    CHECK((*session)(actions::FocusPreviousSearchMatch {}));
+    QCoreApplication::processEvents();
+    CHECK(barRequests.count() == 1);
+}
+
+TEST_CASE("TerminalSession: Find Next with no search opens the find bar", "[contour][session][actions]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    namespace actions = contour::actions;
+    session->terminal().writeToScreen("some text\r\n");
+    auto const cursor = [&] {
+        auto const l = std::scoped_lock { session->terminal() };
+        return session->terminal().normalModeCursorPosition();
+    };
+    auto const before = cursor();
+    auto barRequests = QSignalSpy { session.get(), &contour::session::TerminalSession::searchBarRequested };
+
+    CHECK((*session)(actions::FocusNextSearchMatch {}));
+    QCoreApplication::processEvents();
+    CHECK(barRequests.count() == 1);
+
+    CHECK((*session)(actions::FocusPreviousSearchMatch {}));
+    QCoreApplication::processEvents();
+    CHECK(barRequests.count() == 2);
+
+    // Nothing reached the application, and the cursor stayed.
+    CHECK(mockPtyOf(*session).stdinBuffer().empty());
+    CHECK(cursor() == before);
+}
+
+TEST_CASE("TerminalSession: Find Next wraps", "[contour][session][actions]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen("needle one\r\nhay\r\nneedle two\r\n");
+    session->setSearchPattern(QStringLiteral("needle"));
+    auto const first = vtbackend::CellLocation { .line = vtbackend::LineOffset(0), .column = {} };
+    auto const second = vtbackend::CellLocation { .line = vtbackend::LineOffset(2), .column = {} };
+    {
+        auto const _ = std::scoped_lock { terminal };
+        terminal.moveNormalModeCursorTo(second);
+    }
+    auto barRequests = QSignalSpy { session.get(), &contour::session::TerminalSession::searchBarRequested };
+
+    CHECK((*session)(contour::actions::FocusNextSearchMatch {}));
+    QCoreApplication::processEvents();
+    {
+        auto const _ = std::scoped_lock { terminal };
+        CHECK(terminal.normalModeCursorPosition() == first);
+    }
+    // With the bar closed, stepping does not open it.
+    CHECK(barRequests.count() == 0);
+}
+
+TEST_CASE("TerminalSession: Use Selection for Find takes the first line, escaped under regex",
+          "[contour][session][actions]")
+{
+    contour::test::TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto& terminal = session->terminal();
+    terminal.writeToScreen("foo.bar\r\nsecond line");
+    session->toggleSearchOption(static_cast<int>(contour::session::SearchToggle::Regex));
+    auto barRequests = QSignalSpy { session.get(), &contour::session::TerminalSession::searchBarRequested };
+
+    SECTION("without a selection nothing changes")
+    {
+        CHECK_FALSE((*session)(contour::actions::SearchSelection {}));
+        QCoreApplication::processEvents();
+        CHECK(barRequests.count() == 0);
+        auto const _ = std::scoped_lock { terminal };
+        CHECK(terminal.search().pattern.empty());
+    }
+
+    SECTION("the selection's first line, escaped")
+    {
+        REQUIRE((*session)(contour::actions::SelectAll {}));
+        CHECK((*session)(contour::actions::SearchSelection {}));
+        QCoreApplication::processEvents();
+        CHECK(barRequests.count() == 1);
+        auto const _ = std::scoped_lock { terminal };
+        CHECK(terminal.search().pattern == U"foo\\.bar");
+    }
 }
 
 TEST_CASE("TerminalSession: the find bar's state follows the pattern it is given",
@@ -6264,11 +6353,13 @@ TEST_CASE("TerminalSession: stepping PAST the last match keeps the one already r
     REQUIRE((*held)(contour::actions::FocusPreviousSearchMatch {}));
     REQUIRE(held->terminal().viewport().scrolled());
 
-    // Back onto the last match, and then one step past it -- the step that finds nothing. Forwards
-    // rather than backwards, because searchPrevMatch() at the very top of the scrollback cannot step
-    // back at all and so re-finds the match it is standing on, reporting success. @see stepSearch.
-    REQUIRE((*held)(contour::actions::FocusNextSearchMatch {}));
-    CHECK_FALSE((*held)(contour::actions::FocusNextSearchMatch {}));
+    // Find Next wraps (R-h), so a step finds nothing only where nothing matches: a pattern that matches
+    // nothing, set while the user stands on the match the step above revealed.
+    {
+        auto const _ = std::scoped_lock { held->terminal() };
+        REQUIRE(held->terminal().setNewSearchTerm(U"haystack", vtbackend::SearchOrigin::Typed).has_value());
+    }
+    CHECK((*held)(contour::actions::FocusNextSearchMatch {}));
 
     held->terminal().writeToScreen("more output\r\n");
     CHECK(held->terminal().viewport().scrolled());

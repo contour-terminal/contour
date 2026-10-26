@@ -450,6 +450,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// One step of the find bar's navigation, wrapping at @p edge when it cannot go further.
     void stepSearch(SearchWrapEdge edge);
 
+    /// Find Next (@p edge Top) or Find Previous (Bottom): steps and wraps as the bar does, or, with no
+    /// pattern, asks for the find bar.
+    /// @return Always true: the chord is the session's either way. The action-handler contract is a bool.
+    [[nodiscard]] bool focusOrOpenSearch(SearchWrapEdge edge);
+
+    /// One step towards @p edge's direction, without wrapping: what vi's `n` and `N` do.
+    /// @return Whether a match was stepped to; a bool, as the action handlers it backs return one.
+    [[nodiscard]] bool focusAdjacentSearchMatch(SearchWrapEdge edge);
+
   public:
     // }}}
 
@@ -1382,6 +1391,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     bool operator()(actions::ToggleLastFold);
     bool operator()(actions::ScrollUp);
     bool operator()(actions::SearchReverse);
+    bool operator()(actions::SearchSelection);
     bool operator()(actions::SendChars const& event);
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);

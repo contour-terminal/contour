@@ -95,6 +95,7 @@ struct ToggleFoldAt{ int line {}; }; // OSC 133: toggle the fold covering a give
 struct ToggleLastFold{};   // OSC 133: toggle the most recent finished command's fold
 struct ScrollUp{};
 struct SearchReverse{};
+struct SearchSelection{};
 struct SendChars{ std::string chars; };
 struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
@@ -220,6 +221,7 @@ using Action = std::variant<CancelSelection,
                             ToggleLastFold,
                             ScrollUp,
                             SearchReverse,
+                            SearchSelection,
                             SendChars,
                             ToggleAllKeyMaps,
                             ToggleFullscreen,
@@ -545,6 +547,10 @@ namespace documentation
     constexpr inline std::string_view SearchReverse {
         "Opens the find bar, searching upwards from the current cursor position."
     };
+    constexpr inline std::string_view SearchSelection {
+        "Searches for the selected text: its first line becomes the find bar's pattern, escaped when the bar "
+        "searches by regular expression."
+    };
     constexpr inline std::string_view SendChars {
         "Writes given characters in `chars` member to the applications input."
     };
@@ -828,6 +834,8 @@ struct ActionCatalogEntry
         ActionCatalogEntry { "ToggleLastFold", Action { ToggleLastFold {} }, documentation::ToggleLastFold },
         ActionCatalogEntry { "ScrollUp", Action { ScrollUp {} }, documentation::ScrollUp },
         ActionCatalogEntry { "SearchReverse", Action { SearchReverse {} }, documentation::SearchReverse },
+        ActionCatalogEntry {
+            "SearchSelection", Action { SearchSelection {} }, documentation::SearchSelection },
         ActionCatalogEntry { "SendChars", Action { SendChars {} }, documentation::SendChars },
         ActionCatalogEntry {
             "ToggleAllKeyMaps", Action { ToggleAllKeyMaps {} }, documentation::ToggleAllKeyMaps },

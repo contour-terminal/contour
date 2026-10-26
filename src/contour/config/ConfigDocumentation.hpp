@@ -1387,6 +1387,8 @@ constexpr StringLiteral InputMappingsConfig {
     "{comment} - ScrollUp          Scrolls up by the multiplier factor.\n"
     "{comment} - SearchReverse     Opens the find bar, searching upwards from the current cursor "
     "position.\n"
+    "{comment} - SearchSelection   Searches for the selected text: its first line becomes the find bar's\n"
+    "{comment}                     pattern, escaped when the bar searches by regular expression.\n"
     "{comment} - SendChars         Writes given characters in `chars` member to the applications input.\n"
     "{comment} - SwitchToTab       Switches to the tab position, given by extra parameter \"position\".\n"
     "{comment}                     The positions start at number 1.\n"

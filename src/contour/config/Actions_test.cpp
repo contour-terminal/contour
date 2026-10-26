@@ -11,8 +11,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <format>
 #include <optional>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -391,4 +393,17 @@ TEST_CASE("Actions: the tab-menu actions are dropped on key repeat", "[actions][
         actions::ShowAbout {},
     };
     CHECK(actions::filterRepeatableActions(held).empty());
+}
+
+TEST_CASE("actions::fromString names Use Selection for Find", "[actions][parse]")
+{
+    auto const action = contour::actions::fromString("SearchSelection");
+    REQUIRE(action.has_value());
+    CHECK(std::holds_alternative<contour::actions::SearchSelection>(*action));
+
+    auto const& catalog = contour::actions::actionCatalog();
+    auto const entry = std::ranges::find(
+        catalog, std::string_view { "SearchSelection" }, &contour::actions::ActionCatalogEntry::name);
+    REQUIRE(entry != catalog.end());
+    CHECK_FALSE(entry->documentation.empty());
 }
