@@ -276,7 +276,10 @@ TEST_CASE("UiStyle: the pane glyphs per row", "[uistyle]")
         CHECK(tokens.restartGlyph == "↩");
     }
     auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
-    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::SplitRight) == "⊞");
+    // A box-drawing cross, which every terminal font draws: the monospace fonts set U+229E (⊞) as a
+    // boxed X, which reads as Close.
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::SplitRight) == "┼");
+    CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::SplitDown) == "⊟");
     CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::Zoom) == "Z");
     CHECK(glyphOf(ChromeStyle::Terminal, PaneHeaderAction::Close) == "×");
     CHECK(terminal.splitLineGlyphs[0] == "│");

@@ -512,7 +512,8 @@ provider.
   cells. Return restarts the session.
 
 **TUI row.**
-- The header is one row of cells: name, cwd, and `⊞ ⊟ Z ×`.
+- The header is one row of cells: name, cwd, and `┼ ⊟ Z ×` (`┼`, not `⊞`, which monospace fonts set
+  as a boxed X).
 - Splits are `│` and `─` cell lines.
 - Inactive panes are drawn at 0.62 opacity.
 - In Minimal, the bar row is hidden while there is one tab, and there are no headers.

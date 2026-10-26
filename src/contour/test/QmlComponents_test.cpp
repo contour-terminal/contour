@@ -4823,7 +4823,7 @@ TEST_CASE("pane card: the Terminal row draws a header of one cell row (offscreen
     CHECK(PaneTreeHost::partOf(active, "paneHeader").height() == host.style().cellHeight());
 
     auto const expected =
-        std::array { QStringLiteral("⊞"), QStringLiteral("⊟"), QStringLiteral("Z"), QStringLiteral("×") };
+        std::array { QStringLiteral("┼"), QStringLiteral("⊟"), QStringLiteral("Z"), QStringLiteral("×") };
     for (auto const index: std::views::iota(size_t { 0 }, expected.size()))
     {
         auto const& button = PaneTreeHost::partOf(active, std::format("paneHeaderAction{}", index).c_str());

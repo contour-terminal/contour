@@ -482,8 +482,10 @@ namespace detail
         .chipOpenGlyph = "[",
         .chipCloseGlyph = "]",
         .hostDotGlyph = "●",
-        // The header row's buttons as the tui board sets them: Z for zoom, the light × for close.
-        .paneActionGlyphs = { "⊞", "⊟", "Z", "×" },
+        // The header row's buttons as the tui board sets them: Z for zoom, the light × for close. Split
+        // right is the box-drawing cross every terminal font draws: monospace fonts set U+229E (⊞) as a
+        // boxed X, which reads as Close.
+        .paneActionGlyphs = { "┼", "⊟", "Z", "×" },
         .splitLineGlyphs = { "│", "─" },
         .restartGlyph = "↩",
         .closeGlyph = "×",
