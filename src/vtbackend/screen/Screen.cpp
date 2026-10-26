@@ -8704,131 +8704,155 @@ unique_ptr<ParserExtension> Screen::hookDECUDK(Sequence const& seq)
         [this, clearAll, locked](string_view data) { _terminal->programUDK(clearAll, locked, data); });
 }
 
+namespace
+{
+    /// @p searchText as a literal query under @p mode; nothing for an empty needle, which matches nothing.
+    [[nodiscard]] optional<SearchQuery> literalQuery(std::u32string_view searchText,
+                                                     SearchCaseSensitivity mode)
+    {
+        if (searchText.empty())
+            return nullopt;
+        // A literal always compiles, and with no whole-word option reads no delimiter.
+        return SearchQuery::compile(searchText, SearchOptions { .caseSensitivity = mode }, {}).value();
+    }
+} // namespace
+
 optional<CellLocation> Screen::search(std::u32string_view searchText,
                                       CellLocation startPosition,
-                                      SearchCaseSensitivity mode)
+                                      SearchCaseSensitivity mode) const
 {
-    return searchFrom(searchText, startPosition, caseComparisonFor(searchText, mode));
-}
-
-optional<CellLocation> Screen::searchFrom(std::u32string_view searchText,
-                                          CellLocation startPosition,
-                                          CaseComparison comparison)
-{
-    if (searchText.empty())
+    auto const query = literalQuery(searchText, mode);
+    if (!query)
         return nullopt;
-
-    // A start past the end of its row begins at the next one; the find bar steps there from a match on
-    // the last column.
-    auto const columns = unbox<int>(pageSize().columns);
-    if (unbox(startPosition.column) >= columns)
-    {
-        ++startPosition.line;
-        startPosition.column = ColumnOffset(0);
-    }
-
-    auto const firstLine = std::max(unbox(startPosition.line), -unbox<int>(historyLineCount()));
-    for (auto const line: std::views::iota(firstLine, unbox<int>(pageSize().lines)))
-    {
-        auto const firstColumn = line == unbox(startPosition.line) ? unbox(startPosition.column) : 0;
-        for (auto const column: std::views::iota(firstColumn, columns))
-        {
-            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
-            if (_grid.textMatchesAt(searchText, candidate, comparison))
-                return candidate;
-        }
-    }
-    return nullopt;
+    // A literal never gives up: only a regex can be too complex.
+    return searchFrom(*query, startPosition).value_or(nullopt);
 }
 
 optional<CellLocation> Screen::searchReverse(std::u32string_view searchText,
                                              CellLocation startPosition,
-                                             SearchCaseSensitivity mode)
+                                             SearchCaseSensitivity mode) const
 {
-    return searchReverseFrom(searchText, startPosition, caseComparisonFor(searchText, mode));
+    auto const query = literalQuery(searchText, mode);
+    if (!query)
+        return nullopt;
+    return searchReverseFrom(*query, startPosition).value_or(nullopt);
 }
 
-optional<CellLocation> Screen::searchReverseFrom(std::u32string_view searchText,
-                                                 CellLocation startPosition,
-                                                 CaseComparison comparison)
+std::expected<optional<CellLocation>, SearchPatternError> Screen::searchFrom(SearchQuery const& query,
+                                                                             CellLocation startPosition) const
 {
-    if (searchText.empty())
+    // A start past the end of its row begins at the next one; the find bar steps there from a match on
+    // the last column.
+    if (startPosition.column >= boxed_cast<ColumnOffset>(pageSize().columns))
+    {
+        ++startPosition.line;
+        startPosition.column = ColumnOffset(0);
+    }
+    auto const historyTop = -boxed_cast<LineOffset>(historyLineCount());
+    if (startPosition.line < historyTop)
+        startPosition = CellLocation { .line = historyTop, .column = ColumnOffset(0) };
+    if (startPosition.line >= boxed_cast<LineOffset>(pageSize().lines))
         return nullopt;
 
-    auto const columns = unbox<int>(pageSize().columns);
-    auto const lastLine = std::min(unbox(startPosition.line), unbox<int>(pageSize().lines) - 1);
-    auto const firstLine = -unbox<int>(historyLineCount());
-    for (auto const line: std::views::iota(firstLine, lastLine + 1) | std::views::reverse)
+    auto segment = optional { searchSegmentAt(_grid, startPosition.line) };
+    while (segment)
     {
-        auto const lastColumn = line == unbox(startPosition.line)
-                                    ? std::min(unbox(startPosition.column), columns - 1)
-                                    : columns - 1;
-        for (auto const column: std::views::iota(0, lastColumn + 1) | std::views::reverse)
-        {
-            auto const candidate = CellLocation { .line = LineOffset(line), .column = ColumnOffset(column) };
-            if (_grid.textMatchesAt(searchText, candidate, comparison))
-                return candidate;
-        }
+        auto const matches = query.matchesIn(_grid, *segment);
+        if (!matches)
+            return std::unexpected { matches.error() };
+        auto const match = std::ranges::find_if(*matches, [startPosition](CellLocationRange const& range) {
+            return range.first >= startPosition;
+        });
+        if (match != matches->end())
+            return match->first;
+        segment = nextSearchSegment(_grid, *segment);
     }
     return nullopt;
+}
+
+std::expected<optional<CellLocation>, SearchPatternError> Screen::searchReverseFrom(
+    SearchQuery const& query, CellLocation startPosition) const
+{
+    auto const lastLine = boxed_cast<LineOffset>(pageSize().lines) - 1;
+    if (startPosition.line > lastLine)
+        startPosition =
+            CellLocation { .line = lastLine, .column = boxed_cast<ColumnOffset>(pageSize().columns) };
+    if (startPosition.line < -boxed_cast<LineOffset>(historyLineCount()))
+        return nullopt;
+
+    auto segment = optional { searchSegmentAt(_grid, startPosition.line) };
+    while (segment)
+    {
+        auto const matches = query.matchesIn(_grid, *segment);
+        if (!matches)
+            return std::unexpected { matches.error() };
+        auto const backwards = *matches | std::views::reverse;
+        auto const match = std::ranges::find_if(backwards, [startPosition](CellLocationRange const& range) {
+            return range.first <= startPosition;
+        });
+        if (match != backwards.end())
+            return match->first;
+        segment = previousSearchSegment(_grid, *segment);
+    }
+    return nullopt;
+}
+
+std::expected<optional<CellLocationRange>, SearchPatternError> Screen::matchStartingAt(
+    SearchQuery const& query, CellLocation start) const
+{
+    if (start.line < -boxed_cast<LineOffset>(historyLineCount())
+        || start.line >= boxed_cast<LineOffset>(pageSize().lines))
+        return nullopt;
+    auto const matches = query.matchesIn(_grid, searchSegmentAt(_grid, start.line));
+    if (!matches)
+        return std::unexpected { matches.error() };
+    auto const match = std::ranges::find(*matches, start, &CellLocationRange::first);
+    if (match == matches->end())
+        return nullopt;
+    return *match;
 }
 
 SearchMatchTally Screen::tallyMatches(std::u32string_view searchText,
                                       CellLocation position,
                                       SearchCaseSensitivity mode,
-                                      size_t limit)
+                                      size_t limit) const
+{
+    auto const query = literalQuery(searchText, mode);
+    if (!query)
+        return SearchMatchTally {};
+    return tallyMatches(*query, position, limit).value_or(SearchMatchTally {});
+}
+
+std::expected<SearchMatchTally, SearchPatternError> Screen::tallyMatches(SearchQuery const& query,
+                                                                         CellLocation position,
+                                                                         size_t limit) const
 {
     auto tally = SearchMatchTally {};
-    if (searchText.empty() || limit == 0)
+    if (limit == 0)
         return tally;
 
-    auto const lastLine = boxed_cast<LineOffset>(pageSize().lines) - 1;
-    auto const lastColumn = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
-
-    // The cell after @p location, or nullopt at the very end of the grid. Advancing by ONE cell (and
-    // not by the needle's length) is what keeps this count in step with searchNextMatch(), which does
-    // the same -- so overlapping matches, which navigation does visit, are counted rather than hidden.
-    auto const advance = [&](CellLocation location) -> optional<CellLocation> {
-        if (location.column < lastColumn)
-        {
-            ++location.column;
-            return location;
-        }
-        if (location.line < lastLine)
-        {
-            ++location.line;
-            location.column = ColumnOffset(0);
-            return location;
-        }
-        return nullopt;
-    };
-
-    auto cursor =
-        CellLocation { .line = -boxed_cast<LineOffset>(historyLineCount()), .column = ColumnOffset(0) };
-
-    // Resolved once for the whole walk, not per match. @see searchFrom.
-    auto const comparison = caseComparisonFor(searchText, mode);
-
-    while (auto const match = searchFrom(searchText, cursor, comparison))
+    auto const historyTop = -boxed_cast<LineOffset>(historyLineCount());
+    auto segment = optional { searchSegmentAt(_grid, historyTop) };
+    while (segment)
     {
-        if (tally.total == limit)
+        auto const matches = query.matchesIn(_grid, *segment);
+        if (!matches)
+            return std::unexpected { matches.error() };
+        for (auto const& match: *matches)
         {
-            // A match exists beyond the limit, so the count the caller gets is a floor rather than a
-            // total. Saying so is the whole point of the flag: "9999" and "9999+" mean different things.
-            tally.exactness = TallyExactness::Capped;
-            break;
+            if (tally.total == limit)
+            {
+                // A match exists beyond the limit, so the count the caller gets is a floor rather than a
+                // total. Saying so is the whole point of the flag: "9999" and "9999+" mean different things.
+                tally.exactness = TallyExactness::Capped;
+                return tally;
+            }
+            ++tally.total;
+            if (match.first == position)
+                tally.ordinal = tally.total;
         }
-
-        ++tally.total;
-        if (*match == position)
-            tally.ordinal = tally.total;
-
-        auto const next = advance(*match);
-        if (!next)
-            break;
-        cursor = *next;
+        segment = nextSearchSegment(_grid, *segment);
     }
-
     return tally;
 }
 

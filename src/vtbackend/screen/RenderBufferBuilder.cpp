@@ -710,54 +710,30 @@ void RenderBufferBuilder::prepareSearchHighlights(LineOffset gridLine)
         return;
 
     auto const& search = _terminal->search();
-    if (search.pattern.empty())
+    if (!search.query || _searchFailure)
         return;
 
     auto const& grid = _screen->grid();
-    auto const pattern = u32string_view(search.pattern);
     auto const columns = unbox(grid.pageSize().columns);
 
-    // A match that reaches this row may begin on a row above it in the same logical line. Each row above
-    // that holds text gives it at least one codepoint of the needle, so it begins no further up than the
-    // needle has codepoints in rows that hold text. A row holding none -- all of it a tall block's lower
-    // part -- gives the match nothing, and costs nothing to cross.
-    auto const holdsText = [&grid](LineOffset row) {
-        auto const& line = grid.lineAt(row);
-        auto const& storage = line.storage();
-        return !line.isBlank()
-               && std::ranges::any_of(
-                   std::views::iota(size_t { 0 }, unbox<size_t>(line.size())), [&storage](size_t column) {
-                       return storage.clusterSize[column] != 0 && !holdsNoText(storage, column);
-                   });
-    };
-    auto firstRow = gridLine;
-    auto rowsWithText = size_t { 0 };
-    while (rowsWithText < pattern.size() && grid.continuesRowAbove(firstRow))
+    if (auto const segment = searchSegmentAt(grid, gridLine); segment != _searchSegment)
     {
-        --firstRow;
-        if (holdsText(firstRow))
-            ++rowsWithText;
-    }
-    if (_searchScannedThrough)
-        firstRow = max(firstRow, *_searchScannedThrough + 1);
-
-    auto const cursor = _terminal->normalModeCursorPosition();
-    for (auto const row: std::views::iota(unbox(firstRow), unbox(gridLine) + 1))
-    {
-        for (auto const column: std::views::iota(0, columns))
+        _searchSegment = segment;
+        auto const matches = search.query->matchesIn(grid, segment);
+        if (!matches)
         {
-            auto const first = CellLocation { .line = LineOffset(row), .column = ColumnOffset(column) };
-            if (auto const last = grid.matchedTextEnd(pattern, first, search.comparison))
-                _searchMatches.push_back(SearchMatch {
-                    .first = first,
-                    .last = *last,
-                    .highlight = CellLocationRange { .first = first, .second = *last }.contains(cursor)
-                                     ? SearchHighlight::FocusedMatch
-                                     : SearchHighlight::Match,
-                });
+            _searchFailure = matches.error();
+            _searchMatches.clear();
+            return;
         }
+        auto const cursor = _terminal->normalModeCursorPosition();
+        for (auto const& match: *matches)
+            _searchMatches.push_back(SearchMatch {
+                .first = match.first,
+                .last = match.second,
+                .highlight = match.contains(cursor) ? SearchHighlight::FocusedMatch : SearchHighlight::Match,
+            });
     }
-    _searchScannedThrough = max(_searchScannedThrough.value_or(gridLine), gridLine);
 
     // A match that ends above this row reaches no row still to come.
     std::erase_if(_searchMatches,

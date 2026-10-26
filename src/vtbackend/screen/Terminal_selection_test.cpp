@@ -170,7 +170,7 @@ TEST_CASE("Terminal.plain_drag_selection_does_not_overwrite_the_search_pattern",
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
 
     // Seed a search pattern the way a user typing into the find bar would.
-    mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    (void) mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
     REQUIRE(mock.terminal.search().pattern == U"needle");
 
     // An ordinary single-click drag across two lines -- not a double/triple-click word selection.
@@ -211,7 +211,7 @@ TEST_CASE("Terminal.word_selection_across_a_soft_wrap_still_updates_the_search_p
     auto constexpr UiHandledHint = false;
     auto constexpr PixelCoordinate = vtbackend::PixelCoordinate {};
 
-    mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
+    (void) mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed);
     REQUIRE(mock.terminal.search().pattern == U"needle");
 
     // Double-click inside the word: two presses at the same cell, inside the one-second window.

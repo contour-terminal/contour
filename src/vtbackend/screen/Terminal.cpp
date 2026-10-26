@@ -1260,9 +1260,8 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     // a hint session is active every line must take the per-cell path, or a label on a plain line —
     // the common case — would never be drawn. Grid::render reuses its search-highlight flag as that
     // per-cell switch.
-    auto const renderLinesPerCell = (!_search.pattern.empty() || isHintModeActive())
-                                        ? HighlightSearchMatches::Yes
-                                        : HighlightSearchMatches::No;
+    auto const renderLinesPerCell =
+        (_search.query || isHintModeActive()) ? HighlightSearchMatches::Yes : HighlightSearchMatches::No;
 
     auto const theCursorPosition = [&]() -> std::optional<CellLocation> {
         if (inputHandler().mode() == ViMode::Insert)
@@ -1306,6 +1305,14 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
             builder, _viewport.scrollOffset(), renderLinesPerCell, smoothScrollExtra, foldProjection());
     else
         _lastRenderPassHints = displayedScreen.render(builder, _viewport.scrollOffset(), renderLinesPerCell);
+
+    // A query the highlighter found too complex to match is ended here, under the lock this pass holds, so
+    // the next frame runs no matcher at all and the find bar can say why (R-f).
+    if (auto const failure = builder.searchFailure())
+    {
+        _search.problem = failure;
+        _search.query.reset();
+    }
 
     // After both branches: the gutter and the fold labels belong to the main display whichever page it is
     // showing, and each is a no-op on a page folding does not apply to.
@@ -2070,7 +2077,9 @@ void Terminal::updateSelectionMatches()
         return;
 
     auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
-    setNewSearchTerm(text32, SearchOrigin::DoubleClick);
+    // A double-clicked word is literal (R-g), and a literal always compiles: there is no error to report.
+    [[maybe_unused]] auto const installed = setNewSearchTerm(text32, SearchOrigin::DoubleClick);
+    assert(installed.has_value());
 }
 
 void Terminal::setStatusLineDefinition(StatusLineDefinition&& definition)
@@ -8543,38 +8552,106 @@ void Terminal::setUserInputLock(UserInputLock lock)
     }
 }
 
-bool Terminal::setNewSearchTerm(std::u32string text, SearchOrigin origin)
+namespace
 {
+    /// The options @p origin reads a pattern with: a word taken from the screen is text, whatever the toggles
+    /// say (R-g), so a double-clicked `a+b` or a `*` on `f(x)` finds just that.
+    [[nodiscard]] SearchOptions effectiveSearchOptions(SearchOptions options, SearchOrigin origin) noexcept
+    {
+        switch (origin)
+        {
+            case SearchOrigin::Typed: break;
+            case SearchOrigin::DoubleClick:
+            case SearchOrigin::WordUnderCursor: options.syntax = SearchSyntax::Literal; break;
+        }
+        return options;
+    }
+} // namespace
+
+std::expected<SearchChange, SearchPatternError> Terminal::installSearch(std::u32string pattern,
+                                                                        SearchOptions options,
+                                                                        SearchOrigin origin)
+{
+    auto const patternChanged = _search.pattern != pattern;
+    auto const optionsChanged = _search.options != options;
+    auto const readingChanged =
+        effectiveSearchOptions(_search.options, _search.origin) != effectiveSearchOptions(options, origin);
+    _search.options = options;
     _search.origin = origin;
 
-    if (_search.pattern == text)
-        return false;
+    if (!patternChanged && !readingChanged)
+    {
+        if (_search.problem)
+            return std::unexpected { *_search.problem };
+        return optionsChanged ? SearchChange::Changed : SearchChange::Unchanged;
+    }
 
-    _search.pattern = std::move(text);
-    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
-    publishBindingModes();
-    return true;
+    _search.pattern = std::move(pattern);
+    _search.query.reset();
+    _search.problem.reset();
+    if (!_search.pattern.empty())
+    {
+        auto compiled = SearchQuery::compile(
+            _search.pattern, effectiveSearchOptions(options, origin), _settings.wordDelimiters);
+        if (compiled)
+            _search.query = std::make_shared<SearchQuery const>(std::move(*compiled));
+        else
+            _search.problem = compiled.error();
+    }
+    if (patternChanged)
+        publishBindingModes();
+
+    if (_search.problem)
+        return std::unexpected { *_search.problem };
+    return SearchChange::Changed;
 }
 
-bool Terminal::setSearchCaseSensitivity(SearchCaseSensitivity mode)
+std::expected<SearchChange, SearchPatternError> Terminal::setNewSearchTerm(std::u32string text,
+                                                                           SearchOrigin origin)
 {
-    if (_search.caseSensitivity == mode)
-        return false;
+    return installSearch(std::move(text), _search.options, origin);
+}
 
-    _search.caseSensitivity = mode;
-    _search.comparison = caseComparisonFor(_search.pattern, mode);
-    return true;
+std::expected<SearchChange, SearchPatternError> Terminal::setSearchOptions(SearchOptions options)
+{
+    return installSearch(_search.pattern, options, _search.origin);
+}
+
+std::optional<CellLocation> Terminal::settleSearch(
+    std::expected<std::optional<CellLocation>, SearchPatternError> result)
+{
+    if (result)
+        return *result;
+    _search.problem = result.error();
+    _search.query.reset();
+    return std::nullopt;
+}
+
+std::optional<CellLocationRange> Terminal::focusedSearchMatch() const
+{
+    if (!_search.query)
+        return std::nullopt;
+    // Const, so a failure to match cannot end the query here; it reads as no match, and the next step or
+    // count that meets it ends the query.
+    return displayedPage().matchStartingAt(*_search.query, normalModeCursorPosition()).value_or(std::nullopt);
 }
 
 SearchMatchTally Terminal::tallySearchMatches(CellLocation position, size_t limit)
 {
-    return displayedPage().tallyMatches(
-        u32string_view(_search.pattern), position, _search.caseSensitivity, limit);
+    if (!_search.query)
+        return SearchMatchTally {};
+    auto const tally = displayedPage().tallyMatches(*_search.query, position, limit);
+    if (tally)
+        return *tally;
+    _search.problem = tally.error();
+    _search.query.reset();
+    return SearchMatchTally {};
 }
 
 optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
 {
-    if (!setNewSearchTerm(std::move(text), SearchOrigin::Typed))
+    auto const change = setNewSearchTerm(std::move(text), SearchOrigin::WordUnderCursor);
+    if (change && *change == SearchChange::Unchanged)
         return searchPosition;
 
     return searchReverse(searchPosition);
@@ -8582,11 +8659,11 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
 
 optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
-    auto const searchText = u32string_view(_search.pattern);
-    // Through the cached comparison rather than the policy: Search::comparison is kept in step with
-    // the pattern by this class's own setters, and re-deriving it here would put a UCD lookup per
-    // codepoint of the needle on every keystroke of an incremental search. @see Search::comparison.
-    auto const matchLocation = displayedPage().searchFrom(searchText, searchPosition, _search.comparison);
+    // Through the compiled query: compiling it, and resolving its case policy, is done once per pattern by
+    // this class's own setters, never per keystroke of an incremental search.
+    auto const matchLocation = _search.query
+                                   ? settleSearch(displayedPage().searchFrom(*_search.query, searchPosition))
+                                   : std::nullopt;
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
@@ -8626,11 +8703,10 @@ std::optional<CellLocation> Terminal::searchPrevMatch(CellLocation cursorPositio
 void Terminal::clearSearch()
 {
     _search.pattern.clear();
+    _search.query.reset();
+    _search.problem.reset();
     publishBindingModes();
     _search.origin = SearchOrigin::Typed;
-    // Kept in step with the (now empty) pattern by the same rule the setters use, rather than pinned
-    // to a constant: an empty needle under a pinned Sensitive policy still compares exactly.
-    _search.comparison = caseComparisonFor(_search.pattern, _search.caseSensitivity);
 
     // The highlights of the pattern just dropped are still in the render buffer, and nothing on this
     // path rebuilds it -- unlike search()/searchReverse(). Raised as its own event rather than as
@@ -8662,10 +8738,10 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
 
 optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
-    auto const searchText = u32string_view(_search.pattern);
-    // The cached comparison, for the reason Terminal::search() states.
+    // Through the compiled query, for the reason Terminal::search() states.
     auto const matchLocation =
-        displayedPage().searchReverseFrom(searchText, searchPosition, _search.comparison);
+        _search.query ? settleSearch(displayedPage().searchReverseFrom(*_search.query, searchPosition))
+                      : std::nullopt;
 
     if (matchLocation)
         viewport().makeVisibleWithinSafeArea(matchLocation.value().line);

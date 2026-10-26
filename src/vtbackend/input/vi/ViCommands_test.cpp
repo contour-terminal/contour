@@ -487,6 +487,19 @@ TEST_CASE("vi.motion: % matches the bracket on the screen the cursor walks", "[v
     CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 6_columnOffset);
 }
 
+TEST_CASE("vi.search: * searches the word under the cursor literally while the regex toggle is on", "[vi]")
+{
+    // `*` takes a word from the screen, which is text: under the regex toggle "a.b" would also find "axb".
+    auto mock = setupMockTerminal(
+        "a.b axb a.b", vtbackend::PageSize { vtbackend::LineCount(4), vtbackend::ColumnCount(20) });
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = vtbackend::SearchSyntax::Regex }).has_value());
+
+    mock.sendCharSequence("*");
+    CHECK(mock.terminal.search().pattern == U"a.b");
+    CHECK(mock.terminal.normalModeCursorPosition() == 0_lineOffset + 8_columnOffset);
+    CHECK(mock.terminal.search().options.syntax == vtbackend::SearchSyntax::Regex);
+}
+
 TEST_CASE("ViCommands:modeChanged", "[vi]")
 {
     auto mock = setupMockTerminal(
@@ -494,7 +507,7 @@ TEST_CASE("ViCommands:modeChanged", "[vi]")
 
     SECTION("clearSearch() must be invoked when switch to ViMode::Insert")
     {
-        mock.terminal.setNewSearchTerm(U"search_term", vtbackend::SearchOrigin::DoubleClick);
+        (void) mock.terminal.setNewSearchTerm(U"search_term", vtbackend::SearchOrigin::DoubleClick);
         mock.terminal.inputHandler().setMode(vtbackend::ViMode::Insert);
         REQUIRE(mock.terminal.search().pattern.empty());
     }

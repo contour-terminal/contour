@@ -2801,12 +2801,15 @@ void TerminalSession::setSearchPattern(QString const& pattern)
             // Two steps rather than searchReverse(text, pos): that overload short-circuits when the
             // term is unchanged and hands back the position it was given, which is indistinguishable
             // from a match. Here the result has to actually mean "found something".
-            (void) _terminal.setNewSearchTerm(std::move(text), vtbackend::SearchOrigin::Typed);
+            auto const installed =
+                _terminal.setNewSearchTerm(std::move(text), vtbackend::SearchOrigin::Typed);
 
             // Backwards from the cursor, which is what the terminal's search has always done and what
             // makes an incremental search land on the nearest match behind you rather than jumping to
             // the top of the scrollback on every keystroke.
-            auto const match = _terminal.searchReverse(_terminal.normalModeCursorPosition());
+            // A pattern that does not compile has no query and so no match; Search::problem says why.
+            auto const match =
+                installed ? _terminal.searchReverse(_terminal.normalModeCursorPosition()) : std::nullopt;
             if (match)
             {
                 // The cursor MUST follow the match, exactly as the vi `/` flow did. Three things read
@@ -2849,9 +2852,12 @@ void TerminalSession::cycleSearchCaseSensitivity()
     {
         auto const _ = std::scoped_lock { _terminal };
         // Unconditional: nextSearchCase() never answers with the policy it was given, so
-        // setSearchCaseSensitivity() cannot report "already in effect" here and testing it would only
+        // setSearchOptions() cannot report "already in effect" here and testing it would only
         // suggest it could.
-        (void) _terminal.setSearchCaseSensitivity(nextSearchCase(_terminal.search().caseSensitivity));
+        auto options = _terminal.search().options;
+        options.caseSensitivity = nextSearchCase(options.caseSensitivity);
+        // Its error, where the pattern does not compile under them, is held by Search::problem.
+        std::ignore = _terminal.setSearchOptions(options);
 
         // Only the RE-SEARCH is skipped without a pattern, never the refresh and the notify below: the
         // glyph and the tooltip changed regardless, and the bar has to be told.
@@ -2985,8 +2991,8 @@ QString TerminalSession::renderSearchCaseTooltip(vtbackend::SearchCaseSensitivit
 void TerminalSession::refreshSearchStatusLocked()
 {
     auto const& search = _terminal.search();
-    _searchCase = describeSearchCase(search.caseSensitivity);
-    _searchCaseTooltip = renderSearchCaseTooltip(search.caseSensitivity);
+    _searchCase = describeSearchCase(search.options.caseSensitivity);
+    _searchCaseTooltip = renderSearchCaseTooltip(search.options.caseSensitivity);
     // Cached rather than read through on demand: searchPattern() is a Q_PROPERTY whose NOTIFY is
     // searchStateChanged, so a binding woken by that signal reads it -- and if reading it took the
     // terminal lock, every emit made while holding that lock would deadlock. Caching it here makes
@@ -6315,7 +6321,9 @@ void TerminalSession::configureTerminal()
         // an open bar kept showing the lit glyph of a mode the terminal had already stopped using.
         // Already under this function's own lock (see above) -- taking a second one here
         // self-deadlocks, because Terminal's state mutex is a plain non-recursive std::mutex.
-        (void) _terminal.setSearchCaseSensitivity(_profile.searchCaseSensitivity.value());
+        auto searchOptions = _terminal.search().options;
+        searchOptions.caseSensitivity = _profile.searchCaseSensitivity.value();
+        std::ignore = _terminal.setSearchOptions(searchOptions); // an error is held by Search::problem
         refreshSearchStatusLocked();
 
         // Posted rather than emitted: this runs under the lock, and a QML binding woken by this signal

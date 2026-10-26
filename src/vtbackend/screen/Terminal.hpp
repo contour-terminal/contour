@@ -26,6 +26,7 @@
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/LinkPresentation.hpp>
 #include <vtbackend/screen/ProgramStatusSet.hpp>
+#include <vtbackend/screen/SearchQuery.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
@@ -302,18 +303,19 @@ class Modes
 /// stepping afterwards. Terminal::clearSearch() is what ends it.
 struct Search
 {
-    std::u32string pattern;
-    SearchCaseSensitivity caseSensitivity = SearchCaseSensitivity::Smart;
-    SearchOrigin origin = SearchOrigin::Typed;
+    std::u32string pattern;                    ///< As the user gave it; kept when it does not compile.
+    SearchOptions options {};                  ///< The find bar's toggles, as the user set them.
+    SearchOrigin origin = SearchOrigin::Typed; ///< Where the pattern came from.
 
-    /// The cached result of caseComparisonFor(pattern, caseSensitivity).
+    /// The pattern compiled under the options its origin reads it with; null for an empty pattern, one that
+    /// does not compile, or one that proved too complex to match.
     ///
-    /// Derived, and maintained by Terminal's setters -- never assigned from anywhere else. It is
-    /// cached because RenderBufferBuilder asks it once per RENDERED CELL, and under the default Smart
-    /// policy the honest answer is a UCD lookup per codepoint of the needle: ~109ns against ~8ns for
-    /// the (incorrect) <cctype> test it replaced, which at 240x70 is over a millisecond per frame
-    /// spent re-deriving a constant.
-    CaseComparison comparison = CaseComparison::Folded;
+    /// Derived, and maintained by Terminal's setters -- never assigned from anywhere else. Shared, so that a
+    /// reader working through the grid in steps keeps the query it began with.
+    std::shared_ptr<SearchQuery const> query {};
+
+    /// Why the pattern is not searched for, while it is not; nothing otherwise.
+    std::optional<SearchPatternError> problem {};
 };
 
 /// Folds the 7-bit C1 control introducers in a terminal reply to their single-byte 8-bit forms, as
@@ -3426,7 +3428,7 @@ class Terminal: public IStatusLinePublishTarget
     /// on the underlying std::string (torn read / use-after-free on reallocation).
     [[nodiscard]] std::optional<std::string> resolvedTabName() const;
     [[nodiscard]] bool focused() const noexcept { return _focused; }
-    /// Read-only by design: @c Search::comparison is a cache of the other two fields, and the setters
+    /// Read-only by design: @c Search::query is derived from the other fields, and the setters
     /// are what keep it in step. A mutable handle here is how the matcher and the highlighter came to
     /// disagree in the first place, so there is no longer one.
     [[nodiscard]] Search const& search() const noexcept { return _search; }
@@ -3704,10 +3706,12 @@ class Terminal: public IStatusLinePublishTarget
         return _userInputLock.load(std::memory_order_relaxed);
     }
 
-    // Sets the current search term to the given text and
-    // moves the viewport accordingly to make sure the given text is visible,
-    // or it will not move at all if the input text was not found.
-    // Every search reads the page on display, the one the viewport shows.
+    /// Searches backwards for the word vi's `*` and `#` took from under the cursor: installs @p text as the
+    /// pattern (SearchOrigin::WordUnderCursor, so always literal) and moves the viewport to make the match
+    /// visible. Every search reads the page on display, the one the viewport shows.
+    /// @param text           The word.
+    /// @param searchPosition Where to search backwards from.
+    /// @return The match; @p searchPosition itself where the word was already the pattern.
     [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string text, CellLocation searchPosition);
     [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
@@ -3717,16 +3721,27 @@ class Terminal: public IStatusLinePublishTarget
     [[nodiscard]] std::optional<CellLocation> searchNextMatch(CellLocation cursorPosition);
     [[nodiscard]] std::optional<CellLocation> searchPrevMatch(CellLocation cursorPosition);
 
-    /// Installs @p text as the active search pattern.
-    /// @param text   The needle. Replaces whatever was being searched for.
+    /// Installs @p text as the active search pattern, compiled under the search's options.
+    ///
+    /// A double-clicked word and the word vi's `*` and `#` search for are always literal, whatever the
+    /// options say; the options themselves are left as they are.
+    /// @param text   The needle. Replaces whatever was being searched for; empty ends the search's query.
     /// @param origin Where it came from; selects which highlight colors its matches take.
-    /// @return false if @p text was already the pattern, so callers can skip a redundant search.
-    bool setNewSearchTerm(std::u32string text, SearchOrigin origin);
+    /// @return Whether the pattern or how it is read changed, so callers can skip a redundant search; or why
+    ///         the pattern cannot be searched for, which Search::problem then holds too.
+    [[nodiscard]] std::expected<SearchChange, SearchPatternError> setNewSearchTerm(std::u32string text,
+                                                                                   SearchOrigin origin);
 
-    /// Re-points the active search at @p mode. Does not itself move the viewport or the cursor --
-    /// the caller re-runs the search, because only it knows where from.
-    /// @return false if @p mode was already in effect.
-    bool setSearchCaseSensitivity(SearchCaseSensitivity mode);
+    /// Re-points the active search at @p options, recompiling its pattern where they read it differently.
+    /// Does not itself move the viewport or the cursor -- the caller re-runs the search, because only it
+    /// knows where from.
+    /// @param options The find bar's toggles.
+    /// @return Whether they changed; or why the pattern cannot be searched for under them.
+    [[nodiscard]] std::expected<SearchChange, SearchPatternError> setSearchOptions(SearchOptions options);
+
+    /// The match of the active search that begins at the normal-mode cursor, on the page on display.
+    /// @return Its first cell and last column, or nothing where no match begins there.
+    [[nodiscard]] std::optional<CellLocationRange> focusedSearchMatch() const;
 
     /// Counts the active pattern's matches across the whole page on display, scrollback included, and
     /// locates @p position among them.
@@ -4225,6 +4240,19 @@ class Terminal: public IStatusLinePublishTarget
     /// state lock. Called by every writer of the state they name -- the screen, DECCKM, DECNKM, the
     /// selection and the search -- once it has changed it, under that lock.
     void publishBindingModes() noexcept;
+
+    /// Installs @p pattern, @p options and @p origin as the search, recompiling the query where the pattern
+    /// or the options its origin reads it with changed. @see setNewSearchTerm, setSearchOptions
+    [[nodiscard]] std::expected<SearchChange, SearchPatternError> installSearch(std::u32string pattern,
+                                                                                SearchOptions options,
+                                                                                SearchOrigin origin);
+
+    /// A search's answer, with a failure to match (R-f) ending the query: Search::problem holds why, and
+    /// nothing highlights or steps until the pattern or the options change.
+    /// @param result What the page on display answered.
+    /// @return The match, or nothing where there is none or the query failed.
+    [[nodiscard]] std::optional<CellLocation> settleSearch(
+        std::expected<std::optional<CellLocation>, SearchPatternError> result);
 
     struct TheSelectionHelper: public vtbackend::SelectionHelper
     {

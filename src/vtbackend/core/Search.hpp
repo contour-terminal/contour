@@ -29,11 +29,14 @@ enum class SearchCaseSensitivity : uint8_t
 ///
 /// It selects between two named highlight vocabularies rather than reporting a yes/no fact: a
 /// pattern the user typed paints @c ColorPalette::searchHighlight, while one the terminal derived
-/// from a double-click paints @c wordHighlight. @see RenderBufferBuilder.
+/// from a double-click paints @c wordHighlight. @see RenderBufferBuilder. It also decides how the
+/// pattern is read: a word taken from the screen is text, never a regex, whatever the find bar's
+/// toggles say.
 enum class SearchOrigin : uint8_t
 {
-    Typed = 0,   //!< Entered into the find bar, or by a vi-mode search.
-    DoubleClick, //!< Derived from the selection, to visualize the selected word.
+    Typed = 0,       //!< Entered into the find bar.
+    DoubleClick,     //!< Derived from the selection, to visualize the selected word.
+    WordUnderCursor, //!< The word under the cursor, as vi's `*` and `#` search for it.
 };
 
 /// Whether the renderer paints search matches at all.

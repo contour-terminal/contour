@@ -3641,6 +3641,69 @@ TEST_CASE("search.highlightReachesAcrossRowsWithoutText", "[screen]")
     CHECK(highlightedCells(mock, U"aBb") == std::set<std::pair<int, int>> { { 0, 0 } });
 }
 
+TEST_CASE("search.regexStepsAndWholeWordSkipsPartialWords", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };
+    mock.writeToScreen("cat concat cat");
+    REQUIRE(mock.terminal.setSearchOptions({ .wordBoundary = SearchWordBoundary::WholeWord }).has_value());
+    REQUIRE(mock.terminal.setNewSearchTerm(U"cat", SearchOrigin::Typed).has_value());
+
+    // The "cat" that ends "concat" at column 7 is no word of its own.
+    CHECK(mock.terminal.searchNextMatch(CellLocation { LineOffset(0), ColumnOffset(0) })
+          == CellLocation { LineOffset(0), ColumnOffset(11) });
+}
+
+TEST_CASE("search.invalidRegexHighlightsNothingAndSaysWhy", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("xa(b");
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+
+    auto const invalid = mock.terminal.setNewSearchTerm(U"a(", SearchOrigin::Typed);
+    REQUIRE_FALSE(invalid.has_value());
+    CHECK(invalid.error() == SearchPatternError::InvalidSyntax);
+    CHECK(mock.terminal.search().problem == SearchPatternError::InvalidSyntax);
+    CHECK(mock.terminal.search().query == nullptr);
+    CHECK(mock.terminal.search().pattern == U"a(");
+    CHECK_FALSE(mock.terminal.search(CellLocation {}).has_value());
+    // Not even the text "a(" itself, which a literal search would find.
+    CHECK(highlightedCells(mock, U"a(").empty());
+
+    CHECK(mock.terminal.setNewSearchTerm(U"a", SearchOrigin::Typed).has_value());
+    CHECK_FALSE(mock.terminal.search().problem.has_value());
+    CHECK(mock.terminal.search().query != nullptr);
+}
+
+TEST_CASE("search.optionsReportWhetherTheyChanged", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    REQUIRE(mock.terminal.setNewSearchTerm(U"a", SearchOrigin::Typed) == SearchChange::Changed);
+    auto const wholeWord = SearchOptions { .wordBoundary = SearchWordBoundary::WholeWord };
+
+    CHECK(mock.terminal.setSearchOptions(wholeWord) == SearchChange::Changed);
+    CHECK(mock.terminal.setSearchOptions(wholeWord) == SearchChange::Unchanged);
+    CHECK(mock.terminal.setSearchOptions(
+              { .syntax = SearchSyntax::Regex, .wordBoundary = SearchWordBoundary::WholeWord })
+          == SearchChange::Changed);
+    CHECK(mock.terminal.setNewSearchTerm(U"a", SearchOrigin::Typed) == SearchChange::Unchanged);
+}
+
+TEST_CASE("search.doubleClickWordIsLiteralUnderRegex", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("aab a+b");
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+
+    CHECK(mock.terminal.setNewSearchTerm(U"a+b", SearchOrigin::DoubleClick).has_value());
+    // The text "a+b", not the regex's "aab".
+    CHECK(mock.terminal.search(CellLocation {}) == CellLocation { LineOffset(0), ColumnOffset(4) });
+    CHECK(mock.terminal.search().options.syntax == SearchSyntax::Regex);
+
+    // Typed, the same pattern is the regex again.
+    CHECK(mock.terminal.setNewSearchTerm(U"a+b", SearchOrigin::Typed) == SearchChange::Changed);
+    CHECK(mock.terminal.search(CellLocation {}) == CellLocation { LineOffset(0), ColumnOffset(0) });
+}
+
 TEST_CASE("Screen.screenshot.startsWhereTheReplayingCursorIs", "[screen]")
 {
     // The state dump (Screen::inspect) prints the screenshot between lines of its own, into a log or a

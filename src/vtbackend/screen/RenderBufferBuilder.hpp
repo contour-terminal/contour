@@ -63,6 +63,11 @@ class RenderBufferBuilder
                         FrameLinks links,
                         RenderedDisplay display);
 
+    /// Why the search's query could not be matched while this pass painted its highlights, so the terminal
+    /// can end the query (R-f): the builder reads the terminal as const, and cannot.
+    /// @return SearchPatternError::TooComplex where the regex engine gave up; nothing otherwise.
+    [[nodiscard]] std::optional<SearchPatternError> searchFailure() const noexcept { return _searchFailure; }
+
     /// Renders grid row @p line as host chrome copying it: its own colours, SGR and hyperlinks, but no
     /// cursor, selection, search match or yank highlight -- those describe the row where it really is.
     ///
@@ -270,9 +275,10 @@ class RenderBufferBuilder
 
     /// Works out which cells of grid row @p gridLine the search highlights, into _rowSearchHighlights.
     ///
-    /// The matches are the search's own (Grid::matchedTextEnd), found only among the rows a match reaching
-    /// this one can begin on: the rows rendered before it, and those above it in its logical line. Rows
-    /// arrive top to bottom, so each candidate start is tried once per pass.
+    /// The matches are the search query's own (SearchQuery::matchesIn), asked once per pass for the segment
+    /// holding the row: rows arrive top to bottom, and the rows of one segment ask once between them. A
+    /// match that ends past its segment -- a literal across a cut -- is kept until its last row is painted.
+    /// A query the engine finds too complex paints nothing, and is not asked again this pass.
     /// @param gridLine The grid row about to be rendered cell by cell.
     void prepareSearchHighlights(LineOffset gridLine);
 
@@ -366,8 +372,11 @@ class RenderBufferBuilder
     /// The search matches found so far this pass that may still reach the row being rendered.
     std::vector<SearchMatch> _searchMatches;
 
-    /// The last grid row whose cells have all been tried as the start of a match this pass.
-    std::optional<LineOffset> _searchScannedThrough;
+    /// The segment whose matches were last added to _searchMatches this pass.
+    std::optional<SearchSegment> _searchSegment;
+
+    /// Why the search query could not be matched this pass; nothing while it could. @see searchFailure
+    std::optional<SearchPatternError> _searchFailure;
 
     /// How each cell of the row being rendered is painted for the search, by column; empty for none.
     std::vector<SearchHighlight> _rowSearchHighlights;

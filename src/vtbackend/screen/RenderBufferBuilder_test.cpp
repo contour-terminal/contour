@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <ranges>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -89,6 +90,43 @@ HyperlinkId replaceRowWithLinkedText(MockTerm<>& mock, LineOffset row, std::stri
     std::ignore = writeTextToSoA(soa, 0, text, GraphicsAttributes {}, link, /*asciiHint=*/true);
     mock.terminal.primaryScreen().grid().lineAt(row) = Line(LineFlags {}, std::move(soa), columns);
     return link;
+}
+
+/// The background a cell matched by the search is painted in, and the one of the match the cursor is on.
+constexpr auto SearchMatched = RGBColor { 0xAB, 0xCD, 0xEF };
+constexpr auto SearchFocused = RGBColor { 0x12, 0x34, 0x56 };
+
+/// How each column of grid row @p row is painted for @p pattern, read as a regex: 'm' a match, 'f' the match
+/// the vi cursor at @p cursor stands on, '.' neither.
+[[nodiscard]] std::string regexHighlightOf(MockTerm<>& mock,
+                                           std::u32string pattern,
+                                           CellLocation cursor,
+                                           int row)
+{
+    auto const paint = [](RGBColor background) {
+        return CellRGBColorAndAlphaPair { .foreground = RGBColor { 0, 0, 0 },
+                                          .foregroundAlpha = 1.0f,
+                                          .background = background,
+                                          .backgroundAlpha = 1.0f };
+    };
+    mock.terminal.colorPalette().searchHighlight = paint(SearchMatched);
+    mock.terminal.colorPalette().searchHighlightFocused = paint(SearchFocused);
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+    REQUIRE(mock.terminal.setNewSearchTerm(std::move(pattern), SearchOrigin::Typed).has_value());
+    mock.terminal.moveNormalModeCursorTo(cursor);
+    mock.terminal.refreshRenderBuffer(true);
+
+    auto painted = std::string(unbox<size_t>(mock.terminal.pageSize().columns), '?');
+    for (auto const& cell: mock.terminal.renderBuffer().get().cells)
+    {
+        if (unbox(cell.position.line) != row)
+            continue;
+        auto const background = cell.attributes.backgroundColor;
+        painted[unbox<size_t>(cell.position.column)] = background == SearchMatched   ? 'm'
+                                                       : background == SearchFocused ? 'f'
+                                                                                     : '.';
+    }
+    return painted;
 }
 } // namespace
 
@@ -570,3 +608,57 @@ TEST_CASE("RenderBufferBuilder.aStatusLineIsNoPartOfThePagesDetectedLinks", "[re
         cells, [](auto const& entry) { return entry.second.linkRole != LinkDecorationRole::None; }));
 }
 #endif
+
+TEST_CASE("search.regexHighlightPaintsTheMatchedCells", "[renderbuffer][search]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(12) } };
+    mock.writeToScreen("id 42 and 7");
+    CHECK(regexHighlightOf(mock, U"[0-9]+", CellLocation { LineOffset(0), ColumnOffset(10) }, 0)
+          == "...mm.....f.");
+}
+
+TEST_CASE("search.regexHighlightPaintsBothRowsOfAWrappedMatch", "[renderbuffer][search]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) } };
+    mock.writeToScreen("abc 12 de 345");
+    auto const elsewhere = CellLocation { LineOffset(1), ColumnOffset(9) };
+    CHECK(regexHighlightOf(mock, U"de 3", elsewhere, 0) == ".......mmm");
+    CHECK(regexHighlightOf(mock, U"de 3", elsewhere, 1) == "m.........");
+}
+
+TEST_CASE("search.regexHighlightCoversBothHalvesOfAWideCharacter", "[renderbuffer][search]")
+{
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+    mock.writeToScreen("x\xE6\x97\xA5y"); // x日y
+    CHECK(regexHighlightOf(mock, U"\u65E5", CellLocation { LineOffset(1), ColumnOffset(0) }, 0) == ".mm...");
+}
+
+TEST_CASE("search.aPatternTooComplexToHighlightEndsTheQuery", "[renderbuffer][search]")
+{
+    // (a+)+$ over a run of a's that ends in a b is exponential for a backtracking engine. Where the engine
+    // gives up (libc++, MSVC), one frame meets it, ends the query, and no later frame runs the matcher; where
+    // it does not (libstdc++'s breadth-first executor), the pattern simply matches nothing.
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(80) } };
+    mock.writeToScreen(std::string(60, 'a') + "b");
+    REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+    REQUIRE(mock.terminal.setNewSearchTerm(U"(a+)+$", SearchOrigin::Typed).has_value());
+    auto const query = mock.terminal.search().query;
+    REQUIRE(query != nullptr);
+    auto const& grid = mock.terminal.primaryScreen().grid();
+    auto const direct = query->matchesIn(grid, searchSegmentAt(grid, LineOffset(0)));
+
+    mock.terminal.refreshRenderBuffer(true);
+    if (direct)
+    {
+        CHECK(direct->empty());
+        CHECK(mock.terminal.search().query == query);
+        return;
+    }
+    CHECK(direct.error() == SearchPatternError::TooComplex);
+    CHECK(mock.terminal.search().problem == SearchPatternError::TooComplex);
+    CHECK(mock.terminal.search().query == nullptr);
+    CHECK(mock.terminal.search().pattern == U"(a+)+$");
+    // The next frame finds no query to run.
+    mock.terminal.refreshRenderBuffer(true);
+    CHECK(mock.terminal.search().query == nullptr);
+}
