@@ -4247,6 +4247,10 @@ class Terminal: public IStatusLinePublishTarget
                                                                                 SearchOptions options,
                                                                                 SearchOrigin origin);
 
+    /// Compiles Search::pattern under the options its origin reads it with and the current word delimiters,
+    /// into Search::query or, where it does not compile, Search::problem. An empty pattern leaves both empty.
+    void compileSearch();
+
     /// A search's answer, with a failure to match (R-f) ending the query: Search::problem holds why, and
     /// nothing highlights or steps until the pattern or the options change.
     /// @param result What the page on display answered.

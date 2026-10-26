@@ -3525,6 +3525,9 @@ void Terminal::setCursorShape(CursorShape shape)
 void Terminal::setWordDelimiters(string const& wordDelimiters)
 {
     _settings.wordDelimiters = unicode::from_utf8(wordDelimiters);
+    // A whole-word search reads the delimiters its query was compiled with, so a reload re-reads them.
+    if (!_search.pattern.empty())
+        compileSearch();
 }
 
 void Terminal::setExtendedWordDelimiters(string const& wordDelimiters)
@@ -8587,23 +8590,27 @@ std::expected<SearchChange, SearchPatternError> Terminal::installSearch(std::u32
     }
 
     _search.pattern = std::move(pattern);
-    _search.query.reset();
-    _search.problem.reset();
-    if (!_search.pattern.empty())
-    {
-        auto compiled = SearchQuery::compile(
-            _search.pattern, effectiveSearchOptions(options, origin), _settings.wordDelimiters);
-        if (compiled)
-            _search.query = std::make_shared<SearchQuery const>(std::move(*compiled));
-        else
-            _search.problem = compiled.error();
-    }
+    compileSearch();
     if (patternChanged)
         publishBindingModes();
 
     if (_search.problem)
         return std::unexpected { *_search.problem };
     return SearchChange::Changed;
+}
+
+void Terminal::compileSearch()
+{
+    _search.query.reset();
+    _search.problem.reset();
+    if (_search.pattern.empty())
+        return;
+    auto compiled = SearchQuery::compile(
+        _search.pattern, effectiveSearchOptions(_search.options, _search.origin), _settings.wordDelimiters);
+    if (compiled)
+        _search.query = std::make_shared<SearchQuery const>(std::move(*compiled));
+    else
+        _search.problem = compiled.error();
 }
 
 std::expected<SearchChange, SearchPatternError> Terminal::setNewSearchTerm(std::u32string text,

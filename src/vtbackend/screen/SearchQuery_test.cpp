@@ -253,7 +253,9 @@ TEST_CASE("searchQuery.blankRowsAndPaddingAreNotText", "[searchquery]")
         REQUIRE(gridOf(mock).isLineWrapped(LineOffset(1)));
         REQUIRE(gridOf(mock).isLineWrapped(LineOffset(2)));
         CHECK(spansOf(gridOf(mock), 0, U"a.b", RegexOptions).empty());
-        CHECK(spansOf(gridOf(mock), 0, U"a\\s*b", RegexOptions).size() == 1);
+        CHECK(spansOf(gridOf(mock), 0, U"a\\s*b", RegexOptions).empty());
+        CHECK(spansOf(gridOf(mock), 0, U"a[^x]b", RegexOptions).empty());
+        CHECK(spansOf(gridOf(mock), 0, U"a[\\s\\S]*b", RegexOptions).empty());
         CHECK(spansOf(gridOf(mock), 0, U"b") == std::vector<Span> { { 2, 0, 2, 0 } });
     }
 
@@ -263,7 +265,9 @@ TEST_CASE("searchQuery.blankRowsAndPaddingAreNotText", "[searchquery]")
         REQUIRE_FALSE(gridOf(mock).lineAt(LineOffset(1)).isBlank());
         REQUIRE(gridOf(mock).isLineWrapped(LineOffset(1)));
         CHECK(spansOf(gridOf(mock), 0, U"a.b", RegexOptions).empty());
-        CHECK(spansOf(gridOf(mock), 0, U"a\\s*b", RegexOptions).size() == 1);
+        CHECK(spansOf(gridOf(mock), 0, U"a\\s*b", RegexOptions).empty());
+        CHECK(spansOf(gridOf(mock), 0, U"a[^x]b", RegexOptions).empty());
+        CHECK(spansOf(gridOf(mock), 0, U"a[\\s\\S]*b", RegexOptions).empty());
     }
 }
 
@@ -305,6 +309,10 @@ TEST_CASE("searchQuery.segmentsCutALongLineAtFixedRows", "[searchquery]")
     CHECK(vtbackend::nextSearchSegment(grid, segment(368, Rows - 1)) == std::nullopt);
     CHECK(vtbackend::previousSearchSegment(grid, segment(184, 367)) == segment(0, 183));
     CHECK(vtbackend::previousSearchSegment(grid, segment(0, 183)) == std::nullopt);
+    // Stepping within the line, both ways, lands on the cuts searchSegmentAt() makes.
+    CHECK(vtbackend::nextSearchSegment(grid, segment(184, 367)) == segment(368, Rows - 1));
+    CHECK(vtbackend::previousSearchSegment(grid, segment(368, Rows - 1)) == segment(184, 367));
+    CHECK(vtbackend::searchSegmentAt(grid, LineOffset(Rows - 1)) == segment(368, Rows - 1));
 }
 
 TEST_CASE("searchQuery.aLiteralSpansASegmentCutButARegexDoesNot", "[searchquery]")
@@ -323,4 +331,35 @@ TEST_CASE("searchQuery.aLiteralSpansASegmentCutButARegexDoesNot", "[searchquery]
     CHECK(spansOf(grid, 0, U"needle", RegexOptions).empty());
     CHECK(spansOf(grid, 184, U"needle", RegexOptions).empty());
     CHECK(spansOf(grid, 184, U"dle", RegexOptions) == std::vector<Span> { { 184, 0, 184, 2 } });
+}
+
+TEST_CASE("searchQuery.wholeWordResumesAtTheNextDelimiter", "[searchquery]")
+{
+    // A rejected candidate skips to the next word start; what is found is what stepping one unit at a time
+    // finds.
+    auto constexpr WholeWordRegex =
+        SearchOptions { .syntax = SearchSyntax::Regex, .wordBoundary = SearchWordBoundary::WholeWord };
+    auto const mock = termWith(1, 30, "afoo foo bfoo foo.xfoo fooo");
+    CHECK(spansOf(gridOf(mock), 0, U"f[o]+", WholeWordRegex)
+          == std::vector<Span> { { 0, 5, 0, 7 }, { 0, 14, 0, 16 }, { 0, 23, 0, 26 } });
+    CHECK(spansOf(gridOf(mock), 0, U"o+", WholeWordRegex).empty());
+    CHECK(spansOf(gridOf(mock), 0, U"[a-z]*o", WholeWordRegex).size() == 6);
+}
+
+TEST_CASE("searchQuery.aFoldedClassRangeKeepsItsEnds", "[searchquery]")
+{
+    auto constexpr InsensitiveRegex = SearchOptions { .caseSensitivity = SearchCaseSensitivity::Insensitive,
+                                                      .syntax = SearchSyntax::Regex };
+    auto const mock = termWith(1, 20, "_ q Q @ a Z");
+
+    // [@-Z] is @ and the capitals; folded it takes their lowercase too, and never the _ between them.
+    CHECK(spansOf(gridOf(mock), 0, U"[@-Z]", InsensitiveRegex)
+          == std::vector<Span> {
+              { 0, 2, 0, 2 }, { 0, 4, 0, 4 }, { 0, 6, 0, 6 }, { 0, 8, 0, 8 }, { 0, 10, 0, 10 } });
+
+    // [Z-a] runs from Z up to a, past _; folding its ends must not reverse it.
+    auto const zToA = SearchQuery::compile(U"[Z-a]", InsensitiveRegex, WordDelimiters);
+    REQUIRE(zToA.has_value());
+    CHECK(spansOf(gridOf(mock), 0, U"[Z-a]", InsensitiveRegex)
+          == std::vector<Span> { { 0, 0, 0, 0 }, { 0, 8, 0, 8 }, { 0, 10, 0, 10 } });
 }

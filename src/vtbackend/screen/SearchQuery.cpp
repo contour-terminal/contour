@@ -12,9 +12,12 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <ranges>
 #include <span>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace vtbackend
 {
@@ -119,16 +122,83 @@ namespace
         return units;
     }
 
+    /// Appends to @p units the lowercase images of the uppercase codepoints in [@p low, @p high], as class
+    /// items: what a range of a folded class must also match, because the subject it runs on is folded.
+    void appendFoldedImages(std::wstring& units, char32_t low, char32_t high)
+    {
+        auto images = std::vector<char32_t> {};
+        for (auto const codepoint:
+             std::views::iota(static_cast<uint32_t>(low), static_cast<uint32_t>(high) + 1))
+            if (auto const lower = unicode::simple_lowercase(static_cast<char32_t>(codepoint));
+                lower != codepoint)
+                images.push_back(lower);
+        std::ranges::sort(images);
+        auto const [unique, end] = std::ranges::unique(images);
+        images.erase(unique, end);
+        // As runs, so [A-Z] adds one a-z rather than 26 items.
+        auto runStart = std::size_t { 0 };
+        for (auto const index: std::views::iota(std::size_t { 0 }, images.size()))
+        {
+            if (index + 1 < images.size() && images[index + 1] == images[index] + 1)
+                continue;
+            appendUnits(units, images[runStart]);
+            if (index > runStart)
+            {
+                units.push_back(L'-');
+                appendUnits(units, images[index]);
+            }
+            runStart = index + 1;
+        }
+    }
+
     /// A regex's source as the engine compiles it: NFC, folded outside its escapes under @p comparison.
+    ///
+    /// A class range keeps its ends as written -- folding them would reverse `[Z-a]` and widen `[@-Z]` over
+    /// `_` -- and gains the lowercase images of the capitals it spans, so `[A-Z]` still matches the folded
+    /// subject's letters.
     [[nodiscard]] std::wstring regexUnits(std::u32string_view pattern, CaseComparison comparison)
     {
         auto units = std::wstring {};
         auto const normalized = unicode::to_nfc(pattern);
+        // A class item not yet written: it may be a range's low end.
+        auto low = std::optional<char32_t> {};
+        auto inRange = false;
+        auto const flush = [&] {
+            if (low)
+                appendUnits(units, foldedFor(*low, comparison));
+            if (inRange)
+                units.push_back(L'-');
+            low.reset();
+            inRange = false;
+        };
         (void) anyRegexSourceCharacter(
             std::u32string_view(normalized), [&](char32_t ch, RegexSourceRole role) {
-                appendUnits(units, isUnescaped(role) ? foldedFor(ch, comparison) : ch);
+                auto const isClassItem = role == RegexSourceRole::InClass && ch != U']' && ch != U'\\';
+                if (!isClassItem)
+                {
+                    flush();
+                    appendUnits(units, isUnescaped(role) ? foldedFor(ch, comparison) : ch);
+                }
+                else if (inRange)
+                {
+                    appendUnits(units, *low);
+                    units.push_back(L'-');
+                    appendUnits(units, ch);
+                    if (comparison == CaseComparison::Folded && *low <= ch)
+                        appendFoldedImages(units, *low, ch);
+                    low.reset();
+                    inRange = false;
+                }
+                else if (ch == U'-' && low)
+                    inRange = true;
+                else
+                {
+                    flush();
+                    low = ch;
+                }
                 return false;
             });
+        flush();
         return units;
     }
 
@@ -271,6 +341,9 @@ namespace
     {
         if (begin >= end)
             return std::nullopt;
+        // A row with no text is one line break that no pattern matches across (R-a), not even `\s` or `[^x]`.
+        if (std::wstring_view(subject.units).substr(begin, end - begin).contains(L'\n'))
+            return std::nullopt;
         auto const firstCell = std::ranges::lower_bound(subject.cells, begin, {}, &SubjectCell::firstUnit);
         if (firstCell == subject.cells.end() || firstCell->firstUnit != begin)
             return std::nullopt;
@@ -288,6 +361,28 @@ namespace
                 break;
         }
         return CellLocationRange { .first = firstCell->first, .second = lastCell->last };
+    }
+
+    /// Where a regex search resumes after dropping the match it found at @p begin: one unit on, or, for a
+    /// whole word, just past the next delimiter -- no whole word begins before it, so stepping a unit at a
+    /// time would only find, and drop, the matches in between.
+    /// @return The unit to resume at; past the subject's end where nothing is left to find.
+    [[nodiscard]] std::size_t resumeAfterRejection(Subject const& subject,
+                                                   std::size_t begin,
+                                                   SearchWordBoundary boundary,
+                                                   std::u32string_view delimiters)
+    {
+        switch (boundary)
+        {
+            case SearchWordBoundary::Any: break;
+            case SearchWordBoundary::WholeWord: {
+                auto const rest = std::wstring_view(subject.units).substr(begin);
+                auto const delimiter = std::ranges::find_if(
+                    rest, [delimiters](wchar_t unit) { return delimitsWord(unit, delimiters); });
+                return begin + static_cast<std::size_t>(delimiter - rest.begin()) + 1;
+            }
+        }
+        return begin + 1;
     }
 } // namespace
 
@@ -363,8 +458,9 @@ std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchQuery::m
 
     try
     {
-        // The engine's own iteration, except that a match it finds off a cell boundary, empty, or not a whole
-        // word where one is asked for is dropped, and the search resumes one unit after where it began.
+        // The engine's own iteration, except that a match it finds off a cell boundary, empty, across a row
+        // with no text, or not a whole word where one is asked for is dropped, and the search resumes at the
+        // next place a match may begin.
         auto position = std::size_t { 0 };
         while (position <= subject.units.size())
         {
@@ -382,7 +478,7 @@ std::expected<std::vector<CellLocationRange>, SearchPatternError> SearchQuery::m
                 position = end;
             }
             else
-                position = begin + 1;
+                position = resumeAfterRejection(subject, begin, boundary, _wordDelimiters);
         }
     }
     catch (std::regex_error const&)
@@ -404,16 +500,30 @@ SearchSegment searchSegmentAt(Grid const& grid, LineOffset row)
 
 std::optional<SearchSegment> nextSearchSegment(Grid const& grid, SearchSegment segment)
 {
-    if (segment.last >= boxed_cast<LineOffset>(grid.pageSize().lines) - 1)
+    auto const lastPageLine = boxed_cast<LineOffset>(grid.pageSize().lines) - 1;
+    if (segment.last >= lastPageLine)
         return std::nullopt;
-    return searchSegmentAt(grid, segment.last + 1);
+    auto const first = segment.last + 1;
+    if (!grid.continuesRowAbove(first))
+        return searchSegmentAt(grid, first);
+    // The rest of the same logical line, cut where its head's cuts fall: no walk back up to the head, which
+    // would make walking a long line's segments quadratic.
+    auto const limit = std::min(first + LineOffset::cast_from(rowsPerSegment(grid) - 1), lastPageLine);
+    return SearchSegment { .first = first, .last = grid.logicalLineEnd(first, limit) };
 }
 
 std::optional<SearchSegment> previousSearchSegment(Grid const& grid, SearchSegment segment)
 {
-    if (segment.first <= -boxed_cast<LineOffset>(grid.historyLineCount()))
+    auto const historyTop = -boxed_cast<LineOffset>(grid.historyLineCount());
+    if (segment.first <= historyTop)
         return std::nullopt;
-    return searchSegmentAt(grid, segment.first - 1);
+    if (!grid.continuesRowAbove(segment.first))
+        return searchSegmentAt(grid, segment.first - 1);
+    // The cut above, within the same logical line, as nextSearchSegment() steps down without a head walk.
+    return SearchSegment {
+        .first = std::max(segment.first - LineOffset::cast_from(rowsPerSegment(grid)), historyTop),
+        .last = segment.first - 1,
+    };
 }
 
 std::u32string escapeSearchRegex(std::u32string_view text)

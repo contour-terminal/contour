@@ -26,6 +26,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 using namespace vtbackend;
@@ -3535,7 +3536,8 @@ std::set<std::pair<int, int>> highlightedCells(MockTerm<>& mock, std::u32string 
                                                   .backgroundAlpha = 1.0f };
     mock.terminal.colorPalette().searchHighlight = paint;
     mock.terminal.colorPalette().searchHighlightFocused = paint;
-    (void) mock.terminal.setNewSearchTerm(std::move(needle), SearchOrigin::Typed);
+    // An error is no failure here: a pattern that does not compile paints no cell, which is the answer.
+    std::ignore = mock.terminal.setNewSearchTerm(std::move(needle), SearchOrigin::Typed);
     mock.terminal.refreshRenderBuffer(true);
 
     auto cells = std::set<std::pair<int, int>> {};
@@ -3701,6 +3703,68 @@ TEST_CASE("search.doubleClickWordIsLiteralUnderRegex", "[screen]")
 
     // Typed, the same pattern is the regex again.
     CHECK(mock.terminal.setNewSearchTerm(U"a+b", SearchOrigin::Typed) == SearchChange::Changed);
+    CHECK(mock.terminal.search(CellLocation {}) == CellLocation { LineOffset(0), ColumnOffset(0) });
+}
+
+TEST_CASE("search.matchStartingAtAndTheFocusedMatch", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("x\xE6\x97\xA5y abcd"); // x日y abcd
+    auto const& screen = mock.terminal.primaryScreen();
+    auto const at = [](int column) {
+        return CellLocation { LineOffset(0), ColumnOffset(column) };
+    };
+
+    REQUIRE(mock.terminal.setNewSearchTerm(U"\u65E5", SearchOrigin::Typed).has_value());
+    auto const query = mock.terminal.search().query;
+    REQUIRE(query != nullptr);
+
+    SECTION("a match begins at its first cell and ends on a wide character's second half")
+    {
+        auto const match = screen.matchStartingAt(*query, at(1));
+        REQUIRE(match.has_value());
+        REQUIRE(match->has_value());
+        CHECK((*match)->first == at(1));
+        CHECK((*match)->second == at(2));
+        auto const onSecondHalf = screen.matchStartingAt(*query, at(2));
+        REQUIRE(onSecondHalf.has_value());
+        CHECK_FALSE(onSecondHalf->has_value());
+
+        mock.terminal.moveNormalModeCursorTo(at(1));
+        auto const focused = mock.terminal.focusedSearchMatch();
+        REQUIRE(focused.has_value());
+        CHECK(focused->first == at(1));
+        CHECK(focused->second == at(2));
+    }
+
+    SECTION("a cursor inside a match is on none")
+    {
+        REQUIRE(mock.terminal.setNewSearchTerm(U"abc", SearchOrigin::Typed).has_value());
+        mock.terminal.moveNormalModeCursorTo(at(6));
+        CHECK_FALSE(mock.terminal.focusedSearchMatch().has_value());
+        mock.terminal.moveNormalModeCursorTo(at(5));
+        CHECK(mock.terminal.focusedSearchMatch().has_value());
+    }
+
+    SECTION("a dropped query focuses nothing")
+    {
+        mock.terminal.moveNormalModeCursorTo(at(1));
+        REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
+        REQUIRE_FALSE(mock.terminal.setNewSearchTerm(U"(", SearchOrigin::Typed).has_value());
+        CHECK_FALSE(mock.terminal.focusedSearchMatch().has_value());
+    }
+}
+
+TEST_CASE("search.newWordDelimitersRecompileTheQuery", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(10) };
+    mock.writeToScreen("foo.bar");
+    mock.terminal.setWordDelimiters(" ");
+    REQUIRE(mock.terminal.setSearchOptions({ .wordBoundary = SearchWordBoundary::WholeWord }).has_value());
+    REQUIRE(mock.terminal.setNewSearchTerm(U"foo", SearchOrigin::Typed).has_value());
+    CHECK_FALSE(mock.terminal.search(CellLocation {}).has_value());
+
+    mock.terminal.setWordDelimiters(" .");
     CHECK(mock.terminal.search(CellLocation {}) == CellLocation { LineOffset(0), ColumnOffset(0) });
 }
 

@@ -716,8 +716,11 @@ void RenderBufferBuilder::prepareSearchHighlights(LineOffset gridLine)
     auto const& grid = _screen->grid();
     auto const columns = unbox(grid.pageSize().columns);
 
-    if (auto const segment = searchSegmentAt(grid, gridLine); segment != _searchSegment)
+    // Only once the rows leave the segment last asked about: finding a row's segment walks up to its logical
+    // line's head, which per row would cost a long line's length per row.
+    if (!_searchSegment || gridLine < _searchSegment->first || gridLine > _searchSegment->last)
     {
+        auto const segment = searchSegmentAt(grid, gridLine);
         _searchSegment = segment;
         auto const matches = search.query->matchesIn(grid, segment);
         if (!matches)
