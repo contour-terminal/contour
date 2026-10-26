@@ -64,6 +64,8 @@ enum class SnapshotScript : uint8_t
                         //!< header's actions and the split handle's grabber.
     PaneExited,         //!< split-three with an ended pane: its footer below the cells.
     SingleTabMinimal,   //!< One tab under Minimal: the bare band, or none (the Terminal row).
+    PaletteFiltered,    //!< The palette filtered by "split": Pane, then Layouts with a surfaced child.
+    PaletteDrilledIn,   //!< The palette inside Change Profile's level.
 };
 
 /// How a script's active tab is divided into panes.
@@ -105,6 +107,8 @@ enum class ScriptAction : uint8_t
     OpenTabColorFlyout, //!< The second tab's colour flyout, as the SetTabColor action opens it.
     HoverPaneHeader,    //!< The pointer over the active pane's header, then on the gap beside it.
     RevealHeaders,      //!< Minimal's headers revealed over the panes, as the held modifier reveals them.
+    FilterPalette,      //!< The palette open, its filter "split".
+    DrillInPalette,     //!< The palette open inside the Change Profile level.
 };
 
 /// What a script's tabs carry beyond their titles.
@@ -685,6 +689,42 @@ inline constexpr auto SnapshotScripts = std::array {
                         .transparency = config::TransparencyPreference::Allowed,
                         .host = SnapshotHost::RowDefault,
                         .density = config::ChromeDensity::Minimal,
+                        .paneEnd = SnapshotPaneEnd::None },
+    SnapshotScriptRow { .script = SnapshotScript::PaletteFiltered,
+                        .name = "palette-filtered",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::FilterPalette,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
+                        .paneEnd = SnapshotPaneEnd::None },
+    SnapshotScriptRow { .script = SnapshotScript::PaletteDrilledIn,
+                        .name = "palette-drill-in",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::DrillInPalette,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed,
+                        .transparency = config::TransparencyPreference::Allowed,
+                        .host = SnapshotHost::RowDefault,
+                        .density = config::ChromeDensity::Comfortable,
                         .paneEnd = SnapshotPaneEnd::None },
 };
 

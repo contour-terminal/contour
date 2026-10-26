@@ -5,6 +5,7 @@
 // need a display: the last case renders them, on the display route only, and only when
 // CONTOUR_SNAPSHOT_DIR names where they go.
 
+#include <contour/command/CommandPaletteTree.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/TabBarMode.hpp>
@@ -15,6 +16,7 @@
 #include <contour/test/DisplayHarness.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/test/TestEnvironment.hpp>
+#include <contour/window/CommandPaletteModel.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/TitleBandLayout.hpp>
@@ -55,6 +57,25 @@ namespace
 {
     return static_cast<int>(std::ranges::count_if(contour::test::itemsNamed(root, name),
                                                   [](QQuickItem const* item) { return item->isVisible(); }));
+}
+/// Role @p role of the palette model's row @p row.
+[[nodiscard]] QVariant paletteRole(contour::window::CommandPaletteModel const& model,
+                                   int row,
+                                   contour::window::CommandPaletteModel::Roles role)
+{
+    return model.data(model.index(row, 0), static_cast<int>(role));
+}
+
+/// The first group header the scene's palette draws: the first row that names a group.
+[[nodiscard]] QString firstPaletteGroupHeader(contour::test::snapshot::ChromeSnapshotScene const& scene)
+{
+    auto const& model = scene.paletteModel();
+    for (auto const row: std::views::iota(0, model.rowCount()))
+        if (auto title = paletteRole(model, row, contour::window::CommandPaletteModel::Roles::GroupTitleRole)
+                             .toString();
+            !title.isEmpty())
+            return title;
+    return {};
 }
 } // namespace
 
@@ -134,6 +155,37 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 auto const* palette = scene.root().findChild<QObject*>(QStringLiteral("commandPalette"));
                 REQUIRE(palette != nullptr);
                 CHECK(palette->property("opened").toBool());
+                // No history in the scene: the first group is the table's first, and the profiles are one
+                // drill-in row.
+                CHECK(firstPaletteGroupHeader(scene) == QStringLiteral("Pane"));
+                auto const& model = scene.paletteModel();
+                CHECK(std::ranges::any_of(std::views::iota(0, model.rowCount()), [&](int row) {
+                    return paletteRole(model, row, contour::window::CommandPaletteModel::Roles::KindRole)
+                               .toInt()
+                           == model.drillInKind();
+                }));
+                break;
+            }
+            case SnapshotScript::PaletteFiltered: {
+                auto const* palette = scene.root().findChild<QObject*>(QStringLiteral("commandPalette"));
+                REQUIRE(palette != nullptr);
+                CHECK(palette->property("opened").toBool());
+                CHECK(firstPaletteGroupHeader(scene) == QStringLiteral("Pane"));
+                auto const& model = scene.paletteModel();
+                CHECK(std::ranges::any_of(std::views::iota(0, model.rowCount()), [&](int row) {
+                    return paletteRole(model, row, contour::window::CommandPaletteModel::Roles::TitleRole)
+                               .toString()
+                           == QStringLiteral("Launch Layout · split-dev");
+                }));
+                break;
+            }
+            case SnapshotScript::PaletteDrilledIn: {
+                auto const& model = scene.paletteModel();
+                CHECK(model.depth() == static_cast<int>(contour::command::PaletteDepth::Level));
+                CHECK(model.levelTitle() == QStringLiteral("Change Profile"));
+                auto const* list = scene.root().findChild<QObject*>(QStringLiteral("commandPaletteList"));
+                REQUIRE(list != nullptr);
+                CHECK(list->property("count").toInt() == scene.paletteProfileCount());
                 break;
             }
             case SnapshotScript::Settings:

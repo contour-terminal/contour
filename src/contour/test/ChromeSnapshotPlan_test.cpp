@@ -122,7 +122,14 @@ TEST_CASE("snapshot.scriptTable.densityAndPaneEnd", "[snapshot]")
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).tabCount == 1);
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).panes == PaneShape::SingleLeaf);
     CHECK(scriptRow(SnapshotScript::SingleTabMinimal).density == ChromeDensity::Minimal);
-    CHECK(SnapshotScripts.back().script == SnapshotScript::SingleTabMinimal);
+    // The palette's grouped, filtered and drilled-in states, appended after it.
+    CHECK(static_cast<int>(SnapshotScript::PaletteFiltered)
+          == static_cast<int>(SnapshotScript::SingleTabMinimal) + 1);
+    CHECK(scriptRow(SnapshotScript::PaletteFiltered).name == "palette-filtered");
+    CHECK(scriptRow(SnapshotScript::PaletteFiltered).action == ScriptAction::FilterPalette);
+    CHECK(scriptRow(SnapshotScript::PaletteDrilledIn).name == "palette-drill-in");
+    CHECK(scriptRow(SnapshotScript::PaletteDrilledIn).action == ScriptAction::DrillInPalette);
+    CHECK(SnapshotScripts.back().script == SnapshotScript::PaletteDrilledIn);
     // Each pane of a split is named, as the canvas's split names them.
     CHECK(paneCount(PaneShape::SingleLeaf) == 1);
     CHECK(paneCount(PaneShape::SplitThree) == 3);

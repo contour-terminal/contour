@@ -3,6 +3,7 @@
 
 #include <contour/command/CommandCatalog.hpp>
 #include <contour/command/CommandHistory.hpp>
+#include <contour/command/CommandPaletteTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/GuiConfigStore.hpp>
@@ -199,8 +200,13 @@ class ChromeSnapshotScene
         _sessions { makeSessions(scriptRow(variant.script), _look) },
         _rootPane { makePaneTree(scriptRow(variant.script).panes, _sessions) },
         _history { PaletteHistoryCapacity },
-        _paletteModel { makePaletteModel(
-            _history, _actionCommands, _config, command::shortcutStyleFor(variantHost(variant))) },
+        _paletteConfig { makePaletteConfig() },
+        _profileCommands { _paletteConfig },
+        _layoutCommands { _paletteConfig },
+        _paletteModel { makePaletteModel(_history,
+                                         { &_profileCommands, &_layoutCommands, &_actionCommands },
+                                         _config,
+                                         command::shortcutStyleFor(variantHost(variant))) },
         _settings { makeSettings(scriptRow(variant.script).surface) },
         _controller { MainWindowScene {
             .tabCount = scriptRow(variant.script).tabCount,
@@ -246,6 +252,15 @@ class ChromeSnapshotScene
     /// @return The object the script's action created over the window, or null when it created none.
     [[nodiscard]] QObject const* overlay() const noexcept { return _overlay.get(); }
 
+    /// @return The command palette's model.
+    [[nodiscard]] window::CommandPaletteModel const& paletteModel() const noexcept { return *_paletteModel; }
+
+    /// @return How many profiles the palette offers: the default one and PaletteProfiles.
+    [[nodiscard]] int paletteProfileCount() const noexcept
+    {
+        return static_cast<int>(_paletteConfig.profiles.value().size());
+    }
+
     /// @return The tab colour flyout the script's action opened, or null when it opened none.
     [[nodiscard]] QObject const* openedTabColorFlyout() const noexcept { return _tabColorFlyout; }
 
@@ -264,13 +279,12 @@ class ChromeSnapshotScene
         switch (scriptRow(_variant.script).action)
         {
             case ScriptAction::None: break;
-            case ScriptAction::OpenPalette: {
-                auto const* palette = root().findChild<QObject*>(QStringLiteral("commandPalette"));
-                REQUIRE(palette != nullptr);
-                _controller.openCommandPalette();
-                REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, 2000));
+            case ScriptAction::OpenPalette: openPalette(); break;
+            case ScriptAction::FilterPalette:
+                openPalette();
+                filterPalette(QStringLiteral("split"));
                 break;
-            }
+            case ScriptAction::DrillInPalette: drillInPalette(); break;
             case ScriptAction::ShowToast: showToast(); break;
             case ScriptAction::OpenKitDialog: openKitDialog(); break;
             case ScriptAction::OpenTabMenu: openTabMenu(); break;
@@ -332,6 +346,8 @@ class ChromeSnapshotScene
   private:
     /// How many recent commands the palette remembers, as MockPaletteController remembers them.
     static constexpr std::size_t PaletteHistoryCapacity = 5;
+    /// How long the scene waits for the palette's transitions at most, in milliseconds.
+    static constexpr int PaletteSettleMs = 2000;
 
     /// The toast's message.
     static inline auto const ToastText = QStringLiteral("Copied 3 lines");
@@ -430,18 +446,74 @@ class ChromeSnapshotScene
         return leaf(ActiveLeaf);
     }
 
-    /// The command palette's model, wired as MockPaletteController wires it, with the shortcuts spelled
-    /// the way the row's host spells them.
+    /// The profiles the palette's scene adds beside the default one, and the layouts it saves (R-m).
+    static constexpr auto PaletteProfiles = std::array<std::string_view, 2> { "work", "presentation" };
+    static constexpr auto PaletteLayouts = std::array<std::string_view, 2> { "split-dev", "logs" };
+
+    /// The configuration the palette's profile and layout rows come from: the default profile, plus
+    /// PaletteProfiles and PaletteLayouts. Apart from the scene's own, so the Settings window keeps
+    /// showing the defaults.
+    [[nodiscard]] static config::Config makePaletteConfig()
+    {
+        auto config = config::Config {};
+        for (auto const name: PaletteProfiles)
+            config.profiles.value().insert_or_assign(std::string(name), config::TerminalProfile {});
+        for (auto const name: PaletteLayouts)
+            config.layouts.value().insert_or_assign(std::string(name), config::Layout {});
+        return config;
+    }
+
+    /// The command palette's model, wired as WindowController wires it, with the shortcuts spelled the way
+    /// the row's host spells them.
     [[nodiscard]] static std::unique_ptr<window::CommandPaletteModel> makePaletteModel(
         command::CommandHistory const& history,
-        command::ActionCommandSource const& actions,
+        std::vector<command::CommandSource const*> sources,
         config::Config const& config,
         command::ShortcutStyle shortcuts)
     {
-        auto model = std::make_unique<window::CommandPaletteModel>(
-            history, std::vector<command::CommandSource const*> { &actions }, shortcuts);
+        auto model = std::make_unique<window::CommandPaletteModel>(history, std::move(sources), shortcuts);
         model->refresh(command::shortcutIndex(config, shortcuts));
         return model;
+    }
+
+    /// Opens the palette, as the OpenCommandPalette action does, and waits until it has finished opening.
+    void openPalette()
+    {
+        auto const* palette = root().findChild<QObject*>(QStringLiteral("commandPalette"));
+        REQUIRE(palette != nullptr);
+        _controller.openCommandPalette();
+        REQUIRE(QTest::qWaitFor([&] { return palette->property("opened").toBool(); }, PaletteSettleMs));
+    }
+
+    /// Types @p text into the open palette's filter field.
+    void filterPalette(QString const& text) const
+    {
+        auto* filter = root().findChild<QObject*>(QStringLiteral("commandPaletteFilter"));
+        REQUIRE(filter != nullptr);
+        filter->setProperty("text", text);
+        QCoreApplication::processEvents();
+    }
+
+    /// Opens the palette inside Change Profile's level: filtered by "profile", the parent found by its id
+    /// (not by its rank), entered, and the level shown.
+    void drillInPalette()
+    {
+        openPalette();
+        filterPalette(QStringLiteral("profile"));
+        auto& model = *_paletteModel;
+        auto const rows = std::views::iota(0, model.rowCount());
+        auto const parent = std::ranges::find_if(rows, [&](int row) {
+            return model
+                       .data(model.index(row, 0),
+                             static_cast<int>(window::CommandPaletteModel::Roles::IdRole))
+                       .toString()
+                   == QStringLiteral("ChangeProfile");
+        });
+        REQUIRE(parent != rows.end());
+        model.enter(*parent);
+        REQUIRE(
+            QTest::qWaitFor([&] { return model.depth() == static_cast<int>(command::PaletteDepth::Level); },
+                            PaletteSettleMs));
     }
 
     /// Gives the mock the band geometry and the traffic lights' inset the controller measures in production
@@ -783,6 +855,9 @@ class ChromeSnapshotScene
     std::vector<std::unique_ptr<MockSession>> _sessions;
     std::unique_ptr<MockPaneProxy> _rootPane;
     command::CommandHistory _history;
+    config::Config _paletteConfig; ///< The palette's profiles and layouts (makePaletteConfig()).
+    command::ProfileCommandSource _profileCommands;
+    command::LayoutCommandSource _layoutCommands;
     command::ActionCommandSource _actionCommands;
     std::unique_ptr<window::CommandPaletteModel> _paletteModel;
     QTemporaryDir _settingsDir;
