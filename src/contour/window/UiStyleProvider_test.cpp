@@ -1759,47 +1759,55 @@ TEST_CASE("UiStyleProvider publishes the command palette's tokens per row", "[co
 TEST_CASE("UiStyleProvider: the command palette's inks read on every row, appearance and bundled scheme",
           "[contour][uistyle]")
 {
+    using contour::config::ChromeColorRole;
     using contour::config::ChromeStyle;
+    using contour::config::ColorSourceKind;
     using contour::config::MinimumMarkContrast;
     using contour::config::MinimumTextContrast;
     using contour::window::UiStyleProvider;
+    using enum ChromeColorRole;
 
-    // One row per ink the palette draws, against the ground it is drawn on; on the native rows, the kit's
-    // two labels on its elevated surface in both appearances. The surface carries the
-    // query, the titles, the group headers, the shortcuts, the drill-in glyph, the placeholder, the empty
-    // label and the footer's description and hints.
+    // One row per ink the palette draws, against the ground it is drawn on. The surface carries the query,
+    // the titles, the group headers, the shortcuts, the drill-in glyph, the placeholder, the empty label
+    // and the footer's description and hints; the selected row carries its title and accessory.
     struct InkRow
     {
-        char const* ink = "";
-        char const* ground = "";
+        ChromeColorRole ink = PaletteText;
+        ChromeColorRole ground = PaletteSurface;
         double minimum = 0.0;
         char const* what = "";
     };
-    auto const surfaceInks = std::array {
-        InkRow { .ink = "paletteText",
-                 .ground = "paletteSurface",
-                 .minimum = MinimumTextContrast,
-                 .what = "titles" },
-        InkRow { .ink = "paletteSecondaryText",
-                 .ground = "paletteSurface",
+    auto const inks = std::array {
+        InkRow {
+            .ink = PaletteText, .ground = PaletteSurface, .minimum = MinimumTextContrast, .what = "titles" },
+        InkRow { .ink = PaletteSecondaryText,
+                 .ground = PaletteSurface,
                  .minimum = MinimumTextContrast,
                  .what = "headers, shortcuts, footer" },
-    };
-    // The selected row. On the native rows these are the OS's own selected-row pair
-    // (QPalette::Highlight / HighlightedText), which this test cannot vouch for: the platform sets them,
-    // and an offscreen palette says nothing about what macOS, Windows or KDE will paint (Breeze's #3DAEE9
-    // under white reads about 2.5:1). Only the Terminal row's pair, taken from the scheme, is asserted.
-    auto const selectionInks = std::array {
-        InkRow { .ink = "paletteSelectionText",
-                 .ground = "paletteSelectionFill",
+        InkRow { .ink = PaletteSelectionText,
+                 .ground = PaletteSelectionFill,
                  .minimum = MinimumTextContrast,
                  .what = "selected title and accessory" },
         // The selected row's fill is a state mark (WCAG 1.4.11) against the surface around it.
-        InkRow { .ink = "paletteSelectionFill",
-                 .ground = "paletteSurface",
+        InkRow { .ink = PaletteSelectionFill,
+                 .ground = PaletteSurface,
                  .minimum = MinimumMarkContrast,
                  .what = "selection" },
     };
+    // Not held to a ratio: PaletteSeparator draws the two rules (below the query, above the footer) and the
+    // popover's border. They are decorative: the query, the list and the footer are told apart by their
+    // content and position, and the popover from the window by its surface and its elevation shadow, so no
+    // component depends on them being seen (WCAG 1.4.11 asks 3:1 of what identifies a component or state).
+    auto const decorative = std::array { PaletteSeparator };
+
+    // Every palette role is either checked or documented as decorative here, so a new one cannot slip by.
+    auto covered = std::vector<ChromeColorRole> { decorative.begin(), decorative.end() };
+    for (auto const& pair: inks)
+        covered.insert(covered.end(), { pair.ink, pair.ground });
+    std::ranges::sort(covered);
+    auto const [first, last] = std::ranges::unique(covered);
+    covered.erase(first, last);
+    CHECK(covered.size() == contour::config::ChromeColorRoleCount - contour::config::PaneColorRoleEnd);
 
     for (auto const name: vtbackend::defaultColorPaletteNames())
     {
@@ -1808,27 +1816,35 @@ TEST_CASE("UiStyleProvider: the command palette's inks read on every row, appear
         REQUIRE(vtbackend::defaultColorPalettes(name, palette));
         for (auto const index: std::views::iota(size_t { 0 }, contour::config::detail::ChromeStyleCount))
         {
-            auto const row = static_cast<ChromeStyle>(index);
             CAPTURE(index);
-            auto inputs = contour::window::chromeInputsFor(row, QGuiApplication::font());
+            auto inputs =
+                contour::window::chromeInputsFor(static_cast<ChromeStyle>(index), QGuiApplication::font());
             inputs.scheme = contour::config::chromeSchemeColorsOf(palette);
             auto const provider = UiStyleProvider(inputs);
-            auto const color = [&](char const* role) {
-                return tokenOf(provider, "colors", role).value<QColor>();
-            };
-            auto const check = [&](InkRow const& pair) {
-                INFO(pair.what << ": " << pair.ink << " on " << pair.ground);
-                auto const ground = color(pair.ground);
-                CHECK(contrastOf(over(color(pair.ink), ground), ground) >= pair.minimum);
+            auto const* colors =
+                qobject_cast<contour::window::ChromeColorTokens const*>(groupOf(provider, "colors"));
+            REQUIRE(colors != nullptr);
+            // A role the OS paints (its selected-row pair, QPalette::Highlight / HighlightedText) is not this
+            // test's to vouch for: an offscreen palette says nothing about what macOS, Windows or KDE will
+            // paint (Breeze's #3DAEE9 under white reads about 2.5:1). Chosen by the role's source, not by
+            // row.
+            auto const isOsPainted = [&](ChromeColorRole role) {
+                auto const kind = provider.resolvedRow().colors[static_cast<size_t>(role)].kind;
+                return kind == ColorSourceKind::PaletteHighlight
+                       || kind == ColorSourceKind::PaletteHighlightedText;
             };
             for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
                 withWindowColor(window, [&] {
                     INFO("chrome: " << window.name().toStdString());
-                    for (auto const& pair: surfaceInks)
-                        check(pair);
-                    if (row == ChromeStyle::Terminal)
-                        for (auto const& pair: selectionInks)
-                            check(pair);
+                    for (auto const& pair: inks)
+                    {
+                        if (isOsPainted(pair.ink) || isOsPainted(pair.ground))
+                            continue;
+                        INFO(pair.what << ": role " << static_cast<int>(pair.ink) << " on role "
+                                       << static_cast<int>(pair.ground));
+                        auto const ground = colors->color(pair.ground);
+                        CHECK(contrastOf(over(colors->color(pair.ink), ground), ground) >= pair.minimum);
+                    }
                 });
         }
     }

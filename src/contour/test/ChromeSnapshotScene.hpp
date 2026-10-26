@@ -463,8 +463,8 @@ class ChromeSnapshotScene
         return config;
     }
 
-    /// The command palette's model, wired as WindowController wires it, with the shortcuts spelled the way
-    /// the row's host spells them.
+    /// The command palette's model over @p sources (the scene's profile, layout and action rows), with the
+    /// shortcuts spelled the way the row's host spells them.
     [[nodiscard]] static std::unique_ptr<window::CommandPaletteModel> makePaletteModel(
         command::CommandHistory const& history,
         std::vector<command::CommandSource const*> sources,

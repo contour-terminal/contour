@@ -116,6 +116,19 @@ Popup {
         root.select(list.count > 0 ? 0 : -1);
     }
 
+    // Where the keyboard goes back to on close: @p item, or where it has been hidden (a dialog's button gone
+    // while the palette was up) its nearest visible ancestor in the same popup or dialog. Null when there is
+    // none -- @p item was not over the overlay, or its popup has closed -- and the terminal takes it.
+    function _handBackTarget(item) {
+        const overlay = root.Overlay.overlay;
+        if (!item || !root._isOverOverlay(item))
+            return null;
+        for (let node = item; node && node !== overlay; node = node.parent)
+            if (node.visible)
+                return node;
+        return null;
+    }
+
     // Whether @p item sits in the window's overlay layer, i.e. inside a popup or a dialog.
     function _isOverOverlay(item) {
         const overlay = root.Overlay.overlay;
@@ -142,9 +155,9 @@ Popup {
     // the close that is still unwinding, and the palette would need dismissing twice. Deferring to the
     // next event-loop turn dispatches the command with the popup's state machine at rest.
     onClosed: {
-        // A target that has gone (the find bar closed under the palette) takes no focus: the terminal does.
-        if (root._returnFocus && root._returnFocus.visible && root._isOverOverlay(root._returnFocus))
-            root._returnFocus.forceActiveFocus();
+        const target = root._handBackTarget(root._returnFocus);
+        if (target)
+            target.forceActiveFocus();
         else if (root.window)
             root.window.restoreTerminalFocus();
         root._returnFocus = null;

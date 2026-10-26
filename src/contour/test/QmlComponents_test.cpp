@@ -6294,17 +6294,29 @@ TEST_CASE("Keys typed straight after open reach the field (offscreen)", "[contou
 
     QMetaObject::invokeMethod(host.palette, "open");
     REQUIRE_FALSE(host.palette->property("opened").toBool()); // the enter transition is still running
-    for (auto const key: { 's', 'p', 'l' })
-        QTest::keyClick(window, key);
-    CHECK(filter->property("text").toString() == QStringLiteral("spl"));
-    // ... and are still there once the palette has finished opening.
-    REQUIRE(QTest::qWaitFor([&] { return host.palette->property("opened").toBool(); }, PaletteSettleMs));
-    CHECK(filter->property("text").toString() == QStringLiteral("spl"));
-    CHECK(controller.model().filter() == QStringLiteral("spl"));
 
-    QTest::keyClick(window, Qt::Key_Escape);
-    waitForPaletteClosed(*host.palette);
-    CHECK(controller.ran.isEmpty());
+    SECTION("Escape before the palette has finished opening closes it")
+    {
+        QTest::keyClick(window, Qt::Key_Escape);
+        waitForPaletteClosed(*host.palette);
+        CHECK_FALSE(host.palette->property("visible").toBool());
+        CHECK(controller.ran.isEmpty());
+    }
+
+    SECTION("typed keys land in the field and stay there")
+    {
+        for (auto const key: { 's', 'p', 'l' })
+            QTest::keyClick(window, key);
+        CHECK(filter->property("text").toString() == QStringLiteral("spl"));
+        // ... and are still there once the palette has finished opening.
+        REQUIRE(QTest::qWaitFor([&] { return host.palette->property("opened").toBool(); }, PaletteSettleMs));
+        CHECK(filter->property("text").toString() == QStringLiteral("spl"));
+        CHECK(controller.model().filter() == QStringLiteral("spl"));
+
+        QTest::keyClick(window, Qt::Key_Escape);
+        waitForPaletteClosed(*host.palette);
+        CHECK(controller.ran.isEmpty());
+    }
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

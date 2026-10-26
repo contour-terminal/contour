@@ -2789,11 +2789,26 @@ TEST_CASE("Closing the palette over a dialog gives the dialog its focus back (of
     waitForPopupOpened(*commandPalette);
     REQUIRE(window.activeFocusItem() != accept);
 
-    QTest::keyClick(&window, Qt::Key_Escape);
-    waitForPopupClosed(*commandPalette);
+    SECTION("the button that had it")
+    {
+        QTest::keyClick(&window, Qt::Key_Escape);
+        waitForPopupClosed(*commandPalette);
 
-    CHECK(dialog->property("opened").toBool());
-    CHECK(window.activeFocusItem() == accept);
+        CHECK(dialog->property("opened").toBool());
+        CHECK(window.activeFocusItem() == accept);
+    }
+
+    SECTION("the dialog, where that button has gone while the palette was up")
+    {
+        accept->setVisible(false);
+        QTest::keyClick(&window, Qt::Key_Escape);
+        waitForPopupClosed(*commandPalette);
+
+        CHECK(dialog->property("opened").toBool());
+        auto* content = dialog->property("contentItem").value<QQuickItem*>();
+        REQUIRE(content != nullptr);
+        CHECK(isWithin(window.activeFocusItem(), content->parentItem()));
+    }
     CHECK(controller.ranCommands.isEmpty());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);

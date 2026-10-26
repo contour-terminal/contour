@@ -180,8 +180,11 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 break;
             }
             case SnapshotScript::PaletteDrilledIn: {
+                // The scene waited for the level (drillInPalette); the palette is still up over it.
+                auto const* palette = scene.root().findChild<QObject*>(QStringLiteral("commandPalette"));
+                REQUIRE(palette != nullptr);
+                CHECK(palette->property("opened").toBool());
                 auto const& model = scene.paletteModel();
-                CHECK(model.depth() == static_cast<int>(contour::command::PaletteDepth::Level));
                 CHECK(model.levelTitle() == QStringLiteral("Change Profile"));
                 auto const* list = scene.root().findChild<QObject*>(QStringLiteral("commandPaletteList"));
                 REQUIRE(list != nullptr);
