@@ -257,6 +257,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(int sessionEnd READ getSessionEnd NOTIFY sessionEndChanged)
     Q_PROPERTY(QString endMessage READ getEndMessage NOTIFY sessionEndChanged)
     Q_PROPERTY(int restartOffer READ getRestartOffer NOTIFY sessionEndChanged)
+    // {{{ Panes
+    // What the pane header shows: the directory the shell reported (OSC 7 / OSC 3008), home-abbreviated and
+    // made safe to show, and this pane's own program status (a window::TabBadgeKind's value, as the tab
+    // strip's BadgeRole gives it) with its text. Each is notified only when it changes.
+    Q_PROPERTY(
+        QString displayWorkingDirectory READ getDisplayWorkingDirectory NOTIFY displayWorkingDirectoryChanged)
+    Q_PROPERTY(int programStatus READ getProgramStatus NOTIFY paneProgramStatusChanged)
+    Q_PROPERTY(QString programStatusText READ getProgramStatusText NOTIFY paneProgramStatusChanged)
+    // }}}
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -716,6 +725,38 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// 0 (None) while it runs. GUI thread only (see _end).
     [[nodiscard]] int getSessionEnd() const noexcept { return static_cast<int>(_end); }
 
+    // {{{ Panes
+    /// @return The working directory the pane header shows, as refreshDisplayWorkingDirectory() last
+    ///         computed it. GUI thread.
+    [[nodiscard]] QString const& getDisplayWorkingDirectory() const noexcept
+    {
+        return _shownWorkingDirectory;
+    }
+
+    /// Recomputes the header's working directory (shownWorkingDirectory() against the manager's home) and
+    /// notifies displayWorkingDirectoryChanged() when it differs. GUI thread; takes the terminal lock.
+    void refreshDisplayWorkingDirectory();
+
+    /// The working directory to show, abbreviated as a shell prompt writes it, but only for a directory on
+    /// this machine: this machine's home says nothing about another machine's paths. Made safe to show.
+    /// Takes the terminal lock.
+    /// @param home The user's home directory; empty abbreviates nothing.
+    /// @return The directory; empty when none can be determined.
+    [[nodiscard]] std::string shownWorkingDirectory(std::string_view home) const;
+
+    /// @return This pane's program status, a window::TabBadgeKind's value. GUI thread.
+    [[nodiscard]] int getProgramStatus() const noexcept { return static_cast<int>(_paneProgramStatus); }
+
+    /// @return What this pane's program status says (its record's title, message or app). GUI thread.
+    [[nodiscard]] QString const& getProgramStatusText() const noexcept { return _paneProgramStatusText; }
+
+    /// Sets this pane's program status, decided by the manager (window::paneProgramStatusOf), and notifies
+    /// paneProgramStatusChanged() when either part differs. Domain state, not configuration. GUI thread.
+    /// @param kind The badge this pane's own records earn.
+    /// @param text What it says.
+    void setPaneProgramStatus(window::TabBadgeKind kind, QString text);
+    // }}}
+
     /// @return The ended pane's footer text; empty while the session runs.
     [[nodiscard]] QString getEndMessage() const;
 
@@ -988,6 +1029,13 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// OSC 7501: posted to the GUI thread as progressChanged() is, where the tab strip reads the records
     /// back.
     void programStatusChanged(vtbackend::ProgramStatusChange const& change) override;
+
+    /// OSC 7 reported another directory. Parser thread, terminal lock held: only posts
+    /// refreshDisplayWorkingDirectory() to the GUI thread.
+    void workingDirectoryChanged() override;
+
+    /// OSC 3008 changed the context ancestry, whose cwd the header may show. As workingDirectoryChanged().
+    void contextChanged(vtbackend::ContextId activeContext) override;
 
     /// A shell command block finished (OSC 133;D, or an OSC 3008 end while OSC 3008 owns the marks).
     ///
@@ -1327,6 +1375,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void updateImageCanvasCeiling();
 
   signals:
+    /// @see getDisplayWorkingDirectory
+    void displayWorkingDirectoryChanged();
+    /// @see getProgramStatus. Not programStatusChanged(), which is the terminal event this session hears.
+    void paneProgramStatusChanged();
     void hyperlinkHoverChanged();
     /// The hovered command block changed, or the pointer left it: re-read commandBlockTooltip().
     void commandBlockHoverChanged();
@@ -2093,6 +2145,15 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// Whether a tab-strip refresh for this session's program status is queued on the GUI thread, so that
     /// a program reporting in a loop queues one. Set on the parser thread, cleared on the GUI thread.
     std::atomic<bool> _isProgramStatusRefreshPending = false;
+    /// Whether a refreshDisplayWorkingDirectory() is queued on the GUI thread, so that OSC 7 and OSC 3008
+    /// arriving together queue one. Set on the parser thread, cleared on the GUI thread.
+    std::atomic<bool> _isWorkingDirectoryRefreshPending = false;
+    /// @see getDisplayWorkingDirectory. GUI thread.
+    QString _shownWorkingDirectory;
+    /// @see getProgramStatus. GUI thread.
+    window::TabBadgeKind _paneProgramStatus = window::TabBadgeKind::None;
+    /// @see getProgramStatusText. GUI thread.
+    QString _paneProgramStatusText;
     /// The origins of the output gathered for the queued tab-badge notice, one bit per window::OutputOrigin;
     /// zero when none is queued (@see noteOutputForTab). Set on the parser thread, cleared on the GUI thread.
     std::atomic<uint8_t> _pendingOutputOrigins = 0;

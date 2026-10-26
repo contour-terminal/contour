@@ -111,6 +111,11 @@ class MainWindowControllerMock: public QAbstractListModel
     // Connections-targets.
     Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
     Q_PROPERTY(QVariantList newTabMenuModel READ newTabMenuModel NOTIFY newTabMenuModelChanged)
+    // {{{ Panes
+    // Mirrors WindowController's visible pane count; a test sets it to drive the pane headers.
+    Q_PROPERTY(
+        int visiblePaneCount READ visiblePaneCount WRITE setVisiblePaneCount NOTIFY visiblePaneCountChanged)
+    // }}}
 
   public:
     using QAbstractListModel::QAbstractListModel;
@@ -185,6 +190,21 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::triggerNewTabMenuAction(), recording the pick.
     Q_INVOKABLE void triggerNewTabMenuAction(int actionId) { newTabMenuPicks.push_back(actionId); }
 
+    // {{{ Panes
+    /// Mirrors WindowController::visiblePaneCount().
+    [[nodiscard]] int visiblePaneCount() const noexcept { return _visiblePaneCount; }
+
+    /// Splits or zooms, as WindowController recounts the active tab's panes.
+    /// @param count The panes shown.
+    void setVisiblePaneCount(int count)
+    {
+        if (_visiblePaneCount == count)
+            return;
+        _visiblePaneCount = count;
+        emit visiblePaneCountChanged();
+    }
+    // }}}
+
     std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
     std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
     int newTabMenuOpenings = 0;          ///< How often the new-tab menu was asked for.
@@ -204,11 +224,13 @@ class MainWindowControllerMock: public QAbstractListModel
     void newTabMenuModelChanged();
     void newTabMenuRequested();
     void aboutRequested();
+    void visiblePaneCountChanged();
 
   private:
     QVariantList _tabContextMenuModel {};
     QVariantList _newTabMenuModel {};
-    int _hostChipState = 0; ///< @see hostChipState; 0 = HostChipState::Connected.
+    int _hostChipState = 0;    ///< @see hostChipState; 0 = HostChipState::Connected.
+    int _visiblePaneCount = 1; ///< @see visiblePaneCount; one pane, unsplit.
 };
 
 } // namespace contour::test

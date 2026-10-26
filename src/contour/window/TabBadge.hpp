@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -124,6 +126,27 @@ inline constexpr auto TabBadgeRules = std::array {
     auto const rule = std::ranges::find(TabBadgeRules, kind, &TabBadgeRule::kind);
     return rule != TabBadgeRules.end() && programStatus != BadgeKind::None
            && rule->programStatus == programStatus;
+}
+
+/// What one pane's header shows of its own program status.
+struct PaneStatusBadge
+{
+    TabBadgeKind kind = TabBadgeKind::None; ///< The badge the pane's records earn.
+    std::string text;                       ///< What it says; empty with no badge.
+
+    bool operator==(PaneStatusBadge const&) const = default;
+};
+
+/// The badge one pane's own records earn, decided as a tab's is (badgeFor(), then resolveTabBadge()) but
+/// in front: a visible header is on screen, so what shows only out of sight (Done, Error) stays the tab's.
+/// @param records The pane's resolved records (resolvedRecords()), least recently updated first.
+/// @return The pane's badge and its text.
+[[nodiscard]] inline PaneStatusBadge paneStatusBadgeOf(
+    std::span<vtbackend::ProgramStatusRecord const> records)
+{
+    auto program = badgeFor(records, TabFocus::Foreground);
+    auto const kind = resolveTabBadge({ .programStatus = program.kind }).kind;
+    return { .kind = kind, .text = kind == TabBadgeKind::None ? std::string {} : std::move(program.text) };
 }
 
 /// How the Pill shape draws a badge kind. The Flat shape always draws the glyph.

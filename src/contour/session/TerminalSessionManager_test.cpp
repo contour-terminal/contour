@@ -18,6 +18,7 @@
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/TabBadge.hpp>
 #include <contour/window/WindowController.hpp>
@@ -1341,6 +1342,208 @@ TEST_CASE("TerminalSessionManager: the host chip follows the connection", "[mana
     manager.setHostConnection(ConnectionState::Connected);
     CHECK(window->hostChipState() == static_cast<int>(HostChipState::Connected));
     CHECK(spy.count() == 3);
+}
+
+// }}}
+
+// {{{ Step 2: panes -- each pane's directory, program status and focus, and the window's visible panes
+
+namespace
+{
+
+/// Reports @p url as the shell's working directory (OSC 7), as a shell's prompt does, and runs what the
+/// session posted for it.
+void reportWorkingDirectory(contour::session::TerminalSession& session, std::string_view url)
+{
+    session.terminal().writeToScreen(std::format("\033]7;{}\033\\", url));
+    drainPosted();
+}
+
+/// The leaf proxy that shows @p session under @p node, or null.
+[[nodiscard]] contour::session::PaneProxy* proxyShowing(contour::session::PaneProxy* node,
+                                                        contour::session::TerminalSession const* session)
+{
+    if (node == nullptr)
+        return nullptr;
+    if (node->isLeaf())
+        return node->session() == session ? node : nullptr;
+    if (auto* found = proxyShowing(node->first(), session))
+        return found;
+    return proxyShowing(node->second(), session);
+}
+
+} // namespace
+
+TEST_CASE("TerminalSessionManager: OSC 7 notifies the pane's working directory once", "[manager][panes]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+    drainPosted();
+
+    auto const changed =
+        QSignalSpy { session, &contour::session::TerminalSession::displayWorkingDirectoryChanged };
+    reportWorkingDirectory(*session, "file://localhost/tmp/x");
+    CHECK(changed.count() == 1);
+    CHECK(session->getDisplayWorkingDirectory() == QStringLiteral("/tmp/x"));
+
+    // A prompt re-reporting the same directory is no news.
+    reportWorkingDirectory(*session, "file://localhost/tmp/x");
+    CHECK(changed.count() == 1);
+
+    SECTION("OSC 3008 notifies too")
+    {
+        session->terminal().writeToScreen(
+            "\033]3008;start=shell-1;type=shell;machineid=3deb5353d3ba43d08201c136a47ead7b;cwd=/srv\033\\");
+        drainPosted();
+        CHECK(changed.count() == 2);
+        CHECK(session->getDisplayWorkingDirectory() == QStringLiteral("/srv"));
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a pane's working directory is abbreviated and made safe to show",
+          "[manager][panes]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const session = window->activeSession();
+    REQUIRE(session != nullptr);
+
+    auto const& home = manager.homeDirectory();
+    REQUIRE_FALSE(home.empty());
+    auto const path = std::string { home.starts_with('/') ? "" : "/" } + home;
+
+    SECTION("beneath the home")
+    {
+        reportWorkingDirectory(*session,
+                               std::format("file://{}{}/repo", contour::test::TestApp::HostName, path));
+        CHECK(session->getDisplayWorkingDirectory() == QStringLiteral("~/repo"));
+    }
+
+    SECTION("holding a bidi override")
+    {
+        // OSC 7 is percent-decoded: %E2%80%AE is U+202E RIGHT-TO-LEFT OVERRIDE.
+        reportWorkingDirectory(*session, "file://localhost/tmp/a%E2%80%AEb");
+        CHECK_FALSE(session->getDisplayWorkingDirectory().contains(QChar(0x202E)));
+        CHECK(session->getDisplayWorkingDirectory().startsWith(QStringLiteral("/tmp/a")));
+    }
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a pane's program status is its own", "[manager][panes]")
+{
+    using contour::window::TabBadgeKind;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    REQUIRE(left != nullptr);
+    manager.splitActivePane(/*vertical*/ true, left);
+    auto* const right = window->activeSession();
+    REQUIRE(right != left);
+    drainPosted();
+
+    auto const leftChanged =
+        QSignalSpy { left, &contour::session::TerminalSession::paneProgramStatusChanged };
+    auto const rightChanged =
+        QSignalSpy { right, &contour::session::TerminalSession::paneProgramStatusChanged };
+
+    left->terminal().writeToScreen("\033]7501;state=working:app=cargo\033\\");
+    drainPosted();
+    CHECK(left->getProgramStatus() == static_cast<int>(TabBadgeKind::Working));
+    CHECK(left->getProgramStatusText() == QStringLiteral("cargo"));
+    CHECK(right->getProgramStatus() == static_cast<int>(TabBadgeKind::None));
+    CHECK(right->getProgramStatusText().isEmpty());
+    CHECK(leftChanged.count() == 1);
+    CHECK(rightChanged.count() == 0);
+    // The tab still shows what any of its panes holds.
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::Working);
+
+    left->terminal().writeToScreen("\033]7501;state=clear\033\\");
+    drainPosted();
+    CHECK(left->getProgramStatus() == static_cast<int>(TabBadgeKind::None));
+    CHECK(leftChanged.count() == 2);
+    CHECK(rightChanged.count() == 0);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: a pane's focus says how it was reached", "[manager][panes]")
+{
+    using contour::window::PaneFocus;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const left = window->activeSession();
+    REQUIRE(left != nullptr);
+    manager.splitActivePane(/*vertical*/ true, left);
+    auto* const right = window->activeSession();
+    REQUIRE(right != left);
+
+    auto* const leftProxy = proxyShowing(window->activeTabRootPane(), left);
+    auto* const rightProxy = proxyShowing(window->activeTabRootPane(), right);
+    REQUIRE(leftProxy != nullptr);
+    REQUIRE(rightProxy != nullptr);
+
+    rightProxy->activate();
+    CHECK(rightProxy->focus() == static_cast<int>(PaneFocus::Focused));
+    CHECK(leftProxy->focus() == static_cast<int>(PaneFocus::Unfocused));
+
+    manager.focusPane(vtworkspace::FocusDirection::Left, right);
+    CHECK(leftProxy->focus() == static_cast<int>(PaneFocus::KeyboardFocused));
+    CHECK(rightProxy->focus() == static_cast<int>(PaneFocus::Unfocused));
+
+    // A click on the pane the keyboard reached moves nothing, yet its focus is the pointer's now, and QML
+    // is told so.
+    auto const leftActive = QSignalSpy { leftProxy, &contour::session::PaneProxy::activeChanged };
+    leftProxy->activate();
+    CHECK(leftProxy->focus() == static_cast<int>(PaneFocus::Focused));
+    CHECK(leftActive.count() >= 1);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("TerminalSessionManager: visiblePaneCount follows splits and zoom", "[manager][panes]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    CHECK(window->visiblePaneCount() == 0);
+
+    window->createNewTab();
+    CHECK(window->visiblePaneCount() == 1);
+    auto const changed = QSignalSpy { &*window, &contour::window::WindowController::visiblePaneCountChanged };
+
+    manager.splitActivePane(/*vertical*/ true, window->activeSession());
+    CHECK(window->visiblePaneCount() == 2);
+    CHECK(changed.count() == 1);
+
+    manager.splitActivePane(/*vertical*/ false, window->activeSession());
+    CHECK(window->visiblePaneCount() == 3);
+    CHECK(changed.count() == 2);
+
+    manager.toggleActivePaneZoom(window->activeSession());
+    CHECK(window->visiblePaneCount() == 1);
+    CHECK(changed.count() == 3);
+
+    manager.toggleActivePaneZoom(window->activeSession());
+    CHECK(window->visiblePaneCount() == 3);
+    CHECK(changed.count() == 4);
+
+    contour::test::closeAllTabs(*window);
 }
 
 // }}}

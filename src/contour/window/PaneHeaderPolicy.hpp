@@ -45,6 +45,27 @@ enum class PaneFocus : uint8_t
 /// The number of @c PaneFocus enumerators.
 inline constexpr size_t PaneFocusCount = static_cast<size_t>(PaneFocus::KeyboardFocused) + 1;
 
+/// How a tab's active pane was last made active.
+enum class PaneActivation : uint8_t
+{
+    Pointer = 0, //!< A click or tap on the pane, or nothing yet.
+    Keyboard,    //!< A FocusPane* action.
+};
+
+/// The number of @c PaneActivation enumerators.
+inline constexpr size_t PaneActivationCount = static_cast<size_t>(PaneActivation::Keyboard) + 1;
+
+/// The focus an active pane has, by how it was reached, in enumerator order.
+inline constexpr auto ActivePaneFocus =
+    std::array<PaneFocus, PaneActivationCount> { PaneFocus::Focused, PaneFocus::KeyboardFocused };
+
+/// @param activation How the active pane was reached.
+/// @return Its focus.
+[[nodiscard]] constexpr PaneFocus activePaneFocus(PaneActivation activation) noexcept
+{
+    return ActivePaneFocus[static_cast<size_t>(activation)];
+}
+
 /// What the header text shows.
 enum class PaneHeaderContent : uint8_t
 {

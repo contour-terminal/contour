@@ -184,3 +184,26 @@ TEST_CASE("tabBadge.programStatusWon", "[tabbadge]")
     CHECK_FALSE(isProgramStatusBadge(TabBadgeKind::Done, BadgeKind::None));
     CHECK_FALSE(isProgramStatusBadge(TabBadgeKind::None, BadgeKind::None));
 }
+
+TEST_CASE("tabBadge.paneStatusIsDecidedInFront", "[tabbadge]")
+{
+    using vtbackend::ProgramState;
+    auto const recordOf = [](ProgramState state) {
+        return vtbackend::ProgramStatusRecord { .id = {},
+                                                .state = state,
+                                                .kind = vtbackend::BlockedKind::None,
+                                                .progress = std::nullopt,
+                                                .app = "cargo",
+                                                .title = {},
+                                                .message = {} };
+    };
+
+    CHECK(paneStatusBadgeOf({}) == PaneStatusBadge {});
+    auto const working = std::array { recordOf(ProgramState::Working) };
+    CHECK(paneStatusBadgeOf(working) == PaneStatusBadge { .kind = TabBadgeKind::Working, .text = "cargo" });
+    auto const blocked = std::array { recordOf(ProgramState::Working), recordOf(ProgramState::Blocked) };
+    CHECK(paneStatusBadgeOf(blocked).kind == TabBadgeKind::Blocked);
+    // What shows only out of sight is the tab's: the header is on screen.
+    auto const done = std::array { recordOf(ProgramState::Done) };
+    CHECK(paneStatusBadgeOf(done) == PaneStatusBadge {});
+}

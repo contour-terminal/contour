@@ -189,3 +189,12 @@ TEST_CASE("paneHeader.names", "[paneheader]")
     }
     CHECK(contour::config::chromeDensityName(ChromeDensity::Minimal) == "minimal");
 }
+
+TEST_CASE("paneHeader.activePaneFocusByActivation", "[paneheader]")
+{
+    CHECK(activePaneFocus(PaneActivation::Pointer) == PaneFocus::Focused);
+    CHECK(activePaneFocus(PaneActivation::Keyboard) == PaneFocus::KeyboardFocused);
+    // A zero activation, as a tab that was never told one holds, is the pointer's.
+    CHECK(activePaneFocus(PaneActivation {}) == PaneFocus::Focused);
+    CHECK(ActivePaneFocus.size() == PaneActivationCount);
+}

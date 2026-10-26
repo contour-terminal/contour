@@ -33,6 +33,7 @@
 #include <contour/window/TabAttention.hpp>
 
 #include <vtbackend/core/FileUrl.hpp>
+#include <vtbackend/core/WorkingDirectory.hpp>
 #include <vtbackend/input/HeldModifiers.hpp>
 #include <vtbackend/input/vi/HintModeHandler.hpp>
 #include <vtbackend/input/vi/ViCommands.hpp>
@@ -588,6 +589,9 @@ void TerminalSession::attachDisplay(DisplaySurface& newDisplay)
     // before it drained (dropping the clear): without this, the stale-set flag would make every future
     // cursorPositionChanged() early-return, freezing IME rectangle tracking and the a11y caret.
     _cursorMovedPostPending.clear(std::memory_order_release);
+
+    // What the pane header shows before the shell reports anything: the directory the session started in.
+    refreshDisplayWorkingDirectory();
 
 #ifdef CONTOUR_EXTENSIONS
     // A question asked while no display showed this session (a background tab) is shown now.
@@ -2302,6 +2306,58 @@ void TerminalSession::programStatusChanged(vtbackend::ProgramStatusChange const&
         if (_manager != nullptr)
             _manager->refreshTabBadgeForSession(modelSessionId());
     });
+}
+
+void TerminalSession::workingDirectoryChanged()
+{
+    // The threading constraint of programStatusChanged() above, and its answer: the GUI thread reads the
+    // directory back, so the header never shows one older than the one in effect when the call runs, and a
+    // burst of reports queues one call.
+    if (_isWorkingDirectoryRefreshPending.exchange(true))
+        return;
+    _postTarget->post([this]() {
+        _isWorkingDirectoryRefreshPending = false;
+        refreshDisplayWorkingDirectory();
+    });
+}
+
+void TerminalSession::contextChanged(vtbackend::ContextId /*activeContext*/)
+{
+    // An OSC 3008 context carries a cwd too, which the resolver prefers over OSC 7.
+    workingDirectoryChanged();
+}
+
+void TerminalSession::refreshDisplayWorkingDirectory()
+{
+    auto shown = QString::fromStdString(shownWorkingDirectory(
+        _manager != nullptr ? std::string_view { _manager->homeDirectory() } : std::string_view {}));
+    if (shown == _shownWorkingDirectory)
+        return;
+    _shownWorkingDirectory = std::move(shown);
+    emit displayWorkingDirectoryChanged();
+}
+
+std::string TerminalSession::shownWorkingDirectory(std::string_view home) const
+{
+    // Purely presentational, which is why it happens here and not at the source: a caller that wants a
+    // path to act on wants the real one.
+    auto const resolved = resolveWorkingDirectory(vtbackend::CwdPurpose::Display);
+    if (!resolved) // Nothing reported: the directory the session started in, which is on this machine.
+        return vtbackend::abbreviateHomePath(displayWorkingDirectory(), home);
+
+    auto const shown = resolved->locality == vtbackend::ContextLocality::Local
+                           ? vtbackend::abbreviateHomePath(resolved->path, home)
+                           : resolved->path;
+    return vtbackend::sanitizeCommandLine(shown, vtbackend::SanitizePurpose::Display);
+}
+
+void TerminalSession::setPaneProgramStatus(window::TabBadgeKind kind, QString text)
+{
+    if (kind == _paneProgramStatus && text == _paneProgramStatusText)
+        return;
+    _paneProgramStatus = kind;
+    _paneProgramStatusText = std::move(text);
+    emit paneProgramStatusChanged();
 }
 
 void TerminalSession::commandBlockFinished(vtbackend::CommandBlockSummary const& summary)

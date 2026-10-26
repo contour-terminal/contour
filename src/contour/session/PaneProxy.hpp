@@ -32,6 +32,9 @@ class PaneProxy: public QObject
     Q_PROPERTY(contour::session::PaneProxy* second READ second NOTIFY changed)
     Q_PROPERTY(contour::session::TerminalSession* session READ session NOTIFY changed)
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
+    // A window::PaneFocus's value: Unfocused unless active, KeyboardFocused when a FocusPane* action reached
+    // it. Notified with `active`: the manager re-announces it when only the way it was reached changed.
+    Q_PROPERTY(int focus READ focus NOTIFY activeChanged)
     Q_PROPERTY(int paneId READ paneId CONSTANT)
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
@@ -52,10 +55,13 @@ class PaneProxy: public QObject
     [[nodiscard]] TerminalSession* session() const noexcept;
     [[nodiscard]] bool active() const noexcept;
 
+    /// @return This pane's window::PaneFocus, as its value. @see TerminalSessionManager::lastPaneActivation
+    [[nodiscard]] int focus() const noexcept;
+
     /// Writes a new splitter ratio back to the model (called from the QML drag handle).
     Q_INVOKABLE void setRatio(double ratio);
 
-    /// Makes this pane the active pane of its tab (called on focus-in / click).
+    /// Makes this pane the active pane of its tab (called on focus-in / click), reached by the pointer.
     Q_INVOKABLE void activate();
 
     // {{{ Manager-side wiring (not for QML)

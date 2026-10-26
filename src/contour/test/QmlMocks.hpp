@@ -54,6 +54,14 @@ class MockSession: public QObject
     Q_PROPERTY(QVariantList scrollbarMarkColors READ scrollbarMarkColors NOTIFY scrollbarMarksChanged)
     // Mirrors TerminalSession's reconnecting state, which TerminalPane's overlay shows.
     Q_PROPERTY(bool isReconnecting READ isReconnecting NOTIFY reconnectingChanged)
+    // {{{ Panes: what the pane header reads, mirroring TerminalSession's properties and their signals.
+    Q_PROPERTY(
+        QString displayWorkingDirectory READ displayWorkingDirectory NOTIFY displayWorkingDirectoryChanged)
+    Q_PROPERTY(QString foregroundProcessName READ foregroundProcessName NOTIFY foregroundProcessNameChanged)
+    Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+    Q_PROPERTY(int programStatus READ programStatus NOTIFY paneProgramStatusChanged)
+    Q_PROPERTY(QString programStatusText READ programStatusText NOTIFY paneProgramStatusChanged)
+    // }}}
 
   public:
     /// @param background The session background colour; configuration, hence fixed for the lifetime.
@@ -162,6 +170,42 @@ class MockSession: public QObject
         emit dimUnfocusedChanged();
     }
 
+    // {{{ Panes
+    [[nodiscard]] QString const& displayWorkingDirectory() const noexcept { return _displayWorkingDirectory; }
+    [[nodiscard]] QString const& foregroundProcessName() const noexcept { return _foregroundProcessName; }
+    [[nodiscard]] QString const& title() const noexcept { return _title; }
+    [[nodiscard]] int programStatus() const noexcept { return _programStatus; }
+    [[nodiscard]] QString const& programStatusText() const noexcept { return _programStatusText; }
+
+    /// The shell reported another directory, as TerminalSession::refreshDisplayWorkingDirectory() tells.
+    void setDisplayWorkingDirectory(QString directory)
+    {
+        _displayWorkingDirectory = std::move(directory);
+        emit displayWorkingDirectoryChanged();
+    }
+    /// Another program came to the front, as TerminalSession::pollForegroundProcess() tells.
+    void setForegroundProcessName(QString name)
+    {
+        _foregroundProcessName = std::move(name);
+        emit foregroundProcessNameChanged();
+    }
+    /// The application set another title.
+    void setTitle(QString title)
+    {
+        _title = std::move(title);
+        emit titleChanged();
+    }
+    /// The pane's program status changed, as TerminalSession::setPaneProgramStatus() tells.
+    /// @param kind A window::TabBadgeKind's value.
+    /// @param text What it says.
+    void setProgramStatus(int kind, QString text)
+    {
+        _programStatus = kind;
+        _programStatusText = std::move(text);
+        emit paneProgramStatusChanged();
+    }
+    // }}}
+
     // Permission dialog stubs (SessionChrome connects these signals to dialog .open slots).
     Q_INVOKABLE void applyPendingFontChange(bool, bool) {}
     Q_INVOKABLE void applyPendingPaste(bool, bool) {}
@@ -190,6 +234,10 @@ class MockSession: public QObject
     void opacityChanged();
     void dimUnfocusedChanged();
     void reconnectingChanged();
+    void displayWorkingDirectoryChanged();
+    void foregroundProcessNameChanged();
+    void titleChanged();
+    void paneProgramStatusChanged();
     void onBell();
     void onAlert();
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);
@@ -216,6 +264,11 @@ class MockSession: public QObject
     float _opacity = 1.0F;
     float _dimUnfocused = 0.0F;
     bool _reconnecting = false;
+    QString _displayWorkingDirectory;
+    QString _foregroundProcessName;
+    QString _title;
+    int _programStatus = 0; ///< window::TabBadgeKind::None.
+    QString _programStatusText;
 };
 
 /// A DYNAMIC stand-in for a PaneProxy (one node of the split tree). Unlike the old static mock, session /
@@ -234,6 +287,8 @@ class MockPaneProxy: public QObject
     Q_PROPERTY(MockPaneProxy* second READ second NOTIFY changed)
     Q_PROPERTY(QObject* session READ session NOTIFY changed)
     Q_PROPERTY(bool active READ active NOTIFY changed)
+    // A window::PaneFocus's value, as PaneProxy's focus gives it.
+    Q_PROPERTY(int focus READ focus NOTIFY changed)
 
   public:
     explicit MockPaneProxy(bool leaf, MockPaneProxy* a = nullptr, MockPaneProxy* b = nullptr):
@@ -252,6 +307,7 @@ class MockPaneProxy: public QObject
     [[nodiscard]] MockPaneProxy* second() const { return _second; }
     [[nodiscard]] QObject* session() const { return _session; }
     [[nodiscard]] bool active() const { return _active; }
+    [[nodiscard]] int focus() const { return _focus; }
 
     // setRatio (from the divider drag) records what it was handed, so a drag is observable; the mock's
     // own ratio stays put, as the model only re-publishes it on its next rebuild.
@@ -267,6 +323,14 @@ class MockPaneProxy: public QObject
         if (_session == s)
             return;
         _session = s;
+        emit changed();
+    }
+    /// How the pane is focused now. @param focus A window::PaneFocus's value.
+    void setFocus(int focus)
+    {
+        if (_focus == focus)
+            return;
+        _focus = focus;
         emit changed();
     }
     void setActive(bool a)
@@ -313,6 +377,7 @@ class MockPaneProxy: public QObject
     MockPaneProxy* _second;
     QObject* _session = nullptr;
     bool _active = false;
+    int _focus = 0;       // window::PaneFocus::Unfocused
     int _orientation = 2; // vtworkspace::SplitState::Vertical for a split node; ignored for a leaf
     double _ratio = 0.5;
 };

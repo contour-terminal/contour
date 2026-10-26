@@ -133,6 +133,11 @@ class WindowController:
     // A window::HostChipState as its underlying value: where the connection to that host stands.
     Q_PROPERTY(int hostChipState READ hostChipState NOTIFY hostChipStateChanged)
     Q_PROPERTY(QString applicationVersion READ applicationVersion CONSTANT)
+    // {{{ Panes
+    // The panes the active tab shows: the leaves under its layout root (1 while zoomed or unsplit, 0 without
+    // a tab), which decides whether the panes wear headers.
+    Q_PROPERTY(int visiblePaneCount READ visiblePaneCount NOTIFY visiblePaneCountChanged)
+    // }}}
     QML_ELEMENT
     QML_UNCREATABLE("Created by the session manager")
 
@@ -425,6 +430,8 @@ class WindowController:
 
     // {{{ PaneProxy tree + window-service reads
     [[nodiscard]] session::PaneProxy* activeTabRootPane() const noexcept { return _activeTabRootProxy; }
+    /// @return The leaves under the active tab's layout root; 0 without a tab.
+    [[nodiscard]] int visiblePaneCount() const noexcept { return _visiblePaneCount; }
     [[nodiscard]] session::TerminalSession* activeSession() const noexcept;
     [[nodiscard]] bool titleBarVisible() const noexcept;
     [[nodiscard]] bool isMultimediaReady() const noexcept;
@@ -803,6 +810,10 @@ class WindowController:
     void bellRequested(QString const& source, double volume);
     /// @see requestAlert.
     void alertRequested();
+    // {{{ Panes
+    /// @see visiblePaneCount
+    void visiblePaneCountChanged();
+    // }}}
 
   private:
     /// The backing vtworkspace::Window, or nullptr if it has been removed.
@@ -1032,6 +1043,8 @@ class WindowController:
     // surviving pane's QML item / display is not torn down when a sibling splits or closes.
     std::unordered_map<uint64_t, session::PaneProxy*> _paneProxies;
     session::PaneProxy* _activeTabRootProxy = nullptr;
+    // @see visiblePaneCount. Recounted with the layout root (refreshActiveTabLayoutRoot()).
+    int _visiblePaneCount = 0;
 
     // Carries beginMoveRows()'s result from onTabAboutToBeMoved() to onTabMoved().
     bool _tabMoveInProgress = false;

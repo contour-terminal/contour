@@ -640,20 +640,8 @@ QString WindowController::tabWorkingDirectory(int index) const
     if (session == nullptr)
         return {};
 
-    // Abbreviated as a shell prompt writes it, but only for a directory on this machine: this machine's
-    // home says nothing about another machine's paths, where `~` would name a different directory.
-    // Purely presentational, which is why it happens here and not at the source: a caller that wants a
-    // path to act on wants the real one.
-    auto const& home = _manager.homeDirectory();
-    auto const resolved = session->resolveWorkingDirectory(vtbackend::CwdPurpose::Display);
-    if (!resolved) // Nothing reported: the directory the session started in, which is on this machine.
-        return QString::fromStdString(
-            vtbackend::abbreviateHomePath(session->displayWorkingDirectory(), home));
-
-    auto const shown = resolved->locality == vtbackend::ContextLocality::Local
-                           ? vtbackend::abbreviateHomePath(resolved->path, home)
-                           : resolved->path;
-    return QString::fromStdString(vtbackend::sanitizeCommandLine(shown, vtbackend::SanitizePurpose::Display));
+    // The same answer the pane header shows: abbreviated for a directory on this machine, made safe to show.
+    return QString::fromStdString(session->shownWorkingDirectory(_manager.homeDirectory()));
 }
 
 void WindowController::dispatchTabStripWheel(
@@ -1942,6 +1930,14 @@ void WindowController::refreshActiveTabLayoutRoot()
         _activeTabRootProxy = newRoot;
         emit activeTabRootPaneChanged();
         emit activeSessionChanged();
+    }
+
+    // Recounted here rather than with the root: a split under an unchanged root adds a pane too.
+    auto const visible = tab != nullptr ? tab->layoutRoot()->leafCount() : 0;
+    if (visible != _visiblePaneCount)
+    {
+        _visiblePaneCount = visible;
+        emit visiblePaneCountChanged();
     }
 }
 

@@ -9,6 +9,9 @@
 #include <contour/session/TerminalSession.hpp>
 #include <contour/session/TerminalSessionManager.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
+#include <contour/window/ProgramStatusBadge.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/TabLabel.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -1247,8 +1250,9 @@ void TerminalSessionManager::tabAboutToBeRemoved(vtworkspace::WindowId window, i
         c->onTabAboutToBeRemoved(index);
 }
 
-void TerminalSessionManager::tabClosed(vtworkspace::WindowId window, vtworkspace::TabId, int)
+void TerminalSessionManager::tabClosed(vtworkspace::WindowId window, vtworkspace::TabId tab, int)
 {
+    _paneActivations.erase(tab.value);
     if (auto* c = controllerFor(window))
         c->onTabClosed();
 }
@@ -1525,9 +1529,28 @@ void TerminalSessionManager::refreshTabProgressForSession(vtworkspace::SessionId
 
 void TerminalSessionManager::refreshTabBadgeForSession(vtworkspace::SessionId session)
 {
+    // The records changed: the pane's own status may have, as well as the tab's.
+    if (auto* s = sessionForId(session))
+        refreshPaneProgramStatus(*s);
+    refreshTabBadgeOf(session);
+}
+
+void TerminalSessionManager::refreshTabBadgeOf(vtworkspace::SessionId session)
+{
     // Only the badge's roles, for the reason refreshTabProgressForSession gives.
     if (auto* tab = findTabHostingSession(session))
         refreshTabBadge(*tab);
+}
+
+void TerminalSessionManager::refreshPaneProgramStatus(TerminalSession& session)
+{
+    auto const badge = [&] {
+        // The lock the parser thread holds while it changes the records.
+        auto const& terminal = session.terminal();
+        auto const _ = std::lock_guard { terminal };
+        return window::paneStatusBadgeOf(window::resolvedRecords(terminal.programStatus()));
+    }();
+    session.setPaneProgramStatus(badge.kind, QString::fromStdString(badge.text));
 }
 
 void TerminalSessionManager::refreshTabBadge(vtworkspace::Tab const& tab)
@@ -1546,7 +1569,7 @@ void TerminalSessionManager::noteSessionOutput(vtworkspace::SessionId session, w
         return;
     // Asked of the ledger first: a session that is on screen, or already marked, repaints nothing.
     if (_attention.noteOutput(session, sessionVisibility(*s), origin) == window::AttentionChange::Changed)
-        refreshTabBadgeForSession(session);
+        refreshTabBadgeOf(session);
 }
 
 void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
@@ -1558,7 +1581,7 @@ void TerminalSessionManager::noteCommandFinished(TerminalSession const& session,
         return;
     if (_attention.noteFinished(session.modelSessionId(), sessionVisibility(session), ending)
         == window::AttentionChange::Changed)
-        refreshTabBadgeForSession(session.modelSessionId());
+        refreshTabBadgeOf(session.modelSessionId());
 }
 
 void TerminalSessionManager::markVisibleSessionsSeen(vtworkspace::WindowId window)
@@ -2079,7 +2102,11 @@ void TerminalSessionManager::closeActivePane(TerminalSession* acting, SessionEnd
 void TerminalSessionManager::focusPane(vtworkspace::FocusDirection direction, TerminalSession* acting)
 {
     if (auto* tab = paneActionTargetTab(acting))
+    {
+        // Recorded first, so that the active-pane change the move fires reads it.
+        notePaneActivation(tab->id(), window::PaneActivation::Keyboard);
         _model->focusDirection(tab->id(), direction);
+    }
 }
 
 void TerminalSessionManager::swapPane(vtworkspace::FocusDirection direction, TerminalSession* acting)
@@ -2136,6 +2163,23 @@ void TerminalSessionManager::activatePane(vtworkspace::TabId tab, vtworkspace::P
 {
     if (_model->findTab(tab) != nullptr)
         _model->setActivePane(tab, id);
+}
+
+void TerminalSessionManager::notePaneActivation(vtworkspace::TabId tab, window::PaneActivation activation)
+{
+    if (lastPaneActivation(tab) == activation)
+        return;
+    _paneActivations[tab.value] = activation;
+    // The active pane may stay where it is (a click on the pane the keyboard reached), so no active-pane
+    // change would tell the proxies their focus moved.
+    if (auto* c = controllerFor(_model->windowOfTab(tab)))
+        c->notifyActivePaneChanged();
+}
+
+window::PaneActivation TerminalSessionManager::lastPaneActivation(vtworkspace::TabId tab) const noexcept
+{
+    auto const found = _paneActivations.find(tab.value);
+    return found != _paneActivations.end() ? found->second : window::PaneActivation::Pointer;
 }
 
 // }}}

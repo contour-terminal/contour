@@ -9,6 +9,7 @@
 #include <contour/platform/TaskbarProgressSink.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/session/TerminalSession.hpp>
+#include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/TabAttention.hpp>
 #include <contour/window/WindowController.hpp>
 
@@ -511,6 +512,16 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     void setPaneRatio(vtworkspace::TabId tab, vtworkspace::PaneId id, double ratio);
     /// Makes leaf @p id the active pane of tab @p tab.
     void activatePane(vtworkspace::TabId tab, vtworkspace::PaneId id);
+
+    /// Records how tab @p tab's active pane was last reached -- a pointer (PaneProxy::activate()) or a
+    /// FocusPane* action -- and, when that changes, tells the tab's proxies, whose focus reads it.
+    /// @param tab The tab.
+    /// @param activation How.
+    void notePaneActivation(vtworkspace::TabId tab, window::PaneActivation activation);
+
+    /// @param tab The tab.
+    /// @return How its active pane was last reached; Pointer for a tab never told.
+    [[nodiscard]] window::PaneActivation lastPaneActivation(vtworkspace::TabId tab) const noexcept;
     // }}}
 
     void updateColorPreference(vtbackend::ColorPreference const& preference);
@@ -642,7 +653,8 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param session The session whose hosting tab should refresh its progress indicator.
     void refreshTabProgressForSession(vtworkspace::SessionId session);
 
-    /// The program-status path (OSC 7501): repaints the badge of the tab hosting @p session, which pools the
+    /// The program-status path (OSC 7501): recomputes @p session's own pane status
+    /// (TerminalSession::setPaneProgramStatus) and repaints the badge of the tab hosting it, which pools the
     /// records of all its panes. Marks no output. No-op if no tab hosts @p session. GUI thread.
     /// @param session The session whose records changed.
     void refreshTabBadgeForSession(vtworkspace::SessionId session);
@@ -961,6 +973,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param tab The tab whose badge inputs changed.
     void refreshTabBadge(vtworkspace::Tab const& tab);
 
+    /// Repaints the badge of the tab hosting @p session, as the output path does: its pane's own status is
+    /// left alone, since output changes no record. @param session The session.
+    void refreshTabBadgeOf(vtworkspace::SessionId session);
+
+    /// Recomputes @p session's pane status from its own records (window::paneStatusBadgeOf), under its
+    /// terminal's lock, and hands it to the session. @param session The session.
+    void refreshPaneProgramStatus(TerminalSession& session);
+
     /// Tells the session factory how @p tab is presented now (@see SessionFactory::reportTabPresentation):
     /// what activePaneChanged, paneZoomChanged, tabTitleChanged, tabColorChanged and activeTabChanged call,
     /// each with the tab it is about. Nothing for a factory whose sessions this process hosts.
@@ -1232,6 +1252,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     // SessionId -> the tab hosting that session's leaf, so updateStatusLine() and
     // findTabHostingSession() resolve a session's tab in O(1) instead of walking every tab's tree.
     std::unordered_map<uint64_t, vtworkspace::TabId> _tabBySession;
+    // TabId -> how that tab's active pane was last reached (@see notePaneActivation); a tab absent from it
+    // was reached by the pointer. Pruned when the tab closes.
+    std::unordered_map<uint64_t, window::PaneActivation> _paneActivations;
     uint64_t _nextSessionId { 1 };
     // The id pre-minted for the next tab the model is about to create, consumed by the model's
     // SessionAllocator so a model tab and its backing TerminalSession share one id.
