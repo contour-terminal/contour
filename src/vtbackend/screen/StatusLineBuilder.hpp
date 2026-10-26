@@ -47,16 +47,24 @@ namespace StatusLineDefinitions
         ColorRole role;           ///< The role.
         std::string_view name;    ///< As written in a template, lowercase.
         std::size_t paletteIndex; ///< The indexed palette colour the role resolves to.
+        /// The contrast ratio the role's colour must reach on its bar to be drawn; below it the bar's ink
+        /// is. Secondary text (Muted) sits at the large-text tier, the rest at MinimumTextContrast.
+        double minimumContrast;
     };
 
     /// The colour roles, one row per ColorRole in enumerator order: the parser, the serializer and the
     /// settings page all read this table, so a sixth role is one row here and one enumerator.
     inline constexpr auto ColorRoleNames = std::array {
-        ColorRoleName { .role = ColorRole::Accent, .name = "accent", .paletteIndex = 4 },
-        ColorRoleName { .role = ColorRole::Success, .name = "success", .paletteIndex = 2 },
-        ColorRoleName { .role = ColorRole::Danger, .name = "danger", .paletteIndex = 1 },
-        ColorRoleName { .role = ColorRole::Warning, .name = "warning", .paletteIndex = 3 },
-        ColorRoleName { .role = ColorRole::Muted, .name = "muted", .paletteIndex = 8 },
+        ColorRoleName {
+            .role = ColorRole::Accent, .name = "accent", .paletteIndex = 4, .minimumContrast = 4.5 },
+        ColorRoleName {
+            .role = ColorRole::Success, .name = "success", .paletteIndex = 2, .minimumContrast = 4.5 },
+        ColorRoleName {
+            .role = ColorRole::Danger, .name = "danger", .paletteIndex = 1, .minimumContrast = 4.5 },
+        ColorRoleName {
+            .role = ColorRole::Warning, .name = "warning", .paletteIndex = 3, .minimumContrast = 4.5 },
+        ColorRoleName {
+            .role = ColorRole::Muted, .name = "muted", .paletteIndex = 8, .minimumContrast = 3.0 },
     };
 
     static_assert(
@@ -90,7 +98,7 @@ namespace StatusLineDefinitions
     /// The RGB value text in @p color draws with on @p ground.
     ///
     /// A hex colour is the user's and is drawn as written. A role is the scheme's colour for it while that
-    /// reads on @p ground at @ref MinimumTextContrast, and otherwise the ground's legible ink
+    /// reads on @p ground at its row's minimumContrast, and otherwise the ground's legible ink
     /// (legibleInkOn()): blue accent text on the blue Normal-mode bar would vanish, where the ink keeps it
     /// readable.
     /// @param color The text colour.

@@ -104,7 +104,7 @@ A role names a color by what it means rather than by its value, and takes it fro
 scheme when the line is drawn, so it follows a scheme change: `accent` is palette color 4 (blue),
 `success` 2 (green), `danger` 1 (red), `warning` 3 (yellow) and `muted` 8 (bright black). The scheme
 is the configured one: a program changing the palette (OSC 4) recolours its own text, not the status
-line. Where a role's color would not read on the bar it is drawn on (at 4.5:1), the role's text takes
+line. Where a role's color would not read on the bar it is drawn on (at 4.5:1; `muted`, secondary text, at 3:1), the role's text takes
 the bar's legible ink instead -- the scheme's foreground or background, bright white, then black or
 white -- so it stays readable in every input mode and scheme; a `#RRGGBB` color is drawn as written. Roles are
 read in any case and written lowercase. A value that is neither a role nor a color leaves the color

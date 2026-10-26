@@ -719,8 +719,7 @@ class HostGitLookups
   public:
     /// @param given The services a test or an embedder hands the host; borrowed.
     /// @param fileSystem The host's filesystem. Without @p given, the host runs lookups of its own -- one
-    /// probe
-    ///        thread and this machine's files -- only when this is this machine's (NativeFileSystem).
+    /// probe thread and this machine's files -- only when this is this machine's (NativeFileSystem).
     HostGitLookups(std::optional<vtbackend::GitHeadServices> given,
                    core::platform::FileSystem const& fileSystem);
 

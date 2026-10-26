@@ -217,7 +217,9 @@ namespace StatusLineDefinitions
         auto const* const role = std::get_if<ColorRole>(&color);
         if (!role)
             return std::get<RGBColor>(color);
-        if (auto const rgb = roleColor(*role, palette); contrastRatio(rgb, ground) >= MinimumTextContrast)
+        auto const& row = ColorRoleNames[static_cast<std::size_t>(*role)];
+        if (auto const rgb = palette.indexedColor(row.paletteIndex);
+            contrastRatio(rgb, ground) >= row.minimumContrast)
             return rgb;
         return legibleInkOn(palette, ground);
     }

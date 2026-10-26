@@ -773,8 +773,7 @@ TEST_CASE("statusLine.colors.rolesReadOnContourSchemes", "[statusline][colors]")
         {
             INFO(scheme << ": " << row.name);
             auto const ratio = contrastRatio(StatusLineDefinitions::roleColor(row.role, palette), background);
-            auto const minimum = row.role == StatusLineDefinitions::ColorRole::Muted ? 3.0 : 4.5;
-            CHECK(ratio >= minimum);
+            CHECK(ratio >= row.minimumContrast);
         }
     }
 }
@@ -795,8 +794,30 @@ TEST_CASE("statusLine.colors.rolesReadOnEveryBar", "[statusline][colors]")
                 INFO(scheme << ": " << row.name << " on " << formatColor(bar.background));
                 auto const ink = StatusLineDefinitions::resolveItemColor(
                     StatusLineDefinitions::ItemColor { row.role }, palette, bar.background);
-                CHECK(contrastRatio(ink, bar.background) >= MinimumTextContrast);
+                CHECK(contrastRatio(ink, bar.background) >= row.minimumContrast);
             }
+    }
+}
+
+TEST_CASE("serializeToVT.lastCommandDurationKeepsMutedOnTheContourSchemes", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    for (auto const scheme: { "contour-dark"sv, "contour-light"sv })
+    {
+        INFO(scheme);
+        auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+        REQUIRE(defaultColorPalettes(scheme, mc.terminal.defaultColorPalette()));
+        mc.terminal.resetColorPalette();
+        test::typeAtPrompt(mc, "ctest");
+        mc.writeToScreen("\033]133;C\033\\");
+        mc.steadyClock.advance(134s);
+        mc.writeToScreen(test::commandEnd(0));
+        mc.writeToScreen("\033]133;A\033\\$ ");
+
+        auto const palette = mc.terminal.defaultColorPalette();
+        auto const line =
+            serializeToVT(mc.terminal, parseStatusLineSegment("{LastCommand}"sv), StatusLineStyling::Enabled);
+        CHECK(line.contains(textSgrOf(palette.indexedColor(8)) + " · 2m 14s"));
     }
 }
 // }}}
