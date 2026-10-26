@@ -3854,12 +3854,12 @@ class Terminal: public IStatusLinePublishTarget
     /// Whether a changed screen is announced to the listener now.
     enum class ScreenNotification : uint8_t
     {
-        Skipped = 0, ///< Rendering is suppressed, or the change only swapped the render buffers.
+        Skipped = 0, ///< Rendering is suppressed, or a frame waits for a swap that failed again.
         Due,         ///< The listener is told.
     };
 
-    /// What screenUpdated() and screenReplayed() share: marks the screen dirty and swaps a pending render
-    /// buffer.
+    /// What screenUpdated() and screenReplayed() share: marks the screen dirty and retries the swap of a
+    /// pending render buffer.
     /// @return Due when the listener is to be told.
     [[nodiscard]] ScreenNotification markScreenChanged();
 

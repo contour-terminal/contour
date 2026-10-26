@@ -4728,6 +4728,34 @@ TEST_CASE("Terminal.processInputOnce.passive.aHeldFrontBufferIsRetriedWhenTheDis
 }
 #endif
 
+TEST_CASE("Terminal.screenUpdated.aRetriedSwapThatSucceedsIsAnnounced", "[terminal][threading]")
+{
+    // The display's last frame lost its swap to a paint, and the display then went away -- its tab was
+    // switched from -- leaving the frame waiting to be swapped in. The first output afterwards retries the
+    // swap, which now succeeds, and must still say the screen changed: a background tab learns of its
+    // output from nothing else.
+    struct CountingTerm final: MockTerm<>
+    {
+        using MockTerm<>::MockTerm;
+        int screenUpdates = 0; ///< How often the terminal said the screen changed.
+        void screenUpdated() override { ++screenUpdates; }
+    };
+    auto mock = CountingTerm { PageSize { LineCount(3), ColumnCount(20) }, LineCount(10) };
+    {
+        auto const painting = mock.terminal.renderBuffer();
+        // On a thread of its own: the swap's try_lock must fail as it does against the render thread, and a
+        // mutex may not be tried by the thread that holds it.
+        std::thread { [&mock] { std::ignore = mock.terminal.refreshRenderBuffer(); } }.join();
+        REQUIRE(mock.terminal.renderBufferState() == vtbackend::RenderBufferState::TrySwapBuffers);
+    }
+    mock.screenUpdates = 0;
+
+    mock.writeToScreen("x");
+
+    CHECK(mock.terminal.renderBufferState() == vtbackend::RenderBufferState::WaitingForRefresh);
+    CHECK(mock.screenUpdates == 1);
+}
+
 TEST_CASE("Terminal.processInputOnce.readsAheadWhileTheStateIsTaken", "[terminal][threading]")
 {
     // While another thread -- the render thread, building a frame -- holds the terminal's state, the

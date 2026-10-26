@@ -4986,11 +4986,13 @@ Terminal::ScreenNotification Terminal::markScreenChanged()
     if (isRenderingSuppressed())
         return ScreenNotification::Skipped;
 
-    if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
-    {
-        _renderBuffer.swapBuffers(_renderBuffer.lastUpdate.load(std::memory_order_relaxed));
+    // A frame still waiting for its swap is the display's to show: retry it, and stay quiet while a paint
+    // holds the front buffer still. One that now succeeds is announced as any change is -- the display that
+    // built it may since have gone (a tab switched from), and this output is then the only news a background
+    // tab gets. A spurious announcement to a display that is still there costs nothing; it coalesces.
+    if (_renderBuffer.state == RenderBufferState::TrySwapBuffers
+        && !_renderBuffer.swapBuffers(_renderBuffer.lastUpdate.load(std::memory_order_relaxed)))
         return ScreenNotification::Skipped;
-    }
 
     return ScreenNotification::Due;
 }
@@ -7791,8 +7793,9 @@ void Terminal::synchronizedOutput(bool enabled)
     {
         // Instrumentation only. This branch drops a repaint that the throttle would have allowed, and
         // nothing re-arms it: while this state lasts, the batch's screenUpdated() only retries the swap of
-        // the frame built before and tells the display nothing, so the block's end shows only with the next
-        // repaint something else asks for.
+        // the frame built before, and tells the display only when that retry succeeds, so while a paint
+        // still holds the front buffer the block's end shows only with the next repaint something else asks
+        // for.
         ZoneScopedN("syncOut.dropped.trySwap");
         return;
     }
