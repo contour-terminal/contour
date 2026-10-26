@@ -14,6 +14,12 @@
 //
 // The card's fill is the terminal's own background, painted by the header and the terminal it holds: a
 // fill of its own beneath them would composite a translucent profile twice.
+//
+// Two things here sit over cells, against the spec's "nothing goes over non-blank cells" (§1.5), and both
+// are ruled exceptions, not precedent: the held-modifier reveal's overlay header (D4), which must move
+// nothing, and the reconnecting pill over a grid that is frozen and dimmed anyway. Anything else that would
+// cover cells (Step 3f's sticky header among them) takes room of its own, as the inline header and the
+// ExitedFooter do.
 import QtQuick
 import QtQuick.Window
 

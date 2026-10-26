@@ -45,6 +45,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1347,6 +1348,45 @@ TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uist
     CHECK(comfortable.paneHeaderName(QStringLiteral("vim"), QStringLiteral("~/src"))
           == QStringLiteral("vim"));
     CHECK(comfortable.paneHeaderName(QString(), QStringLiteral("~/src")) == QStringLiteral("~/src"));
+}
+
+TEST_CASE("UiStyleProvider: a pane's dimmed header and footer text read at 4.5:1 on every bundled scheme",
+          "[contour][uistyle]")
+{
+    // colorOn() picks black or white ink by the pane's tone at the kit's label alphas; a mid-grey scheme
+    // background near the tone threshold is where that would fall short. The footer's text sits on the
+    // footer's wash, which is resolved against the same background.
+    using contour::config::ChromeColorRole;
+    using contour::config::ChromeStyle;
+    using contour::window::UiStyleProvider;
+    auto const row = GENERATE(ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux);
+    CAPTURE(static_cast<int>(row));
+    auto const provider = UiStyleProvider(contour::window::chromeInputsFor(row, QGuiApplication::font()));
+    for (auto const name: vtbackend::defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = vtbackend::ColorPalette {};
+        REQUIRE(vtbackend::defaultColorPalettes(name, palette));
+        auto const background = contour::platform::toQColor(palette.defaultBackground);
+        auto const dimmed =
+            over(paneColorOn(provider, ChromeColorRole::PaneHeaderTextDimmed, background), background);
+        CHECK(contrastOf(dimmed, background) >= 4.5);
+        auto const footer =
+            over(paneColorOn(provider, ChromeColorRole::PaneFooterFill, background), background);
+        auto const footerText =
+            over(paneColorOn(provider, ChromeColorRole::PaneFooterText, background), footer);
+        CHECK(contrastOf(footerText, footer) >= 4.5);
+        // Close's label on its fill (the wash once more), and on that fill under the pointer (the wash
+        // again) and pressed (the wash a third time): ExitedFooter's FooterButton states.
+        auto const text = paneColorOn(provider, ChromeColorRole::PaneFooterText, background);
+        auto const close = over(paneColorOn(provider, ChromeColorRole::PaneFooterFill, background), footer);
+        auto const hovered = over(paneColorOn(provider, ChromeColorRole::PaneFooterFill, background), close);
+        auto const pressed =
+            over(paneColorOn(provider, ChromeColorRole::PaneHeaderActionHover, background), footer);
+        CHECK(contrastOf(over(text, close), close) >= 4.5);
+        CHECK(contrastOf(over(text, hovered), hovered) >= 4.5);
+        CHECK(contrastOf(over(text, pressed), pressed) >= 4.5);
+    }
 }
 
 TEST_CASE("UiStyleProvider: colorOn picks the label by the pane's own background", "[contour][uistyle]")

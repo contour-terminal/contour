@@ -473,7 +473,7 @@ native menu bar's "Settings…".
 
 **Seams.**
 - `PaneNode.qml` draws splits with a `SplitView`.
-- Its `handle` thickness is `vtworkspace::DefaultSplitHandleThickness = 6`
+- Its `handle` thickness is `vtworkspace::DefaultSplitHandleThickness = 6` (renamed `DefaultPaneGap` in Step 2)
   (`PaneLayout.hpp:37`). The window-size solver uses the same value (`WindowController.cpp:1619-1625`).
 - The dim layer is at `TerminalPane.qml:181-200`, and the reconnecting overlay at `:205-220`.
 
@@ -496,6 +496,9 @@ native menu bar's "Settings…".
   - `PaneFocus { Unfocused = 0, Focused, KeyboardFocused }`;
   - the visible pane count;
   - the width in points.
+  - Added in implementation: the pane's `height`, the inline `headerHeight` and the
+    `minimumContentHeight` (an inline header hides when it would leave less than one cell row), and
+    `actionsReveal` (`layout.paneActions`: on hover only, or on hover or focus).
 - Outputs, as enums:
   - `PaneHeaderContent { Hidden = 0, Name, NameAndCwd }`, where the cwd appears from 360 pt wide;
   - `HeaderActions { Hidden = 0, Shown }`.

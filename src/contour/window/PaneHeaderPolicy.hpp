@@ -156,6 +156,10 @@ inline constexpr std::array<DensityHeaderRule, config::ChromeDensityCount> Densi
         return {};
 
     auto const focused = inputs.focus != PaneFocus::Unfocused;
+    // A pane reached by the keyboard (a FocusPane* move: KeyboardFocused) shows its actions until a
+    // pointer activates a pane, although Tab cannot reach them from the grid -- Tab goes to the PTY.
+    // Ruled (Step 2, M3): the keyboard-reached pane is the one being worked on, and its buttons stay
+    // usable there by assistive technology (their press actions) and by the chords they name.
     auto const actionsShown =
         inputs.pointer == PointerPresence::Hovering || inputs.focus == PaneFocus::KeyboardFocused
         || (inputs.actionsReveal == config::PaneActionsReveal::OnHoverOrFocus && focused);

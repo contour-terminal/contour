@@ -1009,7 +1009,7 @@ TEST_CASE("WindowGeometry.snapPaneExtentToDevicePixels.the split handle needs sn
     // that origin is `firstExtent + handleThickness`, and the default handle is 6 LOGICAL pixels, which
     // is 7.5 device pixels at the very common 125% scale and 10.5 at 175%. Panes on exactly those
     // scales would have kept the #2040 artifact while 100/150/200% were fixed.
-    auto constexpr DefaultHandleThickness = 6.0; // vtworkspace::DefaultSplitHandleThickness
+    auto constexpr DefaultHandleThickness = 6.0; // vtworkspace::DefaultPaneGap
 
     for (auto const dpr: { 1.0, 1.25, 1.5, 1.75, 2.0, 2.5 })
     {

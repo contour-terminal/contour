@@ -156,6 +156,9 @@ Item {
             accessibleName: qsTr("Close")
             // The footer's own wash once more: a step above the footer, as the kit's fill.3 is.
             fill: footer.washColor
+            // Pressed, the kit's strongest fill on the footer in place of the wash.
+            pressedFill: chromeStyle.paletteRevision < 0 ? "transparent"
+                       : chromeStyle.colorOn(chromeStyle.roles.paneHeaderActionHover, footer.background)
             ink: footer.textColor
             onClicked: if (footer.session) footer.session.dismiss()
         }
@@ -176,7 +179,11 @@ Item {
         text: footer.messageFloorText
     }
 
-    // A footer button: its label in the tab type on a control-rounded fill, `size.footerButton` high.
+    // A footer button: its label in the tab type on a control-rounded fill, `size.footerButton` high. Under
+    // the pointer it lays the footer's wash (fill.3) once more over that fill (native rows); pressed, it shows its
+    // pressedFill instead, without the hover layer. Both resolve on the pane's own background, as the
+    // header's actions do, and keep the label at 4.5:1 on every bundled scheme -- which a stronger fill
+    // laid OVER Close's wash would not.
     component FooterButton: Rectangle {
         id: button
 
@@ -190,7 +197,9 @@ Item {
         /// The label's colour.
         property color ink
         /// The button's fill.
-        property alias fill: button.color
+        property color fill
+        /// The button's fill while pressed; its rest fill unless the host names a stronger one.
+        property color pressedFill: fill
 
         /// A left click, or the accessibility press action.
         signal clicked()
@@ -198,10 +207,24 @@ Item {
         width: buttonLabel.implicitWidth + (footer.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5)
         height: chromeStyle.size.footerButton
         radius: chromeStyle.radii.control
+        color: buttonTap.pressed ? button.pressedFill : button.fill
 
         Accessible.role: Accessible.Button
         Accessible.name: button.accessibleName
         Accessible.onPressAction: button.clicked()
+
+        HoverHandler {
+            id: buttonHover
+        }
+
+        Rectangle {
+            objectName: button.objectName + "State"
+            anchors.fill: parent
+            radius: button.radius
+            // Native rows only: the Terminal row's wash is an opaque bar colour, which would hide a
+            // bracketed button's own fill (Restart's accent) and its ink with it.
+            color: buttonHover.hovered && !buttonTap.pressed && !footer.bracketed ? footer.washColor : "transparent"
+        }
 
         Text {
             id: buttonLabel
@@ -214,6 +237,7 @@ Item {
         }
 
         TapHandler {
+            id: buttonTap
             gesturePolicy: TapHandler.ReleaseWithinBounds
             onTapped: button.clicked()
         }

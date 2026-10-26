@@ -25,26 +25,27 @@ struct LayoutSize
     [[nodiscard]] constexpr bool operator==(LayoutSize const&) const noexcept = default;
 };
 
-/// Default thickness of a split divider handle in logical pixels.
+/// Default gap between two panes of a split, in logical pixels.
 ///
-/// What a SplitChrome assumes when nobody names a gap: the divider before pane cards, and the extent a
-/// headless host (no chrome tokens) solves with.
+/// What a SplitChrome assumes when nobody names a gap: the extent a headless host (no chrome tokens)
+/// solves with. A host with chrome tokens names its own (window::splitChromeOf, the `space.paneGap` the
+/// canvas draws between the pane cards).
 ///
 /// Solver contract: the gap handed to the solver must be an UPPER bound of the rendered handle.
 /// The solver may only ever overshoot (surplus becomes leaf padding); undershooting would silently
 /// shrink a requested grid.
-inline constexpr int DefaultSplitHandleThickness = 6;
+inline constexpr int DefaultPaneGap = 6;
 
 /// What a split tree spends around its leaves, in the host's unit: the extents contentSizeForLeaf() adds
 /// to a leaf's requirement on its way up to the content area.
 ///
-/// Every field must be an upper bound of what the host draws (see DefaultSplitHandleThickness).
+/// Every field must be an upper bound of what the host draws (see DefaultPaneGap).
 struct SplitChrome
 {
     /// The divider between two side-by-side panes (a SplitState::Vertical split), along the width.
-    int sideBySideGap = DefaultSplitHandleThickness;
+    int sideBySideGap = DefaultPaneGap;
     /// The divider between two stacked panes (a SplitState::Horizontal split), along the height.
-    int stackedGap = DefaultSplitHandleThickness;
+    int stackedGap = DefaultPaneGap;
     /// The height each leaf of a split spends on its header, above its grid.
     int leafHeader = 0;
     /// How far a split tree's cards sit in from each edge of the content area.
@@ -58,7 +59,7 @@ struct SplitChrome
 
 /// Thickness, in CELLS, of the divider a split spends between its children.
 ///
-/// The cell-space counterpart of DefaultSplitHandleThickness, and deliberately not derived from it:
+/// The cell-space counterpart of DefaultPaneGap, and deliberately not derived from it:
 /// this is tmux's model, whose `layout_check` verifies `first + divider + second == parent` on every
 /// ingested layout string — which only holds for exactly one cell. Single-sourced so a projection
 /// (layoutInCells) and any composition of one cannot drift apart.

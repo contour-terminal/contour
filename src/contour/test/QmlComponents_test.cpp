@@ -8136,6 +8136,15 @@ TEST_CASE("pane end: the footer reads at 4.5:1 (offscreen)", "[contour][gui][qml
         auto const fill = over(colorOf(button), footerFill);
         auto const& label = PaneTreeHost::partOf(button, (std::string { name } + "Label").c_str());
         CHECK(contrastOf(colorOf(label), fill) >= 4.5);
+        // And under the pointer, the footer's wash laid over the fill (native rows); pressed, the button's
+        // pressed fill.
+        if (row != contour::config::ChromeStyle::Terminal)
+        {
+            auto const hovered = over(colorOf(PaneTreeHost::partOf(card, "exitedFooterFill")), fill);
+            CHECK(contrastOf(colorOf(label), hovered) >= 4.5);
+        }
+        auto const pressed = over(button.property("pressedFill").value<QColor>(), footerFill);
+        CHECK(contrastOf(colorOf(label), pressed) >= 4.5);
     }
 }
 
@@ -8288,6 +8297,59 @@ TEST_CASE("pane end: a narrow pane's footer drops Close's chord before its messa
     CHECK(message.width() >= messageWidth);
     CHECK(restart.isVisible());
     CHECK(accessibleNameOf(footer).contains(QStringLiteral("exited")));
+}
+
+TEST_CASE("pane end: the footer's buttons answer hover and press as the kit's buttons do (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 1200, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+    endWithExitCode(session);
+    host.settle();
+
+    auto const& card = host.cardOf(leaf);
+    auto const background = session.property("backgroundColor").value<QColor>();
+    auto const roleOn = [&host, &background](contour::config::ChromeColorRole role) {
+        return host.style().colorOn(static_cast<int>(role), background);
+    };
+    for (auto const* name: { "exitedFooterRestart", "exitedFooterClose" })
+    {
+        INFO("button: " << name);
+        auto const& button = PaneTreeHost::partOf(card, name);
+        auto const& layer = PaneTreeHost::partOf(button, (std::string { name } + "State").c_str());
+        auto const centre = button.mapToScene(QPointF { button.width() / 2, button.height() / 2 }).toPoint();
+        CHECK(colorOf(layer).alpha() == 0); // at rest, the button is its fill alone
+
+        // Under the pointer, the footer's wash once more -- on the native rows; the Terminal row's opaque
+        // bar wash would hide a bracketed button's own fill.
+        QTest::mouseMove(&host.window, centre);
+        QCoreApplication::processEvents();
+        if (PaneTreeHost::partOf(card, "exitedFooter").property("bracketed").toBool())
+            CHECK(colorOf(layer).alpha() == 0);
+        else
+            CHECK(colorOf(layer) == roleOn(contour::config::ChromeColorRole::PaneFooterFill));
+
+        // Pressed, the hover layer goes and the button shows its pressed fill: Close the strongest fill in
+        // place of its wash, Restart its accent.
+        auto const restFill = colorOf(button);
+        QTest::mousePress(&host.window, Qt::LeftButton, {}, centre);
+        QCoreApplication::processEvents();
+        CHECK(colorOf(layer).alpha() == 0);
+        CHECK(colorOf(button)
+              == (std::string_view { name } == "exitedFooterClose"
+                      ? roleOn(contour::config::ChromeColorRole::PaneHeaderActionHover)
+                      : restFill));
+        QTest::mouseRelease(&host.window, Qt::LeftButton, {}, centre);
+        QCoreApplication::processEvents();
+
+        QTest::mouseMove(&host.window, QPoint { 2, 2 });
+        QCoreApplication::processEvents();
+        CHECK(colorOf(layer).alpha() == 0);
+    }
 }
 
 TEST_CASE("pane end: a local reconnect names no host (offscreen)", "[contour][gui][qml][paneend]")
