@@ -85,6 +85,7 @@ class MockSession: public QObject
     Q_PROPERTY(bool searchNavigable READ searchNavigable NOTIFY searchStateChanged)
     Q_PROPERTY(QVariantList searchToggles READ searchToggles NOTIFY searchStateChanged)
     Q_PROPERTY(QVariantMap searchFocusedRows READ searchFocusedRows NOTIFY searchFocusedRowsChanged)
+    Q_PROPERTY(QVariantMap pendingPermission READ pendingPermission NOTIFY pendingPermissionChanged)
     // }}}
 
   public:
@@ -367,23 +368,29 @@ class MockSession: public QObject
     int previousCalls = 0;                     ///< searchPrevious() calls.
     // }}}
 
-    // Permission dialog stubs (SessionChrome connects these signals to dialog .open slots).
-    Q_INVOKABLE void applyPendingFontChange(contour::session::permission::PermissionDecision,
-                                            contour::session::permission::PermissionMemory)
+    // {{{ The permission question
+    [[nodiscard]] QVariantMap const& pendingPermission() const noexcept { return _pendingPermission; }
+
+    /// The session asks another question, as TerminalSession::publishPendingPermission() tells.
+    void setPendingPermission(QVariantMap prompt)
     {
+        _pendingPermission = std::move(prompt);
+        emit pendingPermissionChanged();
     }
-    Q_INVOKABLE void applyPendingPaste(contour::session::permission::PermissionDecision,
-                                       contour::session::permission::PermissionMemory)
+
+    /// Records the answer, as TerminalSession::answerPermission() would run the question's role.
+    Q_INVOKABLE void answerPermission(contour::session::permission::PermissionDecision decision,
+                                      contour::session::permission::PermissionMemory memory)
     {
+        lastPermissionAnswer = std::pair { decision, memory };
+        ++permissionAnswers;
     }
-    Q_INVOKABLE void executePendingBufferCapture(contour::session::permission::PermissionDecision,
-                                                 contour::session::permission::PermissionMemory)
-    {
-    }
-    Q_INVOKABLE void executeShowHostWritableStatusLine(contour::session::permission::PermissionDecision,
-                                                       contour::session::permission::PermissionMemory)
-    {
-    }
+
+    /// The last answer given, if any.
+    std::optional<std::pair<contour::session::PermissionDecision, contour::session::PermissionMemory>>
+        lastPermissionAnswer;
+    int permissionAnswers = 0; ///< How often the chrome answered.
+    // }}}
 
     // The extension prompt: what it shows, and each answer, counted.
     [[nodiscard]] Q_INVOKABLE QString pendingExtensionPermissionText() const { return extensionQuestion; }
@@ -420,10 +427,7 @@ class MockSession: public QObject
     void onAlert();
     void onShowNotification(QString const& /*title*/, QString const& /*body*/);
     void onScrollOffsetChanged(int /*value*/);
-    void requestPermissionForFontChange();
-    void requestPermissionForBufferCapture();
-    void requestPermissionForShowHostWritableStatusLine();
-    void requestPermissionForPasteLargeFile();
+    void pendingPermissionChanged();
     void requestPermissionForExtension();
 
   private:
@@ -450,6 +454,7 @@ class MockSession: public QObject
     QString _displayWorkingDirectory;
     QString _foregroundProcessName;
     QString _title;
+    QVariantMap _pendingPermission;
     int _programStatus = 0; ///< window::TabBadgeKind::None.
     QString _programStatusText;
     int _sessionEnd = 0; ///< session::EndReason::None.

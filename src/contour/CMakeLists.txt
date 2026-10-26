@@ -282,7 +282,10 @@ if(CONTOUR_FRONTEND_GUI)
         session/SessionFactory.hpp
         window/SettingsController.hpp
         window/SettingsWindowHost.hpp
+        session/PastePreview.hpp
         session/Permission.hpp
+        session/PermissionPrompt.hpp
+        session/PermissionQueue.hpp
         session/TerminalSession.hpp
         session/TerminalSessionManager.hpp
         window/ChromeStyleHost.hpp
@@ -333,6 +336,7 @@ if(CONTOUR_FRONTEND_GUI)
         window/SettingsController.cpp
         window/SettingsWindowHost.cpp
         session/Permission.cpp
+        session/PermissionPrompt.cpp
         session/TerminalSession.cpp
         display/TerminalAccessible.cpp
         display/FirstFrameWatchdog.cpp
@@ -800,6 +804,7 @@ if(CONTOUR_FRONTEND_GUI)
             display/ViewportTextIndex_test.cpp
             session/KeyboardRouting_test.cpp
             session/Permission_test.cpp
+            session/PermissionPrompt_test.cpp
             test/MainWindowQml_test.cpp
             test/MainWindowControllerMock.hpp
             test/MockMainController.hpp
@@ -1212,6 +1217,7 @@ if(CONTOUR_TESTING)
         cli/ShellIntegrationShells_test.cpp
         display/RedrawCoalescer_test.cpp
         session/SearchStatus_test.cpp
+        session/PastePreview_test.cpp
         session/ScreenshotFile_test.cpp
         session/CommandOutputFiles_test.cpp
         session/CommandBlockTooltip_test.cpp

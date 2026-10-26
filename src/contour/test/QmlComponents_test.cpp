@@ -9913,4 +9913,60 @@ TEST_CASE("Closing the palette over the find bar gives the find bar its focus ba
 }
 // }}}
 
+// {{{ The session's permission question
+TEST_CASE("SessionChrome opens one dialog for the session's question (offscreen)",
+          "[contour][gui][qml][permission]")
+{
+    auto const capture = contour::test::QmlMessageCapture {};
+    QQmlEngine engine;
+    MockTabController controller;
+    engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    contour::test::installChromeStyle(engine);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/SessionChrome.qml")));
+    while (component.status() == QQmlComponent::Loading)
+        QCoreApplication::processEvents();
+    REQUIRE(component.isReady());
+
+    MockSession session;
+    QVariantMap initial;
+    initial.insert("session", QVariant::fromValue(static_cast<QObject*>(&session)));
+    std::unique_ptr<QObject> chrome(component.createWithInitialProperties(initial));
+    REQUIRE(chrome != nullptr);
+    auto* const dialog = chrome->findChild<QObject*>(QStringLiteral("permissionDialog"));
+    REQUIRE(dialog != nullptr);
+
+    auto const title = QStringLiteral("Allow “zsh” to read the screen?");
+    auto const detail = QStringLiteral("It asks for the last 24 lines of the terminal, to read them back.");
+    session.setPendingPermission(QVariantMap {
+        { QStringLiteral("title"), title },
+        { QStringLiteral("lines"),
+          QVariantList { QVariantMap { { QStringLiteral("text"), detail },
+                                       { QStringLiteral("strong"), false },
+                                       { QStringLiteral("verbatim"), false } } } },
+    });
+    QCoreApplication::processEvents();
+    CHECK(dialog->property("title").toString() == title);
+    CHECK(dialog->property("text").toString() == detail);
+
+    // "Yes to All" is Allow, remembered for the session.
+    REQUIRE(QMetaObject::invokeMethod(dialog, "yesToAllClicked"));
+    REQUIRE(session.lastPermissionAnswer.has_value());
+    CHECK(session.lastPermissionAnswer->first == contour::session::PermissionDecision::Allow);
+    CHECK(session.lastPermissionAnswer->second == contour::session::PermissionMemory::Session);
+
+    // Closing it unanswered is Deny, this once.
+    REQUIRE(QMetaObject::invokeMethod(dialog, "rejected"));
+    CHECK(session.lastPermissionAnswer->first == contour::session::PermissionDecision::Deny);
+    CHECK(session.lastPermissionAnswer->second == contour::session::PermissionMemory::Once);
+    CHECK(session.permissionAnswers == 2);
+
+    // Emptied once answered: no dialog opens for nothing.
+    session.setPendingPermission({});
+    QCoreApplication::processEvents();
+    CHECK(dialog->property("title").toString() == title);
+    // Offscreen, Qt Labs Platform has no native dialog to open and says so; that is no QML diagnostic.
+    CHECK(capture.count(contour::test::isQmlDiagnostic) == 0);
+}
+// }}}
+
 #include <QmlComponents_test.moc>

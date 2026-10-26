@@ -16,7 +16,10 @@
 #include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
 #include <contour/session/HyperlinkTooltip.hpp>
+#include <contour/session/PastePreview.hpp>
 #include <contour/session/Permission.hpp>
+#include <contour/session/PermissionPrompt.hpp>
+#include <contour/session/PermissionQueue.hpp>
 #include <contour/session/SearchStatus.hpp>
 #include <contour/session/SessionFactory.hpp>
 #include <contour/window/HostChipState.hpp>
@@ -269,6 +272,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     Q_PROPERTY(
         QString foregroundProcessName READ getForegroundProcessName NOTIFY foregroundProcessNameChanged)
     // }}}
+    // The question this session asks its user now, as the permission dialog shows it; empty while nothing is
+    // asked. See pendingPermission().
+    Q_PROPERTY(QVariantMap pendingPermission READ pendingPermission NOTIFY pendingPermissionChanged)
 
     // Q_PROPERTY(QString profileName READ profileName NOTIFY profileNameChanged)
 
@@ -1019,51 +1025,65 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @return The layout; never nullptr.
     [[nodiscard]] input::KeyboardLayout const& keyboardLayout() const noexcept;
 
-    // The guarded roles' executors: each answers its role's pending request, and remembers the answer for the
-    // session unless @p memory is Once (see executeRole()). The parameters name the enums' declaring
-    // namespace, so moc's normalized signature names the type registered with QML.
+    // The guarded roles' executors: each answers its role's pending request, remembers the answer for the
+    // session unless @p memory is Once (see executeRole()), and settles the role's question if it is asked.
+    // answerPermission() reaches them for the question shown; public for the tests that answer directly.
 
     /// Applies the font change a program asked for, if @p decision allows it.
     /// @param decision Whether the user allowed it.
     /// @param memory How long the answer stands.
-    Q_INVOKABLE void applyPendingFontChange(contour::session::permission::PermissionDecision decision,
-                                            contour::session::permission::PermissionMemory memory);
+    void applyPendingFontChange(contour::session::permission::PermissionDecision decision,
+                                contour::session::permission::PermissionMemory memory);
 
     /// Sends the large paste that waits for the user's verdict, if @p decision allows it.
     /// @param decision Whether the user allowed it.
     /// @param memory How long the answer stands.
-    Q_INVOKABLE void applyPendingPaste(contour::session::permission::PermissionDecision decision,
-                                       contour::session::permission::PermissionMemory memory);
+    void applyPendingPaste(contour::session::permission::PermissionDecision decision,
+                           contour::session::permission::PermissionMemory memory);
 
     /// Answers every buffer capture outstanding: with the capture if @p decision allows it, else with the
     /// terminating chunk alone.
     /// @param decision Whether the user allowed it.
     /// @param memory How long the answer stands.
-    Q_INVOKABLE void executePendingBufferCapture(contour::session::permission::PermissionDecision decision,
-                                                 contour::session::permission::PermissionMemory memory);
+    void executePendingBufferCapture(contour::session::permission::PermissionDecision decision,
+                                     contour::session::permission::PermissionMemory memory);
 
     /// Shows the host-writable status line a program asked for, if @p decision allows it.
     /// @param decision Whether the user allowed it.
     /// @param memory How long the answer stands.
-    Q_INVOKABLE void executeShowHostWritableStatusLine(
-        contour::session::permission::PermissionDecision decision,
-        contour::session::permission::PermissionMemory memory);
+    void executeShowHostWritableStatusLine(contour::session::permission::PermissionDecision decision,
+                                           contour::session::permission::PermissionMemory memory);
 
     /// Runs the command RerunCommand asked about, if @p decision allows it: typed at the prompt and entered
     /// -- unless the prompt went away while the dialog was up, or the line can no longer be typed as it is.
     /// @param decision Whether the user allowed it.
     /// @param memory How long the answer stands.
-    Q_INVOKABLE void applyPendingRerun(contour::session::permission::PermissionDecision decision,
-                                       contour::session::permission::PermissionMemory memory);
+    void applyPendingRerun(contour::session::permission::PermissionDecision decision,
+                           contour::session::permission::PermissionMemory memory);
 
     /// The answer the user asked to stand for the session for @p role, if any.
     /// @param role The guarded role.
     /// @return The remembered decision; nothing when every request still asks (or follows the configuration).
     [[nodiscard]] std::optional<PermissionDecision> rememberedDecision(GuardedRole role) const;
 
-    /// The command RerunCommand asks to run, made safe to show; empty while none is waiting.
-    /// @return The command line, for the dialog that asks.
-    [[nodiscard]] Q_INVOKABLE QString pendingRerunCommandLine() const;
+    /// The question this session asks now, for QML: empty while nothing is asked; else `title` (QString),
+    /// `lines` (a list of `{text, strong, verbatim}` maps), `denyText`, `allowText`, `rememberText`,
+    /// `rememberScope`, `initialMemory`, `defaultDecision` (each its enum's underlying int, as QML compares
+    /// it with Permission.*) and `allowNeedsRemember`. The two line flags and allowNeedsRemember stay bool:
+    /// a QVariantMap read by QML is the documented carve-out. Changes are notified by
+    /// pendingPermissionChanged(). GUI thread.
+    /// @return The question, as the dialog shows it.
+    [[nodiscard]] QVariantMap pendingPermission() const { return _pendingPermission; }
+
+    /// Answers the question shown: runs its role with @p decision and @p memory, and, when another waits, has
+    /// it shown on the next turn of the event loop, once the dialog that answered this one has closed.
+    /// @param decision Whether the user allowed it.
+    /// @param memory How long the answer stands.
+    Q_INVOKABLE void answerPermission(contour::session::permission::PermissionDecision decision,
+                                      contour::session::permission::PermissionMemory memory);
+
+    /// @return The question shown now, if any.
+    [[nodiscard]] std::optional<PermissionAsk> pendingPermissionAsk() const;
     Q_INVOKABLE void resizeTerminalToDisplaySize();
 
     /// What the prompt asking requestPermissionForExtension() says: which extension asks, from which module,
@@ -1528,8 +1548,23 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// @param memory How long the answer stands.
     void executeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
 
-    /// Records @p decision for @p role for the rest of the session, unless @p memory is Once.
-    void rememberDecision(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
+    /// What every executor does first: records @p decision for @p role for the rest of the session, unless
+    /// @p memory is Once, and withdraws @p role's question, which this answer settles.
+    void concludeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory);
+
+    /// Builds the prompt of the question shown, from its role's pending state; nothing while none is asked.
+    [[nodiscard]] std::optional<PermissionPrompt> currentPermissionPrompt();
+
+    /// Republishes pendingPermission() from the question shown, notifying if it changed.
+    void publishPendingPermission();
+
+    /// Shows the question now at the front: publishes it and announces its title politely.
+    void showNextPermission();
+
+    /// Forgets the remembered answer of every role whose configured permission differs between
+    /// @p previous and the active profile's, and settles a question the configuration now answers.
+    /// @param previous The permission settings before the profile was replaced.
+    void reconcilePermissions(config::PermissionsConfig const& previous);
 
     /// Sends @p text to the application as one paste, repeated @p count times.
     void sendPasteRepeatedly(std::string const& text, unsigned count);
@@ -1585,11 +1620,9 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     void dimUnfocusedChanged();
     void onBell(float volume);
     void onAlert();
-    void requestPermissionForFontChange();
-    void requestPermissionForPasteLargeFile();
-    void requestPermissionForBufferCapture();
-    void requestPermissionForShowHostWritableStatusLine();
-    void requestPermissionForRerunCommand();
+    /// pendingPermission() changed: another question is shown, the one shown was answered, or what it asks
+    /// changed while it is shown.
+    void pendingPermissionChanged();
     /// A status-line extension asks to run its commands; pendingExtensionPermissionText() says what to show.
     void requestPermissionForExtension();
     void showNotification(QString const& title, QString const& content);
@@ -2319,6 +2352,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     {
         std::string text;
         unsigned count;
+        /// What the prompt shows of it: made once, as the paste is held, never from the whole text again.
+        PastePreview preview {};
     };
     std::optional<BigPasteRequest> _pendingBigPaste;
 
@@ -2326,6 +2361,10 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// answer comes: the block's record may have gone by then, and what runs is what was shown.
     std::optional<vtbackend::CommandLineText> _pendingRerun;
     PermissionCache _rememberedPermissions;
+    /// The questions asked, one shown at a time. GUI thread.
+    PermissionQueue _permissionQueue;
+    /// @see pendingPermission. GUI thread.
+    QVariantMap _pendingPermission;
     std::unique_ptr<QThread> _exitWatcherThread;
 
     std::atomic<bool> _onClosedHandled = false;

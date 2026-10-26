@@ -1054,11 +1054,138 @@ void TerminalSession::executeRole(GuardedRole role, PermissionDecision decision,
     }
 }
 
-void TerminalSession::rememberDecision(GuardedRole role, PermissionDecision decision, PermissionMemory memory)
+void TerminalSession::concludeRole(GuardedRole role, PermissionDecision decision, PermissionMemory memory)
 {
     // Persistent stands for the session too: a guarded role has nowhere persistent to keep it.
     if (memory != PermissionMemory::Once)
         _rememberedPermissions[role] = decision;
+
+    // Whoever answered -- the user, the configuration or a remembered answer -- this drains what the role's
+    // question asks about, so the question goes. Shown, the next one opens on the next turn of the event
+    // loop, once the dialog that answered this one has closed; with none left the dialog's data empties now.
+    switch (_permissionQueue.withdraw(role))
+    {
+        case PromptChange::Due:
+            QMetaObject::invokeMethod(this, [this]() { showNextPermission(); }, Qt::QueuedConnection);
+            break;
+        case PromptChange::None: publishPendingPermission(); break;
+    }
+}
+
+void TerminalSession::answerPermission(PermissionDecision decision, PermissionMemory memory)
+{
+    auto const ask = _permissionQueue.current();
+    if (!ask)
+        return;
+    // An extension's consent is answered through its own queue.
+    if (auto const* const role = std::get_if<GuardedRole>(&*ask))
+    {
+        sessionLog()("Permission for {} answered {}, {} by user.", *role, decision, memory);
+        executeRole(*role, decision, memory); // its executor withdraws the question (concludeRole)
+    }
+}
+
+std::optional<PermissionAsk> TerminalSession::pendingPermissionAsk() const
+{
+    return _permissionQueue.current();
+}
+
+std::optional<PermissionPrompt> TerminalSession::currentPermissionPrompt()
+{
+    auto const ask = _permissionQueue.current();
+    auto const* const role = ask ? std::get_if<GuardedRole>(&*ask) : nullptr;
+    if (role == nullptr)
+        return std::nullopt;
+
+    // Program-supplied text all: each builder makes it safe to show.
+    auto const subject = resolvedWindowTitle();
+    switch (*role)
+    {
+        case GuardedRole::ChangeFont:
+            return fontChangePrompt(subject, _pendingFontChange.value_or(vtbackend::FontDef {}));
+        case GuardedRole::CaptureBuffer: {
+            // One answer serves every capture outstanding, so the prompt names the largest.
+            auto lines = vtbackend::LineCount(0);
+            {
+                auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
+                for (auto const& request: _pendingBufferCaptures)
+                    lines = std::max(lines, request.lines);
+            }
+            return bufferCapturePrompt(subject, lines);
+        }
+        case GuardedRole::ShowHostWritableStatusLine: return hostStatusLinePrompt(subject);
+        case GuardedRole::BigPaste:
+            if (!_pendingBigPaste)
+                return bigPastePrompt(subject, 0, PastePreview {});
+            return bigPastePrompt(
+                subject, _pendingBigPaste->text.size() * _pendingBigPaste->count, _pendingBigPaste->preview);
+        case GuardedRole::RerunCommand:
+            return rerunPrompt(_pendingRerun ? _pendingRerun->display() : std::string {});
+    }
+    return std::nullopt;
+}
+
+namespace
+{
+    /// @p prompt as QML reads it: see TerminalSession::pendingPermission().
+    [[nodiscard]] QVariantMap toVariantMap(PermissionPrompt const& prompt)
+    {
+        auto lines = QVariantList {};
+        lines.reserve(static_cast<qsizetype>(prompt.lines.size()));
+        for (auto const& line: prompt.lines)
+            lines.append(QVariantMap {
+                { QStringLiteral("text"), QString::fromStdString(line.text) },
+                { QStringLiteral("strong"), line.weight == PromptLineWeight::Strong },
+                { QStringLiteral("verbatim"), line.style == PromptLineStyle::Verbatim },
+            });
+        return QVariantMap {
+            { QStringLiteral("title"), QString::fromStdString(prompt.title) },
+            { QStringLiteral("lines"), lines },
+            { QStringLiteral("denyText"), QString::fromStdString(prompt.denyText) },
+            { QStringLiteral("allowText"), QString::fromStdString(prompt.allowText) },
+            { QStringLiteral("rememberText"), QString::fromStdString(prompt.rememberText) },
+            { QStringLiteral("rememberScope"), std::to_underlying(prompt.rememberScope) },
+            { QStringLiteral("initialMemory"), std::to_underlying(prompt.initialMemory) },
+            { QStringLiteral("defaultDecision"), std::to_underlying(prompt.defaultDecision) },
+            { QStringLiteral("allowNeedsRemember"), prompt.allowOnce == AllowOnce::Withheld },
+        };
+    }
+} // namespace
+
+void TerminalSession::publishPendingPermission()
+{
+    auto const prompt = currentPermissionPrompt();
+    auto next = prompt ? toVariantMap(*prompt) : QVariantMap {};
+    if (next == _pendingPermission)
+        return;
+    _pendingPermission = std::move(next);
+    emit pendingPermissionChanged();
+}
+
+void TerminalSession::showNextPermission()
+{
+    publishPendingPermission();
+    if (auto const title = _pendingPermission.value(QStringLiteral("title")).toString(); !title.isEmpty())
+        announce(title);
+}
+
+void TerminalSession::reconcilePermissions(config::PermissionsConfig const& previous)
+{
+    auto const& current = _profile.permissions.value();
+    for (auto const& row: GuardedRoleRows)
+    {
+        auto const now = configuredPermission(current, row.role);
+        if (configuredPermission(previous, row.role) == now)
+            continue;
+        // The user's "don't ask again" answered the old setting, not this one.
+        _rememberedPermissions.erase(row.role);
+        // A question the configuration now answers is answered by it, rather than left on screen.
+        if (now != config::Permission::Ask && _permissionQueue.contains(row.role))
+            executeRole(row.role,
+                        now == config::Permission::Allow ? PermissionDecision::Allow
+                                                         : PermissionDecision::Deny,
+                        PermissionMemory::Once);
+    }
 }
 
 std::optional<PermissionDecision> TerminalSession::rememberedDecision(GuardedRole role) const
@@ -1070,20 +1197,7 @@ std::optional<PermissionDecision> TerminalSession::rememberedDecision(GuardedRol
 
 config::Permission TerminalSession::configuredPermissionFor(GuardedRole role) const
 {
-    auto const& permissions = _profile.permissions.value();
-    switch (role)
-    {
-        case GuardedRole::ChangeFont: return permissions.changeFont;
-        case GuardedRole::CaptureBuffer: return permissions.captureBuffer;
-        case GuardedRole::ShowHostWritableStatusLine: return permissions.displayHostWritableStatusLine;
-        // BigPaste is gated on payload size, not on configuration; what the gate adds for it is the
-        // answer the user asked to be remembered for the session.
-        case GuardedRole::BigPaste: return config::Permission::Ask;
-        // Asked every time unless the user said otherwise for the session: the line is the shell's report,
-        // which any program writing to the terminal can forge, so it runs only once it has been read.
-        case GuardedRole::RerunCommand: return config::Permission::Ask;
-    }
-    return config::Permission::Ask;
+    return configuredPermission(_profile.permissions.value(), role);
 }
 
 void TerminalSession::postPermissionRequest(GuardedRole role)
@@ -1120,15 +1234,16 @@ void TerminalSession::requestPermission(config::Permission allowedByConfig, Guar
             else
             {
                 sessionLog()("Permission for {} requires asking user.", role);
-                switch (role)
+                switch (_permissionQueue.offer(role))
                 {
-                        // clang-format off
-                    case GuardedRole::ChangeFont: emit requestPermissionForFontChange(); break;
-                    case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
-                    case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;
-                    case GuardedRole::BigPaste: emit requestPermissionForPasteLargeFile(); break;
-                    case GuardedRole::RerunCommand: emit requestPermissionForRerunCommand(); break;
-                        // clang-format on
+                    case PromptChange::Due: showNextPermission(); break;
+                    case PromptChange::None:
+                        // Already asked. Shown, what it asks may have changed since (a later font, another
+                        // paste, a larger capture), so the dialog's data follows; waiting, it is built when
+                        // it is shown.
+                        if (_permissionQueue.current() == PermissionAsk { role })
+                            publishPendingPermission();
+                        break;
                 }
             }
             break;
@@ -1494,7 +1609,7 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 
 void TerminalSession::executePendingBufferCapture(PermissionDecision decision, PermissionMemory memory)
 {
-    rememberDecision(GuardedRole::CaptureBuffer, decision, memory);
+    concludeRole(GuardedRole::CaptureBuffer, decision, memory);
 
     // One verdict answers every request outstanding at this moment: the user was asked once, about
     // capturing this buffer, and each request still owes its own reply.
@@ -1538,7 +1653,7 @@ void TerminalSession::requestShowHostWritableStatusLine()
 
 void TerminalSession::executeShowHostWritableStatusLine(PermissionDecision decision, PermissionMemory memory)
 {
-    rememberDecision(GuardedRole::ShowHostWritableStatusLine, decision, memory);
+    concludeRole(GuardedRole::ShowHostWritableStatusLine, decision, memory);
 
     // Under the lock: the parser thread reads what the answer leaves behind at DECSASD 0, and draws the
     // line it puts up. Denied, the line stays hidden, and status_line.sync_to_window_title may show what
@@ -1588,7 +1703,7 @@ void TerminalSession::setFontDef(vtbackend::FontDef const& fontDef)
 
 void TerminalSession::applyPendingFontChange(PermissionDecision decision, PermissionMemory memory)
 {
-    rememberDecision(GuardedRole::ChangeFont, decision, memory);
+    concludeRole(GuardedRole::ChangeFont, decision, memory);
 
     if (!_pendingFontChange)
         return;
@@ -2040,7 +2155,10 @@ void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
         // 512 KB soft limit to ask user for permission
         if (pasteText.size() > static_cast<size_t>(1024 * 512))
         {
-            _pendingBigPaste = BigPasteRequest { .text = std::move(pasteText), .count = count };
+            auto preview = makePastePreview(pasteText);
+            _pendingBigPaste = BigPasteRequest { .text = std::move(pasteText),
+                                                 .count = count,
+                                                 .preview = std::move(preview) };
             sessionLog()("Clipboard contains huge text. Requesting permission.");
             // BigPaste is the one guarded role with no configuration field, so the gate resolves it as
             // Ask; what it adds over a bare emit is the remembered per-session answer, which only
@@ -2079,7 +2197,7 @@ void TerminalSession::sendPasteRepeatedly(std::string const& text, unsigned coun
 void TerminalSession::applyPendingPaste(PermissionDecision decision, PermissionMemory memory)
 {
     sessionLog()("applyPendingPaste: {}, {}", decision, memory);
-    rememberDecision(GuardedRole::BigPaste, decision, memory);
+    concludeRole(GuardedRole::BigPaste, decision, memory);
 
     if (!_pendingBigPaste)
         return;
@@ -2137,7 +2255,7 @@ namespace
 void TerminalSession::applyPendingRerun(PermissionDecision decision, PermissionMemory memory)
 {
     sessionLog()("applyPendingRerun: {}, {}", decision, memory);
-    rememberDecision(GuardedRole::RerunCommand, decision, memory);
+    concludeRole(GuardedRole::RerunCommand, decision, memory);
 
     if (!_pendingRerun)
         return;
@@ -2158,11 +2276,6 @@ void TerminalSession::applyPendingRerun(PermissionDecision decision, PermissionM
     }
     terminal().sendPaste(commandLine.raw());
     terminal().sendRawInput("\r");
-}
-
-QString TerminalSession::pendingRerunCommandLine() const
-{
-    return _pendingRerun ? QString::fromStdString(_pendingRerun->display()) : QString {};
 }
 
 void TerminalSession::onSelectionCompleted()
@@ -6417,7 +6530,9 @@ void TerminalSession::activateProfile(string const& newProfileName, ProfileWindo
     // reload _config already is the new one, so the old gutter survives only as what the terminal draws.
     auto const fittedFrame = pageFrameOf(_terminal, _profile);
     _profileName = newProfileName;
+    auto const previousPermissions = _profile.permissions.value();
     _profile = *newProfile;
+    reconcilePermissions(previousPermissions);
     configureTerminal();
 #ifdef CONTOUR_EXTENSIONS
     reloadExtensions();

@@ -132,6 +132,17 @@ constexpr auto TestPageSize = vtpty::PageSize { vtpty::LineCount(24), vtpty::Col
     return makeSessionWith(app, std::make_unique<vtpty::MockPty>(TestPageSize), std::move(notifier));
 }
 
+/// Counts into @p asks each time @p session shows a question about @p role -- a dialog opening, or the open
+/// one changing what it says. The connection lives with the session, which every caller outlives.
+void countAsks(contour::session::TerminalSession& session, contour::session::GuardedRole role, int& asks)
+{
+    QObject::connect(
+        &session, &contour::session::TerminalSession::pendingPermissionChanged, [&session, role, &asks] {
+            if (session.pendingPermissionAsk() == contour::session::PermissionAsk { role })
+                ++asks;
+        });
+}
+
 /// Writes one finished command as a shell with OSC 133 integration does, and the next prompt below it:
 /// the prompt `$ <typed>`, the output start (carrying @p startParameters), @p output as written, and the
 /// command end with exit code 0.
@@ -1302,9 +1313,7 @@ TEST_CASE("TerminalSession: pasteFromClipboard writes clipboard text and enforce
 
     // > 512 KB: requires permission; nothing written until granted.
     int permissionRequests = 0;
-    QObject::connect(session.get(),
-                     &contour::session::TerminalSession::requestPermissionForPasteLargeFile,
-                     [&] { ++permissionRequests; });
+    countAsks(*session, contour::session::GuardedRole::BigPaste, permissionRequests);
     clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
     session->pasteFromClipboard(1, false);
     CHECK(permissionRequests == 1);
@@ -1390,9 +1399,7 @@ TEST_CASE("TerminalSession: an approved large paste sends what was approved, not
     SECTION("a remembered refusal keeps refusing")
     {
         auto asks = 0;
-        QObject::connect(session.get(),
-                         &contour::session::TerminalSession::requestPermissionForPasteLargeFile,
-                         [&asks] { ++asks; });
+        countAsks(*session, contour::session::GuardedRole::BigPaste, asks);
 
         clipboard->setText(QString((1024 * 512) + 1, QChar('y')));
         session->pasteFromClipboard(1, /*strip=*/false);
@@ -4991,8 +4998,7 @@ constexpr auto CaptureWholePageSequence = std::string_view { "\033[>0,t" };
 /// with the session, which every caller outlives.
 void countCaptureAsks(contour::session::TerminalSession& session, int& asks)
 {
-    QObject::connect(
-        &session, &contour::session::TerminalSession::requestPermissionForBufferCapture, [&asks] { ++asks; });
+    countAsks(session, contour::session::GuardedRole::CaptureBuffer, asks);
 }
 
 } // namespace
@@ -5125,6 +5131,164 @@ TEST_CASE("TerminalSession: the configured capture_buffer permission decides the
         CHECK(asks == 0);
         CHECK(capturedSeededScreen(*held));
     }
+}
+
+namespace
+{
+
+/// A font request a program might make: a family and a size.
+[[nodiscard]] vtbackend::FontDef requestedFont()
+{
+    auto font = vtbackend::FontDef {};
+    font.size = 17.0;
+    font.regular = "Iosevka";
+    return font;
+}
+
+/// A copy of @p app's configuration in which profile @p name configures capture_buffer as @p permission: a
+/// file saved with that one setting changed, as the reload that follows would read it.
+[[nodiscard]] contour::config::Config withCapturePermission(contour::ContourGuiApp& app,
+                                                            std::string const& name,
+                                                            contour::config::Permission permission)
+{
+    auto config = app.config();
+    config.profiles.value().at(name).permissions.value().captureBuffer = permission;
+    return config;
+}
+
+} // namespace
+
+TEST_CASE("TerminalSession: two questions asked at once are shown one after the other",
+          "[contour][session][permission][queue]")
+{
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+
+    TestApp testApp;
+    auto const name = registerProfile(testApp.app(), "ask-both", [](contour::config::TerminalProfile& p) {
+        p.permissions.value().changeFont = contour::config::Permission::Ask;
+        p.permissions.value().captureBuffer = contour::config::Permission::Ask;
+    });
+    auto held = makeSessionWithSurface(testApp.app(), name);
+    held->terminal().writeToScreen(std::format("{}\r\n", SeededLine));
+    mockPtyOf(*held).stdinBuffer().clear();
+    auto changes = 0;
+    QObject::connect(held.session.get(),
+                     &contour::session::TerminalSession::pendingPermissionChanged,
+                     [&changes] { ++changes; });
+
+    // A program changes the font and asks for a capture in the same chunk; the capture asks twice.
+    held->setFontDef(requestedFont());
+    captureWholePage(*held);
+    captureWholePage(*held);
+    QCoreApplication::processEvents();
+
+    CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::ChangeFont });
+    CHECK(changes == 1);
+    CHECK(
+        held->pendingPermission().value(QStringLiteral("title")).toString().endsWith("to change the font?"));
+
+    // The answer to the font is the font's alone: the capture is asked next, once this dialog has closed.
+    held->answerPermission(PermissionDecision::Deny, PermissionMemory::Once);
+    CHECK(held.surface->fontsSet.empty());
+    CHECK(mockPtyOf(*held).stdinBuffer().empty());
+    QCoreApplication::processEvents();
+    CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+    CHECK(
+        held->pendingPermission().value(QStringLiteral("title")).toString().endsWith("to read the screen?"));
+
+    // One answer serves both captures, each owed its reply.
+    held->answerPermission(PermissionDecision::Allow, PermissionMemory::Once);
+    CHECK(capturedSeededScreen(*held));
+    CHECK(countOccurrences(mockPtyOf(*held).stdinBuffer(), CaptureReplyTerminator) == 2);
+    CHECK(held.surface->fontsSet.empty());
+    QCoreApplication::processEvents();
+    CHECK_FALSE(held->pendingPermissionAsk().has_value());
+    CHECK(held->pendingPermission().isEmpty());
+}
+
+TEST_CASE("TerminalSession: a remembered answer outlives a reload that leaves its setting alone, and not "
+          "one that changes it",
+          "[contour][session][permission]")
+{
+    using contour::config::Permission;
+    using contour::session::GuardedRole;
+    using contour::session::PermissionAsk;
+
+    TestApp testApp;
+    auto held = sessionCapturing(testApp.app(), Permission::Ask);
+    auto const profile = held->profileName();
+    auto asks = 0;
+    countAsks(*held, GuardedRole::CaptureBuffer, asks);
+
+    captureWholePage(*held);
+    REQUIRE(asks == 1);
+    held->answerPermission(PermissionDecision::Allow, PermissionMemory::Session);
+    REQUIRE(capturedSeededScreen(*held));
+
+    // The same file again: the answer stands.
+    held->applyReloadedConfig(withCapturePermission(testApp.app(), profile, Permission::Ask), profile);
+    mockPtyOf(*held).stdinBuffer().clear();
+    captureWholePage(*held);
+    CHECK(asks == 1);
+    CHECK(capturedSeededScreen(*held));
+
+    // Configured deny wins, without asking: the terminator alone.
+    held->applyReloadedConfig(withCapturePermission(testApp.app(), profile, Permission::Deny), profile);
+    mockPtyOf(*held).stdinBuffer().clear();
+    captureWholePage(*held);
+    CHECK(asks == 1);
+    CHECK(mockPtyOf(*held).stdinBuffer() == CaptureReplyTerminator);
+
+    // Back to ask: the answer given for the old setting is gone, so it asks again.
+    held->applyReloadedConfig(withCapturePermission(testApp.app(), profile, Permission::Ask), profile);
+    mockPtyOf(*held).stdinBuffer().clear();
+    captureWholePage(*held);
+    CHECK(asks == 2);
+    CHECK(held->pendingPermissionAsk() == PermissionAsk { GuardedRole::CaptureBuffer });
+    CHECK(mockPtyOf(*held).stdinBuffer().empty());
+
+    // And a reload that answers the question on screen answers it, rather than leaving the dialog up.
+    held->applyReloadedConfig(withCapturePermission(testApp.app(), profile, Permission::Deny), profile);
+    CHECK_FALSE(held->pendingPermissionAsk().has_value());
+    CHECK(countOccurrences(mockPtyOf(*held).stdinBuffer(), CaptureReplyTerminator) == 1);
+    CHECK_FALSE(mockPtyOf(*held).stdinBuffer().contains(SeededLine));
+}
+
+TEST_CASE("TerminalSession: the paste prompt's preview is bounded however large the paste",
+          "[contour][session][clipboard][permission]")
+{
+    TestApp testApp;
+    auto session = makeDisplaylessSession(testApp.app());
+    auto* clipboard = QGuiApplication::clipboard();
+    REQUIRE(clipboard != nullptr);
+
+    // 30 000 lines of 20 bytes: over the soft limit, under the hard one.
+    constexpr auto Lines = 30'000;
+    auto text = QString {};
+    for (auto const i: std::views::iota(0, Lines))
+        text += QStringLiteral("%1\n").arg(i, 19, 10, QChar('0'));
+    clipboard->setText(text);
+    session->pasteFromClipboard(1, /*strip=*/false);
+
+    auto const prompt = session->pendingPermission();
+    auto const lines = prompt.value(QStringLiteral("lines")).toList();
+    auto const limits = contour::session::PastePreviewLimits {};
+    REQUIRE(std::cmp_equal(lines.size(), limits.lines + 1));
+    for (auto const& line: lines | std::views::take(static_cast<qsizetype>(limits.lines)))
+    {
+        auto const map = line.toMap();
+        CHECK(map.value(QStringLiteral("verbatim")).toBool());
+        auto const bytes = map.value(QStringLiteral("text")).toString().toUtf8().size();
+        CHECK(std::cmp_less_equal(bytes, limits.bytesPerLine + std::string_view { "…" }.size()));
+    }
+    CHECK(lines.back().toMap().value(QStringLiteral("text")).toString()
+          == QStringLiteral("… %1 more lines").arg(Lines - static_cast<int>(limits.lines)));
+    CHECK(
+        prompt.value(QStringLiteral("title")).toString().startsWith(QStringLiteral("Paste 600.0 kB into ")));
+
+    session->applyPendingPaste(PermissionDecision::Deny, PermissionMemory::Once);
+    clipboard->clear();
 }
 
 TEST_CASE("TerminalSession: a capture asked of a background pane is refused, not dropped",
@@ -6062,6 +6226,30 @@ class RecordingAnnouncer final: public contour::platform::Announcer
     std::vector<Said> said;
 };
 } // namespace
+
+TEST_CASE("TerminalSession: asking announces the title", "[contour][session][permission]")
+{
+    TestApp testApp;
+    auto session = makeSessionWithSurface(testApp.app());
+    auto announcer = std::make_unique<RecordingAnnouncer>();
+    auto* recorder = announcer.get();
+    session->setAnnouncer(std::move(announcer));
+
+    auto font = vtbackend::FontDef {};
+    font.size = 17.0;
+    session->setFontDef(font);
+
+    REQUIRE(recorder->said.size() == 1);
+    auto const expected = contour::session::fontChangePrompt(session->resolvedWindowTitle(), font).title;
+    CHECK(recorder->said.front().message.toStdString() == expected);
+    CHECK(expected.starts_with("Allow "));
+    CHECK(recorder->said.front().politeness == QAccessible::AnnouncementPoliteness::Polite);
+
+    // Answered, nothing more is said.
+    session->answerPermission(PermissionDecision::Deny, PermissionMemory::Once);
+    QCoreApplication::processEvents();
+    CHECK(recorder->said.size() == 1);
+}
 
 TEST_CASE("TerminalSession: things with no place in the accessibility tree are announced",
           "[contour][session][a11y]")
@@ -7167,19 +7355,22 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
     terminal.writeToScreen(vtbackend::test::PromptStart); // the next prompt, at which the shell waits
     auto& written = mockPtyOf(*session).stdinBuffer();
     written.clear();
-    auto asked = QSignalSpy(session.session.get(),
-                            &contour::session::TerminalSession::requestPermissionForRerunCommand);
+    auto asked = 0;
+    countAsks(*session, contour::session::GuardedRole::RerunCommand, asked);
 
     SECTION("asked first, shown what it runs, and run once allowed")
     {
         CHECK((*session)(RerunCommand {}));
-        CHECK(asked.count() == 1);
-        CHECK(session->pendingRerunCommandLine() == "make");
+        CHECK(asked == 1);
+        // The prompt shows what runs, as the shell reported it.
+        auto const lines = session->pendingPermission().value(QStringLiteral("lines")).toList();
+        REQUIRE_FALSE(lines.isEmpty());
+        CHECK(lines.front().toMap().value(QStringLiteral("text")).toString() == "make");
         CHECK(written.empty());
 
         session->applyPendingRerun(PermissionDecision::Allow, PermissionMemory::Once);
         CHECK(written == "make\r");
-        CHECK(session->pendingRerunCommandLine().isEmpty());
+        CHECK(session->pendingPermission().isEmpty());
     }
 
     SECTION("refused, nothing is typed")
@@ -7195,7 +7386,7 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
         session->applyPendingRerun(PermissionDecision::Allow, PermissionMemory::Session);
         written.clear();
         CHECK((*session)(RerunCommand {}));
-        CHECK(asked.count() == 1);
+        CHECK(asked == 1);
         CHECK(written == "make\r");
     }
 
@@ -7213,7 +7404,7 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
         terminal.writeToScreen(vtbackend::test::commandStarted("sleep 9"));
         CHECK(session->contextMenuState().livePrompt == contour::command::PromptPresence::Absent);
         CHECK_FALSE((*session)(RerunCommand {}));
-        CHECK(asked.count() == 0);
+        CHECK(asked == 0);
     }
 
     SECTION("the prompt gone by the time the answer comes, nothing is typed")
@@ -7233,7 +7424,7 @@ TEST_CASE("TerminalSession: RerunCommand types the command at the prompt once it
                                + vtbackend::test::commandEnd(0)
                                + std::string { vtbackend::test::PromptStart });
         CHECK_FALSE((*session)(RerunCommand {}));
-        CHECK(asked.count() == 0);
+        CHECK(asked == 0);
     }
 }
 

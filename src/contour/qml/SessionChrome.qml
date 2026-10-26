@@ -297,58 +297,29 @@ Item {
         id: bell
     }
 
-    // Permission-wall dialogs.
+    // The session's permission question: one at a time, the next shown once this one is answered. What it
+    // shows is the session's pendingPermission, set as the question opens -- program-supplied text the session
+    // has already made safe to show.
     RequestPermission {
-        id: requestFontChangeDialog
-        text: qsTr("The host application is requesting to change the display font.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Allow, Permission.Session);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Allow, Permission.Once);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Deny, Permission.Session);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Deny, Permission.Once);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingFontChange(Permission.Deny, Permission.Once);
-    }
+        id: permissionDialog
+        objectName: "permissionDialog"
 
-    RequestPermission {
-        id: requestLargeFilePaste
-        text: qsTr("The host application is going to paste a large file. Are you sure?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Allow, Permission.Session);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Allow, Permission.Once);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Deny, Permission.Session);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Deny, Permission.Once);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingPaste(Permission.Deny, Permission.Once);
-    }
+        function answer(decision, memory) {
+            if (chrome.session !== null)
+                chrome.session.answerPermission(decision, memory);
+        }
 
-    RequestPermission {
-        id: requestBufferCaptureDialog
-        text: qsTr("The host application is requesting to capture the terminal buffer.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Allow, Permission.Session);
-        onYesClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Allow, Permission.Once);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Deny, Permission.Session);
-        onNoClicked: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Deny, Permission.Once);
-        onRejected: if (chrome.session !== null) chrome.session.executePendingBufferCapture(Permission.Deny, Permission.Once);
-    }
+        function showPrompt(prompt) {
+            title = prompt.title;
+            text = prompt.lines.map(line => line.text).join("\n");
+            open();
+        }
 
-    RequestPermission {
-        id: requestShowHostWritableStatusLine
-        text: qsTr("The host application is requesting to show the host-writable status line.")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Allow, Permission.Session);
-        onYesClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Allow, Permission.Once);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Deny, Permission.Session);
-        onNoClicked: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Deny, Permission.Once);
-        onRejected: if (chrome.session !== null) chrome.session.executeShowHostWritableStatusLine(Permission.Deny, Permission.Once);
-    }
-
-    // Asked before RerunCommand types a command at the prompt and enters it: the command line is what the
-    // shell reported, or what the screen showed, and a program writing to the terminal can forge either. The
-    // text is set as the dialog opens, from the command the session holds for it.
-    RequestPermission {
-        id: requestRerunCommandDialog
-        title: qsTr("Run this command again?")
-        onYesToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Allow, Permission.Session);
-        onYesClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Allow, Permission.Once);
-        onNoToAllClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Deny, Permission.Session);
-        onNoClicked: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Deny, Permission.Once);
-        onRejected: if (chrome.session !== null) chrome.session.applyPendingRerun(Permission.Deny, Permission.Once);
+        onYesClicked: answer(Permission.Allow, Permission.Once)
+        onYesToAllClicked: answer(Permission.Allow, Permission.Session)
+        onNoClicked: answer(Permission.Deny, Permission.Once)
+        onNoToAllClicked: answer(Permission.Deny, Permission.Session)
+        onRejected: answer(Permission.Deny, Permission.Once)
     }
 
     // Asked when a status-line extension first runs one of the commands its manifest declares, with
@@ -494,19 +465,15 @@ Item {
             searchBar.focusField();
         }
 
-        // Permission-wall hooks.
-        function onRequestPermissionForFontChange() { requestFontChangeDialog.open(); }
-        function onRequestPermissionForBufferCapture() { requestBufferCaptureDialog.open(); }
-        function onRequestPermissionForShowHostWritableStatusLine() { requestShowHostWritableStatusLine.open(); }
-        function onRequestPermissionForPasteLargeFile() { requestLargeFilePaste.open(); }
+        // The session asks another question, or what the one shown asks changed.
+        function onPendingPermissionChanged() {
+            let prompt = chrome.session.pendingPermission;
+            if (prompt.title !== undefined)
+                permissionDialog.showPrompt(prompt);
+        }
         function onRequestPermissionForExtension() {
             requestExtensionCommandsDialog.text = chrome.session.pendingExtensionPermissionText();
             requestExtensionCommandsDialog.open();
-        }
-        function onRequestPermissionForRerunCommand() {
-            requestRerunCommandDialog.text = qsTr("It is typed at the prompt and entered:") + "\n\n"
-                                             + chrome.session.pendingRerunCommandLine();
-            requestRerunCommandDialog.open();
         }
     }
 }
