@@ -1816,15 +1816,7 @@ config::MenuPresentation ContourGuiApp::menuPresentation() const noexcept
 window::TitleBandTokens ContourGuiApp::titleBandTokens() const
 {
     if (_chromeStyleHost)
-    {
-        auto const& provider = _chromeStyleHost->provider();
-        return window::TitleBandTokens {
-            .style = _chromeStyle,
-            .material = provider.resolvedRow().material.titleBand,
-            .height = provider.bandHeight(),
-            .cellHeight = _chromeStyle == config::ChromeStyle::Terminal ? provider.cellHeight() : 0.0,
-        };
-    }
+        return _chromeStyleHost->provider().titleBandTokens();
     // No provider yet: the Pill rows' band is their title-bar token; the Flat rows' is their measured strip,
     // which nobody has measured, so 0 leaves the band to its own height.
     auto const row =

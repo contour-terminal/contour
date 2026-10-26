@@ -1037,7 +1037,7 @@ qreal WindowController::nativeControlsInset() const noexcept
     // band's leading corner is free there.
     if (_osWindow == nullptr || !_nativeFrame
         || framePolicy().controlPlacement != platform::ControlPlacement::OverChrome
-        || _osWindow->windowStates().testFlag(Qt::WindowFullScreen))
+        || windowMode() == WindowMode::FullScreen)
         return 0.0;
     return _nativeFrame->nativeControlsInset(*_osWindow);
 }
@@ -1343,28 +1343,33 @@ bool WindowController::dressesTitleBand() const noexcept
 platform::TitleBandRequest WindowController::titleBandRequest() const
 {
     auto const tokens = _manager.app().titleBandTokens();
-    auto const fullScreen = _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowFullScreen);
     auto const surface = resolveTitleBandSurface(TitleBandSurfaceInputs {
         .style = tokens.style,
         .material = tokens.material,
         .frame = _titleBarVisible ? WindowFrame::NativeFrame : WindowFrame::ClientBand,
-        .mode = fullScreen ? WindowMode::FullScreen : WindowMode::Windowed,
+        .mode = windowMode(),
     });
     return platform::TitleBandRequest { .backdrop = surface.backdrop,
                                         .growth = surface.growth,
                                         .scheme = effectiveColorScheme() };
 }
 
+WindowMode WindowController::windowMode() const noexcept
+{
+    return _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowFullScreen)
+               ? WindowMode::FullScreen
+               : WindowMode::Windowed;
+}
+
 TitleBandGeometry WindowController::titleBandGeometry() const
 {
-    auto const fullScreen = _osWindow != nullptr && _osWindow->windowStates().testFlag(Qt::WindowFullScreen);
     // Only the full-size content view has a native title bar under the band to make room for.
     auto const native = _osWindow != nullptr && dressesTitleBand()
                             ? _manager.app().titleBandMaterial().metrics(*_osWindow)
                             : platform::NativeTitleBarMetrics {};
     return resolveTitleBandGeometry(TitleBandGeometryInputs {
         .tokens = _manager.app().titleBandTokens(),
-        .mode = fullScreen ? WindowMode::FullScreen : WindowMode::Windowed,
+        .mode = windowMode(),
         .devicePixelRatio = _osWindow != nullptr ? _osWindow->devicePixelRatio() : 1.0,
         .nativeHeight = native.height,
         .fullScreenTop = native.fullScreenTop,

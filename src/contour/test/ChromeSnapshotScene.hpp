@@ -398,11 +398,7 @@ class ChromeSnapshotScene
             _engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>());
         REQUIRE(provider != nullptr);
         auto const geometry = window::resolveTitleBandGeometry(window::TitleBandGeometryInputs {
-            .tokens = { .style = _variant.row,
-                        .material = provider->resolvedRow().material.titleBand,
-                        .height = provider->bandHeight(),
-                        .cellHeight =
-                            _variant.row == config::ChromeStyle::Terminal ? provider->cellHeight() : 0.0 },
+            .tokens = provider->titleBandTokens(),
             .mode = window::WindowMode::Windowed,
             .devicePixelRatio = window().devicePixelRatio(),
             .nativeHeight = SnapshotNativeTitleBarHeight,

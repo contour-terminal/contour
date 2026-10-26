@@ -78,8 +78,8 @@ ThemedWindow
     // full-screen toolbar does: a revealed band always (the pointer at the edge has revealed the menu bar
     // too), a pinned one (an interrupted remote connection) only while the pointer rests on the edge --
     // otherwise the menu bar is hidden, and a band below its place would float over live rows.
-    readonly property bool bandBelowMenuBar: appWindow.band.band === "reveal"
-                                             || (appWindow.band.band === "pinned" && revealEdgeHover.hovered)
+    readonly property bool bandBelowMenuBar: appWindow.band.band === "reveal" || appWindow.pinnedBandBelowMenuBar
+    readonly property bool pinnedBandBelowMenuBar: appWindow.band.band === "pinned" && revealEdgeHover.hovered
 
     // The band's WindowFrame and WindowMode, as the ints titleBand() and bandFill() take.
     readonly property int bandFrame: appWindow.win && appWindow.win.titleBarVisible ? 1 : 0
@@ -284,7 +284,7 @@ ThemedWindow
         // Down to the band's resting rectangle while it is revealed, so the pointer keeps it however far it
         // has slid, and on its way down from the menu bar above it; passive, so every click still reaches
         // the band beneath.
-        height: titleBar.revealed || (appWindow.band.band === "pinned" && revealEdgeHover.hovered)
+        height: titleBar.revealed || appWindow.pinnedBandBelowMenuBar
                 ? titleBar.restingTop + titleBar.implicitHeight : chromeStyle.space.revealEdge
         // A pinned band is shown already; its edge only moves it below the menu bar (bandBelowMenuBar).
         visible: appWindow.band.band === "reveal" || appWindow.band.band === "pinned"

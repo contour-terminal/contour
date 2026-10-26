@@ -1002,6 +1002,9 @@ class WindowController:
     /// @return Whether this window's frame is the full-size content view the title-band material dresses.
     [[nodiscard]] bool dressesTitleBand() const noexcept;
 
+    /// @return FullScreen while the bound OS window is in full screen, else Windowed (also unbound).
+    [[nodiscard]] WindowMode windowMode() const noexcept;
+
     /// The frame policy for this window's platform and current decoration.
     [[nodiscard]] platform::FramePolicy framePolicy() const noexcept;
 

@@ -7,6 +7,7 @@
 #include <contour/config/UiStyle.hpp>
 #include <contour/platform/PlatformAppearance.hpp>
 #include <contour/window/ChromeTokenObjects.hpp>
+#include <contour/window/TitleBandGeometry.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -500,6 +501,19 @@ class UiStyleProvider: public QObject
 
     /// @return The title band's height in logical pixels. @see bandHeight
     [[nodiscard]] qreal bandHeight() const noexcept;
+
+    /// The title band's tokens as this provider resolves them: its row, the row's resolved title-band
+    /// material, bandHeight() and, on the Terminal row, one cell's height (0 elsewhere).
+    /// @return The tokens window::resolveTitleBandGeometry() takes.
+    [[nodiscard]] TitleBandTokens titleBandTokens() const noexcept
+    {
+        return TitleBandTokens {
+            .style = _inputs.row,
+            .material = _groups.material.titleBand,
+            .height = bandHeight(),
+            .cellHeight = _inputs.row == config::ChromeStyle::Terminal ? cellHeight() : 0.0,
+        };
+    }
 
     /// What the title band paints: its surface (window::resolveTitleBandSurface) for this row's resolved
     /// @c material.titleBand, @p frame and @p mode, as a colour.
