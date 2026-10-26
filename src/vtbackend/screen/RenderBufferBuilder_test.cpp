@@ -13,10 +13,12 @@
 #include <vtbackend/testing/TestHelpers.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <format>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -112,7 +114,8 @@ constexpr auto SearchFocused = RGBColor { 0x12, 0x34, 0x56 };
     mock.terminal.colorPalette().searchHighlight = paint(SearchMatched);
     mock.terminal.colorPalette().searchHighlightFocused = paint(SearchFocused);
     REQUIRE(mock.terminal.setSearchOptions({ .syntax = SearchSyntax::Regex }).has_value());
-    REQUIRE(mock.terminal.setNewSearchTerm(std::move(pattern), SearchOrigin::Typed).has_value());
+    auto const installed = mock.terminal.setNewSearchTerm(std::move(pattern), SearchOrigin::Typed);
+    REQUIRE(installed.has_value());
     mock.terminal.moveNormalModeCursorTo(cursor);
     mock.terminal.refreshRenderBuffer(true);
 
@@ -122,9 +125,12 @@ constexpr auto SearchFocused = RGBColor { 0x12, 0x34, 0x56 };
         if (unbox(cell.position.line) != row)
             continue;
         auto const background = cell.attributes.backgroundColor;
-        painted[unbox<size_t>(cell.position.column)] = background == SearchMatched   ? 'm'
-                                                       : background == SearchFocused ? 'f'
-                                                                                     : '.';
+        auto mark = '.';
+        if (background == SearchMatched)
+            mark = 'm';
+        else if (background == SearchFocused)
+            mark = 'f';
+        painted[unbox<size_t>(cell.position.column)] = mark;
     }
     return painted;
 }
@@ -661,4 +667,35 @@ TEST_CASE("search.aPatternTooComplexToHighlightEndsTheQuery", "[renderbuffer][se
     // The next frame finds no query to run.
     mock.terminal.refreshRenderBuffer(true);
     CHECK(mock.terminal.search().query == nullptr);
+}
+
+TEST_CASE("search.aMatchReadsOnEveryCellItPaints", "[renderbuffer][search]")
+{
+    // A match's fill is mixed over the cell's own background, which is not always the page: a reverse-video
+    // status bar, or a selection. Its ink is picked against what the cell actually shows.
+    auto const scheme = GENERATE(std::string_view { "contour-dark" }, std::string_view { "contour-light" });
+    auto const ground = GENERATE(
+        std::string_view { "page" }, std::string_view { "reverse" }, std::string_view { "selected" });
+    INFO(std::format("scheme {}, ground {}", scheme, ground));
+
+    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(20) } };
+    REQUIRE(defaultColorPalettes(scheme, mock.terminal.colorPalette()));
+    mock.writeToScreen(ground == "reverse" ? "\033[7mneedle needle\033[m" : "needle needle");
+    if (ground == "selected")
+        mock.terminal.selectAll();
+    REQUIRE(mock.terminal.setNewSearchTerm(U"needle", SearchOrigin::Typed).has_value());
+    // The cursor on the second match: the first is a plain match, the second the current one.
+    mock.terminal.moveNormalModeCursorTo(CellLocation { LineOffset(0), ColumnOffset(7) });
+    mock.terminal.refreshRenderBuffer(true);
+
+    for (auto const column: { 0, 7 })
+    {
+        INFO(std::format("column {}", column));
+        auto const& cells = mock.terminal.renderBuffer().get().cells;
+        auto const cell = std::ranges::find(
+            cells, CellLocation { LineOffset(0), ColumnOffset(column) }, &RenderCell::position);
+        REQUIRE(cell != cells.end());
+        CHECK(contrastRatio(cell->attributes.foregroundColor, cell->attributes.backgroundColor)
+              >= MinimumTextContrast);
+    }
 }

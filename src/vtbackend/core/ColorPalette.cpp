@@ -144,6 +144,8 @@ namespace
 
         // Yellow means search: a match at 35 %, the current one at 85 %. Both set their own ink: the cell's
         // own colour does not read on either -- the sixteen ANSI colours fall to 2:1 on contour-dark's tint.
+        // The renderer picks that ink per cell (vtbackend::legibleInkOn) against the fill as mixed over the
+        // cell's own background; over the page it is the ink named here.
         palette.searchHighlight = { .foreground = scheme.foreground,
                                     .foregroundAlpha = 1.0f,
                                     .background = scheme.searchMatch,

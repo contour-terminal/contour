@@ -435,7 +435,7 @@ TEST_CASE("ColorPalette.searchMatchTextReadsAtFourAndAHalfToOne", "[ColorPalette
 {
     // Each fill is drawn at its alpha over the page. Both set their own ink, which the renderer substitutes
     // for the cell's colour (RenderBufferBuilder::paintSearchHighlight), so no ANSI colour has to read on
-    // them.
+    // them; over a cell that is not the page the renderer re-picks it ([renderbuffer] covers that).
     for (auto const& scheme: YellowSchemes)
     {
         INFO("scheme: " << scheme.name);

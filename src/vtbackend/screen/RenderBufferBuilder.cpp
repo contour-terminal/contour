@@ -783,7 +783,11 @@ void RenderBufferBuilder::paintSearchHighlight(ColumnOffset column)
                                              .background = cellAttributes.backgroundColor };
     auto const searchMatchColors = makeRGBColorPair(actualColors, highlightColors);
     cellAttributes.backgroundColor = searchMatchColors.background;
-    cellAttributes.foregroundColor = searchMatchColors.foreground;
+    // A fill that sets its own ink is mixed over the cell's own background, which is not always the page --
+    // a reverse-video bar, a selection -- so the ink is picked against what the cell actually shows.
+    cellAttributes.foregroundColor = std::holds_alternative<RGBColor>(highlightColors.foreground)
+                                         ? legibleInkOn(palette, searchMatchColors.background)
+                                         : searchMatchColors.foreground;
 }
 
 void RenderBufferBuilder::prepareLinkOverlay(LineOffset gridLine)

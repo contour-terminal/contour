@@ -211,19 +211,21 @@ TEST_CASE("searchWalk.aMatchAcrossTheStepBoundaryCountsOnce", "[searchwalk]")
 
 TEST_CASE("searchWalk.aLongWrappedLineIsReadSegmentBySegment", "[searchwalk]")
 {
-    // One logical line of 5 000 rows of 20 columns, cut every 1 843 rows: a step of 500 rows reads one
-    // segment, found from the one before it rather than by walking back to the line's head.
-    auto constexpr Columns = std::size_t { 20 };
+    // One logical line of 5 000 rows of 200 columns, cut every 184 rows: a step of 500 rows reads three
+    // segments, and only the first is found by walking back to the line's head -- the others from the one
+    // before them. A walk per segment would be quadratic in the line's length.
+    auto constexpr Columns = std::size_t { 200 };
     auto line = std::string(Columns * 5000, 'x');
     for (auto const at: std::views::iota(std::size_t { 1 }, std::size_t { 100 }))
-        line.replace(at * 997, 6, "needle");
-    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(20) }, LineCount(6000) };
+        line.replace(at * 9973, 6, "needle");
+    auto mock = MockTerm { PageSize { LineCount(10), ColumnCount(200) }, LineCount(6000) };
     mock.writeToScreen(line);
     auto const& grid = mock.terminal.primaryScreen().grid();
     auto const query = compiled(U"needle");
 
     auto const drained = drain(SearchTallyWalk { query, grid, CellLocation {} }, grid, SearchWalkStepLines);
-    CHECK(drained.steps == 3);
+    CHECK(drained.walk.headLookups() == static_cast<std::size_t>(drained.steps));
+    CHECK(drained.steps < 5000 / 184);
     CHECK(drained.walk.tally() == oracle(grid, *query, CellLocation {}));
 }
 

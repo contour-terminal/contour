@@ -68,6 +68,10 @@ class SearchTallyWalk
     /// @return The last match the walk found, where it still is in @p grid.
     [[nodiscard]] std::optional<CellLocation> lastMatch(Grid const& grid) const;
 
+    /// @return How many segments the walk has found by walking back to their line's head: at most one per
+    ///         step, the rest found from the segment before them. A cost, read by the tests.
+    [[nodiscard]] size_t headLookups() const noexcept { return _headLookups; }
+
     /// @return How many rows the last step read.
     [[nodiscard]] LineCount rowsLastStep() const noexcept { return _rowsLastStep; }
 
@@ -92,6 +96,9 @@ class SearchTallyWalk
         auto operator<=>(StableCell const&) const = default;
     };
 
+    /// The segment holding @p row, found by walking back to its line's head: counted. @see headLookups
+    [[nodiscard]] SearchSegment segmentFromHead(Grid const& grid, LineOffset row);
+
     /// Starts over from @p grid's top, with an empty tally: the rows read so far no longer exist as such.
     void restart(Grid const& grid);
 
@@ -110,6 +117,7 @@ class SearchTallyWalk
     size_t _nearestOrdinal = 0;            ///< The ordinal of @ref _nearest.
     std::optional<StableCell> _last {};    ///< The last match.
     LineCount _rowsLastStep {};
+    size_t _headLookups = 0; ///< @see headLookups
     WalkProgress _progress = WalkProgress::Running;
 };
 
