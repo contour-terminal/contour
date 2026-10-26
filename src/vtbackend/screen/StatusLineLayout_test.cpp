@@ -6,6 +6,7 @@
 
 #include <format>
 #include <optional>
+#include <ranges>
 #include <vector>
 
 using namespace vtbackend;
@@ -302,4 +303,27 @@ TEST_CASE("collapseStatusLine.measuresSegmentsAsItIsTold", "[statusline][collaps
     };
     CHECK(collapseStatusLine(items, ColumnCount(9)) == std::vector { Shown, Shown, Shown });
     CHECK(collapseStatusLine(items, ColumnCount(9), joined) == std::vector { Shown, Dropped, Shown });
+}
+
+TEST_CASE("collapseStatusLine.measuresTheLineAsItWouldBeDrawn", "[statusline][collapse]")
+{
+    using enum StatusLinePriority;
+
+    // Classic in 14 columns: " NORMAL" | "« title »" | "0 │ 12:04". Once the clock goes, its " │ " goes with
+    // it, and the right fits beside the mode; once the title goes, so do « and ». The mode stays: counting
+    // the separators that will be dropped made the line look too wide for it.
+    auto const items = std::vector {
+        separator(StatusLineSide::Left, 1),   item(StatusLineSide::Left, 6, Essential),
+        separator(StatusLineSide::Middle, 2), item(StatusLineSide::Middle, 10, Normal),
+        separator(StatusLineSide::Middle, 2), item(StatusLineSide::Right, 1, Normal),
+        separator(StatusLineSide::Right, 3),  item(StatusLineSide::Right, 5, Low),
+    };
+    for (auto const columns: std::views::iota(11, 18))
+    {
+        INFO(columns);
+        auto const expected =
+            columns < 16 ? std::vector { Shown, Shown, Dropped, Dropped, Dropped, Shown, Dropped, Dropped }
+                         : std::vector { Shown, Shown, Dropped, Dropped, Dropped, Shown, Shown, Shown };
+        CHECK(collapseStatusLine(items, ColumnCount(columns)) == expected);
+    }
 }

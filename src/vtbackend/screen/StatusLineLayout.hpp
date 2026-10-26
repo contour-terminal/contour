@@ -104,8 +104,8 @@ struct StatusLinePlacement
 namespace detail
 {
     /// Drops each separator whose item went: one between two items with either of them, a leading one with
-    /// the item after it, a trailing one with the item before it. Dropping only narrows a segment, so every
-    /// segment placed stays placed.
+    /// the item after it, a trailing one with the item before it. Each collapse round measures the line with
+    /// this pass applied, so it sees the line as it would be drawn.
     inline void dropOrphanedSeparators(std::span<StatusLineItemExtent const> items,
                                        std::span<StatusLineItemFate> fates)
     {
@@ -189,9 +189,13 @@ template <typename MeasureSegment>
     // Every round drops one item, so there are at most as many rounds as items.
     for ([[maybe_unused]] auto const round: indices)
     {
-        auto const widths = StatusLineSegmentWidths { .left = measureSegment(StatusLineSide::Left, fates),
-                                                      .middle = measureSegment(StatusLineSide::Middle, fates),
-                                                      .right = measureSegment(StatusLineSide::Right, fates) };
+        // Measured as it would be drawn: without the separators whose items are gone, which would otherwise
+        // make the line look wider than it is and cost an item that fits.
+        auto drawn = fates;
+        detail::dropOrphanedSeparators(items, drawn);
+        auto const widths = StatusLineSegmentWidths { .left = measureSegment(StatusLineSide::Left, drawn),
+                                                      .middle = measureSegment(StatusLineSide::Middle, drawn),
+                                                      .right = measureSegment(StatusLineSide::Right, drawn) };
         auto const placement = placeStatusLineSegments(widths, columns);
 
         // A non-empty middle or right segment that is not shown, or a left one wider than the line.

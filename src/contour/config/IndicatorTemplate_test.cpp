@@ -230,3 +230,84 @@ TEST_CASE("IndicatorTemplate.eachPaneDrawsItsOwnLine", "[config][statusline]")
     (void) b.mc.terminal.sendFocusInEvent();
     CHECK(statusCellAt(b.mc, 0).backgroundColor == bScheme.indicatorStatusLineInsertMode.background);
 }
+
+TEST_CASE("IndicatorTemplate.theShippedTemplatesCollapseCleanly", "[config][statusline][collapse]")
+{
+    // At every width: the mode is shown whenever the line holds it, every piece drawn is whole and in its
+    // place, and no separator is left without its item.
+    auto const files = core::platform::testing::InMemoryFileSystem {};
+    auto const widths = std::views::iota(6, 121);
+
+    // A terminal @p width columns wide, in vi Normal mode, drawing @p segments.
+    auto const drawn =
+        [&](int width, contour::config::IndicatorTemplate const& segments, auto const& prepare) {
+            auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(width) }, files };
+            prepare(mc);
+            mc.terminal.setStatusLineDefinition(
+                parseStatusLineDefinition(segments.left, segments.middle, segments.right));
+            mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+            mc.terminal.inputHandler().setMode(ViMode::Normal);
+            auto const row = statusRow(mc);
+            auto const clock =
+                serializeToVT(mc.terminal, parseStatusLineSegment("{Clock}"sv), StatusLineStyling::Disabled);
+            auto const history = serializeToVT(
+                mc.terminal, parseStatusLineSegment("{HistoryLineCount}"sv), StatusLineStyling::Disabled);
+            auto const lastCommand = serializeToVT(
+                mc.terminal, parseStatusLineSegment("{LastCommand}"sv), StatusLineStyling::Disabled);
+            return std::array { row, clock, history, lastCommand };
+        };
+
+    SECTION("Classic")
+    {
+        for (auto const width: widths)
+        {
+            INFO(width);
+            auto const [line, clock, history, _] =
+                drawn(width, contour::config::ClassicIndicatorTemplate, [](MockTerm<>& mc) {
+                    mc.writeToScreen("\033]2;title\033\\");
+                });
+            INFO(line);
+
+            if (width >= 7)
+                CHECK(line.starts_with(" NORMAL"));
+            CHECK(line.contains("title") == line.contains("«"));
+            CHECK(line.contains("title") == line.contains("»"));
+            if (line.contains("title"))
+                CHECK(line.contains("« title »"));
+            CHECK(line.contains("│") == line.contains(':'));
+            if (line.contains(':'))
+                CHECK(line.ends_with(std::format("{} │ {}", history, clock)));
+            if (width >= 26)
+                CHECK(line.contains("« title »"));
+        }
+    }
+
+    SECTION("Native2026")
+    {
+        for (auto const width: widths)
+        {
+            INFO(width);
+            auto const [line, clock, _, lastCommand] = drawn(width, native2026(), [](MockTerm<>& mc) {
+                mc.writeToScreen("\033]7;file:///srv/app\033\\");
+                runFor(mc, "make", 4ms, 0);
+            });
+            INFO(line);
+            REQUIRE(lastCommand.contains("make"));
+
+            if (width >= 8)
+                CHECK(line.starts_with(" NORMAL "));
+            if (line.contains("srv"))
+                CHECK(line.substr(8).starts_with(" /srv/app"));
+            if (line.contains("make"))
+                CHECK(line.contains(lastCommand));
+            if (line.contains(':'))
+                CHECK(line.ends_with(clock + " "));
+            if (width >= 60)
+            {
+                CHECK(line.contains("/srv/app"));
+                CHECK(line.contains(lastCommand));
+                CHECK(line.ends_with(clock + " "));
+            }
+        }
+    }
+}

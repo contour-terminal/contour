@@ -1560,7 +1560,8 @@ TEST_CASE("Terminal.indicatorStatusLine.anyWidthDrawsWithoutOverlap", "[terminal
 TEST_CASE("Terminal.indicatorStatusLine.aLongTitleCostsOnlyItself", "[terminal][statusline][collapse]")
 {
     // A title too long for the middle takes nothing else with it: the right segment keeps its clock and its
-    // separator, and the middle leaves no lone «.
+    // separator, and the middle leaves no lone «. (The native2026 template shows no title; its widths are
+    // swept in contour's IndicatorTemplate_test, against the shipped constant.)
     struct Template
     {
         std::string_view name;
@@ -1575,10 +1576,6 @@ TEST_CASE("Terminal.indicatorStatusLine.aLongTitleCostsOnlyItself", "[terminal][
                        "{Tabs:ActiveColor=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }{Context:Left= │ }",
                    .middle = "« {Title} »",
                    .right = "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}" },
-        Template { .name = "Native2026",
-                   .left = " {InputMode:Bold}{Context:Left=  }",
-                   .middle = "{Title}",
-                   .right = "{HistoryLineCount:Faint}  {Clock:Faint} " },
     };
     for (auto const& shape: shipped)
     {
@@ -1600,4 +1597,5 @@ TEST_CASE("Terminal.indicatorStatusLine.aLongTitleCostsOnlyItself", "[terminal][
         CHECK_FALSE(line.contains("»"));
     }
 }
+
 // }}}
