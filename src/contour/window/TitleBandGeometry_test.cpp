@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/window/TitleBandGeometry.hpp>
 
-#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>

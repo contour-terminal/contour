@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -45,9 +46,9 @@ struct TitleBandSurface
 /// One row of the surface table.
 struct TitleBandSurfaceRow
 {
-    config::ChromeStyle style; ///< The chrome row it applies to.
-    config::Material material; ///< The material it applies to.
-    TitleBandSurface surface;  ///< The windowed answer.
+    config::ChromeStyle style {}; ///< The chrome row it applies to.
+    config::Material material {}; ///< The material it applies to.
+    TitleBandSurface surface {};  ///< The windowed answer.
 };
 
 /// The surface rows, first match wins; a row and material no row names keeps today's band.
@@ -107,6 +108,9 @@ enum class ChromeTone : uint8_t
     Light = 0, //!< A light ground: black ink.
     Dark,      //!< A dark ground: white ink.
 };
+
+/// Number of @c ChromeTone enumerators, derived from the last one.
+inline constexpr size_t ChromeToneCount = static_cast<size_t>(ChromeTone::Dark) + 1;
 
 /// @param color A ground colour.
 /// @return @c Dark when its relative luminance is below @c TitleBandDarkLuminance, else @c Light.

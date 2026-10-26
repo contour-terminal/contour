@@ -871,21 +871,20 @@ TEST_CASE("UiStyleProvider: the Terminal row's inks stay legible on its bar", "[
     auto const slot = [&](SchemeSlot value) {
         return contour::platform::toQColor(inputs.scheme.bySlot[static_cast<size_t>(value)]);
     };
-    // Blue on contour-light's dark bar fails 4.5:1, so Running falls back to the bar's text.
-    CHECK(terminal.statusInk(static_cast<int>(StatusColorRole::Running)) == slot(SchemeSlot::BarText));
-    CHECK(terminal.progressColor(1) == slot(SchemeSlot::BarText));
+    // Blue on contour-light's dark bar fails 4.5:1, so Running falls back to the bar's ink.
+    CHECK(terminal.statusInk(static_cast<int>(StatusColorRole::Running)) == slot(SchemeSlot::BarInk));
+    CHECK(terminal.progressColor(1) == slot(SchemeSlot::BarInk));
     for (auto const role: std::views::iota(0, static_cast<int>(contour::config::StatusColorRoleCount)))
     {
         CAPTURE(role);
-        CHECK(contrastOf(terminal.statusInk(role), slot(SchemeSlot::Bar))
-              >= std::min(4.5, contrastOf(slot(SchemeSlot::BarText), slot(SchemeSlot::Bar))));
+        CHECK(contrastOf(terminal.statusInk(role), slot(SchemeSlot::Bar)) >= 4.5);
     }
     auto const role = [&terminal](char const* name) {
         return tokenOf(terminal, "colors", name).value<QColor>();
     };
     CHECK(role("tabActiveFill") == slot(SchemeSlot::Selection));
     CHECK(role("tabTextActive") == slot(SchemeSlot::SelectionText));
-    CHECK(role("tabText") == slot(SchemeSlot::BarText));
+    CHECK(role("tabText") == slot(SchemeSlot::BarInk));
     CHECK(contrastOf(role("tabTextActive"), role("tabActiveFill")) >= 4.5);
     CHECK(contrastOf(role("tabText"), role("tabWellFill")) >= 4.5);
 }
@@ -1240,9 +1239,15 @@ TEST_CASE("UiStyleProvider: paneHeader answers the pure policy", "[contour][uist
           == QStringLiteral("hidden"));
     CHECK(comfortable.paneHeader(0, 1, 1, 2, 400, 22).value("content").toString()
           == QStringLiteral("hidden"));
+    // Each enum's first value past its end, as QML could pass it, answers nothing.
+    auto constexpr PastReveal = static_cast<int>(contour::window::HeaderRevealCount);
+    auto constexpr PastPointer = static_cast<int>(contour::window::PointerPresenceCount);
+    auto constexpr PastFocus = static_cast<int>(contour::window::PaneFocusCount);
     CHECK(comfortable.paneHeader(-1, 0, 0, 2, 400, 300).isEmpty());
-    CHECK(comfortable.paneHeader(0, 2, 0, 2, 400, 300).isEmpty());
-    CHECK(comfortable.paneHeader(0, 0, 3, 2, 400, 300).isEmpty());
+    CHECK(comfortable.paneHeader(PastReveal, 0, 0, 2, 400, 300).isEmpty());
+    CHECK(comfortable.paneHeader(0, PastPointer, 0, 2, 400, 300).isEmpty());
+    CHECK(comfortable.paneHeader(0, 0, PastFocus, 2, 400, 300).isEmpty());
+    CHECK(!comfortable.paneHeader(PastReveal - 1, PastPointer - 1, PastFocus - 1, 2, 400, 300).isEmpty());
 
     auto const minimal = UiStyleProvider(densityInputs(ChromeStyle::MacOS, ChromeDensity::Minimal));
     CHECK(minimal.paneHeader(1, 0, 0, 2, 400, 300).value("placement").toString()
@@ -1381,10 +1386,10 @@ TEST_CASE("UiStyleProvider: unfocusedDim floors Minimal and caps Increased Contr
     });
     withWindowColor(QColor(LightChrome), [&] { CHECK(minimal.unfocusedDim(0) == Catch::Approx(0.10)); });
 
-    for (auto const density: { ChromeDensity::Comfortable, ChromeDensity::Minimal })
+    for (auto const density: std::views::iota(size_t { 0 }, contour::config::ChromeDensityCount))
     {
-        CAPTURE(static_cast<int>(density));
-        auto inputs = densityInputs(ChromeStyle::MacOS, density);
+        CAPTURE(density);
+        auto inputs = densityInputs(ChromeStyle::MacOS, static_cast<ChromeDensity>(density));
         inputs.accessibility.contrast = ContrastPreference::Increased;
         auto const increased = UiStyleProvider(inputs);
         CHECK(increased.unfocusedDim(0.3) == Catch::Approx(0.05));

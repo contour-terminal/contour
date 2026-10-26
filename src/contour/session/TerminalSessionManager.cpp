@@ -1995,6 +1995,9 @@ std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSes
     // No leaf carries the ended session any more, so removeSession() drops only its bookkeeping and
     // frees it later, leaving the leaf to the new one.
     removeSession(ended);
+    // It forgot the ended session's marks but found no tab to repaint, as no leaf carries that session now:
+    // the badge is repainted through the new one, which its tab now hosts.
+    refreshTabBadgeForSession(sessionId);
     return session;
 }
 

@@ -63,12 +63,14 @@ TEST_CASE("surface.otherRowsKeepToday", "[titlebandsurface]")
         if (static_cast<ChromeStyle>(style) == ChromeStyle::MacOS)
             continue;
         for (auto const material: std::views::iota(size_t { 0 }, contour::config::MaterialCount))
-            for (auto const frame: { WindowFrame::ClientBand, WindowFrame::NativeFrame })
-                for (auto const mode: { WindowMode::Windowed, WindowMode::FullScreen })
+            for (auto const frame: std::views::iota(size_t { 0 }, WindowFrameCount))
+                for (auto const mode: std::views::iota(size_t { 0 }, WindowModeCount))
                 {
-                    CAPTURE(style, material, static_cast<int>(frame), static_cast<int>(mode));
-                    CHECK(surfaceOf(
-                              static_cast<ChromeStyle>(style), static_cast<Material>(material), frame, mode)
+                    CAPTURE(style, material, frame, mode);
+                    CHECK(surfaceOf(static_cast<ChromeStyle>(style),
+                                    static_cast<Material>(material),
+                                    static_cast<WindowFrame>(frame),
+                                    static_cast<WindowMode>(mode))
                           == TitleBandSurface {});
                 }
     }
@@ -130,8 +132,10 @@ TEST_CASE("tint.legibility", "[titlebandsurface]")
         INFO("scheme: " << name);
         auto palette = vtbackend::ColorPalette {};
         REQUIRE(vtbackend::defaultColorPalettes(name, palette));
-        for (auto const chrome: { ChromeTone::Light, ChromeTone::Dark })
+        for (auto const tone: std::views::iota(size_t { 0 }, ChromeToneCount))
         {
+            CAPTURE(tone);
+            auto const chrome = static_cast<ChromeTone>(tone);
             auto const tint = legibleBandTint(palette.defaultBackground, chrome);
             if (!tint)
                 continue;

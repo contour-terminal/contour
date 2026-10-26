@@ -173,7 +173,7 @@ QColor ChromeColorTokens::resolve(config::ChromeColorSource const& source, Qt::C
         case config::ColorSourceKind::Scheme:
             return faded(platform::toQColor(_scheme.bySlot[static_cast<size_t>(source.slot)]));
         case config::ColorSourceKind::SchemeOnBar:
-            return faded(platform::toQColor(config::inkOnBar(_scheme, source.slot)));
+            return faded(platform::toQColor(config::legibleOnBar(_scheme, source.slot)));
         case config::ColorSourceKind::SchemeShade:
             return faded(platform::toQColor(
                 config::shadeLightness(_scheme.bySlot[static_cast<size_t>(source.slot)], source.level)));

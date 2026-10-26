@@ -1192,7 +1192,7 @@ TEST_CASE("the Terminal row draws one cell-high tabs with glyph badges (offscree
     auto const bar = scheme.bySlot[static_cast<size_t>(SchemeSlot::Bar)];
     auto const floor =
         std::min(contour::config::MinimumTextContrast,
-                 vtbackend::contrastRatio(scheme.bySlot[static_cast<size_t>(SchemeSlot::BarText)], bar));
+                 vtbackend::contrastRatio(scheme.bySlot[static_cast<size_t>(SchemeSlot::BarInk)], bar));
     for (auto const index: std::views::iota(std::size_t { 0 }, glyphs.size()))
     {
         INFO("badge row " << index + 1);

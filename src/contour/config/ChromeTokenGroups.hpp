@@ -165,7 +165,7 @@ enum class ColorSourceKind : uint8_t
     Fill,        //!< The kit's @c fill.N wash.
     Label,       //!< The kit's @c label.N text.
     Surface,     //!< The kit's opaque @c surface.N: 1 elevated, 2 secondary.
-    SchemeOnBar, //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else see inkOnBar.
+    SchemeOnBar, //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else @c BarInk.
     StatusMark,  //!< A status hue's mark ink (@c StatusInkUse::Mark), picked by the source's @c status.
     SchemeShade, //!< The scheme @c slot moved by @c level HSL lightness points (see shadeLightness).
     Separator,   //!< Black on a light ground, white on a dark one, at @c contrast.separatorPercent.
@@ -177,8 +177,10 @@ enum class SchemeSlot : uint8_t
     Background = 0, //!< The scheme's default background.
     Foreground,     //!< The scheme's default foreground.
     Bar,            //!< ANSI colour 0, the bar fill.
-    BarText,        //!< Whichever of the default foreground and background reads better on @c Bar.
-    Secondary,      //!< ANSI colour 8.
+    /// The bar's one ink: the first of @c BarInkFallbacks that reads on @c Bar at 4.5:1. Every text on the
+    /// bar is inked with it, so one bar never carries two answers to the same question.
+    BarInk,
+    Secondary, //!< ANSI colour 8.
     /// The chrome's selection: the scheme's (@c schemeSelectionOf) where an end of the scheme reads on it
     /// at 4.5:1, else the first legible pair of @c SelectionFallbacks.
     Selection,
@@ -1067,7 +1069,7 @@ namespace detail
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         .colors = { schemeColor(SchemeSlot::Bar),
-                    schemeColor(SchemeSlot::BarText),
+                    schemeColor(SchemeSlot::BarInk),
                     schemeColor(SchemeSlot::Warning),
                     schemeColor(SchemeSlot::Foreground),
                     schemeColor(SchemeSlot::Background),
@@ -1077,26 +1079,27 @@ namespace detail
                     schemeColor(SchemeSlot::Bar),           // TabHoverFill
                     schemeColor(SchemeSlot::Bar),           // TabCloseFill
                     schemeColor(SchemeSlot::Selection),     // ControlPressedFill
-                    schemeColor(SchemeSlot::BarText),       // TabText
+                    schemeColor(SchemeSlot::BarInk),        // TabText
                     schemeColor(SchemeSlot::SelectionText), // TabTextActive
                     // Not Secondary: ANSI 8 on a light scheme's dark bar fails 4.5:1, so it does not dim.
-                    schemeColor(SchemeSlot::BarText),   // TabTextDimmed
-                    schemeColor(SchemeSlot::BarText),   // TabTextTinted (the row has no tint)
-                    schemeColor(SchemeSlot::Bar),       // ChipFill
-                    schemeColor(SchemeSlot::BarText),   // ChipText
-                    schemeColor(SchemeSlot::BarText),   // ChipTextStrong
+                    schemeColor(SchemeSlot::BarInk), // TabTextDimmed
+                    schemeColor(SchemeSlot::BarInk), // TabTextTinted (the row has no tint)
+                    schemeColor(SchemeSlot::Bar),    // ChipFill
+                    schemeColor(SchemeSlot::BarInk), // ChipText
+                    schemeColor(SchemeSlot::BarInk), // ChipTextStrong
                     // A pane is its own cells: the header is a bar row, the split a line in ANSI 8.
                     schemeColor(SchemeSlot::Background), // PaneGapFill
                     schemeColor(SchemeSlot::Background), // PaneCardBorder
                     schemeColor(SchemeSlot::Bar),        // PaneHeaderFill
-                    // On the bar, as the status inks are: BarText, or black or white where it does not read.
-                    schemeOnBar(SchemeSlot::BarText),   // PaneHeaderText
+                    // On the bar: its one ink, and the dimmed text ANSI 8 where that reads there (else the
+                    // ink).
+                    schemeColor(SchemeSlot::BarInk),    // PaneHeaderText
                     schemeOnBar(SchemeSlot::Secondary), // PaneHeaderTextDimmed
                     schemeColor(SchemeSlot::Secondary), // PaneSplitLine
                     schemeColor(SchemeSlot::Accent),    // PaneGrabber
                     schemeColor(SchemeSlot::Bar),       // PaneFooterFill
-                    schemeOnBar(SchemeSlot::BarText) }, // PaneFooterText
-        // The scheme's hues, each falling back to the bar's text where it would not read on the bar.
+                    schemeColor(SchemeSlot::BarInk) },  // PaneFooterText
+        // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),
                        schemeOnBar(SchemeSlot::Success),
@@ -1183,23 +1186,72 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
     return palette.defaultBackground;
 }
 
+/// Where the bar's ink comes from, in the order it is tried. All three ink the bar itself.
+enum class BarInkSource : uint8_t
+{
+    SchemeEnd = 0, //!< Whichever of the default foreground and background reads better on the bar.
+    BrightWhite,   //!< ANSI 15 (bright white), for a scheme whose own ends are dim.
+    Mono,          //!< Black or white, whichever reads better: always at least 4.58:1.
+};
+
+/// The candidates for the bar's ink, first legible one wins. one-dark's grey foreground on its black ANSI 0
+/// and solarized-light's on its cream fail 4.5:1; the last candidate always reads, so the bar does on every
+/// scheme.
+inline constexpr std::array BarInkFallbacks {
+    BarInkSource::SchemeEnd,
+    BarInkSource::BrightWhite,
+    BarInkSource::Mono,
+};
+
 /// Where the chrome's selection comes from, in the order it is tried.
 enum class SelectionSource : uint8_t
 {
     Scheme = 0, //!< The scheme's own selection, with its better end of the scheme on top.
     Inverse,    //!< Inverse video: the foreground as the fill, the background as the text.
-    Bar,        //!< The bar and its text.
-    BarBright,  //!< The bar with ANSI 15 (bright white) on it, for a scheme whose own ends are dim.
-    BarMono,    //!< The bar with black or white on it, whichever reads better: always at least 4.58:1.
+    Bar,        //!< The bar and its ink (@c BarInkFallbacks): always legible.
 };
 
 /// The candidates for the chrome's selection, first legible one wins. Most bundled schemes inherit a
 /// saturated blue selection on which neither end of the scheme reaches 4.5:1 (one-dark, solarized-dark);
 /// the last candidate always reads, so the active tab does on every scheme.
 inline constexpr std::array SelectionFallbacks {
-    SelectionSource::Scheme,    SelectionSource::Inverse, SelectionSource::Bar,
-    SelectionSource::BarBright, SelectionSource::BarMono,
+    SelectionSource::Scheme,
+    SelectionSource::Inverse,
+    SelectionSource::Bar,
 };
+
+namespace detail
+{
+    /// A text colour on the fill it is read on.
+    struct InkPair
+    {
+        vtbackend::RGBColor fill {}; ///< The ground.
+        vtbackend::RGBColor text {}; ///< The ink on it.
+    };
+
+    /// The first candidate whose text reads on its fill at 4.5:1; failing all, the one that reads best.
+    /// @param candidates The sources, in the order they are tried; not empty.
+    /// @param pairOf     Maps a source to its pair.
+    /// @return The chosen pair.
+    template <typename Source, size_t N, typename PairOf>
+    [[nodiscard]] InkPair firstLegiblePair(std::array<Source, N> const& candidates, PairOf const& pairOf)
+    {
+        static_assert(N > 0);
+        auto const ratioOf = [](InkPair const& pair) {
+            return vtbackend::contrastRatio(pair.text, pair.fill);
+        };
+        auto best = pairOf(candidates.front());
+        for (auto const source: candidates)
+        {
+            auto const candidate = pairOf(source);
+            if (ratioOf(candidate) >= MinimumTextContrast)
+                return candidate;
+            if (ratioOf(candidate) > ratioOf(best))
+                best = candidate;
+        }
+        return best;
+    }
+} // namespace detail
 
 /// Reduces a terminal colour palette to the slots the Terminal chrome paints with.
 /// @param palette The active terminal colour palette.
@@ -1216,53 +1268,47 @@ inline constexpr std::array SelectionFallbacks {
                    : palette.defaultBackground;
     };
 
-    auto colors = ChromeSchemeColors {};
-    colors.bySlot[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
-    colors.bySlot[static_cast<size_t>(SchemeSlot::Foreground)] = palette.defaultForeground;
-    colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = bar;
-    colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)] = readableOn(bar);
-    colors.bySlot[static_cast<size_t>(SchemeSlot::Secondary)] = palette.brightColor(0);
-    // The first candidate whose text reads at 4.5:1; failing all, the one that reads best.
-    struct Pair
-    {
-        vtbackend::RGBColor fill;
-        vtbackend::RGBColor text;
-    };
-    auto const pairOf = [&](SelectionSource source) -> Pair {
+    // The bar's ink, resolved once: the bar's text, the Terminal row's selection fallback and every
+    // SchemeOnBar source read this slot.
+    auto const barInk = detail::firstLegiblePair(BarInkFallbacks, [&](BarInkSource source) {
+                            switch (source)
+                            {
+                                case BarInkSource::SchemeEnd:
+                                    return detail::InkPair { .fill = bar, .text = readableOn(bar) };
+                                case BarInkSource::BrightWhite:
+                                    return detail::InkPair { .fill = bar, .text = palette.brightColor(7) };
+                                case BarInkSource::Mono: break;
+                            }
+                            auto const black = vtbackend::RGBColor { 0, 0, 0 };
+                            auto const white = vtbackend::RGBColor { 255, 255, 255 };
+                            return detail::InkPair { .fill = bar,
+                                                     .text = vtbackend::contrastRatio(black, bar)
+                                                                     >= vtbackend::contrastRatio(white, bar)
+                                                                 ? black
+                                                                 : white };
+                        }).text;
+
+    auto const selection = detail::firstLegiblePair(SelectionFallbacks, [&](SelectionSource source) {
         switch (source)
         {
             case SelectionSource::Scheme: {
                 auto const own = schemeSelectionOf(palette);
-                return { .fill = own, .text = readableOn(own) };
+                return detail::InkPair { .fill = own, .text = readableOn(own) };
             }
             case SelectionSource::Inverse:
-                return { .fill = palette.defaultForeground, .text = palette.defaultBackground };
-            case SelectionSource::Bar: return { .fill = bar, .text = readableOn(bar) };
-            case SelectionSource::BarBright: return { .fill = bar, .text = palette.brightColor(7) };
-            case SelectionSource::BarMono: break;
+                return detail::InkPair { .fill = palette.defaultForeground,
+                                         .text = palette.defaultBackground };
+            case SelectionSource::Bar: break;
         }
-        auto const black = vtbackend::RGBColor { 0, 0, 0 };
-        auto const white = vtbackend::RGBColor { 255, 255, 255 };
-        return { .fill = bar,
-                 .text = vtbackend::contrastRatio(black, bar) >= vtbackend::contrastRatio(white, bar)
-                             ? black
-                             : white };
-    };
-    auto const ratioOf = [](Pair const& pair) {
-        return vtbackend::contrastRatio(pair.text, pair.fill);
-    };
-    auto selection = pairOf(SelectionFallbacks.front());
-    for (auto const source: SelectionFallbacks)
-    {
-        auto const candidate = pairOf(source);
-        if (ratioOf(candidate) >= MinimumTextContrast)
-        {
-            selection = candidate;
-            break;
-        }
-        if (ratioOf(candidate) > ratioOf(selection))
-            selection = candidate;
-    }
+        return detail::InkPair { .fill = bar, .text = barInk };
+    });
+
+    auto colors = ChromeSchemeColors {};
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Background)] = palette.defaultBackground;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Foreground)] = palette.defaultForeground;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)] = bar;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::BarInk)] = barInk;
+    colors.bySlot[static_cast<size_t>(SchemeSlot::Secondary)] = palette.brightColor(0);
     colors.bySlot[static_cast<size_t>(SchemeSlot::Selection)] = selection.fill;
     colors.bySlot[static_cast<size_t>(SchemeSlot::SelectionText)] = selection.text;
     colors.bySlot[static_cast<size_t>(SchemeSlot::Accent)] = palette.normalColor(4);
@@ -1272,13 +1318,13 @@ inline constexpr std::array SelectionFallbacks {
     return colors;
 }
 
-/// The colour a scheme hue is inked in on the Terminal row's bar.
+/// The colour a @c SchemeOnBar source inks with on the Terminal row's bar.
 ///
 /// A hue that reads at 4.5:1 on @c Bar is itself; one that does not (blue on contour-light's dark bar)
-/// gives way to @c BarText, so the glyph it inks keeps its meaning by shape rather than vanishing.
+/// gives way to @c BarInk, so the glyph it inks keeps its meaning by shape rather than vanishing.
 /// @param colors The scheme's chrome slots.
 /// @param hue    The slot to ink with.
-/// @return The hue, or @c BarText.
+/// @return The hue, or @c BarInk.
 [[nodiscard]] inline vtbackend::RGBColor legibleOnBar(ChromeSchemeColors const& colors,
                                                       SchemeSlot hue) noexcept
 {
@@ -1286,24 +1332,7 @@ inline constexpr std::array SelectionFallbacks {
     auto const bar = colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)];
     if (vtbackend::contrastRatio(color, bar) >= MinimumTextContrast)
         return color;
-    return colors.bySlot[static_cast<size_t>(SchemeSlot::BarText)];
-}
-
-/// The colour a @c SchemeOnBar source inks with: legibleOnBar(), and where even @c BarText does not read
-/// at 4.5:1 on @c Bar (one-dark's grey foreground on its black ANSI 0, solarized-light's on its cream),
-/// black or white, whichever reads better there -- so the bar's text is legible on every scheme.
-/// @param colors The scheme's chrome slots.
-/// @param hue    The slot to ink with.
-/// @return The hue, @c BarText, or black or white.
-[[nodiscard]] inline vtbackend::RGBColor inkOnBar(ChromeSchemeColors const& colors, SchemeSlot hue) noexcept
-{
-    auto const ink = legibleOnBar(colors, hue);
-    auto const bar = colors.bySlot[static_cast<size_t>(SchemeSlot::Bar)];
-    if (vtbackend::contrastRatio(ink, bar) >= MinimumTextContrast)
-        return ink;
-    auto const black = vtbackend::RGBColor { 0, 0, 0 };
-    auto const white = vtbackend::RGBColor { 255, 255, 255 };
-    return vtbackend::contrastRatio(black, bar) >= vtbackend::contrastRatio(white, bar) ? black : white;
+    return colors.bySlot[static_cast<size_t>(SchemeSlot::BarInk)];
 }
 
 /// @p color moved by @p points HSL lightness points (out of 100), keeping its hue and saturation.

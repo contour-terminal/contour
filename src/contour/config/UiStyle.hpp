@@ -221,10 +221,10 @@ struct UiStyleTokens
     std::string_view hostDotGlyph;   ///< The host chip's state dot; empty where it is a vector circle.
 
     /// A pane header's action buttons, indexed by @c PaneHeaderAction.
-    std::array<std::string_view, PaneHeaderActionCount> paneActionGlyphs;
+    std::array<std::string_view, PaneHeaderActionCount> paneActionGlyphs {};
     /// The line a split is drawn with, side by side then stacked; empty where the gap is the line.
-    std::array<std::string_view, 2> splitLineGlyphs;
-    std::string_view restartGlyph; ///< Marks the exited footer's Restart button.
+    std::array<std::string_view, 2> splitLineGlyphs {};
+    std::string_view restartGlyph {}; ///< Marks the exited footer's Restart button.
 
     std::string_view closeGlyph;   ///< The per-tab close affordance.
     std::string_view zoomGlyph;    ///< Marks a tab whose active pane is zoomed (see vtmux::Tab).

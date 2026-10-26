@@ -1899,4 +1899,43 @@ TEST_CASE("TerminalSessionManager: a remote-hosted pane offers no Restart", "[ma
     contour::test::closeAllTabs(*window);
 }
 
+TEST_CASE("TerminalSessionManager: restarting an ended pane repaints its tab's badge",
+          "[manager][paneend][tabbadge]")
+{
+    using contour::window::TabBadgeKind;
+
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedControllerWithOsWindow const window { manager };
+    window->bindWindow(window.osWindow.get());
+
+    window->createNewTab();
+    window->createNewTab();
+    REQUIRE(window->activeTabIndex() == 1);
+    auto* const ended = sessionAtRow(manager, *window, 0);
+    REQUIRE(ended != nullptr);
+    drainPosted();
+
+    // Unseen output in the background tab, and the strip has read the mark it shows.
+    ended->terminal().writeToScreen("x");
+    drainPosted();
+    endEarly(*ended);
+    drainPosted();
+    REQUIRE(badgeAt(*window, 0) != TabBadgeKind::None);
+
+    // The restart forgets the ended session's marks; the new one has none, and the strip is told so: the
+    // badge's own role changes, or the delegate bound to it keeps the stale mark.
+    auto changed = QSignalSpy { &*window, &QAbstractItemModel::dataChanged };
+    REQUIRE(manager.restartSession(*ended).has_value());
+    drainPosted();
+    CHECK(badgeAt(*window, 0) == TabBadgeKind::None);
+    auto const badgeRole = static_cast<int>(contour::window::WindowController::Roles::BadgeRole);
+    CHECK(std::ranges::any_of(changed, [&](QList<QVariant> const& arguments) {
+        return arguments.at(0).toModelIndex().row() == 0
+               && arguments.at(2).value<QList<int>>().contains(badgeRole);
+    }));
+
+    contour::test::closeAllTabs(*window);
+}
+
 // }}}

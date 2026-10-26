@@ -491,6 +491,10 @@ QString UiStyleProvider::paneHeaderName(QString const& processName, QString cons
     return QString::fromStdString(window::paneHeaderName(processName.toStdString(), title.toStdString()));
 }
 
+// colorOn() picks a pane's tone by toneOf(); the chrome's own scheme follows the terminal background by
+// platform::colorSchemeOfBackground(). One threshold, so a pane and the chrome agree on what is dark.
+static_assert(TitleBandDarkLuminance == platform::DarkBackgroundLuminance);
+
 QColor UiStyleProvider::colorOn(int role, QColor const& background) const
 {
     if (!inRange(role, config::ChromeColorRoleCount))

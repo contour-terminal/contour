@@ -302,7 +302,7 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
             CHECK(fill.kind == ColorSourceKind::Scheme);
             CHECK(fill.slot == SchemeSlot::Bar);
             CHECK(text.kind == ColorSourceKind::Scheme);
-            CHECK(text.slot == SchemeSlot::BarText);
+            CHECK(text.slot == SchemeSlot::BarInk);
             CHECK(glyph.kind == ColorSourceKind::Scheme);
             CHECK(glyph.slot == SchemeSlot::Warning);
             CHECK(toastFill.kind == ColorSourceKind::Scheme);
@@ -477,12 +477,14 @@ TEST_CASE("chromeTokens.schemeColours", "[chrometokens]")
     CHECK(schemeSelectionOf(palette) == 0x010101_rgb);
 }
 
-TEST_CASE("chromeTokens.barTextReadsOnTheBar", "[chrometokens]")
+TEST_CASE("chromeTokens.barInkIsTheFirstLegibleCandidate", "[chrometokens]")
 {
     using namespace contour::config;
     auto const slotOf = [](ChromeSchemeColors const& colors, SchemeSlot slot) {
         return colors.bySlot[static_cast<size_t>(slot)];
     };
+    auto const black = 0x000000_rgb;
+    auto const white = 0xFFFFFF_rgb;
 
     for (auto const name: defaultColorPaletteNames())
     {
@@ -491,20 +493,41 @@ TEST_CASE("chromeTokens.barTextReadsOnTheBar", "[chrometokens]")
         REQUIRE(defaultColorPalettes(name, palette));
         auto const colors = chromeSchemeColorsOf(palette);
         auto const bar = slotOf(colors, SchemeSlot::Bar);
-        auto const text = slotOf(colors, SchemeSlot::BarText);
-        CHECK((text == palette.defaultForeground || text == palette.defaultBackground));
-        CHECK(contrastRatio(text, bar) >= std::max(contrastRatio(palette.defaultForeground, bar),
-                                                   contrastRatio(palette.defaultBackground, bar)));
+        auto const ink = slotOf(colors, SchemeSlot::BarInk);
+        CHECK(contrastRatio(ink, bar) >= MinimumTextContrast);
+
+        // BarInkFallbacks in order: the better end of the scheme, ANSI 15, then black or white.
+        auto const schemeEnd =
+            contrastRatio(palette.defaultForeground, bar) >= contrastRatio(palette.defaultBackground, bar)
+                ? palette.defaultForeground
+                : palette.defaultBackground;
+        if (contrastRatio(schemeEnd, bar) >= MinimumTextContrast)
+            CHECK(ink == schemeEnd);
+        else if (contrastRatio(palette.brightColor(7), bar) >= MinimumTextContrast)
+            CHECK(ink == palette.brightColor(7));
+        else
+            CHECK((ink == black || ink == white));
     }
 
     auto light = ColorPalette {};
     REQUIRE(defaultColorPalettes("contour-light", light));
-    CHECK(slotOf(chromeSchemeColorsOf(light), SchemeSlot::BarText) == light.defaultBackground);
-    CHECK(contrastRatio(light.defaultBackground, light.normalColor(0)) >= 4.5);
+    CHECK(slotOf(chromeSchemeColorsOf(light), SchemeSlot::BarInk) == light.defaultBackground);
 
     auto dark = ColorPalette {};
     REQUIRE(defaultColorPalettes("contour-dark", dark));
-    CHECK(slotOf(chromeSchemeColorsOf(dark), SchemeSlot::BarText) == dark.defaultForeground);
+    CHECK(slotOf(chromeSchemeColorsOf(dark), SchemeSlot::BarInk) == dark.defaultForeground);
+
+    // The two schemes whose ends do not read on their own bar take a later candidate.
+    for (auto const* name: { "one-dark", "solarized-light" })
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        auto const ink = slotOf(colors, SchemeSlot::BarInk);
+        CHECK(ink != palette.defaultForeground);
+        CHECK(ink != palette.defaultBackground);
+    }
 }
 
 TEST_CASE("chromeTokens.menuPresentationIgnoresPreferences", "[chrometokens]")
@@ -652,17 +675,17 @@ TEST_CASE("chromeTokens.bandColourRoles", "[chrometokens]")
         BandColorRow { .role = TabCloseFill, .native = fill(3), .terminal = schemeColor(SchemeSlot::Bar) },
         BandColorRow {
             .role = ControlPressedFill, .native = fill(2), .terminal = schemeColor(SchemeSlot::Selection) },
-        BandColorRow { .role = TabText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarText) },
+        BandColorRow { .role = TabText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarInk) },
         BandColorRow {
             .role = TabTextActive, .native = label(1), .terminal = schemeColor(SchemeSlot::SelectionText) },
         BandColorRow {
-            .role = TabTextDimmed, .native = label(3), .terminal = schemeColor(SchemeSlot::BarText) },
+            .role = TabTextDimmed, .native = label(3), .terminal = schemeColor(SchemeSlot::BarInk) },
         BandColorRow {
-            .role = TabTextTinted, .native = label(1), .terminal = schemeColor(SchemeSlot::BarText) },
+            .role = TabTextTinted, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
         BandColorRow { .role = ChipFill, .native = fill(4), .terminal = schemeColor(SchemeSlot::Bar) },
-        BandColorRow { .role = ChipText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarText) },
+        BandColorRow { .role = ChipText, .native = label(2), .terminal = schemeColor(SchemeSlot::BarInk) },
         BandColorRow {
-            .role = ChipTextStrong, .native = label(1), .terminal = schemeColor(SchemeSlot::BarText) },
+            .role = ChipTextStrong, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
     };
     // Every role from TabWellFill up to the pane roles has a row here (chromeTokens.paneColourRoles has
     // those).
@@ -773,8 +796,7 @@ TEST_CASE("chromeTokens.selectionTextReadsOnTheSelection", "[chrometokens]")
     REQUIRE(defaultColorPalettes("one-dark", oneDark));
     auto const oneDarkColors = chromeSchemeColorsOf(oneDark);
     CHECK(slotIn(oneDarkColors, SchemeSlot::Selection) == oneDark.normalColor(0));
-    CHECK(contrastRatio(slotIn(oneDarkColors, SchemeSlot::SelectionText), oneDark.normalColor(0))
-          >= MinimumTextContrast);
+    CHECK(slotIn(oneDarkColors, SchemeSlot::SelectionText) == slotIn(oneDarkColors, SchemeSlot::BarInk));
 }
 
 TEST_CASE("chromeTokens.statusInkLegibleOnTheBar", "[chrometokens]")
@@ -787,21 +809,20 @@ TEST_CASE("chromeTokens.statusInkLegibleOnTheBar", "[chrometokens]")
         REQUIRE(defaultColorPalettes(name, palette));
         auto const colors = chromeSchemeColorsOf(palette);
         auto const bar = slotIn(colors, SchemeSlot::Bar);
-        auto const floor = std::min(4.5, contrastRatio(slotIn(colors, SchemeSlot::BarText), bar));
         for (auto const hue:
              { SchemeSlot::Accent, SchemeSlot::Danger, SchemeSlot::Success, SchemeSlot::Warning })
         {
             CAPTURE(static_cast<int>(hue));
             auto const ink = legibleOnBar(colors, hue);
-            CHECK((ink == slotIn(colors, hue) || ink == slotIn(colors, SchemeSlot::BarText)));
-            CHECK(contrastRatio(ink, bar) >= floor);
+            CHECK((ink == slotIn(colors, hue) || ink == slotIn(colors, SchemeSlot::BarInk)));
+            CHECK(contrastRatio(ink, bar) >= MinimumTextContrast);
         }
     }
 
     auto light = ColorPalette {};
     REQUIRE(defaultColorPalettes("contour-light", light));
     auto const lightColors = chromeSchemeColorsOf(light);
-    CHECK(legibleOnBar(lightColors, SchemeSlot::Accent) == slotIn(lightColors, SchemeSlot::BarText));
+    CHECK(legibleOnBar(lightColors, SchemeSlot::Accent) == slotIn(lightColors, SchemeSlot::BarInk));
 
     auto dark = ColorPalette {};
     REQUIRE(defaultColorPalettes("contour-dark", dark));
@@ -1009,10 +1030,11 @@ TEST_CASE("chromeTokens.increasedContrastCapsTheDim", "[chrometokens]")
                                                       .transparency = TransparencyPreference::Allowed,
                                                       .contrast = ContrastPreference::Increased };
     for (auto const index: AllStyles())
-        for (auto const density: { ChromeDensity::Comfortable, ChromeDensity::Minimal })
+        for (auto const density: std::views::iota(size_t { 0 }, ChromeDensityCount))
         {
-            CAPTURE(index, static_cast<int>(density));
-            auto const tokens = resolveChromeTokens(static_cast<ChromeStyle>(index), increased, density);
+            CAPTURE(index, density);
+            auto const tokens = resolveChromeTokens(
+                static_cast<ChromeStyle>(index), increased, static_cast<ChromeDensity>(density));
             CHECK(tokens.contrast.paneDimPercent == 5);
             CHECK(tokens.contrast.activeCardRing == Catch::Approx(1.5));
         }
@@ -1080,7 +1102,7 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
         PaneColorRow {
             .role = PaneHeaderFill, .native = transparent, .terminal = schemeColor(SchemeSlot::Bar) },
         PaneColorRow {
-            .role = PaneHeaderText, .native = label(1), .terminal = schemeOnBar(SchemeSlot::BarText) },
+            .role = PaneHeaderText, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
         PaneColorRow { .role = PaneHeaderTextDimmed,
                        .native = label(2),
                        .terminal = schemeOnBar(SchemeSlot::Secondary) },
@@ -1089,7 +1111,7 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
         PaneColorRow { .role = PaneGrabber, .native = fill(1), .terminal = schemeColor(SchemeSlot::Accent) },
         PaneColorRow { .role = PaneFooterFill, .native = fill(3), .terminal = schemeColor(SchemeSlot::Bar) },
         PaneColorRow {
-            .role = PaneFooterText, .native = label(1), .terminal = schemeOnBar(SchemeSlot::BarText) },
+            .role = PaneFooterText, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
     };
     // Every role from PaneGapFill to the end of the enumeration has a row here.
     CHECK(rows.size() == ChromeColorRoleCount - static_cast<size_t>(PaneGapFill));
@@ -1111,7 +1133,7 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
     CHECK(separator().kind == ColorSourceKind::Separator);
 }
 
-TEST_CASE("chromeTokens.inkOnBarReadsOnEveryScheme", "[chrometokens]")
+TEST_CASE("chromeTokens.legibleOnBarReadsOnEveryScheme", "[chrometokens]")
 {
     using namespace contour::config;
     for (auto const name: defaultColorPaletteNames())
@@ -1125,11 +1147,13 @@ TEST_CASE("chromeTokens.inkOnBarReadsOnEveryScheme", "[chrometokens]")
         {
             CAPTURE(slot);
             auto const hue = static_cast<SchemeSlot>(slot);
-            auto const ink = inkOnBar(colors, hue);
+            auto const ink = legibleOnBar(colors, hue);
             CHECK(contrastRatio(ink, bar) >= MinimumTextContrast);
-            // Where the scheme's own answer reads, it is kept.
-            if (contrastRatio(legibleOnBar(colors, hue), bar) >= MinimumTextContrast)
-                CHECK(ink == legibleOnBar(colors, hue));
+            // Where the scheme's own hue reads, it is kept; else the bar's one ink.
+            if (contrastRatio(slotIn(colors, hue), bar) >= MinimumTextContrast)
+                CHECK(ink == slotIn(colors, hue));
+            else
+                CHECK(ink == slotIn(colors, SchemeSlot::BarInk));
         }
     }
 }
