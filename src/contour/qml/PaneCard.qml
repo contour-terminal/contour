@@ -140,7 +140,10 @@ Item {
         y: 0
         z: 1
         width: card.width
-        height: card.policy.placement === "overlay" ? chromeStyle.overlayPaneHeader : chromeStyle.size.paneHeader
+        // Inline, it is floored to whole device pixels, so the grid below it starts on the device grid
+        // (#2040) -- as the window-size solver counts it (window::splitChromeOf). The overlay moves nothing.
+        height: card.policy.placement === "overlay" ? chromeStyle.overlayPaneHeader
+                                                    : chromeStyle.paneHeaderHeight(Screen.devicePixelRatio)
         visible: card.headerShown
         session: card.session
         node: card.node

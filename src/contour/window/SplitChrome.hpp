@@ -57,10 +57,10 @@ namespace detail
 
 /// What a split tree spends around its leaves, in logical pixels, for the pane-tree size solver.
 ///
-/// The same tokens PaneNode.qml draws the gap, the header and the inset with, so the solver and the
-/// canvas cannot disagree. The gaps and the inset are counted as drawn -- snapped to the device grid by
-/// snappedChromePixels() -- and rounded up to whole logical pixels: never less than the canvas spends, and
-/// less than one logical pixel more. The header, which no split draws yet, is its token rounded up.
+/// The same tokens PaneNode.qml and PaneCard.qml draw the gap, the header and the inset with, so the solver
+/// and the canvas cannot disagree. The gaps, the inset and the inline header are counted as drawn --
+/// snapped to the device grid by snappedChromePixels() -- and rounded up to whole logical pixels: never less
+/// than the canvas spends, and less than one logical pixel more.
 /// @param tokens           The resolved token row (density and accessibility applied).
 /// @param unitWidth        One horizontal token unit, in logical pixels: a cell's width on Terminal, else 1.
 /// @param unitHeight       One vertical token unit, in logical pixels: a cell's height on Terminal, else 1.
@@ -77,7 +77,7 @@ namespace detail
     return vtworkspace::SplitChrome {
         .sideBySideGap = drawn(tokens.space.paneGap, unitWidth),
         .stackedGap = drawn(tokens.space.paneGapRows, unitHeight),
-        .leafHeader = detail::ceilOf(static_cast<double>(tokens.size.paneHeader) * unitHeight),
+        .leafHeader = drawn(tokens.size.paneHeader, unitHeight),
         .rootInset = drawn(tokens.space.paneInset, unitWidth),
         .leafInset = detail::ceilOf(
             cardContentInset(static_cast<double>(tokens.radii.paneCard) * unitWidth, devicePixelRatio)),

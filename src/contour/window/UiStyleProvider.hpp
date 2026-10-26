@@ -349,6 +349,13 @@ class UiStyleProvider: public QObject
     /// @return The inset in logical pixels, on the device grid; 0 for a square card.
     [[nodiscard]] Q_INVOKABLE qreal paneCardContentInset(qreal devicePixelRatio) const;
 
+    /// How high a pane card draws its inline header (`size.paneHeader`), floored to whole device pixels
+    /// (window::snappedChromePixels) so the grid below it starts on the device grid (#2040), as the
+    /// window-size solver counts it (window::splitChromeOf).
+    /// @param devicePixelRatio The window's device-pixel ratio.
+    /// @return The header's height in logical pixels; the bare token for a ratio of 0 or less.
+    [[nodiscard]] Q_INVOKABLE qreal paneHeaderHeight(qreal devicePixelRatio) const;
+
     /// One device pixel, in logical pixels: the pane card's border width.
     /// @param devicePixelRatio The window's device-pixel ratio.
     /// @return @c 1 / @p devicePixelRatio, or 1 for a ratio of 0 or less.

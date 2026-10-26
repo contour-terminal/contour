@@ -571,6 +571,12 @@ qreal UiStyleProvider::paneCardContentInset(qreal devicePixelRatio) const
     return devicePixelRatio > 0 ? cardContentInset(_radii.paneCard(), devicePixelRatio) : 0.0;
 }
 
+qreal UiStyleProvider::paneHeaderHeight(qreal devicePixelRatio) const
+{
+    return devicePixelRatio > 0 ? snappedChromePixels(_size.paneHeader(), devicePixelRatio)
+                                : _size.paneHeader();
+}
+
 qreal UiStyleProvider::hairline(qreal devicePixelRatio) const
 {
     return devicePixelRatio > 0 ? 1.0 / devicePixelRatio : 1.0;

@@ -4051,6 +4051,7 @@ TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fr
     using contour::config::ChromeStyle;
     auto const [row, density] = GENERATE(std::pair { ChromeStyle::MacOS, ChromeDensity::Comfortable },
                                          std::pair { ChromeStyle::MacOS, ChromeDensity::Minimal },
+                                         std::pair { ChromeStyle::Fluent, ChromeDensity::Comfortable },
                                          std::pair { ChromeStyle::Terminal, ChromeDensity::Comfortable });
     CAPTURE(static_cast<int>(row), static_cast<int>(density));
     auto host = SplitHost(row, density, vtworkspace::SplitState::Vertical);
@@ -4083,10 +4084,16 @@ TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fr
         auto const gap = call("snapGapToDevice", host.token("space", "paneGap"), dpr);
         auto const stackedGap = call("snapGapToDevice", host.token("space", "paneGapRows"), dpr);
         auto const first = call("snapToDevice", (host.root().width() - (2 * inset)) * 0.5, dpr);
+        // The inline header a card draws above its grid (PaneCard.qml), and the card's content inset below
+        // it: the grid's origin is `header + contentInset` into the card.
+        auto const header = provider->paneHeaderHeight(dpr);
+        auto const contentInset = provider->paneCardContentInset(dpr);
 
         CHECK(isWhole(inset * dpr));
         CHECK(isWhole((inset + first) * dpr));
         CHECK(isWhole((inset + first + gap) * dpr));
+        CHECK(isWhole((inset + header + contentInset) * dpr));
+        CHECK(isWhole((inset + first + gap + header + contentInset) * dpr));
         CHECK(gap * dpr >= 1); // never floored away
 
         // What is drawn never exceeds what the solver counts, per axis -- and the solver counts exactly
@@ -4097,6 +4104,8 @@ TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fr
         CHECK(ceilOf(gap) == chrome.sideBySideGap);
         CHECK(ceilOf(stackedGap) == chrome.stackedGap);
         CHECK(ceilOf(inset) == chrome.rootInset);
+        CHECK(header <= chrome.leafHeader);
+        CHECK(ceilOf(header) == chrome.leafHeader);
     }
 }
 

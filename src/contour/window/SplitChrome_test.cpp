@@ -86,13 +86,14 @@ TEST_CASE("splitChromeOf counts the gaps and the inset as drawn on the device gr
 {
     // A 7.4 x 16.2 cell on the Terminal row. At 100 % the canvas draws 7 x 16 device pixels, so the solver
     // counts 7 and 16 -- not 8 and 17, which would grow the window past the grid it asked for. At 125 %
-    // the canvas draws 9 / 1.25 = 7.2 and 20 / 1.25 = 16 points, counted as 8 and 16. The header is not
-    // drawn by a split yet, so it is the token rounded up either way.
+    // the canvas draws 9 / 1.25 = 7.2 and 20 / 1.25 = 16 points, counted as 8 and 16. The inline header
+    // is drawn on the device grid as well (PaneCard.qml, UiStyleProvider::paneHeaderHeight), so its one
+    // cell row is counted as drawn: 16 points at both scales.
     auto const tokens = resolveChromeTokens(ChromeStyle::Terminal, AccessibilityPreferences {});
     CHECK(splitChromeOf(tokens, 7.4, 16.2, 1.0)
-          == SplitChrome { .sideBySideGap = 7, .stackedGap = 16, .leafHeader = 17, .rootInset = 0 });
+          == SplitChrome { .sideBySideGap = 7, .stackedGap = 16, .leafHeader = 16, .rootInset = 0 });
     CHECK(splitChromeOf(tokens, 7.4, 16.2, 1.25)
-          == SplitChrome { .sideBySideGap = 8, .stackedGap = 16, .leafHeader = 17, .rootInset = 0 });
+          == SplitChrome { .sideBySideGap = 8, .stackedGap = 16, .leafHeader = 16, .rootInset = 0 });
 
     // A native row's whole-point tokens: whatever fraction a scale floors off, the count is the token. The
     // cards' content inset is rounded UP on the device grid instead, so it is counted by the scale.
