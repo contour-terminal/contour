@@ -1175,6 +1175,7 @@ if(CONTOUR_TESTING)
         config/DaemonSettings_test.cpp
         config/GlobalOverrides_test.cpp
         config/GuiStateStore_test.cpp
+        config/IndicatorTemplate_test.cpp
         config/HostUrl_test.cpp
         config/LayoutBuilder_test.cpp
         config/NewDefaultsOffer_test.cpp

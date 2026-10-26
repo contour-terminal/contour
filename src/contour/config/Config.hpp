@@ -657,15 +657,22 @@ inline constexpr auto ClassicIndicatorTemplate = IndicatorTemplate {
     .right = "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold}",
 };
 
-/// The 2026 redesign's interim indicator status line (DefaultsEdition::Native2026).
+/// The 2026 redesign's indicator status line (DefaultsEdition::Native2026): where you are and how the
+/// last command went.
 ///
-/// No {Tabs}, because the GUI tab strip shows them, and no `Color=` literal, so every colour comes from
-/// the color scheme's `indicatorStatusLine*` pairs and follows a light or dark scheme. A later phase of
-/// the redesign replaces it with the full template.
+/// Left: the vi mode as a chip, hidden in Insert mode, then the privilege/machine context, the working
+/// directory and the Git branch. Middle: the last command's outcome, the selection's size and the search
+/// prompt. Right: progress, the scroll position and a faint clock. No {Tabs} and no {Title}, because the
+/// chrome already shows both. Every colour is a role (`success`, `warning`, `accent`) or the scheme's
+/// `indicatorStatusLine*` pairs, so the line follows a light or dark scheme; {Git} takes the plain
+/// foreground, as no role names the canvas's magenta. Each segment is written in the serializer's
+/// canonical form, so saving it from the settings page leaves it byte for byte as it is. 0.9.0 is
+/// unreleased, so this replaces the interim template in place rather than adding an edition.
 inline constexpr auto Native2026IndicatorTemplate = IndicatorTemplate {
-    .left = " {InputMode:Bold}{Context:Left=  }",
-    .middle = "{Title}",
-    .right = "{HistoryLineCount:Faint}  {Clock:Faint} ",
+    .left = "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}{Context:Left= }{Cwd:Color=success,Left= }"
+            "{Git:Left=  }",
+    .middle = "{LastCommand}{Selection:Left=  }{SearchPrompt:Color=warning,Left=  }",
+    .right = "{Progress:Color=accent,Right=  }{Scroll:Right=  }{Clock:Faint,Right= }",
 };
 
 struct IndicatorConfig

@@ -4077,9 +4077,11 @@ constexpr auto Native2026Expectation = ExpectedEditionDefaults {
     .columns = 100,
     .horizontalMargin = 8,
     .verticalMargin = 6,
-    .statusLineLeft = " {InputMode:Bold}{Context:Left=  }",
-    .statusLineMiddle = "{Title}",
-    .statusLineRight = "{HistoryLineCount:Faint}  {Clock:Faint} ",
+    .statusLineLeft =
+        "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}{Context:Left= }{Cwd:Color=success,Left= }"
+        "{Git:Left=  }",
+    .statusLineMiddle = "{LastCommand}{Selection:Left=  }{SearchPrompt:Color=warning,Left=  }",
+    .statusLineRight = "{Progress:Color=accent,Right=  }{Scroll:Right=  }{Clock:Faint,Right= }",
     .linkDecoration = vtbackend::LinkDecorationMode::Modifier,
     .dimUnfocused = 0.15,
     .bellSound = "off",

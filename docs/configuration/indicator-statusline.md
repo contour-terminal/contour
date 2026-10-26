@@ -10,10 +10,14 @@ profiles:
     your_profile:
         status_line:
             indicator:
-                left: "{VTType} │ {InputMode:Bold,Color=#C0C030}{TraceMode:Bold,Color=#FFFF00,Left= │ }{ProtectedMode:Bold,Left= │ }"
-                middle: "{Tabs}{Title:Left= « ,Right= » ,Color=#20c0c0}"
-                right: "{HistoryLineCount:Faint,Color=#c0c0c0} │ {Clock:Bold} "
+                left: "{InputMode:Bold,Left= ,Right= ,Chip,Hide=Insert}{Context:Left= }{Cwd:Color=success,Left= }{Git:Left=  }"
+                middle: "{LastCommand}{Selection:Left=  }{SearchPrompt:Color=warning,Left=  }"
+                right: "{Progress:Color=accent,Right=  }{Scroll:Right=  }{Clock:Faint,Right= }"
 ```
+
+This is the default of a configuration with `defaults_edition: native2026`: the vi mode as a chip
+(hidden while typing), the directory and Git branch, how the last command went, the selection and
+search, and the scroll position and clock. Its colours are roles, so it follows the color scheme.
 
 Each segment, `left`, `middle`, and `right` may contain text to be displayed in the
 left, middle, or right segment of the indicator statusline.
