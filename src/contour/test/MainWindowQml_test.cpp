@@ -28,6 +28,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/TabBadge.hpp>
 #include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/core/Color.hpp>
@@ -1485,7 +1486,7 @@ using contour::config::MotionPreference;
 struct FullScreenBand
 {
     QQmlEngine engine;
-    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    MockMainController controller;
     contour::test::QmlMessageCapture warnings;
     std::unique_ptr<QObject> root;
     QQuickWindow* window;
@@ -1493,7 +1494,10 @@ struct FullScreenBand
     MotionPreference motion;
 
     /// @param motion The motion preference the band moves under.
-    explicit FullScreenBand(MotionPreference motion = MotionPreference::Full):
+    /// @param scene  What the window holds.
+    explicit FullScreenBand(MotionPreference motion = MotionPreference::Full,
+                            MainWindowScene scene = MainWindowScene { .tabCount = 3 }):
+        controller { std::move(scene) },
         root { loadMainWindow(engine, controller, warnings, macOSSetup(motion)) },
         window { qobject_cast<QQuickWindow*>(root.get()) },
         motion { motion }
@@ -1609,6 +1613,109 @@ TEST_CASE("full screen reveals the band by fading it under Reduce Motion (offscr
           "[contour][gui][qml][mainwindow][band]")
 {
     checkFullScreenReveal(MotionPreference::Reduced);
+}
+
+TEST_CASE("the drift chip reveals with a full-screen band, never over the cells (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    auto band = FullScreenBand { MotionPreference::Full,
+                                 MainWindowScene { .tabCount = 3,
+                                                   .drift = contour::test::snapshot::SnapshotDrift::Shown } };
+    auto& chip = named(*band.root, QStringLiteral("daemonDriftBadge"));
+    CHECK(isInside(&chip, band.titleBar));
+    CHECK_FALSE(chip.isVisible()); // concealed with the band
+
+    band.revealFromEdge();
+    band.waitUntilIn();
+    CHECK(chip.isVisible());
+    CHECK(isInside(&chip, band.titleBar));
+    CHECK_FALSE(isInside(&chip, &named(*band.root, QStringLiteral("content"))));
+    CHECK(band.warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// One accessible node met by a walk of the tree, with the roles of the nodes above it.
+struct AccessibleNode
+{
+    QAccessible::Role role;               ///< The node's own role.
+    QString name;                         ///< The node's accessible name.
+    std::vector<QAccessible::Role> above; ///< The roles from the root down to its parent.
+};
+
+/// Walks the accessible tree below @p node, depth first.
+void walkAccessible(QAccessibleInterface* node,
+                    std::vector<QAccessible::Role>& above,
+                    std::vector<AccessibleNode>& out)
+{
+    if (node == nullptr || !node->isValid())
+        return;
+    out.push_back(
+        AccessibleNode { .role = node->role(), .name = node->text(QAccessible::Name), .above = above });
+    above.push_back(node->role());
+    for (auto const index: std::views::iota(0, node->childCount()))
+        walkAccessible(node->child(index), above, out);
+    above.pop_back();
+}
+
+/// @return Every accessible node of @p window.
+[[nodiscard]] std::vector<AccessibleNode> accessibleTreeOf(QQuickWindow& window)
+{
+    auto nodes = std::vector<AccessibleNode> {};
+    auto above = std::vector<QAccessible::Role> {};
+    walkAccessible(QAccessible::queryAccessibleInterface(&window), above, nodes);
+    return nodes;
+}
+} // namespace
+
+TEST_CASE("the assembled band has one title bar, holding the chip, the strip, its tabs and their badges "
+          "(offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    // §2.6: the chrome's accessible tree, walked. A second bar holding only the tabs (the Pill shape with
+    // the tabs at the bottom) is no second title bar.
+    using contour::config::TabBarPosition;
+    for (auto const position: { TabBarPosition::Top, TabBarPosition::Bottom })
+    {
+        INFO("tabs at the " << (position == TabBarPosition::Top ? "top" : "bottom"));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 6,
+                                                          .hostLabel = QStringLiteral("home"),
+                                                          .decor = TabDecor::EveryBadge,
+                                                          .tabBarPosition = position } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        showWindow(*root);
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        REQUIRE(window != nullptr);
+
+        auto const tree = accessibleTreeOf(*window);
+        auto const under = [](AccessibleNode const& node, QAccessible::Role role) {
+            return std::ranges::find(node.above, role) != node.above.end();
+        };
+        CHECK(std::ranges::count(tree, QAccessible::TitleBar, &AccessibleNode::role) == 1);
+        auto const chip = std::ranges::find_if(tree, [](AccessibleNode const& node) {
+            return node.name.startsWith(QStringLiteral("Attached to home"));
+        });
+        REQUIRE(chip != tree.end());
+        CHECK(under(*chip, QAccessible::TitleBar));
+        auto const strip = std::ranges::find(tree, QAccessible::PageTabList, &AccessibleNode::role);
+        REQUIRE(strip != tree.end());
+        CHECK(under(*strip, QAccessible::TitleBar) == (position == TabBarPosition::Top));
+        auto const tabs = std::ranges::count_if(tree, [&](AccessibleNode const& node) {
+            return node.role == QAccessible::PageTab && under(node, QAccessible::PageTabList);
+        });
+        CHECK(tabs == 6);
+        auto const badge = std::ranges::find_if(tree, [&](AccessibleNode const& node) {
+            return node.role == QAccessible::StaticText && under(node, QAccessible::PageTab)
+                   && node.name
+                          == QString::fromUtf8(
+                              contour::window::tabBadgeLook(contour::window::TabBadgeKind::Blocked)
+                                  .accessibleName);
+        });
+        CHECK(badge != tree.end());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
 }
 
 TEST_CASE("the tab bar at the bottom on macOS keeps the band at the top (offscreen)",

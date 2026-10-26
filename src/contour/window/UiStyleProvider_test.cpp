@@ -908,6 +908,10 @@ TEST_CASE("UiStyleProvider: badgeLook, hostChipLook, titleBand and tabWellLayout
           == mac.statusInk(static_cast<int>(contour::config::StatusColorRole::Warning)));
     CHECK(mac.hostChipLook(99).isEmpty());
 
+    // The chip shows for a window with a host to name (window::hostChipPresence).
+    CHECK(mac.isHostChipShown(QStringLiteral("home")));
+    CHECK_FALSE(mac.isHostChipShown({}));
+
     auto const macBand = mac.titleBand(0, 0, 0, 0, {}, 0);
     CHECK(macBand.value("band").toString() == QStringLiteral("shown"));
     CHECK(macBand.value("bandEdge").toString() == QStringLiteral("top"));

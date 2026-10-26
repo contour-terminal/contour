@@ -822,7 +822,8 @@ class WindowController:
     /// @return The badge, with a Working one's progress.
     [[nodiscard]] TabBadge tabBadge(vtworkspace::Tab const& tab, int row) const;
     /// @p session's foreground process name, asked once until the next TitleRole refresh (@ref
-    /// _processNames).
+    /// _processNames). Only a TitleRole change re-reads it, so a tab keeps the name of the process it first
+    /// found until its title changes; Step 2's foreground poll is what invalidates it on a process change.
     [[nodiscard]] std::string const& cachedProcessName(session::TerminalSession const& session) const;
     /// Resolves the label shown on @p row's tab.
     [[nodiscard]] QString resolvedTabLabel(vtworkspace::Tab* tab,

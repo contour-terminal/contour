@@ -608,9 +608,10 @@ QString WindowController::resolvedTabLabel(vtworkspace::Tab* tab,
 
     auto expanded =
         expandTabLabel(templ, TabLabelContext { .position = row + 1, .windowTitle = windowTitle });
-    // The process is asked only for a label that came out empty: a blank tab names nothing.
+    // A blank tab names nothing: a label that came out empty falls back to the process's name. Asked only
+    // then, since the name costs a query of the process table.
     if (expanded.empty() && session != nullptr)
-        expanded = tabLabelWithFallback(std::move(expanded), cachedProcessName(*session));
+        expanded = cachedProcessName(*session);
     return QString::fromStdString(expanded);
 }
 

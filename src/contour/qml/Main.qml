@@ -328,11 +328,12 @@ ThemedWindow
     }
 
     // Shown only while the daemon runs another release than this client (see DaemonDriftModel): in the
-    // band's trailing area while the band is shown, and at the content's corner while it is not, so the
-    // drift is never unsaid. Positioned by x/y, since its parent changes.
+    // band's trailing area while the band is there -- shown, or revealing with it in full screen, never over
+    // the cells -- and at the content's corner while it is not, so the drift is never unsaid. Positioned by
+    // x/y, since its parent changes.
     DaemonDriftBadge {
         id: driftChip
-        readonly property bool inBand: titleBar.presence === "shown"
+        readonly property bool inBand: titleBar.presence !== "hidden"
         parent: inBand ? titleBar.driftSlot : content
         x: inBand ? 0 : parent.width - width - chromeStyle.space.s4
         y: inBand ? (parent.height - height) / 2 : parent.height - height - chromeStyle.space.s4

@@ -30,7 +30,7 @@ Item {
     Accessible.role: Accessible.StaticText
     Accessible.name: qsTr("Attached to %1, %2").arg(root.hostLabel).arg(root.look.accessibleState ?? "")
 
-    visible: root.hostLabel !== ""
+    visible: chromeStyle.isHostChipShown(root.hostLabel)
     implicitWidth: root.visible ? row.implicitWidth + (root.bracketed ? 0 : chromeStyle.space.s5 + chromeStyle.space.s5) : 0
     implicitHeight: chromeStyle.size.hostChip
     width: root.implicitWidth

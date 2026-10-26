@@ -202,7 +202,10 @@ Popup {
 
                     HoverHandler { id: swatchHover }
                     scale: swatchHover.hovered ? 1.15 : 1.0
-                    Behavior on scale { NumberAnimation { duration: chromeStyle.motion.fast } }
+                    Behavior on scale {
+                        enabled: chromeStyle.motion.animates
+                        NumberAnimation { duration: chromeStyle.motion.fast }
+                    }
 
                     TapHandler {
                         onTapped: root.applySwatch(cell.index)

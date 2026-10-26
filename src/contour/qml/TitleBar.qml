@@ -11,7 +11,7 @@
 // Where the band goes and what its middle holds is UiStyleProvider::titleBand's table, which Main.qml reads
 // and hands down as `centre` and `presence`. A second instance with `role: "tabs"` is the bar that holds
 // only the tabs when they sit at the bottom under a band at the top: it has no controls, chips, toolbar or
-// new-tab menu, so nothing of the band's exists twice.
+// new-tab menu, so nothing of the band's exists twice -- not even its title-bar role.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -20,8 +20,10 @@ import QtQuick.Window
 Item {
     id: root
 
-    Accessible.role: Accessible.TitleBar
-    Accessible.name: qsTr("Title bar")
+    // The window has one title bar: a bar holding only the tabs is a plain pane, and its strip carries the
+    // name (§2.6).
+    Accessible.role: root.isBand ? Accessible.TitleBar : Accessible.Pane
+    Accessible.name: root.isBand ? qsTr("Title bar") : ""
 
     required property var controller // this window's WindowController (Main.qml: appWindow.win)
     required property var window

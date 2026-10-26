@@ -291,6 +291,11 @@ QVariantMap UiStyleProvider::hostChipLook(int state) const
              { QStringLiteral("accessibleState"), nameOf(look.accessibleState) } };
 }
 
+bool UiStyleProvider::isHostChipShown(QString const& hostLabel) const
+{
+    return hostChipPresence(hostLabel.toStdString()) == HostChipPresence::Shown;
+}
+
 QVariantMap UiStyleProvider::titleBand(
     int frame, int mode, int strip, int position, QString const& hostLabel, int hostChipState) const
 {

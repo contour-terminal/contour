@@ -359,6 +359,11 @@ class UiStyleProvider: public QObject
     ///         outside the table.
     [[nodiscard]] Q_INVOKABLE QVariantMap hostChipLook(int state) const;
 
+    /// Whether a window attached to @p hostLabel shows the host chip (window::hostChipPresence).
+    /// @param hostLabel The window's host label; empty for a local window.
+    /// @return Whether the chip shows: a QML-facing bool, the documented carve-out.
+    [[nodiscard]] Q_INVOKABLE bool isHostChipShown(QString const& hostLabel) const;
+
     /// Where the title band and the tabs go, for this row's tab shape (window::resolveTitleBand).
     ///
     /// Ints rather than enums: this is the QML-facing carve-out, whose one caller (Main.qml) passes the

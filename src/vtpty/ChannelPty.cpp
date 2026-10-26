@@ -53,7 +53,9 @@ void ChannelPty::append(std::string_view data, ReadOrigin origin)
         _outputBuffer.append(data);
         _outputFed += data.size();
         // Where a replay ends, not where it starts: one is fed ahead of the live output it refills for, so a
-        // read reaching past this end took live output too.
+        // read reaching past this end took live output too. A second replay moves the end past live bytes not
+        // yet read, which then read as replayed: that can cost a tab its output dot, never give it a false
+        // one.
         if (origin == ReadOrigin::Replay)
             _replayEnd = _outputFed;
     }
