@@ -35,6 +35,7 @@
 #include <core/Escape.hpp>
 #include <core/Utf8Path.hpp>
 #include <core/Utils.hpp>
+#include <core/platform/UserPaths.hpp>
 
 #include <libunicode/convert.h>
 #include <libunicode/width.h>
@@ -289,8 +290,13 @@ Terminal::Terminal(Events& eventListener,
                    std::optional<StatusLineExtensionServices> extensionServices,
                    std::optional<GitHeadServices> gitServices):
     _eventListener { eventListener },
-    _homeDirectory { !factorySettings.homeDirectory.empty() ? factorySettings.homeDirectory
-                                                            : env.get("HOME").value_or("") },
+    // HOME, or Windows' USERPROFILE, when the composition root names none.
+    _homeDirectory { !factorySettings.homeDirectory.empty()
+                         ? factorySettings.homeDirectory
+                         : core::platform::homeDirectory(env)
+                               .transform(
+                                   [](std::filesystem::path const& home) { return core::pathToUtf8(home); })
+                               .value_or(std::string {}) },
     _fileSystem { fileSystem },
     _linkServices { std::move(linkServices) },
     // Read here rather than per reply: what it names is how this terminal was launched, and a

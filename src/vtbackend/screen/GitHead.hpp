@@ -147,7 +147,8 @@ struct GitHeadServices
 /// What `{Git}` shows for @p directory: the branch, ref or short object id, made safe to show.
 /// @param fileSystem Where to look.
 /// @param directory The directory whose repository to describe.
-/// @return The text; empty outside a repository, for a reftable one, or when HEAD cannot be read.
+/// @return The branch or ref name, or a detached HEAD's short object id in parentheses (`(a1b2c3d)`, as git's
+///         prompt shows it); empty outside a repository, for a reftable one, or when HEAD cannot be read.
 [[nodiscard]] std::string describeGitHead(GitFileSystem const& fileSystem,
                                           std::filesystem::path const& directory);
 

@@ -879,7 +879,7 @@ namespace
 
         /// How the newest command that reported its end went; nothing while one runs, before any, or when
         /// a newer prompt ended it without a report.
-        std::string visit(StatusLineDefinitions::LastCommand const& item)
+        [[nodiscard]] std::string visit(StatusLineDefinitions::LastCommand const& item) const
         {
             using StatusLineDefinitions::ColorRole;
 
@@ -906,8 +906,14 @@ namespace
             if (auto const exitCode = last->exitCode)
                 parts.push_back(*exitCode == 0 ? run("✓", ColorRole::Success)
                                                : run(std::format("✗ exit {}", *exitCode), ColorRole::Danger));
-            // display() is sanitized: no byte of the command line reaches the status screen as an escape.
-            if (auto command = elideEnd(last->commandLine.display(), item.maxWidth, vt.clusterWidthPolicy());
+            // On one line: a multi-line command's breaks and tabs read as spaces, not as the replacement
+            // character display() gives every control. Sanitized after the fold, so no byte of the command
+            // line reaches the status screen as an escape.
+            auto oneLine = last->commandLine.raw();
+            std::ranges::replace_if(oneLine, [](char c) { return c == '\n' || c == '\r' || c == '\t'; }, ' ');
+            if (auto command = elideEnd(sanitizeCommandLine(oneLine, SanitizePurpose::Display),
+                                        item.maxWidth,
+                                        vt.clusterWidthPolicy());
                 !command.empty())
                 parts.push_back(std::move(command));
 

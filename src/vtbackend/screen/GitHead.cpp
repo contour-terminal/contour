@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cerrno>
 #include <filesystem>
+#include <format>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -102,15 +103,17 @@ std::optional<GitHead> parseGitHead(std::string_view contents)
     if (text.starts_with(RefPrefix))
     {
         auto const ref = trimStart(text.substr(RefPrefix.size()));
-        for (auto const& form: RefForms)
-            if (ref.starts_with(form.prefix) && ref.size() > form.prefix.size())
-            {
-                auto name = ref.substr(form.prefix.size());
-                // reftable's stub (see ReftableStubBranch): the branch is elsewhere, so there is none here.
-                if (form.kind == GitHeadKind::Branch && name == ReftableStubBranch)
-                    return std::nullopt;
-                return GitHead { .kind = form.kind, .name = std::string { name } };
-            }
+        // The first form whose prefix matches decides: "refs/heads/" with no name is no branch, not a ref.
+        if (auto const form =
+                std::ranges::find_if(RefForms, [&](RefForm const& f) { return ref.starts_with(f.prefix); });
+            form != RefForms.end() && ref.size() > form->prefix.size())
+        {
+            auto name = ref.substr(form->prefix.size());
+            // reftable's stub (see ReftableStubBranch): the branch is elsewhere, so there is none here.
+            if (form->kind == GitHeadKind::Branch && name == ReftableStubBranch)
+                return std::nullopt;
+            return GitHead { .kind = form->kind, .name = std::string { name } };
+        }
         return std::nullopt;
     }
 
@@ -218,7 +221,15 @@ std::string describeGitHead(GitFileSystem const& fileSystem, std::filesystem::pa
         return {};
     // A ref name may hold any byte git allows in a path, an escape included, and this text is written to
     // the status screen, which parses it.
-    return sanitizeCommandLine(parsed->name, SanitizePurpose::Display);
+    auto name = sanitizeCommandLine(parsed->name, SanitizePurpose::Display);
+    switch (parsed->kind)
+    {
+        case GitHeadKind::Branch:
+        case GitHeadKind::OtherRef: return name;
+        // In parentheses, as git's own prompt shows one, so a commit does not read as a branch of that name.
+        case GitHeadKind::Detached: return std::format("({})", name);
+    }
+    return name;
 }
 
 namespace

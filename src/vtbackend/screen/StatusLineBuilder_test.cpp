@@ -739,6 +739,28 @@ TEST_CASE("serializeToVT.rolesIgnoreTheProgramsPalette", "[statusline][colors]")
     CHECK_FALSE(line.contains(textSgrOf(0xFFFF00_rgb)));
 }
 
+TEST_CASE("serializeToVT.roleReadsOnTheBarOfTheModeItIsDrawnIn", "[statusline][colors]")
+{
+    // The ground is the bar the line is drawn on now: vi Normal mode's, not the idle one's.
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    REQUIRE(defaultColorPalettes("contour-dark", mc.terminal.defaultColorPalette()));
+    mc.terminal.resetColorPalette();
+    mc.terminal.inputHandler().setMode(ViMode::Normal);
+
+    auto const& palette = mc.terminal.defaultColorPalette();
+    auto const accent = StatusLineDefinitions::ItemColor { StatusLineDefinitions::ColorRole::Accent };
+    auto const onNormal = StatusLineDefinitions::resolveItemColor(
+        accent, palette, palette.indicatorStatusLineNormalMode.background);
+    auto const onInactive = StatusLineDefinitions::resolveItemColor(
+        accent, palette, palette.indicatorStatusLineInactive.background);
+    REQUIRE(onNormal != onInactive); // contour-dark's accent is its Normal bar: the fallback must show
+
+    auto const line = serializeToVT(
+        mc.terminal, parseStatusLineSegment("{VTType:Color=accent}"sv), StatusLineStyling::Enabled);
+    CHECK(line.contains(textSgrOf(onNormal)));
+    CHECK_FALSE(line.contains(textSgrOf(onInactive)));
+}
+
 TEST_CASE("statusLine.colors.rolesReadOnContourSchemes", "[statusline][colors]")
 {
     // The roles' own colours, before any fallback: the Contour schemes are designed for them on the idle bar.
@@ -845,6 +867,14 @@ TEST_CASE("serializeToVT.cwdTakesTheHomeItIsGiven", "[statusline][cwd]")
     // Without one, the environment's.
     auto plain = MockTerm { PageSize { LineCount(3), ColumnCount(80) }, environment };
     CHECK(plain.terminal.homeDirectory() == "/elsewhere");
+}
+
+TEST_CASE("serializeToVT.cwdFindsAWindowsHome", "[statusline][cwd]")
+{
+    // Windows names the home USERPROFILE, not HOME.
+    auto const environment = core::testing::FakeEnvironment { { { "USERPROFILE", "/Users/bob" } } };
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(80) }, environment };
+    CHECK(mc.terminal.homeDirectory() == "/Users/bob");
 }
 
 TEST_CASE("serializeToVT.cwdWithATrailingSlash", "[statusline][cwd]")
@@ -1140,6 +1170,15 @@ TEST_CASE("serializeToVT.lastCommandIsBoundedAndSafe", "[statusline][lastcommand
     mc.writeToScreen(test::commandEnd(0));
     CHECK_FALSE(lastCommandOf(mc).contains('\033'));
     CHECK(lastCommandOf(mc).contains("evil"));
+}
+
+TEST_CASE("serializeToVT.lastCommandFoldsLineBreaksToSpaces", "[statusline][lastcommand]")
+{
+    // A multi-line command reads on a one-line bar, rather than as a replacement character per break.
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(80) } };
+    mc.writeToScreen(test::reportedCommandStart("for%20f%20in%20x%0Ado%09echo%0D%0Adone"));
+    mc.writeToScreen(test::commandEnd(0));
+    CHECK(lastCommandOf(mc) == "✓ for f in x do echo  done · 0ms");
 }
 
 TEST_CASE("serializeToVT.lastCommandElidesByGraphemeCluster", "[statusline][lastcommand]")

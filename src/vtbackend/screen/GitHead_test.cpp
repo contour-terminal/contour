@@ -38,6 +38,7 @@ TEST_CASE("GitHead.parsesEveryHeadForm", "[git]")
         { "", std::nullopt },
         { "ref:", std::nullopt },
         { "garbage", std::nullopt },
+        { "ref: refs/heads/", std::nullopt },
         // reftable's stub: the real HEAD is in .git/reftable/, which this reader does not decode.
         { "ref: refs/heads/.invalid\n", std::nullopt },
         { std::string { Sha1.substr(1) }, std::nullopt },
@@ -179,6 +180,14 @@ TEST_CASE("GitHeadCache.readsAReftableRepositoryAsBranchless", "[git]")
     fixture.files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
     fixture.files.addDirectory("/r/.git/reftable");
     CHECK(fixture.branchOf(std::filesystem::path { "/r" }).empty());
+}
+
+TEST_CASE("GitHeadCache.showsADetachedHeadAsAShortHash", "[git]")
+{
+    // In parentheses, as git's own prompt does, so a commit does not read as a branch of that name.
+    auto fixture = GitFixture {};
+    fixture.files.addFile("/r/.git/HEAD", std::string { Sha1 } + "\n");
+    CHECK(fixture.branchOf(std::filesystem::path { "/r" }) == "(a1b2c3d)");
 }
 
 TEST_CASE("GitHeadCache.showsOnlySafeText", "[git]")
