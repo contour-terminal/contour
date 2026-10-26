@@ -484,7 +484,8 @@ vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
 
 std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexcept
 {
-    if (_injectedLinkServices)
+    // NativeGitFileSystem probes this machine's disk: a test's injected files are not to be paired with it.
+    if (&_fileSystem != &core::platform::NativeFileSystem::instance())
         return std::nullopt;
     return vtbackend::GitHeadServices { .executor = _linkProbeExecutor, .fileSystem = _gitFileSystem };
 }

@@ -437,10 +437,11 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// @return References valid for the app's lifetime.
     [[nodiscard]] vtbackend::LinkDetectionServices linkDetectionServices() noexcept;
 
-    /// What every session's `{Git}` runs on: the path-probe thread (a hung mount stalls it alone) and this
-    /// machine's files.
-    /// @return References valid for the app's lifetime; nullopt for an app given test link services, whose
-    ///         filesystem is not this machine's, so that its `{Git}` reads nothing.
+    /// What every session's `{Git}` runs on: the one path-probe thread and this machine's files. That thread
+    /// is shared by `{Git}` and the link probes of every session, so a lookup on a hung mount stalls them all
+    /// until the mount answers.
+    /// @return References valid for the app's lifetime; nullopt for an app given a filesystem other than this
+    ///         machine's, so that its `{Git}` reads nothing.
     [[nodiscard]] std::optional<vtbackend::GitHeadServices> gitHeadServices() noexcept;
 
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;

@@ -153,15 +153,21 @@ GitPathStatus NativeGitFileSystem::status(std::filesystem::path const& path) con
 #endif
 }
 
-std::optional<std::string> NativeGitFileSystem::readMetadata(std::filesystem::path const& path) const
+std::optional<std::string> readGitMetadata(core::platform::FileSystem const& files,
+                                           std::filesystem::path const& path)
 {
-    auto const size = _files.fileSize(path);
-    if (!size || *size > MaxGitMetadataSize || !_files.isRegularFile(path))
+    auto const size = files.fileSize(path);
+    if (!size || *size > MaxGitMetadataSize || !files.isRegularFile(path))
         return std::nullopt;
-    auto contents = _files.readFile(path);
+    auto contents = files.readFile(path);
     if (!contents)
         return std::nullopt;
     return *std::move(contents);
+}
+
+std::optional<std::string> NativeGitFileSystem::readMetadata(std::filesystem::path const& path) const
+{
+    return readGitMetadata(_files, path);
 }
 
 std::optional<std::filesystem::path> findGitHeadFile(GitFileSystem const& fileSystem,

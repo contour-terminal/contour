@@ -10,10 +10,13 @@
 
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 using namespace vtbackend;
 using core::platform::testing::InMemoryFileSystem;
@@ -171,6 +174,77 @@ TEST_CASE("GitHeadCache.answersTheLatestQuestion", "[git]")
     fixture.executor.drain();
     CHECK(fixture.cache.branch() == "other");
     CHECK(fixture.changes == 1);
+}
+
+namespace
+{
+/// An InMemoryGitFileSystem that runs @ref onProbe before its first probe: what the terminal does while a
+/// lookup is under way on the executor.
+class InterruptedGitFileSystem final: public GitFileSystem
+{
+  public:
+    explicit InterruptedGitFileSystem(test::InMemoryGitFileSystem const& inner): _inner { inner } {}
+
+    mutable std::function<void()> onProbe; ///< Run, once, as the first probe begins.
+
+    [[nodiscard]] GitPathStatus status(std::filesystem::path const& path) const override
+    {
+        if (auto const hook = std::exchange(onProbe, nullptr))
+            hook();
+        return _inner.status(path);
+    }
+
+    [[nodiscard]] std::optional<std::string> readMetadata(std::filesystem::path const& path) const override
+    {
+        return _inner.readMetadata(path);
+    }
+
+  private:
+    test::InMemoryGitFileSystem const& _inner;
+};
+} // namespace
+
+TEST_CASE("GitHeadCache.asksAgainWhileALookupRuns", "[git]")
+{
+    // A question asked while a lookup is RUNNING -- not queued -- is answered by that lookup going round
+    // again, not by a second one, and its stale answer is never shown.
+    auto files = InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    files.addFile("/q/.git/HEAD", "ref: refs/heads/other\n");
+    auto const inner = test::InMemoryGitFileSystem { files };
+    auto git = InterruptedGitFileSystem { inner };
+    auto executor = core::async::testing::ManualExecutor {};
+    auto changes = 0;
+    auto cache = std::optional<GitHeadCache> {};
+    cache.emplace(GitHeadServices { .executor = executor, .fileSystem = git }, [&] { ++changes; });
+
+    git.onProbe = [&] {
+        cache->refresh(std::filesystem::path { "/q" });
+    };
+    cache->refresh(std::filesystem::path { "/r" });
+    CHECK(executor.drain() == 1);
+    CHECK(cache->branch() == "other");
+    // One answer told, the latest: the first question's was never published.
+    CHECK(changes == 1);
+}
+
+TEST_CASE("GitHeadCache.aLookupAfterItsCacheIsGoneReadsNothing", "[git]")
+{
+    // A lookup still queued when its terminal goes -- at shutdown -- runs, reads nothing and tells nobody.
+    auto files = InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    auto const git = test::InMemoryGitFileSystem { files };
+    auto executor = core::async::testing::ManualExecutor {};
+    auto changes = 0;
+    auto cache = std::optional<GitHeadCache> {};
+    cache.emplace(GitHeadServices { .executor = executor, .fileSystem = git }, [&] { ++changes; });
+
+    cache->refresh(std::filesystem::path { "/r" });
+    REQUIRE(executor.pending() == 1);
+    cache.reset();
+    executor.drain();
+    CHECK(git.calls() == 0);
+    CHECK(changes == 0);
 }
 
 TEST_CASE("GitHeadCache.readsAReftableRepositoryAsBranchless", "[git]")

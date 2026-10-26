@@ -69,7 +69,9 @@ struct GitPathStatus
 {
     GitPathKind kind = GitPathKind::Absent; ///< What the path names.
     /// The filesystem holding it, comparable only with another of the same GitFileSystem; nullopt where
-    /// that cannot be told, which never ends a walk.
+    /// that cannot be told. A walk stops at a parent whose device differs from its start's, so where every
+    /// probe tells none (Windows) it is never stopped; on POSIX a parent whose probe failed tells none while
+    /// the start told one, which ends the walk there.
     std::optional<std::uint64_t> device {};
 
     bool operator==(GitPathStatus const&) const = default;
@@ -118,11 +120,21 @@ class NativeGitFileSystem final: public GitFileSystem
     core::platform::FileSystem const& _files;
 };
 
+/// Reads a small file of git's through @p files: what every GitFileSystem's readMetadata() does.
+/// @param files Where to read.
+/// @param path The file.
+/// @return Its contents when it is a regular file of at most @ref MaxGitMetadataSize bytes; else nullopt.
+[[nodiscard]] std::optional<std::string> readGitMetadata(core::platform::FileSystem const& files,
+                                                         std::filesystem::path const& path);
+
 /// What a terminal's `{Git}` needs: where the lookups run, and what they read.
 struct GitHeadServices
 {
     /// Where the walk and the read run: a thread a hung mount may block, never one holding a terminal's lock.
-    /// It must be joined before @ref fileSystem is destroyed.
+    /// It must be joined before @ref fileSystem is destroyed. A ThreadPoolExecutor that was stopped runs what
+    /// is submitted to it inline, so a lookup asked for at shutdown may run on the frame, under the lock.
+    /// Every terminal given the same executor shares it: in the app, one probe thread serves `{Git}` and the
+    /// link probes of every session, so a lookup on a hung mount stalls them all.
     core::async::IExecutor& executor;
     GitFileSystem const& fileSystem; ///< What the lookups read. Must outlive every lookup in flight.
 };

@@ -46,13 +46,7 @@ class InMemoryGitFileSystem final: public GitFileSystem
     [[nodiscard]] std::optional<std::string> readMetadata(std::filesystem::path const& path) const override
     {
         ++_calls;
-        auto const size = _files.fileSize(path);
-        if (!size || *size > MaxGitMetadataSize || !_files.isRegularFile(path))
-            return std::nullopt;
-        auto contents = _files.readFile(path);
-        if (!contents)
-            return std::nullopt;
-        return *std::move(contents);
+        return readGitMetadata(_files, path);
     }
 
   private:

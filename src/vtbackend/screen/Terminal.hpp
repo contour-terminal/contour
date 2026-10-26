@@ -841,7 +841,10 @@ class Terminal: public IStatusLinePublishTarget
     ///                        `{Extension}` items render empty and every event hook is one untaken branch.
     ///                        The lifetime rules are StatusLineExtensionServices'.
     /// @param gitServices     Where `{Git}` looks up the branch, off the state lock; absent, `{Git}` shows
-    ///                        nothing and nothing is read. The lifetime rules are GitHeadServices'.
+    ///                        nothing and nothing is read. The lifetime rules are GitHeadServices'. A
+    ///                        ThreadPoolExecutor that was stopped runs what is submitted to it inline, so a
+    ///                        lookup asked for at shutdown may run on the render thread, under the terminal
+    ///                        lock, as a link probe may.
     Terminal(Events& eventListener,
              core::Environment const& env,
              core::platform::FileSystem const& fileSystem,
