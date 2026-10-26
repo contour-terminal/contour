@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <core/async/IExecutor.hpp>
 #include <core/platform/FileSystem.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,69 +55,144 @@ inline constexpr std::string_view ReftableStubBranch = ".invalid";
 ///         @ref DetachedHeadDigits; anything else nullopt.
 [[nodiscard]] std::optional<GitHead> parseGitHead(std::string_view contents);
 
+/// What a path is, as one probe of it says.
+enum class GitPathKind : uint8_t
+{
+    Absent = 0,  ///< Nothing is there, or a component of the path is no directory.
+    Directory,   ///< A directory, or a link to one.
+    RegularFile, ///< A regular file, or a link to one.
+    Other,       ///< Anything else -- a socket, a device, a path that cannot be probed.
+};
+
+/// What one probe of a path says: what is there, and which filesystem holds it.
+struct GitPathStatus
+{
+    GitPathKind kind = GitPathKind::Absent; ///< What the path names.
+    /// The filesystem holding it, comparable only with another of the same GitFileSystem; nullopt where
+    /// that cannot be told, which never ends a walk.
+    std::optional<std::uint64_t> device {};
+
+    bool operator==(GitPathStatus const&) const = default;
+};
+
+/// The filesystem as repository discovery reads it: one probe per path, and a bounded read.
+///
+/// A seam of its own rather than core::platform::FileSystem, which answers "what is this" in up to three
+/// calls and cannot say which filesystem a path is on -- what a walk needs to stop at a mount boundary as
+/// git does. Implementations are called from a background executor and must be safe to call from any
+/// thread.
+class GitFileSystem
+{
+  public:
+    GitFileSystem() = default;
+    GitFileSystem(GitFileSystem const&) = delete;
+    GitFileSystem(GitFileSystem&&) = delete;
+    GitFileSystem& operator=(GitFileSystem const&) = delete;
+    GitFileSystem& operator=(GitFileSystem&&) = delete;
+    virtual ~GitFileSystem() = default;
+
+    /// Probes @p path once, following links.
+    /// @param path The path.
+    /// @return What it is, and its filesystem.
+    [[nodiscard]] virtual GitPathStatus status(std::filesystem::path const& path) const = 0;
+
+    /// Reads a small file of git's.
+    /// @param path The file.
+    /// @return Its contents when it is a regular file of at most @ref MaxGitMetadataSize bytes; else nullopt.
+    [[nodiscard]] virtual std::optional<std::string> readMetadata(
+        std::filesystem::path const& path) const = 0;
+};
+
+/// This machine's filesystem: a `stat(2)` per probe, its `st_dev` the device, and reads through @p files.
+/// Windows tells no device, so a walk there is not stopped at a volume boundary.
+class NativeGitFileSystem final: public GitFileSystem
+{
+  public:
+    /// @param files Where files are read. Borrowed: it must outlive this.
+    explicit NativeGitFileSystem(core::platform::FileSystem const& files): _files { files } {}
+
+    [[nodiscard]] GitPathStatus status(std::filesystem::path const& path) const override;
+    [[nodiscard]] std::optional<std::string> readMetadata(std::filesystem::path const& path) const override;
+
+  private:
+    core::platform::FileSystem const& _files;
+};
+
+/// What a terminal's `{Git}` needs: where the lookups run, and what they read.
+struct GitHeadServices
+{
+    /// Where the walk and the read run: a thread a hung mount may block, never one holding a terminal's lock.
+    /// It must be joined before @ref fileSystem is destroyed.
+    core::async::IExecutor& executor;
+    GitFileSystem const& fileSystem; ///< What the lookups read. Must outlive every lookup in flight.
+};
+
 /// Finds the HEAD file of the repository @p directory is in, as git does: the first `.git` walking up to
-/// the root decides.
+/// the root decides, and the walk does not leave the filesystem it started on (git's default, without
+/// `GIT_DISCOVERY_ACROSS_FILESYSTEM`).
+///
+/// Lexical: a symlinked directory is walked by its own parents, not its target's. OSC 7 reports the logical
+/// `$PWD`, so a shell in `~/link` pointing into a repository finds no repository, where git, which walks the
+/// physical path, does. Resolving it would cost a realpath on every lookup.
+///
+/// Each level costs two probes: the directory, for its device, and its `.git`.
 /// @param fileSystem Where to look.
 /// @param directory Where to start; a path without a root directory finds nothing.
 /// @return `.git/HEAD` when that `.git` is a directory holding it as a regular file; `<p>/HEAD` when it is
 ///         a file (a worktree or submodule) of at most @ref MaxGitMetadataSize bytes whose first line is
 ///         `gitdir: <p>`, @p p relative to the directory holding the `.git` file; nullopt otherwise.
-[[nodiscard]] std::optional<std::filesystem::path> findGitHeadFile(
-    core::platform::FileSystem const& fileSystem, std::filesystem::path const& directory);
+[[nodiscard]] std::optional<std::filesystem::path> findGitHeadFile(GitFileSystem const& fileSystem,
+                                                                   std::filesystem::path const& directory);
 
-/// The branch `{Git}` shows, read through a filesystem only when it may have changed.
+/// What `{Git}` shows for @p directory: the branch, ref or short object id, made safe to show.
+/// @param fileSystem Where to look.
+/// @param directory The directory whose repository to describe.
+/// @return The text; empty outside a repository, for a reftable one, or when HEAD cannot be read.
+[[nodiscard]] std::string describeGitHead(GitFileSystem const& fileSystem,
+                                          std::filesystem::path const& directory);
+
+/// The branch `{Git}` shows, looked up on a background executor and never under a terminal's lock.
 ///
-/// Per frame refresh() costs nothing: once it has read for a directory it reads again only after
-/// invalidate() -- which the terminal calls when a command ends (OSC 133 D) and on every working-directory
-/// report (OSC 7) -- or for another directory. Even then it walks to HEAD and stats it, and re-reads only
-/// when HEAD's path or modification time changed.
+/// A frame calls refresh(), which does no I/O: once a lookup for a directory has started it starts another
+/// only after invalidate() -- which the terminal calls when a command ends (OSC 133 D, or a daemon's record
+/// of one) and on every working-directory report (OSC 7) -- or for another directory. The lookup runs on
+/// the services' executor; when its answer differs from what is shown, the cache publishes it and asks the
+/// owner for a frame. Until then the previous answer stays, so a frame never waits and a branch shows one
+/// frame after it is known.
 ///
-/// Not thread-safe: the terminal calls every member under its state lock.
+/// invalidate(), refresh() and branch() are called under the terminal's lock; the lookup takes only the
+/// cache's own mutex, after the terminal's in lock order.
 class GitHeadCache
 {
   public:
-    /// @param fileSystem Where the repository is read. Borrowed: it must outlive the cache.
-    explicit GitHeadCache(core::platform::FileSystem const& fileSystem);
+    /// @param services Where lookups run and what they read; see GitHeadServices for the lifetime rules.
+    /// @param onBranchChanged Called on the executor, with the cache's mutex held and the terminal's NOT
+    ///                        held, when a lookup changed branch(). Must be cheap, must not throw, and must
+    ///                        not take the terminal's lock or call into this cache.
+    GitHeadCache(GitHeadServices services, std::function<void()> onBranchChanged);
+
+    /// Stops telling the owner: a lookup in flight finishes, unheard.
+    ~GitHeadCache();
+
+    GitHeadCache(GitHeadCache const&) = delete;
+    GitHeadCache(GitHeadCache&&) = delete;
+    GitHeadCache& operator=(GitHeadCache const&) = delete;
+    GitHeadCache& operator=(GitHeadCache&&) = delete;
 
     /// Says the branch may have changed, so that the next refresh() looks again.
     void invalidate() noexcept;
 
-    /// Brings branch() up to date for @p directory, unless it already is for it and nothing invalidated it.
-    /// @param directory The directory whose repository to show; nullopt for none (no branch).
+    /// Starts a lookup for @p directory unless one already ran or runs for it and nothing invalidated it.
+    /// Never blocks on I/O.
+    /// @param directory The directory whose repository to show; nullopt for none (no branch, at once).
     void refresh(std::optional<std::filesystem::path> const& directory);
 
-    /// @return The branch, ref or short object id, made safe to show; empty for none.
-    [[nodiscard]] std::string const& branch() const noexcept { return _branch; }
+    /// @return The last answer, made safe to show; empty for none.
+    [[nodiscard]] std::string branch() const;
 
   private:
-    /// Whether the cache may answer for its directory without looking.
-    enum class GitHeadFreshness : uint8_t
-    {
-        Stale = 0, ///< Look on the next refresh().
-        Fresh,     ///< Nothing invalidated it since it last looked.
-    };
-
-    /// What identifies a HEAD file's contents without reading them.
-    struct HeadKey
-    {
-        std::filesystem::path head;               ///< The HEAD file.
-        std::filesystem::file_time_type mtime {}; ///< Its last modification.
-
-        bool operator==(HeadKey const&) const = default;
-    };
-
-    /// The key of the HEAD file @p directory's repository has, or nullopt for none.
-    [[nodiscard]] std::optional<HeadKey> keyFor(std::filesystem::path const& directory) const;
-
-    /// What the HEAD file @p head says, made safe to show; empty when it is unreadable, too large or not
-    /// git's.
-    [[nodiscard]] std::string branchIn(std::filesystem::path const& head) const;
-
-    core::platform::FileSystem const& _fileSystem;
-    GitHeadFreshness _freshness = GitHeadFreshness::Stale;
-    std::optional<std::filesystem::path> _directory;
-    std::optional<HeadKey> _key;
-    std::string _branch;
+    struct State;
+    std::shared_ptr<State> _state;
 };
 
 } // namespace vtbackend

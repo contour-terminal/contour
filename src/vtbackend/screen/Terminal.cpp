@@ -286,12 +286,12 @@ Terminal::Terminal(Events& eventListener,
                    TerminalClocks clocks,
                    SemanticBlockTokenSource sessionTokens,
                    std::optional<LinkDetectionServices> linkServices,
-                   std::optional<StatusLineExtensionServices> extensionServices):
+                   std::optional<StatusLineExtensionServices> extensionServices,
+                   std::optional<GitHeadServices> gitServices):
     _eventListener { eventListener },
     _homeDirectory { !factorySettings.homeDirectory.empty() ? factorySettings.homeDirectory
                                                             : env.get("HOME").value_or("") },
     _fileSystem { fileSystem },
-    _gitHead { fileSystem },
     _linkServices { std::move(linkServices) },
     // Read here rather than per reply: what it names is how this terminal was launched, and a
     // configuration value re-read on every DA/DSR/CPR is a lookup on a path that answers thousands
@@ -365,6 +365,10 @@ Terminal::Terminal(Events& eventListener,
                                                     onStatusLineCommandCompleted(output);
                                                 })
                                           : nullptr },
+    // The same contract as onStatusLineCommandCompleted(): on the executor, without the state lock.
+    _gitHead { gitServices ? std::make_unique<GitHeadCache>(*gitServices,
+                                                            [this] { breakLoopAndRefreshRenderBuffer(); })
+                           : nullptr },
     // Last: its redraw request reaches what every member above holds.
     _linkDetector { makeLinkDetector() }
 {
@@ -6026,7 +6030,8 @@ void Terminal::adoptCommandBlock(CommandBlockRecord record, AdoptMode mode)
         _eventListener.commandBlockFinished(*summary);
         // A live command the host saw end, as endCommand() is told of one here: it may have switched
         // branches.
-        _gitHead.invalidate();
+        if (_gitHead)
+            _gitHead->invalidate();
     }
 }
 
@@ -6606,8 +6611,9 @@ void Terminal::endCommand(int exitCode, ContextOutcome outcome)
     // Raised from inside the parse, under _stateMutex, exactly as progressChanged() is.
     if (auto const summary = _commandBlocks.commandFinished(exitCode, outcome))
         _eventListener.commandBlockFinished(*summary);
-    // The command may have switched branches; the next frame looks.
-    _gitHead.invalidate();
+    // The command may have switched branches; the next frame asks.
+    if (_gitHead)
+        _gitHead->invalidate();
 }
 
 void Terminal::commandContextStarted(ContextId started)
@@ -6641,7 +6647,8 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
         return;
     }
     // Changed or not: a shell re-reports at every prompt, which is when a branch switch shows.
-    _gitHead.invalidate();
+    if (_gitHead)
+        _gitHead->invalidate();
     auto const changed = *parsed != _currentWorkingDirectory;
     _currentWorkingDirectory = *std::move(parsed);
     recordForeignDirectory();
@@ -6651,12 +6658,17 @@ void Terminal::setCurrentWorkingDirectory(string const& url)
         [&] { return StatusLineEvents::CwdChanged { .cwd = _currentWorkingDirectory.path }; });
 }
 
+std::string Terminal::gitBranch() const
+{
+    return _gitHead ? _gitHead->branch() : std::string {};
+}
+
 void Terminal::refreshGitHead()
 {
-    if (!containsItem<StatusLineDefinitions::Git>(_indicatorStatusLineDefinition))
+    if (!_gitHead || !containsItem<StatusLineDefinitions::Git>(_indicatorStatusLineDefinition))
         return;
     // Only a directory provably on this machine: another machine's path names another repository, or none.
-    _gitHead.refresh(
+    _gitHead->refresh(
         resolveWorkingDirectory(CwdPurpose::OpenLocally)
             .and_then([](ResolvedWorkingDirectory const& resolved) -> std::optional<std::filesystem::path> {
                 // A path this platform cannot spell has no branch rather than a wrong one.

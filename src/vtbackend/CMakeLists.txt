@@ -17,6 +17,7 @@ set(vtbackend_HEADERS
     testing/CatchStringMakers.hpp
     testing/DetectingTerm.hpp
     testing/FakeStatusLineExtensions.hpp
+    testing/InMemoryGitFileSystem.hpp
     core/CellFlags.hpp
     grid/CellProxy.hpp
     grid/CellUtil.hpp

@@ -77,7 +77,7 @@ class MockTerm: public Terminal::NullEvents
                       std::optional<LinkDetectionServices> linkServices = std::nullopt,
                       std::optional<StatusLineExtensionServices> extensionServices = std::nullopt);
 
-    /// A terminal that reads printed paths and Git metadata from @p fileSystem; everything else as
+    /// A terminal that reads printed paths from @p fileSystem, and shows no `{Git}`; everything else as
     /// `MockTerm { size }`.
     /// @param size The page size.
     /// @param fileSystem The terminal's filesystem. Borrowed: it must outlive the terminal.
@@ -89,6 +89,23 @@ class MockTerm: public Terminal::NullEvents
                    &fixedOffsetLocalTime<>,
                    std::nullopt,
                    std::nullopt }
+    {
+    }
+
+    /// A terminal that reads printed paths from @p fileSystem and looks up `{Git}` through @p gitServices;
+    /// everything else as `MockTerm { size }`.
+    /// @param size The page size.
+    /// @param fileSystem The terminal's filesystem. Borrowed: it must outlive the terminal.
+    /// @param gitServices Where `{Git}` looks up the branch: a test's executor, drained by hand.
+    MockTerm(PageSize size, core::platform::FileSystem const& fileSystem, GitHeadServices gitServices):
+        MockTerm { createSettings(size, HistoryLimits {}, 1024),
+                   core::defaultEnvironment(),
+                   fileSystem,
+                   std::nullopt,
+                   &fixedOffsetLocalTime<>,
+                   std::nullopt,
+                   std::nullopt,
+                   gitServices }
     {
     }
 
@@ -510,7 +527,8 @@ class MockTerm: public Terminal::NullEvents
              std::optional<StatusLineCommandServices> commandServices,
              LocalTimeConverter localTime,
              std::optional<LinkDetectionServices> linkServices,
-             std::optional<StatusLineExtensionServices> extensionServices);
+             std::optional<StatusLineExtensionServices> extensionServices,
+             std::optional<GitHeadServices> gitServices = std::nullopt);
 };
 
 template <typename PtyDevice>
@@ -550,7 +568,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                                      std::optional<StatusLineCommandServices> commandServices,
                                      LocalTimeConverter localTime,
                                      std::optional<LinkDetectionServices> linkServices,
-                                     std::optional<StatusLineExtensionServices> extensionServices):
+                                     std::optional<StatusLineExtensionServices> extensionServices,
+                                     std::optional<GitHeadServices> gitServices):
     terminal { *this,
                environment,
                fileSystem,
@@ -564,7 +583,8 @@ inline MockTerm<PtyDevice>::MockTerm(vtbackend::Settings settings,
                    return token;
                },
                std::move(linkServices),
-               extensionServices }
+               extensionServices,
+               gitServices }
 {
     if (auto const logFilterString = core::defaultEnvironment().get("LOG"))
     {

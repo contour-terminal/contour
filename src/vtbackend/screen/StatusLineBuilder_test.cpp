@@ -5,11 +5,13 @@
 #include <vtbackend/grid/GraphemeClusters.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/Terminal.hpp>
+#include <vtbackend/testing/InMemoryGitFileSystem.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
 #include <core/Environment.hpp>
 #include <core/Utils.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 #include <core/testing/Environment.hpp>
 
@@ -934,62 +936,126 @@ namespace
 }
 } // namespace
 
+namespace
+{
+/// A terminal showing `{Git}`, whose lookups read in-memory files and run when a test drains their executor.
+struct GitTerm
+{
+    core::platform::testing::InMemoryFileSystem files;
+    test::InMemoryGitFileSystem git { files };
+    core::async::testing::ManualExecutor executor;
+    MockTerm<> mc { PageSize { LineCount(3), ColumnCount(40) },
+                    files,
+                    GitHeadServices { .executor = executor, .fileSystem = git } };
+
+    GitTerm()
+    {
+        files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+        REQUIRE(files.createDirectories("/r/src"));
+        mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    }
+
+    /// The line once every lookup a frame asked for has run and the frame its answer asks for is drawn.
+    [[nodiscard]] std::string settledLine()
+    {
+        mc.terminal.refreshRenderBuffer();
+        executor.drain();
+        return indicatorTextAfterRefresh(mc.terminal);
+    }
+};
+} // namespace
+
 TEST_CASE("serializeToVT.gitFollowsTheShell", "[statusline][git]")
 {
-    auto files = core::platform::testing::InMemoryFileSystem {};
-    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
-    REQUIRE(files.createDirectories("/r/src"));
-    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };
-    mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
-    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
-
+    auto term = GitTerm {};
+    auto& mc = term.mc;
     mc.writeToScreen("\033]7;file:///r/src\033\\");
-    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+    CHECK(term.settledLine() == "main");
 
-    // A frame reads nothing: only a command's end or a directory report makes it look again.
-    REQUIRE(files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
-    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
-    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+    // A frame asks for nothing: only a command's end or a directory report makes it look again.
+    REQUIRE(term.files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    CHECK(term.settledLine() == "main");
+    CHECK(term.settledLine() == "main");
 
     test::typeAtPrompt(mc, "git switch next");
     mc.writeToScreen("\033]133;C\033\\");
     mc.writeToScreen("\033]133;D;0\033\\");
-    CHECK(indicatorTextAfterRefresh(mc.terminal) == "next");
+    CHECK(term.settledLine() == "next");
 
     // Another machine's directory has no branch here, whatever this machine holds at that path.
     mc.writeToScreen("\033]7;file://elsewhere.example/r/src\033\\");
-    CHECK(indicatorTextAfterRefresh(mc.terminal).empty());
+    CHECK(term.settledLine().empty());
+}
+
+TEST_CASE("serializeToVT.gitLooksAgainWhenTheShellReReportsItsDirectory", "[statusline][git]")
+{
+    // A shell re-reports its directory at every prompt; a branch switched by a program that marked no command
+    // shows at the next one.
+    auto term = GitTerm {};
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+    CHECK(term.settledLine() == "main");
+
+    REQUIRE(term.files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+    CHECK(term.settledLine() == "next");
+}
+
+TEST_CASE("serializeToVT.gitNeverReadsOnTheFrame", "[statusline][git]")
+{
+    auto term = GitTerm {};
+    auto& terminal = term.mc.terminal;
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+
+    // The frame, under the terminal's lock, only queues a lookup: nothing is read until the executor runs it.
+    CHECK(indicatorTextAfterRefresh(terminal).empty());
+    CHECK(indicatorTextAfterRefresh(terminal).empty());
+    CHECK(term.git.calls() == 0);
+    CHECK(term.executor.pending() == 1);
+
+    // Its answer asks for a frame, which shows it.
+    terminal.ensureFreshRenderBuffer();
+    REQUIRE(terminal.renderBufferState() == RenderBufferState::WaitingForRefresh);
+    term.executor.drain();
+    CHECK(term.git.calls() > 0);
+    CHECK(terminal.renderBufferState() == RenderBufferState::RefreshBuffersAndTrySwap);
+    CHECK(indicatorTextAfterRefresh(terminal) == "main");
 }
 
 TEST_CASE("serializeToVT.gitFollowsADaemonClientsCommands", "[statusline][git]")
 {
     // A daemon client runs no parser: a command's end reaches it as an adopted record, never as OSC 133 D.
-    auto files = core::platform::testing::InMemoryFileSystem {};
-    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
-    REQUIRE(files.createDirectories("/r/src"));
-    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };
-    mc.writeToScreen("\033]7;file:///r/src\033\\");
-    mc.terminal.bindReplica(
+    auto term = GitTerm {};
+    auto& terminal = term.mc.terminal;
+    term.mc.writeToScreen("\033]7;file:///r/src\033\\");
+    terminal.bindReplica(
         ReplicaRole::SameMachine,
         HostIdentity { .machineId = "3deb5353d3ba43d08201c136a47ead7b", .hostname = "zeta" });
-    mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
-    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
-    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+    CHECK(term.settledLine() == "main");
 
-    REQUIRE(files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
-    mc.terminal.adoptCommandBlock(test::mirroredRecord(5, CommandBlockState::Running), AdoptMode::Live);
-    CHECK(indicatorTextAfterRefresh(mc.terminal) == "main");
+    REQUIRE(term.files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    terminal.adoptCommandBlock(test::mirroredRecord(5, CommandBlockState::Running), AdoptMode::Live);
+    CHECK(term.settledLine() == "main");
 
-    mc.terminal.adoptCommandBlock(test::mirroredFinish(5, 0, CommandBlockEnd::Reported), AdoptMode::Live);
-    CHECK(indicatorTextAfterRefresh(mc.terminal) == "next");
+    terminal.adoptCommandBlock(test::mirroredFinish(5, 0, CommandBlockEnd::Reported), AdoptMode::Live);
+    CHECK(term.settledLine() == "next");
 }
 
 TEST_CASE("serializeToVT.gitShowsNoBranchForAReftableRepository", "[statusline][git]")
 {
     // reftable keeps HEAD in .git/reftable/ and leaves .git/HEAD naming the stub branch ".invalid".
+    auto term = GitTerm {};
+    term.files.addFile("/t/.git/HEAD", "ref: refs/heads/.invalid\n");
+    term.files.addDirectory("/t/.git/reftable");
+    term.mc.writeToScreen("\033]7;file:///t\033\\");
+    CHECK(term.settledLine().empty());
+}
+
+TEST_CASE("serializeToVT.gitShowsNothingWithoutGitServices", "[statusline][git]")
+{
+    // A terminal given no Git services -- a daemon's host terminal -- shows no branch and reads nothing.
     auto files = core::platform::testing::InMemoryFileSystem {};
-    files.addFile("/r/.git/HEAD", "ref: refs/heads/.invalid\n");
-    files.addDirectory("/r/.git/reftable");
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
     auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };
     mc.terminal.setStatusLineDefinition(parseStatusLineDefinition("{Git}", "", ""));
     mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);

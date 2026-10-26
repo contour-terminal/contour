@@ -4,15 +4,25 @@
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
 
 #include <core/Utf8Path.hpp>
+#include <core/async/DetachedTask.hpp>
+#include <core/async/ResumeOn.hpp>
+#include <core/async/StopToken.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
+
+#ifndef _WIN32
+    #include <sys/stat.h>
+#endif
 
 namespace vtbackend
 {
@@ -59,27 +69,14 @@ namespace
                });
     }
 
-    /// The contents of @p path when it is a regular file of at most MaxGitMetadataSize bytes, else nullopt.
-    [[nodiscard]] std::optional<std::string> readGitMetadata(core::platform::FileSystem const& fileSystem,
-                                                             std::filesystem::path const& path)
-    {
-        auto const size = fileSystem.fileSize(path);
-        if (!size || *size > MaxGitMetadataSize)
-            return std::nullopt;
-        auto contents = fileSystem.readFile(path);
-        if (!contents)
-            return std::nullopt;
-        return std::move(*contents);
-    }
-
     /// The HEAD a `.git` FILE points at (a worktree's or a submodule's), or nullopt when it says no
     /// `gitdir:`.
-    [[nodiscard]] std::optional<std::filesystem::path> headOfGitFile(
-        core::platform::FileSystem const& fileSystem, std::filesystem::path const& dotGit)
+    [[nodiscard]] std::optional<std::filesystem::path> headOfGitFile(GitFileSystem const& fileSystem,
+                                                                     std::filesystem::path const& dotGit)
     {
         constexpr auto GitDirPrefix = std::string_view { "gitdir:" };
 
-        auto const contents = readGitMetadata(fileSystem, dotGit);
+        auto const contents = fileSystem.readMetadata(dotGit);
         if (!contents)
             return std::nullopt;
         auto const firstLine = trimEnd(std::string_view { *contents }.substr(0, contents->find('\n')));
@@ -124,7 +121,47 @@ std::optional<GitHead> parseGitHead(std::string_view contents)
     return std::nullopt;
 }
 
-std::optional<std::filesystem::path> findGitHeadFile(core::platform::FileSystem const& fileSystem,
+GitPathStatus NativeGitFileSystem::status(std::filesystem::path const& path) const
+{
+#ifdef _WIN32
+    // One query, as stat(2) is one; Windows names no device through it, so no walk stops at a volume.
+    auto error = std::error_code {};
+    auto const found = std::filesystem::status(path, error);
+    switch (found.type())
+    {
+        case std::filesystem::file_type::not_found: return GitPathStatus { .kind = GitPathKind::Absent };
+        case std::filesystem::file_type::directory: return GitPathStatus { .kind = GitPathKind::Directory };
+        case std::filesystem::file_type::regular: return GitPathStatus { .kind = GitPathKind::RegularFile };
+        default: return GitPathStatus { .kind = GitPathKind::Other };
+    }
+#else
+    struct stat info {};
+    if (::stat(path.c_str(), &info) != 0)
+        // Nothing there, or a component that is no directory: the walk goes on. Any other failure -- a
+        // permission, an I/O error -- is something there that cannot be read, which ends it as git's does.
+        return GitPathStatus { .kind = errno == ENOENT || errno == ENOTDIR ? GitPathKind::Absent
+                                                                           : GitPathKind::Other };
+    auto const device = static_cast<std::uint64_t>(info.st_dev);
+    if (S_ISDIR(info.st_mode))
+        return GitPathStatus { .kind = GitPathKind::Directory, .device = device };
+    if (S_ISREG(info.st_mode))
+        return GitPathStatus { .kind = GitPathKind::RegularFile, .device = device };
+    return GitPathStatus { .kind = GitPathKind::Other, .device = device };
+#endif
+}
+
+std::optional<std::string> NativeGitFileSystem::readMetadata(std::filesystem::path const& path) const
+{
+    auto const size = _files.fileSize(path);
+    if (!size || *size > MaxGitMetadataSize || !_files.isRegularFile(path))
+        return std::nullopt;
+    auto contents = _files.readFile(path);
+    if (!contents)
+        return std::nullopt;
+    return *std::move(contents);
+}
+
+std::optional<std::filesystem::path> findGitHeadFile(GitFileSystem const& fileSystem,
                                                      std::filesystem::path const& directory)
 {
     // A relative path would be looked up against this process's directory, which is not the shell's.
@@ -132,71 +169,48 @@ std::optional<std::filesystem::path> findGitHeadFile(core::platform::FileSystem 
         return std::nullopt;
 
     auto current = directory.lexically_normal();
+    auto const start = fileSystem.status(current);
+    if (start.kind != GitPathKind::Directory)
+        return std::nullopt;
+
     while (true)
     {
         auto const dotGit = current / ".git";
-        if (fileSystem.isDirectory(dotGit))
+        switch (fileSystem.status(dotGit).kind)
         {
-            auto head = dotGit / "HEAD";
-            if (!fileSystem.isRegularFile(head))
-                return std::nullopt;
-            return head;
+            case GitPathKind::Directory: {
+                auto head = dotGit / "HEAD";
+                if (fileSystem.status(head).kind != GitPathKind::RegularFile)
+                    return std::nullopt;
+                return head;
+            }
+            case GitPathKind::RegularFile: return headOfGitFile(fileSystem, dotGit);
+            // Anything else named .git stops the walk, as git's own discovery does.
+            case GitPathKind::Other: return std::nullopt;
+            case GitPathKind::Absent: break;
         }
-        if (fileSystem.isRegularFile(dotGit))
-            return headOfGitFile(fileSystem, dotGit);
-        // Anything else named .git stops the walk, as git's own discovery does.
-        if (fileSystem.exists(dotGit))
-            return std::nullopt;
 
         auto parent = current.parent_path();
         if (parent == current || parent.empty())
+            return std::nullopt;
+        // Not into another filesystem: a parent on a network or automount root is where a stat can hang, or
+        // (`/net/.git`) ask a name service about a host called ".git".
+        if (fileSystem.status(parent).device != start.device)
             return std::nullopt;
         current = std::move(parent);
     }
 }
 
-GitHeadCache::GitHeadCache(core::platform::FileSystem const& fileSystem): _fileSystem { fileSystem }
+std::string describeGitHead(GitFileSystem const& fileSystem, std::filesystem::path const& directory)
 {
-}
-
-void GitHeadCache::invalidate() noexcept
-{
-    _freshness = GitHeadFreshness::Stale;
-}
-
-void GitHeadCache::refresh(std::optional<std::filesystem::path> const& directory)
-{
-    if (_freshness == GitHeadFreshness::Fresh && directory == _directory)
-        return;
-    _freshness = GitHeadFreshness::Fresh;
-    _directory = directory;
-
-    auto key = directory ? keyFor(*directory) : std::nullopt;
-    if (key == _key)
-        return; // The same HEAD, unchanged since it was read: nothing to read.
-
-    _branch = key ? branchIn(key->head) : std::string {};
-    _key = std::move(key);
-}
-
-std::optional<GitHeadCache::HeadKey> GitHeadCache::keyFor(std::filesystem::path const& directory) const
-{
-    auto head = findGitHeadFile(_fileSystem, directory);
+    auto const head = findGitHeadFile(fileSystem, directory);
     if (!head)
-        return std::nullopt;
-    auto const mtime = _fileSystem.lastWriteTime(*head);
-    if (!mtime)
-        return std::nullopt;
-    return HeadKey { .head = *std::move(head), .mtime = *mtime };
-}
-
-std::string GitHeadCache::branchIn(std::filesystem::path const& head) const
-{
+        return {};
     // A reftable repository keeps its refs, HEAD's target included, in <gitdir>/reftable/; its HEAD file is a
     // stub that never changes. Decoding reftable is left for later: such a repository shows no branch.
-    if (_fileSystem.isDirectory(head.parent_path() / "reftable"))
+    if (fileSystem.status(head->parent_path() / "reftable").kind == GitPathKind::Directory)
         return {};
-    auto const contents = readGitMetadata(_fileSystem, head);
+    auto const contents = fileSystem.readMetadata(*head);
     if (!contents)
         return {};
     auto const parsed = parseGitHead(*contents);
@@ -205,6 +219,124 @@ std::string GitHeadCache::branchIn(std::filesystem::path const& head) const
     // A ref name may hold any byte git allows in a path, an escape included, and this text is written to
     // the status screen, which parses it.
     return sanitizeCommandLine(parsed->name, SanitizePurpose::Display);
+}
+
+namespace
+{
+    /// Whether the cache may answer for its directory without looking.
+    enum class GitHeadFreshness : uint8_t
+    {
+        Stale = 0, ///< Look on the next refresh().
+        Fresh,     ///< Nothing invalidated it since a lookup for its directory started.
+    };
+
+    /// Whether a lookup is running.
+    enum class GitLookup : uint8_t
+    {
+        Idle = 0, ///< None: a refresh that needs one starts it.
+        InFlight, ///< One is queued or running, and looks again if what it was asked changed meanwhile.
+    };
+} // namespace
+
+struct GitHeadCache::State
+{
+    State(GitHeadServices services, std::function<void()> onBranchChanged):
+        services { services }, onBranchChanged { std::move(onBranchChanged) }
+    {
+    }
+
+    /// Looks up what was last asked, on the executor and without any lock while it reads, until what it
+    /// answered is still what is asked. A static member with a by-value parameter: the frame outlives the
+    /// call that started it, and maybe the cache.
+    static core::async::DetachedTask lookUp(std::shared_ptr<State> state)
+    {
+        co_await core::async::ResumeOn { state->services.executor };
+        while (!state->stop.stop_requested())
+        {
+            auto asked = std::optional<std::filesystem::path> {};
+            auto generation = std::uint64_t {};
+            {
+                auto const lock = std::scoped_lock { state->mutex };
+                asked = state->directory;
+                generation = state->generation;
+            }
+            auto answer = asked ? describeGitHead(state->services.fileSystem, *asked) : std::string {};
+
+            auto const lock = std::scoped_lock { state->mutex };
+            if (generation != state->generation)
+                continue; // Asked again meanwhile: look again.
+            state->lookup = GitLookup::Idle;
+            if (answer != state->branch)
+            {
+                state->branch = std::move(answer);
+                // Under the lock on purpose: the destructor clears the callback under it, so it waits for
+                // this.
+                if (state->onBranchChanged)
+                    state->onBranchChanged();
+            }
+            co_return;
+        }
+        auto const lock = std::scoped_lock { state->mutex };
+        state->lookup = GitLookup::Idle;
+    }
+
+    GitHeadServices services;
+    std::mutex mutex;
+    std::function<void()> onBranchChanged;
+    core::async::StopSource stop;
+    GitHeadFreshness freshness = GitHeadFreshness::Stale;
+    GitLookup lookup = GitLookup::Idle;
+    std::optional<std::filesystem::path> directory;
+    std::uint64_t generation = 0; ///< Moves with every question asked of the lookup.
+    std::string branch;
+};
+
+GitHeadCache::GitHeadCache(GitHeadServices services, std::function<void()> onBranchChanged):
+    _state { std::make_shared<State>(services, std::move(onBranchChanged)) }
+{
+}
+
+GitHeadCache::~GitHeadCache()
+{
+    {
+        auto const lock = std::scoped_lock { _state->mutex };
+        _state->onBranchChanged = nullptr;
+    }
+    _state->stop.request_stop();
+}
+
+void GitHeadCache::invalidate() noexcept
+{
+    auto const lock = std::scoped_lock { _state->mutex };
+    _state->freshness = GitHeadFreshness::Stale;
+}
+
+void GitHeadCache::refresh(std::optional<std::filesystem::path> const& directory)
+{
+    {
+        auto const lock = std::scoped_lock { _state->mutex };
+        if (_state->freshness == GitHeadFreshness::Fresh && directory == _state->directory)
+            return;
+        _state->freshness = GitHeadFreshness::Fresh;
+        _state->directory = directory;
+        ++_state->generation;
+        if (!directory)
+        {
+            // Nothing to look at, so nothing to wait for. A lookup in flight sees the new question and stops.
+            _state->branch.clear();
+            return;
+        }
+        if (_state->lookup == GitLookup::InFlight)
+            return; // It sees the new generation, and looks again.
+        _state->lookup = GitLookup::InFlight;
+    }
+    (void) State::lookUp(_state);
+}
+
+std::string GitHeadCache::branch() const
+{
+    auto const lock = std::scoped_lock { _state->mutex };
+    return _state->branch;
 }
 
 } // namespace vtbackend

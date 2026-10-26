@@ -33,6 +33,7 @@
 #include <contour/window/WindowPositionStore.hpp>
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/LinkDetector.hpp>
 #include <vtbackend/screen/StatusLineCommandCache.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
@@ -435,6 +436,12 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     /// terminalClocks().
     /// @return References valid for the app's lifetime.
     [[nodiscard]] vtbackend::LinkDetectionServices linkDetectionServices() noexcept;
+
+    /// What every session's `{Git}` runs on: the path-probe thread (a hung mount stalls it alone) and this
+    /// machine's files.
+    /// @return References valid for the app's lifetime; nullopt for an app given test link services, whose
+    ///         filesystem is not this machine's, so that its `{Git}` reads nothing.
+    [[nodiscard]] std::optional<vtbackend::GitHeadServices> gitHeadServices() noexcept;
 
     [[nodiscard]] std::chrono::seconds earlyExitThreshold() const;
 
@@ -870,6 +877,9 @@ class ContourGuiApp: public QObject, public cli::ContourApp
     // default session factory, and the programs it starts detached, through the default launcher.
     // Declared before both.
     std::shared_ptr<vtpty::ProcessPlacement> _processPlacement;
+    /// What every session's `{Git}` lookups read: this machine's files, through fileSystem(). Declared before
+    /// _linkProbeExecutor, which runs those lookups, so it outlives every lookup the executor joins.
+    vtbackend::NativeGitFileSystem _gitFileSystem;
     /// The one thread every session's path probes run on. Its jobs reach only the filesystem, the clock and a
     /// terminal's redraw request (atomics, and a session's mutex-guarded notify target), which is why it may
     /// be drained and joined while sessions, never destroyed in production, live on. A probe blocked on a

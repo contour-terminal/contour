@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/screen/GitHead.hpp>
+#include <vtbackend/testing/InMemoryGitFileSystem.hpp>
 
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/platform/testing/InMemoryFileSystem.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -44,91 +46,149 @@ TEST_CASE("GitHead.parsesEveryHeadForm", "[git]")
     CHECK(parseGitHead(contents) == expected);
 }
 
+namespace
+{
+/// A GitHeadCache over in-memory files, whose lookups run when a test drains its executor.
+struct GitFixture
+{
+    InMemoryFileSystem files;
+    test::InMemoryGitFileSystem git { files };
+    core::async::testing::ManualExecutor executor;
+    int changes = 0; ///< How often the cache said its branch changed.
+    GitHeadCache cache { GitHeadServices { .executor = executor, .fileSystem = git }, [this] { ++changes; } };
+
+    /// What the cache shows for @p directory once its lookups ran.
+    [[nodiscard]] std::string branchOf(std::optional<std::filesystem::path> const& directory)
+    {
+        cache.refresh(directory);
+        executor.drain();
+        return cache.branch();
+    }
+};
+} // namespace
+
 TEST_CASE("GitHead.findsTheRepositoryFromADeepDirectory", "[git]")
 {
     auto files = InMemoryFileSystem {};
+    auto const git = test::InMemoryGitFileSystem { files };
     files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
     auto deep = std::filesystem::path { "/r" };
     for (auto const level: std::views::iota(0, 100))
         deep /= std::format("d{}", level);
     REQUIRE(files.createDirectories(deep));
 
-    CHECK(findGitHeadFile(files, "/r") == std::filesystem::path { "/r/.git/HEAD" });
-    CHECK(findGitHeadFile(files, deep) == std::filesystem::path { "/r/.git/HEAD" });
-    CHECK(findGitHeadFile(files, "/elsewhere") == std::nullopt);
-    CHECK(findGitHeadFile(files, "r") == std::nullopt);
+    CHECK(findGitHeadFile(git, "/r") == std::filesystem::path { "/r/.git/HEAD" });
+    CHECK(findGitHeadFile(git, deep) == std::filesystem::path { "/r/.git/HEAD" });
+    CHECK(findGitHeadFile(git, "/elsewhere") == std::nullopt);
+    CHECK(findGitHeadFile(git, "r") == std::nullopt);
+}
+
+TEST_CASE("GitHead.stopsAtAMountBoundary", "[git]")
+{
+    auto files = InMemoryFileSystem {};
+    auto git = test::InMemoryGitFileSystem { files };
+    files.addFile("/.git/HEAD", "ref: refs/heads/root\n");
+    files.addFile("/net/host/repo/.git/HEAD", "ref: refs/heads/main\n");
+    REQUIRE(files.createDirectories("/net/host/repo/src"));
+    REQUIRE(files.createDirectories("/net/host/plain"));
+    git.mount("/net", 5);
+    git.mount("/net/host", 6);
+
+    // Inside one filesystem the walk finds the repository as before.
+    CHECK(findGitHeadFile(git, "/net/host/repo/src") == std::filesystem::path { "/net/host/repo/.git/HEAD" });
+    // It does not climb out of the mount, to /net (an automount root) or to the repository at /.
+    CHECK(findGitHeadFile(git, "/net/host/plain") == std::nullopt);
+    CHECK(findGitHeadFile(git, "/net") == std::nullopt);
 }
 
 TEST_CASE("GitHead.followsAWorktreeFile", "[git]")
 {
     auto files = InMemoryFileSystem {};
+    auto const git = test::InMemoryGitFileSystem { files };
     files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
     files.addFile("/r/.git/worktrees/w/HEAD", "ref: refs/heads/w\n");
     files.addFile("/r/.git/modules/s/HEAD", "ref: refs/heads/s\n");
 
     files.addFile("/w/.git", "gitdir: /r/.git/worktrees/w\n");
-    CHECK(findGitHeadFile(files, "/w") == std::filesystem::path { "/r/.git/worktrees/w/HEAD" });
+    CHECK(findGitHeadFile(git, "/w") == std::filesystem::path { "/r/.git/worktrees/w/HEAD" });
 
     files.addFile("/r/s/.git", "gitdir: ../.git/modules/s");
-    CHECK(findGitHeadFile(files, "/r/s") == std::filesystem::path { "/r/.git/modules/s/HEAD" });
+    CHECK(findGitHeadFile(git, "/r/s") == std::filesystem::path { "/r/.git/modules/s/HEAD" });
 
     // The first .git decides: a broken one does not fall through to the repository above it.
     files.addFile("/r/broken/.git", "not a gitdir line\n");
-    CHECK(findGitHeadFile(files, "/r/broken") == std::nullopt);
+    CHECK(findGitHeadFile(git, "/r/broken") == std::nullopt);
 
     files.addFile("/r/huge/.git", "gitdir: /r/.git\n" + std::string(5000, 'x'));
-    CHECK(findGitHeadFile(files, "/r/huge") == std::nullopt);
+    CHECK(findGitHeadFile(git, "/r/huge") == std::nullopt);
 }
 
 TEST_CASE("GitHeadCache.isStaleUntilInvalidated", "[git]")
 {
-    auto files = InMemoryFileSystem {};
-    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
-    REQUIRE(files.createDirectories("/r/src"));
-    auto cache = GitHeadCache { files };
+    auto fixture = GitFixture {};
+    fixture.files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    REQUIRE(fixture.files.createDirectories("/r/src"));
+    auto& cache = fixture.cache;
 
+    // A refresh reads nothing itself: the lookup runs on the executor, and its answer is published there.
     cache.refresh(std::filesystem::path { "/r/src" });
+    CHECK(fixture.git.calls() == 0);
+    CHECK(cache.branch().empty());
+    fixture.executor.drain();
     CHECK(cache.branch() == "main");
+    CHECK(fixture.changes == 1);
 
-    REQUIRE(files.writeFile("/r/.git/HEAD", "ref: refs/heads/next"));
+    REQUIRE(fixture.files.writeFile("/r/.git/HEAD", "ref: refs/heads/next"));
     cache.refresh(std::filesystem::path { "/r/src" });
     cache.refresh(std::filesystem::path { "/r/src" });
+    CHECK(fixture.executor.pending() == 0);
     CHECK(cache.branch() == "main");
 
     cache.invalidate();
-    cache.refresh(std::filesystem::path { "/r/src" });
-    CHECK(cache.branch() == "next");
+    CHECK(fixture.branchOf(std::filesystem::path { "/r/src" }) == "next");
+    CHECK(fixture.changes == 2);
 
-    cache.refresh(std::filesystem::path { "/other" });
-    CHECK(cache.branch().empty());
+    CHECK(fixture.branchOf(std::filesystem::path { "/other" }).empty());
+    CHECK(fixture.branchOf(std::filesystem::path { "/r/src" }) == "next");
 
-    cache.refresh(std::filesystem::path { "/r/src" });
-    CHECK(cache.branch() == "next");
+    // No directory needs no lookup: the branch goes at once.
     cache.refresh(std::nullopt);
+    CHECK(fixture.executor.pending() == 0);
     CHECK(cache.branch().empty());
+}
+
+TEST_CASE("GitHeadCache.answersTheLatestQuestion", "[git]")
+{
+    auto fixture = GitFixture {};
+    fixture.files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    fixture.files.addFile("/q/.git/HEAD", "ref: refs/heads/other\n");
+
+    // Asked twice before its lookup ran: one lookup, and it answers the second question.
+    fixture.cache.refresh(std::filesystem::path { "/r" });
+    fixture.cache.refresh(std::filesystem::path { "/q" });
+    CHECK(fixture.executor.pending() == 1);
+    fixture.executor.drain();
+    CHECK(fixture.cache.branch() == "other");
+    CHECK(fixture.changes == 1);
 }
 
 TEST_CASE("GitHeadCache.readsAReftableRepositoryAsBranchless", "[git]")
 {
     // Whatever HEAD says beside a reftable directory, it is not where the branch is kept.
-    auto files = InMemoryFileSystem {};
-    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
-    files.addDirectory("/r/.git/reftable");
-    auto cache = GitHeadCache { files };
-    cache.refresh(std::filesystem::path { "/r" });
-    CHECK(cache.branch().empty());
+    auto fixture = GitFixture {};
+    fixture.files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    fixture.files.addDirectory("/r/.git/reftable");
+    CHECK(fixture.branchOf(std::filesystem::path { "/r" }).empty());
 }
 
 TEST_CASE("GitHeadCache.showsOnlySafeText", "[git]")
 {
-    auto files = InMemoryFileSystem {};
-    files.addFile("/r/.git/HEAD", "ref: refs/heads/evil\x1b[2Jx\n");
-    auto cache = GitHeadCache { files };
-    cache.refresh(std::filesystem::path { "/r" });
-    CHECK_FALSE(cache.branch().empty());
-    CHECK_FALSE(cache.branch().contains('\033'));
+    auto fixture = GitFixture {};
+    fixture.files.addFile("/r/.git/HEAD", "ref: refs/heads/evil\x1b[2Jx\n");
+    auto const evil = fixture.branchOf(std::filesystem::path { "/r" });
+    CHECK_FALSE(evil.empty());
+    CHECK_FALSE(evil.contains('\033'));
 
-    files.addFile("/big/.git/HEAD", "ref: refs/heads/main\n" + std::string(5000, ' '));
-    cache.refresh(std::filesystem::path { "/big" });
-    CHECK(cache.branch().empty());
+    fixture.files.addFile("/big/.git/HEAD", "ref: refs/heads/main\n" + std::string(5000, ' '));
+    CHECK(fixture.branchOf(std::filesystem::path { "/big" }).empty());
 }

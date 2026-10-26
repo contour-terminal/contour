@@ -834,6 +834,8 @@ class Terminal: public IStatusLinePublishTarget
     /// @param extensionServices The status-line extensions to show and to tell about state changes; absent,
     ///                        `{Extension}` items render empty and every event hook is one untaken branch.
     ///                        The lifetime rules are StatusLineExtensionServices'.
+    /// @param gitServices     Where `{Git}` looks up the branch, off the state lock; absent, `{Git}` shows
+    ///                        nothing and nothing is read. The lifetime rules are GitHeadServices'.
     Terminal(Events& eventListener,
              core::Environment const& env,
              core::platform::FileSystem const& fileSystem,
@@ -843,7 +845,8 @@ class Terminal: public IStatusLinePublishTarget
              TerminalClocks clocks,
              SemanticBlockTokenSource sessionTokens,
              std::optional<LinkDetectionServices> linkServices = std::nullopt,
-             std::optional<StatusLineExtensionServices> extensionServices = std::nullopt);
+             std::optional<StatusLineExtensionServices> extensionServices = std::nullopt,
+             std::optional<GitHeadServices> gitServices = std::nullopt);
 
     /// Revokes the extensions' publish sink first, waiting for a delivery in flight, so that none reaches a
     /// terminal whose members are being destroyed.
@@ -3542,10 +3545,11 @@ class Terminal: public IStatusLinePublishTarget
     ///         none.
     [[nodiscard]] std::string_view homeDirectory() const noexcept { return _homeDirectory; }
 
-    /// @return The branch `{Git}` shows for the shell's directory, as last read; empty for none. Reads no
-    ///         file: the indicator status line's repaint refreshes it, and only after a command ended or the
-    ///         shell reported a directory.
-    [[nodiscard]] std::string const& gitBranch() const noexcept { return _gitHead.branch(); }
+    /// @return The branch `{Git}` shows for the shell's directory, as last looked up; empty for none. A copy,
+    ///         for the lookup publishes the next one from another thread. Reads no file: the indicator status
+    ///         line's repaint asks for a lookup, on the Git services' executor, and only after a command
+    ///         ended or the shell reported a directory.
+    [[nodiscard]] std::string gitBranch() const;
 
     /// @returns either an empty string or a file:// URL of the last set working directory, as reported.
     [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
@@ -4152,9 +4156,10 @@ class Terminal: public IStatusLinePublishTarget
     LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
 
-    /// Brings gitBranch() up to date for the shell's local directory, when the template shows `{Git}`.
-    /// Called by updateIndicatorStatusLine() on the render thread under the state lock; reads files only
-    /// after endCommand() or setCurrentWorkingDirectory() invalidated the branch, so not per frame.
+    /// Asks for gitBranch() for the shell's local directory, when the template shows `{Git}`. Called by
+    /// updateIndicatorStatusLine() under the state lock; reads no file -- a lookup runs on the Git services'
+    /// executor, and only after endCommand(), adoptCommandBlock() or setCurrentWorkingDirectory() invalidated
+    /// the branch, or the directory changed.
     void refreshGitHead();
 
     void updateCursorVisibilityState() const noexcept;
@@ -4430,9 +4435,6 @@ class Terminal: public IStatusLinePublishTarget
 
     /// Where the paths this terminal recognizes on screen are looked up. @see Terminal()
     core::platform::FileSystem const& _fileSystem;
-
-    /// The `{Git}` branch, read through @ref _fileSystem. Guarded by the state lock.
-    GitHeadCache _gitHead;
 
     /// What passive link detection runs on; nullopt detects nothing. Fixed at construction.
     std::optional<LinkDetectionServices> _linkServices;
@@ -5627,6 +5629,10 @@ class Terminal: public IStatusLinePublishTarget
     /// _renderBuffer, and being destroyed before them guarantees no callback fires once the members declared
     /// before it are gone (runs still in flight keep their own state alive and merely find nobody to notify).
     std::unique_ptr<StatusLineCommandCache> _statusLineCommands;
+
+    /// Looks up the `{Git}` branch off thread; null without Git services, which then shows none. Declared
+    /// after what its redraw request touches, as _statusLineCommands is, for the same reason.
+    std::unique_ptr<GitHeadCache> _gitHead;
 
     /// Finds links in output once it goes quiet; null without detection services, with no clickable pattern,
     /// or with detection off on every screen. Replaced, never changed, by setLinkPatterns() and

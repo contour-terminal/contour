@@ -416,6 +416,7 @@ ContourGuiApp::ContourGuiApp(core::Environment const& env,
     _commandCapture { vtpty::SystemCommandCapture::defaultShell(env), _commandShutdown.get_token() },
     _commandExecutor(makeBackgroundExecutor(StatusLineCommandThreads)),
     _processPlacement(processPlacement ? std::move(processPlacement) : vtpty::makeDefaultProcessPlacement()),
+    _gitFileSystem(fileSystem ? *fileSystem : core::platform::NativeFileSystem::instance()),
     _linkProbeExecutor(makeBackgroundExecutor(LinkProbeThreads)),
     _injectedLinkServices { std::move(linkServices) },
     _sessionFactory(std::make_unique<remote::RoutingSessionFactory>(
@@ -479,6 +480,13 @@ vtbackend::LinkDetectionServices ContourGuiApp::linkDetectionServices() noexcept
              .fileSystem = fileSystem(),
              .clock = _terminalClocks.steady.get(),
              .tuning = {} };
+}
+
+std::optional<vtbackend::GitHeadServices> ContourGuiApp::gitHeadServices() noexcept
+{
+    if (_injectedLinkServices)
+        return std::nullopt;
+    return vtbackend::GitHeadServices { .executor = _linkProbeExecutor, .fileSystem = _gitFileSystem };
 }
 
 ContourGuiApp::~ContourGuiApp()
