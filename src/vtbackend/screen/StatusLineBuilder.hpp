@@ -48,23 +48,34 @@ namespace StatusLineDefinitions
         std::string_view name;    ///< As written in a template, lowercase.
         std::size_t paletteIndex; ///< The indexed palette colour the role resolves to.
         /// The contrast ratio the role's colour must reach on its bar to be drawn; below it the bar's ink
-        /// is. Secondary text (Muted) sits at the large-text tier, the rest at MinimumTextContrast.
+        /// is. Secondary text (Muted) sits at the large-text tier (MinimumLargeTextContrast), the rest at
+        /// MinimumTextContrast.
         double minimumContrast;
     };
 
     /// The colour roles, one row per ColorRole in enumerator order: the parser, the serializer and the
     /// settings page all read this table, so a sixth role is one row here and one enumerator.
     inline constexpr auto ColorRoleNames = std::array {
-        ColorRoleName {
-            .role = ColorRole::Accent, .name = "accent", .paletteIndex = 4, .minimumContrast = 4.5 },
-        ColorRoleName {
-            .role = ColorRole::Success, .name = "success", .paletteIndex = 2, .minimumContrast = 4.5 },
-        ColorRoleName {
-            .role = ColorRole::Danger, .name = "danger", .paletteIndex = 1, .minimumContrast = 4.5 },
-        ColorRoleName {
-            .role = ColorRole::Warning, .name = "warning", .paletteIndex = 3, .minimumContrast = 4.5 },
-        ColorRoleName {
-            .role = ColorRole::Muted, .name = "muted", .paletteIndex = 8, .minimumContrast = 3.0 },
+        ColorRoleName { .role = ColorRole::Accent,
+                        .name = "accent",
+                        .paletteIndex = 4,
+                        .minimumContrast = MinimumTextContrast },
+        ColorRoleName { .role = ColorRole::Success,
+                        .name = "success",
+                        .paletteIndex = 2,
+                        .minimumContrast = MinimumTextContrast },
+        ColorRoleName { .role = ColorRole::Danger,
+                        .name = "danger",
+                        .paletteIndex = 1,
+                        .minimumContrast = MinimumTextContrast },
+        ColorRoleName { .role = ColorRole::Warning,
+                        .name = "warning",
+                        .paletteIndex = 3,
+                        .minimumContrast = MinimumTextContrast },
+        ColorRoleName { .role = ColorRole::Muted,
+                        .name = "muted",
+                        .paletteIndex = 8,
+                        .minimumContrast = MinimumLargeTextContrast },
     };
 
     static_assert(

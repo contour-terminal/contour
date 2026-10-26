@@ -104,4 +104,46 @@ enum class CaseComparison : uint8_t
 [[nodiscard]] CaseComparison caseComparisonFor(std::u32string_view searchText,
                                                SearchCaseSensitivity mode) noexcept;
 
+/// How a search pattern is read.
+enum class SearchSyntax : uint8_t
+{
+    Literal = 0, //!< The pattern is the text to find, character for character.
+    Regex,       //!< The pattern is an ECMAScript regular expression.
+};
+
+/// Where a match may begin and end relative to the words around it.
+enum class SearchWordBoundary : uint8_t
+{
+    Any = 0,   //!< Anywhere, inside a word too.
+    WholeWord, //!< Only where a word delimiter, a line's end or a line break is on either side.
+};
+
+/// How a search reads its pattern: the find bar's three toggles.
+///
+/// All-zero is what the terminal has always done -- smart case, literal text, anywhere -- so a
+/// value-initialized one changes nothing.
+struct SearchOptions
+{
+    SearchCaseSensitivity caseSensitivity = SearchCaseSensitivity::Smart; //!< Letter case.
+    SearchSyntax syntax = SearchSyntax::Literal;                          //!< Literal or regex.
+    SearchWordBoundary wordBoundary = SearchWordBoundary::Any;            //!< Whole words only, or not.
+
+    constexpr bool operator==(SearchOptions const&) const noexcept = default;
+};
+
+/// Why a search pattern cannot be searched for.
+enum class SearchPatternError : uint8_t
+{
+    InvalidSyntax = 0, //!< The regex does not compile.
+    BackReference,     //!< The regex names a back-reference (`\1`…), which no engine here runs everywhere.
+    TooComplex,        //!< Matching gave up within the engine's own complexity or stack budget.
+};
+
+/// Whether a search setter changed what is searched for, so the caller knows whether to search again.
+enum class SearchChange : uint8_t
+{
+    Unchanged = 0, //!< Everything was already so; the last search's answer stands.
+    Changed,       //!< The pattern or how it is read changed.
+};
+
 } // namespace vtbackend

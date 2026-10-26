@@ -87,9 +87,11 @@ set(vtbackend_HEADERS
     vt/PointerShape.hpp
     core/Primitives.hpp
     core/Search.hpp
+    screen/SearchQuery.hpp
     vt/ProgressState.hpp
     shell/PromptRegion.hpp
     vt/RectangularAreaChecksum.hpp
+    core/RegexEngine.hpp
     render/RenderBuffer.hpp
     screen/RenderBufferBuilder.hpp
     core/RowMove.hpp
@@ -194,6 +196,7 @@ set(vtbackend_SOURCES
     links/ScanText.cpp
     screen/PrintedLinks.cpp
     screen/Screen.cpp
+    screen/SearchQuery.cpp
     shell/SemanticBlockTracker.cpp
     vt/SemanticPrompt.cpp
     input/vi/Selector.cpp
@@ -363,6 +366,7 @@ if(LIBTERMINAL_TESTING)
         screen/Screen_multipage_test.cpp
         core/Image_test.cpp
         core/Search_test.cpp
+        screen/SearchQuery_test.cpp
         vt/SemanticPrompt_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp

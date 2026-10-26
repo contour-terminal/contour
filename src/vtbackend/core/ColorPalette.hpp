@@ -555,6 +555,9 @@ bool defaultColorPalettes(std::string_view colorPaletteName, ColorPalette& palet
 /// The WCAG AA ratio text must reach against the ground it is drawn on.
 inline constexpr double MinimumTextContrast = 4.5;
 
+/// The WCAG AA ratio large or secondary text must reach against its ground: the large-text tier.
+inline constexpr double MinimumLargeTextContrast = 3.0;
+
 /// Where the ink for text on a ground comes from, in the order legibleInkOn() tries it.
 enum class InkSource : uint8_t
 {
