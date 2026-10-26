@@ -3,6 +3,7 @@
 #include <vtbackend/screen/LocalTime.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
+#include <vtbackend/testing/InMemoryGitFileSystem.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
 #include <vtbackend/testing/TestHelpers.hpp>
 
@@ -18,6 +19,7 @@
 #include <crispy/BufferObject.hpp>
 
 #include <core/async/Task.hpp>
+#include <core/async/testing/ManualExecutor.hpp>
 #include <core/log/LogSink.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/net/IoBackend.hpp>
@@ -1677,6 +1679,88 @@ TEST_CASE("SessionHost.extension.repaintsOnlyForClients", "[vthost][host][extens
 
     host.unsubscribeStream(&mirror);
     host.unsubscribeStream(&watcher);
+}
+
+TEST_CASE("SessionHost.extension.hostRowCarriesTheGitBranch", "[vthost][host][extensions][git]")
+{
+    // A row an extension draws is the host's, {Git} included: the client mirrors it, and for a client on
+    // another machine it is the only place the branch can come from. A branch the host's lookup finds after
+    // the row was drawn is repainted and sent, as an extension's frame is.
+    struct Mirror final: vthost::SessionStreamEvents
+    {
+        int updates = 0;
+        void sessionScreenUpdated(vtworkspace::SessionId /*session*/) override { ++updates; }
+    };
+
+    auto files = core::platform::testing::InMemoryFileSystem {};
+    files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
+    REQUIRE(files.createDirectories("/r/src"));
+    auto git = vtbackend::test::InMemoryGitFileSystem { files };
+    auto lookups = core::async::testing::ManualExecutor {};
+
+    auto const source = core::net::makeDefaultBackend();
+    auto loop = core::net::EventLoop { *source };
+    auto const hosting = std::make_shared<vthost::testing::FakeExtensionHosting>();
+    hosting->prepare = [](vtbackend::FakeStatusLineExtensions& fake) {
+        fake.publish("ext", vthost::testing::frameOf("E"));
+    };
+    auto settings = vtbackend::Settings {};
+    settings.statusDisplayType = vtbackend::StatusDisplayType::Indicator;
+    settings.indicatorStatusLine.left = "{Extension:ext} {Git}";
+    settings.indicatorStatusLine.middle.clear();
+    settings.indicatorStatusLine.right.clear();
+    auto host =
+        SessionHost { loop,
+                      [](vtbackend::PageSize size, std::optional<vtpty::Process::ExecInfo> const&) {
+                          return std::make_unique<vtpty::MockPty>(size);
+                      },
+                      std::move(settings),
+                      core::defaultEnvironment(),
+                      vthost::SessionHostConfig {
+                          .pumping = vthost::SessionPumping::Manual,
+                          .fileSystem = files,
+                          .git = vtbackend::GitHeadServices { .executor = lookups, .fileSystem = git },
+                          .extensions = hosting,
+                      } };
+    auto const* tab = host.createTab();
+    REQUIRE(tab != nullptr);
+    auto* terminal = host.terminal(tab->rootPane()->session());
+    REQUIRE(terminal != nullptr);
+    auto mirror = Mirror {};
+    host.subscribeStream(&mirror);
+
+    auto const turn = [&] {
+        for ([[maybe_unused]] auto const _: std::views::iota(0, 4))
+            std::ignore = loop.runOnce(std::chrono::milliseconds { 0 });
+    };
+    auto const row = [&] {
+        auto const _ = std::lock_guard { *terminal };
+        return terminal->indicatorStatusLineDisplay().grid().lineAt(vtbackend::LineOffset(0)).toUtf8Trimmed();
+    };
+    // The lookups the repaints asked for, run as the probe thread would, and what their answers ask of the
+    // loop.
+    auto const settle = [&] {
+        turn();
+        lookups.drain();
+        turn();
+    };
+
+    terminal->writeToScreen("\033]7;file:///r/src\033\\");
+    settle();
+    CHECK(row() == "E main");
+
+    // A branch switch the shell's next directory report reveals reaches the client too.
+    REQUIRE(files.writeFile("/r/.git/HEAD", "ref: refs/heads/next\n"));
+    terminal->writeToScreen("\033]7;file:///r/src\033\\");
+    turn();
+    auto const before = mirror.updates;
+    CHECK(row() == "E main");
+    lookups.drain();
+    turn();
+    CHECK(row() == "E next");
+    CHECK(mirror.updates > before);
+
+    host.unsubscribeStream(&mirror);
 }
 
 TEST_CASE("SessionHost.extension.foregroundPollFollowsLoadedSubscriptions", "[vthost][host][extensions]")

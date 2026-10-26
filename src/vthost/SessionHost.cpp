@@ -42,6 +42,23 @@ using vtworkspace::TabId;
 using vtworkspace::WindowId;
 
 // ---------------------------------------------------------------------------
+// HostGitLookups
+
+HostGitLookups::HostGitLookups(std::optional<vtbackend::GitHeadServices> given,
+                               core::platform::FileSystem const& fileSystem):
+    _fileSystem { !given && &fileSystem == &core::platform::NativeFileSystem::instance()
+                      ? std::make_unique<vtbackend::NativeGitFileSystem>(fileSystem)
+                      : nullptr },
+    // Started here, on the thread building the host: the daemon blocks its shutdown signals before it does,
+    // and the probe thread inherits that mask, as every pump thread does.
+    _executor { _fileSystem ? std::make_unique<core::async::ThreadPoolExecutor>(1) : nullptr },
+    _services { _fileSystem ? std::optional { vtbackend::GitHeadServices { .executor = *_executor,
+                                                                           .fileSystem = *_fileSystem } }
+                            : given }
+{
+}
+
+// ---------------------------------------------------------------------------
 // HostedSession
 
 HostedSession::HostedSession(SessionId id,
@@ -59,7 +76,8 @@ HostedSession::HostedSession(SessionId id,
                              SessionSignalCallback onSignal,
                              HostedSessionExtensions extensions,
                              std::string profileName,
-                             SettingsOrigin settingsOrigin):
+                             SettingsOrigin settingsOrigin,
+                             std::optional<vtbackend::GitHeadServices> git):
     _id(id),
     _profileName(std::move(profileName)),
     _settingsOrigin(settingsOrigin),
@@ -92,7 +110,8 @@ HostedSession::HostedSession(SessionId id,
               clocks,
               vtbackend::randomSemanticBlockTokens(),
               std::nullopt,
-              _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt),
+              _extensions ? std::optional { _extensions->terminalServices() } : std::nullopt,
+              git),
     _onClosed(std::move(onClosed))
 {
     // DECSSDT 2 only REQUESTS the host-writable status line; the frontend decides.
@@ -293,6 +312,7 @@ SessionHost::SessionHost(core::net::EventLoop& loop,
     _inputWatermarks(config.inputWatermarks),
     _sizePolicy(config.sizePolicy),
     _fileSystem(config.fileSystem.get()),
+    _git(config.git, config.fileSystem.get()),
     _profiles(std::move(config.profiles)),
     _extensions(std::move(config.extensions)),
     _objects(std::move(config.uuids)),
@@ -491,7 +511,8 @@ std::optional<SessionId> SessionHost::seedSession(SessionSpawnRequest const& inc
         },
         makeSessionExtensions(id),
         std::move(profileName),
-        spawn.settingsOrigin);
+        spawn.settingsOrigin,
+        _git.services());
 
     // Before the pump starts: the seed assumes nothing else writes to the terminal.
     if (request.restoredHistory)

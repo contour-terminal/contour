@@ -1083,7 +1083,8 @@ TEST_CASE("serializeToVT.gitShowsNoBranchForAReftableRepository", "[statusline][
 
 TEST_CASE("serializeToVT.gitShowsNothingWithoutGitServices", "[statusline][git]")
 {
-    // A terminal given no Git services -- a daemon's host terminal -- shows no branch and reads nothing.
+    // A terminal given no Git services -- one over a test's files, or a tmux client's -- shows no branch and
+    // reads nothing.
     auto files = core::platform::testing::InMemoryFileSystem {};
     files.addFile("/r/.git/HEAD", "ref: refs/heads/main\n");
     auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(40) }, files };

@@ -372,9 +372,13 @@ Terminal::Terminal(Events& eventListener,
                                                 })
                                           : nullptr },
     // The same contract as onStatusLineCommandCompleted(): on the executor, without the state lock.
-    _gitHead { gitServices ? std::make_unique<GitHeadCache>(*gitServices,
-                                                            [this] { breakLoopAndRefreshRenderBuffer(); })
-                           : nullptr },
+    _gitHead { gitServices
+                   ? std::make_unique<GitHeadCache>(*gitServices,
+                                                    [this] {
+                                                        breakLoopAndRefreshRenderBuffer();
+                                                        _eventListener.indicatorStatusLineItemChanged();
+                                                    })
+                   : nullptr },
     // Last: its redraw request reaches what every member above holds.
     _linkDetector { makeLinkDetector() }
 {

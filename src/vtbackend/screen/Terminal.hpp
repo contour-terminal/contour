@@ -537,6 +537,12 @@ class Terminal: public IStatusLinePublishTarget
         /// Terminal::refreshIndicatorStatusLine).
         virtual void extensionFramePublished() {}
 
+        /// What an indicator status-line item shows changed off the parser: a `{Git}` lookup found another
+        /// branch. Called on the lookup's executor, holding no terminal lock, under renderBufferUpdated()'s
+        /// rules, after the terminal asked for a frame. For a host that renders nothing itself (the daemon),
+        /// which repaints the indicator status line on its own thread then, as for extensionFramePublished().
+        virtual void indicatorStatusLineItemChanged() {}
+
         /// The page was resized, so any row may have moved: a change of width reflowed every row under
         /// new stable ids, and a change of height moved rows between the page and the history. What is
         /// drawn from rows' places -- the scrollbar's travel and its ticks -- is stale, even when no output

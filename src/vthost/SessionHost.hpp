@@ -14,6 +14,7 @@
 /// marshal completion (PTY closed) through EventLoop::post().
 
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/GitHead.hpp>
 #include <vtbackend/screen/Settings.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/screen/TerminalClocks.hpp>
@@ -23,6 +24,7 @@
 #include <vtpty/Pty.hpp>
 
 #include <core/Environment.hpp>
+#include <core/async/ThreadPoolExecutor.hpp>
 #include <core/net/DeadlineTimer.hpp>
 #include <core/net/EventLoop.hpp>
 #include <core/platform/FileSystem.hpp>
@@ -298,6 +300,7 @@ class HostedSession
     ///        default.
     /// @param profileName The host profile the session was spawned under; empty for none named.
     /// @param settingsOrigin Where @p settings came from.
+    /// @param git Where the terminal's `{Git}` looks up its branch; none shows no branch.
     HostedSession(vtworkspace::SessionId id,
                   core::Environment const& env,
                   std::unique_ptr<vtpty::Pty> pty,
@@ -313,7 +316,8 @@ class HostedSession
                   SessionSignalCallback onSignal,
                   HostedSessionExtensions extensions = {},
                   std::string profileName = {},
-                  SettingsOrigin settingsOrigin = SettingsOrigin::Profile);
+                  SettingsOrigin settingsOrigin = SettingsOrigin::Profile,
+                  std::optional<vtbackend::GitHeadServices> git = std::nullopt);
 
     /// Joins the pump thread; the PTY must have been closed first (terminate()).
     ~HostedSession();
@@ -495,6 +499,14 @@ class HostedSession
             if (onStatusLineExtensionPublished)
                 onStatusLineExtensionPublished();
         }
+        /// A `{Git}` lookup found another branch: the row is repainted on the loop and sent, as for an
+        /// extension's frame -- through the same pending flag, so a burst costs one repaint. Without
+        /// extensions the clients draw the row themselves, and nothing is to be sent.
+        void indicatorStatusLineItemChanged() override
+        {
+            if (onStatusLineExtensionPublished)
+                onStatusLineExtensionPublished();
+        }
         /// The host's identity, as TerminalSession reports the GUI's: a record's working directory is
         /// local when it names the machine the daemon runs on.
         [[nodiscard]] vtbackend::LocalIdentity localIdentity() const noexcept override
@@ -670,6 +682,12 @@ struct SessionHostConfig
     /// the host. The default is the machine's own.
     std::reference_wrapper<core::platform::FileSystem const> fileSystem =
         core::platform::NativeFileSystem::instance();
+    /// Where every session's `{Git}` looks up its branch: a row the host draws (one its extensions drive) is
+    /// what its clients mirror, branch included. Borrowed: they must outlive the host. nullopt has the host
+    /// run its own -- a probe thread of its own and this machine's files -- when @ref fileSystem is this
+    /// machine's, and none at all for any other (a test's in-memory files are not to be paired with the real
+    /// disk's).
+    std::optional<vtbackend::GitHeadServices> git {};
     /// Where a connection's reads pause while its input backs up in a session, and resume.
     InputWatermarks inputWatermarks {};
     /// The status-line extensions every session it spawns runs; null for none, which constructs, polls and
@@ -693,6 +711,29 @@ struct SessionHostConfig
     std::optional<WorkspaceRestore> restore {};
     /// Where the UUIDs of windows, tabs and panes come from. Tests pass a sequential one.
     std::shared_ptr<vtcontrol::UuidSource> uuids = vtcontrol::systemUuidSource();
+};
+
+/// Where a host's sessions look up their `{Git}` branch: the services it was given, or its own.
+class HostGitLookups
+{
+  public:
+    /// @param given The services a test or an embedder hands the host; borrowed.
+    /// @param fileSystem The host's filesystem. Without @p given, the host runs lookups of its own -- one
+    /// probe
+    ///        thread and this machine's files -- only when this is this machine's (NativeFileSystem).
+    HostGitLookups(std::optional<vtbackend::GitHeadServices> given,
+                   core::platform::FileSystem const& fileSystem);
+
+    /// @return What every session's terminal is given; nullopt for none, which shows no branch.
+    [[nodiscard]] std::optional<vtbackend::GitHeadServices> services() const noexcept { return _services; }
+
+  private:
+    /// Declared before the executor, so that it outlives every lookup the executor joins.
+    std::unique_ptr<vtbackend::NativeGitFileSystem> _fileSystem;
+    /// One thread for every session's lookups: a lookup on a hung mount stalls `{Git}` in every session of
+    /// this host, and nothing else.
+    std::unique_ptr<core::async::ThreadPoolExecutor> _executor;
+    std::optional<vtbackend::GitHeadServices> _services;
 };
 
 /// Owns every hosted session and the authoritative vtworkspace::SessionModel,
@@ -1282,6 +1323,9 @@ class SessionHost final: public vtworkspace::ModelEvents
     ClientSizePolicy _sizePolicy;
     /// Where every session this host spawns looks up the paths printed on its screen.
     core::platform::FileSystem const& _fileSystem;
+    /// Where every session's `{Git}` looks up its branch. Declared before _sessions, so that its probe thread
+    /// is joined after every session's terminal stopped asking it.
+    HostGitLookups _git;
     /// The host's profiles; null for none. @see SessionHostConfig::profiles
     std::shared_ptr<ProfileCatalog const> _profiles;
     /// What each attached client reported it can display, keyed by its stream subscription so the
