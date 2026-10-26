@@ -1186,6 +1186,7 @@ if(CONTOUR_TESTING)
         config/WindowControlStyle_test.cpp
         test/ChromeSnapshotPlan_test.cpp
         command/CommandCatalog_test.cpp
+        command/CommandPaletteTree_test.cpp
         command/CommandHistory_test.cpp
         command/ContextMenu_test.cpp
         command/FuzzyFilter_test.cpp

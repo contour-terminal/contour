@@ -10,6 +10,7 @@ add_library(contour_command STATIC
     CommandCatalog.cpp CommandCatalog.hpp
     CommandHistory.cpp CommandHistory.hpp
     CommandHistoryStore.cpp CommandHistoryStore.hpp
+    CommandPaletteTree.cpp CommandPaletteTree.hpp
     ContextMenu.cpp ContextMenu.hpp
     ContextMenuTable.hpp
     MenuBarTable.cpp MenuBarTable.hpp
