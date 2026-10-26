@@ -3522,6 +3522,22 @@ class Terminal: public IStatusLinePublishTarget
     /// is held automatically extends the selection without requiring mouse movement.
     void extendSelectionAfterScroll();
 
+    /// How this terminal's screens measure a grapheme cluster, per DEC mode 2027; also what the status line
+    /// measures and cuts its items by, so a fit it judges is the fit the screen lays out.
+    ///
+    /// DEC mode 2027 is how an application says it expects whole clusters to be measured. Contour keeps the
+    /// mode set by default and always clusters; what the mode gates is narrower -- whether a codepoint
+    /// arriving AFTER the first may change how many columns the cluster occupies. Resetting it does not
+    /// restore the full pre-clustering behaviour, only this part of it: a terminal that also stopped
+    /// segmenting would place every combining mark in its own cell, which is a larger change and is not
+    /// what applications resetting the mode are usually after.
+    /// @return Whether a late codepoint may revise its cluster's width.
+    [[nodiscard]] ClusterWidthPolicy clusterWidthPolicy() const noexcept
+    {
+        return isModeEnabled(DECMode::Unicode) ? ClusterWidthPolicy::ClusterAware
+                                               : ClusterWidthPolicy::FirstCodepoint;
+    }
+
     /// @return The user's home directory, for abbreviating a path to `~`; empty when the environment names
     ///         none.
     [[nodiscard]] std::string_view homeDirectory() const noexcept { return _homeDirectory; }

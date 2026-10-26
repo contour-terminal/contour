@@ -2,6 +2,7 @@
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
+#include <vtbackend/grid/GraphemeClusters.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
@@ -786,14 +787,25 @@ namespace
     return serializeToVT(mc.terminal, parseStatusLineSegment("{Cwd}"sv), StatusLineStyling::Disabled);
 }
 
-/// The width of @p text in columns.
+/// The width of @p text in columns, as the grid lays it out (mode 2027, which Contour keeps set).
 [[nodiscard]] int columnsOf(std::string_view text)
 {
-    auto columns = 0;
-    for (auto const codepoint: unicode::convert_to<char32_t>(text))
-        columns += static_cast<int>(unicode::width(codepoint));
-    return columns;
+    return unbox<int>(columnsOnTheGrid(text, ClusterWidthPolicy::ClusterAware));
 }
+
+/// @p text repeated @p count times.
+[[nodiscard]] std::string repeated(std::string_view text, int count)
+{
+    auto result = std::string {};
+    for ([[maybe_unused]] auto const _: std::views::iota(0, count))
+        result += text;
+    return result;
+}
+
+constexpr auto Family = "\U0001F468\u200D\U0001F469\u200D\U0001F467"sv;
+constexpr auto Heart = "\u2764\uFE0F"sv;
+constexpr auto Flag = "\U0001F1E9\U0001F1EA"sv;
+constexpr auto DecomposedE = "e\u0301"sv;
 } // namespace
 
 TEST_CASE("serializeToVT.cwdShowsWhereTheShellIs", "[statusline][cwd]")
@@ -827,6 +839,33 @@ TEST_CASE("serializeToVT.cwdOfADeepOrBrokenPath", "[statusline][cwd]")
 
     CHECK(cwdAfterReporting("file:///tmp/a%FFb") == "/tmp/a\uFFFDb");
     CHECK_FALSE(cwdAfterReporting("file:///tmp/a%1Bb").contains('\033'));
+}
+
+TEST_CASE("serializeToVT.cwdElidesByGraphemeCluster", "[statusline][cwd]")
+{
+    // A long last component is cut at its start, a whole cluster at a time: never a base without its mark,
+    // never half a ZWJ sequence or flag, and measured as the grid draws it.
+    struct Row
+    {
+        std::string_view name;
+        std::string_view cluster;
+        int keptOf40; ///< Clusters kept after the "…" at the default MaxWidth of 40.
+    };
+    for (auto const& row: { Row { "CJK", "漢"sv, 19 },
+                            Row { "decomposed é", DecomposedE, 39 },
+                            Row { "ZWJ family", Family, 19 },
+                            Row { "flag", Flag, 19 },
+                            Row { "VS16 heart", Heart, 19 } })
+    {
+        INFO(row.name);
+        auto const shown = cwdAfterReporting("file:///" + repeated(row.cluster, 60));
+        CHECK(shown == "…" + repeated(row.cluster, row.keptOf40));
+        CHECK(columnsOf(shown) <= 40);
+    }
+
+    // Measured as the grid draws it, a path that fits is not elided because its codepoints would not.
+    auto const families = "/f/" + repeated(Family, 7);
+    CHECK(cwdAfterReporting("file://" + families) == families);
 }
 
 TEST_CASE("parseStatusLineSegment.maxWidthIsGeneric", "[statusline][cwd]")
@@ -968,6 +1007,19 @@ TEST_CASE("serializeToVT.lastCommandIsBoundedAndSafe", "[statusline][lastcommand
     mc.writeToScreen(test::commandEnd(0));
     CHECK_FALSE(lastCommandOf(mc).contains('\033'));
     CHECK(lastCommandOf(mc).contains("evil"));
+}
+
+TEST_CASE("serializeToVT.lastCommandElidesByGraphemeCluster", "[statusline][lastcommand]")
+{
+    using namespace std::chrono_literals;
+    auto mc = MockTerm { PageSize { LineCount(5), ColumnCount(200) } };
+    for (auto const cluster: { Family, Heart })
+    {
+        runFor(mc, repeated(cluster, 30), 4ms, 0);
+        auto const text = lastCommandOf(mc, StatusLineStyling::Disabled, "{LastCommand:MaxWidth=11}");
+        // Five whole two-column clusters and the "…": the next would not fit the eleven columns.
+        CHECK(text == "✓ " + repeated(cluster, 5) + "… · 4ms");
+    }
 }
 
 TEST_CASE("serializeToVT.lastCommandColoursItsStatus", "[statusline][lastcommand]")

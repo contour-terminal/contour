@@ -936,15 +936,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
 ClusterWidthPolicy Screen::clusterWidthPolicy() const noexcept
 {
-    // DEC mode 2027 is how an application says it expects whole clusters to be measured. Contour
-    // keeps the mode set by default and always clusters; what the mode gates is narrower -- whether
-    // a codepoint arriving AFTER the first may change how many columns the cluster occupies.
-    //
-    // NOTE: resetting 2027 does not restore the full pre-clustering behaviour, only this part of it.
-    // A terminal that also stopped segmenting would place every combining mark in its own cell, which
-    // is a larger change and is not what applications resetting the mode are usually after.
-    return _terminal->isModeEnabled(DECMode::Unicode) ? ClusterWidthPolicy::ClusterAware
-                                                      : ClusterWidthPolicy::FirstCodepoint;
+    return _terminal->clusterWidthPolicy();
 }
 
 void Screen::applyClusterWidthChange(int delta) noexcept

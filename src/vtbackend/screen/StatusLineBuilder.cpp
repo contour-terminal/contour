@@ -4,6 +4,7 @@
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/grid/GraphemeClusters.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/shell/CommandBlock.hpp>
 #include <vtbackend/shell/CommandLineSanitizer.hpp>
@@ -67,54 +68,47 @@ namespace // helper functions
         core::unreachable();
     }
 
-    /// The width of @p text in columns: counted in COLUMNS, not bytes, because a CJK name is two columns per
-    /// codepoint and three bytes, and measuring bytes would elide text that fits.
-    [[nodiscard]] int columnsOf(std::string_view text)
-    {
-        auto columns = 0;
-        for (auto const codepoint: unicode::convert_to<char32_t>(text))
-            columns += static_cast<int>(unicode::width(codepoint));
-        return columns;
-    }
-
     /// @p text, cut at its END to at most @p maxWidth columns with a trailing "…" when it is wider.
     /// @param text The text, valid UTF-8.
     /// @param maxWidth The widest the result may be, in columns.
-    /// @return @p text itself, or its head and "…"; never cut inside a codepoint.
-    [[nodiscard]] std::string elideEnd(std::string_view text, ColumnCount maxWidth)
+    /// @param policy How the status screen measures a grapheme cluster.
+    /// @return @p text itself, or its head and "…"; never cut inside a grapheme cluster.
+    [[nodiscard]] std::string elideEnd(std::string_view text, ColumnCount maxWidth, ClusterWidthPolicy policy)
     {
-        if (columnsOf(text) <= unbox<int>(maxWidth))
+        if (columnsOnTheGrid(text, policy) <= maxWidth)
             return std::string { text };
 
         // The ellipsis is budgeted for, as elideMiddle() budgets for its own.
-        auto const budget = unbox<int>(maxWidth) - 1;
-        auto head = std::u32string {};
-        auto columns = 0;
-        for (auto const codepoint: unicode::convert_to<char32_t>(text))
+        auto const budget = maxWidth - ColumnCount(1);
+        auto head = std::string {};
+        auto columns = ColumnCount(0);
+        for (auto const& cluster: graphemeClustersOf(text, policy))
         {
-            columns += static_cast<int>(unicode::width(codepoint));
+            columns += cluster.columns;
             if (columns > budget)
                 break;
-            head += codepoint;
+            head += cluster.text;
         }
-        return unicode::convert_to<char>(std::u32string_view { head }) + "…";
+        return head + "…";
     }
 
     /// Joins @p segments, eliding the MIDDLE when the result would exceed @p maxWidth columns.
     /// @param segments The parts, outermost first.
     /// @param separator What goes between two parts.
     /// @param maxWidth The widest the result may be, in columns.
+    /// @param policy How the status screen measures a grapheme cluster.
     /// @return The joined parts; the first, "…" and the last; or the last alone cut at its start.
     [[nodiscard]] std::string elideMiddle(std::vector<std::string> const& segments,
                                           std::string_view separator,
-                                          ColumnCount maxWidth)
+                                          ColumnCount maxWidth,
+                                          ClusterWidthPolicy policy)
     {
         auto const join = [&](std::vector<std::string> const& parts) {
             return core::joinWith(parts, separator);
         };
 
         auto candidate = join(segments);
-        if (columnsOf(candidate) <= unbox<int>(maxWidth))
+        if (columnsOnTheGrid(candidate, policy) <= maxWidth)
             return candidate;
 
         // Keep both ends: the first answers *where*, the last answers *who*.
@@ -122,38 +116,35 @@ namespace // helper functions
         {
             auto elided = std::vector<std::string> { segments.front(), "…", segments.back() };
             candidate = join(elided);
-            if (columnsOf(candidate) <= unbox<int>(maxWidth))
+            if (columnsOnTheGrid(candidate, policy) <= maxWidth)
                 return candidate;
         }
 
         // Still too wide: the innermost alone, cut at its own START so its tail -- the part that
         // identifies it -- survives.
         //
-        // Cut by CODEPOINT, never by byte: a container name is UTF-8, and erasing one byte at a
-        // time leaves the string starting on a continuation byte, which is mojibake on screen and
-        // an invalid sequence handed to writeToScreenInternal(). The ellipsis is budgeted for
-        // rather than added afterwards, because prepending it to a string already at maxWidth
-        // overflows the width by exactly the column the caller allotted.
-        auto const codepoints = unicode::convert_to<char32_t>(std::string_view { segments.back() });
-        auto const budget = unbox<int>(maxWidth) - 1; // one column for the leading '…'
-        if (budget <= 0)
-            return {};
-
-        auto kept = size_t {};
-        auto columns = 0;
-        for (auto index = codepoints.size(); index-- > 0;)
+        // Cut by GRAPHEME CLUSTER, never by byte or codepoint: a byte cut leaves mojibake and an invalid
+        // sequence for writeToScreenInternal(), and a codepoint cut can keep a combining mark without its
+        // base, or half a ZWJ sequence or flag. The ellipsis is budgeted for rather than added afterwards,
+        // because prepending it to a string already at maxWidth overflows the width by exactly the column
+        // the caller allotted.
+        auto const budget = maxWidth - ColumnCount(1); // one column for the leading '…'
+        auto const clusters = graphemeClustersOf(segments.back(), policy);
+        auto kept = std::size_t { 0 };
+        auto columns = ColumnCount(0);
+        for (auto const& cluster: clusters | std::views::reverse)
         {
-            columns += static_cast<int>(unicode::width(codepoints[index]));
+            columns += cluster.columns;
             if (columns > budget)
                 break;
-            kept = codepoints.size() - index;
+            ++kept;
         }
         if (kept == 0)
             return {};
 
         auto tail = std::string { "…" };
-        unicode::convert_to<char>(std::u32string_view { codepoints }.substr(codepoints.size() - kept),
-                                  std::back_inserter(tail));
+        for (auto const& cluster: clusters | std::views::drop(clusters.size() - kept))
+            tail += cluster.text;
         return tail;
     }
 } // namespace
@@ -850,7 +841,8 @@ namespace
             if (segments.empty())
                 return {};
 
-            return elideMiddle(segments, item.separator.value_or(" › "), item.maxWidth);
+            return elideMiddle(
+                segments, item.separator.value_or(" › "), item.maxWidth, vt.clusterWidthPolicy());
         }
 
         std::string visit(StatusLineDefinitions::Cwd const& item)
@@ -867,7 +859,7 @@ namespace
             auto parts = std::vector<std::string> {};
             for (auto const part: std::views::split(shown, '/'))
                 parts.emplace_back(std::string_view { part });
-            return elideMiddle(parts, "/", item.maxWidth);
+            return elideMiddle(parts, "/", item.maxWidth, vt.clusterWidthPolicy());
         }
 
         /// The branch the terminal last read for the shell's directory: no I/O here, as on every frame.
@@ -906,7 +898,8 @@ namespace
                 parts.push_back(*exitCode == 0 ? run("✓", ColorRole::Success)
                                                : run(std::format("✗ exit {}", *exitCode), ColorRole::Danger));
             // display() is sanitized: no byte of the command line reaches the status screen as an escape.
-            if (auto command = elideEnd(last->commandLine.display(), item.maxWidth); !command.empty())
+            if (auto command = elideEnd(last->commandLine.display(), item.maxWidth, vt.clusterWidthPolicy());
+                !command.empty())
                 parts.push_back(std::move(command));
 
             auto text = core::joinWith(parts, " ");

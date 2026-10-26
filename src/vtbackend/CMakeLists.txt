@@ -39,6 +39,7 @@ set(vtbackend_HEADERS
     shell/Folding.hpp
     vt/Functions.hpp
     core/GraphicsAttributes.hpp
+    grid/GraphemeClusters.hpp
     grid/Grid.hpp
     screen/Gutter.hpp
     screen/GutterSettings.hpp
@@ -161,6 +162,7 @@ set(vtbackend_SOURCES
     shell/ScrollbarMarks.cpp
     shell/StickyHeader.cpp
     vt/Functions.cpp
+    grid/GraphemeClusters.cpp
     grid/Grid.cpp
     screen/Gutter.cpp
     core/FileUrl.cpp
@@ -378,6 +380,7 @@ if(LIBTERMINAL_TESTING)
         screen/Terminal_links_test.cpp
         screen/BulkScan_test.cpp
         shell/ShellIntegration_test.cpp
+        grid/GraphemeClusters_test.cpp
         grid/LineSoA_test.cpp
         grid/SoAClusterWriter_test.cpp
         graphics/SixelParser_test.cpp

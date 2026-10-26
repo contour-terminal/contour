@@ -6,6 +6,7 @@
 #include <vtbackend/core/LineFlags.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/WorkingDirectory.hpp>
+#include <vtbackend/grid/GraphemeClusters.hpp>
 #include <vtbackend/input/HeldModifiers.hpp>
 #include <vtbackend/input/InputGenerator.hpp>
 #include <vtbackend/input/MatchModes.hpp>
@@ -36,7 +37,6 @@
 #include <core/Utils.hpp>
 
 #include <libunicode/convert.h>
-#include <libunicode/utf8_grapheme_segmenter.h>
 #include <libunicode/width.h>
 
 #include <gsl/pointers>
@@ -1573,35 +1573,6 @@ RGBColorPair Terminal::indicatorStatusLineColors() const
     }
     core::unreachable();
 }
-
-namespace
-{
-    /// The columns @p text takes when a screen writes it. libunicode measures each grapheme cluster; the grid
-    /// gives a cluster at least one column (appendCodepointToCluster, LineSoA.cpp), as wide as its first
-    /// codepoint, or, under ClusterWidthPolicy::ClusterAware, as the whole cluster where that is wider -- a
-    /// cluster widens and never narrows (Screen::applyClusterWidthChange).
-    /// @param text   UTF-8 text.
-    /// @param policy How the screen measures a cluster (DEC mode 2027).
-    /// @return The columns @p text takes.
-    [[nodiscard]] ColumnCount columnsOnTheGrid(std::string_view text, ClusterWidthPolicy policy)
-    {
-        auto columns = 0u;
-        for (auto const& cluster: unicode::utf8_grapheme_segmenter(text))
-        {
-            if (cluster.empty())
-                continue;
-            auto const first = std::max(1u, unicode::width(cluster.front()));
-            switch (policy)
-            {
-                case ClusterWidthPolicy::FirstCodepoint: columns += first; break;
-                case ClusterWidthPolicy::ClusterAware:
-                    columns += std::max(first, unicode::grapheme_cluster_width(cluster));
-                    break;
-            }
-        }
-        return ColumnCount::cast_from(columns);
-    }
-} // namespace
 
 void Terminal::updateIndicatorStatusLine()
 {
