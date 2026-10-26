@@ -1689,6 +1689,33 @@ TEST_CASE("SettingsController: an extension item keeps its name and styles throu
     }
 }
 
+TEST_CASE("SettingsController: the indicator bridge keeps role colours", "[settings]")
+{
+    // A role is a word, not a hex colour: a bridge that read it through a hex parser would save it as black.
+    auto fx = Fixture(BasicConfig);
+    auto const original =
+        QString("{VTType:Color=#C0C030}{Clock:Color=muted}{Title:Color=#000000,BackgroundColor=accent}");
+
+    auto const items = fx.controller->parseIndicatorSegment(original);
+    REQUIRE(items.size() == 3);
+    auto const vtType = items[0].toMap();
+    auto const clock = items[1].toMap();
+    auto const title = items[2].toMap();
+    CHECK(vtType.value("hasColor").toBool());
+    CHECK(vtType.value("color").toString() == "#C0C030");
+    CHECK(clock.value("hasColor").toBool());
+    CHECK(clock.value("color").toString() == "muted");
+    CHECK(title.value("hasBgColor").toBool());
+    CHECK(title.value("bgColor").toString() == "accent");
+
+    CHECK(fx.controller->serializeIndicatorSegment(items) == original);
+
+    // A colour the page cannot read is left unset, not written as black.
+    auto broken = clock;
+    broken["color"] = QString("#zz");
+    CHECK(fx.controller->serializeIndicatorSegment({ broken }) == "{Clock}");
+}
+
 TEST_CASE("SettingsController: the indicator placeholder catalog matches what parsing produces", "[settings]")
 {
     auto fx = Fixture(BasicConfig);

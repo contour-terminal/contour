@@ -2614,15 +2614,27 @@ namespace
     }
 
     /// Exposes an optional colour as the pair of keys the editor reads: a bool saying whether it is set
-    /// at all, and its "#RRGGBB" text. Split in two because an unset colour is not black -- it means
-    /// "inherit" -- and one string cannot say both.
+    /// at all, and its text -- "#RRGGBB" or a role's name. Split in two because an unset colour is not
+    /// black -- it means "inherit" -- and one string cannot say both.
     void writeColorPair(QVariantMap& row,
                         QString const& hasKey,
                         QString const& colorKey,
-                        std::optional<vtbackend::RGBColor> const& color)
+                        std::optional<vtbackend::StatusLineDefinitions::ItemColor> const& color)
     {
         row[hasKey] = color.has_value();
-        row[colorKey] = color ? QString::fromStdString(vtbackend::formatColor(*color)) : QString {};
+        row[colorKey] =
+            color ? QString::fromStdString(vtbackend::StatusLineDefinitions::formatItemColor(*color))
+                  : QString {};
+    }
+
+    /// An optional colour from the "has"/value key pair @p hasKey / @p colorKey: read as the template
+    /// parser reads it, so a role stays a role and text that is no colour is unset rather than black.
+    [[nodiscard]] std::optional<vtbackend::StatusLineDefinitions::ItemColor> optionalColor(
+        QVariantMap const& row, QString const& hasKey, QString const& colorKey)
+    {
+        if (!row.value(hasKey).toBool())
+            return std::nullopt;
+        return vtbackend::StatusLineDefinitions::parseItemColor(row.value(colorKey).toString().toStdString());
     }
 
     /// Reads the styles shared by every item into @p row.
@@ -2645,10 +2657,8 @@ namespace
     {
         auto styles = vtbackend::StatusLineDefinitions::Styles {};
 
-        if (row.value(QStringLiteral("hasColor")).toBool())
-            styles.foregroundColor = hexToRgb(row.value(QStringLiteral("color")).toString());
-        if (row.value(QStringLiteral("hasBgColor")).toBool())
-            styles.backgroundColor = hexToRgb(row.value(QStringLiteral("bgColor")).toString());
+        styles.foregroundColor = optionalColor(row, QStringLiteral("hasColor"), QStringLiteral("color"));
+        styles.backgroundColor = optionalColor(row, QStringLiteral("hasBgColor"), QStringLiteral("bgColor"));
 
         auto const flags = row.value(QStringLiteral("flags")).toMap();
         for (auto const& flag: vtbackend::StatusLineDefinitions::CellFlagNames)
@@ -2660,15 +2670,6 @@ namespace
         return styles;
     }
 
-    /// An optional colour from the "has"/value key pair @p hasKey / @p colorKey.
-    [[nodiscard]] std::optional<vtbackend::RGBColor> optionalColor(QVariantMap const& row,
-                                                                   QString const& hasKey,
-                                                                   QString const& colorKey)
-    {
-        if (!row.value(hasKey).toBool())
-            return std::nullopt;
-        return hexToRgb(row.value(colorKey).toString());
-    }
 } // namespace
 
 QVariantList SettingsController::parseIndicatorSegment(QString const& templateStr) const

@@ -66,11 +66,40 @@ namespace // helper functions
     }
 } // namespace
 
-static std::optional<RGBColor> tryParseColorAttribute(crispy::StringInterpolation const& interpolation,
-                                                      std::string_view key)
+namespace StatusLineDefinitions
+{
+    std::optional<ItemColor> parseItemColor(std::string_view text)
+    {
+        auto const lower = core::toLower(text);
+        if (auto const row =
+                std::ranges::find_if(ColorRoleNames, [&](ColorRoleName const& r) { return r.name == lower; });
+            row != ColorRoleNames.end())
+            return ItemColor { row->role };
+        if (auto const rgb = parseColor(text))
+            return ItemColor { *rgb };
+        return std::nullopt;
+    }
+
+    std::string formatItemColor(ItemColor const& color)
+    {
+        if (auto const* const role = std::get_if<ColorRole>(&color))
+            return std::string { ColorRoleNames[static_cast<std::size_t>(*role)].name };
+        return formatColor(std::get<RGBColor>(color));
+    }
+
+    RGBColor resolveItemColor(ItemColor const& color, ColorPalette const& palette) noexcept
+    {
+        if (auto const* const role = std::get_if<ColorRole>(&color))
+            return palette.indexedColor(ColorRoleNames[static_cast<std::size_t>(*role)].paletteIndex);
+        return std::get<RGBColor>(color);
+    }
+} // namespace StatusLineDefinitions
+
+static std::optional<StatusLineDefinitions::ItemColor> tryParseColorAttribute(
+    crispy::StringInterpolation const& interpolation, std::string_view key)
 {
     if (auto const i = interpolation.attributes.find(key); i != interpolation.attributes.end())
-        return parseColor(i->second);
+        return StatusLineDefinitions::parseItemColor(i->second);
 
     return std::nullopt;
 }
@@ -263,21 +292,28 @@ namespace
         StatusLineStyling styling;
         std::string result {};
 
-        std::string makeTextColor(std::optional<RGBColor> const& color, std::string_view defaultSequence = {})
+        /// The SGR that selects @p color as the text colour, a role resolved against the terminal's palette
+        /// now; @p defaultSequence when there is none.
+        [[nodiscard]] std::string makeTextColor(std::optional<StatusLineDefinitions::ItemColor> const& color,
+                                                std::string_view defaultSequence = {}) const
         {
             if (!color)
                 return std::string(defaultSequence);
 
-            return std::format("\033[38:2:{}:{}:{}m", color->red, color->green, color->blue);
+            auto const rgb = StatusLineDefinitions::resolveItemColor(*color, vt.colorPalette());
+            return std::format("\033[38:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
         }
 
-        std::string makeBackgroundColor(std::optional<RGBColor> const& color,
-                                        std::string_view defaultSequence = {})
+        /// The SGR that selects @p color as the background, as makeTextColor() resolves it.
+        [[nodiscard]] std::string makeBackgroundColor(
+            std::optional<StatusLineDefinitions::ItemColor> const& color,
+            std::string_view defaultSequence = {}) const
         {
             if (!color)
                 return std::string(defaultSequence);
 
-            return std::format("\033[48:2:{}:{}:{}m", color->red, color->green, color->blue);
+            auto const rgb = StatusLineDefinitions::resolveItemColor(*color, vt.colorPalette());
+            return std::format("\033[48:2:{}:{}:{}m", rgb.red, rgb.green, rgb.blue);
         }
 
         void applyStyles(StatusLineDefinitions::Styles const& styles) // {{{
@@ -820,14 +856,14 @@ namespace
             out += value;
         }
 
-        /// Appends "key=#RRGGBB" when @p color holds a value; a no-op otherwise.
-        void addColor(std::string_view key, std::optional<RGBColor> color)
+        /// Appends "key=#RRGGBB" or "key=<role>" when @p color holds a value; a no-op otherwise.
+        void addColor(std::string_view key, std::optional<StatusLineDefinitions::ItemColor> const& color)
         {
-            // formatColor() is documented as the exact inverse of parseColor(), which is what
+            // formatItemColor() is the exact inverse of parseItemColor(), which is what
             // tryParseColorAttribute() reads these back with -- so the two ends of the round trip are
             // one function apart rather than two spellings that have to be kept agreeing.
             if (color)
-                add(key, formatColor(*color));
+                add(key, StatusLineDefinitions::formatItemColor(*color));
         }
     };
 

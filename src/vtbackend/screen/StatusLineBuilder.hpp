@@ -3,6 +3,7 @@
 
 #include <vtbackend/core/CellFlags.hpp>
 #include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
 
@@ -10,6 +11,7 @@
 #include <chrono>
 #include <cstddef>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -22,10 +24,68 @@ namespace vtbackend
 
 namespace StatusLineDefinitions
 {
+    /// A colour a template may name by what it MEANS rather than by its value, resolved against the
+    /// terminal's palette when the line is drawn -- so it follows the active scheme, and a live scheme
+    /// change.
+    enum class ColorRole : uint8_t
+    {
+        Accent = 0, ///< What draws the eye: the active item, a running job.
+        Success,    ///< Something went well.
+        Danger,     ///< Something failed.
+        Warning,    ///< Something needs attention.
+        Muted,      ///< Secondary detail.
+    };
+
+    /// One colour role as a template spells it, and the palette entry it resolves to.
+    struct ColorRoleName
+    {
+        ColorRole role;           ///< The role.
+        std::string_view name;    ///< As written in a template, lowercase.
+        std::size_t paletteIndex; ///< The indexed palette colour the role resolves to.
+    };
+
+    /// The colour roles, one row per ColorRole in enumerator order: the parser, the serializer and the
+    /// settings page all read this table, so a sixth role is one row here and one enumerator.
+    inline constexpr auto ColorRoleNames = std::array {
+        ColorRoleName { .role = ColorRole::Accent, .name = "accent", .paletteIndex = 4 },
+        ColorRoleName { .role = ColorRole::Success, .name = "success", .paletteIndex = 2 },
+        ColorRoleName { .role = ColorRole::Danger, .name = "danger", .paletteIndex = 1 },
+        ColorRoleName { .role = ColorRole::Warning, .name = "warning", .paletteIndex = 3 },
+        ColorRoleName { .role = ColorRole::Muted, .name = "muted", .paletteIndex = 8 },
+    };
+
+    static_assert(
+        [] {
+            for (auto const index: std::views::iota(std::size_t { 0 }, ColorRoleNames.size()))
+                if (static_cast<std::size_t>(ColorRoleNames[index].role) != index)
+                    return false;
+            return true;
+        }(),
+        "ColorRoleNames' row i must describe ColorRole enumerator i.");
+
+    /// A status-line item's colour: a fixed RGB value, or a scheme role resolved when drawn.
+    using ItemColor = std::variant<RGBColor, ColorRole>;
+
+    /// Reads a colour attribute's value.
+    /// @param text A role name (ASCII case-insensitive), or anything parseColor() accepts.
+    /// @return The colour, or nullopt when @p text is neither.
+    [[nodiscard]] std::optional<ItemColor> parseItemColor(std::string_view text);
+
+    /// Writes a colour attribute's value -- the inverse of parseItemColor().
+    /// @param color The colour.
+    /// @return The role's lowercase name, or formatColor()'s `#RRGGBB`.
+    [[nodiscard]] std::string formatItemColor(ItemColor const& color);
+
+    /// The RGB value @p color draws with.
+    /// @param color The colour.
+    /// @param palette The palette a role resolves against.
+    /// @return @p color itself, or the palette entry its role names.
+    [[nodiscard]] RGBColor resolveItemColor(ItemColor const& color, ColorPalette const& palette) noexcept;
+
     struct Styles
     {
-        std::optional<RGBColor> foregroundColor;
-        std::optional<RGBColor> backgroundColor;
+        std::optional<ItemColor> foregroundColor;
+        std::optional<ItemColor> backgroundColor;
         CellFlags flags;
         std::string textLeft;
         std::string textRight;
@@ -124,8 +184,8 @@ namespace StatusLineDefinitions
 
     struct Tabs: Styles
     {
-        std::optional<RGBColor> activeColor;
-        std::optional<RGBColor> activeBackground;
+        std::optional<ItemColor> activeColor;
+        std::optional<ItemColor> activeBackground;
         std::optional<std::string> separator;
     };
 

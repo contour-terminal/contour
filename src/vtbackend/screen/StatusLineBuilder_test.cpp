@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/core/CellFlags.hpp>
+#include <vtbackend/core/Color.hpp>
+#include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/screen/StatusLineBuilder.hpp>
 #include <vtbackend/screen/Terminal.hpp>
 #include <vtbackend/testing/MockTerm.hpp>
+
+#include <core/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -587,7 +591,7 @@ TEST_CASE("StatusLineBuilder.extension.parse", "[statusline][extensions]")
         auto const& item = std::get<Extension>(segment[0]);
         CHECK(item.name == "git");
         REQUIRE(item.foregroundColor.has_value());
-        CHECK(*item.foregroundColor == RGBColor { 0xFF, 0x00, 0x00 });
+        CHECK(*item.foregroundColor == StatusLineDefinitions::ItemColor { RGBColor { 0xFF, 0x00, 0x00 } });
         CHECK(item.textLeft == "[");
     }
 
@@ -622,3 +626,77 @@ TEST_CASE("StatusLineBuilder.extension.parse", "[statusline][extensions]")
         }
     }
 }
+
+// {{{ Role colours
+// A colour attribute names either a hex colour, drawn as written, or one of five scheme roles, resolved
+// against the terminal's palette each time the line is drawn -- so a role follows a scheme change.
+
+TEST_CASE("statusLine.colors.everyRoleParsesAndRoundTrips", "[statusline][colors]")
+{
+    using StatusLineDefinitions::ItemColor;
+    for (auto const& row: StatusLineDefinitions::ColorRoleNames)
+    {
+        INFO(row.name);
+        CHECK(StatusLineDefinitions::parseItemColor(row.name) == ItemColor { row.role });
+        auto const upper = core::toUpper(row.name);
+        CHECK(StatusLineDefinitions::parseItemColor(upper) == ItemColor { row.role });
+        CHECK(StatusLineDefinitions::formatItemColor(ItemColor { row.role }) == row.name);
+    }
+
+    CHECK(StatusLineDefinitions::parseItemColor("#FF0000") == ItemColor { RGBColor { 0xFF, 0, 0 } });
+    CHECK_FALSE(StatusLineDefinitions::parseItemColor("magenta").has_value());
+    CHECK_FALSE(StatusLineDefinitions::parseItemColor("Yellow").has_value());
+    CHECK_FALSE(StatusLineDefinitions::parseItemColor("").has_value());
+}
+
+TEST_CASE("statusLine.colors.hexAndRolesMix", "[statusline][colors]")
+{
+    constexpr auto Mixed =
+        "{VTType:Color=#C0C030}{Clock:Color=muted}{Title:Color=#000000,BackgroundColor=accent}"sv;
+    CHECK(serializeStatusLineSegment(parseStatusLineSegment(Mixed)) == Mixed);
+
+    // Written lowercase, whatever the spelling it was read with.
+    CHECK(canonical("{Clock:Color=Accent}"sv) == "{Clock:Color=accent}");
+
+    // A word that is neither a role nor a colour leaves the colour unset rather than turning it black.
+    auto const unknown = parseStatusLineSegment("{Clock:Color=magenta}"sv);
+    REQUIRE(unknown.size() == 1);
+    REQUIRE(std::holds_alternative<StatusLineDefinitions::Clock>(unknown[0]));
+    CHECK_FALSE(std::get<StatusLineDefinitions::Clock>(unknown[0]).foregroundColor.has_value());
+}
+
+TEST_CASE("serializeToVT.roleIsResolvedWhenDrawn", "[statusline][colors]")
+{
+    auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto const segment = parseStatusLineSegment("{VTType:Color=accent}"sv);
+    auto const sgrOf = [](RGBColor c) {
+        return std::format("\033[38:2:{}:{}:{}m", c.red, c.green, c.blue);
+    };
+
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled)
+              .contains(sgrOf(mc.terminal.colorPalette().normalColor(4))));
+
+    // A scheme change reaches the next frame: nothing resolved the role when the template was parsed.
+    mc.terminal.colorPalette().palette[4] = 0x123456_rgb;
+    CHECK(serializeToVT(mc.terminal, segment, StatusLineStyling::Enabled).contains("38:2:18:52:86"));
+}
+
+TEST_CASE("statusLine.colors.rolesReadOnContourSchemes", "[statusline][colors]")
+{
+    for (auto const scheme: { "contour-dark"sv, "contour-light"sv })
+    {
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(scheme, palette));
+        auto const background = palette.indicatorStatusLineInactive.background;
+        for (auto const& row: StatusLineDefinitions::ColorRoleNames)
+        {
+            INFO(scheme << ": " << row.name);
+            auto const ratio = contrastRatio(StatusLineDefinitions::resolveItemColor(
+                                                 StatusLineDefinitions::ItemColor { row.role }, palette),
+                                             background);
+            auto const minimum = row.role == StatusLineDefinitions::ColorRole::Muted ? 3.0 : 4.5;
+            CHECK(ratio >= minimum);
+        }
+    }
+}
+// }}}

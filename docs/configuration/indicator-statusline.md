@@ -56,8 +56,8 @@ Parameter                 | Description
 --------------------------|--------------------------------------------------------------------
 `Left=TEXT`               | text to show on the left side, if the variable is to be shown
 `Right=TEXT`              | text to show on the right side, if the variable is to be shown
-`Color=#RRGGBB`           | text color in hexadecimal RGB notation
-`BackgroundColor=#RRGGBB` | background color in hexadecimal RGB notation
+`Color=COLOR`             | text color: `#RRGGBB`, or one of the roles `accent`, `success`, `danger`, `warning`, `muted`
+`BackgroundColor=COLOR`   | background color: `#RRGGBB`, or one of the roles `accent`, `success`, `danger`, `warning`, `muted`
 `Bold`                    | text in bold font face
 `Italic`                  | text in italic font face
 `Underline`               | underline text (only one underline style can be active)
@@ -71,6 +71,12 @@ Parameter                 | Description
 `Inverse`                 | inversed text/background coloring
 
 These parameters apply to all variables above.
+
+A role names a color by what it means rather than by its value, and takes it from the active color
+scheme when the line is drawn, so it follows a scheme change: `accent` is palette color 4 (blue),
+`success` 2 (green), `danger` 1 (red), `warning` 3 (yellow) and `muted` 8 (bright black). Roles are
+read in any case and written lowercase. A value that is neither a role nor a color leaves the color
+unset. The same values are accepted by the `Tabs` attributes `ActiveColor` and `ActiveBackground`.
 
 The `Command` variable additionally takes these attributes:
 
