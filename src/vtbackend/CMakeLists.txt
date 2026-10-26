@@ -108,6 +108,7 @@ set(vtbackend_HEADERS
     grid/SoAClusterWriter.hpp
     shell/StableIdSet.hpp
     screen/StatusLineBuilder.hpp
+    screen/StatusLineLayout.hpp
     screen/GitHead.hpp
     core/SteadyClockRef.hpp
     shell/StickyHeader.hpp
@@ -365,6 +366,7 @@ if(LIBTERMINAL_TESTING)
         vt/SemanticPrompt_test.cpp
         vt/Sequence_test.cpp
         screen/StatusLineBuilder_test.cpp
+        screen/StatusLineLayout_test.cpp
         screen/GitHead_test.cpp
         screen/StatusLineCommandCache_test.cpp
         core/WindowSizeStack_test.cpp

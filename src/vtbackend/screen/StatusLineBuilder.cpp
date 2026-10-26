@@ -24,6 +24,7 @@
 #include <iterator>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -1083,10 +1084,12 @@ std::string groupDigits(std::uint64_t value)
     return result;
 }
 
-std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, StatusLineStyling styling)
+std::string serializeToVT(Terminal const& vt,
+                          std::span<StatusLineDefinitions::Item const> items,
+                          StatusLineStyling styling)
 {
     auto serializer = VTSerializer { .vt = vt, .styling = styling };
-    for (auto const& item: segment)
+    for (auto const& item: items)
         serializer(item);
     return serializer.result;
 }

@@ -6,14 +6,17 @@
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/Primitives.hpp>
 #include <vtbackend/core/TerminalContext.hpp>
+#include <vtbackend/screen/StatusLineLayout.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -374,76 +377,76 @@ namespace StatusLineDefinitions
 
     // clang-format off
     template <> struct ItemTraits<Title>
-    { static constexpr std::string_view Name = "Title", Label = "Window title", Sample = "~/src"; };
+    { static constexpr std::string_view Name = "Title", Label = "Window title", Sample = "~/src"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<Clock>
-    { static constexpr std::string_view Name = "Clock", Label = "Clock", Sample = "12:04"; };
+    { static constexpr std::string_view Name = "Clock", Label = "Clock", Sample = "12:04"; static constexpr auto Priority = StatusLinePriority::Low; };
 
     template <> struct ItemTraits<InputMode>
-    { static constexpr std::string_view Name = "InputMode", Label = "Input mode", Sample = "NORMAL"; };
+    { static constexpr std::string_view Name = "InputMode", Label = "Input mode", Sample = "NORMAL"; static constexpr auto Priority = StatusLinePriority::Essential; };
 
     template <> struct ItemTraits<TraceMode>
-    { static constexpr std::string_view Name = "TraceMode", Label = "Trace mode", Sample = "TRACING"; };
+    { static constexpr std::string_view Name = "TraceMode", Label = "Trace mode", Sample = "TRACING"; static constexpr auto Priority = StatusLinePriority::Essential; };
 
     template <> struct ItemTraits<ProtectedMode>
-    { static constexpr std::string_view Name = "ProtectedMode", Label = "Protected mode", Sample = "PROTECTED"; };
+    { static constexpr std::string_view Name = "ProtectedMode", Label = "Protected mode", Sample = "PROTECTED"; static constexpr auto Priority = StatusLinePriority::Essential; };
 
     template <> struct ItemTraits<Progress>
-    { static constexpr std::string_view Name = "Progress", Label = "Progress indicator", Sample = "45%"; };
+    { static constexpr std::string_view Name = "Progress", Label = "Progress indicator", Sample = "45%"; static constexpr auto Priority = StatusLinePriority::High; };
 
     template <> struct ItemTraits<SearchMode>
-    { static constexpr std::string_view Name = "SearchMode", Label = "Search mode", Sample = "SEARCH"; };
+    { static constexpr std::string_view Name = "SearchMode", Label = "Search mode", Sample = "SEARCH"; static constexpr auto Priority = StatusLinePriority::Essential; };
 
     template <> struct ItemTraits<SearchPrompt>
-    { static constexpr std::string_view Name = "SearchPrompt", Label = "Search prompt", Sample = "Search: needle"; };
+    { static constexpr std::string_view Name = "SearchPrompt", Label = "Search prompt", Sample = "Search: needle"; static constexpr auto Priority = StatusLinePriority::Essential; };
 
     template <> struct ItemTraits<HistoryLineCount>
-    { static constexpr std::string_view Name = "HistoryLineCount", Label = "Scrollback position", Sample = "0/1000"; };
+    { static constexpr std::string_view Name = "HistoryLineCount", Label = "Scrollback position", Sample = "0/1000"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<Hyperlink>
-    { static constexpr std::string_view Name = "Hyperlink", Label = "Hovered hyperlink", Sample = "https://contour-terminal.org/"; };
+    { static constexpr std::string_view Name = "Hyperlink", Label = "Hovered hyperlink", Sample = "https://contour-terminal.org/"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<VTType>
-    { static constexpr std::string_view Name = "VTType", Label = "Terminal type", Sample = "VT525"; };
+    { static constexpr std::string_view Name = "VTType", Label = "Terminal type", Sample = "VT525"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<Tabs>
-    { static constexpr std::string_view Name = "Tabs", Label = "Tab strip", Sample = "1 2 3"; };
+    { static constexpr std::string_view Name = "Tabs", Label = "Tab strip", Sample = "1 2 3"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<Context>
-    { static constexpr std::string_view Name = "Context", Label = "Context breadcrumb", Sample = "container:build \u203a root"; };
+    { static constexpr std::string_view Name = "Context", Label = "Context breadcrumb", Sample = "container:build \u203a root"; static constexpr auto Priority = StatusLinePriority::Essential; };
 
     template <> struct ItemTraits<Cwd>
-    { static constexpr std::string_view Name = "Cwd", Label = "Working directory", Sample = "~/repo/contour"; };
+    { static constexpr std::string_view Name = "Cwd", Label = "Working directory", Sample = "~/repo/contour"; static constexpr auto Priority = StatusLinePriority::High; };
 
     template <> struct ItemTraits<Git>
-    { static constexpr std::string_view Name = "Git", Label = "Git branch", Sample = "main"; };
+    { static constexpr std::string_view Name = "Git", Label = "Git branch", Sample = "main"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<LastCommand>
-    { static constexpr std::string_view Name = "LastCommand", Label = "Last command", Sample = "\u2713 make \u00b7 4ms"; };
+    { static constexpr std::string_view Name = "LastCommand", Label = "Last command", Sample = "\u2713 make \u00b7 4ms"; static constexpr auto Priority = StatusLinePriority::High; };
 
     template <> struct ItemTraits<SelectionSize>
-    { static constexpr std::string_view Name = "Selection", Label = "Selection size", Sample = "12 lines \u00b7 418 chars"; };
+    { static constexpr std::string_view Name = "Selection", Label = "Selection size", Sample = "12 lines \u00b7 418 chars"; static constexpr auto Priority = StatusLinePriority::High; };
 
     template <> struct ItemTraits<Scroll>
-    { static constexpr std::string_view Name = "Scroll", Label = "Scroll position", Sample = "\u2191 1 240 / 10 000"; };
+    { static constexpr std::string_view Name = "Scroll", Label = "Scroll position", Sample = "\u2191 1 240 / 10 000"; static constexpr auto Priority = StatusLinePriority::High; };
 
     template <> struct ItemTraits<Text>
-    { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; };
+    { static constexpr std::string_view Name = "Text", Label = "Static text", Sample = "text"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<Command>
-    { static constexpr std::string_view Name = "Command", Label = "Shell command output", Sample = "(output)"; };
+    { static constexpr std::string_view Name = "Command", Label = "Shell command output", Sample = "(output)"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<Extension>
-    { static constexpr std::string_view Name = "Extension", Label = "Extension", Sample = "(extension)"; };
+    { static constexpr std::string_view Name = "Extension", Label = "Extension", Sample = "(extension)"; static constexpr auto Priority = StatusLinePriority::Normal; };
 
     template <> struct ItemTraits<CellSGR>
-    { static constexpr std::string_view Name = "CellSGR", Label = "Cell SGR at cursor", Sample = "1;38:2::255:0:0"; };
+    { static constexpr std::string_view Name = "CellSGR", Label = "Cell SGR at cursor", Sample = "1;38:2::255:0:0"; static constexpr auto Priority = StatusLinePriority::Low; };
 
     template <> struct ItemTraits<CellTextUtf8>
-    { static constexpr std::string_view Name = "CellTextUTF8", Label = "Cell text at cursor (UTF-8)", Sample = "E2 96 88"; };
+    { static constexpr std::string_view Name = "CellTextUTF8", Label = "Cell text at cursor (UTF-8)", Sample = "E2 96 88"; static constexpr auto Priority = StatusLinePriority::Low; };
 
     template <> struct ItemTraits<CellTextUtf32>
-    { static constexpr std::string_view Name = "CellTextUTF32", Label = "Cell text at cursor (UTF-32)", Sample = "U+2588"; };
+    { static constexpr std::string_view Name = "CellTextUTF32", Label = "Cell text at cursor (UTF-32)", Sample = "U+2588"; static constexpr auto Priority = StatusLinePriority::Low; };
     // clang-format on
 
     /// Invokes @p f with a `std::type_identity<T>` for each @ref Item alternative, in variant order.
@@ -459,6 +462,31 @@ namespace StatusLineDefinitions
         [&]<std::size_t... I>(std::index_sequence<I...>) {
             (f(std::type_identity<std::variant_alternative_t<I, Item>> {}), ...);
         }(std::make_index_sequence<std::variant_size_v<Item>> {});
+    }
+
+    /// Whether @ref ItemTraits gives items of type @p T a priority, which collapsing a narrow line reads.
+    template <typename T>
+    concept HasPriority = requires {
+        { ItemTraits<T>::Priority } -> std::convertible_to<StatusLinePriority>;
+    };
+
+    static_assert(
+        [] {
+            auto covered = true;
+            forEachItemType(
+                [&](auto tag) { covered = covered && HasPriority<typename decltype(tag)::type>; });
+            return covered;
+        }(),
+        "Every Item alternative needs an ItemTraits<T>::Priority.");
+
+    /// How much @p item matters when the line is too narrow for all of it.
+    /// @param item The item.
+    /// @return Its type's @ref ItemTraits priority.
+    [[nodiscard]] inline StatusLinePriority priorityOf(Item const& item) noexcept
+    {
+        return std::visit(
+            [](auto const& alternative) { return ItemTraits<std::decay_t<decltype(alternative)>>::Priority; },
+            item);
     }
 } // namespace StatusLineDefinitions
 
@@ -523,6 +551,14 @@ enum class StatusLineStyling : uint8_t
 [[nodiscard]] std::string groupDigits(std::uint64_t value);
 
 class Terminal;
-std::string serializeToVT(Terminal const& vt, StatusLineSegment const& segment, StatusLineStyling styling);
+/// The VT text that draws @p items on the status screen: SGR and all with @p styling enabled, or the text
+/// alone to measure it.
+/// @param vt The terminal whose state the items show.
+/// @param items A segment, or any run of its items.
+/// @param styling Whether the items' styles are written.
+/// @return The text.
+[[nodiscard]] std::string serializeToVT(Terminal const& vt,
+                                        std::span<StatusLineDefinitions::Item const> items,
+                                        StatusLineStyling styling);
 
 } // namespace vtbackend

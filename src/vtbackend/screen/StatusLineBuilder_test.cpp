@@ -1507,3 +1507,40 @@ TEST_CASE("serializeToVT.modeChipTextReads", "[statusline][inputmode][colors]")
         == "NORMAL");
 }
 // }}}
+
+// {{{ Collapse by priority
+TEST_CASE("Terminal.indicatorStatusLine.anyWidthDrawsWithoutOverlap", "[terminal][statusline][collapse]")
+{
+    // An Essential mode chip, a Normal terminal type, the title in the middle and a Low clock on the right:
+    // in a narrow pane the clock goes first, then the type; nothing overlaps, and the mode is cut only when
+    // it alone is wider than the line.
+    for (auto const width: std::views::iota(1, 41))
+    {
+        INFO(width);
+        auto mc = MockTerm { PageSize { LineCount(3), ColumnCount(width) } };
+        mc.terminal.setStatusLineDefinition(parseStatusLineDefinition(
+            "{InputMode:Left= ,Right= }{VTType:Left= }", "{Title}", "{Clock:Left= }"));
+        mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+        mc.terminal.inputHandler().setMode(ViMode::Normal);
+        REQUIRE(mc.terminal.refreshRenderBuffer());
+
+        auto const line = mc.terminal.indicatorStatusLineDisplay().grid().lineText(LineOffset(0));
+        auto const text = test::trimRight(line);
+        CHECK(columnsOf(text) <= width);
+        auto const clock = serializeToVT(
+            mc.terminal, parseStatusLineSegment("{Clock:Left= }"sv), StatusLineStyling::Disabled);
+        if (width >= 8)
+            CHECK(line.starts_with(" NORMAL "));
+        else
+            CHECK(std::string_view { " NORMAL " }.starts_with(text));
+        // The clock, when shown, ends in the last column, whole.
+        if (text.contains(clock.substr(1)))
+            CHECK(text.ends_with(clock));
+        if (width == 12)
+        {
+            CHECK(text == " NORMAL");
+            CHECK_FALSE(text.contains(clock.substr(1)));
+        }
+    }
+}
+// }}}

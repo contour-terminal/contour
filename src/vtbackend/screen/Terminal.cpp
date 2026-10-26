@@ -1666,47 +1666,62 @@ void Terminal::updateIndicatorStatusLine()
     auto const& definitions = _indicatorStatusLineDefinition;
 
     // A segment is placed by the columns the screen lays its text out in, not by its bytes.
-    auto const widthOf = [&](StatusLineSegment const& segment) {
-        return columnsOnTheGrid(serializeToVT(*this, segment, Styling::Disabled),
+    auto const widthOf = [&](std::span<StatusLineDefinitions::Item const> items) {
+        return columnsOnTheGrid(serializeToVT(*this, items, Styling::Disabled),
                                 _indicatorStatusScreen.clusterWidthPolicy());
     };
     auto const columns = _indicatorStatusScreen.pageSize().columns;
 
-    // The columns, from the first, that the left segment and a middle one shown take.
-    auto taken = ColumnCount(0);
+    // Too narrow for every item, the line drops whole ones by priority until each segment is placed.
+    auto const sides = std::array {
+        std::pair { StatusLineSide::Left, &definitions.left },
+        std::pair { StatusLineSide::Middle, &definitions.middle },
+        std::pair { StatusLineSide::Right, &definitions.right },
+    };
+    auto extents = std::vector<StatusLineItemExtent> {};
+    for (auto const& [side, segment]: sides)
+        for (auto const& item: *segment)
+            extents.push_back(StatusLineItemExtent { .side = side,
+                                                     .width = widthOf(std::span { &item, 1 }),
+                                                     .priority = StatusLineDefinitions::priorityOf(item) });
+    auto const fates = collapseStatusLine(extents, columns);
 
-    if (!definitions.left.empty())
+    // The segments as drawn: the template's own while nothing is dropped, which is every frame that fits.
+    auto shownSegments = std::array<StatusLineSegment, 3> {};
+    auto const collapsed = std::ranges::contains(fates, StatusLineItemFate::Dropped);
+    if (collapsed)
     {
-        auto const leftVT = serializeToVT(*this, definitions.left, Styling::Enabled);
-        writeToScreenInternal(_indicatorStatusScreen, leftVT);
-        taken = widthOf(definitions.left);
+        auto fate = fates.begin();
+        for (auto const& [side, segment]: sides)
+            for (auto const& item: *segment)
+                if (*fate++ == StatusLineItemFate::Shown)
+                    shownSegments[std::to_underlying(side)].push_back(item);
     }
+    auto const segmentOf = [&](StatusLineSide side) -> StatusLineSegment const& {
+        return collapsed ? shownSegments[std::to_underlying(side)] : *sides[std::to_underlying(side)].second;
+    };
+    auto const& left = segmentOf(StatusLineSide::Left);
+    auto const& middle = segmentOf(StatusLineSide::Middle);
+    auto const& right = segmentOf(StatusLineSide::Right);
 
-    if (!definitions.middle.empty() || !definitions.right.empty())
+    // Re-measured as whole segments, so a cluster that joins across two items is measured as the grid lays it
+    // out.
+    auto const placement = placeStatusLineSegments(
+        StatusLineSegmentWidths { .left = widthOf(left), .middle = widthOf(middle), .right = widthOf(right) },
+        columns);
+
+    // The left segment starts in the first column, and one wider than the line is cut at its last.
+    if (!left.empty())
+        writeToScreenInternal(_indicatorStatusScreen, serializeToVT(*this, left, Styling::Enabled));
+    if (placement.middleStart)
     {
-        // The middle segment is centred, and not shown if it is too wide, or where it would overlap what the
-        // left segment takes.
-        auto const middleWidth = widthOf(definitions.middle);
-        auto const middleStart = (columns - middleWidth) / ColumnCount(2);
-        if (!definitions.middle.empty()
-            && columns / ColumnCount(2) - ColumnCount(1) > middleWidth / ColumnCount(2)
-            && taken <= middleStart)
-        {
-            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(middleStart));
-            writeToScreenInternal(_indicatorStatusScreen,
-                                  serializeToVT(*this, definitions.middle, Styling::Enabled));
-            taken = std::max(taken, middleStart + middleWidth);
-        }
-
-        // The right segment ends in the last column, and is not shown if it is as wide as the line, or
-        // where it would overlap what the segments before it take.
-        auto const rightWidth = widthOf(definitions.right);
-        if (rightWidth < columns && taken + rightWidth <= columns)
-        {
-            _indicatorStatusScreen.moveCursorToColumn(boxed_cast<ColumnOffset>(columns - rightWidth));
-            writeToScreenInternal(_indicatorStatusScreen,
-                                  serializeToVT(*this, definitions.right, Styling::Enabled));
-        }
+        _indicatorStatusScreen.moveCursorToColumn(*placement.middleStart);
+        writeToScreenInternal(_indicatorStatusScreen, serializeToVT(*this, middle, Styling::Enabled));
+    }
+    if (placement.rightStart)
+    {
+        _indicatorStatusScreen.moveCursorToColumn(*placement.rightStart);
+        writeToScreenInternal(_indicatorStatusScreen, serializeToVT(*this, right, Styling::Enabled));
     }
 
     // What the template printed may reset its rendition -- a {Command}'s output and an {Extension}'s text are
