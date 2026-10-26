@@ -5,6 +5,7 @@
 // need a display: the last case renders them, on the display route only, and only when
 // CONTOUR_SNAPSHOT_DIR names where they go.
 
+#include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/Config.hpp>
 #include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
@@ -16,6 +17,7 @@
 #include <contour/test/TestEnvironment.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/TabBadge.hpp>
+#include <contour/window/TitleBandLayout.hpp>
 
 #include <vtbackend/core/ColorPalette.hpp>
 
@@ -35,6 +37,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <ranges>
 
@@ -77,8 +80,23 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
         auto const look = snapshotLook(variant.edition, variant.appearance);
         auto* titleBar = scene.root().findChild<QQuickItem*>(QStringLiteral("titleBar"));
         REQUIRE(titleBar != nullptr);
-        // Review focus 5: Native2026 hides a one-tab strip, Classic does not.
-        CHECK(titleBar->isVisible() == contour::config::isTabBarShown(look.tabBarVisibility, row.tabCount));
+        // Review focus 5: Native2026 hides a one-tab strip, Classic does not -- except on the macOS band,
+        // which always shows (1c D1). The band table decides, from the row's tab shape and the script's
+        // frame and mode.
+        using contour::window::TabStripGate;
+        auto const band = contour::window::resolveTitleBand({
+            .shape = contour::config::ChromeTokenRows[static_cast<std::size_t>(variant.row)].layout.tabShape,
+            .frame = row.frame == SnapshotFrame::NativeFrame ? contour::window::WindowFrame::NativeFrame
+                                                             : contour::window::WindowFrame::ClientBand,
+            .mode = row.mode == SnapshotWindowMode::FullScreenRevealed
+                        ? contour::window::WindowMode::FullScreen
+                        : contour::window::WindowMode::Windowed,
+            .strip = contour::config::isTabBarShown(look.tabBarVisibility, row.tabCount)
+                         ? TabStripGate::Shown
+                         : TabStripGate::Hidden,
+            .position = contour::config::TabBarPosition::Top,
+        });
+        CHECK(titleBar->isVisible() == (band.band != contour::window::BarPresence::Hidden));
         switch (variant.script)
         {
             case SnapshotScript::ThreeTabs: {
@@ -188,6 +206,31 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 CHECK(flyout->property("tabIndex").toInt() == 1); // the second tab's
                 break;
             }
+            case SnapshotScript::RemoteConnected:
+            case SnapshotScript::RemoteDisconnected: {
+                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("hostChip"));
+                REQUIRE(chip != nullptr);
+                CHECK(chip->isVisible() == titleBar->isVisible());
+                auto const* status = chip->findChild<QObject*>(QStringLiteral("hostChipStatus"));
+                REQUIRE(status != nullptr);
+                CHECK(status->property("text").toString().isEmpty()
+                      == (variant.script == SnapshotScript::RemoteConnected));
+                break;
+            }
+            case SnapshotScript::DaemonDrift: {
+                auto const* chip = scene.root().findChild<QQuickItem*>(QStringLiteral("daemonDriftBadge"));
+                REQUIRE(chip != nullptr);
+                CHECK(chip->isVisible());
+                break;
+            }
+            case SnapshotScript::NativeTitleBar: {
+                auto const* leading =
+                    scene.root().findChild<QQuickItem*>(QStringLiteral("leadingWindowControls"));
+                REQUIRE(leading != nullptr);
+                CHECK(leading->width() == 0);
+                break;
+            }
+            case SnapshotScript::FullScreenReveal: CHECK(titleBar->property("revealed").toBool()); break;
             case SnapshotScript::SingleTab: break;
         }
     }

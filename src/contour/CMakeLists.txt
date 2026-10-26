@@ -391,6 +391,8 @@ if(CONTOUR_FRONTEND_GUI)
         qml/SearchBar.qml
         qml/SessionChrome.qml
         qml/TitleBar.qml
+        qml/HostChip.qml
+        qml/ToolbarButton.qml
         qml/TabStrip.qml
         qml/TabItem.qml
         qml/TabBadgeSlot.qml

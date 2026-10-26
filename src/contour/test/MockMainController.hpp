@@ -8,10 +8,13 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
@@ -25,8 +28,10 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <utility>
 
+#include <vthost/client/ReleaseDrift.hpp>
 #include <vtworkspace/PaneLayout.hpp>
 
 namespace contour::test
@@ -70,7 +75,19 @@ struct MainWindowScene
     config::TabBarVisibility tabBarVisibility = config::TabBarVisibility::Always;
     snapshot::TabDecor decor = snapshot::TabDecor::Plain; ///< What the tabs carry beyond their titles.
     int activeTab = 0;                                    ///< The active tab's index.
+    /// How the attached host's connection stands; read only while @c hostLabel names one.
+    window::HostChipState hostChipState = window::HostChipState::Connected;
+    config::TabBarPosition tabBarPosition = config::TabBarPosition::Top; ///< The configured tab-bar edge.
+    snapshot::SnapshotDrift drift = snapshot::SnapshotDrift::None;       ///< Whether the daemon drifted.
+    snapshot::SnapshotFrame frame = snapshot::SnapshotFrame::ClientBand; ///< Who draws the title area.
+    /// What the OS reserves at the band's leading edge for its own window controls while the chrome draws
+    /// the band (macOS's traffic lights); 0 under the native frame, which draws them in a bar of its own.
+    qreal nativeControlsInset = 0;
 };
+
+/// The client and daemon releases a drifted scene reports, as DaemonDriftModel_test assesses them.
+inline constexpr auto DriftClientVersion = std::string_view { "0.8.2" };
+inline constexpr auto DriftDaemonVersion = std::string_view { "0.8.1" };
 
 /// Manager + WindowController in one mock: `terminalSessions` context property AND the object
 /// Main.qml assigns to `win` (createWindowController returns this). The QAbstractListModel rows
@@ -82,7 +99,11 @@ class MockMainController: public MainWindowControllerMock
     // Writable here so a test can let multimedia become ready after the window loaded, as it does in
     // production once the background probe finishes.
     Q_PROPERTY(bool multimediaReady READ multimediaReady NOTIFY multimediaReadyChanged)
-    Q_PROPERTY(bool titleBarVisible READ titleBarVisible NOTIFY titleBarVisibleChanged)
+    Q_PROPERTY(
+        bool titleBarVisible READ titleBarVisible WRITE setTitleBarVisible NOTIFY titleBarVisibleChanged)
+    // Mirrors WindowController's frame adapter: what the OS reserves for its own window controls, which
+    // follows the frame (zero once show_title_bar hands the title area to the system).
+    Q_PROPERTY(qreal nativeControlsInset READ nativeControlsInset NOTIFY titleBarVisibleChanged)
     // Tab-strip placement + resolved visibility, mirroring the production WindowController properties
     // Main.qml binds. Writable here so a test can flip them and re-load Main.qml to assert the layout.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition WRITE setTabBarPosition NOTIFY tabBarPositionChanged)
@@ -128,11 +149,23 @@ class MockMainController: public MainWindowControllerMock
     /// @param scene What the window holds; see MainWindowScene. Its pointers must outlive the mock.
     explicit MockMainController(MainWindowScene scene = {}):
         _scene { std::move(scene) },
+        _tabBarPosition { static_cast<int>(_scene.tabBarPosition) },
         _tabBarShouldShow { config::isTabBarShown(_scene.tabBarVisibility, _scene.tabCount) },
+        _titleBarVisible { _scene.frame == snapshot::SnapshotFrame::NativeFrame },
         _hostingNotice { _scene.hostingNotice }
     {
         attachedHost = _scene.hostLabel;
+        setHostChipState(static_cast<int>(_scene.hostChipState));
+        if (_scene.drift == snapshot::SnapshotDrift::Shown)
+            _drift.show(vthost::client::assessDrift(
+                DriftClientVersion, DriftDaemonVersion, vthost::client::LayoutAfterRestart::Lost));
     }
+
+    /// @return Whether the scene's daemon drifted, so Main.qml is given the drift model.
+    [[nodiscard]] bool hasDrift() const noexcept { return _scene.drift == snapshot::SnapshotDrift::Shown; }
+
+    /// @return The drift model Main.qml reads as `daemonDrift` when the scene drifted.
+    [[nodiscard]] window::DaemonDriftModel& daemonDrift() noexcept { return _drift; }
 
     [[nodiscard]] int activeTabIndex() const noexcept { return _scene.activeTab; }
     [[nodiscard]] QString const& hostingNotice() const noexcept { return _hostingNotice; }
@@ -155,7 +188,23 @@ class MockMainController: public MainWindowControllerMock
             emit multimediaReadyChanged();
         }
     }
-    [[nodiscard]] bool titleBarVisible() const noexcept { return false; } // frameless CSD (default)
+    /// @return Whether the system frame draws the title area (show_title_bar); false, frameless CSD, by
+    /// default.
+    [[nodiscard]] bool titleBarVisible() const noexcept { return _titleBarVisible; }
+    /// What ToggleTitleBar does: hands the title area to the system frame, or takes it back.
+    void setTitleBarVisible(bool visible)
+    {
+        if (_titleBarVisible != visible)
+        {
+            _titleBarVisible = visible;
+            emit titleBarVisibleChanged();
+        }
+    }
+    /// @return The scene's inset while the chrome draws the band, and 0 under the native frame.
+    [[nodiscard]] qreal nativeControlsInset() const noexcept
+    {
+        return _titleBarVisible ? 0 : _scene.nativeControlsInset;
+    }
 
     [[nodiscard]] int tabBarPosition() const noexcept { return _tabBarPosition; }
     void setTabBarPosition(int position)
@@ -373,8 +422,10 @@ class MockMainController: public MainWindowControllerMock
 
     MainWindowScene _scene;
     int _chromeHeight = 0;
-    int _tabBarPosition = 0;       // 0 = Top (default), 1 = Bottom
-    bool _tabBarShouldShow;        // seeded from the scene's tab-bar visibility
+    int _tabBarPosition;    // seeded from the scene; 0 = Top, 1 = Bottom
+    bool _tabBarShouldShow; // seeded from the scene's tab-bar visibility
+    bool _titleBarVisible;  // seeded from the scene's frame
+    window::DaemonDriftModel _drift;
     bool _multimediaReady = false; // the background probe has not finished
     QString _hostingNotice;
 };
@@ -400,6 +451,8 @@ class MockMainController: public MainWindowControllerMock
     // as the production manager pins its controllers.
     QQmlEngine::setObjectOwnership(&controller, QQmlEngine::CppOwnership);
     engine.rootContext()->setContextProperty("terminalSessions", &controller);
+    if (controller.hasDrift())
+        engine.rootContext()->setContextProperty("daemonDrift", &controller.daemonDrift());
 
     installChromeStyle(engine, chrome);
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/qt/qml/Contour/Ui/Main.qml")));
@@ -413,6 +466,9 @@ class MockMainController: public MainWindowControllerMock
     std::unique_ptr<QObject> root(component.create());
     REQUIRE(root != nullptr);
     QCoreApplication::processEvents();
+    // What the bindings unloaded while `win` resolved (a Loader deletes its item later) is gone, so a
+    // findChild() sees only what the window shows.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
     for (auto const& w: warnings.messages())
         INFO("QML warning: " << w.toStdString());

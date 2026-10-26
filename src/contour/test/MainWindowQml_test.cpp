@@ -15,8 +15,10 @@
 // without PTYs or displays. activeTabRootPane stays null, so the pane tree (which would need a real
 // TerminalDisplay) never instantiates — exactly the pre-first-session state.
 
+#include <contour/config/AccessibilityPreferences.hpp>
 #include <contour/config/ChromeTokenGroups.hpp>
 #include <contour/config/NewDefaultsOffer.hpp>
+#include <contour/config/TabBarMode.hpp>
 #include <contour/config/UiStyle.hpp>
 #include <contour/config/WindowControlStyle.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -25,20 +27,27 @@
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
+#include <contour/window/HostChipState.hpp>
+#include <contour/window/UiStyleProvider.hpp>
 
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
 #include <QtCore/QFile>
+#include <QtCore/QPoint>
+#include <QtCore/QPointF>
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUrl>
+#include <QtGui/QAccessible>
 #include <QtGui/QColor>
 #include <QtGui/QFont>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
+#include <QtGui/QWindow>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -368,43 +377,6 @@ TEST_CASE("Main.qml has no settings page or settings tab (offscreen)", "[contour
 
     CHECK(root->findChild<QObject*>(QStringLiteral("settingsPageLoader")) == nullptr);
     CHECK(root->findChild<QObject*>(QStringLiteral("settingsTab")) == nullptr);
-}
-
-TEST_CASE("Main.qml remote chrome: a window attached to a host names it (offscreen)",
-          "[contour][gui][qml][mainwindow][window][hosts]")
-{
-    SECTION("a remote window")
-    {
-        QQmlEngine engine;
-        MockMainController controller;
-        controller.attachedHost = QStringLiteral("home");
-        contour::test::QmlMessageCapture warnings;
-        auto root = loadMainWindow(engine, controller, warnings);
-
-        // No session has a title yet, so the title is the host alone.
-        CHECK(root->property("title").toString() == QStringLiteral("home"));
-        auto const* badge = root->findChild<QQuickItem*>(QStringLiteral("hostBadge"));
-        REQUIRE(badge != nullptr);
-        CHECK(badge->isVisible());
-        auto const* text = root->findChild<QObject*>(QStringLiteral("hostBadgeText"));
-        REQUIRE(text != nullptr);
-        CHECK(text->property("text").toString() == QStringLiteral("home"));
-        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
-    }
-
-    SECTION("a local window")
-    {
-        QQmlEngine engine;
-        MockMainController controller;
-        contour::test::QmlMessageCapture warnings;
-        auto root = loadMainWindow(engine, controller, warnings);
-
-        CHECK(root->property("title").toString().isEmpty());
-        auto const* badge = root->findChild<QQuickItem*>(QStringLiteral("hostBadge"));
-        REQUIRE(badge != nullptr);
-        CHECK_FALSE(badge->isVisible());
-        CHECK(badge->width() == 0);
-    }
 }
 
 namespace
@@ -1257,6 +1229,461 @@ TEST_CASE("the Terminal row sets the active tab apart where its fill is the bar'
     CHECK(fillOf(*tabs[0]) == fillOf(*tabs[1])); // the premise: the fill alone says nothing here
     CHECK(boldOf(*tabs[0]));
     CHECK_FALSE(boldOf(*tabs[1]));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("Main.qml remote chrome: a window attached to a host names it in its chip (offscreen)",
+          "[contour][gui][qml][mainwindow][window][hosts]")
+{
+    SECTION("a remote window")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        controller.attachedHost = QStringLiteral("home");
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        // No session has a title yet, so the title is the host alone (remoteWindowTitle).
+        CHECK(root->property("title").toString() == QStringLiteral("home"));
+        // The chip replaces the strip's old host badge.
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("hostBadge")) == nullptr);
+        auto* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+        REQUIRE(chip != nullptr);
+        CHECK(chip->isVisible());
+        auto const* label = chip->findChild<QObject*>(QStringLiteral("hostChipLabel"));
+        auto const* status = chip->findChild<QObject*>(QStringLiteral("hostChipStatus"));
+        auto const* dot = chip->findChild<QObject*>(QStringLiteral("hostChipDot"));
+        REQUIRE(label != nullptr);
+        REQUIRE(status != nullptr);
+        REQUIRE(dot != nullptr);
+        CHECK(label->property("text").toString() == QStringLiteral("home"));
+
+        auto const* style = engine.rootContext()
+                                ->contextProperty(QStringLiteral("chromeStyle"))
+                                .value<contour::window::UiStyleProvider*>();
+        REQUIRE(style != nullptr);
+        for (auto const index: std::views::iota(std::size_t { 0 }, contour::window::HostChipStateCount))
+        {
+            auto const state = static_cast<contour::window::HostChipState>(index);
+            auto const& look = contour::window::hostChipLook(state);
+            INFO("state: " << look.accessibleState);
+            controller.setHostChipState(static_cast<int>(state));
+            QCoreApplication::processEvents();
+            CHECK(status->property("text").toString() == QString::fromUtf8(look.status));
+            CHECK(dot->property("color").value<QColor>() == style->statusInk(static_cast<int>(look.dot)));
+            CHECK(evaluateIn(*chip, QStringLiteral("Accessible.name")).toString()
+                  == QStringLiteral("Attached to home, %1").arg(QString::fromUtf8(look.accessibleState)));
+        }
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("a local window")
+    {
+        QQmlEngine engine;
+        MockMainController controller;
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings);
+
+        CHECK(root->property("title").toString().isEmpty());
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("hostBadge")) == nullptr);
+        auto const* chip = root->findChild<QQuickItem*>(QStringLiteral("hostChip"));
+        REQUIRE(chip != nullptr);
+        CHECK_FALSE(chip->isVisible());
+        CHECK(chip->width() == 0);
+    }
+}
+
+namespace
+{
+using contour::config::TabBarVisibility;
+
+/// Whether @p item lies beneath @p ancestor in the visual tree.
+[[nodiscard]] bool isInside(QQuickItem const* item, QQuickItem const* ancestor)
+{
+    for (auto const* parent = item; parent != nullptr; parent = parent->parentItem())
+        if (parent == ancestor)
+            return true;
+    return false;
+}
+
+/// The item named @p name, failing the test when there is none.
+[[nodiscard]] QQuickItem& named(QObject& root, QString const& name)
+{
+    auto* item = root.findChild<QQuickItem*>(name);
+    INFO("item: " << name.toStdString());
+    REQUIRE(item != nullptr);
+    return *item;
+}
+
+/// The centre of @p item, in its window's coordinates.
+[[nodiscard]] QPoint centreOf(QQuickItem const& item)
+{
+    return item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint();
+}
+} // namespace
+
+TEST_CASE("with one tab under Multiple, the macOS band shows the centred title (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                      .tabBarVisibility = TabBarVisibility::Multiple } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+    CHECK(titleBar.isVisible());
+    CHECK(titleBar.height() == styleGroup(engine, "size").property("titleBar").toReal());
+    CHECK(titleBar.height() == 38);
+    auto& title = named(*root, QStringLiteral("bandTitle"));
+    CHECK(title.isVisible());
+    // The active row's title role: what its tab would be labelled.
+    CHECK(title.property("text").toString() == QStringLiteral("Tab 1"));
+    auto const* well = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
+    CHECK((well == nullptr || !well->isVisible()));
+    CHECK(controller.chromeHeight() == 38);
+
+    // A second tab: the gate shows the tabs, and the title gives way to the well.
+    controller.setTabBarShouldShow(true);
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    auto const* shownWell = root->findChild<QQuickItem*>(QStringLiteral("tabWell"));
+    REQUIRE(shownWell != nullptr);
+    CHECK(shownWell->isVisible());
+    CHECK_FALSE(title.isVisible());
+    CHECK(controller.chromeHeight() == 38);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("with one tab under Multiple, Fluent and Linux show no bar, as today (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                          .tabBarVisibility = TabBarVisibility::Multiple } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        CHECK(controller.chromeHeight() == 0);
+        CHECK_FALSE(named(*root, QStringLiteral("titleBar")).isVisible());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the drift chip sits in the bar, not over the cells (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::ContourLinux })
+    {
+        INFO("row: " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 3, .drift = contour::test::snapshot::SnapshotDrift::Shown } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        showWindow(*root);
+
+        auto& chip = named(*root, QStringLiteral("daemonDriftBadge"));
+        CHECK(chip.isVisible());
+        CHECK(isInside(&chip, &named(*root, QStringLiteral("titleBar"))));
+        CHECK_FALSE(isInside(&chip, &named(*root, QStringLiteral("content"))));
+        CHECK(chip.height() == styleGroup(engine, "size").property("toolbarChip").toReal());
+        // In the band's trailing area: past the drag region.
+        auto const& drag = named(*root, QStringLiteral("dragRegion"));
+        CHECK(chip.mapToScene(QPointF(0, 0)).x() >= drag.mapToScene(QPointF(drag.width(), 0)).x());
+
+        auto* dialog = chip.findChild<QObject*>(QStringLiteral("daemonDriftConfirm"));
+        REQUIRE(dialog != nullptr);
+        CHECK(QString::fromLatin1(dialog->metaObject()->className()).startsWith(QStringLiteral("KitDialog")));
+        QTest::mouseClick(qobject_cast<QQuickWindow*>(root.get()), Qt::LeftButton, {}, centreOf(chip));
+        REQUIRE(QTest::qWaitFor([&] { return dialog->property("opened").toBool(); }, 2000));
+        CHECK(dialog->property("heading").toString() == controller.daemonDrift().actionLabel());
+        REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
+        CHECK(controller.daemonDrift().isRestarting());
+
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("with no bar shown, the chip stays at the content's corner")
+    {
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene {
+            .tabCount = 1,
+            .tabBarVisibility = TabBarVisibility::Multiple,
+            .drift = contour::test::snapshot::SnapshotDrift::Shown } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::ContourLinux));
+        showWindow(*root);
+
+        auto& chip = named(*root, QStringLiteral("daemonDriftBadge"));
+        auto& content = named(*root, QStringLiteral("content"));
+        CHECK(chip.isVisible());
+        CHECK(isInside(&chip, &content));
+        CHECK(chip.x() + chip.width() < content.width());
+        CHECK(chip.y() + chip.height() < content.height());
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("show_title_bar keeps the native frame and a strip (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    constexpr auto Inset = 70.0;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3, .nativeControlsInset = Inset } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    showWindow(*root);
+
+    auto& leading = named(*root, QStringLiteral("leadingWindowControls"));
+    auto& trailing = named(*root, QStringLiteral("trailingWindowControls"));
+    // The client band clears the system's traffic lights.
+    CHECK(leading.width() == Inset);
+
+    controller.setTitleBarVisible(true);
+    QCoreApplication::processEvents();
+    REQUIRE(QTest::qWaitFor([&] { return leading.width() == 0; }, 1000));
+    CHECK(named(*root, QStringLiteral("titleBar")).isVisible());
+    CHECK(named(*root, QStringLiteral("tabWell")).isVisible());
+    CHECK(tabDelegates(*root).size() == 3);
+    CHECK_FALSE(named(*root, QStringLiteral("bandTitle")).isVisible());
+    // The system frame draws the controls: none of ours.
+    CHECK_FALSE(leading.property("active").toBool());
+    CHECK_FALSE(trailing.property("active").toBool());
+    CHECK(trailing.width() == 0);
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+namespace
+{
+/// The full-screen reveal on the macOS row under @p motion; @see the two cases below.
+void checkFullScreenReveal(contour::config::MotionPreference motion)
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = 3 } };
+    contour::test::QmlMessageCapture warnings;
+    auto setup = rowSetup(ChromeStyle::MacOS);
+    setup.accessibility.motion = motion;
+    auto root = loadMainWindow(engine, controller, warnings, setup);
+    auto* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+    window->showFullScreen();
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+    REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
+    QTest::mouseMove(window, QPoint(window->width() / 2, window->height() / 2));
+
+    auto const reduced = motion == contour::config::MotionPreference::Reduced;
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+    auto& content = named(*root, QStringLiteral("content"));
+    auto& edge = named(*root, QStringLiteral("bandRevealEdge"));
+    auto const slideOffset = [&] {
+        return titleBar.property("slideOffset").toReal();
+    };
+    auto const revealed = [&] {
+        return titleBar.property("revealed").toBool();
+    };
+
+    CHECK(edge.isVisible());
+    CHECK_FALSE(revealed());
+    // The band overlays the top rows: it takes nothing from the content, nor from the declared chrome.
+    CHECK(content.y() == named(*root, QStringLiteral("bannerStack")).y());
+    CHECK(content.y() == 0);
+    CHECK(controller.chromeHeight() == 0);
+    // Concealed: slid above the window, or faded out.
+    REQUIRE(QTest::qWaitFor(
+        [&] { return reduced ? titleBar.opacity() == 0 : titleBar.y() == -titleBar.height(); }, 2000));
+    CHECK(slideOffset() == (reduced ? 0 : -titleBar.height()));
+    auto const contentY = content.y();
+    auto const contentHeight = content.height();
+
+    QTest::mouseMove(window, centreOf(edge));
+    REQUIRE(QTest::qWaitFor(revealed, 2000));
+    REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == 0 && titleBar.opacity() == 1; }, 2000));
+    CHECK(titleBar.isVisible());
+    CHECK(slideOffset() == 0);
+    CHECK(content.y() == contentY);
+    CHECK(content.height() == contentHeight);
+
+    // Down onto the band keeps it; away from both hides it again.
+    QTest::mouseMove(window, centreOf(titleBar));
+    QCoreApplication::processEvents();
+    CHECK(revealed());
+    QTest::mouseMove(window, QPoint(window->width() / 2, window->height() / 2));
+    REQUIRE(QTest::qWaitFor([&] { return !revealed(); }, 2000));
+    if (reduced)
+    {
+        REQUIRE(QTest::qWaitFor([&] { return titleBar.opacity() == 0; }, 2000));
+        CHECK(titleBar.y() == 0);
+        CHECK(slideOffset() == 0);
+    }
+    else
+        REQUIRE(QTest::qWaitFor([&] { return titleBar.y() == -titleBar.height(); }, 2000));
+    CHECK(content.y() == contentY);
+    CHECK(content.height() == contentHeight);
+
+    window->showNormal();
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+} // namespace
+
+TEST_CASE("full screen reveals the band without resizing the content (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    checkFullScreenReveal(contour::config::MotionPreference::Full);
+}
+
+TEST_CASE("full screen reveals the band by fading it under Reduce Motion (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    checkFullScreenReveal(contour::config::MotionPreference::Reduced);
+}
+
+TEST_CASE("the tab bar at the bottom on macOS keeps the band at the top (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene {
+        .tabCount = 3, .tabBarPosition = contour::config::TabBarPosition::Bottom } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+    auto const* window = qobject_cast<QQuickWindow*>(root.get());
+    REQUIRE(window != nullptr);
+
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+    auto& tabsBar = named(*root, QStringLiteral("tabsBar"));
+    auto& content = named(*root, QStringLiteral("content"));
+    CHECK(titleBar.y() == 0);
+    CHECK(named(*root, QStringLiteral("bandTitle")).isVisible());
+    CHECK(tabsBar.isVisible());
+    CHECK(tabsBar.y() + tabsBar.height() == window->height());
+    CHECK(isInside(&named(*root, QStringLiteral("tabWell")), &tabsBar));
+    // One strip, the tabs bar's, and one "+", the band's.
+    CHECK(root->findChildren<QQuickItem*>(QStringLiteral("tabList")).size() == 1);
+    CHECK(root->findChildren<QQuickItem*>(QStringLiteral("newTabButton")).size() == 1);
+    CHECK(isInside(&named(*root, QStringLiteral("newTabButton")), &titleBar));
+    CHECK(root->findChildren<QQuickItem*>(QStringLiteral("hostChip")).size() == 1);
+    // The content runs between the two.
+    CHECK(content.y() == titleBar.height());
+    CHECK(content.y() + content.height() == tabsBar.y());
+    CHECK(controller.chromeHeight() == static_cast<int>(titleBar.height() + tabsBar.height()));
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the macOS + opens profiles on a secondary click (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    // One tab (the band shows the title, so no strip exists) and three (the well beside the "+").
+    for (auto const tabCount: { 1, 3 })
+    {
+        INFO("tabs: " << tabCount);
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = tabCount,
+                                                          .tabBarVisibility = TabBarVisibility::Multiple } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::MacOS));
+        showWindow(*root);
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+
+        CHECK(root->findChild<QQuickItem*>(QStringLiteral("newTabMenuButton")) == nullptr);
+        CHECK(root->findChildren<QQuickItem*>(QStringLiteral("newTabButton")).size() == 1);
+        auto& plus = named(*root, QStringLiteral("newTabButton"));
+        CHECK(plus.isVisible());
+        CHECK(plus.width() == styleGroup(engine, "size").property("toolbarButton").toReal());
+        CHECK(evaluateIn(plus, QStringLiteral("Accessible.role")).toInt() == QAccessible::Button);
+
+        QTest::mouseClick(window, Qt::LeftButton, {}, centreOf(plus));
+        CHECK(controller.calls.count(QStringLiteral("createNewTab")) == 2); // the startup tab, and this one
+        CHECK(controller.newTabMenuOpenings == 0);
+
+        QTest::mouseClick(window, Qt::RightButton, {}, centreOf(plus));
+        CHECK(controller.newTabMenuOpenings == 1);
+        auto* menu = root->findChild<QObject*>(QStringLiteral("newTabMenu"));
+        REQUIRE(menu != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+        CHECK(menu->property("count").toInt() == static_cast<int>(contour::test::MockProfileNames.size()));
+
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+
+    SECTION("Fluent keeps its caret")
+    {
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 3 } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Fluent));
+        CHECK(named(*root, QStringLiteral("newTabMenuButton")).isVisible());
+        CHECK(root->findChildren<QQuickItem*>(QStringLiteral("newTabButton")).size() == 1);
+        CHECK(isInside(&named(*root, QStringLiteral("newTabButton")),
+                       &named(*root, QStringLiteral("tabStrip"))));
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+    }
+}
+
+TEST_CASE("the Terminal row snaps the native inset to cells and brackets its chips (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    constexpr auto Inset = 70.0;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene {
+        .tabCount = 2, .hostLabel = QStringLiteral("build-01"), .nativeControlsInset = Inset } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
+    showWindow(*root);
+
+    qreal snapped = 0;
+    REQUIRE(QMetaObject::invokeMethod(
+        &chromeStyleOf(engine), "snapToCells", Q_RETURN_ARG(qreal, snapped), Q_ARG(qreal, Inset)));
+    CHECK(snapped >= Inset);
+    auto const cell = chromeStyleOf(engine).property("cellWidth").toReal();
+    CHECK(std::fmod(snapped, cell) == Catch::Approx(0.0).margin(1e-6));
+    CHECK(named(*root, QStringLiteral("leadingWindowControls")).width() == snapped);
+
+    auto& chip = named(*root, QStringLiteral("hostChip"));
+    auto const& open = part(chip, QStringLiteral("hostChipOpen"));
+    auto const& label = part(chip, QStringLiteral("hostChipLabel"));
+    auto const& close = part(chip, QStringLiteral("hostChipClose"));
+    CHECK(open.property("text").toString() == QStringLiteral("["));
+    CHECK(close.property("text").toString() == QStringLiteral("]"));
+    CHECK(part(chip, QStringLiteral("hostChipDotGlyph")).isVisible());
+    CHECK_FALSE(part(chip, QStringLiteral("hostChipDot")).isVisible());
+    CHECK(open.x() + open.width() <= label.x());
+    CHECK(label.x() + label.width() <= close.x());
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
+
+TEST_CASE("the Terminal row keeps the active tab and the + in view when its tabs overflow (offscreen)",
+          "[contour][gui][qml][mainwindow][band]")
+{
+    constexpr auto TabCount = 20;
+    QQmlEngine engine;
+    MockMainController controller { MainWindowScene { .tabCount = TabCount, .activeTab = TabCount - 1 } };
+    contour::test::QmlMessageCapture warnings;
+    auto root = loadMainWindow(engine, controller, warnings, rowSetup(ChromeStyle::Terminal));
+    showWindow(*root);
+
+    auto& titleBar = named(*root, QStringLiteral("titleBar"));
+    auto const& list = named(*root, QStringLiteral("tabList"));
+    auto const tabs = tabDelegates(*root);
+    REQUIRE(tabs.size() == static_cast<std::size_t>(TabCount));
+    auto const* active = tabs.back();
+    REQUIRE(active != nullptr);
+    auto const contentX = list.property("contentX").toReal();
+    CHECK(contentX > 0);
+    CHECK(active->x() >= contentX);
+    CHECK(active->x() + active->width() <= contentX + list.width());
+
+    auto& plus = named(*root, QStringLiteral("newTabButton"));
+    CHECK(plus.isVisible());
+    CHECK(plus.mapToItem(&titleBar, QPointF(plus.width(), 0)).x() <= titleBar.width());
+    auto const& drag = named(*root, QStringLiteral("dragRegion"));
+    CHECK(drag.width() >= styleGroup(engine, "space").property("dragReserve").toReal());
 
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }

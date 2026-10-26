@@ -17,6 +17,7 @@
 #include <contour/test/QmlMessageCapture.hpp>
 #include <contour/test/QmlMocks.hpp>
 #include <contour/window/CommandPaletteModel.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/SettingsController.hpp>
 #include <contour/window/SettingsWindowHost.hpp>
 #include <contour/window/SettingsWindowRules.hpp>
@@ -26,6 +27,8 @@
 
 #include <QtCore/QByteArray>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QPoint>
+#include <QtCore/QPointF>
 #include <QtCore/QSize>
 #include <QtCore/QStringList>
 #include <QtCore/QTemporaryDir>
@@ -35,6 +38,7 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
+#include <QtGui/QWindow>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
@@ -142,6 +146,11 @@ class ChromeSnapshotScene
             .tabBarVisibility = _look.tabBarVisibility,
             .decor = scriptRow(variant.script).decor,
             .activeTab = scriptRow(variant.script).activeTab,
+            .hostChipState = hostChipStateFor(scriptRow(variant.script).connection),
+            .tabBarPosition = config::TabBarPosition::Top,
+            .drift = scriptRow(variant.script).drift,
+            .frame = scriptRow(variant.script).frame,
+            .nativeControlsInset = 0,
         } },
         _newDefaults { newDefaultsOfferFor(scriptRow(variant.script).banner) },
         _settingsWindow { makeSettingsWindow() },
@@ -153,7 +162,19 @@ class ChromeSnapshotScene
     ChromeSnapshotScene& operator=(ChromeSnapshotScene const&) = delete;
     ChromeSnapshotScene(ChromeSnapshotScene&&) = delete;
     ChromeSnapshotScene& operator=(ChromeSnapshotScene&&) = delete;
-    ~ChromeSnapshotScene() = default;
+    /// Leaves full screen before the window goes, so the next scene's window may enter it: macOS refuses
+    /// while a window is still on its way out of a full-screen space.
+    ~ChromeSnapshotScene()
+    {
+        if (_root == nullptr || window().visibility() != QWindow::FullScreen)
+            return;
+        window().showNormal();
+        // Best effort: a destructor has nothing to report a window that stays in full screen to.
+        [[maybe_unused]] auto const left = QTest::qWaitFor(
+            [&] { return window().visibility() != QWindow::FullScreen; }, FullScreenSettleTimeoutMs);
+        // The animation out of the space outlasts the state change.
+        QTest::qWait(FullScreenLeaveMs);
+    }
 
     /// @return The object the script's action created over the window, or null when it created none.
     [[nodiscard]] QObject const* overlay() const noexcept { return _overlay.get(); }
@@ -166,7 +187,11 @@ class ChromeSnapshotScene
     void show()
     {
         window().resize(SnapshotWindowSize);
-        window().show();
+        switch (scriptRow(_variant.script).mode)
+        {
+            case SnapshotWindowMode::Windowed: window().show(); break;
+            case SnapshotWindowMode::FullScreenRevealed: showFullScreenRevealed(); break;
+        }
         if (_settingsWindow != nullptr)
             REQUIRE(_settingsWindow->show(nullptr).has_value());
         switch (scriptRow(_variant.script).action)
@@ -245,6 +270,12 @@ class ChromeSnapshotScene
     /// The title of the tab menu's colour sub-menu.
     static inline auto const TabColorTitle = QStringLiteral("Tab Color");
 
+    /// How often, and for how long at most, the full-screen size is polled until it holds still.
+    static constexpr int FullScreenSettlePollMs = 200;
+    static constexpr int FullScreenSettleTimeoutMs = 5000;
+    /// How long macOS's animation out of a full-screen space is given.
+    static constexpr int FullScreenLeaveMs = 1500;
+
     /// What halves a length to centre an item.
     static constexpr qreal HalfDivisor = 2;
 
@@ -319,6 +350,58 @@ class ChromeSnapshotScene
         model->setShortcuts(command::shortcutIndex(config, shortcuts));
         model->refresh();
         return model;
+    }
+
+    /// The chip state a script's connection column shows.
+    /// @param connection The script's host connection.
+    /// @return Its HostChipState; Connected for a local window, which shows no chip.
+    [[nodiscard]] static constexpr window::HostChipState hostChipStateFor(HostConnection connection) noexcept
+    {
+        switch (connection)
+        {
+            case HostConnection::Local:
+            case HostConnection::Connected: break;
+            case HostConnection::Reconnecting: return window::HostChipState::Reconnecting;
+            case HostConnection::Disconnected: return window::HostChipState::Disconnected;
+        }
+        return window::HostChipState::Connected;
+    }
+
+    /// Shows the window in full screen and rests the pointer on the band's reveal edge, waiting until the
+    /// band is revealed.
+    void showFullScreenRevealed()
+    {
+        // Shown first: macOS takes a window into full screen from its frame, not from nothing.
+        window().show();
+        REQUIRE(QTest::qWaitForWindowExposed(&window(), FullScreenSettleTimeoutMs));
+        window().showFullScreen();
+        REQUIRE(QTest::qWaitFor([&] { return window().visibility() == QWindow::FullScreen; }, 3000));
+        // macOS animates into full screen after the state changes: settled once the size holds still.
+        auto sizes = std::vector<QSize> { window().size() };
+        for ([[maybe_unused]] auto const poll:
+             std::views::iota(0, FullScreenSettleTimeoutMs / FullScreenSettlePollMs))
+        {
+            QTest::qWait(FullScreenSettlePollMs);
+            sizes.push_back(window().size());
+            if (sizes.back() == sizes[sizes.size() - 2] && sizes.back() != SnapshotWindowSize)
+                break;
+        }
+        INFO("full-screen sizes seen: " << sizes.size() << ", last " << sizes.back().width() << "x"
+                                        << sizes.back().height());
+        REQUIRE(sizes.back() == sizes[sizes.size() - 2]);
+        auto const* edge = root().findChild<QQuickItem*>(QStringLiteral("bandRevealEdge"));
+        auto const* titleBar = root().findChild<QQuickItem*>(QStringLiteral("titleBar"));
+        REQUIRE(edge != nullptr);
+        REQUIRE(titleBar != nullptr);
+        REQUIRE(QTest::qWaitFor([&] { return edge->isVisible(); }, 2000));
+        auto const onEdge =
+            edge->mapToScene(QPointF(edge->width() / HalfDivisor, edge->height() / HalfDivisor)).toPoint();
+        // Two moves, because a move to where the pointer already is sends nothing.
+        QTest::mouseMove(&window(), onEdge + QPoint(0, static_cast<int>(window().height() / HalfDivisor)));
+        QTest::mouseMove(&window(), onEdge);
+        REQUIRE(QTest::qWaitFor([&] { return titleBar->property("revealed").toBool(); }, 2000));
+        // The slide (or, under Reduce Motion, the fade) runs out.
+        REQUIRE(QTest::qWaitFor([&] { return titleBar->y() == 0 && titleBar->opacity() == 1; }, 2000));
     }
 
     /// The hosting notice a script's banner column asks for.

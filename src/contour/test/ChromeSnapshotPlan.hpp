@@ -46,9 +46,14 @@ enum class SnapshotScript : uint8_t
     NewDefaultsBanner,
     TabMenu,
     About,
-    TabBadges,      //!< Every badge kind on one strip, beside a coloured active tab.
-    TabOverflow,    //!< More tabs than the strip holds, the last one active.
-    TabColorFlyout, //!< The second tab's colour flyout.
+    TabBadges,          //!< Every badge kind on one strip, beside a coloured active tab.
+    TabOverflow,        //!< More tabs than the strip holds, the last one active.
+    TabColorFlyout,     //!< The second tab's colour flyout.
+    RemoteConnected,    //!< A window attached to a host, connected: the host chip in the band.
+    RemoteDisconnected, //!< A window whose host connection is lost: the chip says so.
+    DaemonDrift,        //!< The daemon runs another release: the drift chip in the band.
+    NativeTitleBar,     //!< show_title_bar: the system frame draws the title, the strip sits below it.
+    FullScreenReveal,   //!< Full screen, with the pointer at the top edge revealing the band.
 };
 
 /// How a script's active tab is divided into panes.
@@ -88,8 +93,31 @@ enum class TabDecor : uint8_t
 /// Whether the window is attached to a host, and in which state.
 enum class HostConnection : uint8_t
 {
-    Local = 0,
-    Reconnecting,
+    Local = 0,    //!< Not attached: no host chip.
+    Connected,    //!< Attached, and the daemon is reachable.
+    Reconnecting, //!< Attached, and the connection is being re-established.
+    Disconnected, //!< Attached, and nothing is retried.
+};
+
+/// Whether the daemon a script's window talks to runs another release than the client.
+enum class SnapshotDrift : uint8_t
+{
+    None = 0, //!< The releases match: no drift chip.
+    Shown,    //!< They differ: the drift chip shows.
+};
+
+/// Who draws a script's window title area, as show_title_bar decides.
+enum class SnapshotFrame : uint8_t
+{
+    ClientBand = 0, //!< show_title_bar false: the chrome draws its own band.
+    NativeFrame,    //!< show_title_bar true: the system frame draws the title.
+};
+
+/// How a script's window is shown.
+enum class SnapshotWindowMode : uint8_t
+{
+    Windowed = 0,       //!< An ordinary window.
+    FullScreenRevealed, //!< Full screen, with the band revealed by the pointer at the top edge.
 };
 
 /// The banner a script shows above the content.
@@ -108,17 +136,20 @@ inline constexpr std::string_view SnapshotHostingNotice =
 /// One row of the script table.
 struct SnapshotScriptRow
 {
-    SnapshotScript script = SnapshotScript::SingleTab;     ///< The script this row describes.
-    std::string_view name {};                              ///< Its name in file names and the manifest.
-    int tabCount = 1;                                      ///< How many tabs the window holds.
-    PaneShape panes = PaneShape::SingleLeaf;               ///< The active tab's pane layout.
-    SnapshotSurface surface = SnapshotSurface::MainWindow; ///< The window the picture is of.
-    ScriptAction action = ScriptAction::None;              ///< What is done after showing the window.
-    HostConnection connection = HostConnection::Local;     ///< The attached host's state.
-    std::string_view hostLabel {};                         ///< The attached host's label; empty when local.
-    SnapshotBanner banner = SnapshotBanner::None;          ///< The banner shown above the content.
-    TabDecor decor = TabDecor::Plain;                      ///< What the tabs carry.
-    int activeTab = 0;                                     ///< The active tab's index.
+    SnapshotScript script = SnapshotScript::SingleTab;      ///< The script this row describes.
+    std::string_view name {};                               ///< Its name in file names and the manifest.
+    int tabCount = 1;                                       ///< How many tabs the window holds.
+    PaneShape panes = PaneShape::SingleLeaf;                ///< The active tab's pane layout.
+    SnapshotSurface surface = SnapshotSurface::MainWindow;  ///< The window the picture is of.
+    ScriptAction action = ScriptAction::None;               ///< What is done after showing the window.
+    HostConnection connection = HostConnection::Local;      ///< The attached host's state.
+    std::string_view hostLabel {};                          ///< The attached host's label; empty when local.
+    SnapshotBanner banner = SnapshotBanner::None;           ///< The banner shown above the content.
+    TabDecor decor = TabDecor::Plain;                       ///< What the tabs carry.
+    int activeTab = 0;                                      ///< The active tab's index.
+    SnapshotDrift drift = SnapshotDrift::None;              ///< Whether the drift chip shows.
+    SnapshotFrame frame = SnapshotFrame::ClientBand;        ///< Who draws the title area.
+    SnapshotWindowMode mode = SnapshotWindowMode::Windowed; ///< How the window is shown.
 };
 
 /// The rows of the script table, in enumerator order.
@@ -133,7 +164,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::ThreeTabs,
                         .name = "three-tabs",
                         .tabCount = 3,
@@ -144,7 +178,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::SplitThree,
                         .name = "split-three",
                         .tabCount = 1,
@@ -155,7 +192,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::Palette,
                         .name = "palette",
                         .tabCount = 1,
@@ -166,7 +206,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::Settings,
                         .name = "settings",
                         .tabCount = 1,
@@ -177,7 +220,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::RemoteReconnecting,
                         .name = "remote-reconnecting",
                         .tabCount = 1,
@@ -188,7 +234,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "build-01",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::Toast,
                         .name = "toast",
                         .tabCount = 1,
@@ -199,7 +248,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::KitDialog,
                         .name = "kit-dialog",
                         .tabCount = 1,
@@ -210,7 +262,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::HostingBanner,
                         .name = "hosting-banner",
                         .tabCount = 1,
@@ -221,7 +276,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::Hosting,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::NewDefaultsBanner,
                         .name = "new-defaults-banner",
                         .tabCount = 1,
@@ -232,7 +290,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::NewDefaults,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::TabMenu,
                         .name = "tab-menu",
                         .tabCount = 3,
@@ -243,7 +304,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::About,
                         .name = "about",
                         .tabCount = 1,
@@ -254,7 +318,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::TabBadges,
                         .name = "tab-badges",
                         .tabCount = 6,
@@ -265,7 +332,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::EveryBadge,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::TabOverflow,
                         .name = "tab-overflow",
                         .tabCount = 20,
@@ -276,7 +346,10 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 19 },
+                        .activeTab = 19,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
     SnapshotScriptRow { .script = SnapshotScript::TabColorFlyout,
                         .name = "tab-color-flyout",
                         .tabCount = 3,
@@ -287,7 +360,80 @@ inline constexpr auto SnapshotScripts = std::array {
                         .hostLabel = "",
                         .banner = SnapshotBanner::None,
                         .decor = TabDecor::Plain,
-                        .activeTab = 0 },
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
+    SnapshotScriptRow { .script = SnapshotScript::RemoteConnected,
+                        .name = "remote-connected",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Connected,
+                        .hostLabel = "build-01",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
+    SnapshotScriptRow { .script = SnapshotScript::RemoteDisconnected,
+                        .name = "remote-disconnected",
+                        .tabCount = 1,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Disconnected,
+                        .hostLabel = "build-01",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
+    SnapshotScriptRow { .script = SnapshotScript::DaemonDrift,
+                        .name = "daemon-drift",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::Shown,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::Windowed },
+    SnapshotScriptRow { .script = SnapshotScript::NativeTitleBar,
+                        .name = "native-title-bar",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::NativeFrame,
+                        .mode = SnapshotWindowMode::Windowed },
+    SnapshotScriptRow { .script = SnapshotScript::FullScreenReveal,
+                        .name = "full-screen-reveal",
+                        .tabCount = 3,
+                        .panes = PaneShape::SingleLeaf,
+                        .surface = SnapshotSurface::MainWindow,
+                        .action = ScriptAction::None,
+                        .connection = HostConnection::Local,
+                        .hostLabel = "",
+                        .banner = SnapshotBanner::None,
+                        .decor = TabDecor::Plain,
+                        .activeTab = 0,
+                        .drift = SnapshotDrift::None,
+                        .frame = SnapshotFrame::ClientBand,
+                        .mode = SnapshotWindowMode::FullScreenRevealed },
 };
 
 static_assert(std::ranges::all_of(std::views::iota(std::size_t { 0 }, SnapshotScripts.size()),

@@ -12,12 +12,15 @@
 
 #include <contour/test/QmlChromeStyle.hpp>
 #include <contour/test/QmlMessageCapture.hpp>
+#include <contour/window/DaemonDriftModel.hpp>
+#include <contour/window/HostChipState.hpp>
 #include <contour/window/TabBadge.hpp>
 
 #include <QtCore/QCoreApplication>
 #include <QtGui/QAccessible>
 #include <QtGui/QColor>
 #include <QtQml/QQmlComponent>
+#include <QtQml/QQmlContext>
 #include <QtQml/QQmlEngine>
 #include <QtQuick/QQuickItem>
 
@@ -28,6 +31,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+
+#include <vthost/client/ReleaseDrift.hpp>
 
 namespace
 {
@@ -184,6 +189,10 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
     QQmlEngine engine;
     contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
+    // The drift chip names itself by the model's line, so it is given one that drifted.
+    auto drift = contour::window::DaemonDriftModel {};
+    drift.show(vthost::client::assessDrift("0.8.2", "0.8.1", vthost::client::LayoutAfterRestart::Lost));
+    engine.rootContext()->setContextProperty(QStringLiteral("daemonDrift"), &drift);
 
     struct Case
     {
@@ -226,6 +235,25 @@ TEST_CASE("accessibility: every kit primitive declares a role and a name", "[con
                .swatches = 0,
                .name = QStringLiteral("Waiting for you"),
                .role = QAccessible::StaticText },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/HostChip.qml"),
+               .initialProperties =
+                   QVariantMap {
+                       { "hostLabel", QStringLiteral("build-01") },
+                       { "connection", static_cast<int>(contour::window::HostChipState::Reconnecting) } },
+               .swatches = 0,
+               .name = QStringLiteral("Attached to build-01, reconnecting"),
+               .role = QAccessible::StaticText },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/ToolbarButton.qml"),
+               .initialProperties = QVariantMap { { "glyph", QStringLiteral("+") },
+                                                  { "accessibleName", QStringLiteral("New tab") } },
+               .swatches = 0,
+               .name = QStringLiteral("New tab"),
+               .role = QAccessible::Button },
+        Case { .url = QStringLiteral("qrc:/qt/qml/Contour/Ui/DaemonDriftBadge.qml"),
+               .initialProperties = {},
+               .swatches = 0,
+               .name = QStringLiteral("daemon 0.8.1 is older than this client"),
+               .role = QAccessible::Button },
     };
 
     for (auto const& testCase: cases)

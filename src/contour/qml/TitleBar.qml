@@ -1,11 +1,17 @@
 // vim:syntax=qml
-// The custom (client-side-decoration) title bar: tab strip + draggable region + window controls.
+// The title band: the window's own bar, holding its controls, the host chip, the tabs or the active
+// session's title, a draggable region, the daemon drift chip and (under the Pill shape) the new-tab button.
 //
-// Because the window is frameless, this bar owns everything the native decoration used to: the tab
-// strip, an empty draggable region (drag to move the window, double-click to maximize/restore), and
-// the min/max/close controls. Which END of the bar those controls sit at is the configured
-// window_control_style's to decide (`windowControls.side`), which is why there is a slot for them
-// at each edge and never an anchor pinning them to one.
+// Because the window is frameless, this bar owns everything the native decoration used to: the tabs, an
+// empty draggable region (drag to move the window, double-click to maximize/restore), and the
+// min/max/close controls. Which END of the bar those controls sit at is the configured
+// window_control_style's to decide (`windowControls.side`), which is why there is a slot for them at each
+// edge and never an anchor pinning them to one.
+//
+// Where the band goes and what its middle holds is UiStyleProvider::titleBand's table, which Main.qml reads
+// and hands down as `centre` and `presence`. A second instance with `role: "tabs"` is the bar that holds
+// only the tabs when they sit at the bottom under a band at the top: it has no controls, chips, toolbar or
+// new-tab menu, so nothing of the band's exists twice.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -19,6 +25,30 @@ Item {
 
     required property var controller // this window's WindowController (Main.qml: appWindow.win)
     required property var window
+
+    /// Which bar this is: "band" (the window's own bar) or "tabs" (a bar holding only the tabs).
+    property string role: "band"
+    /// What the middle holds, as UiStyleProvider::titleBand names it: "tabs", "title" or "empty".
+    property string centre: "tabs"
+    /// Whether the bar is on screen, as UiStyleProvider::titleBand names it: "hidden", "shown" or "reveal"
+    /// (full screen: it overlays the top rows while the pointer is at the screen edge or on it).
+    property string presence: "shown"
+    /// Whether a "reveal" bar is revealed. Assigned by Main.qml, from the reveal edge and `hovered`.
+    property bool revealed: false
+    /// How far a hidden "reveal" bar is slid above its resting place: its height under full motion, and 0
+    /// under Reduce Motion, where it fades instead. Main.qml adds it to the resting `y`.
+    readonly property real slideOffset: root.isConcealed && chromeStyle.motion.animates ? -root.height : 0
+    /// Whether the pointer is over the bar.
+    readonly property bool hovered: bandHover.hovered
+    /// The trailing slot the drift chip is placed in while the band is shown (see Main.qml).
+    readonly property Item driftSlot: driftSlotItem
+
+    readonly property bool isBand: root.role === "band"
+    readonly property bool isPill: chromeStyle.layout.isPill
+    // A "reveal" bar that is not revealed: slid away, or faded out.
+    readonly property bool isConcealed: root.presence === "reveal" && !root.revealed
+    // The room between the band's chips and the parts beside them.
+    readonly property real gap: chromeStyle.space.s5
 
     // Whether to draw our own min/max/close controls. Set false whenever the NATIVE frame is shown,
     // on any OS, because its server-side controls would otherwise be duplicated -- that is exactly
@@ -38,13 +68,25 @@ Item {
     // The number comes from the frame adapter (WindowController.nativeControlsInset), NOT from our
     // chrome tokens: AppKit's buttons are a fixed size whatever font Contour is set in, so composing
     // it from windowControlInset/trafficLightDotSize would be wrong by whatever the style says --
-    // badly wrong under `ui_style: terminal`, where those are counted in character cells.
+    // badly wrong under `ui_style: terminal`, where those are counted in character cells. It is rounded
+    // up to whole cells there, so the tabs after it stay on the cell grid.
     property real nativeControlsInset: 0
 
     // The whole bar's height, and so the window's chrome height (Main.qml declares it to the
-    // WindowController, which feeds the WM size hints). One character row in the terminal style,
-    // the historical 34px in the native one -- see UiStyleProvider.
-    implicitHeight: chromeStyle.chromeHeight
+    // WindowController, which feeds the WM size hints): the band token, 38 under the Pill shape, one
+    // character row in the terminal style, and the historical 34px on the other native rows.
+    implicitHeight: chromeStyle.bandHeight
+
+    // A hidden "reveal" bar fades under Reduce Motion (and slides under full motion, see slideOffset).
+    opacity: root.isConcealed && !chromeStyle.motion.animates ? 0 : 1
+    Behavior on opacity {
+        enabled: root.presence === "reveal"
+        NumberAnimation { duration: chromeStyle.motion.standard }
+    }
+
+    HoverHandler {
+        id: bandHover
+    }
 
     // Live OS palette handle: re-emits paletteChanged on an OS dark/light switch so the bar recolors
     // in realtime.
@@ -74,6 +116,24 @@ Item {
         }
     }
 
+    // What the bar's parts other than the tabs take, from their preferred widths, which do not depend on
+    // the tabs: the tabs are left the rest, less the drag reserve.
+    readonly property real fixedPartsWidth: leadingSlot.Layout.preferredWidth
+                                            + hostChipSlot.Layout.preferredWidth
+                                            + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin
+                                            + driftSlotItem.Layout.preferredWidth + driftSlotItem.Layout.rightMargin
+                                            + newTabSlot.Layout.preferredWidth + newTabSlot.Layout.rightMargin
+                                            + trailingSlot.Layout.preferredWidth
+
+    // The room the centred title has: the bar less twice the wider of its two ends, so it stays centred
+    // on the bar without running under either end.
+    readonly property real titleRoom: {
+        const leading = leadingSlot.Layout.preferredWidth + hostChipSlot.Layout.preferredWidth
+                        + hostChipSlot.Layout.leftMargin + hostChipSlot.Layout.rightMargin;
+        const trailing = root.fixedPartsWidth - leading;
+        return Math.max(0, root.width - 2 * Math.max(leading, trailing));
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -83,7 +143,7 @@ Item {
             id: leadingSlot
             objectName: "leadingWindowControls"
             Layout.fillHeight: true
-            active: root.useCustomWindowControls && windowControls.side === "leading"
+            active: root.isBand && root.useCustomWindowControls && windowControls.side === "leading"
             // Zero while inactive, stated rather than inherited: a Loader only recomputes its
             // implicit size while it HAS an item, so one that has ever been filled keeps the width
             // of three controls forever -- and after a live style change that would leave the
@@ -92,26 +152,47 @@ Item {
             // No side test: nativeControlsInset is already zero unless the OS is drawing its own
             // controls over this corner. Asking where OUR hidden controls would have sat is a
             // different question, and answers it wrong when the two disagree.
-            Layout.preferredWidth: active ? implicitWidth : root.nativeControlsInset
+            Layout.preferredWidth: active ? implicitWidth
+                                 : root.isBand ? chromeStyle.snapToCells(root.nativeControlsInset) : 0
             sourceComponent: windowControlsComponent
         }
 
-        TabStrip {
-            id: tabStrip
-            objectName: "tabStrip"
+        // The host a remote window is attached to. The band's only, and absent for a local window.
+        Loader {
+            id: hostChipSlot
+            active: root.isBand
+            readonly property bool shown: item !== null && item.visible
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: shown ? item.implicitWidth : 0
+            Layout.leftMargin: shown ? root.gap : 0
+            Layout.rightMargin: shown ? root.gap : 0
+            sourceComponent: HostChip {
+                // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
+                hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
+                connection: root.controller ? (root.controller.hostChipState ?? 0) : 0
+            }
+        }
+
+        // The tabs, while the middle holds them. A Loader, so a band showing the title holds no second
+        // strip (with its own tab menu) beside the tabs bar's.
+        Loader {
+            id: tabStripLoader
+            active: root.centre === "tabs"
             Layout.fillHeight: true
-            // Take only as much width as the tabs need, but never crowd out the drag region: the
-            // RowLayout gives the remaining width to the fillWidth drag region below. A well is already
-            // sized to what is left it (availableWidth), so it needs no cap of its own.
-            Layout.preferredWidth: tabStrip.pill ? implicitWidth : Math.min(implicitWidth, root.width * 0.7)
-            // What the well may take: the bar less the window controls, the drag reserve and the strip's
-            // own buttons. Read from the slots' preferred widths, which do not depend on the strip.
-            availableWidth: Math.max(0, root.width - leadingSlot.Layout.preferredWidth
-                                        - trailingSlot.Layout.preferredWidth
-                                        - chromeStyle.space.dragReserve - tabStrip.fixedWidth)
-            controller: root.controller
-            // Threaded down so a closed inline rename can hand keyboard focus back to the terminal.
-            window: root.window
+            // As wide as the tabs need: the strip caps itself at availableWidth, so the drag region below
+            // keeps at least its reserve.
+            Layout.preferredWidth: active ? implicitWidth : 0
+            sourceComponent: TabStrip {
+                id: tabStrip
+                objectName: "tabStrip"
+                // What the tabs may take: the bar less its other parts, the drag reserve and the strip's
+                // own buttons. Read from preferred widths, which do not depend on the strip.
+                availableWidth: Math.max(0, root.width - root.fixedPartsWidth
+                                            - chromeStyle.space.dragReserve - tabStrip.fixedWidth)
+                controller: root.controller
+                // Threaded down so a closed inline rename can hand keyboard focus back to the terminal.
+                window: root.window
+            }
         }
 
         // Draggable empty region: move the window, double-click to toggle maximize, right-click for the
@@ -159,15 +240,117 @@ Item {
             }
         }
 
+        // The drift chip's place in the band's trailing area, before the "+" (Pill) or the window controls
+        // (Flat). Main.qml parents the chip here while the band is shown; it is the band's only.
+        Item {
+            id: driftSlotItem
+            objectName: "bandDriftSlot"
+            readonly property Item chip: children.length > 0 ? children[0] : null
+            readonly property bool shown: root.isBand && chip !== null && chip.visible
+            Layout.fillHeight: true
+            Layout.preferredWidth: shown ? chip.width : 0
+            Layout.rightMargin: shown ? root.gap : 0
+        }
+
+        // The band's new-tab button, under the Pill shape (Flat draws its own in the strip). A secondary
+        // click or a long press opens the profiles, as the macOS "+" does (layout.profileMenu).
+        Loader {
+            id: newTabSlot
+            active: root.isBand && root.isPill
+            Layout.alignment: Qt.AlignVCenter
+            Layout.preferredWidth: active ? implicitWidth : 0
+            Layout.rightMargin: active ? chromeStyle.space.s4 : 0
+            sourceComponent: ToolbarButton {
+                id: newTabButton
+                objectName: "newTabButton"
+                glyph: chromeStyle.newTabGlyph
+                accessibleName: qsTr("New tab")
+                onClicked: if (root.controller) root.controller.createNewTab()
+                onSecondaryClicked: {
+                    if (root.controller)
+                        root.controller.openNewTabMenu(newTabButton.mapToItem(null, 0, newTabButton.height))
+                }
+            }
+        }
+
         // Trailing slot: where Windows and Breeze put theirs, after the drag region.
         Loader {
             id: trailingSlot
             objectName: "trailingWindowControls"
             Layout.fillHeight: true
-            active: root.useCustomWindowControls && windowControls.side === "trailing"
+            active: root.isBand && root.useCustomWindowControls && windowControls.side === "trailing"
             // Zero while inactive, for the reason the leading slot states.
             Layout.preferredWidth: active ? implicitWidth : 0
             sourceComponent: windowControlsComponent
+        }
+    }
+
+    // The active session's title, centred on the band while its middle holds no tabs: one tab on macOS.
+    // Read from the active row's title role, so it is the label its tab would show.
+    Text {
+        id: bandTitle
+        objectName: "bandTitle"
+        visible: root.isBand && root.centre === "title"
+        anchors.centerIn: parent
+        width: Math.min(implicitWidth, root.titleRoom)
+        text: titleRows.activeTitle
+        font: root.titleFont
+        color: chromeStyle.colors.tabText
+        elide: Text.ElideMiddle
+    }
+
+    // The title in the body type, medium: a copy, since the token's font is shared.
+    readonly property font titleFont: {
+        let font = chromeStyle.type.body;
+        font.weight = Font.Medium;
+        return font;
+    }
+
+    // One object per tab, carrying its title and whether it is active, while the band shows a title.
+    Instantiator {
+        id: titleRows
+        active: bandTitle.visible
+        model: root.controller
+        delegate: QtObject {
+            required property string title
+            required property bool isActive
+        }
+
+        readonly property string activeTitle: {
+            for (let index = 0; index < titleRows.count; ++index) {
+                const row = titleRows.objectAt(index);
+                if (row && row.isActive)
+                    return row.title;
+            }
+            return "";
+        }
+    }
+
+    // The new-tab profile menu, the band's only: opened below the button that asked for it -- the band's
+    // "+" under the Pill shape, the strip's "▾" on Flat.
+    Loader {
+        id: newTabMenuLoader
+        active: root.isBand
+        sourceComponent: ActionContextMenu {
+            objectName: "newTabMenu"
+            entries: root.controller ? root.controller.newTabMenuModel : []
+            onPicked: (actionId) => { if (root.controller) root.controller.triggerNewTabMenuAction(actionId) }
+        }
+    }
+
+    Connections {
+        target: root.controller
+        enabled: root.isBand
+        function onNewTabMenuRequested() {
+            const menu = newTabMenuLoader.item;
+            if (!menu)
+                return;
+            const anchor = root.isPill ? newTabSlot.item
+                         : tabStripLoader.item ? tabStripLoader.item.newTabMenuAnchor : null;
+            if (anchor)
+                menu.popup(anchor, 0, anchor.height);
+            else
+                menu.popup();
         }
     }
 }

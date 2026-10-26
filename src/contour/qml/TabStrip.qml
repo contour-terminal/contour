@@ -1,14 +1,17 @@
 // vim:syntax=qml
-// The horizontal tab strip plus the new-tab split button ("+" and a "▾" profile dropdown).
+// The horizontal tab strip, plus on the Flat shape the new-tab split button ("+" and a "▾" profile dropdown).
 //
 // Under the Pill shape (chromeStyle.layout.tabShape) the tabs sit in a rounded well, every pill as wide
 // as chromeStyle.tabWellLayout() says for the width the title bar leaves it: equal widths up to the
 // maximum, icon-only pills below the minimum, and a well that scrolls, keeping the active tab in view,
-// once even those do not fit. The Flat shape is today's strip, each tab as wide as its title.
+// once even those do not fit. The Flat shape is today's strip, each tab as wide as its title, which scrolls
+// the same way once its tabs outgrow the width it is left. Under Pill the new-tab button is the title
+// band's (TitleBar's ToolbarButton), so the strip draws neither "+" nor "▾" there.
 //
 // The model is this window's WindowController (passed in as `controller`), whose rows are the tabs and
 // whose roles (title, accentColor, isActive, paneCount) drive each TabItem delegate. Alongside the tabs
-// the strip hosts the tabs' one context menu and the new-tab dropdown — neither a row of the tab model.
+// the strip hosts the tabs' one context menu — not a row of the tab model. The new-tab menu is the title
+// bar's, which pops it at `newTabMenuAnchor`.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -25,11 +28,13 @@ Row {
     // The ApplicationWindow, so a delegate can call restoreTerminalFocus() when a rename closes.
     required property var window
 
-    // The width the title bar leaves the tab well: its own width less the window controls, the drag
+    // The width the title bar leaves the tabs: its own width less the window controls, its chips, the drag
     // reserve and this strip's fixed parts (fixedWidth). Assigned by TitleBar.
     property real availableWidth: 0
-    // The strip's parts that are not the tabs, which the title bar subtracts from the well's width.
-    readonly property real fixedWidth: hostBadge.width + newTabButton.width + newTabMenuButton.width
+    // The strip's parts that are not the tabs, which the title bar subtracts from the tabs' width.
+    readonly property real fixedWidth: newTabLoader.width + newTabMenuLoader.width
+    // The "▾" the title bar pops the new-tab menu at, or null where the strip draws none.
+    readonly property Item newTabMenuAnchor: newTabMenuLoader.item
 
     // The QML-facing carve-out of the shape token: whether the tabs are pills in a well.
     readonly property bool pill: chromeStyle.layout.isPill
@@ -38,13 +43,14 @@ Row {
 
     spacing: 0
 
-    // Brings the active tab into view, should the well have scrolled it out. Deferred, because it runs on
-    // changes the list has not laid out yet.
+    // Brings the active tab into view, should the tabs have scrolled it out: the well's, or a Flat strip
+    // that outgrew its width. Deferred, because it runs on changes the list has not laid out yet.
     function revealActiveTab() {
-        if (root.pill && root.controller)
+        if (root.controller)
             list.positionViewAtIndex(root.controller.activeTabIndex, ListView.Contain)
     }
     onWellLayoutChanged: Qt.callLater(root.revealActiveTab)
+    onAvailableWidthChanged: Qt.callLater(root.revealActiveTab)
 
     // Maps a cursor x (in the drop area's coordinates, what a DropArea's drag reports) to the tab slot
     // the dragged tab would drop into: slot i means "before tab i" (so dropping past the midpoint of tab
@@ -84,38 +90,14 @@ Row {
         return root.dropIndexToX(index) - list.contentX + list.x
     }
 
-    // The remote host this window's sessions run on (`contour client --host`), at the strip's leading edge,
-    // so a remote window is never mistaken for a local one. Not interactive, and in the inactive tab text's
-    // font and colour: it names where the tabs are, it is not one of them. Absent for a local window.
-    Item {
-        id: hostBadge
-        objectName: "hostBadge"
-        // `?? ""` keeps a lightweight mock controller (offscreen tests) without the property local.
-        readonly property string hostLabel: root.controller ? (root.controller.hostLabel ?? "") : ""
-        visible: hostLabel !== ""
-        width: visible ? hostBadgeText.implicitWidth + (2 * chromeStyle.labelPadding) : 0
-        height: root.height
-        Accessible.role: Accessible.StaticText
-        Accessible.name: qsTr("Attached to %1").arg(hostLabel)
-
-        SystemPalette {
-            id: hostBadgePalette
-            colorGroup: SystemPalette.Active
-        }
-
-        Text {
-            id: hostBadgeText
-            objectName: "hostBadgeText"
-            anchors.centerIn: parent
-            font: chromeStyle.font
-            text: hostBadge.hostLabel
-            color: hostBadgePalette.windowText
-        }
-    }
-
     // The tab list plus a DropArea that accepts tabs dragged from this or any other window's strip.
     Item {
-        width: root.pill ? root.wellLayout.wellWidth : list.contentWidth
+        // A Flat strip is as wide as its tabs until they outgrow what the bar leaves them; then it clips
+        // and scrolls, so the active tab and the "+" beside it stay in view.
+        // A strip on its own, whose width no bar assigns, is as wide as its tabs.
+        width: root.pill ? root.wellLayout.wellWidth
+             : root.availableWidth > 0 ? Math.min(list.contentWidth, root.availableWidth)
+             : list.contentWidth
         height: root.height
 
         // The well the pills sit in, centred in the bar. Only the Pill shape has one.
@@ -263,54 +245,60 @@ Row {
         }
     }
 
-    ToolButton {
-        id: newTabButton
-        objectName: "newTabButton"
+    // The new-tab button: on the Flat shape only, since the Pill band draws its own (TitleBar's
+    // ToolbarButton). A Loader, so the shape without it has no second "newTabButton" for a test to find.
+    Loader {
+        id: newTabLoader
+        active: !root.pill
         height: root.height
-        text: chromeStyle.newTabGlyph
-        Accessible.name: qsTr("New tab")
-        // Wider than a tab's close glyph (see UiStyleTokens::stripButtonUnits): this and the dropdown
-        // beside it are permanent, frequently used targets, so the style pads them out.
-        width: chromeStyle.stripButtonWidth
-        font: chromeStyle.newTabFont
-        focusPolicy: Qt.NoFocus
-        onClicked: root.controller.createNewTab()
-        // Flat, transparent chrome so the button blends into the strip background instead of showing
-        // an opaque style button panel; a subtle highlight wash gives hover feedback.
-        background: Rectangle {
-            color: newTabButton.hovered ? chromeStyle.wash(newTabButton.palette.highlight)
-                                        : "transparent"
+        sourceComponent: ToolButton {
+            id: newTabButton
+            objectName: "newTabButton"
+            height: root.height
+            text: chromeStyle.newTabGlyph
+            Accessible.name: qsTr("New tab")
+            // Wider than a tab's close glyph (see UiStyleTokens::stripButtonUnits): this and the dropdown
+            // beside it are permanent, frequently used targets, so the style pads them out.
+            width: chromeStyle.stripButtonWidth
+            font: chromeStyle.newTabFont
+            focusPolicy: Qt.NoFocus
+            onClicked: root.controller.createNewTab()
+            // Flat, transparent chrome so the button blends into the strip background instead of showing
+            // an opaque style button panel; a subtle highlight wash gives hover feedback.
+            background: Rectangle {
+                color: newTabButton.hovered ? chromeStyle.wash(newTabButton.palette.highlight)
+                                            : "transparent"
+            }
         }
     }
 
-    // The new-tab profile dropdown: the "▾" beside "+". Asks the controller, which publishes one entry per
-    // configured profile (open a new tab with it) and asks for the menu below — the Windows-Terminal
+    // The new-tab profile dropdown: the "▾" beside "+", where the row reaches the profiles by a caret
+    // (layout.profileMenu). Asks the controller, which publishes one entry per configured profile (open a new
+    // tab with it) and asks for the menu, which the title bar pops below this button — the Windows-Terminal
     // split-button idiom.
-    ToolButton {
-        id: newTabMenuButton
-        objectName: "newTabMenuButton"
+    Loader {
+        id: newTabMenuLoader
+        active: !root.pill && chromeStyle.layout.profileMenu === chromeStyle.layout.caret
         height: root.height
-        text: chromeStyle.menuGlyph
-        Accessible.name: qsTr("New tab with profile")
-        width: chromeStyle.stripButtonWidth
-        font: chromeStyle.menuFont
-        focusPolicy: Qt.NoFocus
-        ToolTip.visible: hovered
-        ToolTip.text: qsTr("New tab with profile…")
-        onClicked: {
-            if (root.controller)
-                root.controller.openNewTabMenu(newTabMenuButton.mapToItem(null, 0, newTabMenuButton.height))
-        }
-        background: Rectangle {
-            color: newTabMenuButton.hovered ? chromeStyle.wash(newTabMenuButton.palette.highlight)
-                                            : "transparent"
-        }
-
-        ActionContextMenu {
-            id: newTabMenu
-            objectName: "newTabMenu"
-            entries: root.controller ? root.controller.newTabMenuModel : []
-            onPicked: (actionId) => { if (root.controller) root.controller.triggerNewTabMenuAction(actionId) }
+        sourceComponent: ToolButton {
+            id: newTabMenuButton
+            objectName: "newTabMenuButton"
+            height: root.height
+            text: chromeStyle.menuGlyph
+            Accessible.name: qsTr("New tab with profile")
+            width: chromeStyle.stripButtonWidth
+            font: chromeStyle.menuFont
+            focusPolicy: Qt.NoFocus
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("New tab with profile…")
+            onClicked: {
+                if (root.controller)
+                    root.controller.openNewTabMenu(newTabMenuButton.mapToItem(null, 0, newTabMenuButton.height))
+            }
+            background: Rectangle {
+                color: newTabMenuButton.hovered ? chromeStyle.wash(newTabMenuButton.palette.highlight)
+                                                : "transparent"
+            }
         }
     }
 
@@ -339,9 +327,6 @@ Row {
                 tabContextMenu.popup(item, 0, item.height)
             else
                 tabContextMenu.popup(list, 0, list.height)
-        }
-        function onNewTabMenuRequested() {
-            newTabMenu.popup(newTabMenuButton, 0, newTabMenuButton.height)
         }
     }
 }

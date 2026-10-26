@@ -173,9 +173,10 @@ class MainWindowControllerMock: public QAbstractListModel
     /// Mirrors WindowController::triggerTabContextMenuAction(), recording the pick.
     Q_INVOKABLE void triggerTabContextMenuAction(int actionId) { tabMenuPicks.push_back(actionId); }
 
-    /// Mirrors WindowController::openNewTabMenu(): publishes the menu, then asks for it.
+    /// Mirrors WindowController::openNewTabMenu(): publishes the menu, then asks for it, counting the calls.
     Q_INVOKABLE void openNewTabMenu(QPointF /*windowPosition*/)
     {
+        ++newTabMenuOpenings;
         _newTabMenuModel = mockNewTabMenuModel();
         emit newTabMenuModelChanged();
         emit newTabMenuRequested();
@@ -186,6 +187,7 @@ class MainWindowControllerMock: public QAbstractListModel
 
     std::vector<int> tabMenuPicks {};    ///< Every tab menu pick, in order.
     std::vector<int> newTabMenuPicks {}; ///< Every new-tab menu pick, in order.
+    int newTabMenuOpenings = 0;          ///< How often the new-tab menu was asked for.
 
   signals:
     void hostChipStateChanged();

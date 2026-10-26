@@ -56,6 +56,25 @@ ThemedWindow
     property int tabBarPosition: win ? win.tabBarPosition : 0
     property bool tabBarShouldShow: win ? win.tabBarShouldShow : true
 
+    // Where the title band and the tabs go -- { band, bandEdge, centre, tabBar }, each by name -- from the
+    // row's tab shape (UiStyleProvider::titleBand): who draws the frame (show_title_bar), whether the window
+    // is in full screen, the tab-bar gate and the configured edge. The four arguments are the enumerators'
+    // underlying values: WindowFrame { ClientBand, NativeFrame }, WindowMode { Windowed, FullScreen },
+    // TabStripGate { Hidden, Shown } and TabBarPosition { Top, Bottom }. Main.qml is the only caller.
+    readonly property var band: chromeStyle.titleBand(appWindow.win && appWindow.win.titleBarVisible ? 1 : 0,
+                                                      appWindow.visibility === Window.FullScreen ? 1 : 0,
+                                                      appWindow.tabBarShouldShow ? 1 : 0,
+                                                      appWindow.tabBarPosition)
+
+    // Reveals a full-screen band while the pointer is on the reveal edge, and keeps it while the pointer
+    // is on the band itself. Imperative rather than a binding: the band's own hover only counts while it
+    // is revealed, and a binding reading its own result would be a loop.
+    function updateBandReveal() {
+        titleBar.revealed = appWindow.band.band === "reveal"
+                            && (revealEdgeHover.hovered || (titleBar.revealed && titleBar.hovered));
+    }
+    onBandChanged: appWindow.updateBandReveal()
+
     // Diagnostic lifecycle/notification traces below are routed through a category that is off by
     // default (Warning floor), so they stay silent during normal use (closing a window and firing a
     // notification are expected events) but can be re-enabled for debugging via
@@ -93,7 +112,9 @@ ThemedWindow
         // The banner stack counts too: it takes rows from the terminal just as the strip does. A change
         // only refreshes the size hints -- it resizes no window, and no banner's height depends on the
         // window's -- so a banner coming or going cannot feed back into its own height.
-        win.chromeHeight = Qt.binding(function() { return titleBar.effectiveHeight + bannerStack.height })
+        win.chromeHeight = Qt.binding(function() {
+            return titleBar.effectiveHeight + tabsBar.effectiveHeight + bannerStack.height
+        })
         // If this window was spawned to receive a torn-off tab (drag a tab onto the desktop),
         // adopt that tab as our sole tab instead of creating a fresh one — the dragged terminal
         // keeps running, no placeholder flash. Otherwise create the usual first tab. Either path
@@ -115,19 +136,30 @@ ThemedWindow
         // bar to the window's height and overriding the `height` binding below for good. See the scrollbar
         // in SessionChrome.qml for the full mechanism; it shipped that bug as a full-pane-wide bar.
         // left/right stay anchored: that pair is unconditional, so sizing the width is intended.
+        // A full-screen band slides from above its resting place by its slideOffset.
         anchors.left: parent.left
         anchors.right: parent.right
-        y: appWindow.tabBarPosition === 0 ? 0 : parent.height - titleBar.height
-        // Shown per the profile's tab_bar_visibility, resolved against the live tab count by the
-        // controller (Always / Never / Multiple). When hidden, height/effectiveHeight collapse to 0 so
-        // the content area (and the declared chrome height feeding the geometry authority) reclaim it.
-        visible: appWindow.tabBarShouldShow
-        height: visible ? implicitHeight : 0
-        property real effectiveHeight: visible ? implicitHeight : 0
+        y: (appWindow.band.bandEdge === "bottom" ? parent.height - titleBar.height : 0) + titleBar.slideOffset
+        Behavior on y {
+            enabled: titleBar.presence === "reveal" && chromeStyle.motion.animates
+            NumberAnimation { duration: chromeStyle.motion.standard }
+        }
+        // Shown per the band table: on macOS always (it carries the traffic lights), elsewhere per the
+        // profile's tab_bar_visibility resolved against the live tab count (Always / Never / Multiple). When
+        // hidden, height/effectiveHeight collapse to 0 so the content area (and the declared chrome height
+        // feeding the geometry authority) reclaim it. A full-screen band overlays the top rows instead, so
+        // it never takes room from the content (effectiveHeight 0) and is visible only while it reveals,
+        // or still fading out.
+        presence: appWindow.band.band
+        centre: appWindow.band.centre
+        visible: presence === "shown" || (presence === "reveal" && (revealed || opacity > 0))
+        height: presence === "hidden" ? 0 : implicitHeight
+        readonly property real effectiveHeight: presence === "shown" ? implicitHeight : 0
+        onHoveredChanged: appWindow.updateBandReveal()
         // Declared after the content area below, so a positive z keeps the bar above it. The terminal now
         // renders through a scene-graph node (TerminalRenderNode) and composites in z-order like any item,
         // so this is ordinary stacking — no longer a workaround for the terminal painting over siblings.
-        z: 1
+        z: 2
         controller: appWindow.win
         window: appWindow
         // Draw our own min/max/close controls only in frameless (CSD) mode. When the native frame is
@@ -141,6 +173,44 @@ ThemedWindow
         nativeControlsInset: (appWindow.win && appWindow.win.nativeControlsInset) || 0
     }
 
+    // The bar that holds only the tabs, at the bottom, while the band stays at the top with the title (the
+    // Pill shape with the tabs configured at the bottom). No controls, chips or toolbar: those are the band's.
+    TitleBar {
+        id: tabsBar
+        objectName: "tabsBar" // so offscreen layout tests can findChild() this item
+        role: "tabs"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: parent.height - tabsBar.height
+        presence: appWindow.band.tabBar
+        // Its tabs exist only while it is shown, so a hidden one holds no second strip or tab menu.
+        centre: presence === "shown" ? "tabs" : "empty"
+        visible: presence === "shown"
+        height: visible ? implicitHeight : 0
+        readonly property real effectiveHeight: height
+        z: 2
+        controller: appWindow.win
+        window: appWindow
+        useCustomWindowControls: false
+    }
+
+    // The strip along the top edge that reveals a full-screen band while the pointer rests on it.
+    Item {
+        id: bandRevealEdge
+        objectName: "bandRevealEdge" // so offscreen tests can findChild() it
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: 0
+        height: chromeStyle.space.revealEdge
+        visible: appWindow.band.band === "reveal"
+        z: 3
+
+        HoverHandler {
+            id: revealEdgeHover
+            onHoveredChanged: appWindow.updateBandReveal()
+        }
+    }
+
     // The banners, in a stack above the content: the content starts below them, so a banner pushes the
     // terminal down (and back up when it goes) instead of covering its first line. With the tab strip
     // at the top the stack sits below it; at the bottom it is the window's topmost row. A banner with no
@@ -150,7 +220,8 @@ ThemedWindow
         objectName: "bannerStack" // so offscreen tests can findChild() it
         anchors.left: parent.left
         anchors.right: parent.right
-        y: appWindow.tabBarPosition === 0 ? titleBar.height : 0
+        // Below the band's effective height: a full-screen band overlays the content and pushes nothing.
+        y: appWindow.band.bandEdge === "top" ? titleBar.effectiveHeight : 0
         // The banners' own extent, taken at once: the Column's implicit height follows only when the
         // window next polishes, and the content below is anchored to this edge. Summed rather than
         // childrenRect, which keeps a collapsed banner's stale y -- dismiss the lower banner first and
@@ -193,12 +264,11 @@ ThemedWindow
     Item {
         id: content
         objectName: "content" // so offscreen layout tests can findChild() this item
-        // Fills the window edge-to-edge on the axis the tab strip does NOT occupy: with the strip at
-        // the top, content runs from titleBar.bottom to the window bottom; with the strip at the bottom,
-        // content runs from the window top to titleBar.top. When the strip is hidden, titleBar's height
-        // is 0, so content reclaims the full window either way.
+        // Fills the window edge-to-edge on the axis the bars do NOT occupy: below the band and the banners
+        // at the top, and down to the band, or to the tabs bar, at the bottom. A hidden bar's height is 0,
+        // so content reclaims the full window either way.
         anchors.top: bannerStack.bottom
-        anchors.bottom: appWindow.tabBarPosition === 1 ? titleBar.top : parent.bottom
+        anchors.bottom: appWindow.band.bandEdge === "bottom" ? titleBar.top : tabsBar.top
         anchors.left: parent.left
         anchors.right: parent.right
 
@@ -219,13 +289,18 @@ ThemedWindow
             }
         }
 
-        // Shown only while the daemon runs another release than this client (see DaemonDriftModel).
-        DaemonDriftBadge {
-            z: 10
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: 8
-        }
+    }
+
+    // Shown only while the daemon runs another release than this client (see DaemonDriftModel): in the
+    // band's trailing area while the band is shown, and at the content's corner while it is not, so the
+    // drift is never unsaid. Positioned by x/y, since its parent changes.
+    DaemonDriftBadge {
+        id: driftChip
+        readonly property bool inBand: titleBar.presence === "shown"
+        parent: inBand ? titleBar.driftSlot : content
+        x: inBand ? 0 : parent.width - width - chromeStyle.space.s4
+        y: inBand ? (parent.height - height) / 2 : parent.height - height - chromeStyle.space.s4
+        z: 10
     }
 
     // The command palette (Ctrl+Shift+P). Opened by the OpenCommandPalette action, which routes

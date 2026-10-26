@@ -40,6 +40,32 @@ TEST_CASE("snapshot.scriptTable", "[snapshot]")
         CHECK(scriptRow(script).decor == TabDecor::Plain);
         CHECK(scriptRow(script).activeTab == 0);
     }
+    // The title band's rows.
+    CHECK(scriptRow(SnapshotScript::RemoteConnected).connection == HostConnection::Connected);
+    CHECK(scriptRow(SnapshotScript::RemoteConnected).hostLabel == "build-01");
+    CHECK(scriptRow(SnapshotScript::RemoteConnected).name == "remote-connected");
+    CHECK(scriptRow(SnapshotScript::RemoteDisconnected).connection == HostConnection::Disconnected);
+    CHECK(scriptRow(SnapshotScript::RemoteDisconnected).hostLabel == "build-01");
+    CHECK(scriptRow(SnapshotScript::RemoteDisconnected).name == "remote-disconnected");
+    CHECK(scriptRow(SnapshotScript::DaemonDrift).drift == SnapshotDrift::Shown);
+    CHECK(scriptRow(SnapshotScript::DaemonDrift).name == "daemon-drift");
+    CHECK(scriptRow(SnapshotScript::NativeTitleBar).frame == SnapshotFrame::NativeFrame);
+    CHECK(scriptRow(SnapshotScript::NativeTitleBar).tabCount == 3);
+    CHECK(scriptRow(SnapshotScript::NativeTitleBar).name == "native-title-bar");
+    CHECK(scriptRow(SnapshotScript::FullScreenReveal).mode == SnapshotWindowMode::FullScreenRevealed);
+    CHECK(scriptRow(SnapshotScript::FullScreenReveal).name == "full-screen-reveal");
+    // Each of the three axes is set by its own row only: every other row is a client band, windowed,
+    // with no drift.
+    for (auto const& row: SnapshotScripts)
+    {
+        CAPTURE(row.name);
+        CHECK((row.drift == SnapshotDrift::Shown) == (row.script == SnapshotScript::DaemonDrift));
+        CHECK((row.frame == SnapshotFrame::NativeFrame) == (row.script == SnapshotScript::NativeTitleBar));
+        CHECK((row.mode == SnapshotWindowMode::FullScreenRevealed)
+              == (row.script == SnapshotScript::FullScreenReveal));
+        // A host chip needs a host to name, and a host is never local.
+        CHECK(row.hostLabel.empty() == (row.connection == HostConnection::Local));
+    }
     // Every row's active tab is one of its tabs.
     for (auto const& row: SnapshotScripts)
     {

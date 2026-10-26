@@ -1099,39 +1099,6 @@ TEST_CASE("a swatch pick reaches the controller once the menu has closed (offscr
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
 
-TEST_CASE("the new-tab menu lists the profiles (offscreen)", "[contour][gui][qml][menus]")
-{
-    contour::test::QmlMessageCapture const warnings;
-    QQmlEngine engine;
-    MockTabController controller;
-    auto const host = makeTabStripHost(engine, controller);
-    auto* window = qobject_cast<QQuickWindow*>(host.get());
-    REQUIRE(window != nullptr);
-
-    auto const* button = host->findChild<QQuickItem*>(QStringLiteral("newTabMenuButton"));
-    auto* menu = host->findChild<QObject*>(QStringLiteral("newTabMenu"));
-    REQUIRE(button != nullptr);
-    REQUIRE(menu != nullptr);
-
-    QTest::mouseClick(window,
-                      Qt::LeftButton,
-                      {},
-                      button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
-    CHECK(controller.openNewTabMenuCalls == 1);
-    REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
-    CHECK(menu->property("count").toInt() == controller.newTabMenuModel().size());
-    // One row per profile.
-    CHECK(menu->property("count").toInt() == static_cast<int>(contour::test::MockProfileNames.size()));
-
-    // A picked profile reaches the controller, once the menu has closed.
-    auto* first = menuItemAt(*menu, 0);
-    REQUIRE(first != nullptr);
-    REQUIRE(QMetaObject::invokeMethod(first, "triggered"));
-    REQUIRE(QTest::qWaitFor([&] { return !menu->property("visible").toBool(); }, 2000));
-    CHECK(controller.newTabMenuPicks == std::vector { 0 });
-
-    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
-}
 TEST_CASE("The tab color flyout opens inside the window, wherever the tab strip sits (offscreen)",
           "[contour][gui][qml]")
 {
@@ -4836,6 +4803,41 @@ void skipUnlessOffscreen()
 }
 } // namespace
 
+TEST_CASE("the new-tab menu lists the profiles (offscreen)", "[contour][gui][qml][menus]")
+{
+    contour::test::QmlMessageCapture const warnings;
+    QQmlEngine engine;
+    MockTabController controller;
+    // The menu is the title bar's, which pops it below the strip's "▾".
+    auto const host = makeTitleBarHost(engine, controller);
+    auto* window = qobject_cast<QQuickWindow*>(host.get());
+    REQUIRE(window != nullptr);
+    REQUIRE(QTest::qWaitForWindowExposed(window));
+
+    auto const* button = host->findChild<QQuickItem*>(QStringLiteral("newTabMenuButton"));
+    auto* menu = host->findChild<QObject*>(QStringLiteral("newTabMenu"));
+    REQUIRE(button != nullptr);
+    REQUIRE(menu != nullptr);
+
+    QTest::mouseClick(window,
+                      Qt::LeftButton,
+                      {},
+                      button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+    CHECK(controller.openNewTabMenuCalls == 1);
+    REQUIRE(QTest::qWaitFor([&] { return menu->property("opened").toBool(); }, 2000));
+    CHECK(menu->property("count").toInt() == controller.newTabMenuModel().size());
+    // One row per profile.
+    CHECK(menu->property("count").toInt() == static_cast<int>(contour::test::MockProfileNames.size()));
+
+    // A picked profile reaches the controller, once the menu has closed.
+    auto* first = menuItemAt(*menu, 0);
+    REQUIRE(first != nullptr);
+    REQUIRE(QMetaObject::invokeMethod(first, "triggered"));
+    REQUIRE(QTest::qWaitFor([&] { return !menu->property("visible").toBool(); }, 2000));
+    CHECK(controller.newTabMenuPicks == std::vector { 0 });
+
+    CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+}
 TEST_CASE("A TabItem grabs its drag image only while a drag can start from it (offscreen)",
           "[contour][gui][qml]")
 {
@@ -6213,7 +6215,9 @@ TEST_CASE("the drift badge shows the model's text and confirms before restarting
     CHECK(dialog->property("message").toString() == fixture.model.confirmation());
     CHECK(spy.count() == 0);
 
-    REQUIRE(QMetaObject::invokeMethod(dialog, "confirmed"));
+    // A KitDialog: its accept button is what confirms.
+    CHECK(QString::fromLatin1(dialog->metaObject()->className()).startsWith(QStringLiteral("KitDialog")));
+    REQUIRE(QMetaObject::invokeMethod(dialog, "accept"));
     CHECK(spy.count() == 1);
 }
 
