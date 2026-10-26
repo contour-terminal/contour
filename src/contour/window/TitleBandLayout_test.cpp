@@ -73,9 +73,11 @@ constexpr auto BandCases = std::array {
 };
 
 constexpr auto FullScreen = WindowMode::FullScreen;
+constexpr auto Interrupted = HostNotice::Interrupted;
 
 // In full screen a band shown at the top reveals on the edge (D3); a bottom band and the tab bar stay as
-// they are windowed.
+// they are windowed. A remote window whose connection is interrupted keeps its top band pinned instead,
+// overlaying the top rows: its chip is all that says why the screen stopped.
 constexpr auto FullScreenCases = std::array {
     BandCase { { Pill, ClientBand, FullScreen, GateShown, Top },
                { BarPresence::RevealOnEdge, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
@@ -99,9 +101,13 @@ constexpr auto FullScreenCases = std::array {
                { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
     BandCase { { Flat, NativeFrame, FullScreen, GateHidden, Top },
                { BarPresence::Hidden, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Top, Interrupted },
+               { BarPresence::Pinned, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Pill, ClientBand, FullScreen, GateShown, Top, Interrupted },
+               { BarPresence::Pinned, BarEdge::Top, BarCentre::Tabs, BarPresence::Hidden } },
+    BandCase { { Flat, ClientBand, FullScreen, GateHidden, Bottom, Interrupted },
+               { BarPresence::Shown, BarEdge::Bottom, BarCentre::Tabs, BarPresence::Hidden } },
 };
-
-constexpr auto Interrupted = HostNotice::Interrupted;
 
 // A remote window whose connection is not up: wherever the band is the strip, it shows whatever the gate
 // says, since it is the host chip's home (R-d). The Pill band on a client band shows anyway.
@@ -184,9 +190,10 @@ TEST_CASE("titleBand.anInterruptedConnectionShowsTheStrip", "[titleband]")
                       << int(inputs.strip) << ", position " << int(inputs.position));
         CHECK(resolveTitleBand(inputs) == expected);
     }
-    // In full screen the forced band reveals on the edge, as any band at the top does (D3).
+    // In full screen the forced band stays pinned rather than revealing on the edge: nothing else says why
+    // the screen stopped.
     CHECK(resolveTitleBand({ Flat, ClientBand, FullScreen, GateHidden, Top, Interrupted }).band
-          == BarPresence::RevealOnEdge);
+          == BarPresence::Pinned);
 }
 
 TEST_CASE("titleBand.fullScreenReveals", "[titleband]")
@@ -201,7 +208,7 @@ TEST_CASE("titleBand.fullScreenReveals", "[titleband]")
 
 TEST_CASE("titleBand.names", "[titleband]")
 {
-    constexpr auto PresenceNames = std::array { "hidden", "shown", "reveal" };
+    constexpr auto PresenceNames = std::array { "hidden", "shown", "reveal", "pinned" };
     constexpr auto EdgeNames = std::array { "top", "bottom" };
     constexpr auto CentreNames = std::array { "empty", "tabs", "title" };
     REQUIRE(PresenceNames.size() == BarPresenceCount);

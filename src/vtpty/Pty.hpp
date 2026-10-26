@@ -171,6 +171,10 @@ class Pty
     /// @return Live, unless the device is fed by a mirror that marks its refills
     /// (vtpty::ChannelPty::feedReplay).
     [[nodiscard]] virtual ReadOrigin lastReadOrigin() const { return ReadOrigin::Live; }
+
+    /// The name of the program leading the device's foreground process group.
+    /// @return The name; none for a device with no local process to ask, as a mirrored pane's.
+    [[nodiscard]] virtual std::optional<std::string> foregroundProcessName() const { return std::nullopt; }
 };
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);

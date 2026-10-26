@@ -1718,6 +1718,51 @@ TEST_CASE("the assembled band has one title bar, holding the chip, the strip, it
     }
 }
 
+TEST_CASE("a full-screen window keeps its band shown while its remote connection is interrupted (offscreen)",
+          "[contour][gui][qml][mainwindow][band][hosts]")
+{
+    // A full-screen band reveals only on the edge; a disconnected window's frozen screen would then say
+    // nothing about why. While the connection is interrupted the band stays pinned over the top rows, chip
+    // and all, and once it is back the band leaves again.
+    using contour::window::HostChipState;
+    for (auto const row: { ChromeStyle::Fluent, ChromeStyle::MacOS })
+    {
+        INFO("row " << contour::config::chromeStyleName(row));
+        QQmlEngine engine;
+        MockMainController controller { MainWindowScene { .tabCount = 1,
+                                                          .hostLabel = QStringLiteral("home"),
+                                                          .tabBarVisibility = TabBarVisibility::Multiple,
+                                                          .hostChipState = HostChipState::Disconnected } };
+        contour::test::QmlMessageCapture warnings;
+        auto root = loadMainWindow(engine, controller, warnings, rowSetup(row));
+        auto* window = qobject_cast<QQuickWindow*>(root.get());
+        REQUIRE(window != nullptr);
+        window->showFullScreen();
+        REQUIRE(QTest::qWaitForWindowExposed(window));
+        REQUIRE(QTest::qWaitFor([&] { return window->visibility() == QWindow::FullScreen; }, 2000));
+        QTest::mouseMove(window, QPoint { window->width() / 4, window->height() / 2 });
+        QCoreApplication::processEvents();
+
+        auto& titleBar = named(*root, QStringLiteral("titleBar"));
+        auto& content = named(*root, QStringLiteral("content"));
+        auto& chip = named(*root, QStringLiteral("hostChip"));
+        CHECK(titleBar.property("presence").toString() == QStringLiteral("pinned"));
+        CHECK(titleBar.isVisible());
+        CHECK(titleBar.y() == 0);
+        CHECK(titleBar.opacity() == 1);
+        CHECK(chip.isVisible());
+        // Over the top rows, as a revealed band is: the content keeps the whole screen.
+        CHECK(content.y() == 0);
+        CHECK(controller.chromeHeight() == 0);
+
+        controller.setHostChipState(static_cast<int>(HostChipState::Connected));
+        REQUIRE(QTest::qWaitFor([&] { return !titleBar.isVisible(); }, 2000));
+        CHECK(content.y() == 0);
+        CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
+        window->showNormal();
+    }
+}
+
 TEST_CASE("the tab bar at the bottom on macOS keeps the band at the top (offscreen)",
           "[contour][gui][qml][mainwindow][band]")
 {

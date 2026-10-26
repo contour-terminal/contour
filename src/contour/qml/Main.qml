@@ -181,8 +181,9 @@ ThemedWindow
         presence: appWindow.band.band
         centre: appWindow.band.centre
         // A concealed "reveal" band leaves the screen and the accessibility tree once it has slid away (or,
-        // under Reduce Motion, faded out).
-        visible: presence === "shown"
+        // under Reduce Motion, faded out). A "pinned" one overlays the top rows like a revealed one, held there
+        // while the remote connection is interrupted.
+        visible: presence === "shown" || presence === "pinned"
                  || (presence === "reveal"
                      && (revealed || (chromeStyle.motion.animates ? y > -height : opacity > 0)))
         height: presence === "hidden" ? 0 : implicitHeight

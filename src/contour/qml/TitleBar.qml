@@ -32,8 +32,9 @@ Item {
     property string role: "band"
     /// What the middle holds, as UiStyleProvider::titleBand names it: "tabs", "title" or "empty".
     property string centre: "tabs"
-    /// Whether the bar is on screen, as UiStyleProvider::titleBand names it: "hidden", "shown" or "reveal"
-    /// (full screen: it overlays the top rows while the pointer is at the screen edge or on it).
+    /// Whether the bar is on screen, as UiStyleProvider::titleBand names it: "hidden", "shown", "reveal"
+    /// (full screen: it overlays the top rows while the pointer is at the screen edge or on it) or "pinned"
+    /// (full screen: it overlays them for as long as the remote connection is interrupted).
     property string presence: "shown"
     /// Whether a "reveal" bar is revealed. Assigned by Main.qml, from the reveal edge and `hovered`.
     property bool revealed: false

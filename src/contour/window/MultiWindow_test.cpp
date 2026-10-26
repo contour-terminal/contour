@@ -16,6 +16,8 @@
 #include <contour/test/GuiTestFixtures.hpp>
 #include <contour/window/WindowController.hpp>
 
+#include <vtpty/MockPty.hpp>
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 #include <QtGui/QGuiApplication>
@@ -27,6 +29,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 #include <QtTest/QSignalSpy>
@@ -732,6 +735,41 @@ TEST_CASE("a background (unfocused) tab's title updates in real time", "[contour
             sawRow1TitleChange = true;
     }
     CHECK(sawRow1TitleChange);
+
+    contour::test::closeAllTabs(*window);
+}
+
+TEST_CASE("a tab whose label comes out empty is named after the program in front",
+          "[contour][multiwindow][model][tablabel]")
+{
+    // A blank tab names nothing: the label falls back to the session's foreground process, and only while
+    // it is empty.
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    factoryOwned->makePty = [](vtbackend::PageSize size) -> std::unique_ptr<vtpty::Pty> {
+        auto pty = std::make_unique<vtpty::MockPty>(size);
+        pty->setForegroundProcessName("vim");
+        return pty;
+    };
+    TestApp app(std::move(factoryOwned));
+    auto& manager = app.manager();
+    ScopedController window { manager };
+    window->createNewTab();
+    REQUIRE(window->count() == 1);
+    auto const titleAt = [&](int row) {
+        return window
+            ->data(window->index(row), static_cast<int>(contour::window::WindowController::Roles::TitleRole))
+            .toString();
+    };
+    auto* session =
+        manager.sessionForId(manager.model().window(window.id)->tabAt(0)->activePane()->session());
+    REQUIRE(session != nullptr);
+    REQUIRE(session->resolvedWindowTitle().empty()); // the premise: the default label comes out empty
+
+    CHECK(titleAt(0) == QStringLiteral("vim"));
+
+    session->setTitle(QStringLiteral("build"));
+    QCoreApplication::processEvents();
+    CHECK(titleAt(0) == QStringLiteral("build"));
 
     contour::test::closeAllTabs(*window);
 }

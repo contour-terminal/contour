@@ -58,10 +58,11 @@ enum class BarPresence : uint8_t
     Hidden = 0,   ///< Not shown.
     Shown,        ///< Always shown.
     RevealOnEdge, ///< Overlays the top rows while the pointer is at the screen edge (full screen).
+    Pinned, ///< Overlays the top rows, held revealed (full screen, while the connection is interrupted).
 };
 
 /// Number of @c BarPresence enumerators, derived from the last one.
-inline constexpr size_t BarPresenceCount = static_cast<size_t>(BarPresence::RevealOnEdge) + 1;
+inline constexpr size_t BarPresenceCount = static_cast<size_t>(BarPresence::Pinned) + 1;
 
 /// The window edge a bar sits at.
 enum class BarEdge : uint8_t
@@ -262,7 +263,8 @@ static_assert(detail::titleBandRulesAreEachReachable(),
 /// Decides where the band and the tabs go.
 /// @param inputs What the decision reads.
 /// @return The matching row's answer; in full screen, a band shown at the top reveals on the edge instead
-///         (D3), while a bottom band and the tab bar are unchanged.
+///         (D3) -- or stays pinned over the top rows while the host connection is interrupted, since a
+///         frozen screen says nothing about why -- while a bottom band and the tab bar are unchanged.
 [[nodiscard]] constexpr TitleBand resolveTitleBand(TitleBandInputs const& inputs) noexcept
 {
     auto const* const rule = findTitleBandRule(inputs);
@@ -271,13 +273,14 @@ static_assert(detail::titleBandRulesAreEachReachable(),
     auto band = rule->answer;
     if (inputs.mode == WindowMode::FullScreen && band.band == BarPresence::Shown
         && band.bandEdge == BarEdge::Top)
-        band.band = BarPresence::RevealOnEdge;
+        band.band =
+            inputs.notice == HostNotice::Interrupted ? BarPresence::Pinned : BarPresence::RevealOnEdge;
     return band;
 }
 
 /// The name QML reads a bar presence by.
 /// @param presence The presence.
-/// @return "hidden", "shown" or "reveal".
+/// @return "hidden", "shown", "reveal" or "pinned".
 [[nodiscard]] constexpr std::string_view barPresenceName(BarPresence presence) noexcept
 {
     switch (presence)
@@ -285,6 +288,7 @@ static_assert(detail::titleBandRulesAreEachReachable(),
         case BarPresence::Hidden: return "hidden";
         case BarPresence::Shown: return "shown";
         case BarPresence::RevealOnEdge: return "reveal";
+        case BarPresence::Pinned: return "pinned";
     }
     return "hidden";
 }

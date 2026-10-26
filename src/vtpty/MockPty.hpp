@@ -6,7 +6,9 @@
 #include <crispy/BufferObject.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <utility>
 
 namespace vtpty
 {
@@ -46,6 +48,18 @@ class MockPty: public Pty
     /// transition under test.
     void setWriteBehavior(PtyWriteBehavior behavior) noexcept { _writeBehavior = behavior; }
 
+    /// Names the program in front, as a shell starting one changes it. Runtime state, as for a real pty.
+    /// @param name The name foregroundProcessName() reports; none for no process.
+    void setForegroundProcessName(std::optional<std::string> name)
+    {
+        _foregroundProcessName = std::move(name);
+    }
+
+    [[nodiscard]] std::optional<std::string> foregroundProcessName() const override
+    {
+        return _foregroundProcessName;
+    }
+
     [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
     [[nodiscard]] std::string const& stdinBuffer() const noexcept { return _inputBuffer; }
 
@@ -76,6 +90,7 @@ class MockPty: public Pty
     bool _closed = false;
     PtyWriteBehavior _writeBehavior = PtyWriteBehavior::Accept;
     PtySlaveDummy _slave;
+    std::optional<std::string> _foregroundProcessName; ///< @see setForegroundProcessName
 };
 
 } // namespace vtpty

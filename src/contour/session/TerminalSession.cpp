@@ -1337,9 +1337,9 @@ void TerminalSession::extensionFramePublished()
 
 std::string TerminalSession::foregroundProcessName() const
 {
-    // Only a pty this process spawned has a process group to ask; a mirrored pane's runs elsewhere.
-    auto const* const process = dynamic_cast<vtpty::Process const*>(&_terminal.device());
-    return process != nullptr ? process->foregroundProcessName().value_or(std::string {}) : std::string {};
+    // Only a pty this process spawned has a process group to ask; a mirrored pane's runs elsewhere and
+    // answers none.
+    return _terminal.device().foregroundProcessName().value_or(std::string {});
 }
 
 void TerminalSession::updateColorPreference(vtbackend::ColorPreference preference)
