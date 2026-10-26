@@ -4676,6 +4676,27 @@ TEST_CASE("pane card: Increased Contrast rings the active card (offscreen)", "[c
     }
 }
 
+TEST_CASE("pane card: Minimal frames no pane at the window's edge (offscreen)",
+          "[contour][gui][qml][panecard]")
+{
+    using contour::config::ChromeDensity;
+    auto const density = GENERATE(ChromeDensity::Comfortable, ChromeDensity::Minimal);
+    CAPTURE(static_cast<int>(density));
+    auto setup = paneCardSetup();
+    setup.density = density;
+    auto host = PaneTreeHost { setup, QSize { 800, 400 } };
+    auto panes = TwoPanes {};
+    host.show(panes.split, /*visiblePanes*/ 2);
+
+    // Comfortable's cards each wear a border; Minimal's only line is the gap's, between the panes.
+    for (auto const* leaf: { &panes.left(), &panes.right() })
+        CHECK(PaneTreeHost::partOf(host.cardOf(*leaf), "paneCardSurface").isVisible()
+              == (density == ChromeDensity::Comfortable));
+    auto const lines = itemsNamed(host.root(), QStringLiteral("splitLine"));
+    CHECK(std::ranges::count_if(lines, [](QQuickItem const* line) { return line->isVisible(); })
+          == (density == ChromeDensity::Minimal ? 1 : 0));
+}
+
 TEST_CASE("pane card: a translucent profile's card is composited once (offscreen)",
           "[contour][gui][qml][panecard]")
 {

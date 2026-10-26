@@ -1,9 +1,9 @@
 // vim:syntax=qml
 // The kit's PaneCard: one leaf of the split tree. Once the tab shows two panes or more, the leaf is a card
-// -- its corners rounded, a one-device-pixel border, e1 beneath the active one and, under Increased
-// Contrast, an accent ring around it -- with its PaneHeader above the terminal (inline) or over it (the
-// held-modifier reveal's overlay, which moves nothing). A tab of one pane wears none of it: the terminal is
-// edge to edge.
+// -- its corners rounded, a one-device-pixel border (Comfortable only), e1 beneath the active one and,
+// under Increased Contrast, an accent ring around it -- with its PaneHeader above the terminal (inline) or
+// over it (the held-modifier reveal's overlay, which moves nothing). A tab of one pane wears none of it:
+// the terminal is edge to edge.
 //
 // Focus is told by the header's emphasis and the inactive panes' dim, never by an outline; the Terminal
 // row also lowers an inactive card's content (tui.inactivePaneOpacity; a lone pane is always active, so
@@ -95,12 +95,14 @@ Item {
         cornerRadius: card.cornerRadius
     }
 
-    // The card's edge, above what it holds: a border of one device pixel in the separator colour.
+    // The card's edge, above what it holds: a border of one device pixel in the separator colour. Minimal
+    // frames no card: the gap's one line between the panes is all it draws, so no pane is outlined at the
+    // window's edge.
     Rectangle {
         objectName: "paneCardSurface"
         anchors.fill: parent
         z: 2
-        visible: card.isCard
+        visible: card.isCard && chromeStyle.density !== "minimal"
         radius: card.cornerRadius
         color: "transparent"
         border.width: chromeStyle.hairline(Screen.devicePixelRatio)
