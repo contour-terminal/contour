@@ -419,20 +419,16 @@ QColor UiStyleProvider::bandFill(int frame, int mode, QString const& centre) con
         .density = _inputs.density,
     });
     auto const background = _inputs.scheme.bySlot[static_cast<size_t>(config::SchemeSlot::Background)];
+    auto const tone = paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light;
+    auto const orPaletteWindow = [&](std::optional<vtbackend::RGBColor> const& fill) {
+        return fill ? platform::toQColor(*fill) : paletteWindow;
+    };
     switch (surface.fill)
     {
         case config::BandFill::Palette: break;
         case config::BandFill::Clear: return { Qt::transparent };
-        case config::BandFill::Tint: {
-            auto const tint =
-                legibleBandTint(background, paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
-            return tint ? platform::toQColor(*tint) : paletteWindow;
-        }
-        case config::BandFill::Background: {
-            auto const ground =
-                legibleBandBackground(background, paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
-            return ground ? platform::toQColor(*ground) : paletteWindow;
-        }
+        case config::BandFill::Tint: return orPaletteWindow(legibleBandTint(background, tone));
+        case config::BandFill::Background: return orPaletteWindow(legibleBandBackground(background, tone));
     }
     return paletteWindow;
 }
@@ -449,6 +445,13 @@ QColor UiStyleProvider::statusColor(config::StatusColorRole role, config::Status
     if (!inRange(static_cast<int>(role), config::StatusColors.size()))
         return { Qt::transparent };
 
+    return statusInk(role, use, paletteIsDark() ? ChromeTone::Dark : ChromeTone::Light);
+}
+
+QColor UiStyleProvider::statusInk(config::StatusColorRole role,
+                                  config::StatusInkUse use,
+                                  ChromeTone tone) const
+{
     auto const& row = config::StatusColors[static_cast<size_t>(role)];
     switch (row.source)
     {
@@ -456,7 +459,7 @@ QColor UiStyleProvider::statusColor(config::StatusColorRole role, config::Status
         case config::StatusColorSource::Fixed: break;
     }
     auto const& hues = row.hues(use);
-    return QColor::fromRgb(paletteIsDark() ? hues.dark : hues.light);
+    return QColor::fromRgb(tone == ChromeTone::Dark ? hues.dark : hues.light);
 }
 
 QColor UiStyleProvider::statusMarkOn(int role, QColor const& background) const
@@ -464,18 +467,12 @@ QColor UiStyleProvider::statusMarkOn(int role, QColor const& background) const
     if (!inRange(role, config::StatusColors.size()))
         return { Qt::transparent };
 
-    auto const& row = config::StatusColors[static_cast<size_t>(role)];
     auto const ground = platform::toRGBColor(background);
-    auto const mark = [&]() -> QColor {
-        switch (row.source)
-        {
-            case config::StatusColorSource::PaletteAccent: return accentColor();
-            case config::StatusColorSource::Fixed: break;
-        }
-        auto const& hues = row.hues(config::StatusInkUse::Mark);
-        auto const dark = platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark;
-        return QColor::fromRgb(dark ? hues.dark : hues.light);
-    }();
+    auto const mark =
+        statusInk(static_cast<config::StatusColorRole>(role),
+                  config::StatusInkUse::Mark,
+                  platform::colorSchemeOfBackground(ground) == Qt::ColorScheme::Dark ? ChromeTone::Dark
+                                                                                     : ChromeTone::Light);
     if (vtbackend::contrastRatio(platform::toRGBColor(mark), ground) >= config::MinimumMarkContrast)
         return mark;
     return onColor(background);

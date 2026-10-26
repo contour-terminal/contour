@@ -53,9 +53,8 @@ namespace
 /// How many items named @p name beneath @p root, in the visual tree, are visible.
 [[nodiscard]] int visibleItemsNamed(QQuickItem const& root, QString const& name)
 {
-    return static_cast<int>(
-        std::ranges::count_if(contour::test::snapshot::ChromeSnapshotScene::itemsNamed(root, name),
-                              [](QQuickItem const* item) { return item->isVisible(); }));
+    return static_cast<int>(std::ranges::count_if(contour::test::itemsNamed(root, name),
+                                                  [](QQuickItem const* item) { return item->isVisible(); }));
 }
 } // namespace
 
@@ -325,7 +324,7 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 // The active header shows its actions; the gap beside it is engaged, its grabber shown
                 // wherever the row draws one (the Terminal row's is the engaged line of box glyphs).
                 auto const items = [&](QString const& name) {
-                    return ChromeSnapshotScene::itemsNamed(content, name);
+                    return contour::test::itemsNamed(content, name);
                 };
                 CHECK(std::ranges::count_if(
                           items(QStringLiteral("splitHandle")),
@@ -343,7 +342,7 @@ TEST_CASE("Every snapshot script builds on the macOS and Terminal rows (offscree
                 // The last pane ended: its footer says how, below its cells; no other pane has one.
                 CHECK(visibleItemsNamed(content, QStringLiteral("exitedFooter")) == 1);
                 auto const messages =
-                    ChromeSnapshotScene::itemsNamed(content, QStringLiteral("exitedFooterMessage"));
+                    contour::test::itemsNamed(content, QStringLiteral("exitedFooterMessage"));
                 CHECK(std::ranges::count_if(messages,
                                             [](QQuickItem const* message) {
                                                 return message->isVisible()

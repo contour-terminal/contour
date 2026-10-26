@@ -40,6 +40,9 @@ Item {
     readonly property string closeChord: ended && controller ? controller.shortcutText("ClosePane") : ""
     readonly property color textColor: chromeStyle.paletteRevision < 0 ? "transparent"
         : chromeStyle.colorOn(chromeStyle.roles.paneFooterText, footer.background)
+    // The footer's wash over the pane's background; the Close button takes it once more.
+    readonly property color washColor: chromeStyle.paletteRevision < 0 ? "transparent"
+        : chromeStyle.colorOn(chromeStyle.roles.paneFooterFill, footer.background)
 
     /// A click on the footer outside its buttons.
     signal activated()
@@ -79,8 +82,7 @@ Item {
             anchors.fill: parent
             anchors.topMargin: -footer.cornerRadius
             radius: footer.cornerRadius
-            color: chromeStyle.paletteRevision < 0 ? "transparent"
-                 : chromeStyle.colorOn(chromeStyle.roles.paneFooterFill, footer.background)
+            color: footer.washColor
         }
     }
 
@@ -128,8 +130,7 @@ Item {
             label: qsTr("Close %1").arg(footer.closeChord).trim()
             accessibleName: qsTr("Close")
             // The footer's own wash once more: a step above the footer, as the kit's fill.3 is.
-            fill: chromeStyle.paletteRevision < 0 ? "transparent"
-                  : chromeStyle.colorOn(chromeStyle.roles.paneFooterFill, footer.background)
+            fill: footer.washColor
             ink: footer.textColor
             onClicked: if (footer.session) footer.session.dismiss()
         }

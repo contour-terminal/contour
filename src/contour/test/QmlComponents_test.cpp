@@ -90,6 +90,7 @@
 #include <QtTest/QTest>
 #include <vtworkspace/Primitives.hpp>
 
+using contour::test::itemsNamed;
 using contour::test::MockPaneProxy;
 using contour::test::MockSession;
 using contour::test::StubContourTerminal;
@@ -323,7 +324,7 @@ class MockTabController: public QAbstractListModel
     // suite's message capture turns into a failure.
     void tabColorPickRequested(int /*index*/);
     void tabContextMenuModelChanged();
-    void tabContextMenuRequested(int index);
+    void tabContextMenuRequested(int /*index*/);
     void newTabMenuModelChanged();
     void newTabMenuRequested();
 
@@ -4105,24 +4106,6 @@ TEST_CASE("split handle: the inset and the gap snap to whole device pixels at fr
 
 namespace
 {
-/// Every item beneath @p root (inclusive) named @p name, walking the visual tree so that Loader- and
-/// Repeater-made items are found too.
-[[nodiscard]] std::vector<QQuickItem*> itemsNamed(QQuickItem& root, QString const& name)
-{
-    auto found = std::vector<QQuickItem*> {};
-    auto pending = std::vector<QQuickItem*> { &root };
-    while (!pending.empty())
-    {
-        auto* item = pending.back();
-        pending.pop_back();
-        if (item->objectName() == name)
-            found.push_back(item);
-        for (auto* child: item->childItems())
-            pending.push_back(child);
-    }
-    return found;
-}
-
 /// The name an item announces, read from its `Accessible` attached object; empty without one.
 [[nodiscard]] QString accessibleNameOf(QObject const& item)
 {
@@ -7472,7 +7455,7 @@ TEST_CASE("Banner: the Terminal row is the content's height in the scheme's pale
     CHECK(item->property("topPadding").toReal() == inset);
     CHECK(item->property("bottomPadding").toReal() == inset);
     CHECK(item->height() == item->implicitHeight());
-    CHECK(item->height() == content->implicitHeight() + 2 * inset);
+    CHECK(item->height() == content->implicitHeight() + (2 * inset));
 
     if (setup.row == ChromeStyle::Terminal)
     {
@@ -7710,20 +7693,20 @@ TEST_CASE("KitDialog: a sheet on the macOS row, centred elsewhere (offscreen)",
     contour::test::installChromeStyle(engine, setup);
     contour::test::QmlMessageCapture const warnings;
 
-    DialogHost host;
+    DialogHost const host;
     auto dialog = openKitDialog(
         engine, host.window.contentItem(), QVariantMap { { "heading", QStringLiteral("Close this tab?") } });
     auto const overlayWidth = host.window.contentItem()->width();
     auto const overlayHeight = host.window.contentItem()->height();
 
     CHECK(dialog->property("width").toReal() == chromeToken(engine, "size", "dialogWidth"));
-    CHECK(std::abs(dialog->property("x").toReal() - (overlayWidth - dialog->property("width").toReal()) / 2)
+    CHECK(std::abs(dialog->property("x").toReal() - ((overlayWidth - dialog->property("width").toReal()) / 2))
           <= 1);
     if (setup.row == ChromeStyle::MacOS)
         CHECK(dialog->property("y").toReal() == 0);
     else
         CHECK(std::abs(dialog->property("y").toReal()
-                       - (overlayHeight - dialog->property("height").toReal()) / 2)
+                       - ((overlayHeight - dialog->property("height").toReal()) / 2))
               <= 1);
     CHECK(warnings.count(contour::test::isQmlDiagnostic) == 0);
 }
@@ -7734,7 +7717,7 @@ TEST_CASE("KitDialog: accept and reject close it and emit (offscreen)", "[contou
     contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
 
-    DialogHost host;
+    DialogHost const host;
     auto dialog = openKitDialog(engine,
                                 host.window.contentItem(),
                                 QVariantMap { { "heading", QStringLiteral("Close this tab?") },
@@ -7774,11 +7757,12 @@ TEST_CASE("KitDialog: a destructive accept is painted in the danger colour (offs
                                .value<contour::window::UiStyleProvider*>();
     REQUIRE(provider != nullptr);
 
-    DialogHost host;
-    auto dialog = openKitDialog(engine,
-                                host.window.contentItem(),
-                                QVariantMap { { "heading", QStringLiteral("Close this tab?") },
-                                              { "acceptRole", provider->statusDanger() } });
+    DialogHost const host;
+    auto dialog =
+        openKitDialog(engine,
+                      host.window.contentItem(),
+                      QVariantMap { { "heading", QStringLiteral("Close this tab?") },
+                                    { "acceptRole", contour::window::UiStyleProvider::statusDanger() } });
     auto* accept = dialog->findChild<QQuickItem*>(QStringLiteral("kitDialogAccept"));
     REQUIRE(accept != nullptr);
     auto const* background = accept->property("background").value<QQuickItem*>();
@@ -7799,7 +7783,7 @@ TEST_CASE("KitDialog: the Terminal row's heading and buttons read on its surface
     contour::test::QmlMessageCapture const warnings;
     contour::test::installChromeStyle(engine, terminalRowSetup(schemeName));
 
-    DialogHost host;
+    DialogHost const host;
     auto dialog = openKitDialog(engine,
                                 host.window.contentItem(),
                                 QVariantMap { { "heading", QStringLiteral("Close this tab?") },
@@ -7834,7 +7818,7 @@ TEST_CASE("a KitDialog without a reject text shows one button (offscreen)",
     QQmlEngine engine;
     contour::test::installChromeStyle(engine);
     contour::test::QmlMessageCapture const warnings;
-    DialogHost host;
+    DialogHost const host;
 
     SECTION("an empty reject text hides the reject button")
     {
@@ -7899,8 +7883,9 @@ TEST_CASE("ShowAbout opens the About dialog with the version (offscreen)", "[con
 
     // Centred in the overlay, as the Terminal row places every dialog.
     auto const overlayHeight = window.contentItem()->height();
-    CHECK(std::abs(dialog->property("y").toReal() - (overlayHeight - dialog->property("height").toReal()) / 2)
-          <= 1);
+    CHECK(
+        std::abs(dialog->property("y").toReal() - ((overlayHeight - dialog->property("height").toReal()) / 2))
+        <= 1);
 
     // Every About text reads on the surface it sits on.
     auto const* surface = dialog->property("background").value<QQuickItem*>();

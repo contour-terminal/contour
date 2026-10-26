@@ -9,6 +9,7 @@
 #include <contour/window/ChromeTokenObjects.hpp>
 #include <contour/window/TitleBandGeometry.hpp>
 #include <contour/window/TitleBandLayout.hpp>
+#include <contour/window/TitleBandSurface.hpp>
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -671,6 +672,16 @@ class UiStyleProvider: public QObject
     void paletteRevisionChanged();
 
   private:
+    /// The colour that says @p role when drawn as @p use on a ground of @p tone: statusColor()'s and
+    /// statusMarkOn()'s one pick of the row's source and hue.
+    /// @param role A status role inside config::StatusColors.
+    /// @param use  Whether it colours text or a mark.
+    /// @param tone The tone of what it is drawn on.
+    /// @return The colour.
+    [[nodiscard]] QColor statusInk(config::StatusColorRole role,
+                                   config::StatusInkUse use,
+                                   ChromeTone tone) const;
+
     // By value rather than by reference: the rows have static storage duration, but a reference member
     // would delete move-assignment for no gain -- the row is a handful of ints and string_views.
     ChromeInputs _inputs; ///< What this provider was built from.

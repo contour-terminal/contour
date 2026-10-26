@@ -54,12 +54,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
-#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -323,22 +321,6 @@ class ChromeSnapshotScene
 
     /// @return The font the chrome was configured with, as resolved for the variant's row.
     [[nodiscard]] QFont const& chromeFont() const noexcept { return _chromeFont; }
-
-    /// Every item named @p name in the visual tree beneath @p root, in tree order.
-    ///
-    /// The visual tree rather than findChildren(): a SplitView's handles have a parent item but no QObject
-    /// parent.
-    [[nodiscard]] static std::vector<QQuickItem*> itemsNamed(QQuickItem const& root, QString const& name)
-    {
-        auto found = std::vector<QQuickItem*> {};
-        for (auto* child: root.childItems())
-        {
-            if (child->objectName() == name)
-                found.push_back(child);
-            std::ranges::copy(itemsNamed(*child, name), std::back_inserter(found));
-        }
-        return found;
-    }
 
     /// @return The AppKit title bar the band was measured over (see measureBand), or std::nullopt when the
     ///         variant has none to measure: off a macOS host, under the native frame, or in full screen.

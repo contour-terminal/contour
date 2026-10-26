@@ -498,4 +498,24 @@ class MockNewDefaultsNotice: public QObject
     bool _isOffered = false;
 };
 
+/// Every item named @p name in the visual tree beneath @p root, in depth-first order.
+///
+/// The visual tree rather than findChildren(): Loader- and Repeater-made items and a SplitView's handles
+/// have a parent item but no QObject parent.
+/// @param root Where the walk starts.
+/// @param name The object name to find.
+/// @return The items, possibly none.
+[[nodiscard]] inline std::vector<QQuickItem*> itemsNamed(QQuickItem const& root, QString const& name)
+{
+    auto found = std::vector<QQuickItem*> {};
+    for (auto* child: root.childItems())
+    {
+        if (child->objectName() == name)
+            found.push_back(child);
+        auto const below = itemsNamed(*child, name);
+        found.insert(found.end(), below.begin(), below.end());
+    }
+    return found;
+}
+
 } // namespace contour::test

@@ -66,7 +66,7 @@ class ChromeSnapshotWriter
         auto buffer = QBuffer { &bytes };
         if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG"))
             return std::unexpected(SnapshotWriteError::EncodeFailed);
-        auto const path = _directory / snapshotFileName(variant);
+        auto path = _directory / snapshotFileName(variant);
         if (!_files->writeFile(path, std::string_view(bytes.constData(), static_cast<size_t>(bytes.size()))))
             return std::unexpected(SnapshotWriteError::WriteFailed);
         if (!_files->appendFile(_directory / ManifestFileName, manifestLine(variant, facts)))
