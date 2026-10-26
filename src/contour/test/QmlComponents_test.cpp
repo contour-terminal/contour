@@ -4658,17 +4658,27 @@ TEST_CASE("pane card: a header button that hides hands the focus back to its ter
     host.window.requestActivate();
     REQUIRE(QTest::qWaitForWindowActive(&host.window));
     auto panes = TwoPanes {};
-    // Minimal shows the actions while the modifier is held; the Terminal row on the focused pane.
+    // Minimal shows the actions while the modifier is held and the header was reached by keyboard (its
+    // actions otherwise wait for hover); the Terminal row on the focused pane.
+    if (density == ChromeDensity::Minimal)
+        panes.left().setFocus(static_cast<int>(contour::window::PaneFocus::KeyboardFocused));
     host.show(panes.split,
               /*visiblePanes*/ 2,
               static_cast<int>(density == ChromeDensity::Minimal ? contour::window::HeaderReveal::HeldModifier
                                                                  : contour::window::HeaderReveal::None));
 
-    // The pointer rests on the other pane, so that no hover keeps the left pane's actions shown: moved
-    // twice, since the first move only tells the window where the pointer starts from.
+    // The pointer rests on the other pane, so that no hover keeps the left pane's actions shown. The window
+    // delivers the moves (and the hover they settle) asynchronously, so wait until the left card's hover
+    // handler has seen it leave.
+    auto const& card = host.cardOf(panes.left());
+    auto const handlers = card.findChildren<QObject*>(Qt::FindDirectChildrenOnly);
+    auto const hover = std::ranges::find_if(
+        handlers, [](QObject const* handler) { return handler->inherits("QQuickHoverHandler"); });
+    REQUIRE(hover != handlers.end());
     QTest::mouseMove(&host.window, QPoint { host.window.width() - 2, host.window.height() - 2 });
     QTest::mouseMove(&host.window, QPoint { host.window.width() - 1, host.window.height() - 1 });
-    auto const& card = host.cardOf(panes.left());
+    REQUIRE(QTest::qWaitFor([&] { return !(*hover)->property("hovered").toBool(); }));
+
     auto& button = PaneTreeHost::partOf(card, "paneHeaderAction0");
     REQUIRE(QTest::qWaitFor([&] { return button.isVisible(); }));
     button.forceActiveFocus();
@@ -4680,9 +4690,10 @@ TEST_CASE("pane card: a header button that hides hands the focus back to its ter
     else
         panes.left().setFocus(static_cast<int>(contour::window::PaneFocus::Unfocused));
     REQUIRE(QTest::qWaitFor([&] { return !button.isVisible(); }));
-    QCoreApplication::processEvents();
 
-    CHECK(PaneTreeHost::terminalOf(card).hasActiveFocus());
+    // The header settles where the focus went once the hide has run: wait for it, not for a fixed time.
+    auto const& terminal = PaneTreeHost::terminalOf(card);
+    CHECK(QTest::qWaitFor([&] { return terminal.hasActiveFocus(); }));
 }
 
 TEST_CASE("pane card: Increased Contrast rings the active card (offscreen)", "[contour][gui][qml][panecard]")
