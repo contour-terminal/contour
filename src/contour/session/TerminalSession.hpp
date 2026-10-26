@@ -1141,7 +1141,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
 
     // vtbackend::Events
     //
-    void requestCaptureBuffer(vtbackend::LineCount lines, bool logical) override;
+    void requestCaptureBuffer(vtbackend::LineCount lines, vtbackend::CaptureLineMode mode) override;
     void bell() override;
     void bufferChanged(vtbackend::ScreenType) override;
     void renderBufferUpdated() override;
@@ -2325,7 +2325,7 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     struct CaptureBufferRequest
     {
         vtbackend::LineCount lines;
-        bool logical;
+        vtbackend::CaptureLineMode mode;
     };
 
     /// Capture requests accepted but not yet answered, oldest first.

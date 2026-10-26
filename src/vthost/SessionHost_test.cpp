@@ -270,7 +270,19 @@ class ExitingPty final: public vtpty::Pty
         return std::nullopt;
     }
 
-    [[nodiscard]] int write(std::string_view data) override { return static_cast<int>(data.size()); }
+    [[nodiscard]] int write(std::string_view data) override
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _written += data;
+        return static_cast<int>(data.size());
+    }
+
+    /// What was written to the program: the terminal's replies.
+    [[nodiscard]] std::string written() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _written;
+    }
     [[nodiscard]] vtpty::PageSize pageSize() const noexcept override { return _size; }
     void resizeScreen(vtpty::PageSize size, std::optional<vtpty::ImageSize>) override { _size = size; }
     void waitForClosed() override
@@ -285,6 +297,7 @@ class ExitingPty final: public vtpty::Pty
     vtpty::PtySlaveDummy _slave;
     vtpty::PageSize _size;
     std::string _output;
+    std::string _written;
     bool _closed = false;
     bool _exited = false;
 };
@@ -996,6 +1009,37 @@ TEST_CASE("a hosted session's process exit drops its working program status befo
         REQUIRE(announced.wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
         CHECK(announced.get() == std::vector<std::string> { "", "lint" });
     }
+}
+
+TEST_CASE("a hosted session refuses a buffer capture rather than dropping it", "[vthost][host][capture]")
+{
+    // XTCAPTURE for the whole page. Nobody on the daemon can grant it; a client reading until the terminating
+    // chunk must still get that chunk, or it blocks forever.
+    auto ownedPty = std::make_unique<ExitingPty>(
+        vtbackend::PageSize { .lines = vtbackend::LineCount(5), .columns = vtbackend::ColumnCount(40) },
+        "capture me\r\n\033[>0,t");
+    auto* const pty = ownedPty.get();
+    auto closed = std::promise<void> {};
+    auto hosted = vthost::HostedSession { vtworkspace::SessionId { 1 },
+                                          core::defaultEnvironment(),
+                                          std::move(ownedPty),
+                                          vtbackend::Settings {},
+                                          vtbackend::HostIdentity {},
+                                          vtbackend::TerminalClocks::system(),
+                                          core::platform::NativeFileSystem::instance(),
+                                          {},
+                                          {},
+                                          {},
+                                          {},
+                                          [&] { closed.set_value(); },
+                                          {} };
+    hosted.start();
+    pty->exitProcess();
+    REQUIRE(closed.get_future().wait_for(std::chrono::seconds { 10 }) == std::future_status::ready);
+
+    auto const written = pty->written();
+    CHECK(written.contains("\033^314;\033\\"));
+    CHECK_FALSE(written.contains("capture me"));
 }
 
 TEST_CASE("resizing an unknown pane is reported", "[vthost][host][diagnostics]")

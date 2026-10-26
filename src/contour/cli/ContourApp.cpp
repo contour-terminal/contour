@@ -860,7 +860,8 @@ int ContourApp::captureAction()
 {
     // clang-format off
     auto captureSettings = contour::cli::CaptureSettings {};
-    captureSettings.logicalLines = parameters().get<bool>("contour.capture.logical");
+    captureSettings.lineMode = parameters().get<bool>("contour.capture.logical") ? vtbackend::CaptureLineMode::Logical
+                                                                                : vtbackend::CaptureLineMode::Physical;
     captureSettings.words = parameters().get<bool>("contour.capture.words");
     captureSettings.timeout = parameters().get<double>("contour.capture.timeout");
     captureSettings.lineCount = vtbackend::LineCount::cast_from(parameters().get<unsigned>("contour.capture.lines"));

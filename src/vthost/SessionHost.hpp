@@ -438,6 +438,17 @@ class HostedSession
         /// daemon honors it by switching the terminal's status display on (the
         /// frontend decision the GUI makes too).
         std::function<void()> onShowHostWritableStatusLine;
+        /// A program asked for a buffer capture (XTCAPTURE). No one here can grant it, so the daemon refuses
+        /// it as `capture_buffer: deny` does locally -- with the terminating chunk alone -- rather than
+        /// leaving the program blocked on a reply that never comes. Parser thread, terminal lock held.
+        std::function<void()> onCaptureBuffer;
+
+        void requestCaptureBuffer(vtbackend::LineCount /*lines*/,
+                                  vtbackend::CaptureLineMode /*mode*/) override
+        {
+            if (onCaptureBuffer)
+                onCaptureBuffer();
+        }
 
         void screenUpdated() override
         {

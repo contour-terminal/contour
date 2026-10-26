@@ -119,6 +119,11 @@ HostedSession::HostedSession(SessionId id,
     _events.onShowHostWritableStatusLine = [this] {
         _terminal.answerHostWritableStatusLineRequest(vtbackend::HostWritableStatusLineAnswer::Shown);
     };
+    // Refused, not dropped: a client reads until the terminating chunk. No lock here -- the hook runs on the
+    // parser thread with the terminal lock held -- and the pump's flushInput() after the batch writes it.
+    _events.onCaptureBuffer = [this] {
+        _terminal.primaryScreen().replyCaptureBufferEnd();
+    };
     // Once the terminal they reach exists; they are built on another thread, and run once handed back.
     if (_extensions)
         _extensions->start();

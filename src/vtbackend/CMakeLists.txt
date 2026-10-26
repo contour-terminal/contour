@@ -24,6 +24,7 @@ set(vtbackend_HEADERS
     vt/Charset.hpp
     core/Color.hpp
     core/ContextId.hpp
+    core/CaptureLineMode.hpp
     core/CommandBlockId.hpp
     core/CommandBlockOutcome.hpp
     core/ColorPalette.hpp

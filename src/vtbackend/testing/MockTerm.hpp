@@ -517,9 +517,9 @@ class MockTerm: public Terminal::NullEvents
         mockPty().stdinBuffer().clear();
     }
 
-    void requestCaptureBuffer(LineCount lines, bool logical) override
+    void requestCaptureBuffer(LineCount lines, CaptureLineMode mode) override
     {
-        terminal.primaryScreen().captureBuffer(lines, logical);
+        terminal.primaryScreen().captureBuffer(lines, mode);
     }
 
   private:

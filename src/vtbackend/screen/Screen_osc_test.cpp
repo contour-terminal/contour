@@ -83,45 +83,45 @@ TEST_CASE("captureBuffer", "[screen]")
 
     SECTION("lines: 0")
     {
-        screen.captureBuffer(LineCount(0), false);
+        screen.captureBuffer(LineCount(0), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;\033\\"));
     }
     SECTION("lines: 1")
     {
-        screen.captureBuffer(LineCount(1), false);
+        screen.captureBuffer(LineCount(1), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;KLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 2")
     {
-        screen.captureBuffer(LineCount(2), false);
+        screen.captureBuffer(LineCount(2), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;FGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 3")
     {
-        screen.captureBuffer(LineCount(3), false);
+        screen.captureBuffer(LineCount(3), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput()) == e("\033^314;ABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 4")
     {
-        screen.captureBuffer(LineCount(4), false);
+        screen.captureBuffer(LineCount(4), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput())
               == e("\033^314;67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5")
     {
-        screen.captureBuffer(LineCount(5), false);
+        screen.captureBuffer(LineCount(5), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput())
               == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5 (+1 overflow)")
     {
-        screen.captureBuffer(LineCount(6), false);
+        screen.captureBuffer(LineCount(6), CaptureLineMode::Physical);
         INFO(e(mock.terminal.peekInput()));
         CHECK(e(mock.terminal.peekInput())
               == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));

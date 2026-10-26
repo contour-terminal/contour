@@ -4940,9 +4940,9 @@ string Terminal::extractLastMarkRange() const
 }
 
 // {{{ screen events
-void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
+void Terminal::requestCaptureBuffer(LineCount lines, CaptureLineMode mode)
 {
-    _eventListener.requestCaptureBuffer(lines, logical);
+    _eventListener.requestCaptureBuffer(lines, mode);
 }
 
 void Terminal::requestShowHostWritableStatusLine()

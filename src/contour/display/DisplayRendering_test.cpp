@@ -825,7 +825,7 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
     constexpr auto CaptureAnswerEnd = "\033^314;\033\\"sv;
 
     h.feedAndSettle("capture me\r\n"sv);
-    h.session->requestCaptureBuffer(vtbackend::LineCount(2), /*logical=*/false);
+    h.session->requestCaptureBuffer(vtbackend::LineCount(2), vtbackend::CaptureLineMode::Physical);
     REQUIRE(QTest::qWaitFor([&] { return captureAsks != 0; }));
     REQUIRE(captureAsks == 1);
     h.session->executePendingBufferCapture(PermissionDecision::Allow, PermissionMemory::Once);
@@ -833,11 +833,11 @@ TEST_CASE("display: the permission machinery routes guarded roles end-to-end", "
 
     // A remembered deny resolves the next request without asking again -- and still answers it, since a
     // refused capture owes its client the terminating chunk.
-    h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
+    h.session->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Logical);
     REQUIRE(QTest::qWaitFor([&] { return captureAsks != 1; }));
     REQUIRE(captureAsks == 2);
     h.session->executePendingBufferCapture(PermissionDecision::Deny, PermissionMemory::Session);
-    h.session->requestCaptureBuffer(vtbackend::LineCount(1), /*logical=*/true);
+    h.session->requestCaptureBuffer(vtbackend::LineCount(1), vtbackend::CaptureLineMode::Logical);
     REQUIRE(QTest::qWaitFor(
         [&] { return contour::test::occurrencesOf(CaptureAnswerEnd, h.pty->stdinSnapshot()) == 3; }));
     CHECK(captureAsks == 2); // remembered: resolved without asking again

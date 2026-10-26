@@ -1582,7 +1582,7 @@ void TerminalSession::applyMotionPreference(config::MotionPreference motion)
     }
 }
 
-void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
+void TerminalSession::requestCaptureBuffer(LineCount lines, vtbackend::CaptureLineMode mode)
 {
     // A display-less session (a background split/tab pane) has no GUI queue to decide on, and the client
     // is owed an answer either way -- so refuse it here rather than dropping it silently.
@@ -1601,7 +1601,7 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 
     {
         auto const _ = std::scoped_lock { _pendingBufferCaptureMutex };
-        _pendingBufferCaptures.emplace_back(CaptureBufferRequest { .lines = lines, .logical = logical });
+        _pendingBufferCaptures.emplace_back(CaptureBufferRequest { .lines = lines, .mode = mode });
     }
 
     postPermissionRequest(GuardedRole::CaptureBuffer);
@@ -1631,7 +1631,7 @@ void TerminalSession::executePendingBufferCapture(PermissionDecision decision, P
         for (auto const& request: requests)
         {
             if (decision == PermissionDecision::Allow)
-                _terminal.primaryScreen().captureBuffer(request.lines, request.logical);
+                _terminal.primaryScreen().captureBuffer(request.lines, request.mode);
             else
                 // A refusal is still a reply. The protocol cannot express "no reply is coming", so a client
                 // reading until the empty terminating chunk would otherwise block forever -- which is what

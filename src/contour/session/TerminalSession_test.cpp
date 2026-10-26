@@ -4968,7 +4968,7 @@ constexpr auto CaptureReplyTerminator = std::string_view { "\033^314;\033\\" };
 /// counted from the page's bottom upwards, so a shorter request would take only blank lines.
 void captureWholePage(contour::session::TerminalSession& session)
 {
-    session.requestCaptureBuffer(session.terminal().pageSize().lines, /*logical=*/false);
+    session.requestCaptureBuffer(session.terminal().pageSize().lines, vtbackend::CaptureLineMode::Physical);
 }
 
 /// Whether @p session's PTY holds a capture of the seeded screen. Both halves matter: capturing an

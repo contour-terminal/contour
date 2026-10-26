@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vtbackend/Logging.hpp>
+#include <vtbackend/core/CaptureLineMode.hpp>
 #include <vtbackend/core/ColorPalette.hpp>
 #include <vtbackend/core/FileUrl.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
@@ -539,7 +540,7 @@ class Terminal: public IStatusLinePublishTarget
       public:
         virtual ~Events() = default;
 
-        virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
+        virtual void requestCaptureBuffer(LineCount /*lines*/, CaptureLineMode /*mode*/) {}
         virtual void bell() {}
         /// Another page came on display -- not the cursor's page, which with DECPCCM reset may be another.
         /// @param type The screen type of the page now on display.
@@ -796,7 +797,7 @@ class Terminal: public IStatusLinePublishTarget
     class NullEvents: public Events
     {
       public:
-        void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) override {}
+        void requestCaptureBuffer(LineCount /*lines*/, CaptureLineMode /*mode*/) override {}
         void bell() override {}
         void bufferChanged(ScreenType) override {}
         void renderBufferUpdated() override {}
@@ -3221,7 +3222,7 @@ class Terminal: public IStatusLinePublishTarget
 
     // Screen's EventListener implementation
     //
-    void requestCaptureBuffer(LineCount lines, bool logical);
+    void requestCaptureBuffer(LineCount lines, CaptureLineMode mode);
     void requestShowHostWritableStatusLine();
     void bell();
     /// Tells the frontend that another page came on display. Drops the selection, which was on the page shown

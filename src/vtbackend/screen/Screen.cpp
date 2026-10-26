@@ -2568,7 +2568,7 @@ void Screen::notify(string const& title, string const& content)
     _terminal->notify(title, content);
 }
 
-void Screen::captureBuffer(LineCount lineCount, bool logicalLines)
+void Screen::captureBuffer(LineCount lineCount, CaptureLineMode mode)
 {
     // TODO: Unit test case! (for ensuring line numbering and limits are working as expected)
 
@@ -2576,12 +2576,13 @@ void Screen::captureBuffer(LineCount lineCount, bool logicalLines)
 
     // TODO: when capturing lineCount < screenSize.lines, start at the lowest non-empty line.
     auto const relativeStartLine =
-        logicalLines ? _grid.computeLogicalLineNumberFromBottom(LineCount::cast_from(lineCount))
-                     : unbox(pageSize().lines - lineCount);
+        mode == CaptureLineMode::Logical
+            ? _grid.computeLogicalLineNumberFromBottom(LineCount::cast_from(lineCount))
+            : unbox(pageSize().lines - lineCount);
     auto const startLine =
         LineOffset::cast_from(clamp(relativeStartLine, -unbox(historyLineCount()), unbox(pageSize().lines)));
 
-    vtCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, logicalLines ? "logical" : "actual");
+    vtCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, mode);
 
     size_t constexpr MaxChunkSize = 4096;
     size_t currentChunkSize = 0;
@@ -2605,7 +2606,7 @@ void Screen::captureBuffer(LineCount lineCount, bool logicalLines)
 
     for (LineOffset line = startLine; line <= bottomLine; ++line)
     {
-        if (logicalLines && _grid.lineAt(line).wrapped() && !capturedBuffer.empty())
+        if (mode == CaptureLineMode::Logical && _grid.lineAt(line).wrapped() && !capturedBuffer.empty())
             capturedBuffer.pop_back();
 
         auto const& lineBuffer = _grid.lineAt(line);
@@ -4545,13 +4546,17 @@ namespace impl
             // Count: number of lines to capture from main page aera's bottom upwards
             //        If omitted or 0, the main page area's line count will be used.
 
-            auto const logicalLines = seq.paramOr(0, 0);
-            if (logicalLines != 0 && logicalLines != 1)
-                return ApplyResult::Invalid;
+            auto mode = CaptureLineMode::Physical;
+            switch (seq.paramOr(0, 0))
+            {
+                case 0: mode = CaptureLineMode::Physical; break;
+                case 1: mode = CaptureLineMode::Logical; break;
+                default: return ApplyResult::Invalid;
+            }
 
             auto const lineCount = LineCount(seq.paramOr(1, *terminal.pageSize().lines));
 
-            terminal.requestCaptureBuffer(lineCount, logicalLines);
+            terminal.requestCaptureBuffer(lineCount, mode);
 
             return ApplyResult::Ok;
         }

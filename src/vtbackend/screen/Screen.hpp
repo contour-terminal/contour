@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtbackend/core/CaptureLineMode.hpp>
 #include <vtbackend/core/Color.hpp>
 #include <vtbackend/core/CommandBlockId.hpp>
 #include <vtbackend/core/Hyperlink.hpp>
@@ -598,7 +599,8 @@ class Screen final: public SequenceHandler, public capabilities::StaticDatabase
     void hyperlink(std::string id, std::string uri);                   // OSC 8
     void notify(std::string const& title, std::string const& content); // OSC 777
 
-    void captureBuffer(LineCount lineCount, bool logicalLines);
+    /// Replies with the last @p lineCount lines, counted as @p mode says, in XTCAPTURE chunks.
+    void captureBuffer(LineCount lineCount, CaptureLineMode mode);
 
     /// Replies the empty terminating PM chunk that closes every capture reply, and nothing else.
     ///
