@@ -67,6 +67,12 @@ class ChromeSizeTokens: public QObject
     Q_PROPERTY(qreal paneHeaderAction READ paneHeaderAction CONSTANT)
     Q_PROPERTY(qreal paneFooter READ paneFooter CONSTANT)
     Q_PROPERTY(qreal footerButton READ footerButton CONSTANT)
+    Q_PROPERTY(qreal paletteWidth READ paletteWidth CONSTANT)
+    Q_PROPERTY(qreal paletteMaxHeight READ paletteMaxHeight CONSTANT)
+    Q_PROPERTY(qreal paletteField READ paletteField CONSTANT)
+    Q_PROPERTY(qreal paletteRow READ paletteRow CONSTANT)
+    Q_PROPERTY(qreal paletteGroupHeader READ paletteGroupHeader CONSTANT)
+    Q_PROPERTY(qreal paletteFooter READ paletteFooter CONSTANT)
 
   public:
     /// @param tokens The resolved size group.
@@ -146,6 +152,25 @@ class ChromeSizeTokens: public QObject
     /// @return The height of an exited footer's button in logical pixels.
     [[nodiscard]] qreal footerButton() const noexcept { return _tokens.footerButton * _units.vertical; }
 
+    /// @return The command palette's width in logical pixels.
+    [[nodiscard]] qreal paletteWidth() const noexcept { return _tokens.paletteWidth * _units.horizontal; }
+    /// @return The command palette's greatest height in logical pixels.
+    [[nodiscard]] qreal paletteMaxHeight() const noexcept
+    {
+        return _tokens.paletteMaxHeight * _units.vertical;
+    }
+    /// @return The height of the palette's query row in logical pixels.
+    [[nodiscard]] qreal paletteField() const noexcept { return _tokens.paletteField * _units.vertical; }
+    /// @return The height of a palette row in logical pixels.
+    [[nodiscard]] qreal paletteRow() const noexcept { return _tokens.paletteRow * _units.vertical; }
+    /// @return The height of a palette group header in logical pixels.
+    [[nodiscard]] qreal paletteGroupHeader() const noexcept
+    {
+        return _tokens.paletteGroupHeader * _units.vertical;
+    }
+    /// @return The height of the palette's footer in logical pixels.
+    [[nodiscard]] qreal paletteFooter() const noexcept { return _tokens.paletteFooter * _units.vertical; }
+
   private:
     config::SizeTokens _tokens {};
     ChromeUnits _units {};
@@ -175,6 +200,7 @@ class ChromeSpaceTokens: public QObject
     Q_PROPERTY(qreal paneGapRows READ paneGapRows CONSTANT)
     Q_PROPERTY(qreal paneHeaderGap READ paneHeaderGap CONSTANT)
     Q_PROPERTY(qreal footerLeading READ footerLeading CONSTANT)
+    Q_PROPERTY(qreal paletteInset READ paletteInset CONSTANT)
 
   public:
     /// @param tokens The resolved space group.
@@ -221,6 +247,8 @@ class ChromeSpaceTokens: public QObject
     [[nodiscard]] qreal paneHeaderGap() const noexcept { return _tokens.paneHeaderGap * _units.horizontal; }
     /// @return The exited footer's leading padding in logical pixels.
     [[nodiscard]] qreal footerLeading() const noexcept { return _tokens.footerLeading * _units.horizontal; }
+    /// @return The palette rows' horizontal inset and the list's side padding, in logical pixels.
+    [[nodiscard]] qreal paletteInset() const noexcept { return _tokens.paletteInset * _units.horizontal; }
 
   private:
     config::SpaceTokens _tokens {};
@@ -295,6 +323,8 @@ class ChromeTypeTokens: public QObject
     Q_PROPERTY(QFont paneHeader READ paneHeader CONSTANT)
     Q_PROPERTY(int paneHeaderWeight READ paneHeaderWeight CONSTANT)
     Q_PROPERTY(QFont paneHeaderAction READ paneHeaderAction CONSTANT)
+    Q_PROPERTY(QFont paletteInput READ paletteInput CONSTANT)
+    Q_PROPERTY(QFont shortcut READ shortcut CONSTANT)
 
   public:
     /// @param tokens The resolved type group; a size of 0 keeps @p font's own.
@@ -318,6 +348,10 @@ class ChromeTypeTokens: public QObject
     [[nodiscard]] int paneHeaderWeight() const noexcept { return _paneHeaderWeight; }
     /// @return The font a pane header button's glyph is drawn in.
     [[nodiscard]] QFont const& paneHeaderAction() const noexcept { return _paneHeaderAction; }
+    /// @return The command palette's query font.
+    [[nodiscard]] QFont const& paletteInput() const noexcept { return _paletteInput; }
+    /// @return The font of a command palette row's shortcut.
+    [[nodiscard]] QFont const& shortcut() const noexcept { return _shortcut; }
 
   private:
     QFont _caption {};
@@ -328,6 +362,8 @@ class ChromeTypeTokens: public QObject
     QFont _paneHeader {};
     int _paneHeaderWeight = 0;
     QFont _paneHeaderAction {};
+    QFont _paletteInput {};
+    QFont _shortcut {};
 };
 
 /// Animation durations and travel, `chromeStyle.motion`.
@@ -347,6 +383,7 @@ class ChromeMotionTokens: public QObject
     Q_PROPERTY(bool animates READ animates CONSTANT)
     Q_PROPERTY(int crossFade READ crossFade CONSTANT)
     Q_PROPERTY(int headerReveal READ headerReveal CONSTANT)
+    Q_PROPERTY(qreal popoverScale READ popoverScale CONSTANT)
 
   public:
     /// @param tokens The resolved motion group.
@@ -370,6 +407,8 @@ class ChromeMotionTokens: public QObject
     [[nodiscard]] int style() const noexcept { return static_cast<int>(_tokens.style); }
     /// @return How long the reveal modifier is held before Minimal's headers show, in milliseconds.
     [[nodiscard]] int headerReveal() const noexcept { return _tokens.headerRevealMs; }
+    /// @return The scale a popover opens from: 1 opens at full size (a fade only).
+    [[nodiscard]] qreal popoverScale() const noexcept { return _tokens.popoverScalePercent / 100.0; }
 
     /// @return The QML names of config::MotionStyle's enumerators.
     [[nodiscard]] static constexpr int full() noexcept { return static_cast<int>(config::MotionStyle::Full); }
@@ -571,6 +610,7 @@ class ChromeLayoutTokens: public QObject
     Q_PROPERTY(int paneActions READ paneActions CONSTANT)
     Q_PROPERTY(int onHover READ onHover CONSTANT)
     Q_PROPERTY(int onHoverOrFocus READ onHoverOrFocus CONSTANT)
+    Q_PROPERTY(int paletteTopPercent READ paletteTopPercent CONSTANT)
 
   public:
     /// @param tokens The resolved layout group.
@@ -634,6 +674,9 @@ class ChromeLayoutTokens: public QObject
         return static_cast<int>(config::PaneActionsReveal::OnHoverOrFocus);
     }
 
+    /// @return The command palette's top edge, in percent of the window's height.
+    [[nodiscard]] int paletteTopPercent() const noexcept { return _tokens.paletteTopPercent; }
+
   private:
     config::LayoutTokens _tokens {};
 };
@@ -674,6 +717,12 @@ class ChromeColorTokens: public QObject
     Q_PROPERTY(QColor paneFooterFill READ paneFooterFill NOTIFY changed)
     Q_PROPERTY(QColor paneFooterText READ paneFooterText NOTIFY changed)
     Q_PROPERTY(QColor paneHeaderActionHover READ paneHeaderActionHover NOTIFY changed)
+    Q_PROPERTY(QColor paletteSurface READ paletteSurface NOTIFY changed)
+    Q_PROPERTY(QColor paletteText READ paletteText NOTIFY changed)
+    Q_PROPERTY(QColor paletteSecondaryText READ paletteSecondaryText NOTIFY changed)
+    Q_PROPERTY(QColor paletteSelectionFill READ paletteSelectionFill NOTIFY changed)
+    Q_PROPERTY(QColor paletteSelectionText READ paletteSelectionText NOTIFY changed)
+    Q_PROPERTY(QColor paletteSeparator READ paletteSeparator NOTIFY changed)
 
   public:
     /// The colour sources, indexed by config::ChromeColorRole.
@@ -745,6 +794,21 @@ class ChromeColorTokens: public QObject
     {
         return color(config::ChromeColorRole::PaneHeaderActionHover);
     }
+    [[nodiscard]] QColor paletteSurface() const { return color(config::ChromeColorRole::PaletteSurface); }
+    [[nodiscard]] QColor paletteText() const { return color(config::ChromeColorRole::PaletteText); }
+    [[nodiscard]] QColor paletteSecondaryText() const
+    {
+        return color(config::ChromeColorRole::PaletteSecondaryText);
+    }
+    [[nodiscard]] QColor paletteSelectionFill() const
+    {
+        return color(config::ChromeColorRole::PaletteSelectionFill);
+    }
+    [[nodiscard]] QColor paletteSelectionText() const
+    {
+        return color(config::ChromeColorRole::PaletteSelectionText);
+    }
+    [[nodiscard]] QColor paletteSeparator() const { return color(config::ChromeColorRole::PaletteSeparator); }
 
   signals:
     /// Every role may have changed colour.
@@ -760,7 +824,7 @@ class ChromeColorTokens: public QObject
 /// The QML names of the pane colour roles, `chromeStyle.roles`, for UiStyleProvider::colorOn().
 ///
 /// Properties rather than an exported enum: a Q_ENUM is not reachable through a context-property instance
-/// (see UiStyleProvider::statusDanger). One property per role from @c PaneGapFill on.
+/// (see UiStyleProvider::statusDanger). One property per pane role, @c PaneGapFill up to @c PaneColorRoleEnd.
 class ChromePaneRoleNames: public QObject
 {
     Q_OBJECT

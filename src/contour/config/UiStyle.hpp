@@ -231,6 +231,9 @@ struct UiStyleTokens
     std::string_view newTabGlyph;  ///< The "new tab" button.
     std::string_view menuGlyph;    ///< The "new tab with profile" dropdown button.
     std::string_view submenuGlyph; ///< Marks a menu row that opens a sub-menu.
+
+    std::string_view drillInGlyph {};       ///< Marks a command palette row that opens a list.
+    std::string_view palettePromptGlyph {}; ///< Drawn before the palette's query; empty where there is none.
 };
 
 /// The meanings the chrome colours with a status hue rather than with the OS palette.
@@ -414,6 +417,8 @@ namespace detail
         .newTabGlyph = "+",
         .menuGlyph = "▾",
         .submenuGlyph = "▸",
+        .drillInGlyph = "›",
+        .palettePromptGlyph = "",
     };
 
     // One row tall, every extent a whole cell, square corners and a box-drawing separator: the
@@ -493,6 +498,9 @@ namespace detail
         .newTabGlyph = "+",
         .menuGlyph = "▾",
         .submenuGlyph = "▸",
+        // A heavier triangle and a shell prompt: one cell each, set in the chrome's monospace font.
+        .drillInGlyph = "▸",
+        .palettePromptGlyph = "❯",
     };
 
     // The three native rows start as copies of one another (Phase 0 moves no pixel); a platform's

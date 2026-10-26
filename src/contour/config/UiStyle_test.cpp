@@ -286,3 +286,16 @@ TEST_CASE("UiStyle: the pane glyphs per row", "[uistyle]")
     CHECK(terminal.splitLineGlyphs[1] == "─");
     CHECK(terminal.restartGlyph == "↩");
 }
+
+TEST_CASE("UiStyle: the command palette's glyphs per row", "[uistyle]")
+{
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto const& tokens = uiStyleTokens(row);
+        CHECK(tokens.drillInGlyph == "›");
+        CHECK(tokens.palettePromptGlyph.empty());
+    }
+    auto const& terminal = uiStyleTokens(ChromeStyle::Terminal);
+    CHECK(terminal.drillInGlyph == "▸");
+    CHECK(terminal.palettePromptGlyph == "❯");
+}

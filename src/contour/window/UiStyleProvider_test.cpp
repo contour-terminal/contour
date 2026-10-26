@@ -1224,7 +1224,7 @@ TEST_CASE("chromeStyle names the pane colour roles and the badge kinds in QML", 
         return static_cast<size_t>(meta.propertyCount() - meta.propertyOffset());
     };
     CHECK(propertiesOf(contour::window::ChromePaneRoleNames::staticMetaObject)
-          == contour::config::ChromeColorRoleCount - static_cast<size_t>(ChromeColorRole::PaneGapFill));
+          == contour::config::PaneColorRoleEnd - static_cast<size_t>(ChromeColorRole::PaneGapFill));
     CHECK(propertiesOf(contour::window::ChromeBadgeKindNames::staticMetaObject)
           == contour::window::TabBadgeKindCount);
 }
@@ -1689,4 +1689,69 @@ TEST_CASE("bandFill keeps Minimal's bare band legible on every bundled scheme", 
     }
     // The pass is not vacuous: schemes of the other tone take the fallback.
     CHECK(mismatched > 0);
+}
+
+TEST_CASE("UiStyleProvider publishes the command palette's tokens per row", "[contour][uistyle]")
+{
+    using contour::config::ChromeStyle;
+    using contour::config::MotionPreference;
+    using contour::window::chromeInputsFor;
+    using contour::window::UiStyleProvider;
+    auto const font = QGuiApplication::font();
+
+    auto const mac = UiStyleProvider(chromeInputsFor(ChromeStyle::MacOS, font));
+    CHECK(tokenOf(mac, "size", "paletteWidth").toReal() == 640.0);
+    CHECK(tokenOf(mac, "size", "paletteMaxHeight").toReal() == 420.0);
+    CHECK(tokenOf(mac, "size", "paletteRow").toReal() == 32.0);
+    CHECK(tokenOf(mac, "size", "paletteField").toReal() == 44.0);
+    CHECK(tokenOf(mac, "space", "paletteInset").toReal() == 8.0);
+    CHECK(tokenOf(mac, "type", "paletteInput").value<QFont>().pixelSize() == 17);
+    CHECK(tokenOf(mac, "type", "shortcut").value<QFont>().pixelSize() == 12);
+    CHECK(tokenOf(mac, "motion", "popoverScale").toReal() == Catch::Approx(0.97));
+    CHECK(tokenOf(mac, "layout", "paletteTopPercent").toInt() == 18);
+    CHECK(mac.property("drillInGlyph").toString() == QStringLiteral("›"));
+    CHECK(mac.property("palettePromptGlyph").toString().isEmpty());
+
+    auto const placement = mac.palettePlacement(1280, 800);
+    CHECK(placement.value(QStringLiteral("x")).toReal() == 320.0);
+    CHECK(placement.value(QStringLiteral("y")).toReal() == 144.0);
+    CHECK(placement.value(QStringLiteral("width")).toReal() == 640.0);
+    CHECK(placement.value(QStringLiteral("maxHeight")).toReal() == 420.0);
+    // The margin is s7, 16 pixels: a 600 wide window leaves 568 of it.
+    CHECK(mac.palettePlacement(600, 400).value(QStringLiteral("width")).toReal() == 568.0);
+
+    SECTION("the native surface is the kit's elevated one, and the selection the OS's own")
+    {
+        withWindowColor(QColor(0xF6, 0xF6, 0xF6), [&] {
+            CHECK(tokenOf(mac, "colors", "paletteSurface").value<QColor>() == QColor(Qt::white));
+            CHECK(tokenOf(mac, "colors", "paletteSelectionFill").value<QColor>()
+                  == QGuiApplication::palette().color(QPalette::Highlight));
+            CHECK(tokenOf(mac, "colors", "paletteSelectionText").value<QColor>()
+                  == QGuiApplication::palette().color(QPalette::HighlightedText));
+        });
+        withWindowColor(QColor(0x1E, 0x1E, 0x1E), [&] {
+            CHECK(tokenOf(mac, "colors", "paletteSurface").value<QColor>() == QColor(0x2C, 0x2C, 0x2E));
+        });
+    }
+
+    SECTION("Reduce Motion opens it at full size")
+    {
+        auto inputs = chromeInputsFor(ChromeStyle::MacOS, font);
+        inputs.accessibility.motion = MotionPreference::Reduced;
+        CHECK(tokenOf(UiStyleProvider(inputs), "motion", "popoverScale").toReal() == 1.0);
+    }
+
+    SECTION("the Terminal row counts cells")
+    {
+        auto const terminal = UiStyleProvider(chromeInputsFor(ChromeStyle::Terminal, font));
+        CHECK(tokenOf(terminal, "size", "paletteWidth").toReal()
+              == Catch::Approx(48 * terminal.widthQuantum()));
+        CHECK(tokenOf(terminal, "size", "paletteRow").toReal() == Catch::Approx(terminal.cellHeight()));
+        CHECK(tokenOf(terminal, "motion", "popoverScale").toReal() == 1.0);
+        CHECK(terminal.property("drillInGlyph").toString() == QStringLiteral("▸"));
+        CHECK(terminal.property("palettePromptGlyph").toString() == QStringLiteral("❯"));
+        // The top edge lands on a whole row of cells.
+        auto const y = terminal.palettePlacement(1280, 801).value(QStringLiteral("y")).toReal();
+        CHECK(std::fmod(y, terminal.cellHeight()) == Catch::Approx(0.0).margin(1e-9));
+    }
 }

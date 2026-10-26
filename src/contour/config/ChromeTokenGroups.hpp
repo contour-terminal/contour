@@ -152,6 +152,14 @@ enum class ChromeColorRole : uint8_t
     PaneFooterFill,        //!< The exited footer's fill.
     PaneFooterText,        //!< The exited footer's text.
     PaneHeaderActionHover, //!< A hovered or focused pane header button's fill.
+
+    // The command palette.
+    PaletteSurface,       //!< The palette's surface.
+    PaletteText,          //!< A row's title and the query.
+    PaletteSecondaryText, //!< Group headers, shortcuts, the footer and the placeholder.
+    PaletteSelectionFill, //!< The selected row's fill.
+    PaletteSelectionText, //!< The selected row's title and accessory.
+    PaletteSeparator,     //!< The rules below the query and above the footer.
 };
 
 /// Where a chrome colour comes from.
@@ -164,13 +172,15 @@ enum class ColorSourceKind : uint8_t
     Scheme,            //!< A slot of the terminal's colour scheme, picked by the source's @c slot.
     // The kit's tables (FillAlphas, LabelAlphas, SurfaceColors), by the source's @c level: black or the
     // light surface on a light chrome, white or the dark surface on a dark one.
-    Fill,        //!< The kit's @c fill.N wash.
-    Label,       //!< The kit's @c label.N text.
-    Surface,     //!< The kit's opaque @c surface.N: 1 elevated, 2 secondary.
-    SchemeOnBar, //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else @c BarInk.
-    StatusMark,  //!< A status hue's mark ink (@c StatusInkUse::Mark), picked by the source's @c status.
-    SchemeShade, //!< The scheme @c slot moved by @c level HSL lightness points (see shadeLightness).
-    Separator,   //!< Black on a light ground, white on a dark one, at @c contrast.separatorPercent.
+    Fill,             //!< The kit's @c fill.N wash.
+    Label,            //!< The kit's @c label.N text.
+    Surface,          //!< The kit's opaque @c surface.N: 1 elevated, 2 secondary.
+    SchemeOnBar,      //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else @c BarInk.
+    StatusMark,       //!< A status hue's mark ink (@c StatusInkUse::Mark), picked by the source's @c status.
+    SchemeShade,      //!< The scheme @c slot moved by @c level HSL lightness points (see shadeLightness).
+    Separator,        //!< Black on a light ground, white on a dark one, at @c contrast.separatorPercent.
+    PaletteHighlight, //!< The OS palette's selected-row colour (@c Highlight).
+    PaletteHighlightedText, //!< The OS palette's text on its selected row (@c HighlightedText).
 };
 
 /// The terminal colour-scheme slots the Terminal style paints its chrome with.
@@ -198,8 +208,10 @@ enum class SchemeSlot : uint8_t
 inline constexpr size_t SchemeSlotCount = static_cast<size_t>(SchemeSlot::Warning) + 1;
 
 /// Number of @c ChromeColorRole enumerators, derived from the last one.
-inline constexpr size_t ChromeColorRoleCount =
-    static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
+inline constexpr size_t ChromeColorRoleCount = static_cast<size_t>(ChromeColorRole::PaletteSeparator) + 1;
+
+/// One past the last pane colour role: the pane roles run from @c PaneGapFill to here.
+inline constexpr size_t PaneColorRoleEnd = static_cast<size_t>(ChromeColorRole::PaneHeaderActionHover) + 1;
 
 /// One chrome colour: a source kind plus the field that kind reads.
 struct ChromeColorSource
@@ -304,6 +316,14 @@ struct SizeTokens
     int paneFooter = 0;       ///< Height of the exited footer.
     int footerButton = 0;     ///< Height of an exited footer's button.
 
+    // The command palette.
+    int paletteWidth = 0;       ///< Width of the palette (horizontal units).
+    int paletteMaxHeight = 0;   ///< Height the palette grows to at most (vertical units).
+    int paletteField = 0;       ///< Height of the query row (vertical units).
+    int paletteRow = 0;         ///< Height of a row (vertical units).
+    int paletteGroupHeader = 0; ///< Height of a group header (vertical units).
+    int paletteFooter = 0;      ///< Height of the footer (vertical units).
+
     [[nodiscard]] bool operator==(SizeTokens const&) const = default;
 };
 
@@ -325,6 +345,8 @@ struct SpaceTokens
         0; ///< @c paneGap between stacked panes, in vertical units (a cell's height on Terminal).
     int paneHeaderGap = 0; ///< Gap between a pane header's items.
     int footerLeading = 0; ///< Leading padding of the exited footer.
+
+    int paletteInset = 0; ///< The palette rows' horizontal inset and the list's side padding.
 
     [[nodiscard]] bool operator==(SpaceTokens const&) const = default;
 };
@@ -365,6 +387,9 @@ struct TypeTokens
     int paneHeaderWeight = 400;    ///< A pane header's font weight, on the CSS 100-900 scale.
     double paneHeaderAction = 0.0; ///< A pane header button's glyph.
 
+    double paletteInput = 0.0; ///< The command palette's query.
+    double shortcut = 0.0;     ///< A command palette row's shortcut.
+
     [[nodiscard]] bool operator==(TypeTokens const&) const = default;
 };
 
@@ -383,6 +408,9 @@ struct MotionTokens
     /// How long the reveal modifier is held alone before Minimal's headers show, in milliseconds. A
     /// hold rather than an animation, so Reduce Motion leaves it be.
     int headerRevealMs = 0;
+
+    /// The scale a popover opens from, in percent; 100 opens at full size (a fade only).
+    int popoverScalePercent = 0;
 
     [[nodiscard]] bool operator==(MotionTokens const&) const = default;
 };
@@ -452,6 +480,7 @@ struct LayoutTokens
     TabColorSource tabColors = TabColorSource::Palette;               ///< Where a tab's colours come from.
     ActiveTabWeight activeTabWeight = ActiveTabWeight::Regular;       ///< How the active label stands out.
     PaneActionsReveal paneActions = PaneActionsReveal::OnHover; ///< When a pane header shows its actions.
+    int paletteTopPercent = 0; ///< The command palette's top edge, in percent of the window's height.
 
     [[nodiscard]] bool operator==(LayoutTokens const&) const = default;
 };
@@ -572,7 +601,8 @@ namespace detail
                              .toolbarChipPadding = 9,
                              .paneGapRows = paneGap,
                              .paneHeaderGap = paneHeaderGap,
-                             .footerLeading = 14 };
+                             .footerLeading = 14,
+                             .paletteInset = 8 };
     }
 
     inline constexpr MotionTokens NativeMotion { .fastMs = 100,
@@ -582,7 +612,8 @@ namespace detail
                                                  .spinnerMs = 1200,
                                                  .pulseMs = 700,
                                                  .style = MotionStyle::Full,
-                                                 .headerRevealMs = 500 };
+                                                 .headerRevealMs = 500,
+                                                 .popoverScalePercent = 97 };
 
     inline constexpr ElevationTokens NativeElevation {
         .levels = { ElevationLevel { .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
@@ -702,6 +733,18 @@ namespace detail
                                    .level = 0 };
     }
 
+    /// @param kind A source kind that reads no field, e.g. @c PaletteHighlight.
+    /// @return That kind at full opacity.
+    constexpr ChromeColorSource sourceOf(ColorSourceKind kind) noexcept
+    {
+        return ChromeColorSource { .kind = kind,
+                                   .rgb = 0,
+                                   .status = StatusColorRole::Danger,
+                                   .slot = SchemeSlot::Background,
+                                   .alphaPercent = 100,
+                                   .level = 0 };
+    }
+
     inline constexpr ChromeColorSource StatusWarning { .kind = ColorSourceKind::Status,
                                                        .rgb = 0,
                                                        .status = StatusColorRole::Warning,
@@ -767,6 +810,14 @@ namespace detail
         label(1), // PaneFooterText
         // The kit's strongest fill, by the pane's own tone: the band's tabHoverFill follows the chrome's.
         fill(1), // PaneHeaderActionHover
+        // The palette is the kit's elevated surface; its selection is the OS's own selected-row pair
+        // (white on the accent reads 4.0:1 where macOS's selected-content colour reads 5.3:1).
+        surface(1),                                        // PaletteSurface
+        label(1),                                          // PaletteText
+        label(2),                                          // PaletteSecondaryText
+        sourceOf(ColorSourceKind::PaletteHighlight),       // PaletteSelectionFill
+        sourceOf(ColorSourceKind::PaletteHighlightedText), // PaletteSelectionText
+        separator(),                                       // PaletteSeparator
     };
 
     /// Every row's unfocused-pane dim (kit-tokens' @c pane.dim).
@@ -815,7 +866,13 @@ namespace detail
                   .grabberLength = 32,
                   .paneHeaderAction = 22,
                   .paneFooter = 34,
-                  .footerButton = 24 },
+                  .footerButton = 24,
+                  .paletteWidth = 640,
+                  .paletteMaxHeight = 420,
+                  .paletteField = 44,
+                  .paletteRow = 32,
+                  .paletteGroupHeader = 24,
+                  .paletteFooter = 28 },
         .space = nativeSpace(6, 6),
         .radii = { .control = 6,
                    .popover = 14,
@@ -837,7 +894,9 @@ namespace detail
                   .title = 15,
                   .paneHeader = 11,
                   .paneHeaderWeight = 500,
-                  .paneHeaderAction = 15 },
+                  .paneHeaderAction = 15,
+                  .paletteInput = 17,
+                  .shortcut = 12 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         // The band is Solid, not Glass (ruling S6): under AppKit's title-bar material the NSTitlebarView
@@ -852,7 +911,8 @@ namespace detail
                     .profileMenu = ProfileMenuAffordance::SecondaryClick,
                     .tabColors = TabColorSource::Roles,
                     .activeTabWeight = ActiveTabWeight::Regular,
-                    .paneActions = PaneActionsReveal::OnHover },
+                    .paneActions = PaneActionsReveal::OnHover,
+                    .paletteTopPercent = 18 },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -889,7 +949,13 @@ namespace detail
                   .grabberLength = 32,
                   .paneHeaderAction = 22,
                   .paneFooter = 34,
-                  .footerButton = 24 },
+                  .footerButton = 24,
+                  .paletteWidth = 640,
+                  .paletteMaxHeight = 420,
+                  .paletteField = 44,
+                  .paletteRow = 36,
+                  .paletteGroupHeader = 24,
+                  .paletteFooter = 28 },
         .space = nativeSpace(4, 8),
         .radii = { .control = 4,
                    .popover = 8,
@@ -911,7 +977,9 @@ namespace detail
                   .title = 20,
                   .paneHeader = 12,
                   .paneHeaderWeight = 600,
-                  .paneHeaderAction = 15 },
+                  .paneHeaderAction = 15,
+                  .paletteInput = 16,
+                  .shortcut = 12 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Mica, .popover = Material::Solid },
@@ -923,7 +991,8 @@ namespace detail
                     .profileMenu = ProfileMenuAffordance::Caret,
                     .tabColors = TabColorSource::Palette,
                     .activeTabWeight = ActiveTabWeight::Regular,
-                    .paneActions = PaneActionsReveal::OnHover },
+                    .paneActions = PaneActionsReveal::OnHover,
+                    .paletteTopPercent = 18 },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -960,7 +1029,13 @@ namespace detail
                   .grabberLength = 32,
                   .paneHeaderAction = 22,
                   .paneFooter = 34,
-                  .footerButton = 24 },
+                  .footerButton = 24,
+                  .paletteWidth = 640,
+                  .paletteMaxHeight = 420,
+                  .paletteField = 44,
+                  .paletteRow = 38,
+                  .paletteGroupHeader = 24,
+                  .paletteFooter = 28 },
         .space = nativeSpace(6, 8),
         .radii = { .control = 8,
                    .popover = 12,
@@ -982,7 +1057,9 @@ namespace detail
                   .title = 15,
                   .paneHeader = 12.5,
                   .paneHeaderWeight = 600,
-                  .paneHeaderAction = 15 },
+                  .paneHeaderAction = 15,
+                  .paletteInput = 16,
+                  .shortcut = 12.5 },
         .motion = NativeMotion,
         .elevation = NativeElevation,
         .material = { .titleBand = Material::Solid, .popover = Material::Solid },
@@ -994,7 +1071,8 @@ namespace detail
                     .profileMenu = ProfileMenuAffordance::Caret,
                     .tabColors = TabColorSource::Palette,
                     .activeTabWeight = ActiveTabWeight::Regular,
-                    .paneActions = PaneActionsReveal::OnHover },
+                    .paneActions = PaneActionsReveal::OnHover,
+                    .paletteTopPercent = 18 },
         .tint = { .tabPercent = 20 },
         .colors = NativeColors,
         .statusInk = NativeStatusInk,
@@ -1035,7 +1113,13 @@ namespace detail
                   .grabberLength = 0,
                   .paneHeaderAction = 1,
                   .paneFooter = 1,
-                  .footerButton = 1 },
+                  .footerButton = 1,
+                  .paletteWidth = 48,
+                  .paletteMaxHeight = 20,
+                  .paletteField = 1,
+                  .paletteRow = 1,
+                  .paletteGroupHeader = 1,
+                  .paletteFooter = 1 },
         .space = { .paneGap = 1,
                    .splitHit = 1,
                    .paneInset = 0,
@@ -1045,7 +1129,8 @@ namespace detail
                    .toolbarChipPadding = 1,
                    .paneGapRows = 1,
                    .paneHeaderGap = 1,
-                   .footerLeading = 1 },
+                   .footerLeading = 1,
+                   .paletteInset = 1 },
         .radii = { .control = 0,
                    .popover = 0,
                    .menu = 0,
@@ -1065,7 +1150,10 @@ namespace detail
                   .tab = 0,
                   .title = 0,
                   .paneHeader = 0,
-                  .paneHeaderWeight = 400 },
+                  .paneHeaderWeight = 400,
+                  .paneHeaderAction = 0,
+                  .paletteInput = 0,
+                  .shortcut = 0 },
         .motion = { .fastMs = 100,
                     .standardMs = 160,
                     .emphasizedMs = 220,
@@ -1073,7 +1161,8 @@ namespace detail
                     .spinnerMs = 1200,
                     .pulseMs = 700,
                     .style = MotionStyle::Full,
-                    .headerRevealMs = 500 },
+                    .headerRevealMs = 500,
+                    .popoverScalePercent = 100 },
         .elevation = { .levels = { ElevationLevel {
                                        .offsetX = 0, .offsetY = 0, .blur = 0, .opacityPercent = 0 },
                                    TerminalShadow,
@@ -1088,7 +1177,8 @@ namespace detail
                     .profileMenu = ProfileMenuAffordance::Caret,
                     .tabColors = TabColorSource::Roles,
                     .activeTabWeight = ActiveTabWeight::Bold,
-                    .paneActions = PaneActionsReveal::OnHoverOrFocus },
+                    .paneActions = PaneActionsReveal::OnHoverOrFocus,
+                    .paletteTopPercent = 18 },
         // No tint: a tab's colour is its leading "▌" cell (UiStyleTokens::tabColorGlyph).
         .tint = { .tabPercent = 0 },
         .colors = { schemeColor(SchemeSlot::Bar),
@@ -1123,7 +1213,14 @@ namespace detail
                     schemeColor(SchemeSlot::Bar),       // PaneFooterFill
                     schemeColor(SchemeSlot::BarInk),    // PaneFooterText
                     // A cell row has no hover: the button is its glyph.
-                    detail::noColor() }, // PaneHeaderActionHover
+                    detail::noColor(), // PaneHeaderActionHover
+                    // The palette is a bar-coloured block: the bar's ink, ANSI 8 where it reads there.
+                    schemeColor(SchemeSlot::Bar),           // PaletteSurface
+                    schemeColor(SchemeSlot::BarInk),        // PaletteText
+                    schemeOnBar(SchemeSlot::Secondary),     // PaletteSecondaryText
+                    schemeColor(SchemeSlot::Selection),     // PaletteSelectionFill
+                    schemeColor(SchemeSlot::SelectionText), // PaletteSelectionText
+                    schemeColor(SchemeSlot::Secondary) },   // PaletteSeparator
         // The scheme's hues, each falling back to the bar's ink where it would not read on the bar.
         .statusInk = { schemeOnBar(SchemeSlot::Danger),
                        schemeOnBar(SchemeSlot::Warning),
@@ -1180,6 +1277,7 @@ static_assert(ChromeTokenRows.size() == detail::ChromeStyleCount,
         tokens.motion.emphasizedMs = ReducedMotionCrossFadeMs;
         tokens.motion.travel = 0;
         tokens.motion.style = MotionStyle::CrossFade;
+        tokens.motion.popoverScalePercent = 100;
     }
 
     if (preferences.transparency == TransparencyPreference::Reduced)

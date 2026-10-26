@@ -5,8 +5,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <ranges>
+#include <utility>
 #include <vector>
 
 using namespace vtbackend;
@@ -132,6 +134,18 @@ std::vector<double> numbersOf(contour::config::ChromeTokenRow const& row)
              double(minimal.splitHit),
              double(minimal.paneInset),
              double(minimal.paneCardRadius) });
+    // The command palette's tokens, across their groups.
+    append({ double(size.paletteWidth),
+             double(size.paletteMaxHeight),
+             double(size.paletteField),
+             double(size.paletteRow),
+             double(size.paletteGroupHeader),
+             double(size.paletteFooter),
+             double(row.space.paletteInset),
+             row.type.paletteInput,
+             row.type.shortcut,
+             double(row.motion.popoverScalePercent),
+             double(row.layout.paletteTopPercent) });
     return out;
 }
 
@@ -190,7 +204,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeRadii,
                    { 10, 11, 13, 12, 15, 11, 500, 15 },
                    nativeMotion,
-                   nativeTail }),
+                   nativeTail,
+                   { 640, 420, 44, 32, 24, 28, 8, 17, 12, 97, 18 } }),
           Material::Solid,
           Material::Glass,
           ToastStyle::Floating,
@@ -213,7 +228,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeRadii,
                    { 12, 12, 14, 12, 20, 12, 600, 15 },
                    nativeMotion,
-                   nativeTail }),
+                   nativeTail,
+                   { 640, 420, 44, 36, 24, 28, 8, 16, 12, 97, 18 } }),
           Material::Mica,
           Material::Solid,
           ToastStyle::Floating,
@@ -236,7 +252,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    nativeRadii,
                    { 12, 12.5, 14, 13.5, 15, 12.5, 600, 15 },
                    nativeMotion,
-                   nativeTail }),
+                   nativeTail,
+                   { 640, 420, 44, 38, 24, 28, 8, 16, 12.5, 97, 18 } }),
           Material::Solid,
           Material::Solid,
           ToastStyle::Floating,
@@ -259,7 +276,8 @@ TEST_CASE("chromeTokens.everyRowMatchesTheDesignKit", "[chrometokens]")
                    { 0, 0, 0, 0, 0, 0, 400, 0 },
                    { 100, 160, 220, 0, 1200, 700, 500 },
                    { 0, 0, 0, 0, 1, 1, 0, 60, 1, 1, 0, 60, 1, 1, 0, 60, 10, 0.0, -1, 0.62, 0 },
-                   { 15, 10, 0, 1, 1, 1, 0, 0 } }),
+                   { 15, 10, 0, 1, 1, 1, 0, 0 },
+                   { 48, 20, 1, 1, 1, 1, 1, 0, 0, 100, 18 } }),
           Material::None,
           Material::None,
           ToastStyle::Inverse,
@@ -373,6 +391,9 @@ TEST_CASE("chromeTokens.reducedMotion", "[chrometokens]")
         CHECK(reduced.motion.standardMs == ReducedMotionCrossFadeMs);
         CHECK(reduced.motion.emphasizedMs == ReducedMotionCrossFadeMs);
         CHECK(reduced.motion.travel == 0);
+        // A popover opens at full size: the open is a fade only.
+        CHECK(reduced.motion.popoverScalePercent == 100);
+        CHECK(base.motion.popoverScalePercent == (style == ChromeStyle::Terminal ? 100 : 97));
         CHECK(reduced.size == base.size);
         CHECK(reduced.space == base.space);
         CHECK(reduced.radii == base.radii);
@@ -1117,8 +1138,8 @@ TEST_CASE("chromeTokens.paneColourRoles", "[chrometokens]")
             .role = PaneFooterText, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
         PaneColorRow { .role = PaneHeaderActionHover, .native = fill(1), .terminal = transparent },
     };
-    // Every role from PaneGapFill to the end of the enumeration has a row here.
-    CHECK(rows.size() == ChromeColorRoleCount - static_cast<size_t>(PaneGapFill));
+    // Every pane role, PaneGapFill up to PaneColorRoleEnd, has a row here.
+    CHECK(rows.size() == PaneColorRoleEnd - static_cast<size_t>(PaneGapFill));
 
     for (auto const index: AllStyles())
     {
@@ -1158,6 +1179,87 @@ TEST_CASE("chromeTokens.legibleOnBarReadsOnEveryScheme", "[chrometokens]")
                 CHECK(ink == slotIn(colors, hue));
             else
                 CHECK(ink == slotIn(colors, SchemeSlot::BarInk));
+        }
+    }
+}
+
+TEST_CASE("chromeTokens.paletteColourRoles", "[chrometokens]")
+{
+    using namespace contour::config;
+    using contour::config::detail::label;
+    using contour::config::detail::schemeColor;
+    using contour::config::detail::schemeOnBar;
+    using contour::config::detail::separator;
+    using contour::config::detail::sourceOf;
+    using contour::config::detail::surface;
+    using enum ChromeColorRole;
+
+    struct PaletteColorRow
+    {
+        ChromeColorRole role = PaletteSurface;
+        ChromeColorSource native {};
+        ChromeColorSource terminal {};
+    };
+    auto const rows = std::array {
+        PaletteColorRow {
+            .role = PaletteSurface, .native = surface(1), .terminal = schemeColor(SchemeSlot::Bar) },
+        PaletteColorRow {
+            .role = PaletteText, .native = label(1), .terminal = schemeColor(SchemeSlot::BarInk) },
+        PaletteColorRow { .role = PaletteSecondaryText,
+                          .native = label(2),
+                          .terminal = schemeOnBar(SchemeSlot::Secondary) },
+        PaletteColorRow { .role = PaletteSelectionFill,
+                          .native = sourceOf(ColorSourceKind::PaletteHighlight),
+                          .terminal = schemeColor(SchemeSlot::Selection) },
+        PaletteColorRow { .role = PaletteSelectionText,
+                          .native = sourceOf(ColorSourceKind::PaletteHighlightedText),
+                          .terminal = schemeColor(SchemeSlot::SelectionText) },
+        PaletteColorRow {
+            .role = PaletteSeparator, .native = separator(), .terminal = schemeColor(SchemeSlot::Secondary) },
+    };
+    // Every palette role, PaneColorRoleEnd up to the end of the enumeration, has a row here.
+    CHECK(rows.size() == ChromeColorRoleCount - PaneColorRoleEnd);
+
+    for (auto const index: AllStyles())
+    {
+        auto const style = static_cast<ChromeStyle>(index);
+        CAPTURE(index);
+        for (auto const& row: rows)
+        {
+            CAPTURE(static_cast<int>(row.role));
+            auto const& expected = style == ChromeStyle::Terminal ? row.terminal : row.native;
+            CHECK(resolveChromeTokens(style, {}).colors[static_cast<size_t>(row.role)] == expected);
+        }
+    }
+}
+
+TEST_CASE("chromeTokens.paletteTextReads", "[chrometokens]")
+{
+    // The Terminal row's palette inks against their grounds, on every bundled scheme. The native rows'
+    // inks are the kit's labels on its elevated surface, and the OS's own selected-row pair.
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    auto const row = resolveChromeTokens(ChromeStyle::Terminal, {});
+    auto const slotOf = [&](ChromeColorRole role) {
+        return row.colors[static_cast<size_t>(role)].slot;
+    };
+    auto const pairs = std::array { std::pair { PaletteText, PaletteSurface },
+                                    std::pair { PaletteSecondaryText, PaletteSurface },
+                                    std::pair { PaletteSelectionText, PaletteSelectionFill } };
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const colors = chromeSchemeColorsOf(palette);
+        for (auto const& [ink, ground]: pairs)
+        {
+            CAPTURE(static_cast<int>(ink));
+            auto const& source = row.colors[static_cast<size_t>(ink)];
+            auto const inkColor = source.kind == ColorSourceKind::SchemeOnBar
+                                      ? legibleOnBar(colors, source.slot)
+                                      : slotIn(colors, slotOf(ink));
+            CHECK(contrastRatio(inkColor, slotIn(colors, slotOf(ground))) >= MinimumTextContrast);
         }
     }
 }

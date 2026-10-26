@@ -4,6 +4,7 @@
 #include <contour/platform/ColorConversion.hpp>
 #include <contour/platform/GuiTheme.hpp>
 #include <contour/window/HostChipState.hpp>
+#include <contour/window/PalettePlacement.hpp>
 #include <contour/window/PaneHeaderPolicy.hpp>
 #include <contour/window/SplitChrome.hpp>
 #include <contour/window/TabBadge.hpp>
@@ -196,6 +197,8 @@ namespace
             .paneActions = stringsOf(tokens.paneActionGlyphs),
             .splitLines = stringsOf(tokens.splitLineGlyphs),
             .restart = QString::fromUtf8(tokens.restartGlyph),
+            .drillIn = QString::fromUtf8(tokens.drillInGlyph),
+            .palettePrompt = QString::fromUtf8(tokens.palettePromptGlyph),
         };
     }
 
@@ -375,6 +378,26 @@ QVariantMap UiStyleProvider::tabWellLayout(qreal available, int tabCount) const
              { QStringLiteral("wellWidth"), layout.wellWidth },
              { QStringLiteral("label"), nameOf(tabLabelModeName(layout.label)) },
              { QStringLiteral("scrolls"), layout.overflow == TabWellOverflow::Scrolls } };
+}
+
+QVariantMap UiStyleProvider::palettePlacement(qreal windowWidth, qreal windowHeight) const
+{
+    // The margin is s7 in both directions, each in its own unit; one vertical unit is a cell's height on
+    // the Terminal row and a pixel elsewhere, so it is also what the top edge snaps to.
+    constexpr auto MarginStep = std::size_t { 6 }; // s7
+    auto const placement =
+        placePalette(PaletteInputs { .windowWidth = windowWidth,
+                                     .windowHeight = windowHeight,
+                                     .width = _size.paletteWidth(),
+                                     .maxHeight = _size.paletteMaxHeight(),
+                                     .marginX = _space.step(MarginStep),
+                                     .marginY = _groups.space.scale[MarginStep] * _units.vertical,
+                                     .topPercent = _groups.layout.paletteTopPercent,
+                                     .rowQuantum = _units.vertical });
+    return { { QStringLiteral("x"), placement.x },
+             { QStringLiteral("y"), placement.y },
+             { QStringLiteral("width"), placement.width },
+             { QStringLiteral("maxHeight"), placement.maxHeight } };
 }
 
 QFont UiStyleProvider::activeTabFont(QFont const& base) const

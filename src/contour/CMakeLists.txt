@@ -1220,6 +1220,7 @@ if(CONTOUR_TESTING)
         window/HeldModifierReveal_test.cpp
         window/PaneHeaderPolicy_test.cpp
         window/PaneState_test.cpp
+        window/PalettePlacement_test.cpp
         window/SplitChrome_test.cpp
         window/ProgramStatusBadge_test.cpp
         window/RemoteChrome_test.cpp

@@ -93,6 +93,8 @@ struct ChromeGlyphs
     QStringList paneActions; ///< A pane header's action buttons, indexed by config::PaneHeaderAction.
     QStringList splitLines;  ///< A split's line, side by side then stacked; empty where the gap draws it.
     QString restart;         ///< Marks the exited footer's Restart button.
+    QString drillIn;         ///< Marks a command palette row that opens a list.
+    QString palettePrompt;   ///< Drawn before the palette's query; empty where there is none.
 };
 
 /// Everything a UiStyleProvider is built from.
@@ -234,6 +236,8 @@ class UiStyleProvider: public QObject
     Q_PROPERTY(QString chipOpenGlyph READ chipOpenGlyph CONSTANT)
     Q_PROPERTY(QString chipCloseGlyph READ chipCloseGlyph CONSTANT)
     Q_PROPERTY(QString hostDotGlyph READ hostDotGlyph CONSTANT)
+    Q_PROPERTY(QString drillInGlyph READ drillInGlyph CONSTANT)
+    Q_PROPERTY(QString palettePromptGlyph READ palettePromptGlyph CONSTANT)
 
     // {{{ Panes (Step 2)
     /// The configured chrome density: "comfortable" or "minimal".
@@ -516,6 +520,14 @@ class UiStyleProvider: public QObject
     ///         the well scrolls (a QML-facing bool, the documented carve-out).
     [[nodiscard]] Q_INVOKABLE QVariantMap tabWellLayout(qreal available, int tabCount) const;
 
+    /// Where the command palette goes in a window of the given size (window::placePalette), from the
+    /// row's palette tokens in logical pixels, @c space.s7 as the margin, snapped to whole rows of cells on
+    /// the Terminal row.
+    /// @param windowWidth  The window's width in logical pixels.
+    /// @param windowHeight The window's height in logical pixels.
+    /// @return `{ x, y, width, maxHeight }`.
+    [[nodiscard]] Q_INVOKABLE QVariantMap palettePlacement(qreal windowWidth, qreal windowHeight) const;
+
     /// The font the active tab's label is set in: @p base, in bold where the row sets the active tab
     /// apart by weight (config::ActiveTabWeight), because its fill can be the bar's own colour there.
     /// @param base The font every other tab's label is set in.
@@ -640,6 +652,8 @@ class UiStyleProvider: public QObject
     [[nodiscard]] QString const& chipOpenGlyph() const noexcept { return _glyphs.chipOpen; }
     [[nodiscard]] QString const& chipCloseGlyph() const noexcept { return _glyphs.chipClose; }
     [[nodiscard]] QString const& hostDotGlyph() const noexcept { return _glyphs.hostDot; }
+    [[nodiscard]] QString const& drillInGlyph() const noexcept { return _glyphs.drillIn; }
+    [[nodiscard]] QString const& palettePromptGlyph() const noexcept { return _glyphs.palettePrompt; }
 
     /// @p base laid over the chrome at hover strength.
     ///
