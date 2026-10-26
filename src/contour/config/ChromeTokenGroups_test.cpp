@@ -394,8 +394,11 @@ TEST_CASE("chromeTokens.statusColoursAreLargeTextSafe", "[chrometokens]")
     {
         if (row.source != StatusColorSource::Fixed)
             continue;
-        CHECK(contrastRatio(RGBColor { row.light }, 0xFFFFFF_rgb) >= 3.0);
-        CHECK(contrastRatio(RGBColor { row.dark }, 0x1C1C1E_rgb) >= 3.0);
+        for (auto const use: { StatusInkUse::Text, StatusInkUse::Mark })
+        {
+            CHECK(contrastRatio(RGBColor { row.hues(use).light }, 0xFFFFFF_rgb) >= 3.0);
+            CHECK(contrastRatio(RGBColor { row.hues(use).dark }, 0x1C1C1E_rgb) >= 3.0);
+        }
     }
 }
 
@@ -666,7 +669,7 @@ TEST_CASE("chromeTokens.statusInkPerRow", "[chrometokens]")
                 CHECK(ink == contour::config::detail::schemeOnBar(schemeHue[role]));
             else
             {
-                CHECK(ink.kind == ColorSourceKind::Status);
+                CHECK(ink.kind == ColorSourceKind::StatusMark);
                 CHECK(ink.status == static_cast<StatusColorRole>(role));
                 CHECK(ink.alphaPercent == 100);
             }

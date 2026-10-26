@@ -358,6 +358,13 @@ QColor UiStyleProvider::statusColor(int role) const
 {
     if (!inRange(role, config::StatusColors.size()))
         return { Qt::transparent };
+    return statusColor(static_cast<config::StatusColorRole>(role), config::StatusInkUse::Text);
+}
+
+QColor UiStyleProvider::statusColor(config::StatusColorRole role, config::StatusInkUse use) const
+{
+    if (!inRange(static_cast<int>(role), config::StatusColors.size()))
+        return { Qt::transparent };
 
     auto const& row = config::StatusColors[static_cast<size_t>(role)];
     auto const palette = QGuiApplication::palette();
@@ -369,7 +376,8 @@ QColor UiStyleProvider::statusColor(int role) const
 
     auto const dark = platform::colorSchemeOfBackground(platform::toRGBColor(palette.color(QPalette::Window)))
                       == Qt::ColorScheme::Dark;
-    return QColor::fromRgb(dark ? row.dark : row.light);
+    auto const& hues = row.hues(use);
+    return QColor::fromRgb(dark ? hues.dark : hues.light);
 }
 
 QColor UiStyleProvider::accentColor() const

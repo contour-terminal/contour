@@ -154,6 +154,7 @@ enum class ColorSourceKind : uint8_t
     Label,       //!< The kit's @c label.N text.
     Surface,     //!< The kit's opaque @c surface.N: 1 elevated, 2 secondary.
     SchemeOnBar, //!< The source's scheme @c slot where it reads at 4.5:1 on @c Bar, else @c BarText.
+    StatusMark,  //!< A status hue's mark ink (@c StatusInkUse::Mark), picked by the source's @c status.
 };
 
 /// The terminal colour-scheme slots the Terminal style paints its chrome with.
@@ -573,10 +574,10 @@ namespace detail
     }
 
     /// @param role The status hue.
-    /// @return A @c Status source at full opacity.
-    constexpr ChromeColorSource statusSource(StatusColorRole role) noexcept
+    /// @return A @c StatusMark source at full opacity.
+    constexpr ChromeColorSource statusMarkSource(StatusColorRole role) noexcept
     {
-        return ChromeColorSource { .kind = ColorSourceKind::Status,
+        return ChromeColorSource { .kind = ColorSourceKind::StatusMark,
                                    .rgb = 0,
                                    .status = role,
                                    .slot = SchemeSlot::Background,
@@ -638,12 +639,13 @@ namespace detail
         label(1),   // ChipTextStrong
     };
 
-    /// The native rows' status inks: the status hues themselves, indexed by @c StatusColorRole.
+    /// The native rows' status inks, indexed by @c StatusColorRole: the status hues' mark inks, since every
+    /// ink read from here is a mark (a badge, the host chip's dot, a progress bar).
     inline constexpr std::array<ChromeColorSource, StatusColorRoleCount> NativeStatusInk {
-        statusSource(StatusColorRole::Danger),
-        statusSource(StatusColorRole::Warning),
-        statusSource(StatusColorRole::Success),
-        statusSource(StatusColorRole::Running),
+        statusMarkSource(StatusColorRole::Danger),
+        statusMarkSource(StatusColorRole::Warning),
+        statusMarkSource(StatusColorRole::Success),
+        statusMarkSource(StatusColorRole::Running),
     };
 
     inline constexpr ChromeTokenRow MacRow {

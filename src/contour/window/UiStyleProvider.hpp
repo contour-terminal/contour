@@ -402,9 +402,17 @@ class UiStyleProvider: public QObject
     /// hue keeps its contrast on either chrome. @c Running is the palette's highlight instead of a
     /// fixed hue.
     ///
+    /// This is the text ink (config::StatusInkUse::Text): what QML colours words and filled buttons with.
+    ///
     /// @param role A config::StatusColorRole as its underlying value, as QML passes it.
     /// @return The colour; transparent for a role outside the table.
     [[nodiscard]] Q_INVOKABLE QColor statusColor(int role) const;
+
+    /// The colour that says @p role when drawn as @p use, for the chrome the application palette paints.
+    /// @param role The status role.
+    /// @param use  Whether it colours text or a mark (config::StatusInkUse).
+    /// @return The colour; transparent for a role outside the table. @see statusColor
+    [[nodiscard]] QColor statusColor(config::StatusColorRole role, config::StatusInkUse use) const;
 
     /// Black or white, whichever has the higher contrast ratio against @p background.
     /// @param background The fill the text is drawn on.

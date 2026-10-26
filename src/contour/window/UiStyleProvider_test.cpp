@@ -43,12 +43,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/SessionModel.hpp>
@@ -743,6 +747,80 @@ TEST_CASE("UiStyleProvider: the tab text reads at 4.5:1 on every fill it sits on
         });
 }
 
+namespace
+{
+/// @return The hue of @p color in degrees.
+[[nodiscard]] double hueOf(QColor const& color)
+{
+    return color.hsvHueF() * 360.0;
+}
+
+/// @return How far apart two hues are on the colour wheel, in degrees.
+[[nodiscard]] double hueDistance(double a, double b)
+{
+    auto const apart = std::fmod(std::abs(a - b), 360.0);
+    return std::min(apart, 360.0 - apart);
+}
+} // namespace
+
+TEST_CASE("UiStyleProvider: the native rows' status marks read as their meaning", "[contour][uistyle]")
+{
+    // A mark -- a badge's dot, ring, disc or glyph, the host chip's dot -- is drawn in the status hue's mark
+    // ink, not in the ink its text is darkened to: on a light chrome the text Warning is darkened so far
+    // towards red that a Blocked disc read as a failure. A mark is a non-text graphic, so it is held to
+    // WCAG 1.4.11's 3:1 against every surface it sits on.
+    using contour::config::ChromeStyle;
+    using contour::config::StatusColorRole;
+    using contour::window::TabBadgeKind;
+    using vtbackend::operator""_rgb;
+    constexpr auto MarkKinds = std::array {
+        TabBadgeKind::Output,  TabBadgeKind::Error,   TabBadgeKind::Done,
+        TabBadgeKind::Blocked, TabBadgeKind::Working,
+    };
+    for (auto const row: { ChromeStyle::MacOS, ChromeStyle::Fluent, ChromeStyle::ContourLinux })
+    {
+        auto inputs = contour::window::chromeInputsFor(row, QGuiApplication::font());
+        inputs.appearance.accent = 0x007AFF_rgb; // Running is the system accent: measured at the kit's
+        auto const provider = contour::window::UiStyleProvider(inputs);
+        auto const role = [&provider](char const* name) {
+            return tokenOf(provider, "colors", name).value<QColor>();
+        };
+        for (auto const window: { QColor(LightChrome), QColor(DarkChrome) })
+            withWindowColor(window, [&] {
+                INFO("row " << int(row) << ", chrome " << window.name().toStdString());
+                auto const warning = provider.statusInk(static_cast<int>(StatusColorRole::Warning));
+                auto const danger = provider.statusInk(static_cast<int>(StatusColorRole::Danger));
+                // The kit's own pair (#FF9500, #D70015) is 41 degrees apart; the text pair, 21.
+                CHECK(hueDistance(hueOf(warning), hueOf(danger)) >= 30.0);
+
+                auto const surfaces = std::array {
+                    window,
+                    over(role("tabWellFill"), window),
+                    over(role("tabActiveFill"), window),
+                    over(role("chipFill"), window),
+                };
+                auto marks = std::vector<std::pair<std::string, QColor>> {};
+                for (auto const kind: MarkKinds)
+                {
+                    auto const look = provider.badgeLook(static_cast<int>(kind));
+                    marks.emplace_back(look.value("name").toString().toStdString(),
+                                       look.value("ink").value<QColor>());
+                }
+                for (auto const state:
+                     std::views::iota(std::size_t { 0 }, contour::window::HostChipStateCount))
+                    marks.emplace_back(
+                        "host dot " + std::to_string(state),
+                        provider.hostChipLook(static_cast<int>(state)).value("dot").value<QColor>());
+                for (auto const& [name, ink]: marks)
+                    for (auto const& surface: surfaces)
+                    {
+                        INFO(name << " on " << surface.name().toStdString());
+                        CHECK(contrastOf(over(ink, surface), surface) >= 3.0);
+                    }
+            });
+    }
+}
+
 TEST_CASE("UiStyleProvider: progressColor is the accent while running", "[contour][uistyle]")
 {
     using contour::config::ChromeStyle;
@@ -757,9 +835,10 @@ TEST_CASE("UiStyleProvider: progressColor is the accent while running", "[contou
         withWindowColor(window, [&] {
             CHECK(provider.progressColor(1) == QColor(0x007AFF));
             CHECK(provider.progressColor(3) == QColor(0x007AFF));
+            // A progress bar is a mark: the mark ink, which for Danger is its text ink too.
             CHECK(provider.progressColor(2) == provider.statusColor(danger));
             CHECK(provider.progressColor(4)
-                  == provider.statusColor(static_cast<int>(StatusColorRole::Warning)));
+                  == provider.statusColor(StatusColorRole::Warning, contour::config::StatusInkUse::Mark));
             CHECK(provider.progressColor(0).alpha() == 0);
             CHECK(provider.progressColor(5).alpha() == 0);
             CHECK(provider.progressColor(-1).alpha() == 0);

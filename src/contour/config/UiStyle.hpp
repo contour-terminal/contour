@@ -245,23 +245,53 @@ enum class StatusColorSource : uint8_t
     PaletteAccent, //!< The application palette's highlight colour; the pair is unused.
 };
 
-/// One status role's colour in each theme, as @c 0xRRGGBB.
+/// What a status hue is drawn as, which decides how far it may be darkened.
+enum class StatusInkUse : uint8_t
+{
+    Text = 0, //!< Words -- banner, status and error text -- darkened on a light chrome to read as text.
+    Mark,     //!< A dot, disc, ring or glyph mark: the kit's hue, held to the 3:1 of WCAG 1.4.11.
+};
+
+/// One status hue in each theme, as @c 0xRRGGBB.
+struct StatusHues
+{
+    uint32_t light = 0; ///< Used on a light chrome.
+    uint32_t dark = 0;  ///< Used on a dark chrome.
+};
+
+/// One status role's colours: its text ink and its mark ink.
 struct StatusColor
 {
-    StatusColorSource source = StatusColorSource::Fixed; ///< Where the colour comes from.
-    uint32_t light = 0;                                  ///< Used on a light chrome.
-    uint32_t dark = 0;                                   ///< Used on a dark chrome.
+    StatusColorSource source = StatusColorSource::Fixed; ///< Where the colours come from.
+    StatusHues text;                                     ///< For @c StatusInkUse::Text.
+    StatusHues mark;                                     ///< For @c StatusInkUse::Mark.
+
+    /// @param use What the hue is drawn as.
+    /// @return The pair @p use reads.
+    [[nodiscard]] constexpr StatusHues const& hues(StatusInkUse use) const noexcept
+    {
+        switch (use)
+        {
+            case StatusInkUse::Text: break;
+            case StatusInkUse::Mark: return mark;
+        }
+        return text;
+    }
 };
 
 /// Number of @c StatusColorRole enumerators, derived from the last one.
 inline constexpr size_t StatusColorRoleCount = static_cast<size_t>(StatusColorRole::Running) + 1;
 
 /// The status colours, indexed by @c StatusColorRole; a new role adds its row here.
+///
+/// The text Warning on a light chrome is darkened so far that it reads as Danger's red when it is only a
+/// mark, so the mark keeps the kit's orange (system orange is @c #FF9500): at the kit's hue, darkened only
+/// as far as 3:1 against a light well needs, which @c #FF9500 itself misses (1.8:1).
 inline constexpr std::array<StatusColor, StatusColorRoleCount> StatusColors = {
-    StatusColor { StatusColorSource::Fixed, 0xD70015, 0xFF6961 }, // Danger
-    StatusColor { StatusColorSource::Fixed, 0xC93400, 0xFF9F0A }, // Warning
-    StatusColor { StatusColorSource::Fixed, 0x248A3D, 0x32D74B }, // Success
-    StatusColor { StatusColorSource::PaletteAccent, 0, 0 },       // Running
+    StatusColor { StatusColorSource::Fixed, { 0xD70015, 0xFF6961 }, { 0xD70015, 0xFF6961 } }, // Danger
+    StatusColor { StatusColorSource::Fixed, { 0xC93400, 0xFF9F0A }, { 0xB86600, 0xFF9F0A } }, // Warning
+    StatusColor { StatusColorSource::Fixed, { 0x248A3D, 0x32D74B }, { 0x248A3D, 0x32D74B } }, // Success
+    StatusColor { StatusColorSource::PaletteAccent, {}, {} },                                 // Running
 };
 
 /// The status role a tab's OSC 9;4 progress indicator is inked in, indexed by @c vtbackend::ProgressState.
