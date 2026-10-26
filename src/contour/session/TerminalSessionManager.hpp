@@ -34,7 +34,6 @@
 
 #include <vtworkspace/ModelEvents.hpp>
 #include <vtworkspace/Pane.hpp>
-#include <vtworkspace/PaneLayout.hpp>
 #include <vtworkspace/Primitives.hpp>
 #include <vtworkspace/SessionModel.hpp>
 #include <vtworkspace/Tab.hpp>
@@ -146,7 +145,6 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 {
     Q_OBJECT
     Q_PROPERTY(bool multimediaReady READ isMultimediaReady NOTIFY multimediaReadyChanged)
-    Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
     QML_ELEMENT
 
   public:
@@ -176,15 +174,6 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// The user's home directory, for shortening a path on this machine to `~/...`. Fixed at
     /// construction; empty shortens nothing.
     [[nodiscard]] std::string const& homeDirectory() const noexcept { return _homeDirectory; }
-
-    /// Thickness of the split divider handle in logical pixels, single-sourced from
-    /// vtworkspace::DefaultSplitHandleThickness. PaneNode.qml's explicit SplitView `handle:` binds its
-    /// implicit size to this property so the rendered handle and the pane-layout solver (which
-    /// passes the same constant to vtworkspace::contentSizeForLeaf) cannot diverge.
-    [[nodiscard]] constexpr int splitHandleThickness() const noexcept
-    {
-        return vtworkspace::DefaultSplitHandleThickness;
-    }
 
     /// Creates a backing session + its model tab in @p window (the calling controller's window).
     /// @param window      The target window.

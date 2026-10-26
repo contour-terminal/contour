@@ -32,7 +32,6 @@
 #include <utility>
 
 #include <vthost/client/ReleaseDrift.hpp>
-#include <vtworkspace/PaneLayout.hpp>
 
 namespace contour::test
 {
@@ -109,7 +108,6 @@ class MockMainController: public MainWindowControllerMock
     Q_PROPERTY(int tabBarPosition READ tabBarPosition WRITE setTabBarPosition NOTIFY tabBarPositionChanged)
     Q_PROPERTY(
         bool tabBarShouldShow READ tabBarShouldShow WRITE setTabBarShouldShow NOTIFY tabBarShouldShowChanged)
-    Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane CONSTANT)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
@@ -233,10 +231,6 @@ class MockMainController: public MainWindowControllerMock
             _tabBarShouldShow = show;
             emit tabBarShouldShowChanged();
         }
-    }
-    [[nodiscard]] constexpr int splitHandleThickness() const noexcept
-    {
-        return vtworkspace::DefaultSplitHandleThickness;
     }
     [[nodiscard]] int chromeHeight() const noexcept { return _chromeHeight; }
     void setChromeHeight(int height)

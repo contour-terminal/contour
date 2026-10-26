@@ -36,7 +36,6 @@
 #include <memory>
 
 #include <QtTest/QTest>
-#include <vtworkspace/PaneLayout.hpp>
 
 namespace
 {
@@ -207,7 +206,6 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
     // layout identical to production without needing to vary them.
     Q_PROPERTY(int tabBarPosition READ tabBarPosition NOTIFY tabBarPositionChanged)
     Q_PROPERTY(bool tabBarShouldShow READ tabBarShouldShow NOTIFY tabBarShouldShowChanged)
-    Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
     Q_PROPERTY(int chromeHeight READ chromeHeight WRITE setChromeHeight NOTIFY chromeHeightChanged)
     Q_PROPERTY(QObject* activeTabRootPane READ activeTabRootPane NOTIFY activeTabRootPaneChanged)
     Q_PROPERTY(QObject* activeSession READ activeSession CONSTANT)
@@ -245,10 +243,6 @@ class RoutingMockController: public contour::test::MainWindowControllerMock
     [[nodiscard]] bool titleBarVisible() const noexcept { return false; }
     [[nodiscard]] int tabBarPosition() const noexcept { return 0; }       // Top
     [[nodiscard]] bool tabBarShouldShow() const noexcept { return true; } // shown
-    [[nodiscard]] constexpr int splitHandleThickness() const noexcept
-    {
-        return vtworkspace::DefaultSplitHandleThickness;
-    }
     [[nodiscard]] int chromeHeight() const noexcept { return _chromeHeight; }
     void setChromeHeight(int height)
     {

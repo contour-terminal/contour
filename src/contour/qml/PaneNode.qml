@@ -51,6 +51,35 @@ FocusScope {
         return Math.max(minPaneRatio, Math.min(1.0 - minPaneRatio, raw))
     }
 
+    // Round a logical extent to whole device pixels at ratio `dpr` (#2040). The gap and the first card
+    // both go through it, so the second card's origin (`first + gap`) lands on the device grid too. Pure
+    // and hoisted for the same reason as clampRatio: the offscreen screen's ratio is always 1.
+    function snapToDevice(logical, dpr) {
+        return Math.round(logical * dpr) / dpr
+    }
+
+    // The session the backdrop takes its opacity from: the first leaf's. A split's panes share their
+    // tab's profile, and an opaque backdrop would hide the desktop a translucent profile shows through.
+    function firstLeafSession(node) {
+        if (node === null)
+            return null
+        return node.isLeaf ? node.session : firstLeafSession(node.first)
+    }
+
+    // Only a split tree's root draws the gap behind its cards and insets them; a leaf root, and every
+    // node inside a split, is edge to edge.
+    readonly property bool isSplitRoot: !inSplit && node !== null && !node.isLeaf
+    readonly property var backdropSession: firstLeafSession(node)
+
+    // The gap's colour behind a split tree's cards, which the root's inset and every handle show.
+    Rectangle {
+        objectName: "splitBackdrop"
+        anchors.fill: parent
+        visible: root.isSplitRoot
+        color: chromeStyle.colors.paneGapFill
+        opacity: root.backdropSession ? root.backdropSession.opacity : 1.0
+    }
+
     // Leaf branch: a single terminal pane.
     Loader {
         anchors.fill: parent
@@ -63,9 +92,10 @@ FocusScope {
         }
     }
 
-    // Split branch: two child PaneNodes in a SplitView.
+    // Split branch: two child PaneNodes in a SplitView, inset from the content edge at the tree's root.
     Loader {
         anchors.fill: parent
+        anchors.margins: root.isSplitRoot ? chromeStyle.space.paneInset : 0
         active: root.node !== null && !root.node.isLeaf
         sourceComponent: splitComponent
     }
@@ -96,29 +126,91 @@ FocusScope {
             // app-global terminalSessions and chromeStyle).
             readonly property real dprSnap: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
 
-            // Explicit handle so the thickness has ONE source (vtworkspace::DefaultSplitHandleThickness,
-            // surfaced as terminalSessions.splitHandleThickness) shared with the window-size solver.
-            // Visuals reproduce the Qt Quick "Basic" style default delegate this replaces.
+            // The handle IS the gap between two cards: `space.paneGap` wide side by side, `space.paneGapRows`
+            // high stacked -- the same tokens the window-size solver counts (window::splitChromeOf), so the
+            // two cannot diverge. Its containment mask widens what grabs it to `space.splitHit` without
+            // moving a card: Qt's documented way to make a SplitView handle easier to hit.
             //
             // Snapped to whole device pixels for the same reason the first child's extent is: the SECOND
-            // pane's origin is `firstChild.width + handleThickness`, so snapping only the extent leaves
-            // that origin fractional whenever the handle is. At the very common 125% desktop scale the
-            // default 6 logical pixels is 7.5 device pixels, and 175% makes it 10.5 -- users on exactly
-            // those scales would have seen the #2040 artifact survive in the right/bottom pane.
-            handle: Rectangle {
-                readonly property real snappedThickness:
-                    Math.round(terminalSessions.splitHandleThickness * splitView.dprSnap) / splitView.dprSnap
-                implicitWidth: splitView.orientation === Qt.Horizontal
-                    ? snappedThickness : splitView.width
-                implicitHeight: splitView.orientation === Qt.Horizontal
-                    ? splitView.height : snappedThickness
-                color: SplitHandle.pressed ? splitView.palette.mid
-                    : (SplitHandle.hovered ? splitView.palette.midlight : splitView.palette.button)
+            // pane's origin is `firstChild.width + gap`, so snapping only the extent leaves that origin
+            // fractional whenever the gap is. At the very common 125% desktop scale a 6 point gap is 7.5
+            // device pixels, and 175% makes it 10.5 -- users on exactly those scales would have seen the
+            // #2040 artifact survive in the right/bottom pane.
+            handle: Item {
+                id: splitHandle
+                objectName: "splitHandle"
+
+                readonly property bool sideBySide: splitView.orientation === Qt.Horizontal
+                readonly property real thickness: root.snapToDevice(
+                    sideBySide ? chromeStyle.space.paneGap : chromeStyle.space.paneGapRows, splitView.dprSnap)
+                // The hit area's own hover counts too: SplitHandle.hovered follows the SplitView's
+                // hoverEnabled, which a platform without hover effects leaves off.
+                readonly property bool engaged: SplitHandle.hovered || SplitHandle.pressed || hitHover.hovered
+                // The Terminal row draws the split as a line of box glyphs; the native rows' gap is the line.
+                readonly property string lineGlyph: chromeStyle.splitLineGlyphs[sideBySide ? 0 : 1]
+
+                z: 1
+                implicitWidth: sideBySide ? thickness : splitView.width
+                implicitHeight: sideBySide ? splitView.height : thickness
+                containmentMask: hitArea
+
+                Rectangle {
+                    anchors.fill: parent
+                    visible: splitHandle.lineGlyph === ""
+                    color: chromeStyle.density === "minimal"
+                        ? chromeStyle.colors.paneSplitLine : chromeStyle.colors.paneGapFill
+                    opacity: root.backdropSession ? root.backdropSession.opacity : 1.0
+                }
+
+                Item {
+                    id: hitArea
+                    objectName: "splitHitArea"
+                    // Centred exactly, half a pixel and all: the hit area is a mask, not something drawn.
+                    x: (parent.width - width) / 2
+                    y: (parent.height - height) / 2
+                    width: splitHandle.sideBySide
+                        ? Math.max(chromeStyle.space.splitHit, splitHandle.thickness) : parent.width
+                    height: splitHandle.sideBySide
+                        ? parent.height : Math.max(chromeStyle.space.splitHit, splitHandle.thickness)
+
+                    HoverHandler {
+                        id: hitHover
+                        cursorShape: splitHandle.sideBySide ? Qt.SplitHCursor : Qt.SplitVCursor
+                    }
+                }
+
+                Rectangle {
+                    objectName: "splitGrabber"
+                    anchors.centerIn: parent
+                    width: splitHandle.sideBySide ? chromeStyle.size.grabber : chromeStyle.size.grabberLength
+                    height: splitHandle.sideBySide ? chromeStyle.size.grabberLength : chromeStyle.size.grabber
+                    radius: chromeStyle.radii.grabber
+                    color: chromeStyle.colors.paneGrabber
+                    opacity: splitHandle.engaged ? 1.0 : 0.0
+                    visible: chromeStyle.size.grabber > 0 && opacity > 0
+                    Behavior on opacity { NumberAnimation { duration: chromeStyle.motion.fast } }
+                }
+
+                Repeater {
+                    model: splitHandle.lineGlyph === "" ? 0
+                        : Math.ceil(splitHandle.sideBySide ? splitHandle.height / chromeStyle.cellHeight
+                                                           : splitHandle.width / chromeStyle.cellWidth)
+                    delegate: Text {
+                        required property int index
+                        objectName: "splitLineGlyph"
+                        x: splitHandle.sideBySide ? 0 : index * chromeStyle.cellWidth
+                        y: splitHandle.sideBySide ? index * chromeStyle.cellHeight : 0
+                        text: splitHandle.lineGlyph
+                        font: chromeStyle.font
+                        color: splitHandle.engaged ? splitView.palette.highlight : chromeStyle.colors.paneSplitLine
+                    }
+                }
             }
 
             // First child (URL-loaded to allow recursion).
             Loader {
                 id: firstChild
+                objectName: "splitFirst"
                 source: "PaneNode.qml"
                 onLoaded: {
                     item.inSplit = true
@@ -140,17 +232,18 @@ FocusScope {
                 // ratio, hence the round-trip through splitView.dprSnap: the pane boundary has to land
                 // on a hardware pixel, which is the quantity both paths agree about. The handle is
                 // snapped to the same grid, which is what makes the SECOND pane's origin
-                // (`firstChild.width + handleThickness`) whole as well.
+                // (`firstChild.width + gap`) whole as well.
                 readonly property real dprSnap: splitView.dprSnap
                 SplitView.preferredWidth: SplitView.view.orientation === Qt.Horizontal
-                    ? Math.round(SplitView.view.width * (root.node ? root.node.ratio : 0.5) * dprSnap) / dprSnap : -1
+                    ? root.snapToDevice(SplitView.view.width * (root.node ? root.node.ratio : 0.5), dprSnap) : -1
                 SplitView.preferredHeight: SplitView.view.orientation === Qt.Vertical
-                    ? Math.round(SplitView.view.height * (root.node ? root.node.ratio : 0.5) * dprSnap) / dprSnap : -1
+                    ? root.snapToDevice(SplitView.view.height * (root.node ? root.node.ratio : 0.5), dprSnap) : -1
             }
 
             // Second child (fills the remaining space).
             Loader {
                 id: secondChild
+                objectName: "splitSecond"
                 source: "PaneNode.qml"
                 onLoaded: {
                     item.inSplit = true

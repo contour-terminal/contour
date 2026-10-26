@@ -14,6 +14,7 @@
 #include <contour/command/MenuTree.hpp>
 #include <contour/command/Shortcut.hpp>
 #include <contour/config/Config.hpp>
+#include <contour/config/UiStyle.hpp>
 #include <contour/display/TerminalDisplay.hpp>
 #include <contour/geometry/WindowGeometry.hpp>
 #include <contour/platform/ColorConversion.hpp>
@@ -62,6 +63,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
 #include <algorithm>
 #include <array>
@@ -81,7 +83,6 @@
 
 #include <QtTest/QSignalSpy>
 #include <QtTest/QTest>
-#include <vtworkspace/PaneLayout.hpp>
 
 using contour::test::MockPaneProxy;
 using contour::test::MockSession;
@@ -102,9 +103,6 @@ class MockTabController: public QAbstractListModel
     // axis Main.qml binds its flags / custom controls / resize border to.
     Q_PROPERTY(
         bool titleBarVisible READ titleBarVisible WRITE setTitleBarVisible NOTIFY titleBarVisibleChanged)
-    // Mirrors TerminalSessionManager::splitHandleThickness; PaneNode.qml's explicit SplitView handle
-    // binds its implicit size to it.
-    Q_PROPERTY(int splitHandleThickness READ splitHandleThickness CONSTANT)
     // Mirrors WindowController's tab and new-tab menu surfaces, which TabStrip.qml binds and
     // Connections-targets.
     Q_PROPERTY(QVariantList tabContextMenuModel READ tabContextMenuModel NOTIFY tabContextMenuModelChanged)
@@ -116,11 +114,6 @@ class MockTabController: public QAbstractListModel
     explicit MockTabController(int count): _count { count } {}
 
     [[nodiscard]] bool multimediaReady() const noexcept { return false; }
-
-    [[nodiscard]] constexpr int splitHandleThickness() const noexcept
-    {
-        return vtworkspace::DefaultSplitHandleThickness;
-    }
 
     [[nodiscard]] bool titleBarVisible() const noexcept { return _titleBarVisible; }
     void setTitleBarVisible(bool v)
@@ -3715,6 +3708,325 @@ TEST_CASE("PaneNode: a nested 3-pane tree renders three panes without warnings (
     });
     CHECK(badWarnings == 0);
 }
+
+// {{{ Step 2: the split handle is the gap
+
+namespace
+{
+// Defined with the kit and window-control cases further down; one unnamed namespace per translation unit.
+[[nodiscard]] QQuickItem* findItemNamed(QQuickItem const& root, QString const& objectName);
+[[nodiscard]] qreal chromeToken(QQmlEngine& engine, char const* group, char const* name);
+
+/// A split's axis as MockPaneProxy::orientation carries it (vtworkspace::SplitState).
+enum class SplitAxis : std::uint8_t
+{
+    Stacked = 1,
+    SideBySide = 2,
+};
+
+/// A split of two leaves, each with its own session, on one token row and density, in a 400 x 300 window.
+struct SplitHost
+{
+    QQmlEngine engine;
+    MockTabController controller;
+    QQuickWindow window;
+    MockSession leftSession;
+    MockSession rightSession;
+    MockPaneProxy split { /*leaf*/ false,
+                          new MockPaneProxy(/*leaf*/ true),
+                          new MockPaneProxy(/*leaf*/ true) };
+    std::unique_ptr<QObject> paneNode;
+
+    SplitHost(contour::config::ChromeStyle row, contour::config::ChromeDensity density, SplitAxis axis)
+    {
+        qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        auto setup = contour::test::defaultChromeSetup();
+        setup.row = row;
+        setup.density = density;
+        contour::test::installChromeStyle(engine, setup);
+
+        window.resize(400, 300);
+        window.show();
+        REQUIRE(QTest::qWaitForWindowExposed(&window));
+
+        split.first()->setSession(&leftSession);
+        split.second()->setSession(&rightSession);
+        split.setOrientation(static_cast<int>(axis));
+        paneNode = instantiatePaneNode(engine, window, split);
+        REQUIRE(paneNode != nullptr);
+        // SplitView lays out on polish: wait until the second card has been placed beside the first.
+        REQUIRE(QTest::qWaitFor([this] {
+            auto const* second = item("splitSecond");
+            auto const* first = item("splitFirst");
+            return first != nullptr && second != nullptr && first->width() > 0 && first->height() > 0
+                   && (second->x() > 0 || second->y() > 0);
+        }));
+    }
+
+    [[nodiscard]] QQuickItem& root() const { return *qobject_cast<QQuickItem*>(paneNode.get()); }
+
+    /// @return The item named @p name beneath the pane node, or nullptr.
+    [[nodiscard]] QQuickItem* item(char const* name) const
+    {
+        return findItemNamed(root(), QString::fromUtf8(name));
+    }
+
+    /// @return The item named @p name, which the test cannot go on without.
+    [[nodiscard]] QQuickItem& required(char const* name) const
+    {
+        auto* found = item(name);
+        INFO("item: " << name);
+        REQUIRE(found != nullptr);
+        return *found;
+    }
+
+    [[nodiscard]] qreal token(char const* group, char const* name)
+    {
+        return chromeToken(engine, group, name);
+    }
+
+    /// @return The style object itself, for its top-level properties.
+    [[nodiscard]] QObject& style() const
+    {
+        return *engine.rootContext()->contextProperty(QStringLiteral("chromeStyle")).value<QObject*>();
+    }
+
+    /// @return Where @p target's point @p local is, in window coordinates.
+    [[nodiscard]] static QPoint inWindow(QQuickItem const& target, QPointF local)
+    {
+        return target.mapToScene(local).toPoint();
+    }
+
+    /// @return The centre of the gap between the two cards, in window coordinates.
+    [[nodiscard]] QPoint gapCentre() const
+    {
+        auto const& handle = required("splitHandle");
+        return inWindow(handle, { handle.width() / 2, handle.height() / 2 });
+    }
+};
+
+/// The densities the handle cases run under, with the gap edge a press inside a card must still grab from.
+struct DensityCase
+{
+    contour::config::ChromeDensity density {};
+    int insideCard = 0; ///< How far inside the first card, in points, a press still grabs the divider.
+};
+constexpr auto HandleDensities = std::array {
+    DensityCase { .density = contour::config::ChromeDensity::Comfortable, .insideCard = 1 },
+    DensityCase { .density = contour::config::ChromeDensity::Minimal, .insideCard = 3 },
+};
+} // namespace
+
+TEST_CASE("split handle: the handle is the gap, and its hit area is wider (offscreen)",
+          "[contour][gui][qml][split][handle]")
+{
+    using contour::config::ChromeStyle;
+    auto const [density, insideCard] = GENERATE(from_range(HandleDensities));
+    CAPTURE(static_cast<int>(density));
+
+    SECTION("side by side")
+    {
+        auto host = SplitHost(ChromeStyle::MacOS, density, SplitAxis::SideBySide);
+        auto const gap = host.token("space", "paneGap");
+        auto const hit = host.token("space", "splitHit");
+        auto const& handle = host.required("splitHandle");
+        auto const& hitArea = host.required("splitHitArea");
+        CHECK(handle.width() == gap);
+        CHECK(hitArea.width() == hit);
+        CHECK(hitArea.x() == (gap - hit) / 2);
+        CHECK(hitArea.height() == handle.height());
+
+        // The layout ignores the hit area: the second card starts one gap after the first.
+        auto const& first = host.required("splitFirst");
+        auto const& second = host.required("splitSecond");
+        auto const inset = host.token("space", "paneInset");
+        CHECK(second.mapToItem(&host.root(), QPointF {}).x() == inset + first.width() + gap);
+    }
+
+    SECTION("stacked")
+    {
+        auto host = SplitHost(ChromeStyle::MacOS, density, SplitAxis::Stacked);
+        auto const& handle = host.required("splitHandle");
+        auto const& hitArea = host.required("splitHitArea");
+        CHECK(handle.height() == host.token("space", "paneGapRows"));
+        CHECK(hitArea.height() == host.token("space", "splitHit"));
+        CHECK(hitArea.width() == handle.width());
+    }
+}
+
+TEST_CASE("split handle: the grabber shows on hover (offscreen)", "[contour][gui][qml][split][handle]")
+{
+    auto host = SplitHost(contour::config::ChromeStyle::MacOS,
+                          contour::config::ChromeDensity::Comfortable,
+                          SplitAxis::SideBySide);
+    auto const& grabber = host.required("splitGrabber");
+    CHECK_FALSE(grabber.isVisible());
+
+    QTest::mouseMove(&host.window, host.gapCentre());
+    CHECK(QTest::qWaitFor([&grabber] { return grabber.isVisible(); }));
+    CHECK(grabber.width() == host.token("size", "grabber"));
+    CHECK(grabber.height() == host.token("size", "grabberLength"));
+}
+
+TEST_CASE("split handle: a press inside a card's edge drags the divider (offscreen)",
+          "[contour][gui][qml][split][handle]")
+{
+    auto const [density, insideCard] = GENERATE(from_range(HandleDensities));
+    CAPTURE(static_cast<int>(density));
+    auto host = SplitHost(contour::config::ChromeStyle::MacOS, density, SplitAxis::SideBySide);
+    auto* splitView = findSplitView(&host.root());
+    REQUIRE(splitView != nullptr);
+
+    auto const& handle = host.required("splitHandle");
+    auto const press = SplitHost::inWindow(handle, { -static_cast<qreal>(insideCard), handle.height() / 2 });
+    QTest::mousePress(&host.window, Qt::LeftButton, Qt::NoModifier, press);
+    CHECK(splitView->property("resizing").toBool());
+    for (auto const step: std::views::iota(1, 5))
+        QTest::mouseMove(&host.window, press + QPoint { step * 10, 0 });
+    QTest::mouseRelease(&host.window, Qt::LeftButton, Qt::NoModifier, press + QPoint { 40, 0 });
+
+    CHECK_FALSE(splitView->property("resizing").toBool());
+    REQUIRE(host.split.lastRatio.has_value());
+    CHECK(*host.split.lastRatio > host.split.ratio());
+}
+
+TEST_CASE("split handle: the scrollbar's centre still scrolls (offscreen)",
+          "[contour][gui][qml][split][handle]")
+{
+    auto const [density, insideCard] = GENERATE(from_range(HandleDensities));
+    CAPTURE(static_cast<int>(density));
+    auto host = SplitHost(contour::config::ChromeStyle::MacOS, density, SplitAxis::SideBySide);
+    host.leftSession.setScrollbarRight(true);
+    host.leftSession.setScrollbarVisible(true);
+    host.leftSession.setHistoryLineCount(1000);
+
+    auto const& first = host.required("splitFirst");
+    auto* scrollBar = findItemNamed(first, QStringLiteral("verticalScrollBar"));
+    REQUIRE(scrollBar != nullptr);
+    REQUIRE(QTest::qWaitFor([scrollBar] { return scrollBar->isVisible(); }));
+    auto* splitView = findSplitView(&host.root());
+    REQUIRE(splitView != nullptr);
+
+    auto const press = SplitHost::inWindow(*scrollBar, { scrollBar->width() / 2, scrollBar->height() / 2 });
+    QTest::mousePress(&host.window, Qt::LeftButton, Qt::NoModifier, press);
+    CHECK(scrollBar->property("pressed").toBool());
+    CHECK_FALSE(splitView->property("resizing").toBool());
+    QTest::mouseRelease(&host.window, Qt::LeftButton, Qt::NoModifier, press);
+}
+
+TEST_CASE("split handle: the root inset and backdrop appear only when split (offscreen)",
+          "[contour][gui][qml][split][handle]")
+{
+    SECTION("a leaf root is edge to edge")
+    {
+        QQmlEngine engine;
+        qmlRegisterType<StubContourTerminal>("Contour.Terminal", 1, 0, "ContourTerminal");
+        MockTabController controller;
+        engine.rootContext()->setContextProperty("terminalSessions", &controller);
+        contour::test::installChromeStyle(engine);
+        QQuickWindow window;
+        window.resize(400, 300);
+        window.show();
+        MockSession session;
+        MockPaneProxy leaf(/*leaf*/ true);
+        leaf.setSession(&session);
+        auto paneNode = instantiatePaneNode(engine, window, leaf);
+        REQUIRE(paneNode != nullptr);
+        auto const& root = *qobject_cast<QQuickItem*>(paneNode.get());
+
+        auto const* backdrop = findItemNamed(root, QStringLiteral("splitBackdrop"));
+        REQUIRE(backdrop != nullptr);
+        CHECK_FALSE(backdrop->isVisible());
+        auto const* pane = root.findChild<StubContourTerminal*>();
+        REQUIRE(pane != nullptr);
+        CHECK(pane->mapToItem(&root, QPointF {}) == QPointF {});
+        CHECK(pane->width() == root.width());
+    }
+
+    SECTION("a split root sits its cards in from every edge over the gap's colour")
+    {
+        auto host = SplitHost(contour::config::ChromeStyle::MacOS,
+                              contour::config::ChromeDensity::Comfortable,
+                              SplitAxis::SideBySide);
+        auto const inset = host.token("space", "paneInset");
+        REQUIRE(inset > 0);
+        auto const& backdrop = host.required("splitBackdrop");
+        CHECK(backdrop.isVisible());
+        auto* colors = host.style().property("colors").value<QObject*>();
+        REQUIRE(colors != nullptr);
+        CHECK(backdrop.property("color").value<QColor>() == colors->property("paneGapFill").value<QColor>());
+
+        auto* splitView = findSplitView(&host.root());
+        REQUIRE(splitView != nullptr);
+        CHECK(splitView->mapToItem(&host.root(), QPointF {}) == QPointF { inset, inset });
+        CHECK(splitView->width() == host.root().width() - (2 * inset));
+        CHECK(splitView->height() == host.root().height() - (2 * inset));
+    }
+}
+
+TEST_CASE("split handle: the Terminal row draws the split as a line of box glyphs (offscreen)",
+          "[contour][gui][qml][split][handle]")
+{
+    using contour::config::ChromeDensity;
+    using contour::config::ChromeStyle;
+    auto const glyphs = contour::config::uiStyleTokens(ChromeStyle::Terminal).splitLineGlyphs;
+
+    SECTION("side by side: one cell wide, a vertical line")
+    {
+        auto host = SplitHost(ChromeStyle::Terminal, ChromeDensity::Comfortable, SplitAxis::SideBySide);
+        auto const& handle = host.required("splitHandle");
+        // One cell, on whole device pixels.
+        CHECK(handle.width() == Catch::Approx(host.style().property("cellWidth").toReal()).margin(0.5));
+        auto const& glyph = host.required("splitLineGlyph");
+        CHECK(glyph.property("text").toString() == QString::fromUtf8(glyphs[0]));
+        CHECK_FALSE(host.required("splitGrabber").isVisible());
+    }
+
+    SECTION("stacked: one cell high, a horizontal line")
+    {
+        auto host = SplitHost(ChromeStyle::Terminal, ChromeDensity::Comfortable, SplitAxis::Stacked);
+        auto const& handle = host.required("splitHandle");
+        CHECK(handle.height() == Catch::Approx(host.style().property("cellHeight").toReal()).margin(0.5));
+        auto const& glyph = host.required("splitLineGlyph");
+        CHECK(glyph.property("text").toString() == QString::fromUtf8(glyphs[1]));
+    }
+}
+
+TEST_CASE("split handle: the gap snaps to whole device pixels at fractional scales (offscreen)",
+          "[contour][gui][qml][split][handle]")
+{
+    // #2040: the second card's origin is `first + gap`, so both must land on the device-pixel grid. The
+    // offscreen screen's ratio is 1, so the snap the handle and the first card share is asked directly.
+    auto host = SplitHost(contour::config::ChromeStyle::MacOS,
+                          contour::config::ChromeDensity::Comfortable,
+                          SplitAxis::SideBySide);
+    auto const snap = [&host](qreal logical, qreal dpr) {
+        QVariant result;
+        REQUIRE(QMetaObject::invokeMethod(&host.root(),
+                                          "snapToDevice",
+                                          Q_RETURN_ARG(QVariant, result),
+                                          Q_ARG(QVariant, logical),
+                                          Q_ARG(QVariant, dpr)));
+        return result.toReal();
+    };
+    auto const isWhole = [](qreal value) {
+        return std::abs(value - std::round(value)) < 1e-9;
+    };
+
+    auto const gap = host.token("space", "paneGap");
+    for (auto const dpr: { 1.25, 1.75 })
+    {
+        CAPTURE(dpr);
+        auto const first = snap(400 * 0.5, dpr);
+        auto const snappedGap = snap(gap, dpr);
+        CHECK(isWhole(snappedGap * dpr));
+        CHECK(isWhole((first + snappedGap) * dpr));
+        CHECK(std::abs(snappedGap - gap) <= (0.5 / dpr) + 1e-9);
+    }
+}
+
+// }}}
 
 TEST_CASE("TerminalPane.dimOverlayColor implements the unfocused-dim policy (offscreen)",
           "[contour][gui][qml][dim]")

@@ -10,6 +10,8 @@
 #include <QtGui/QColor>
 #include <QtQuick/QQuickItem>
 
+#include <optional>
+
 namespace contour::test
 {
 
@@ -251,9 +253,11 @@ class MockPaneProxy: public QObject
     [[nodiscard]] QObject* session() const { return _session; }
     [[nodiscard]] bool active() const { return _active; }
 
-    // setRatio (from the divider drag) is a no-op stub — the QML calls it, no test asserts the value.
+    // setRatio (from the divider drag) records what it was handed, so a drag is observable; the mock's
+    // own ratio stays put, as the model only re-publishes it on its next rebuild.
     // activate() (from a pane tap) is call-tracked so click->activate routing is observable.
-    Q_INVOKABLE void setRatio(double) {}
+    Q_INVOKABLE void setRatio(double ratio) { lastRatio = ratio; }
+    std::optional<double> lastRatio {}; ///< What the last divider drag wrote back; none before one.
     Q_INVOKABLE void activate() { ++activateCalls; }
     int activateCalls = 0;
 
