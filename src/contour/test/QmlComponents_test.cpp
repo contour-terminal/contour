@@ -8527,9 +8527,10 @@ TEST_CASE("The find bar draws in cells on the Terminal row (offscreen)", "[conto
     auto* hard = background->findChild<QQuickItem*>(QStringLiteral("elevationHardShadow"));
     REQUIRE(hard != nullptr);
     CHECK(hard->isVisible());
+    CHECK(e2->property("offsetX").toReal() == Catch::Approx(cellWidth));
+    CHECK(e2->property("offsetY").toReal() == Catch::Approx(cellHeight));
     CHECK(hard->x() == e2->property("offsetX").toReal());
     CHECK(hard->y() == e2->property("offsetY").toReal());
-    CHECK(hard->y() > 0.0);
 
     auto const buttons = searchToggleButtons(*host.bar);
     auto const texts = std::array { QStringLiteral("[Aa]"), QStringLiteral("[.*]"), QStringLiteral("[ab]") };

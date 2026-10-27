@@ -870,10 +870,14 @@ TEST_CASE("display: font-size changes re-render without crashing and publish new
     // async), so comparing it here races the render loop and can equal the old value at some DPIs.
     // Driving frames afterward still exercises the re-render path (the point of this display test).
     REQUIRE(h.display->fontSize().pt != 14.0);
+    auto const revision = h.display->cellGeometryRevision();
     CHECK(h.display->setFontSize(text::FontSize { 14.0 }));
     CHECK(h.display->fontSize().pt == 14.0);
     h.pump();
     h.pump();
+    // The rows moved under an unmoved item: what binds a row band (the find bar) is told, once the new cell
+    // size is live.
+    CHECK(QTest::qWaitFor([&] { return h.display->cellGeometryRevision() > revision; }));
 }
 
 #ifdef CONTOUR_TEST_ECHO_WASM
