@@ -45,13 +45,16 @@ Read these in order, then pick up the first open task:
    handing over.
 3. The plan of the step in progress, and its task's brief.
 
-Last update: 2026-10-27, Step 3c done (notices and permissions: a NoticeModel with toasts announced only while
-`accessibility_announcements` allows, guarded roles that take a permission decision and its memory as enums, a
-permission dialog whose every answer names the question it answers, Allow held for half a second after a question
-changes, extension and control consent queued one at a time, the Save Layout sheet). Its ledger, with every ruling,
-the task reviews, the final review and its fix wave, is `docs/superpowers/ledgers/2026-10-25-native-redesign-step-3c.md`.
-Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c, 1d), 4a, 2, 3a, 3b, 3c and 3d. 3e runs in the main checkout; 3f
-follows. Carry into 3e's rebase: the Terminal row's ToastText and ToastHint take 3c's Toast/ToastInk pair.
+Last update: 2026-10-27, Steps 3c and 3e done. 3c: notices and permissions (a NoticeModel with toasts announced
+only while `accessibility_announcements` allows, guarded roles that take a permission decision and its memory as
+enums, a permission dialog whose every answer names the question it answers, Allow held for half a second after a
+question changes, extension and control consent queued one at a time, the Save Layout sheet). 3e: the size
+indicator as a pill on each resized pane, the overlay scrollbar following the system's setting with
+`scrollbar.mode`, the link pill in place of the hyperlink tooltip, and hint labels in the cursor colour; its
+Terminal-row toast text and hint take 3c's Toast/ToastInk pair. Their ledgers, with every ruling, the task
+reviews and the fix rounds, are `docs/superpowers/ledgers/2026-10-25-native-redesign-step-3c.md` and
+`docs/superpowers/ledgers/2026-10-25-native-redesign-step-3e.md`. Done so far: Phase 0, Phase 1 (1e, 1a, 1b, 1c,
+1d), 4a, 2, 3a, 3b, 3c, 3d and 3e. 3f follows.
 
 ## Rules for every step
 
@@ -88,7 +91,7 @@ follows. Carry into 3e's rebase: the Terminal row's ToastText and ToastHint take
 | 3b | Find bar: regex, whole word, chunked search, placement | 2 | 3.8 | `2026-10-25-native-redesign-step-3b.md` (done) |
 | 3c | NoticeModel, permission Dialog, guarded-role enums, consent, Save Layout | 2 | 3.9 | `2026-10-25-native-redesign-step-3c.md` (done) |
 | 3d | Command palette grouping and drill-in | 2 | 3.10 | `2026-10-25-native-redesign-step-3d.md` (done) |
-| 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-3e.md` (written) |
+| 3e | Size indicator, overlay scrollbar, link pill (+ tooltip default), hint labels | 2 | 3.11 | `2026-10-25-native-redesign-step-3e.md` (done) |
 | 3f | Command blocks: rail, chip, block menu, fold chip, sticky header as chrome, ticks | 1b, 2, 3e | 3.12 | `2026-10-25-native-redesign-step-3f.md` (written) |
 | 4b | Settings sections, controls, one save model, `option_as_alt` per side, live preview | 3a–3f | 3.13 | `2026-10-25-native-redesign-step-4b.md` (written) |
 | 5a | Windows 11: Mica, Snap Layouts, Fluent row, Windows backends, menu decision | 4b | 3.14 | `2026-10-25-native-redesign-step-5a.md` (written) |
