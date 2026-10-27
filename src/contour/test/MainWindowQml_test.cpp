@@ -395,9 +395,12 @@ TEST_CASE("Main.qml has no settings page or settings tab (offscreen)", "[contour
 
 namespace
 {
-QString const HostingNotice =
-    QStringLiteral("Contour could not reach its daemon (refused). This window runs its "
-                   "shells itself; they end when it closes.");
+/// The hosting notice the tests set and expect, built on use rather than as a static QString.
+QString hostingNotice()
+{
+    return QStringLiteral("Contour could not reach its daemon (refused). This window runs its "
+                          "shells itself; they end when it closes.");
+}
 } // namespace
 
 TEST_CASE(
@@ -422,13 +425,13 @@ TEST_CASE(
     auto const contentY = content->y();
     auto const contentHeight = content->height();
 
-    controller.setHostingNotice(HostingNotice);
+    controller.setHostingNotice(hostingNotice());
     QCoreApplication::processEvents();
     CHECK(bar->isVisible());
     CHECK(bar->height() > 0);
     auto const* text = bar->findChild<QObject*>(QStringLiteral("bannerText"));
     REQUIRE(text != nullptr);
-    CHECK(text->property("text").toString() == HostingNotice);
+    CHECK(text->property("text").toString() == hostingNotice());
     CHECK(content->y() == titleBar->height() + bar->height());
     CHECK(content->height() == contentHeight - bar->height());
 
@@ -468,7 +471,7 @@ TEST_CASE("Main.qml hosting notice: with the tab bar at the bottom the banner is
     REQUIRE(content != nullptr);
     REQUIRE(window != nullptr);
 
-    controller.setHostingNotice(HostingNotice);
+    controller.setHostingNotice(hostingNotice());
     QCoreApplication::processEvents();
     REQUIRE(bar->isVisible());
     CHECK(stack->y() == 0);
@@ -491,7 +494,7 @@ TEST_CASE("Main.qml hosting notice: the Terminal row's banner is the scheme's pa
         vtbackend::RGBColor { 0x2A2D35u };
     auto root = loadMainWindow(engine, controller, warnings, setup);
 
-    controller.setHostingNotice(HostingNotice);
+    controller.setHostingNotice(hostingNotice());
     QCoreApplication::processEvents();
     auto const* bar = root->findChild<QQuickItem*>(QStringLiteral("hostingNoticeBar"));
     REQUIRE(bar != nullptr);
@@ -528,7 +531,7 @@ TEST_CASE("Main.qml banner stack: dismissing the lower banner, then the upper, g
     auto const contentHeight = content->height();
     auto const chromeHeight = controller.chromeHeight();
 
-    controller.setHostingNotice(HostingNotice);
+    controller.setHostingNotice(hostingNotice());
     notice.setOffered(true);
     QCoreApplication::processEvents();
     REQUIRE(hosting->isVisible());
