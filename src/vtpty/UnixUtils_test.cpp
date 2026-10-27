@@ -78,3 +78,16 @@ TEST_CASE("UnixUtils.closeDescriptorsAbove closes what is above the cut, whichev
     INFO("first: " << static_cast<int>(sweep));
     CHECK(closeInChild(sweep) == 0);
 }
+
+TEST_CASE("inputEchoOf.decidesFromEchoAndCanonical", "[vtpty][inputecho]")
+{
+    // Hidden is line editing without echo -- a password prompt. A program that clears both draws its own
+    // echo (an editor, a shell's line editor), and must never read as a password prompt.
+    using vtpty::InputEcho;
+    using vtpty::util::inputEchoOf;
+    CHECK(inputEchoOf(ECHO | ICANON) == InputEcho::Echoed);
+    CHECK(inputEchoOf(ECHO) == InputEcho::Echoed);
+    CHECK(inputEchoOf(ICANON) == InputEcho::Hidden);
+    CHECK(inputEchoOf(0) == InputEcho::Raw);
+    CHECK(inputEchoOf(ICANON | ISIG) == InputEcho::Hidden);
+}

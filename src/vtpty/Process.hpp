@@ -188,6 +188,7 @@ class [[nodiscard]] Process: public Pty
     [[nodiscard]] int write(std::string_view data) override { return pty().write(data); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
+    [[nodiscard]] InputEcho inputEcho() const noexcept override { return pty().inputEcho(); }
     // clang-format on
 
   private:

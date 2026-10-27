@@ -32,3 +32,13 @@ TEST_CASE("MockPty.foregroundProcessName", "[vtpty][mockpty]")
     pty.setForegroundProcessName(std::nullopt);
     CHECK_FALSE(foregroundOf(pty).has_value());
 }
+
+TEST_CASE("Pty.inputEcho.isUnknownUnlessTheDeviceCanTell", "[vtpty][mockpty][inputecho]")
+{
+    auto pty = vtpty::MockPty { TestPageSize };
+    auto const& device = static_cast<vtpty::Pty const&>(pty);
+    CHECK(device.inputEcho() == vtpty::InputEcho::Unknown);
+
+    pty.setInputEcho(vtpty::InputEcho::Hidden);
+    CHECK(device.inputEcho() == vtpty::InputEcho::Hidden);
+}

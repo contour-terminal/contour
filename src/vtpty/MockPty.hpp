@@ -60,6 +60,13 @@ class MockPty: public Pty
         return _foregroundProcessName;
     }
 
+    /// Sets what the terminal does with typed text, as the program in a real one changes it. Runtime state
+    /// rather than construction-time configuration: a test flips it mid-run, as sudo turning echo off does.
+    /// @param echo The state inputEcho() reports.
+    void setInputEcho(InputEcho echo) noexcept { _inputEcho = echo; }
+
+    [[nodiscard]] InputEcho inputEcho() const noexcept override { return _inputEcho; }
+
     [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
     [[nodiscard]] std::string const& stdinBuffer() const noexcept { return _inputBuffer; }
 
@@ -91,6 +98,7 @@ class MockPty: public Pty
     PtyWriteBehavior _writeBehavior = PtyWriteBehavior::Accept;
     PtySlaveDummy _slave;
     std::optional<std::string> _foregroundProcessName; ///< @see setForegroundProcessName
+    InputEcho _inputEcho = InputEcho::Unknown;         ///< @see setInputEcho
 };
 
 } // namespace vtpty

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <vtpty/Pty.hpp>
+
 #include <gsl/pointers>
 
 #include <array>
@@ -24,6 +26,19 @@ namespace vtpty::util
 termios getTerminalSettings(int fd) noexcept;
 termios constructTerminalSettings(int fd) noexcept;
 bool applyTerminalSettings(int fd, termios const& tio);
+
+/// Decides what the terminal does with typed text from its local flags. Echo wins; without it, line editing
+/// still on is a password prompt (Hidden), and both off is a program drawing its own echo (Raw).
+/// @param localFlags A termios' c_lflag.
+/// @return Echoed, Hidden or Raw; never Unknown.
+[[nodiscard]] constexpr InputEcho inputEchoOf(tcflag_t localFlags) noexcept
+{
+    if ((localFlags & ECHO) != 0)
+        return InputEcho::Echoed;
+    if ((localFlags & ICANON) != 0)
+        return InputEcho::Hidden;
+    return InputEcho::Raw;
+}
 
 /// Marks @p fd close-on-exec -- a descriptor flag, set with F_SETFD -- so that no process this one spawns
 /// inherits it.

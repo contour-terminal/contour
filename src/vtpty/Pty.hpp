@@ -95,6 +95,16 @@ enum class ReadOrigin : std::uint8_t
     Replay,   ///< A mirror refilled the pane with what its program wrote before: not news.
 };
 
+/// What the terminal does with the text typed into it: the line discipline's echo and line editing, as the
+/// program running in it set them.
+enum class InputEcho : std::uint8_t
+{
+    Unknown = 0, ///< The device cannot tell: a mirrored or remote pane, a ConPTY.
+    Echoed,      ///< The terminal echoes what is typed.
+    Raw,    ///< Neither echo nor line editing: the program draws its own echo (an editor, a line editor).
+    Hidden, ///< Line editing without echo: a password prompt.
+};
+
 class Pty
 {
   public:
@@ -175,6 +185,11 @@ class Pty
     /// The name of the program leading the device's foreground process group.
     /// @return The name; none for a device with no local process to ask, as a mirrored pane's.
     [[nodiscard]] virtual std::optional<std::string> foregroundProcessName() const { return std::nullopt; }
+
+    /// What the terminal does with typed text now. GUI-thread safe; a device that cannot tell answers
+    /// Unknown.
+    /// @return The echo state, as the program in the terminal last set it.
+    [[nodiscard]] virtual InputEcho inputEcho() const noexcept { return InputEcho::Unknown; }
 };
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);

@@ -12,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <future>
 #include <optional>
 #include <ranges>
@@ -22,6 +23,7 @@
 #include <utility>
 
 #include <fcntl.h>
+#include <termios.h>
 #include <unistd.h>
 
 using namespace std::chrono_literals;
@@ -261,4 +263,54 @@ TEST_CASE("util.applyCreationFlags.setsWhatPipe2WouldHave", "[vtpty][unixutils]"
 
     for (auto const fd: fds)
         ::close(fd);
+}
+
+namespace
+{
+
+/// Opens a second descriptor on @p pty's slave side, as the program running in it holds one.
+/// @return The descriptor, or -1.
+[[nodiscard]] int openSlaveOf(vtpty::UnixPty const& pty)
+{
+    auto path = std::array<char, 128> {};
+    if (::ptsname_r(unbox<int>(pty.handle()), path.data(), path.size()) != 0)
+        return -1;
+    return ::open(path.data(), O_RDWR | O_NOCTTY);
+}
+
+/// Changes the slave's local flags as a program in the terminal would.
+/// @param slave The slave descriptor.
+/// @param clear The local flags to clear.
+void clearLocalFlags(int slave, tcflag_t clear)
+{
+    auto tio = termios {};
+    REQUIRE(::tcgetattr(slave, &tio) == 0);
+    tio.c_lflag &= ~clear;
+    REQUIRE(::tcsetattr(slave, TCSANOW, &tio) == 0);
+}
+
+} // namespace
+
+TEST_CASE("UnixPty.inputEcho.followsTheSlavesTermios", "[vtpty][unixpty][inputecho]")
+{
+    // The GUI reads the echo from the master; the program in the terminal changes it on the slave. Both
+    // descriptors name one terminal, so the master sees each change: sudo turning echo off reads Hidden,
+    // an editor entering raw mode reads Raw.
+    auto pty =
+        vtpty::UnixPty { vtpty::PageSize { .lines = vtpty::LineCount(24), .columns = vtpty::ColumnCount(80) },
+                         std::nullopt };
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Unknown);
+    REQUIRE(pty.start().has_value());
+    auto const slave = openSlaveOf(pty);
+    REQUIRE(slave >= 0);
+
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Echoed);
+    clearLocalFlags(slave, ECHO);
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Hidden);
+    clearLocalFlags(slave, ICANON);
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Raw);
+
+    ::close(slave);
+    pty.close();
+    CHECK(pty.inputEcho() == vtpty::InputEcho::Unknown);
 }

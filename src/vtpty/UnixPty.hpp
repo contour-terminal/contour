@@ -65,6 +65,12 @@ class UnixPty final: public Pty
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt) override;
 
+    /// Reads the terminal's local flags from the master, under _mutex, so a concurrent close() cannot hand it
+    /// a recycled descriptor. Called on the GUI thread.
+    /// @return Unknown before start(), after close(), or when tcgetattr() fails; else inputEchoOf() the
+    /// flags.
+    [[nodiscard]] InputEcho inputEcho() const noexcept override;
+
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
   private:
