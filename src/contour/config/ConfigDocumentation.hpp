@@ -849,18 +849,18 @@ constexpr StringLiteral InputMethodEditorSupportConfig {
 };
 
 constexpr StringLiteral InputMethodEditorStyleConfig {
-    "{comment} How text an input method is composing is drawn at the cursor: `inline` in the cell's own\n"
-    "{comment} colours with a thin underline, or `highlighted` in the colour scheme's `input_method_editor`\n"
-    "{comment} colours.\n"
+    "{comment} How text an input method is composing is drawn, at the cursor, or to its left when it\n"
+    "{comment} would not fit: `inline` in the terminal's default colours with a thin underline, or\n"
+    "{comment} `highlighted` in the colour scheme's `input_method_editor` colours.\n"
     "input_method_editor_style: {}\n"
     "\n"
 };
 
 constexpr StringLiteral InputMethodEditorStyleWeb {
-    "How text an input method is composing is drawn at the cursor.\n"
+    "How text an input method is composing is drawn, at the cursor, or to its left when it would not fit.\n"
     "\n"
     "Valid values are:\n"
-    "- `inline` - in the cell's own colours with a thin underline, as it will read once committed\n"
+    "- `inline` - in the terminal's default colours with a thin underline, as it will read once committed\n"
     "- `highlighted` - in the colour scheme's `input_method_editor` colours, bold and underlined\n"
     "\n"
     "``` yaml\n"

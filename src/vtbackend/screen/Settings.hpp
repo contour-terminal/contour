@@ -110,12 +110,13 @@ enum class InputWriter : uint8_t
     ReaderThread,
 };
 
-/// How the text an input method is composing (the preedit) is drawn at the cursor.
+/// How the text an input method is composing (the preedit) is drawn, at the cursor, or to its left when it
+/// would not fit (@see placePreedit).
 enum class PreeditStyle : uint8_t
 {
     /// In the colour scheme's `input_method_editor` colours, bold and underlined.
     Highlighted = 0,
-    /// In the cell's own colours, with a thin underline: as the text will read once committed.
+    /// In the terminal's default colours, with a thin underline: as the text will read once committed.
     Inline,
 };
 
