@@ -423,6 +423,16 @@ class SettingsController: public QObject
     [[nodiscard]] bool isInlineColorScheme(std::string const& name) const;
     /// Reports @p error to the UI.
     void fail(std::string const& error);
+    /// Writes the change @p file is staged in now, if one is: an edit still inside the debounce is on disk,
+    /// and in the configuration, before anything reads the profile or scheme from there instead of from the
+    /// draft that carried it. Called before a draft is replaced and before staging from the configuration.
+    /// @param file A side file; nothing staged for it does nothing.
+    /// @return Nothing, or why the change could not be written.
+    [[nodiscard]] std::expected<void, config::SettingsError> settlePendingOf(config::SideFile const& file);
+    /// settlePendingOf() for the open profile draft's file, when a profile is open for editing.
+    [[nodiscard]] std::expected<void, config::SettingsError> settleOpenProfile();
+    /// settlePendingOf() for the open scheme draft's file, when a scheme is open for editing.
+    [[nodiscard]] std::expected<void, config::SettingsError> settleOpenScheme();
     /// Reports @p result's error to the UI, if it has one: the QML wrappers' idiom.
     template <typename T>
     void report(std::expected<T, config::SettingsError> const& result);

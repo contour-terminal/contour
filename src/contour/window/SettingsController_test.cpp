@@ -3628,3 +3628,127 @@ TEST_CASE("SettingsController: option_as_alt is a segmented row of the four sett
     CHECK(fx.cfg.findProfile("New Profile")->optionAsAlt.value() == config::OptionAsAlt::Left);
     CHECK(rowWithKey(fx.controller->profileFields(), "option_as_alt").value("value").toString() == "left");
 }
+
+// {{{ An unflushed edit survives switching to another draft
+
+namespace
+{
+
+/// Writes side-file profiles and schemes @p names without opening any, and reloads.
+void writeSideProfiles(Fixture& fx, std::initializer_list<std::string> names)
+{
+    auto const* main = fx.cfg.findProfile("main");
+    REQUIRE(main != nullptr);
+    for (auto const& name: names)
+        REQUIRE(fx.store->write(config::profileFile(name), config::emitProfileYaml(*main)).has_value());
+    fx.reload();
+}
+
+} // namespace
+
+TEST_CASE("SettingsController: renaming a profile within the debounce after switching away keeps its edit",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeSideProfiles(fx, { "work", "home" });
+    fx.controller->editProfile("work");
+    REQUIRE(fx.controller->setProfileField("show_title_bar", false).has_value());
+    fx.controller->editProfile("home"); // within the debounce: the scheduler has not fired
+
+    REQUIRE(fx.controller->renameProfile("work", "office").has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    REQUIRE(fx.cfg.findProfile("office") != nullptr);
+    CHECK(fx.cfg.findProfile("office")->showTitleBar.value() == false);
+    CHECK(fx.cfg.findProfile("work") == nullptr);
+}
+
+TEST_CASE("SettingsController: Use New within the debounce after switching away keeps a profile's edit",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeSideProfiles(fx, { "work", "home" });
+    fx.controller->editProfile("work");
+    REQUIRE(fx.controller->setProfileField("show_title_bar", false).has_value());
+    fx.controller->setIndicatorSegment(0, QStringLiteral("{Clock}"));
+    fx.controller->editProfile("home");
+
+    REQUIRE(fx.controller
+                ->writeGlobalOverride(config::DefaultsEditionKey,
+                                      config::configEnumToken(config::DefaultsEdition::Native2026))
+                .has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.cfg.findProfile("work")->showTitleBar.value() == false);
+    CHECK(fx.cfg.findProfile("work")->statusLine.value().indicator.left == "{Clock}");
+}
+
+TEST_CASE("SettingsController: reopening a profile within the debounce shows and keeps its edit",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    writeSideProfiles(fx, { "work", "home" });
+    fx.controller->editProfile("work");
+    REQUIRE(fx.controller->setProfileField("show_title_bar", false).has_value());
+    fx.controller->editProfile("home");
+    fx.controller->editProfile("work");
+
+    CHECK(rowWithKey(fx.controller->profileFields(), "show_title_bar").value("value").toBool() == false);
+    REQUIRE(fx.controller->setProfileField("maximized", false).has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.cfg.findProfile("work")->showTitleBar.value() == false);
+    CHECK(fx.cfg.findProfile("work")->maximized.value() == false);
+}
+
+TEST_CASE("SettingsController: renaming a scheme within the debounce after switching away keeps its edit",
+          "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    for (auto const* name: { "midnight", "dawn" })
+        REQUIRE(fx.store
+                    ->write(config::colorSchemeFile(name),
+                            config::emitColorSchemeYaml(vtbackend::ColorPalette {}))
+                    .has_value());
+    fx.reload();
+    fx.controller->editColorScheme("midnight");
+    REQUIRE(fx.controller->setSchemeColor("background", "#101010").has_value());
+    fx.controller->editColorScheme("dawn");
+
+    REQUIRE(fx.controller->renameColorScheme("midnight", "nightfall").has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    REQUIRE(fx.schemeFile("nightfall").has_value());
+    CHECK(fx.schemeFile("nightfall")->defaultBackground == vtbackend::RGBColor { 0x10, 0x10, 0x10 });
+}
+
+TEST_CASE("SettingsController: reopening a scheme within the debounce shows its edit", "[settings][debounce]")
+{
+    auto fx = Fixture(BasicConfig);
+    for (auto const* name: { "midnight", "dawn" })
+        REQUIRE(fx.store
+                    ->write(config::colorSchemeFile(name),
+                            config::emitColorSchemeYaml(vtbackend::ColorPalette {}))
+                    .has_value());
+    fx.reload();
+    fx.controller->editColorScheme("midnight");
+    REQUIRE(fx.controller->setSchemeColor("background", "#101010").has_value());
+    fx.controller->editColorScheme("dawn");
+    fx.controller->editColorScheme("midnight");
+
+    auto const colors = fx.controller->schemeColors();
+    auto const background = std::ranges::find_if(
+        colors, [](QVariant const& row) { return row.toMap().value("key").toString() == "background"; });
+    REQUIRE(background != colors.end());
+    CHECK(background->toMap().value("color").toString().toLower() == "#101010");
+    fx.fire();
+    CHECK(fx.errors.isEmpty());
+    REQUIRE(fx.schemeFile("midnight").has_value());
+    CHECK(fx.schemeFile("midnight")->defaultBackground == vtbackend::RGBColor { 0x10, 0x10, 0x10 });
+}
+
+// }}}

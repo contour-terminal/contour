@@ -907,8 +907,31 @@ QVariantList SettingsController::profileFields() const
     return fields;
 }
 
+std::expected<void, SettingsError> SettingsController::settlePendingOf(config::SideFile const& file)
+{
+    return _session->flushChangeOf(file);
+}
+
+std::expected<void, SettingsError> SettingsController::settleOpenProfile()
+{
+    if (_profileAccess != DraftAccess::Editable)
+        return {};
+    return settlePendingOf(config::profileFile(_editingProfile.toStdString()));
+}
+
+std::expected<void, SettingsError> SettingsController::settleOpenScheme()
+{
+    if (_schemeAccess != DraftAccess::Editable)
+        return {};
+    return settlePendingOf(config::colorSchemeFile(_editingScheme.toStdString()));
+}
+
 void SettingsController::editProfile(QString const& name)
 {
+    // The draft being left, and the profile being opened, may each hold an edit still inside the debounce:
+    // it is written first, so that neither is read back from the configuration without it.
+    report(settleOpenProfile());
+    report(settlePendingOf(config::profileFile(name.toStdString())));
     auto const* profile = _config().findProfile(name.toStdString());
     if (profile == nullptr)
         return;
@@ -1045,6 +1068,8 @@ bool SettingsController::isSideFileProfile(std::string const& name) const
 std::expected<QString, SettingsError> SettingsController::openNewProfile(std::string const& name,
                                                                          config::TerminalProfile profile)
 {
+    if (auto const settled = settleOpenProfile(); !settled)
+        return std::unexpected(settled.error());
     if (auto const staged = stage(config::profileFile(name), config::emitProfileYaml(profile)); !staged)
         return std::unexpected(staged.error());
     _draft = std::move(profile);
@@ -1058,6 +1083,9 @@ std::expected<QString, SettingsError> SettingsController::duplicateProfile(QStri
 {
     if (locked())
         return lockedRefusal();
+    if (_editingProfile != name)
+        if (auto const settled = settlePendingOf(config::profileFile(name.toStdString())); !settled)
+            return std::unexpected(settled.error());
     // The open draft is what the page shows: a read-only one is the configuration's profile anyway.
     auto const* source = _profileAccess != DraftAccess::Closed && _editingProfile == name
                              ? &_draft
@@ -1238,7 +1266,11 @@ std::expected<void, SettingsError> SettingsController::renameProfile(QString con
     if (profileNameTaken(trimmed.toStdString()))
         return refuse(SettingsErrorKind::NameTaken, "A profile with that name already exists.");
 
-    // The open draft carries what is staged for the profile; another profile is as the configuration has it.
+    // The open draft carries what is staged for the profile; another profile is as the configuration has it,
+    // so what is still inside the debounce for it is written first.
+    if (_editingProfile != oldName)
+        if (auto const settled = settlePendingOf(config::profileFile(oldName.toStdString())); !settled)
+            return settled;
     auto const* profile = _editingProfile == oldName ? &_draft : _config().findProfile(oldName.toStdString());
     if (profile == nullptr)
         return refuse(SettingsErrorKind::UnknownSetting, "Open the profile to rename it.");
@@ -1530,8 +1562,21 @@ std::expected<void, SettingsError> SettingsController::writeGlobalOverride(std::
     // old edition's default, in the same change as settings.yml.
     auto files = std::vector<config::StagedFile> {};
     if (key == config::DefaultsEditionKey)
+    {
+        // The profiles are rewritten from the configuration's copies: an edit still inside the debounce is
+        // written (and loaded) first, or the rewrite would replace it.
+        for (auto const& pending: _session->pendingWrites(config::SideFileKind::Profile))
+        {
+            // The open draft carries its own staged edit; the rewrite below starts from it.
+            auto const isOpen =
+                _profileAccess == DraftAccess::Editable && pending.name == _editingProfile.toStdString();
+            if (!isOpen)
+                if (auto const settled = settlePendingOf(pending); !settled)
+                    return settled;
+        }
         if (auto const now = config::configEnumFromToken<config::DefaultsEdition>(value))
             files = profilesAdoptingEdition(*now);
+    }
     _globalDraft.globalOverrides[std::string { key }] = std::string { value };
     files.push_back(
         { .file = config::guiSettingsFile(), .bytes = config::emitGuiSettingsYaml(_globalDraft) });
@@ -1613,6 +1658,8 @@ QVariantList SettingsController::schemeColors() const
 
 void SettingsController::editColorScheme(QString const& name)
 {
+    report(settleOpenScheme());
+    report(settlePendingOf(config::colorSchemeFile(name.toStdString())));
     auto const& cfg = _config();
     auto const file = config::colorSchemeFile(name.toStdString());
     // A side file's draft is parsed from the very bytes the session records as seen: the configuration
@@ -1712,6 +1759,9 @@ std::expected<QString, SettingsError> SettingsController::duplicateColorScheme(Q
 {
     if (locked())
         return lockedRefusal();
+    if (_editingScheme != name)
+        if (auto const settled = settlePendingOf(config::colorSchemeFile(name.toStdString())); !settled)
+            return std::unexpected(settled.error());
     auto palette = _schemeAccess != DraftAccess::Closed && _editingScheme == name
                        ? _schemeDraft
                        : schemePalette(name.toStdString());
@@ -1762,6 +1812,8 @@ std::expected<void, SettingsError> SettingsController::renameColorScheme(QString
         palette = _schemeDraft;
     else
     {
+        if (auto const settled = settlePendingOf(config::colorSchemeFile(oldName.toStdString())); !settled)
+            return settled;
         auto const file = config::colorSchemeFile(oldName.toStdString());
         auto const read = _services.store->read(file);
         auto const bytes = read ? *read : std::nullopt;
