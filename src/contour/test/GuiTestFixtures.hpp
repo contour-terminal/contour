@@ -44,6 +44,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -129,6 +130,33 @@ class MockPtySessionFactory final: public contour::session::SessionFactory
         requestedHostedOperations.push_back(request);
         return hostedOperationRoute;
     }
+
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
+    {
+        return reportedReconnectSupport;
+    }
+
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override
+    {
+        ++reconnects;
+        return reconnectResult;
+    }
+
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override
+    {
+        return std::ranges::contains(namedForReconnect, endedPty) ? contour::session::ReconnectBinding::Bound
+                                                                  : contour::session::ReconnectBinding::Gone;
+    }
+
+    /// What reconnectSupport() reports: Supported stands in for an app attached to a daemon.
+    contour::session::ReconnectSupport reportedReconnectSupport =
+        contour::session::ReconnectSupport::Unsupported;
+    /// What reconnect() answers: success starts the supervised run a real controller would.
+    std::expected<void, contour::session::ReconnectError> reconnectResult {};
+    /// How often reconnect() was asked.
+    int reconnects = 0;
+    /// The ptys of the ended panes the returned layout still names: bindForReconnect() binds exactly these.
+    std::vector<vtpty::Pty const*> namedForReconnect;
 
     /// What hosting() reports: Remote stands in for an attach-mode factory, which runs no command here.
     contour::session::SessionHosting reportedHosting = contour::session::SessionHosting::Local;
@@ -259,6 +287,21 @@ class TestNotifierSessionFactory final: public contour::session::SessionFactory
                       contour::session::InterruptionSink const& interruptions) override
     {
         _factory->bindTerminal(pty, terminal, interruptions);
+    }
+
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
+    {
+        return _factory->reconnectSupport();
+    }
+
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override
+    {
+        return _factory->reconnect();
+    }
+
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override
+    {
+        return _factory->bindForReconnect(endedPty);
     }
 
   private:

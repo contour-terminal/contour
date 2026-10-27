@@ -2234,13 +2234,26 @@ void TerminalSession::recordEndLocked(EndReason reason, std::string detail)
 
 QString TerminalSession::getEndMessage() const
 {
-    return QString::fromStdString(paneFooterMessage(_end, _endDetail));
+    // A refused Reconnect is what the Disconnected footer has to say about it.
+    auto const& detail = _end == EndReason::Disconnected ? _reconnectFailure : _endDetail;
+    return QString::fromStdString(paneFooterMessage(_end, detail, endAction()));
+}
+
+void TerminalSession::noteReconnectFailure(std::string reason)
+{
+    if (_reconnectFailure == reason)
+        return;
+    _reconnectFailure = std::move(reason);
+    emit sessionEndChanged();
+    emit paneFooterChanged();
 }
 
 FooterAction TerminalSession::endAction() const noexcept
 {
-    return offeredAction(
-        _end, _hosting == SessionHosting::Local ? RestartSupport::Supported : RestartSupport::Unsupported);
+    return offeredAction(_end,
+                         _hosting == SessionHosting::Local ? RestartSupport::Supported
+                                                           : RestartSupport::Unsupported,
+                         _manager != nullptr ? _manager->reconnectSupport() : ReconnectSupport::Unsupported);
 }
 
 window::PaneFooterKind TerminalSession::paneFooter() const noexcept
@@ -2277,7 +2290,8 @@ QString TerminalSession::getFooterActionLabel() const
     switch (footerAction())
     {
         case FooterAction::None: return {};
-        case FooterAction::Restart: return QString::fromUtf8(paneFooterRowOf(_end).actionLabel);
+        case FooterAction::Restart:
+        case FooterAction::Reconnect: return QString::fromUtf8(paneFooterRowOf(_end).actionLabel);
         case FooterAction::RunAgain: return QString::fromUtf8(InterruptedFooterRow.actionLabel);
     }
     return {};
@@ -2307,6 +2321,10 @@ void TerminalSession::runFooterAction()
     {
         case FooterAction::None: return;
         case FooterAction::Restart: restart(); return;
+        case FooterAction::Reconnect:
+            if (_manager != nullptr)
+                _manager->reconnectHost();
+            return;
         case FooterAction::RunAgain:
             if (_interruption)
                 std::ignore = requestRerun(*_interruption);
@@ -3855,7 +3873,7 @@ void TerminalSession::sendKeyEvent(Key key,
         // a fresh terminal has negotiated no keyboard protocol that reports releases.
         if (eventType == KeyboardEventType::Press && (key == Key::Enter || key == Key::Numpad_Enter)
             && modifiers.chord.none())
-            restart();
+            runFooterAction();
         return;
     }
     // Before the key leaves: a prompt that turned echo off after its last output (stty -echo; read) is

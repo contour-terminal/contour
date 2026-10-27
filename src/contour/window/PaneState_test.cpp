@@ -35,21 +35,31 @@ TEST_CASE("paneState.followsTheEndThenTheConnection", "[panestate]")
         for (auto const connection: AllConnections)
         {
             auto const expected = [&] {
+                // A first connection reads as reconnecting, as the window's host chip says.
+                auto const seeking =
+                    connection == ConnectionState::Connecting || connection == ConnectionState::Reconnecting;
+                // Only the end the connection undoes is reconnecting with it.
+                if (end == EndReason::Disconnected && seeking)
+                    return PaneState::Reconnecting;
                 if (end != EndReason::None)
                     return PaneState::Ended;
-                // A first connection reads as reconnecting, as the window's host chip says.
-                if (connection == ConnectionState::Connecting || connection == ConnectionState::Reconnecting)
-                    return PaneState::Reconnecting;
-                return PaneState::Live;
+                return seeking ? PaneState::Reconnecting : PaneState::Live;
             }();
             INFO("end " << static_cast<int>(end) << ", connection " << static_cast<int>(connection));
             CHECK(paneStateOf(end, connection) == expected);
         }
 }
 
-TEST_CASE("paneState.anEndedPaneIsEndedEvenWhileReconnecting", "[panestate]")
+TEST_CASE("paneState.aPaneLostWithTheConnectionReconnectsWithIt", "[panestate]")
 {
-    CHECK(paneStateOf(EndReason::Disconnected, ConnectionState::Reconnecting) == PaneState::Ended);
+    // Reconnect is running from its footer: the pill shows over the frozen grid.
+    CHECK(paneStateOf(EndReason::Disconnected, ConnectionState::Reconnecting) == PaneState::Reconnecting);
+    CHECK(paneStateOf(EndReason::Disconnected, ConnectionState::Connecting) == PaneState::Reconnecting);
+    // Refused or failed, the footer is back.
+    CHECK(paneStateOf(EndReason::Disconnected, ConnectionState::Refused) == PaneState::Ended);
+    CHECK(paneStateOf(EndReason::Disconnected, ConnectionState::Failed) == PaneState::Ended);
+    // Any other end is over whatever the connection does.
+    CHECK(paneStateOf(EndReason::Exited, ConnectionState::Reconnecting) == PaneState::Ended);
     CHECK(paneStateOf(EndReason::None, ConnectionState::Reconnecting) == PaneState::Reconnecting);
     CHECK(paneStateOf(EndReason::None, ConnectionState::Connected) == PaneState::Live);
 }

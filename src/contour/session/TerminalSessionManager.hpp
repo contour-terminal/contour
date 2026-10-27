@@ -99,6 +99,13 @@ enum class CommandPaneError : uint8_t
     return "unknown error";
 }
 
+/// Whether a footer's Reconnect is running.
+enum class ReconnectRun : uint8_t
+{
+    Idle = 0, ///< None is: a connection that fails now was not asked for from a footer.
+    Running,  ///< reconnectHost() started one, and the daemon has not come back or refused yet.
+};
+
 /// Why restartSession() started no new session.
 enum class RestartError : uint8_t
 {
@@ -514,6 +521,28 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param ended The session whose pane is restarted; its endAction() must be Restart.
     /// @return The new session; or why there is none, in which case nothing changed.
     [[nodiscard]] std::expected<TerminalSession*, RestartError> restartSession(TerminalSession& ended);
+
+    /// @return Whether an ended pane's footer can offer Reconnect: the session factory is attached to a
+    /// daemon.
+    [[nodiscard]] ReconnectSupport reconnectSupport() const noexcept
+    {
+        return _sessionFactory.reconnectSupport();
+    }
+
+    /// The footer's Reconnect: seeks the daemon again, and every pane lost with the connection shows it is
+    /// reconnecting meanwhile. A refusal to even start puts "Could not reconnect: {reason}." back in their
+    /// footers. Once the daemon's layout is back, rebindDisconnected() takes the panes' sessions back.
+    void reconnectHost();
+
+    /// The daemon is back and has pushed its layout: every Disconnected pane whose remote session that layout
+    /// still names mirrors it again, in place (its PaneId, the active pane and a zoom unchanged); one it does
+    /// not name keeps its footer. Ends a Reconnect that is running.
+    void rebindDisconnected();
+
+    /// The reconnect that was running ended for good without bringing the daemon back: the Disconnected
+    /// panes say so in their footers, as "Could not reconnect: {reason}.". Nothing when none was running.
+    /// @param reason Why it ended, as the connection says it.
+    void reconnectFailed(std::string_view reason);
     // }}}
 
     // {{{ Model service used by PaneProxy + WindowController
@@ -1020,6 +1049,14 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// Repaints the tab hosting @p session for its lock (WindowController::Roles::SecureRole), if it has one.
     void notifySecureTab(TerminalSession const& session);
 
+    /// Puts a new session into the pane @p ended leaves, the work restartSession() and rebindDisconnected()
+    /// share: the leaf keeps its PaneId, the active pane, a zoom and the focus follow, and @p ended is
+    /// retired. The session factory decides what the new session is (a shell here, a daemon session it was
+    /// told).
+    /// @param ended The session whose pane it is.
+    /// @return The new session; or why there is none, in which case nothing changed.
+    [[nodiscard]] std::expected<TerminalSession*, RestartError> replaceEndedSession(TerminalSession& ended);
+
     /// Splits the acting session's tab's active pane, running @p command in the new leaf (a shell when
     /// none). The local half of splitActivePane(), shared with openCommandPane().
     /// @param acting The session whose tab to split (its pane, when it is a leaf of that tab).
@@ -1329,6 +1366,9 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
 
     /// Where the connection to the host stands. @see setHostConnection
     vthost::client::ConnectionState _hostConnection = vthost::client::ConnectionState::Connected;
+    /// Whether a Reconnect from a footer is running: begun by reconnectHost(), over by rebindDisconnected()
+    /// or reconnectFailed().
+    ReconnectRun _reconnectRun = ReconnectRun::Idle;
 
     /// Every session's unseen output and finished commands. Keyed by session, so the marks follow a session
     /// from window to window. @see noteSessionOutput

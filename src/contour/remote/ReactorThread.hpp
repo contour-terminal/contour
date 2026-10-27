@@ -64,8 +64,9 @@ class ReactorThread
     void start(std::function<core::async::Task<void>(core::net::EventLoop*)> rootTask,
                std::function<void(std::string const&)> onFailure = {})
     {
-        _thread =
-            std::thread { [this, rootTask = std::move(rootTask), onFailure = std::move(onFailure)]() mutable {
+        auto* const loop = currentLoop();
+        _thread = std::thread {
+            [this, loop, rootTask = std::move(rootTask), onFailure = std::move(onFailure)]() mutable {
                 // EVERYTHING is caught here, because an exception leaving a std::thread's function is
                 // unconditional std::terminate: no unwind, no handler, the whole Contour process gone —
                 // every local, non-daemon tab in every window with it. And the reactor is where remote
@@ -76,7 +77,7 @@ class ReactorThread
                 // one malformed peer must not take the GUI down either.
                 try
                 {
-                    _loop.blockOn(rootTask(&_loop));
+                    loop->blockOn(rootTask(loop));
                 }
                 catch (core::async::OperationCancelled const&)
                 {
@@ -96,7 +97,38 @@ class ReactorThread
                     _exited = true;
                 }
                 _exitCondition.notify_all();
-            } };
+            }
+        };
+    }
+
+    /// Runs @p rootTask on a fresh loop after the last one ended: joins the finished thread, replaces the
+    /// cancelled loop (a stopped loop cannot run again) and starts the thread again.
+    ///
+    /// Only for a root task that has ended or is about to (a connection that failed or was stopped): it joins
+    /// first, so a task still running blocks the call. Posts that race with the replacement go to whichever
+    /// loop is current; one that reached the old loop is dropped with it.
+    /// @param rootTask The coroutine factory that produces the root task to run on the new loop.
+    /// @param onFailure As for start().
+    void restart(std::function<core::async::Task<void>(core::net::EventLoop*)> rootTask,
+                 std::function<void(std::string const&)> onFailure = {})
+    {
+        join();
+        {
+            auto const lock = std::lock_guard { _loopMutex };
+            _loop.reset(); // before its backend
+            _backend = core::net::makeDefaultBackend();
+            _loop = std::make_unique<core::net::EventLoop>(*_backend);
+        }
+        {
+            auto const lock = std::lock_guard { _exitMutex };
+            _exited = false;
+        }
+        _cancelled.store(false, std::memory_order_release);
+        {
+            auto const lock = std::lock_guard { _failureMutex };
+            _failure.clear();
+        }
+        start(std::move(rootTask), std::move(onFailure));
     }
 
     /// Waits until the root task has ended, for at most @p bound. Thread-safe.
@@ -128,13 +160,18 @@ class ReactorThread
 
     /// Marshals @p fn onto the loop thread. Thread-safe.
     /// @param fn The work to marshal onto the reactor thread.
-    void post(std::function<void()> fn) { _loop.post(std::move(fn)); }
+    void post(std::function<void()> fn)
+    {
+        auto const lock = std::lock_guard { _loopMutex };
+        _loop->post(std::move(fn));
+    }
 
     /// Cancels every flow on the loop (marshaled onto it), so a task parked
     /// in connect/read unwinds and the thread becomes joinable.
     void requestStop()
     {
-        _loop.post([this] { _loop.requestStop(); });
+        auto* const loop = currentLoop();
+        loop->post([loop] { loop->requestStop(); });
     }
 
     /// Waits for the root task (and thus the thread) to finish. Idempotent.
@@ -171,8 +208,17 @@ class ReactorThread
         }
     }
 
+    /// @return The loop posts go to now. The pointer is stable until restart(), which only runs once the
+    ///         thread of the previous one has been joined.
+    [[nodiscard]] core::net::EventLoop* currentLoop()
+    {
+        auto const lock = std::lock_guard { _loopMutex };
+        return _loop.get();
+    }
+
+    mutable std::mutex _loopMutex; ///< Guards the _loop pointer against restart().
     std::unique_ptr<core::net::IoBackend> _backend = core::net::makeDefaultBackend();
-    core::net::EventLoop _loop { *_backend };
+    std::unique_ptr<core::net::EventLoop> _loop = std::make_unique<core::net::EventLoop>(*_backend);
     std::thread _thread;
     std::atomic<bool> _cancelled { false };
     std::mutex _exitMutex;                  ///< Guards _exited.

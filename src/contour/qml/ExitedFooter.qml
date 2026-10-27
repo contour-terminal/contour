@@ -84,7 +84,7 @@ Item {
 
     Accessible.role: Accessible.AlertMessage
     Accessible.name: footer.message
-    Accessible.description: [footer.actionOffered && footer.takesReturn ? qsTr("Return restarts it.") : "",
+    Accessible.description: [footer.actionOffered && footer.takesReturn ? qsTr("Return presses %1.").arg(footer.session.footerActionLabel) : "",
                              footer.closeChord !== "" ? qsTr("%1 closes it.").arg(footer.closeChord) : ""]
                             .filter(sentence => sentence !== "").join(" ")
 

@@ -12249,15 +12249,19 @@ TEST_CASE("TerminalSession: paneState is window::paneStateOf over the end and th
     CHECK(stateOf() == PaneState::Live);
     CHECK(changes.count() == 2);
 
-    // An end wins over the connection, and a connection change after it is no news to the pane.
+    // A pane lost with the connection is ended -- until the connection is sought again from its footer, when
+    // it shows the pill over its frozen grid; refused, its footer is back.
     remote->noteTransportLost();
     mockPtyOf(*remote).close();
     remote->onClosed();
     CHECK(stateOf() == PaneState::Ended);
     CHECK(changes.count() == 3);
     remote->setHostConnection(ConnectionState::Reconnecting);
+    CHECK(stateOf() == PaneState::Reconnecting);
+    CHECK(changes.count() == 4);
+    remote->setHostConnection(ConnectionState::Refused);
     CHECK(stateOf() == PaneState::Ended);
-    CHECK(changes.count() == 3);
+    CHECK(changes.count() == 5);
 }
 
 TEST_CASE("TerminalSession: a remote pane reconnects exactly while its window's host chip says so",

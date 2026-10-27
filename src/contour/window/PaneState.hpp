@@ -33,17 +33,21 @@ inline constexpr size_t PaneStateCount = static_cast<size_t>(PaneState::Ended) +
 /// @param end        How the pane's session ended; None while it runs.
 /// @param connection The state of the daemon connection the session is mirrored over (Connected for a
 ///                   local one).
-/// @return Ended once the session ended, whatever the connection; else Reconnecting while the connection
-///         is being (re)established, folded as the window's host chip folds it (hostChipStateOf), so the
-///         pane's pill and the chip never disagree; else Live.
+/// @return Reconnecting while the connection is being (re)established, folded as the window's host chip
+///         folds it (hostChipStateOf), so the pane's pill and the chip never disagree -- for a live pane, and
+///         for one whose session was lost with the connection (its footer's Reconnect is running); else Ended
+///         once the session ended; else Live.
 [[nodiscard]] constexpr PaneState paneStateOf(session::EndReason end,
                                               vthost::client::ConnectionState connection) noexcept
 {
+    auto const seeking = hostChipStateOf(connection) == HostChipState::Reconnecting;
+    // The one end the connection undoes: the shell still runs in the daemon, and Reconnect takes it back. Any
+    // other end is over whatever the connection does.
+    if (end == session::EndReason::Disconnected && seeking)
+        return PaneState::Reconnecting;
     if (end != session::EndReason::None)
         return PaneState::Ended;
-    if (hostChipStateOf(connection) == HostChipState::Reconnecting)
-        return PaneState::Reconnecting;
-    return PaneState::Live;
+    return seeking ? PaneState::Reconnecting : PaneState::Live;
 }
 
 /// Whether a pane's footer is up, and which.

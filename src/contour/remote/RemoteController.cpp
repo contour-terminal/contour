@@ -57,6 +57,13 @@ bool RemoteController::isConnected() const
     return _state == State::Ready && !_stopped;
 }
 
+bool RemoteController::isConnecting() const
+{
+    auto const lock = std::lock_guard { _mutex };
+    return !_stopped
+           && (_state == State::Connecting || _state == State::Ready || _state == State::Reconnecting);
+}
+
 void RemoteController::failConnect(std::string reason)
 {
     {
@@ -79,6 +86,19 @@ void RemoteController::startConnecting()
     // and then blame it on a slow daemon.
     _reactor.start([this](core::net::EventLoop* loop) { return runClient(loop); },
                    [this](std::string const& reason) { failConnect(reason); });
+}
+
+void RemoteController::restartConnecting()
+{
+    {
+        auto const lock = std::lock_guard { _mutex };
+        _stopped = false;
+        _state = State::Connecting;
+        _failure.clear();
+    }
+    _connectStartedAt = _clock.now();
+    _reactor.restart([this](core::net::EventLoop* loop) { return runClient(loop); },
+                     [this](std::string const& reason) { failConnect(reason); });
 }
 
 std::expected<void, std::string> RemoteController::awaitConnected(std::chrono::milliseconds budget)

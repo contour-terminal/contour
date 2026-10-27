@@ -2,6 +2,7 @@
 #pragma once
 
 #include <contour/platform/Notifier.hpp>
+#include <contour/session/EndReason.hpp>
 #include <contour/session/HostedOperation.hpp>
 
 #include <vtbackend/core/Primitives.hpp>
@@ -15,10 +16,12 @@
 #endif
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <vthost/client/TabPresentation.hpp>
 
@@ -103,6 +106,33 @@ struct InterruptionSink
 {
     QObject* context = nullptr; ///< The object whose thread @ref deliver runs on; null drops everything.
     std::function<void(std::optional<vtbackend::CommandLineText>)> deliver {}; ///< What to run there.
+};
+
+/// Why SessionFactory::reconnect() started no new connection.
+enum class ReconnectError : uint8_t
+{
+    NotAttached = 0,  ///< The factory is not attached to a daemon: there was no connection to seek again.
+    AlreadyConnected, ///< A connection is up, or being sought by the supervisor that runs now.
+};
+
+/// A short reason for @p error, for the footer's "Could not reconnect: {}." and logs.
+/// @param error The failure.
+/// @return A lower-case phrase without a trailing period.
+[[nodiscard]] constexpr std::string_view describe(ReconnectError error) noexcept
+{
+    switch (error)
+    {
+        case ReconnectError::NotAttached: return "this window is not attached to a daemon";
+        case ReconnectError::AlreadyConnected: return "the connection is already being sought";
+    }
+    return "unknown error";
+}
+
+/// What SessionFactory::bindForReconnect() decided about an ended pane.
+enum class ReconnectBinding : uint8_t
+{
+    Gone = 0, ///< The daemon no longer has the pane's session: the pane stays ended.
+    Bound,    ///< The pane's remote session is named: the next createPty() mirrors it again.
 };
 
 class SessionFactory
@@ -260,6 +290,30 @@ class SessionFactory
                               vtbackend::Terminal& /*terminal*/,
                               InterruptionSink const& /*interruptions*/)
     {
+    }
+
+    /// @return Whether an ended pane can seek the daemon again: Supported while attached to one, which is
+    ///         what a pane's Reconnect needs. Everything else (a local factory, tmux) cannot.
+    [[nodiscard]] virtual ReconnectSupport reconnectSupport() const noexcept
+    {
+        return ReconnectSupport::Unsupported;
+    }
+
+    /// Starts a new supervised connection to the daemon after the last one ended, resuming the windows
+    /// followed. The outcome arrives as connection state changes, not as this result.
+    /// @return Nothing once started; why none was.
+    [[nodiscard]] virtual std::expected<void, ReconnectError> reconnect()
+    {
+        return std::unexpected(ReconnectError::NotAttached);
+    }
+
+    /// Prepares the next createPty() to mirror again the daemon session an ended pane showed, when the daemon
+    /// still names it (in the layout it pushed on reconnecting).
+    /// @param endedPty The pty of the ended pane's session.
+    /// @return Bound when the next createPty() will; Gone otherwise, and nothing changed.
+    [[nodiscard]] virtual ReconnectBinding bindForReconnect(vtpty::Pty const* /*endedPty*/)
+    {
+        return ReconnectBinding::Gone;
     }
 };
 

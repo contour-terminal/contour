@@ -118,7 +118,11 @@ class RoutingMockSession: public QObject
     // What an ended pane's footer reads: a running session.
     Q_PROPERTY(int sessionEnd READ sessionEnd CONSTANT)
     Q_PROPERTY(QString endMessage READ endMessage CONSTANT)
-    Q_PROPERTY(int restartOffer READ restartOffer CONSTANT)
+    Q_PROPERTY(int paneFooter READ paneFooter CONSTANT)
+    Q_PROPERTY(QString footerMessage READ footerMessage CONSTANT)
+    Q_PROPERTY(QString footerActionLabel READ footerActionLabel CONSTANT)
+    Q_PROPERTY(QString footerDismissLabel READ footerDismissLabel CONSTANT)
+    Q_PROPERTY(int footerTakesReturn READ footerTakesReturn CONSTANT)
 
   public:
     [[nodiscard]] int pageLineCount() const { return 25; }
@@ -137,7 +141,11 @@ class RoutingMockSession: public QObject
     [[nodiscard]] QColor backgroundColor() const { return { Qt::black }; }
     [[nodiscard]] int sessionEnd() const { return 0; }
     [[nodiscard]] QString endMessage() const { return {}; }
-    [[nodiscard]] int restartOffer() const { return 0; }
+    [[nodiscard]] int paneFooter() const { return 0; }
+    [[nodiscard]] QString footerMessage() const { return {}; }
+    [[nodiscard]] QString footerActionLabel() const { return {}; }
+    [[nodiscard]] QString footerDismissLabel() const { return {}; }
+    [[nodiscard]] int footerTakesReturn() const { return 0; }
     [[nodiscard]] QString bellSource() const { return {}; }
     [[nodiscard]] bool isScrollbarRight() const { return true; }
     [[nodiscard]] bool isScrollbarVisible() const { return false; }

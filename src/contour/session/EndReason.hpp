@@ -28,13 +28,11 @@ enum class EndReason : uint8_t
 /// What a pane footer's primary button does.
 enum class FooterAction : uint8_t
 {
-    None = 0, ///< No primary button: only the dismissal.
-    Restart,  ///< Start the ended session again in the same pane.
-    RunAgain, ///< Ask to type the command a restart stopped at the shell's prompt, and run it.
+    None = 0,  ///< No primary button: only the dismissal.
+    Restart,   ///< Start the ended session again in the same pane.
+    Reconnect, ///< Seek the daemon again, and take the pane's session back from it.
+    RunAgain,  ///< Ask to type the command a restart stopped at the shell's prompt, and run it.
 };
-
-/// Number of @c FooterAction enumerators, derived from the last one.
-inline constexpr std::size_t FooterActionCount = static_cast<std::size_t>(FooterAction::RunAgain) + 1;
 
 /// What a pane footer's dismissing button does.
 enum class FooterDismiss : uint8_t
@@ -62,6 +60,9 @@ struct PaneFooterRow
     FooterDismiss dismiss;              ///< What the dismissing button does.
     std::string_view message;           ///< The footer text when there is no detail to name.
     std::string_view messageWithDetail; ///< The footer text naming the detail, at its one `{}`.
+    /// The footer text while the row's @ref action is offered and there is no detail; empty says @ref
+    /// message.
+    std::string_view messageWithAction;
 };
 
 /// The footer table, one row per EndReason in enumerator order.
@@ -71,33 +72,38 @@ inline constexpr auto PaneFooterRows = std::array {
                     .actionLabel = "",
                     .dismiss = FooterDismiss::Close,
                     .message = "",
-                    .messageWithDetail = "" },
+                    .messageWithDetail = "",
+                    .messageWithAction = "" },
     PaneFooterRow { .end = EndReason::Exited,
                     .action = FooterAction::Restart,
                     .actionLabel = "Restart",
                     .dismiss = FooterDismiss::Close,
                     .message = "Process exited.",
-                    .messageWithDetail = "Process exited with code {}." },
+                    .messageWithDetail = "Process exited with code {}.",
+                    .messageWithAction = "" },
     PaneFooterRow { .end = EndReason::Signalled,
                     .action = FooterAction::Restart,
                     .actionLabel = "Restart",
                     .dismiss = FooterDismiss::Close,
                     .message = "Process ended.",
-                    .messageWithDetail = "Process ended by signal {}." },
+                    .messageWithDetail = "Process ended by signal {}.",
+                    .messageWithAction = "" },
     PaneFooterRow { .end = EndReason::StartFailed,
                     .action = FooterAction::Restart,
                     .actionLabel = "Restart",
                     .dismiss = FooterDismiss::Close,
                     .message = "The terminal could not be started.",
-                    .messageWithDetail = "The terminal could not be started: {}." },
+                    .messageWithDetail = "The terminal could not be started: {}.",
+                    .messageWithAction = "" },
     PaneFooterRow { .end = EndReason::Disconnected,
-                    .action = FooterAction::None,
-                    .actionLabel = "",
+                    .action = FooterAction::Reconnect,
+                    .actionLabel = "Reconnect",
                     .dismiss = FooterDismiss::Close,
                     .message = "Disconnected from the Contour daemon. Its sessions are still running; "
                                "reattach with: contour client",
-                    .messageWithDetail = "Disconnected from the Contour daemon. Its sessions are still "
-                                         "running; reattach with: contour client" },
+                    .messageWithDetail = "Could not reconnect: {}.",
+                    .messageWithAction =
+                        "Disconnected from the Contour daemon. Its sessions are still running." },
 };
 
 /// Looks up the footer row for @p end.
@@ -111,26 +117,52 @@ inline constexpr auto PaneFooterRows = std::array {
 /// The footer text for @p end.
 /// @param end    The end to describe.
 /// @param detail What the end carries (an exit code, a signal, the failure); empty for none.
-/// @return The row's detail form when @p detail is non-empty, else its plain message.
-[[nodiscard]] inline std::string paneFooterMessage(EndReason end, std::string_view detail)
+/// @param offered The primary button the footer offers (offeredAction()).
+/// @return The row's detail form when @p detail is non-empty; else, while the row's action is offered and the
+///         row has words for it, those; else its plain message.
+[[nodiscard]] inline std::string paneFooterMessage(EndReason end,
+                                                   std::string_view detail,
+                                                   FooterAction offered)
 {
     auto const& row = paneFooterRowOf(end);
     if (detail.empty())
-        return std::string { row.message };
+    {
+        auto const offeredWords =
+            offered != FooterAction::None && offered == row.action && !row.messageWithAction.empty();
+        return std::string { offeredWords ? row.messageWithAction : row.message };
+    }
     // The row's text is data, not a literal, so it cannot be a std::format_string.
     return std::vformat(row.messageWithDetail, std::make_format_args(detail));
 }
 
+/// Whether the host application can seek a lost daemon connection again from an ended pane.
+enum class ReconnectSupport : uint8_t
+{
+    Unsupported =
+        0,     ///< No reconnect: only a local session, or a tmux window whose gateway has no supervisor.
+    Supported, ///< The app is attached to a daemon and can start a new supervised run.
+};
+
 /// The primary button an ended pane offers.
-/// @param end  How the session ended.
-/// @param host Whether its hosting can start it again here.
-/// @return The row's action, or None when the hosting cannot restart.
-[[nodiscard]] constexpr FooterAction offeredAction(EndReason end, RestartSupport host) noexcept
+/// @param end       How the session ended.
+/// @param restart   Whether its hosting can start it again here.
+/// @param reconnect Whether the app can seek the daemon again.
+/// @return The row's action, or None when the hosting or the app cannot do it.
+[[nodiscard]] constexpr FooterAction offeredAction(EndReason end,
+                                                   RestartSupport restart,
+                                                   ReconnectSupport reconnect) noexcept
 {
     auto const& row = paneFooterRowOf(end);
-    if (row.action == FooterAction::Restart && host == RestartSupport::Unsupported)
-        return FooterAction::None;
-    return row.action;
+    switch (row.action)
+    {
+        case FooterAction::Restart:
+            return restart == RestartSupport::Supported ? row.action : FooterAction::None;
+        case FooterAction::Reconnect:
+            return reconnect == ReconnectSupport::Supported ? row.action : FooterAction::None;
+        case FooterAction::None:
+        case FooterAction::RunAgain: break;
+    }
+    return FooterAction::None;
 }
 
 /// What the footer over a restored shell says and does. Not an EndReason's row: nothing ended, the pane's

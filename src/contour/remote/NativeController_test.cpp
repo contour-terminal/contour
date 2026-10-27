@@ -2497,6 +2497,103 @@ TEST_CASE("NativeController shows the refusal text", "[contour][remote]")
     }
 }
 
+TEST_CASE("NativeController.reconnect.afterARefusal", "[attach][controller][reconnect][manual]")
+{
+    using contour::session::ReconnectError;
+    using vthost::client::ConnectionState;
+    // A daemon that wants another token refuses the attach for good; once it accepts, a reconnect from the
+    // footer reaches it on a new supervised run.
+    auto daemon = DaemonFixture {
+        {}, vthost::NativeSessionServices { .handshake = { .acceptedTokens = { { .token = "right" } } } }
+    };
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    CHECK(controller.reconnectSupport() == contour::session::ReconnectSupport::Supported);
+
+    auto const refused = controller.connectAndWait(10s);
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(controller.connectionState() == ConnectionState::Failed); // a first connect is not retried
+    CHECK_FALSE(controller.failure().empty());
+
+    daemon.serveAgain([&] { daemon.services = {}; });
+    auto const started = controller.reconnect();
+    REQUIRE(started.has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
+    CHECK(controller.failure().empty());
+
+    // While the run is up there is nothing to start.
+    auto const again = controller.reconnect();
+    REQUIRE_FALSE(again.has_value());
+    CHECK(again.error() == ReconnectError::AlreadyConnected);
+
+    controller.stop();
+}
+
+TEST_CASE("NativeController.reconnect.afterAStop", "[attach][controller][reconnect][manual]")
+{
+    using vthost::client::ConnectionState;
+    // The app stops the controller when its connection ends for good (closing every mirror pty); a
+    // reconnect after that starts the run again on a fresh reactor.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    controller.stop();
+    CHECK(controller.connectionState() == ConnectionState::Stopped);
+
+    REQUIRE(controller.reconnect().has_value());
+    CHECK(waitUntil([&] { return controller.connectionState() == ConnectionState::Connected; }));
+    controller.stop();
+}
+
+TEST_CASE("NativeController.reconnect.neverAttached", "[attach][controller][reconnect][manual]")
+{
+    auto daemon = DaemonFixture {};
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto const result = controllerOwned->reconnect();
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error() == contour::session::ReconnectError::NotAttached);
+}
+
+TEST_CASE("NativeController.reconnect.takesAPaneBackByItsRemoteSession",
+          "[attach][controller][reconnect][manual]")
+{
+    using contour::session::ReconnectBinding;
+    // The layout the daemon pushes names the session a lost pane mirrored: the next pty binds to it again,
+    // keeping the id. A pane whose session the daemon no longer has is Gone.
+    auto daemon = DaemonFixture {};
+    std::ignore = daemon.seedSession("kept");
+    auto timeline = TestTimeline {};
+    auto const controllerOwned = makeNativeController(daemon.endpoint(), timeline);
+    auto& controller = *controllerOwned;
+    requireConnected(controller);
+    REQUIRE(waitUntil([&] { return controller.layout().has_value(); }));
+    auto route = AttachRoute { controller };
+    auto pane = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    auto const session = controller.sessionForPty(&pane.pty());
+    REQUIRE(session.has_value());
+
+    CHECK(controller.bindForReconnect(&pane.pty()) == ReconnectBinding::Bound);
+    // Bound for the next pty, which therefore may be made though nothing is pending.
+    CHECK(controller.canCreateSession());
+    auto replacement = MirrorPane { route.router, route.router.createPty(std::nullopt) };
+    CHECK(controller.sessionForPty(&replacement.pty()) == session);
+    CHECK_FALSE(controller.canCreateSession());
+
+    // A pty the controller never handed out names no session.
+    auto stranger = vtpty::MockPty { cells(80, 24) };
+    CHECK(controller.bindForReconnect(&stranger) == ReconnectBinding::Gone);
+
+    controller.stop();
+    replacement.terminal.reset();
+    pane.terminal.reset();
+}
+
 TEST_CASE("attach controller reports an unreachable daemon", "[attach][controller]")
 {
     // Port 1 on loopback has nothing listening: connect is refused before any TLS.

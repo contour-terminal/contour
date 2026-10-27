@@ -92,6 +92,21 @@ class RoutingSessionFactory final: public contour::session::SessionFactory
         return active().requestHostedOperation(pty, request);
     }
 
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
+    {
+        return active().reconnectSupport();
+    }
+
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override
+    {
+        return active().reconnect();
+    }
+
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override
+    {
+        return active().bindForReconnect(endedPty);
+    }
+
     void bindTerminal(vtpty::Pty const* pty,
                       vtbackend::Terminal& terminal,
                       contour::session::InterruptionSink const& interruptions) override

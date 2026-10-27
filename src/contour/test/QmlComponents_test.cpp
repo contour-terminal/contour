@@ -10086,6 +10086,39 @@ TEST_CASE("pane end: the Terminal row's restored-shell footer brackets its butto
           == QStringLiteral("[Dismiss]"));
 }
 
+TEST_CASE("pane end: a Disconnected pane offers Reconnect, answered by Return (offscreen)",
+          "[contour][gui][qml][paneend]")
+{
+    auto host = PaneTreeHost { paneCardSetup(), QSize { 1200, 400 } };
+    MockSession session;
+    MockPaneProxy leaf { /*leaf*/ true };
+    leaf.setSession(&session);
+    leaf.setActive(true);
+    host.show(leaf, /*visiblePanes*/ 1);
+
+    session.setEnd(static_cast<int>(contour::session::EndReason::Disconnected),
+                   QStringLiteral("Disconnected from the Contour daemon. Its sessions are still running."),
+                   static_cast<int>(contour::session::FooterAction::Reconnect));
+    host.settle();
+    auto const& card = host.cardOf(leaf);
+    auto const& primary = PaneTreeHost::partOf(card, "exitedFooterRestart");
+    REQUIRE(primary.isVisible());
+    CHECK(primary.property("text").toString()
+          == QStringLiteral("Reconnect %1").arg(host.style().restartGlyph()));
+    clickOn(host, primary);
+    CHECK(session.footerActions == 1);
+    CHECK(PaneTreeHost::partOf(card, "exitedFooterClose").isVisible());
+    auto const& footer = PaneTreeHost::partOf(card, "exitedFooter");
+    auto const* const attached = [&]() -> QObject* {
+        for (auto* child: footer.children())
+            if (child->inherits("QQuickAccessibleAttached"))
+                return child;
+        return nullptr;
+    }();
+    REQUIRE(attached != nullptr);
+    CHECK(attached->property("description").toString().contains(QStringLiteral("Return presses Reconnect.")));
+}
+
 TEST_CASE("pane end: the footer reads at 4.5:1 (offscreen)", "[contour][gui][qml][paneend]")
 {
     auto const appearance = GENERATE(vtbackend::ColorPreference::Light, vtbackend::ColorPreference::Dark);

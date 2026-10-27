@@ -2126,7 +2126,56 @@ std::expected<TerminalSession*, RestartError> TerminalSessionManager::restartSes
 {
     if (ended.endAction() != FooterAction::Restart)
         return std::unexpected(RestartError::NotOffered);
+    return replaceEndedSession(ended);
+}
 
+void TerminalSessionManager::reconnectHost()
+{
+    // A failure of an earlier try is not this one's.
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+            session->noteReconnectFailure({});
+    auto const started = _sessionFactory.reconnect();
+    if (!started)
+    {
+        managerLog()("Not reconnecting: {}.", describe(started.error()));
+        _reconnectRun = ReconnectRun::Running;
+        reconnectFailed(describe(started.error()));
+        return;
+    }
+    _reconnectRun = ReconnectRun::Running;
+    // Ahead of the controller's own report of it, which comes queued: the pill shows as the button is
+    // pressed.
+    setHostConnection(vthost::client::ConnectionState::Reconnecting);
+}
+
+void TerminalSessionManager::rebindDisconnected()
+{
+    if (_reconnectRun == ReconnectRun::Idle)
+        return;
+    auto lost = std::vector<TerminalSession*> {};
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+            lost.push_back(session);
+    for (auto* session: lost)
+        if (_sessionFactory.bindForReconnect(&session->terminal().device()) == ReconnectBinding::Bound)
+            if (auto const rebound = replaceEndedSession(*session); !rebound)
+                managerLog()("Not taking a pane back: {}.", describe(rebound.error()));
+    _reconnectRun = ReconnectRun::Idle;
+}
+
+void TerminalSessionManager::reconnectFailed(std::string_view reason)
+{
+    if (std::exchange(_reconnectRun, ReconnectRun::Idle) == ReconnectRun::Idle)
+        return;
+    for (auto* session: _sessionsById | std::views::values)
+        if (session != nullptr && session->endReason() == EndReason::Disconnected)
+            session->noteReconnectFailure(std::string { reason });
+}
+
+std::expected<TerminalSession*, RestartError> TerminalSessionManager::replaceEndedSession(
+    TerminalSession& ended)
+{
     auto const endedId = ended.modelSessionId();
     auto* tab = sessionForId(endedId) == &ended ? findTabHostingSession(endedId) : nullptr;
     auto const* leaf = tab != nullptr ? tab->rootPane()->findLeaf(endedId) : nullptr;

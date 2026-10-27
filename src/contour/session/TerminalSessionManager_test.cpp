@@ -2701,6 +2701,197 @@ TEST_CASE("TerminalSessionManager: a remote-hosted pane offers no Restart", "[ma
     contour::test::closeAllTabs(*window);
 }
 
+namespace
+{
+/// A split of two panes of a remote-hosted manager, both lost with the connection: their ptys closed after
+/// noteTransportLost(), so each shows the Disconnected footer.
+struct LostSplit
+{
+    contour::test::MockPtySessionFactory* factory;
+    contour::test::TestApp app;
+    contour::test::ScopedController window;
+    contour::session::TerminalSession* left = nullptr;
+    contour::session::TerminalSession* right = nullptr;
+    vtworkspace::PaneId leftLeaf;
+    vtworkspace::PaneId rightLeaf;
+
+    static std::unique_ptr<contour::test::MockPtySessionFactory> makeFactory()
+    {
+        auto factory = std::make_unique<contour::test::MockPtySessionFactory>();
+        factory->reportedHosting = contour::session::SessionHosting::Remote;
+        factory->reportedReconnectSupport = contour::session::ReconnectSupport::Supported;
+        return factory;
+    }
+
+    explicit LostSplit(std::unique_ptr<contour::test::MockPtySessionFactory> owned = makeFactory()):
+        factory { owned.get() }, app { std::move(owned) }, window { app.manager() }
+    {
+        left = app.manager().createSession(window.id);
+        REQUIRE(left != nullptr);
+        app.manager().splitActivePane(/*vertical*/ true, left);
+        right = window->activeSession();
+        REQUIRE(right != left);
+        leftLeaf = leafOf(app.manager(), window.id, *left)->id();
+        rightLeaf = leafOf(app.manager(), window.id, *right)->id();
+        for (auto* session: { left, right })
+        {
+            session->noteTransportLost();
+            session->terminal().device().close();
+            session->onClosed();
+            REQUIRE(session->endReason() == contour::session::EndReason::Disconnected);
+        }
+        factory->namedForReconnect = { &left->terminal().device(), &right->terminal().device() };
+    }
+
+    ~LostSplit() { contour::test::closeAllTabs(*window); }
+
+    LostSplit(LostSplit const&) = delete;
+    LostSplit& operator=(LostSplit const&) = delete;
+    LostSplit(LostSplit&&) = delete;
+    LostSplit& operator=(LostSplit&&) = delete;
+};
+
+/// @return The session the leaf @p leaf of @p manager's window now carries; null when none.
+[[nodiscard]] contour::session::TerminalSession* sessionOfLeaf(
+    contour::session::TerminalSessionManager& manager, vtworkspace::WindowId window, vtworkspace::PaneId leaf)
+{
+    auto const* pane = manager.model().window(window)->activeTab()->rootPane()->findPane(leaf);
+    return pane != nullptr ? manager.sessionForId(pane->session()) : nullptr;
+}
+} // namespace
+
+TEST_CASE("TerminalSessionManager: a lost pane offers Reconnect only where the app is attached",
+          "[manager][paneend][reconnect]")
+{
+    using contour::session::FooterAction;
+    auto lost = LostSplit {};
+    CHECK(lost.left->endAction() == FooterAction::Reconnect);
+    CHECK(lost.left->getFooterActionLabel() == "Reconnect");
+    CHECK(lost.left->getFooterMessage()
+          == "Disconnected from the Contour daemon. Its sessions are still running.");
+
+    SECTION("a detached app offers Close alone, and keeps the reattach hint")
+    {
+        auto factory = LostSplit::makeFactory();
+        factory->reportedReconnectSupport = contour::session::ReconnectSupport::Unsupported;
+        auto detached = LostSplit { std::move(factory) };
+        CHECK(detached.left->endAction() == FooterAction::None);
+        CHECK(detached.left->getFooterMessage().contains(QStringLiteral("reattach with: contour client")));
+    }
+}
+
+TEST_CASE("TerminalSessionManager: Reconnect rebinds the panes in place", "[manager][paneend][reconnect]")
+{
+    using contour::session::EndReason;
+    using contour::window::PaneState;
+    auto lost = LostSplit {};
+    auto& manager = lost.app.manager();
+    auto const windows = manager.model().windowCount();
+    auto const leftBefore = lost.left->modelSessionId();
+    auto const ptysBefore = lost.factory->createdPtys.size();
+
+    SECTION("Return on the footer reconnects too")
+    {
+        pressReturn(*lost.left);
+        CHECK(lost.factory->reconnects == 1);
+    }
+
+    lost.right->runFooterAction();
+    REQUIRE(lost.factory->reconnects >= 1);
+    // The press of one is the answer of both: every pane lost with the connection seeks it again.
+    CHECK(lost.left->getPaneState() == static_cast<int>(PaneState::Reconnecting));
+    CHECK(lost.right->getPaneState() == static_cast<int>(PaneState::Reconnecting));
+    CHECK(lost.left->isReconnecting());
+
+    // The daemon's layout is back and names both sessions.
+    manager.rebindDisconnected();
+
+    CHECK(lost.factory->createdPtys.size() == ptysBefore + 2);
+    auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
+    auto* const newRight = sessionOfLeaf(manager, lost.window.id, lost.rightLeaf);
+    REQUIRE(newLeft != nullptr);
+    REQUIRE(newRight != nullptr);
+    CHECK(newLeft->modelSessionId() != leftBefore);
+    for (auto* session: { newLeft, newRight })
+    {
+        CHECK(session->endReason() == EndReason::None);
+        CHECK(session->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::None));
+    }
+    CHECK(manager.model().windowCount() == windows);
+    CHECK(manager.model().window(lost.window.id)->activeTab()->paneCount() == 2);
+
+    // Connected again, no pane shows the pill.
+    manager.setHostConnection(vthost::client::ConnectionState::Connected);
+    CHECK(newLeft->getPaneState() == static_cast<int>(PaneState::Live));
+}
+
+TEST_CASE("TerminalSessionManager: a refused reconnect keeps the footer with the reason",
+          "[manager][paneend][reconnect]")
+{
+    using contour::window::PaneState;
+    auto lost = LostSplit {};
+    auto& manager = lost.app.manager();
+    auto const windows = manager.model().windowCount();
+
+    SECTION("the daemon refuses the handshake")
+    {
+        lost.left->runFooterAction();
+        REQUIRE(lost.left->getPaneState() == static_cast<int>(PaneState::Reconnecting));
+
+        // The supervised run ends for good: the connection says why, and settles in Refused.
+        manager.setHostConnection(vthost::client::ConnectionState::Refused);
+        manager.reconnectFailed("the daemon refused the handshake");
+
+        for (auto* session: { lost.left, lost.right })
+        {
+            CHECK(session->getPaneState() == static_cast<int>(PaneState::Ended));
+            CHECK(session->getFooterMessage()
+                  == QStringLiteral("Could not reconnect: the daemon refused the handshake."));
+            CHECK(session->getFooterActionLabel() == "Reconnect"); // and it can be tried again
+        }
+    }
+
+    SECTION("no connection could be started at all")
+    {
+        lost.factory->reconnectResult = std::unexpected(contour::session::ReconnectError::NotAttached);
+        lost.left->runFooterAction();
+        for (auto* session: { lost.left, lost.right })
+            CHECK(session->getFooterMessage().startsWith(QStringLiteral("Could not reconnect: ")));
+        CHECK(lost.left->getPaneState() == static_cast<int>(PaneState::Ended));
+    }
+
+    SECTION("a failure with no reconnect running is nobody's to report")
+    {
+        manager.reconnectFailed("the connection closed");
+        CHECK(lost.left->getFooterMessage()
+              == "Disconnected from the Contour daemon. Its sessions are still running.");
+    }
+
+    // No window was added, and no pane lost.
+    CHECK(manager.model().windowCount() == windows);
+    CHECK(manager.model().window(lost.window.id)->activeTab()->paneCount() == 2);
+    CHECK(manager.sessionForId(lost.left->modelSessionId()) == lost.left);
+}
+
+TEST_CASE("TerminalSessionManager: a pane the daemon no longer has stays ended",
+          "[manager][paneend][reconnect]")
+{
+    auto lost = LostSplit {};
+    auto& manager = lost.app.manager();
+    // The returned layout omits the right pane's session.
+    lost.factory->namedForReconnect = { &lost.left->terminal().device() };
+    lost.left->runFooterAction();
+
+    manager.rebindDisconnected();
+
+    auto* const newLeft = sessionOfLeaf(manager, lost.window.id, lost.leftLeaf);
+    REQUIRE(newLeft != nullptr);
+    CHECK(newLeft->endReason() == contour::session::EndReason::None);
+    CHECK(sessionOfLeaf(manager, lost.window.id, lost.rightLeaf) == lost.right);
+    CHECK(lost.right->endReason() == contour::session::EndReason::Disconnected);
+    CHECK(lost.right->getPaneFooter() == static_cast<int>(contour::window::PaneFooterKind::Ended));
+}
+
 TEST_CASE("TerminalSessionManager: a restarted pane starts at the size it has once the footer hides",
           "[manager][paneend]")
 {

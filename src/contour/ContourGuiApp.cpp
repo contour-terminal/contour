@@ -1336,6 +1336,15 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
     _onGuiBooted = [this] {
         reconcileAttachWindows();
     };
+    // First: a Reconnect from a footer has the panes lost with the connection take their sessions back
+    // before the layout is reconciled, which would otherwise find no live pane for them and realize them
+    // again beside the ended ones.
+    connect(
+        _nativeController.get(),
+        &remote::NativeController::layoutChanged,
+        this,
+        [this] { _sessionManager.rebindDisconnected(); },
+        Qt::QueuedConnection);
     connect(_nativeController.get(),
             &remote::NativeController::layoutChanged,
             this,
@@ -1355,6 +1364,9 @@ std::expected<void, std::string> ContourGuiApp::startNativeAttach()
             // Before stop(), which closes every mirror pty — the order matters.
             // @see TerminalSession::noteTransportLost
             _sessionManager.noteTransportLost();
+            // A Reconnect from a footer that ends here did not bring the daemon back: the panes it was for
+            // say so, with the connection's own words.
+            _sessionManager.reconnectFailed(_nativeController->failure());
             _nativeController->stop();
         },
         Qt::QueuedConnection);

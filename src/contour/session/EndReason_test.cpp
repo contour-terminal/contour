@@ -18,28 +18,51 @@ TEST_CASE("paneFooter.rowsAreInEnumeratorOrder", "[panestate]")
 
 TEST_CASE("paneFooter.messageNamesTheDetailWhenThereIsOne", "[panestate]")
 {
-    CHECK(paneFooterMessage(EndReason::Exited, "1") == "Process exited with code 1.");
-    CHECK(paneFooterMessage(EndReason::Exited, "") == "Process exited.");
-    CHECK(paneFooterMessage(EndReason::Signalled, "9") == "Process ended by signal 9.");
-    CHECK(paneFooterMessage(EndReason::Signalled, "") == "Process ended.");
-    CHECK(paneFooterMessage(EndReason::StartFailed, "no such directory")
+    CHECK(paneFooterMessage(EndReason::Exited, "1", FooterAction::None) == "Process exited with code 1.");
+    CHECK(paneFooterMessage(EndReason::Exited, "", FooterAction::None) == "Process exited.");
+    CHECK(paneFooterMessage(EndReason::Signalled, "9", FooterAction::None) == "Process ended by signal 9.");
+    CHECK(paneFooterMessage(EndReason::Signalled, "", FooterAction::None) == "Process ended.");
+    CHECK(paneFooterMessage(EndReason::StartFailed, "no such directory", FooterAction::None)
           == "The terminal could not be started: no such directory.");
-    CHECK(paneFooterMessage(EndReason::StartFailed, "") == "The terminal could not be started.");
-    CHECK(paneFooterMessage(EndReason::Disconnected, "")
+    CHECK(paneFooterMessage(EndReason::StartFailed, "", FooterAction::None)
+          == "The terminal could not be started.");
+    CHECK(paneFooterMessage(EndReason::Disconnected, "", FooterAction::None)
           == "Disconnected from the Contour daemon. Its sessions are still running; reattach with: contour "
              "client");
-    CHECK(paneFooterMessage(EndReason::None, "").empty());
+    CHECK(paneFooterMessage(EndReason::None, "", FooterAction::None).empty());
 }
 
-TEST_CASE("paneFooter.restartIsOfferedOnlyWhereTheRowAndTheHostingAllowIt", "[panestate]")
+TEST_CASE("paneFooter.theActionIsOfferedOnlyWhereTheRowAndTheHostingAllowIt", "[panestate]")
 {
-    CHECK(offeredAction(EndReason::Exited, RestartSupport::Supported) == FooterAction::Restart);
-    CHECK(offeredAction(EndReason::Signalled, RestartSupport::Supported) == FooterAction::Restart);
-    CHECK(offeredAction(EndReason::StartFailed, RestartSupport::Supported) == FooterAction::Restart);
-    CHECK(offeredAction(EndReason::Exited, RestartSupport::Unsupported) == FooterAction::None);
-    // Disconnected offers Close only: no reconnect exists to put behind the button.
-    CHECK(offeredAction(EndReason::Disconnected, RestartSupport::Supported) == FooterAction::None);
-    CHECK(offeredAction(EndReason::None, RestartSupport::Supported) == FooterAction::None);
+    constexpr auto Local = RestartSupport::Supported;
+    constexpr auto Remote = RestartSupport::Unsupported;
+    constexpr auto Attached = ReconnectSupport::Supported;
+    constexpr auto Detached = ReconnectSupport::Unsupported;
+
+    CHECK(offeredAction(EndReason::Exited, Local, Detached) == FooterAction::Restart);
+    CHECK(offeredAction(EndReason::Signalled, Local, Detached) == FooterAction::Restart);
+    CHECK(offeredAction(EndReason::StartFailed, Local, Detached) == FooterAction::Restart);
+    CHECK(offeredAction(EndReason::Exited, Remote, Attached) == FooterAction::None);
+    // Reconnect needs an app attached to a daemon, whatever else the hosting does.
+    CHECK(offeredAction(EndReason::Disconnected, Remote, Attached) == FooterAction::Reconnect);
+    CHECK(offeredAction(EndReason::Disconnected, Local, Attached) == FooterAction::Reconnect);
+    CHECK(offeredAction(EndReason::Disconnected, Remote, Detached) == FooterAction::None);
+    CHECK(offeredAction(EndReason::Exited, Local, Attached) == FooterAction::Restart);
+    CHECK(offeredAction(EndReason::None, Local, Attached) == FooterAction::None);
+}
+
+TEST_CASE("paneFooter.disconnectedDropsTheReattachHintWhileReconnectIsOffered", "[panestate]")
+{
+    constexpr auto HostWords = "Disconnected from the Contour daemon. Its sessions are still running.";
+    CHECK(paneFooterMessage(EndReason::Disconnected, "", FooterAction::Reconnect) == HostWords);
+    CHECK(paneFooterMessage(EndReason::Disconnected, "", FooterAction::None)
+          == "Disconnected from the Contour daemon. Its sessions are still running; reattach with: contour "
+             "client");
+    // A refused reconnect says why, whichever button is offered.
+    CHECK(paneFooterMessage(EndReason::Disconnected, "the daemon refused", FooterAction::Reconnect)
+          == "Could not reconnect: the daemon refused.");
+    // Other ends have no words for an offered action: Restart changes nothing of them.
+    CHECK(paneFooterMessage(EndReason::Exited, "", FooterAction::Restart) == "Process exited.");
 }
 
 TEST_CASE("paneFooter.everyRowNamesAnActionLabelExactlyWhenItHasAnAction", "[panestate]")

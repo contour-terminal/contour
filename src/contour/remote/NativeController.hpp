@@ -347,6 +347,31 @@ class NativeController final: public QObject, public contour::session::SessionFa
                       vtbackend::Terminal& terminal,
                       contour::session::InterruptionSink const& interruptions) override;
 
+    /// @return Why the last connection ended for good, as the connection said it; empty when it did not (or
+    ///         was stopped). Any thread.
+    [[nodiscard]] std::string failure() const
+    {
+        auto const lock = std::lock_guard { _mutex };
+        return _failure;
+    }
+
+    /// SessionFactory: Supported -- this controller is the attach to a daemon a pane's Reconnect seeks again.
+    [[nodiscard]] contour::session::ReconnectSupport reconnectSupport() const noexcept override
+    {
+        return contour::session::ReconnectSupport::Supported;
+    }
+
+    /// SessionFactory: starts a new supervised run once the last one ended (refused, failed, or stopped),
+    /// resuming the windows followed. The outcome arrives as connectionStateChanged() and, when it ends for
+    /// good again, connectionClosed(). GUI thread.
+    /// @return Nothing once started; AlreadyConnected while a run is up or being sought, NotAttached when
+    ///         this controller never connected.
+    [[nodiscard]] std::expected<void, contour::session::ReconnectError> reconnect() override;
+
+    /// SessionFactory: when the layout the daemon pushed names the remote session @p endedPty mirrored, makes
+    /// the next createPty() bind to it again. GUI thread.
+    [[nodiscard]] contour::session::ReconnectBinding bindForReconnect(vtpty::Pty const* endedPty) override;
+
   signals:
     /// A remote session appeared that has no local tab yet (fires on the
     /// reactor thread; connect queued).

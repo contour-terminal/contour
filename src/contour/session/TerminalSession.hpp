@@ -991,6 +991,11 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// away in this client alone.
     Q_INVOKABLE void dismissFooter();
 
+    /// Tells an ended session that a Reconnect did not bring the daemon back: its footer then says "Could not
+    /// reconnect: {reason}." -- or its own words again, for an empty @p reason. GUI thread.
+    /// @param reason Why it failed, as the connection says; empty for none.
+    void noteReconnectFailure(std::string reason);
+
     /// Tells the session what a restart stopped in its shell, or that it stands no more: the command line a
     /// daemon's snapshot recorded, empty or nullopt for none. Posted to the GUI thread by whoever mirrors
     /// the daemon's session (NativeController, from the reactor); this is the thread's seam, so the
@@ -2645,6 +2650,8 @@ class TerminalSession: public QAbstractItemModel, public vtbackend::Terminal::Ev
     /// The command a restart stopped in this shell, while its footer stands (noteInterruption()). GUI
     /// thread only.
     std::optional<vtbackend::CommandLineText> _interruption;
+    /// Why the last Reconnect from this ended pane's footer failed; empty for none. GUI thread.
+    std::string _reconnectFailure;
     /// Whether the shell had shown a prompt when the footer's buttons were last decided. GUI thread.
     window::ShellPromptPresence _interruptionPrompt = window::ShellPromptPresence::Absent;
     /// Whether an interruption stands, readable from the parser thread, which re-asks about the prompt on

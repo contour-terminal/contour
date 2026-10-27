@@ -480,6 +480,58 @@ vthost::client::WireLayout NativeController::wireLayout() const
                             : vthost::client::wireToLayout(_layouts.begin()->second);
 }
 
+std::expected<void, contour::session::ReconnectError> NativeController::reconnect()
+{
+    using contour::session::ReconnectError;
+    if (!_connectStartedAt)
+        return std::unexpected(ReconnectError::NotAttached);
+    if (isConnecting())
+        return std::unexpected(ReconnectError::AlreadyConnected);
+    {
+        // The windows this client showed, as a reconnect inside one run resumes them; a client that follows
+        // every window keeps doing so (@see ClientSupervisor::resumeIntent).
+        auto const lock = std::lock_guard { _mutex };
+        if (_intent.kind != vthost::proto::AttachIntentKind::AllWindows)
+            _intent = vthost::proto::AttachIntent {
+                .kind = vthost::proto::AttachIntentKind::Resume,
+                .windows = std::ranges::to<std::vector>(_layouts | std::views::keys),
+            };
+    }
+    restartConnecting();
+    return {};
+}
+
+namespace
+{
+    /// @param pane A node of a layout.
+    /// @param session A daemon session id.
+    /// @return Whether a leaf at or under @p pane carries @p session.
+    [[nodiscard]] bool paneNames(vthost::proto::WirePane const& pane, uint64_t session)
+    {
+        if (!pane.isSplit())
+            return pane.session == session;
+        return std::ranges::any_of(pane.children,
+                                   [session](auto const& child) { return paneNames(child, session); });
+    }
+} // namespace
+
+contour::session::ReconnectBinding NativeController::bindForReconnect(vtpty::Pty const* endedPty)
+{
+    using contour::session::ReconnectBinding;
+    auto const session = sessionForPty(endedPty);
+    if (!session)
+        return ReconnectBinding::Gone;
+    auto const lock = std::lock_guard { _mutex };
+    auto const named = std::ranges::any_of(_layouts | std::views::values, [&](auto const& layout) {
+        return std::ranges::any_of(layout.tabs,
+                                   [&](auto const& tab) { return paneNames(tab.root, *session); });
+    });
+    if (!named)
+        return ReconnectBinding::Gone;
+    _nextBindSession = session;
+    return ReconnectBinding::Bound;
+}
+
 void NativeController::setNextBindSession(uint64_t session)
 {
     auto const lock = std::lock_guard { _mutex };
@@ -1011,7 +1063,8 @@ bool NativeController::canCreateSession() const noexcept
     auto const lock = std::lock_guard { _mutex };
     // During a layout realization the panes are bound by setNextBindSession (not
     // the FIFO queue), so allow creation even with nothing pending.
-    return _realizingLayout || !_pending.empty();
+    // A pane taken back after a reconnect names its session by the same hook (bindForReconnect).
+    return _realizingLayout || _nextBindSession.has_value() || !_pending.empty();
 }
 
 std::unique_ptr<vtpty::Pty> NativeController::createPty(std::optional<std::string> /*cwd*/,
