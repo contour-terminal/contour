@@ -136,7 +136,7 @@ Tab* SessionModel::createTab(WindowId windowId)
     return win->_tabs[static_cast<size_t>(index)].get();
 }
 
-void SessionModel::closeTabAt(Window& win, int index)
+void SessionModel::closeTabAt(Window& win, int index, std::function<void()> const& beforeErase)
 {
     assert(index >= 0 && std::cmp_less(index, win._tabs.size()));
     auto const tabId = win._tabs[static_cast<size_t>(index)]->id();
@@ -145,6 +145,8 @@ void SessionModel::closeTabAt(Window& win, int index)
     // Bracket the removal: a Qt host's beginRemoveRows() must run while the tab is still present (old
     // rowCount), endRemoveRows() after the erase.
     _events.tabAboutToBeRemoved(win.id(), index);
+    if (beforeErase)
+        beforeErase();
     win._tabs.erase(win._tabs.begin() + index);
     _events.tabClosed(win.id(), tabId, index);
 
@@ -341,6 +343,45 @@ void SessionModel::moveTabToWindow(WindowId fromId, TabId tabId, WindowId toId, 
     if (!from->_tabs.empty() && srcActiveWasMoved)
         _events.activeTabChanged(
             fromId, from->_tabs[static_cast<size_t>(from->_activeTabIndex)]->id(), from->_activeTabIndex);
+}
+
+Pane* SessionModel::mergeTabIntoSplit(
+    WindowId fromId, TabId sourceId, WindowId toId, TabId targetId, PaneId leafId, SplitSide side)
+{
+    // Half and half: the grafted tab and the pane it lands beside share the space equally.
+    constexpr double MergeRatio = 0.5;
+
+    if (sourceId == targetId)
+        return nullptr;
+    auto* from = window(fromId);
+    auto* to = window(toId);
+    if (from == nullptr || to == nullptr)
+        return nullptr;
+    auto const sourceIndex = from->indexOf(sourceId);
+    if (sourceIndex < 0 || to->indexOf(targetId) < 0)
+        return nullptr;
+    auto* source = from->tabAt(sourceIndex);
+    auto* target = to->tabAt(to->indexOf(targetId));
+    auto* leaf = target->rootPane()->findPane(leafId);
+    if (leaf == nullptr || !leaf->isLeaf())
+        return nullptr;
+
+    auto const zoomBefore = target->zoomedLeafId();
+    auto const splitNodeId = _nextPaneId++;
+    // The source is announced as removed while it still holds its tree; its tree is taken just before it
+    // is destroyed, so no session is reported closed.
+    Pane* grafted = nullptr;
+    closeTabAt(*from, sourceIndex, [&] {
+        grafted = target->graftTab(*leaf, *source, side, splitNodeId, MergeRatio);
+    });
+
+    activateTab(toId, targetId);
+    _events.paneTreeRestructured(targetId);
+    _events.activePaneChanged(targetId, target->activePane()->id());
+    // The merge turned a one-pane tab into a many-pane one, or cleared a zoom: retitle exactly once.
+    if (!announceZoomChange(*target, zoomBefore))
+        _events.tabTitleChanged(targetId);
+    return grafted;
 }
 
 // }}}

@@ -2087,3 +2087,289 @@ TEST_CASE("SessionModel: findSessionLeaf locates a session in any window", "[vtw
     CHECK(t3 == nullptr);
     CHECK(l3 == nullptr);
 }
+
+// {{{ mergeTabIntoSplit
+
+namespace
+{
+/// Two windows. `a` holds [target, source], `b` holds [other]. The target is one pane (session 1000), the
+/// source two panes (sessions 1001 and 1002, the second active), the other's single pane is 1003.
+///
+/// The ids are captured up front: merging destroys the source tab, so its pointer must not be used after.
+struct MergeFixture: Fixture
+{
+    Window* a = model.createWindow();
+    Window* b = model.createWindow();
+    Tab* target = model.createTab(a->id());
+    Tab* source = model.createTab(a->id());
+    Pane* sourceActive = model.splitActivePane(source->id(), SplitState::Horizontal);
+    Tab* other = model.createTab(b->id());
+    TabId targetId = target->id();
+    TabId sourceId = source->id();
+    PaneId targetLeafId = target->rootPane()->id();
+    PaneId sourceRootId = source->rootPane()->id();
+    PaneId sourceActiveId = sourceActive->id();
+
+    /// The sessions on the leaves of @p tab, in tree order.
+    [[nodiscard]] static std::vector<uint64_t> sessionsOf(Tab const& tab)
+    {
+        auto sessions = std::vector<uint64_t> {};
+        tab.rootPane()->walkTree([&](Pane& pane) {
+            if (pane.isLeaf())
+                sessions.push_back(pane.session().value);
+        });
+        return sessions;
+    }
+
+    /// Merges the source into the target's only leaf on @p side, within window `a`.
+    Pane* merge(SplitSide side)
+    {
+        return model.mergeTabIntoSplit(a->id(), sourceId, a->id(), targetId, targetLeafId, side);
+    }
+};
+} // namespace
+
+TEST_CASE("SessionModel: mergeTabIntoSplit grafts a whole tab beside a leaf, sessions intact",
+          "[vtworkspace][model][merge]")
+{
+    MergeFixture f;
+    REQUIRE(MergeFixture::sessionsOf(*f.source) == std::vector<uint64_t> { 1001, 1002 });
+
+    SECTION("Right: the graft is the second child of a Vertical split")
+    {
+        f.events.log.clear();
+        auto* const grafted = f.merge(SplitSide::Right);
+
+        REQUIRE(grafted != nullptr);
+        auto* const root = f.target->rootPane();
+        CHECK(root->splitState() == SplitState::Vertical);
+        CHECK(root->first()->isLeaf());
+        CHECK(root->first()->id() == f.targetLeafId); // the old pane keeps its identity
+        CHECK(root->first()->session() == SessionId { 1000 });
+        CHECK(root->second() == grafted);
+        CHECK(grafted->id() == f.sourceRootId); // the source's tree arrives whole
+        CHECK(grafted->splitState() == SplitState::Horizontal);
+        CHECK(MergeFixture::sessionsOf(*f.target) == std::vector<uint64_t> { 1000, 1001, 1002 });
+        CHECK(f.target->paneCount() == 3);
+
+        CHECK(f.a->tabCount() == 1); // the source tab is gone
+        CHECK(f.a->indexOf(f.sourceId) < 0);
+        CHECK(f.a->activeTab() == f.target);
+        CHECK(f.target->activePane()->id() == f.sourceActiveId);
+        CHECK(f.target->activePane()->session() == SessionId { 1002 });
+
+        // No pane was closed (so no session was torn down): the source tab is announced as removed, the
+        // target tree as restructured.
+        CHECK(f.events.countPrefix("paneClosed:") == 0);
+        CHECK(f.events.countPrefix("tabAboutToBeRemoved:") == 1);
+        CHECK(f.events.countPrefix(std::format("tabClosed:{}:", f.sourceId.value)) == 1);
+        CHECK(f.events.countPrefix(std::format("restructured:{}", f.targetId.value)) == 1);
+        CHECK(f.events.sawPrefix(std::format("activePane:{}:{}", f.targetId.value, f.sourceActiveId.value)));
+    }
+
+    SECTION("Left puts the graft first")
+    {
+        auto* const grafted = f.merge(SplitSide::Left);
+        REQUIRE(grafted != nullptr);
+        auto* const root = f.target->rootPane();
+        CHECK(root->splitState() == SplitState::Vertical);
+        CHECK(root->first() == grafted);
+        CHECK(root->second()->id() == f.targetLeafId);
+        CHECK(MergeFixture::sessionsOf(*f.target) == std::vector<uint64_t> { 1001, 1002, 1000 });
+    }
+
+    SECTION("Top and Bottom split Horizontal")
+    {
+        auto* const grafted = f.merge(SplitSide::Top);
+        REQUIRE(grafted != nullptr);
+        CHECK(f.target->rootPane()->splitState() == SplitState::Horizontal);
+        CHECK(f.target->rootPane()->first() == grafted);
+    }
+
+    SECTION("Bottom puts the graft second")
+    {
+        auto* const grafted = f.merge(SplitSide::Bottom);
+        REQUIRE(grafted != nullptr);
+        CHECK(f.target->rootPane()->splitState() == SplitState::Horizontal);
+        CHECK(f.target->rootPane()->second() == grafted);
+    }
+
+    SECTION("the halves share the space equally")
+    {
+        (void) f.merge(SplitSide::Right);
+        CHECK(f.target->rootPane()->ratio() == Catch::Approx(0.5));
+    }
+
+    SECTION("a pane closed afterwards finds its successor among the grafted leaves")
+    {
+        // The MRU names exactly the live leaves: closing the active (grafted) pane must land on a
+        // surviving one, whichever tab it came from.
+        (void) f.merge(SplitSide::Right);
+        f.model.closePane(f.a->id(), f.targetId, f.target->activePane()->id());
+        CHECK(f.target->paneCount() == 2);
+        REQUIRE(f.target->activePane() != nullptr);
+        CHECK(f.target->activePane()->isLeaf());
+        CHECK(f.target->rootPane()->findPane(f.target->activePane()->id()) == f.target->activePane());
+        // And again, down to the last pane: every grafted leaf must still be known to the MRU.
+        f.model.closePane(f.a->id(), f.targetId, f.target->activePane()->id());
+        CHECK(f.target->paneCount() == 1);
+        CHECK(f.target->activePane()->session() == SessionId { 1001 });
+    }
+}
+
+TEST_CASE("SessionModel: mergeTabIntoSplit refuses what it cannot graft, changing nothing",
+          "[vtworkspace][model][merge]")
+{
+    MergeFixture f;
+    f.events.log.clear();
+    auto const rootBefore = f.target->rootPane();
+
+    SECTION("a tab merged into itself")
+    {
+        // Review Focus 3: the pane of its own tab.
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.a->id(), f.targetId, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
+              == nullptr);
+    }
+
+    SECTION("a leaf of another tab")
+    {
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.a->id(), f.sourceId, f.a->id(), f.targetId, f.sourceActiveId, SplitSide::Right)
+              == nullptr);
+    }
+
+    SECTION("a split node rather than a leaf")
+    {
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.a->id(), f.targetId, f.a->id(), f.sourceId, f.sourceRootId, SplitSide::Right)
+              == nullptr);
+    }
+
+    SECTION("unknown windows, tabs and panes")
+    {
+        auto const unknownWindow = WindowId { 9999 };
+        auto const unknownTab = TabId { 9999 };
+        auto const unknownPane = PaneId { 9999 };
+        CHECK(f.model.mergeTabIntoSplit(
+                  unknownWindow, f.sourceId, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
+              == nullptr);
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.a->id(), f.sourceId, unknownWindow, f.targetId, f.targetLeafId, SplitSide::Right)
+              == nullptr);
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.a->id(), unknownTab, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
+              == nullptr);
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.a->id(), f.sourceId, f.a->id(), unknownTab, f.targetLeafId, SplitSide::Right)
+              == nullptr);
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.a->id(), f.sourceId, f.a->id(), f.targetId, unknownPane, SplitSide::Right)
+              == nullptr);
+        // A source that is not in the window it is said to be in.
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.b->id(), f.sourceId, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right)
+              == nullptr);
+    }
+
+    CHECK(f.a->tabCount() == 2);
+    CHECK(f.b->tabCount() == 1);
+    CHECK(f.target->rootPane() == rootBefore);
+    CHECK(f.target->paneCount() == 1);
+    CHECK(f.source->paneCount() == 2);
+    CHECK(f.events.log.empty()); // nothing was announced
+}
+
+TEST_CASE("SessionModel: mergeTabIntoSplit clears zoom on both sides", "[vtworkspace][model][merge]")
+{
+    MergeFixture f;
+
+    SECTION("a zoomed source shows all its panes")
+    {
+        f.model.toggleActivePaneZoom(f.sourceId);
+        REQUIRE(f.source->isZoomed());
+        (void) f.merge(SplitSide::Right);
+        CHECK_FALSE(f.target->isZoomed());
+        CHECK(f.target->layoutRoot() == f.target->rootPane());
+    }
+
+    SECTION("a zoomed target is un-zoomed, announced once")
+    {
+        // Give the target a second pane to zoom, then merge beside the zoomed (active) leaf.
+        auto* const second = f.model.splitActivePane(f.targetId, SplitState::Vertical);
+        REQUIRE(second != nullptr);
+        f.model.toggleActivePaneZoom(f.targetId);
+        auto const leaf = f.target->activePane()->id();
+        f.events.log.clear();
+        REQUIRE(
+            f.model.mergeTabIntoSplit(f.a->id(), f.sourceId, f.a->id(), f.targetId, leaf, SplitSide::Bottom)
+            != nullptr);
+        CHECK_FALSE(f.target->isZoomed());
+        CHECK(f.events.countPrefix(std::format("zoom:{}:-", f.targetId.value)) == 1);
+    }
+}
+
+TEST_CASE("SessionModel: mergeTabIntoSplit across windows", "[vtworkspace][model][merge][window]")
+{
+    MergeFixture f;
+    auto const otherId = f.other->id();
+    auto const otherLeaf = f.other->rootPane()->id();
+
+    SECTION("a window's only tab merged into another window's pane empties the source window")
+    {
+        f.events.log.clear();
+        auto* const grafted = f.model.mergeTabIntoSplit(
+            f.b->id(), otherId, f.a->id(), f.targetId, f.targetLeafId, SplitSide::Left);
+        REQUIRE(grafted != nullptr);
+        CHECK(f.b->tabCount() == 0);
+        CHECK(f.b->activeTabIndex() == -1);
+        CHECK(f.a->tabCount() == 2);
+        CHECK(f.a->activeTab() == f.target); // the destination's tab comes to the front
+        CHECK(MergeFixture::sessionsOf(*f.target) == std::vector<uint64_t> { 1003, 1000 });
+        CHECK(f.target->activePane()->session() == SessionId { 1003 });
+        CHECK(f.events.countPrefix("paneClosed:") == 0);
+    }
+
+    SECTION("the source window keeps the rest of its tabs and an active one")
+    {
+        auto* const extra = f.model.createTab(f.b->id()); // b: [other, extra], extra active
+        (void) f.model.mergeTabIntoSplit(
+            f.b->id(), extra->id(), f.a->id(), f.targetId, f.targetLeafId, SplitSide::Right);
+        CHECK(f.b->tabCount() == 1);
+        CHECK(f.b->activeTab() == f.other);
+    }
+
+    SECTION("a leaf of the destination's other tab")
+    {
+        // The source is in b, the leaf in a's tab `source`: the pair (target, leaf) is inconsistent.
+        CHECK(f.model.mergeTabIntoSplit(
+                  f.b->id(), otherId, f.a->id(), f.targetId, f.sourceActiveId, SplitSide::Right)
+              == nullptr);
+        CHECK(otherLeaf == f.other->rootPane()->id());
+    }
+}
+
+TEST_CASE("SessionModel: mergeTabIntoSplit within a window keeps the active bookkeeping straight",
+          "[vtworkspace][model][merge][window]")
+{
+    Fixture f;
+    auto* const win = f.model.createWindow();
+    auto* const first = f.model.createTab(win->id());
+    auto* const middle = f.model.createTab(win->id());
+    auto* const last = f.model.createTab(win->id()); // [first, middle, last], last active
+    auto const firstId = first->id();
+    auto const middleId = middle->id();
+    auto const lastId = last->id();
+    auto const lastLeaf = last->rootPane()->id();
+
+    // A background tab merged below the active one.
+    REQUIRE(f.model.mergeTabIntoSplit(win->id(), firstId, win->id(), lastId, lastLeaf, SplitSide::Bottom)
+            != nullptr);
+    CHECK(win->tabCount() == 2);
+    CHECK(win->activeTab()->id() == lastId);
+    CHECK(win->activeTabIndex() == 1);
+    CHECK(win->tabAt(0)->id() == middleId);
+    CHECK(win->activeTab()->rootPane()->splitState() == SplitState::Horizontal);
+}
+
+// }}}

@@ -481,6 +481,22 @@ class TerminalSessionManager: public QObject, public vtworkspace::ModelEvents
     /// @param to        The destination window's id.
     /// @param toIndex   The destination row.
     void moveTabToWindow(vtworkspace::WindowId from, int fromIndex, vtworkspace::WindowId to, int toIndex);
+    /// Grafts the whole tab at row @p fromIndex of window @p from beside the pane @p leaf of tab @p target
+    /// in window @p to, on @p side, keeping every session (none is closed or re-created). The sessions
+    /// are re-pointed at @p target, the grafted active pane gets focus, and a source window this empties
+    /// is closed. Drives dropping a dragged tab on the edge of a pane.
+    /// @param from      The source window's id.
+    /// @param fromIndex The tab's row in @p from.
+    /// @param to        The destination window's id.
+    /// @param target    The tab holding @p leaf.
+    /// @param leaf      The pane to split.
+    /// @param side      The side of @p leaf the tab goes on.
+    void mergeTabIntoSplit(vtworkspace::WindowId from,
+                           int fromIndex,
+                           vtworkspace::WindowId to,
+                           vtworkspace::TabId target,
+                           vtworkspace::PaneId leaf,
+                           vtworkspace::SplitSide side);
     /// Tears the tab at row @p fromIndex of window @p from into a brand-new OS window. The new window
     /// is spawned (on @p targetScreen if given) and adopts the tab as its sole tab; if that empties the
     /// source window, it is closed. Drives dropping a dragged tab onto empty desktop.

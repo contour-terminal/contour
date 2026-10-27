@@ -139,6 +139,22 @@ class Tab
     [[nodiscard]] Pane* splitActivePane(
         SplitState direction, PaneId splitNodeId, PaneId newLeafId, SessionId newSession, double ratio = 0.5);
 
+    /// Grafts @p source's whole pane tree beside @p leaf, on @p side, taking its sessions with it.
+    ///
+    /// @p source is emptied: it keeps no pane and is only fit to be destroyed (its title and colors are
+    /// not carried over). The zoom is cleared, so the grafted panes are visible, and @p source's active
+    /// pane becomes this tab's active pane. @p leaf becomes the split node, so a pointer to it must not
+    /// be used afterwards; its former pane lives on in the grafted split's other child.
+    /// @pre @p leaf is a leaf of this tab, and @p source is a different tab.
+    /// @param leaf        The leaf to graft beside.
+    /// @param source      The tab whose tree is taken.
+    /// @param side        The side of @p leaf the grafted tree goes on.
+    /// @param splitNodeId The id the promoted node adopts (see Pane::graft).
+    /// @param ratio       The first child's space share.
+    /// @return The root of the grafted tree.
+    [[nodiscard]] Pane* graftTab(
+        Pane& leaf, Tab& source, SplitSide side, PaneId splitNodeId, double ratio = 0.5);
+
     /// Closes @p leaf, absorbing its sibling. The active pane and MRU are updated. Returns the
     /// SessionId of the closed leaf so the caller can tear down that session.
     ///

@@ -44,6 +44,7 @@
 #include <ranges>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace std::string_literals;
 
@@ -1982,6 +1983,39 @@ void TerminalSessionManager::moveTabToWindow(vtworkspace::WindowId from,
     _model->moveTabToWindow(from, tab->id(), to, toIndex);
     updateStatusLine();
     // Dragging a window's LAST tab elsewhere empties it — close the now-empty source window.
+    closeWindowIfEmpty(from);
+}
+
+void TerminalSessionManager::mergeTabIntoSplit(vtworkspace::WindowId from,
+                                               int fromIndex,
+                                               vtworkspace::WindowId to,
+                                               vtworkspace::TabId target,
+                                               vtworkspace::PaneId leaf,
+                                               vtworkspace::SplitSide side)
+{
+    auto* source = tabAtRow(from, fromIndex);
+    if (source == nullptr)
+        return;
+    auto const sourceId = source->id();
+
+    // The merge's own events look sessions up by their tab (focus follows the grafted active pane), so
+    // the index names the target before they fire; a refused merge puts it back.
+    auto sessions = std::vector<vtworkspace::SessionId> {};
+    source->rootPane()->walkTree([&](vtworkspace::Pane& pane) {
+        if (pane.isLeaf())
+            sessions.push_back(pane.session());
+    });
+    for (auto const session: sessions)
+        _tabBySession[session.value] = target;
+
+    if (_model->mergeTabIntoSplit(from, sourceId, to, target, leaf, side) == nullptr)
+    {
+        for (auto const session: sessions)
+            _tabBySession[session.value] = sourceId;
+        return;
+    }
+    updateStatusLine();
+    // Merging a window's LAST tab elsewhere empties it: close the now-empty source window.
     closeWindowIfEmpty(from);
 }
 

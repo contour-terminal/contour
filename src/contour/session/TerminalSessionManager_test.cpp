@@ -67,6 +67,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -3763,3 +3764,144 @@ TEST_CASE("TerminalSessionManager: starting a preview session spawns no process 
     CHECK_FALSE(mock->foregroundProcessName().has_value());
     // Destroyed with its threads started: the end path runs without a real device to close.
 }
+
+// {{{ mergeTabIntoSplit
+
+TEST_CASE("TerminalSessionManager: a window's only tab merged into another window's pane closes the source",
+          "[manager][merge]")
+{
+    auto factoryOwned = std::make_unique<contour::test::MockPtySessionFactory>();
+    auto* const factory = factoryOwned.get();
+    contour::test::TestApp app { std::move(factoryOwned) };
+    auto& manager = app.manager();
+    contour::test::ScopedController const windowA { manager };
+    contour::test::ScopedController const windowB { manager };
+    windowA->createNewTab(); // A: [a0]
+    windowB->createNewTab(); // B: [b0]
+    auto* const movedSession = windowA->activeSession();
+    auto* const targetSession = windowB->activeSession();
+    REQUIRE(movedSession != nullptr);
+    REQUIRE(targetSession != nullptr);
+    auto const movedId = movedSession->modelSessionId();
+    auto const targetId = targetSession->modelSessionId();
+    auto* const targetTab = manager.model().window(windowB.id)->activeTab();
+    REQUIRE(targetTab != nullptr);
+    auto const targetTabId = targetTab->id();
+    auto const targetLeaf = targetTab->rootPane()->id();
+    auto const ptyCountBefore = factory->createdPtys.size();
+
+    manager.mergeTabIntoSplit(
+        windowA.id, 0, windowB.id, targetTabId, targetLeaf, vtworkspace::SplitSide::Right);
+    QCoreApplication::processEvents();
+
+    // The source window held only that tab: it is gone, model and controller both.
+    CHECK(manager.model().window(windowA.id) == nullptr);
+    CHECK(manager.controllerFor(windowA.id) == nullptr);
+
+    // Both sessions live in B's tab, which has one pane more; nothing was re-created.
+    CHECK(factory->createdPtys.size() == ptyCountBefore);
+    CHECK(manager.sessionForId(movedId) == movedSession);
+    CHECK(manager.sessionForId(targetId) == targetSession);
+    auto* const merged = manager.model().findTab(targetTabId);
+    REQUIRE(merged != nullptr);
+    CHECK(merged->paneCount() == 2);
+    CHECK(std::get<1>(manager.model().findSessionLeaf(movedId)) == merged);
+    CHECK(std::get<1>(manager.model().findSessionLeaf(targetId)) == merged);
+
+    // B's window renders both: the proxy tree now has a split whose halves carry the two sessions, the
+    // grafted one on the right and in focus.
+    auto* const root = windowB->activeTabRootPane();
+    REQUIRE(root != nullptr);
+    REQUIRE_FALSE(root->isLeaf());
+    CHECK(root->orientation() == static_cast<int>(vtworkspace::SplitState::Vertical));
+    REQUIRE(root->first() != nullptr);
+    REQUIRE(root->second() != nullptr);
+    CHECK(root->first()->session() == targetSession);
+    CHECK(root->second()->session() == movedSession);
+    CHECK(windowB->activeSession() == movedSession);
+
+    // The session index follows the graft: a rename aimed at the moved session lands on its new tab.
+    manager.setTabTitleForSession(movedId, "merged");
+    REQUIRE(merged->runtimeTitle().has_value());
+    CHECK(*merged->runtimeTitle() == "merged");
+
+    windowB->closeTabAtIndex(0);
+}
+
+TEST_CASE("TerminalSessionManager: a background tab merged into the active tab's pane splits it",
+          "[manager][merge]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    auto* const backgroundSession = window->activeSession();
+    window->createNewTab(); // [t0, t1], t1 active
+    auto* const activeSession = window->activeSession();
+    REQUIRE(backgroundSession != nullptr);
+    REQUIRE(activeSession != nullptr);
+    REQUIRE(backgroundSession != activeSession);
+    auto* const activeTab = manager.model().window(window.id)->activeTab();
+    REQUIRE(activeTab != nullptr);
+    auto const activeTabId = activeTab->id();
+    auto const leaf = activeTab->activePane()->id();
+
+    manager.mergeTabIntoSplit(window.id, 0, window.id, activeTabId, leaf, vtworkspace::SplitSide::Bottom);
+
+    CHECK(window->count() == 1);
+    auto* const merged = manager.model().window(window.id)->activeTab();
+    REQUIRE(merged != nullptr);
+    CHECK(merged->id() == activeTabId);
+    CHECK(merged->rootPane()->splitState() == vtworkspace::SplitState::Horizontal);
+    CHECK(merged->rootPane()->first()->session() == activeSession->modelSessionId());
+    CHECK(merged->rootPane()->second()->session() == backgroundSession->modelSessionId());
+    CHECK(window->activeSession() == backgroundSession);
+
+    window->closeTabAtIndex(0);
+}
+
+TEST_CASE("TerminalSessionManager: a refused merge leaves every session where it was", "[manager][merge]")
+{
+    contour::test::TestApp app { std::make_unique<contour::test::MockPtySessionFactory>() };
+    auto& manager = app.manager();
+    contour::test::ScopedController const window { manager };
+    window->createNewTab();
+    window->createNewTab(); // [t0, t1]
+    auto* const model = &manager.model();
+    auto* const first = model->window(window.id)->tabAt(0);
+    auto* const second = model->window(window.id)->tabAt(1);
+    auto const firstId = first->id();
+    auto const secondId = second->id();
+    auto const firstSession = first->rootPane()->session();
+    auto const unknownLeaf = vtworkspace::PaneId { 9999 };
+
+    SECTION("an unknown pane")
+    {
+        manager.mergeTabIntoSplit(
+            window.id, 0, window.id, secondId, unknownLeaf, vtworkspace::SplitSide::Left);
+    }
+
+    SECTION("a tab onto its own pane")
+    {
+        manager.mergeTabIntoSplit(
+            window.id, 0, window.id, firstId, first->rootPane()->id(), vtworkspace::SplitSide::Left);
+    }
+
+    SECTION("a row that is no tab")
+    {
+        manager.mergeTabIntoSplit(
+            window.id, 7, window.id, secondId, second->rootPane()->id(), vtworkspace::SplitSide::Left);
+    }
+
+    CHECK(window->count() == 2);
+    CHECK(first->paneCount() == 1);
+    CHECK(second->paneCount() == 1);
+    // The session index still names the tab the session is in, so focus and routing keep working.
+    CHECK(std::get<1>(model->findSessionLeaf(firstSession)) == first);
+    CHECK(manager.sessionForId(firstSession) != nullptr);
+
+    window->closeTabAtIndex(0);
+    window->closeTabAtIndex(0);
+}
+
+// }}}

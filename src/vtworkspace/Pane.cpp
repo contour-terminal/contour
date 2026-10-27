@@ -31,6 +31,37 @@ std::pair<Pane*, Pane*> Pane::split(
     return { _first.get(), _second.get() };
 }
 
+Pane* Pane::graft(
+    std::unique_ptr<Pane> subtree, PaneId splitNodeId, SplitState state, GraftOrder order, double ratio)
+{
+    assert(isLeaf() && "graft() must be called on a leaf");
+    assert(subtree != nullptr && "graft() needs a subtree");
+    assert(state != SplitState::None && "graft direction must be Horizontal or Vertical");
+
+    // The leaf's session moves into a child that keeps the leaf's old id, so the surviving terminal's
+    // identity is preserved, exactly as in split().
+    auto existing = std::make_unique<Pane>(_id, _session);
+    existing->_parent = this;
+    subtree->_parent = this;
+    auto* const grafted = subtree.get();
+
+    _id = splitNodeId;
+    _session = SessionId {};
+    _splitState = state;
+    setRatio(ratio);
+    if (order == GraftOrder::GraftFirst)
+    {
+        _first = std::move(subtree);
+        _second = std::move(existing);
+    }
+    else
+    {
+        _first = std::move(existing);
+        _second = std::move(subtree);
+    }
+    return grafted;
+}
+
 SessionId Pane::closeChild(Pane* child)
 {
     assert(!isLeaf() && "closeChild() must be called on a split node");

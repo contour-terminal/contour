@@ -66,6 +66,28 @@ enum class SplitSide : uint8_t
     Bottom,
 };
 
+/// Which child a grafted subtree becomes, relative to the leaf it is grafted beside.
+enum class GraftOrder : uint8_t
+{
+    GraftSecond = 0, //!< The subtree is the second child; the existing pane stays first (Right, Bottom).
+    GraftFirst,      //!< The subtree is the first child; the existing pane becomes second (Left, Top).
+};
+
+/// Returns the split axis that places a grafted half on @p side: Left/Right split Vertical (children
+/// side by side), Top/Bottom split Horizontal (children stacked).
+[[nodiscard]] constexpr SplitState splitStateOf(SplitSide side) noexcept
+{
+    return (side == SplitSide::Left || side == SplitSide::Right) ? SplitState::Vertical
+                                                                 : SplitState::Horizontal;
+}
+
+/// Returns whether a half grafted on @p side comes first (Left, Top) or second (Right, Bottom).
+[[nodiscard]] constexpr GraftOrder graftOrderOf(SplitSide side) noexcept
+{
+    return (side == SplitSide::Left || side == SplitSide::Top) ? GraftOrder::GraftFirst
+                                                               : GraftOrder::GraftSecond;
+}
+
 /// Returns the split axis you must cross to move along @p direction.
 ///
 /// Moving Left/Right crosses a Vertical split (children are side by side); moving Up/Down crosses a
