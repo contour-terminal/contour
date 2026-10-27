@@ -147,7 +147,8 @@ class SettingsEditSession
                                                            std::optional<std::string> bytes);
 
     /// Stages @p files as one change, written in their order, together or not at all, and (re)starts the
-    /// debounce. A later stage() of one of them takes it out of the change.
+    /// debounce. A file already staged keeps its place, and every change it was part of becomes one with
+    /// this: a later stage() of a rename's new file leaves it in the rename.
     /// @param files The files and their new contents.
     /// @return Nothing, or why nothing was staged.
     [[nodiscard]] std::expected<void, SettingsError> stageTogether(std::span<StagedFile const> files);

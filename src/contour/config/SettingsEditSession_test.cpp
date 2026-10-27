@@ -466,6 +466,82 @@ TEST_CASE("SettingsEditSession: files staged together are written together or no
     }
 }
 
+TEST_CASE("SettingsEditSession: a file restaged after a rename stays in the rename", "[settingssession]")
+{
+    // I1: the new file of a rename is edited again before the flush; its write still fails first.
+    auto const newProfile = std::filesystem::path { "profiles" } / "office.yml";
+    auto const target = configDir() / newProfile;
+    auto const fileSystem = vthost::testing::FaultyFileSystem {
+        [&](auto op, std::filesystem::path const& path) {
+            return op == vthost::testing::FaultOp::Rename && path == target;
+        },
+    };
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    auto const rename = std::array {
+        StagedFile { .file = profileFile("office"), .bytes = std::string { "p0" } },
+        StagedFile { .file = profileFile("main"), .bytes = std::nullopt },
+    };
+    REQUIRE(fx.session.stageTogether(rename).has_value());
+    REQUIRE(fx.session.stage(profileFile("office"), "p1").has_value());
+
+    auto const flushed = fx.session.flush();
+
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(flushed.error().kind == SettingsErrorKind::WriteFailed);
+    CHECK(contentOf(fileSystem, mainProfile()) == "p0"); // the profile is not lost
+    CHECK(contentOf(fileSystem, newProfile) == std::nullopt);
+}
+
+TEST_CASE("SettingsEditSession: a change touching another merges with it", "[settingssession]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    auto const first = std::array {
+        StagedFile { .file = profileFile("office"), .bytes = std::string { "p0" } },
+        StagedFile { .file = profileFile("main"), .bytes = std::nullopt },
+    };
+    auto const second = std::array {
+        StagedFile { .file = profileFile("office"), .bytes = std::string { "p1" } },
+        StagedFile { .file = guiSettingsFile(), .bytes = std::string { "default_profile: office\n" } },
+    };
+    REQUIRE(fx.session.stageTogether(first).has_value());
+    REQUIRE(fx.session.stageTogether(second).has_value());
+    handEdit(fileSystem, "settings.yml", "theme: dark\n"); // one of them changed on disk: none is written
+
+    auto const flushed = fx.session.flush();
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(flushed.error().kind == SettingsErrorKind::ChangedOnDisk);
+    CHECK(contentOf(fileSystem, mainProfile()) == "p0");
+    CHECK(contentOf(fileSystem, std::filesystem::path { "profiles" } / "office.yml") == std::nullopt);
+}
+
+TEST_CASE("SettingsEditSession: a failed removal rolls back what the change wrote", "[settingssession]")
+{
+    // m4: the rename's new file is written, the old one's removal fails, so the new one goes again.
+    auto const newProfile = std::filesystem::path { "profiles" } / "office.yml";
+    auto const fileSystem = vthost::testing::FaultyFileSystem {
+        [&](auto op, std::filesystem::path const& path) {
+            return op == vthost::testing::FaultOp::Remove && path == configDir() / mainProfile();
+        },
+    };
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    auto const rename = std::array {
+        StagedFile { .file = profileFile("office"), .bytes = std::string { "p0" } },
+        StagedFile { .file = profileFile("main"), .bytes = std::nullopt },
+    };
+    REQUIRE(fx.session.stageTogether(rename).has_value());
+
+    auto const flushed = fx.session.flush();
+
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(flushed.error().kind == SettingsErrorKind::WriteFailed);
+    CHECK(contentOf(fileSystem, mainProfile()) == "p0");
+    CHECK(contentOf(fileSystem, newProfile) == std::nullopt);
+}
+
 TEST_CASE("SettingsEditSession: what is pending for a file", "[settingssession]")
 {
     auto const fileSystem = core::platform::testing::InMemoryFileSystem {};

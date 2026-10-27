@@ -6,6 +6,7 @@
 #include <format>
 #include <iterator>
 #include <ranges>
+#include <set>
 #include <utility>
 
 namespace contour::config
@@ -88,10 +89,25 @@ std::expected<void, SettingsError> SettingsEditSession::stageTogether(std::span<
     for (auto const& staged: files)
         if (auto const touched = touch(staged.file); !touched)
             return touched;
-    auto const change = _nextChange++;
+    // Every change this one touches becomes one with it, so that a file staged again keeps the change it was
+    // part of -- a rename's new file edited before the flush is still written before the old one goes.
+    auto merged = std::set<uint64_t> {};
     for (auto const& staged: files)
-        _pending.insert_or_assign(staged.file,
-                                  Pending { .bytes = staged.bytes, .change = change, .order = _nextOrder++ });
+        if (auto const pending = _pending.find(staged.file); pending != _pending.end())
+            merged.insert(pending->second.change);
+    auto const change = merged.empty() ? _nextChange++ : *merged.begin();
+    for (auto& [file, pending]: _pending)
+        if (merged.contains(pending.change))
+            pending.change = change;
+    for (auto const& staged: files)
+    {
+        // A file staged again keeps its place in the order it was first staged in.
+        if (auto const pending = _pending.find(staged.file); pending != _pending.end())
+            pending->second.bytes = staged.bytes;
+        else
+            _pending.emplace(staged.file,
+                             Pending { .bytes = staged.bytes, .change = change, .order = _nextOrder++ });
+    }
     scheduleFlush();
     return {};
 }
