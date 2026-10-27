@@ -43,6 +43,8 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -301,10 +303,14 @@ class UnwritableStore final: public config::GuiConfigStore
     /// Why every write fails.
     static constexpr auto Reason = std::string_view { "The configuration directory is read-only." };
 
+    /// What the read-only directory holds, as the loader read it.
+    std::map<config::SideFile, std::string> files;
+
     [[nodiscard]] std::expected<std::optional<std::string>, std::string> read(
-        config::SideFile const& /*file*/) const override
+        config::SideFile const& file) const override
     {
-        return std::optional<std::string> {};
+        auto const found = files.find(file);
+        return found != files.end() ? std::optional { found->second } : std::nullopt;
     }
     [[nodiscard]] std::expected<void, std::string> write(config::SideFile const& /*file*/,
                                                          std::string_view /*bytes*/) override
@@ -1112,12 +1118,18 @@ namespace
 /// write of which then fails; asserts what the page shows afterwards.
 /// @param fx     The fixture, whose store cannot write.
 /// @param reason What the failure must name.
-void checkUnwritableRollsBack(ControllerFixture& fx, QString const& reason)
+/// @param mirror Puts `work.yml`'s bytes where the store reads them too: the loader reads the real disk, the
+///               store its own files, and both must hold what the other does.
+void checkUnwritableRollsBack(ControllerFixture& fx,
+                              QString const& reason,
+                              std::function<void(std::string const&)> const& mirror)
 {
     {
+        auto const bytes = config::emitProfileYaml(*fx.cfg.findProfile("main"));
         std::filesystem::create_directories(fx.configDir / "profiles");
         auto out = std::ofstream(fx.configDir / "profiles" / "work.yml");
-        out << config::emitProfileYaml(*fx.cfg.findProfile("main"));
+        out << bytes;
+        mirror(bytes);
     }
     fx.reload();
     fx.controller->editProfile("work");
@@ -1149,8 +1161,12 @@ TEST_CASE("SettingsController: an unwritable directory rolls the control back", 
     // Review Focus 3: the write fails with the OS's reason, and the row shows the value still in effect.
     SECTION("a store that refuses every write")
     {
-        auto fx = ControllerFixture(OneProfile, std::make_shared<UnwritableStore>());
-        checkUnwritableRollsBack(fx, QString::fromUtf8(UnwritableStore::Reason));
+        auto const store = std::make_shared<UnwritableStore>();
+        auto fx = ControllerFixture(OneProfile, store);
+        checkUnwritableRollsBack(
+            fx, QString::fromUtf8(UnwritableStore::Reason), [&store](std::string const& bytes) {
+                store->files.insert_or_assign(config::profileFile("work"), bytes);
+            });
     }
 
     SECTION("a file system that refuses the replace, through the durable write")
@@ -1161,10 +1177,15 @@ TEST_CASE("SettingsController: an unwritable directory rolls the control back", 
             },
         };
         auto fx = ControllerFixture(OneProfile, files);
-        checkUnwritableRollsBack(fx, QStringLiteral("Permission denied"));
-        // The refused write left no temporary behind.
+        checkUnwritableRollsBack(fx, QStringLiteral("Permission denied"), [&](std::string const& bytes) {
+            REQUIRE(files.createDirectories(fx.configDir / "profiles").has_value());
+            REQUIRE(files.writeFile(fx.configDir / "profiles" / "work.yml", bytes).has_value());
+        });
+        // The refused write left no temporary behind: the profile is all there is.
         auto const listed = files.listDirectory(fx.configDir / "profiles");
-        CHECK((!listed || listed->empty()));
+        REQUIRE(listed.has_value());
+        REQUIRE(listed->size() == 1);
+        CHECK(listed->front().path.filename() == "work.yml");
     }
 }
 

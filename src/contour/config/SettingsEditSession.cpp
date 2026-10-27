@@ -47,12 +47,18 @@ SettingsEditSession::~SettingsEditSession()
     _scheduler.cancel();
 }
 
-void SettingsEditSession::observe(SideFile const& file)
+void SettingsEditSession::observe(SideFile const& file, std::optional<std::string> const& seededFrom)
 {
-    // A file it cannot read now is read by the first stage(), which reports why.
-    if (!_touched.contains(file))
-        if (auto const disk = readNow(file))
-            _touched.emplace(file, TouchedFile { .snapshot = *disk, .lastSeen = *disk });
+    auto const touched = _touched.find(file);
+    if (touched == _touched.end())
+    {
+        _touched.emplace(file, TouchedFile { .snapshot = seededFrom, .lastSeen = seededFrom });
+        return;
+    }
+    if (_pending.contains(file) || touched->second.lastSeen == seededFrom)
+        return;
+    touched->second.snapshot = seededFrom;
+    touched->second.lastSeen = seededFrom;
 }
 
 std::expected<void, SettingsError> SettingsEditSession::touch(SideFile const& file)

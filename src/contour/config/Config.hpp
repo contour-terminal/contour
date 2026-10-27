@@ -2007,6 +2007,11 @@ struct Config
     GuiManagedSettings guiManagedSettings {};
     /// Whether that `settings.yml` could be read at all. Runtime only, like @ref guiManagedSettings.
     GuiSettingsFileHealth guiSettingsFileHealth = GuiSettingsFileHealth::Usable;
+    /// The bytes of each GUI side file the loader merged -- `profiles/<name>.yml` and `settings.yml` -- keyed
+    /// by its path relative to the configuration directory, with `/` separators; nullopt for a `settings.yml`
+    /// there was none of. Runtime only. Settings seeds its drafts from this configuration, so these, not
+    /// what the files hold by the time a draft opens, are what it last saw of them.
+    std::map<std::string, std::optional<std::string>> loadedSideFiles {};
 
     ConfigEntry<InputMappings, documentation::InputMappings> inputMappings { defaultInputMappings(
         defaultsEdition) };

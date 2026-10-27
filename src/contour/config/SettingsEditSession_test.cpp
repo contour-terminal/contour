@@ -280,13 +280,68 @@ TEST_CASE("SettingsEditSession: a file observed when its draft was seeded is not
     auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
     handEdit(fileSystem, mainProfile(), "p0");
     auto fx = SessionFixture { fileSystem };
-    fx.session.observe(profileFile("main"));
+    fx.session.observe(profileFile("main"), "p0");
     CHECK_FALSE(fx.session.hasChanges());
 
     handEdit(fileSystem, mainProfile(), "vim");
     REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
     auto const flushed = fx.session.flush();
 
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(flushed.error().kind == SettingsErrorKind::ChangedOnDisk);
+    CHECK(contentOf(fileSystem, mainProfile()) == "vim");
+}
+
+TEST_CASE("SettingsEditSession: a hand edit made before the draft opened is not written over",
+          "[settingssession]")
+{
+    // C1: the configuration loaded p0; an editor wrote "vim"; only then did a draft open, seeded from p0.
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "vim");
+    auto fx = SessionFixture { fileSystem };
+    fx.session.observe(profileFile("main"), "p0");
+
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    auto const flushed = fx.session.flush();
+
+    REQUIRE_FALSE(flushed.has_value());
+    CHECK(flushed.error().kind == SettingsErrorKind::ChangedOnDisk);
+    CHECK(contentOf(fileSystem, mainProfile()) == "vim");
+}
+
+TEST_CASE("SettingsEditSession: a draft re-seeded from a reload of a hand edit adopts it",
+          "[settingssession]")
+{
+    // I3: the reload read the hand edit and the draft shows it; nothing is pending, so it is the new base.
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    REQUIRE(fx.session.flush().has_value());
+    handEdit(fileSystem, mainProfile(), "vim");
+
+    fx.session.observe(profileFile("main"), "vim");
+    REQUIRE(fx.session.stage(profileFile("main"), "vim2").has_value());
+
+    CHECK(fx.session.flush().has_value());
+    CHECK(contentOf(fileSystem, mainProfile()) == "vim2");
+    // Revert goes back to the version the session adopted, not over it.
+    CHECK(fx.session.revert().has_value());
+    CHECK(contentOf(fileSystem, mainProfile()) == "vim");
+}
+
+TEST_CASE("SettingsEditSession: a re-seed while a change is pending keeps what the session saw",
+          "[settingssession]")
+{
+    auto const fileSystem = core::platform::testing::InMemoryFileSystem {};
+    handEdit(fileSystem, mainProfile(), "p0");
+    auto fx = SessionFixture { fileSystem };
+    REQUIRE(fx.session.stage(profileFile("main"), "p1").has_value());
+    handEdit(fileSystem, mainProfile(), "vim");
+
+    fx.session.observe(profileFile("main"), "vim");
+
+    auto const flushed = fx.session.flush();
     REQUIRE_FALSE(flushed.has_value());
     CHECK(flushed.error().kind == SettingsErrorKind::ChangedOnDisk);
     CHECK(contentOf(fileSystem, mainProfile()) == "vim");
@@ -302,7 +357,8 @@ TEST_CASE("SettingsEditSession: observing a file already touched keeps what the 
     REQUIRE(fx.session.flush().has_value());
     handEdit(fileSystem, mainProfile(), "vim");
 
-    fx.session.observe(profileFile("main")); // a re-seed after a reload must not launder the hand edit
+    // A re-seed from what was loaded before the hand edit must not launder it.
+    fx.session.observe(profileFile("main"), "p1");
     REQUIRE(fx.session.stage(profileFile("main"), "p2").has_value());
 
     auto const flushed = fx.session.flush();

@@ -519,7 +519,7 @@ SettingsController::SettingsController(ConfigAccessor config,
     _globalDraft { _config().guiManagedSettings }
 {
     _session = makeSession();
-    _session->observe(config::guiSettingsFile());
+    _session->observe(config::guiSettingsFile(), loadedBytesOf(config::guiSettingsFile()));
     refresh();
 }
 
@@ -592,6 +592,33 @@ bool SettingsController::colorSchemeSideFileExists(std::string const& name) cons
     }
     auto const read = _services.store->read(file);
     return read && read->has_value();
+}
+
+std::optional<std::string> SettingsController::loadedBytesOf(config::SideFile const& file) const
+{
+    auto const& loaded = _config().loadedSideFiles;
+    auto const found = loaded.find(config::displayPathOf(file));
+    return found != loaded.end() ? found->second : std::nullopt;
+}
+
+void SettingsController::followReloadedDrafts()
+{
+    if (_profileAccess == DraftAccess::Editable)
+    {
+        auto const file = config::profileFile(_editingProfile.toStdString());
+        if (_session->pendingFor(file) == config::PendingChange::None
+            && loadedBytesOf(file) != _draftSeededFrom
+            && _config().findProfile(_editingProfile.toStdString()) != nullptr)
+            editProfile(_editingProfile);
+    }
+    if (_schemeAccess == DraftAccess::Editable)
+    {
+        auto const file = config::colorSchemeFile(_editingScheme.toStdString());
+        auto const read = _services.store->read(file);
+        if (read && read->has_value() && _session->pendingFor(file) == config::PendingChange::None
+            && *read != _schemeSeededFrom)
+            editColorScheme(_editingScheme);
+    }
 }
 
 std::optional<vtbackend::ColorPalette> SettingsController::sideFileScheme(std::string const& name) const
@@ -674,7 +701,7 @@ void SettingsController::onSessionError(SettingsError const& error)
 void SettingsController::reseedGlobalDraft()
 {
     _globalDraft = _config().guiManagedSettings;
-    _session->observe(config::guiSettingsFile());
+    _session->observe(config::guiSettingsFile(), loadedBytesOf(config::guiSettingsFile()));
     emit globalFieldsChanged();
 }
 
@@ -795,8 +822,9 @@ void SettingsController::refresh()
     if (_session->pendingFor(config::guiSettingsFile()) == config::PendingChange::None)
     {
         _globalDraft = cfg.guiManagedSettings;
-        _session->observe(config::guiSettingsFile());
+        _session->observe(config::guiSettingsFile(), loadedBytesOf(config::guiSettingsFile()));
     }
+    followReloadedDrafts();
     rebuildProfileRows();
 
     // Color schemes: those the config knows about, unioned with any colorschemes/*.yml there is.
@@ -882,10 +910,15 @@ void SettingsController::editProfile(QString const& name)
                ProfileAction::Edit)
             ? DraftAccess::Editable
             : DraftAccess::ReadOnly;
-    // What the draft was seeded from is what Settings last saw of the file: an edit made outside it from
-    // now on is one it must not write over.
+    // What the draft was seeded from -- the bytes the configuration loaded, not the file as it is now -- is
+    // what Settings last saw of it: an edit made outside it since that load is one it must not write over.
+    _draftSeededFrom.reset();
     if (_profileAccess == DraftAccess::Editable)
-        _session->observe(config::profileFile(name.toStdString()));
+    {
+        auto const file = config::profileFile(name.toStdString());
+        _draftSeededFrom = loadedBytesOf(file);
+        _session->observe(file, _draftSeededFrom);
+    }
     emit draftChanged();
 }
 
@@ -930,7 +963,12 @@ std::expected<void, SettingsError> SettingsController::stageProfileDraft()
         std::erase_if(patterns, inError);
         writable.hintPatterns = std::move(patterns);
     }
-    return stage(config::profileFile(_editingProfile.toStdString()), config::emitProfileYaml(writable));
+    // What it stages is what the reload that follows reads, so followReloadedDrafts() leaves the draft be.
+    auto bytes = config::emitProfileYaml(writable);
+    auto staged = stage(config::profileFile(_editingProfile.toStdString()), bytes);
+    if (staged)
+        _draftSeededFrom = std::move(bytes);
+    return staged;
 }
 
 void SettingsController::stageProfileDraftReporting()
@@ -1538,30 +1576,43 @@ QVariantList SettingsController::schemeColors() const
 void SettingsController::editColorScheme(QString const& name)
 {
     auto const& cfg = _config();
-    auto const sideFile = sideFileScheme(name.toStdString());
+    auto const file = config::colorSchemeFile(name.toStdString());
+    // A side file's draft is parsed from the very bytes the session records as seen: the configuration
+    // loads a scheme only where a profile names it, and may hold an older version of it.
+    auto const read = _services.store->read(file);
+    auto const bytes = read ? *read : std::nullopt;
+    auto const sideFile = bytes ? config::parseColorSchemeYaml(
+                                      cfg.configFile.parent_path() / config::relativePathOf(file), *bytes)
+                                : std::nullopt;
     auto palette = vtbackend::ColorPalette {};
-    if (auto const it = cfg.colorschemes.value().find(name.toStdString());
-        it != cfg.colorschemes.value().end())
-        palette = it->second;
-    else if (sideFile)
+    if (sideFile)
         palette = *sideFile;
+    else if (auto const it = cfg.colorschemes.value().find(name.toStdString());
+             it != cfg.colorschemes.value().end())
+        palette = it->second;
 
     _schemeDraft = palette;
     _editingScheme = name;
     _schemeAccess = !locked() && (sideFile || colorSchemeSideFileExists(name.toStdString()))
                         ? DraftAccess::Editable
                         : DraftAccess::ReadOnly;
-    // As editProfile(): what the draft was seeded from is what Settings last saw of the file.
+    _schemeSeededFrom.reset();
     if (_schemeAccess == DraftAccess::Editable)
-        _session->observe(config::colorSchemeFile(name.toStdString()));
+    {
+        _schemeSeededFrom = bytes;
+        _session->observe(file, bytes);
+    }
     emit schemeDraftChanged();
     emit editingSchemeChanged();
 }
 
 std::expected<void, SettingsError> SettingsController::stageSchemeDraft()
 {
-    return stage(config::colorSchemeFile(_editingScheme.toStdString()),
-                 config::emitColorSchemeYaml(_schemeDraft));
+    auto bytes = config::emitColorSchemeYaml(_schemeDraft);
+    auto staged = stage(config::colorSchemeFile(_editingScheme.toStdString()), bytes);
+    if (staged)
+        _schemeSeededFrom = std::move(bytes);
+    return staged;
 }
 
 std::expected<void, SettingsError> SettingsController::setSchemeColor(QString const& key,

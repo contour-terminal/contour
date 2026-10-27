@@ -1290,12 +1290,32 @@ static void recordMainConfigOrigins(Config& config, YAMLConfigReader const& read
 /// settings.yml's document. Nothing saved yet is no error: that is an empty document.
 /// @param path The `settings.yml` path, beside contour.yml.
 /// @return The document, or why there is none.
-[[nodiscard]] static std::expected<YAML::Node, std::string> parseGuiSettingsFile(fs::path const& path)
+[[nodiscard]] static std::expected<YAML::Node, std::string> parseGuiSettingsFile(
+    fs::path const& path, std::optional<std::string> const& bytes)
+{
+    if (!bytes)
+        return YAML::Node {};
+    return YAMLConfigReader::parseSideFileText(path, *bytes);
+}
+
+/// The bytes of side file @p path as they are on disk, CRs included, as the Settings store reads them.
+/// @return The bytes, or nullopt when there is no such file or it cannot be read.
+[[nodiscard]] static std::optional<std::string> sideFileBytes(fs::path const& path)
 {
     std::error_code ec;
-    if (!fs::exists(path, ec) || ec)
-        return YAML::Node {};
-    return YAMLConfigReader::parseSideFile(path);
+    if (!fs::is_regular_file(path, ec) || ec)
+        return std::nullopt;
+    auto in = std::ifstream(path, std::ios::binary);
+    if (!in)
+        return std::nullopt;
+    return std::string { std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+}
+
+/// The key of side file @p path, under @p dir, in Config::loadedSideFiles.
+[[nodiscard]] static std::string loadedSideFileKey(fs::path const& dir, fs::path const& path)
+{
+    auto const relative = path.lexically_relative(dir).generic_u8string();
+    return std::string { relative.begin(), relative.end() };
 }
 
 /// The GUI-owned settings a parsed settings.yml holds.
@@ -1360,7 +1380,10 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
         for (auto const& path: files)
         {
             auto const name = core::pathToUtf8(path.stem());
-            auto const root = YAMLConfigReader::parseSideFile(path);
+            auto bytes = sideFileBytes(path);
+            auto const root = bytes ? YAMLConfigReader::parseSideFileText(path, *bytes)
+                                    : YAMLConfigReader::parseSideFile(path); // says why it cannot be read
+            config.loadedSideFiles.insert_or_assign(loadedSideFileKey(dir, path), std::move(bytes));
             if (!root)
             {
                 configLog()("Skipping the profile side file {}", root.error());
@@ -1379,7 +1402,9 @@ static void mergeGuiManagedSideFiles(Config& config, YAMLConfigReader& reader)
     // above just introduced. Read and parsed once: the overrides applied are the ones listed, even when
     // the settings page saves the file in between.
     auto const settingsPath = dir / "settings.yml";
-    auto const settingsDocument = parseGuiSettingsFile(settingsPath);
+    auto settingsBytes = sideFileBytes(settingsPath);
+    auto const settingsDocument = parseGuiSettingsFile(settingsPath, settingsBytes);
+    config.loadedSideFiles.insert_or_assign(loadedSideFileKey(dir, settingsPath), std::move(settingsBytes));
     if (auto loaded = settingsDocument.transform(guiSettingsFrom))
     {
         config.guiManagedSettings = *loaded;
@@ -1481,6 +1506,7 @@ void loadConfigFromFile(Config& config, fs::path const& fileName)
     config.colorschemes.value() = { { "default", vtbackend::ColorPalette {} } };
     config.profileOrigins.clear();
     config.colorSchemeOrigins.clear();
+    config.loadedSideFiles.clear();
 
     auto yamlVisitor = YAMLConfigReader(config.configFile, logger, configEnvironment());
     yamlVisitor.load(config);
@@ -5592,7 +5618,7 @@ std::optional<vtbackend::ColorPalette> parseColorSchemeYaml(std::filesystem::pat
 
 std::expected<GuiManagedSettings, std::string> loadGuiSettingsFile(std::filesystem::path const& path)
 {
-    return parseGuiSettingsFile(path).transform(guiSettingsFrom);
+    return parseGuiSettingsFile(path, sideFileBytes(path)).transform(guiSettingsFrom);
 }
 
 } // namespace contour::config

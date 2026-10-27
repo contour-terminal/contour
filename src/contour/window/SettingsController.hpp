@@ -463,6 +463,11 @@ class SettingsController: public QObject
     void rebuildProfileRows();
     /// Whether profile @p name is a GUI side file, written or staged in this session.
     [[nodiscard]] bool isSideFileProfile(std::string const& name) const;
+    /// @p file's bytes as the configuration in effect loaded them; nullopt when it loaded none.
+    [[nodiscard]] std::optional<std::string> loadedBytesOf(config::SideFile const& file) const;
+    /// Re-seeds each open editable draft whose side file a reload read anew, while nothing is pending for it:
+    /// a change made outside Settings and reloaded is what the page shows and what the session saw.
+    void followReloadedDrafts();
     /// The side-file profiles whose spelled status line follows a switch of the defaults to @p now
     /// (config::indicatorForEdition), as the files to stage with the switch; the open draft follows too.
     /// @param now The edition switched to.
@@ -509,11 +514,14 @@ class SettingsController: public QObject
     config::TerminalProfile _draft;
     QString _editingProfile; //!< "" while none is open.
     DraftAccess _profileAccess = DraftAccess::Closed;
+    std::optional<std::string> _draftSeededFrom; //!< The side file's bytes an editable draft was seeded from.
 
     // The color-scheme draft.
     vtbackend::ColorPalette _schemeDraft;
     QString _editingScheme; //!< "" while none is open.
     DraftAccess _schemeAccess = DraftAccess::Closed;
+    std::optional<std::string>
+        _schemeSeededFrom; //!< The side file's bytes an editable draft was seeded from.
 
     /// A scheme's palette as @ref schemePalette last read it, under the name it was read for.
     struct CachedPalette

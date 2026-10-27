@@ -128,10 +128,15 @@ class SettingsEditSession
     /// Cancels a pending flush: the scheduler must not call into a destroyed session.
     ~SettingsEditSession();
 
-    /// Records @p file as it is now as what the session saw, unless it has seen it already: a draft was
-    /// seeded from it. A file that cannot be read is left to the first stage() to read.
+    /// Records that a draft was seeded from @p seededFrom, @p file's bytes as the configuration loaded them:
+    /// what the session saw of it, whatever the file holds now, so that an edit made outside Settings since
+    /// that load is never written over. A file the session has seen already keeps what it saw while a change
+    /// to it is pending; with nothing pending, bytes other than what it last saw were read by a reload of a
+    /// change made outside Settings, which the draft now shows, and become its snapshot and what it saw, as
+    /// a flush adopts a file changed on disk.
     /// @param file The side file.
-    void observe(SideFile const& file);
+    /// @param seededFrom Its bytes the draft was seeded from; nullopt: it was absent.
+    void observe(SideFile const& file, std::optional<std::string> const& seededFrom);
 
     /// Stages @p bytes as @p file's next content, and (re)starts the debounce.
     /// The first time the session touches @p file it reads and snapshots it.

@@ -109,18 +109,29 @@ struct Fixture
     std::shared_ptr<config::FileGuiConfigStore> store;
     std::shared_ptr<test::ManualSaveScheduler> scheduler = std::make_shared<test::ManualSaveScheduler>();
     int reloads = 0; ///< How many times Settings reloaded the configuration.
+    std::shared_ptr<display::IGpuInventory const> gpuInventory;
+    vtbackend::ColorPreference colorPreference = vtbackend::ColorPreference::Dark;
     std::unique_ptr<SettingsController> controller;
     QStringList errors; ///< What the controller reported through errorOccurred, in order.
 
     explicit Fixture(std::string_view yaml,
                      std::shared_ptr<display::IGpuInventory const> gpus = nullptr,
-                     vtbackend::ColorPreference appearance = vtbackend::ColorPreference::Dark)
+                     vtbackend::ColorPreference appearance = vtbackend::ColorPreference::Dark):
+        gpuInventory { std::move(gpus) }, colorPreference { appearance }
     {
         configPath = writeConfig(dir, yaml);
         // Through the path overload, as production loads: it reads the file's defaults_edition first.
         cfg = config::loadConfigFromFile(configPath);
         store = std::make_shared<config::FileGuiConfigStore>(
             fileSystem, std::filesystem::path(dir.path().toStdU16String()));
+        restartController();
+    }
+
+    /// Builds the controller anew over the configuration as it was last loaded, as the app builds it the
+    /// first time Settings opens, which may be long after the load.
+    void restartController()
+    {
+        controller.reset();
         controller =
             std::make_unique<SettingsController>([this]() -> config::Config const& { return cfg; },
                                                  SettingsControllerServices {
@@ -130,13 +141,20 @@ struct Fixture
                                                          reload();
                                                          return {};
                                                      },
-                                                     .gpuInventory = std::move(gpus),
+                                                     .gpuInventory = gpuInventory,
                                                      .scheduler = scheduler,
                                                  },
-                                                 appearance);
+                                                 colorPreference);
         QObject::connect(controller.get(),
                          &SettingsController::errorOccurred,
                          [this](QString const& message) { errors.push_back(message); });
+    }
+
+    /// Writes @p content to @p relative under the configuration directory, as an editor would, without
+    /// a reload: nothing watches the side files.
+    void handEdit(std::filesystem::path const& relative, std::string_view content) const
+    {
+        REQUIRE(fileSystem.writeFile(configDir() / relative, content).has_value());
     }
 
     /// The configuration directory.
@@ -3264,6 +3282,106 @@ TEST_CASE("SettingsController: Use New brings a side file's spelled old status l
     CHECK(fx.errors.isEmpty());
     CHECK(fx.cfg.defaultsEdition == config::DefaultsEdition::Classic);
     CHECK(fx.cfg.findProfile("work")->statusLine.value().indicator.middle == classic.middle);
+}
+
+// }}}
+
+// {{{ Drafts are seeded from what the configuration loaded
+
+TEST_CASE("SettingsController: a hand edit made before a profile opens is not written over", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    auto const* main = fx.cfg.findProfile("main");
+    REQUIRE(main != nullptr);
+    auto edited = *main; // a copy: the reload below replaces the configuration
+    REQUIRE(fx.store->write(config::profileFile("work"), config::emitProfileYaml(edited)).has_value());
+    fx.reload();
+    edited.maximized = true;
+    auto const handEdited = config::emitProfileYaml(edited);
+    fx.handEdit(config::relativePathOf(config::profileFile("work")), handEdited);
+
+    fx.controller->editProfile("work");
+    fx.controller->commitProfileField("show_title_bar", false);
+    fx.fire();
+
+    CHECK(fx.fileContent(config::relativePathOf(config::profileFile("work"))) == handEdited);
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front().contains("changed outside Settings"));
+}
+
+TEST_CASE("SettingsController: a hand edit made before a scheme opens is kept", "[settings]")
+{
+    // The scheme draft is parsed from the bytes the session records as seen, whatever the configuration
+    // holds of the scheme.
+    auto fx = Fixture("default_profile: main\nprofiles:\n    main:\n        colors: mine\n");
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(
+        fx.store->write(config::colorSchemeFile("mine"), config::emitColorSchemeYaml(palette)).has_value());
+    fx.reload();
+    palette.defaultForeground = vtbackend::RGBColor { 0x12, 0x34, 0x56 };
+    fx.handEdit(config::relativePathOf(config::colorSchemeFile("mine")),
+                config::emitColorSchemeYaml(palette));
+
+    fx.controller->editColorScheme("mine");
+    REQUIRE(fx.controller->setSchemeColor("background", "#101010").has_value());
+    fx.fire();
+
+    auto const written = fx.schemeFile("mine");
+    REQUIRE(written.has_value());
+    CHECK(written->defaultForeground == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
+}
+
+TEST_CASE("SettingsController: a hand edit of settings.yml before Settings opens is not written over",
+          "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.handEdit("settings.yml", "theme: light\n");
+    fx.restartController(); // Settings opens late, over the configuration loaded before the edit
+
+    REQUIRE(fx.controller->setGlobalField("reflow_on_resize", false).has_value());
+    fx.fire();
+
+    CHECK(fx.fileContent("settings.yml") == "theme: light\n");
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front().contains("changed outside Settings"));
+}
+
+TEST_CASE("SettingsController: a commit after a reload of a hand edit lands beside it", "[settings]")
+{
+    // I3: the reload read the hand edit, so it is no conflict.
+    auto fx = Fixture(BasicConfig);
+    fx.commitGlobal("reflow_on_resize", false);
+    auto const written = fx.fileContent("settings.yml");
+    REQUIRE(written.has_value());
+    fx.handEdit("settings.yml", *written + "theme: light\n");
+    fx.reload();
+
+    fx.commitGlobal("snap_to_rows", true);
+
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.cfg.theme.value() == config::GuiTheme::Light);
+    CHECK(fx.cfg.snapToRows.value());
+    CHECK_FALSE(fx.cfg.reflowOnResize.value());
+}
+
+TEST_CASE("SettingsController: an open profile follows a reload of a hand edit", "[settings]")
+{
+    auto fx = Fixture(BasicConfig);
+    fx.openSideProfile("work");
+    auto const* work = fx.cfg.findProfile("work");
+    REQUIRE(work != nullptr);
+    auto edited = *work;
+    REQUIRE_FALSE(edited.maximized.value());
+    edited.maximized = true;
+    fx.handEdit(config::relativePathOf(config::profileFile("work")), config::emitProfileYaml(edited));
+    fx.reload();
+
+    CHECK(rowWithKey(fx.controller->profileFields(), "maximized").value("value").toBool());
+    fx.controller->commitProfileField("show_title_bar", false);
+    fx.fire();
+    CHECK(fx.errors.isEmpty());
+    CHECK(fx.cfg.findProfile("work")->maximized.value());
+    CHECK_FALSE(fx.cfg.findProfile("work")->showTitleBar.value());
 }
 
 // }}}
