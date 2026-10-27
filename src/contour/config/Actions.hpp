@@ -324,14 +324,13 @@ using Action = std::variant<CancelSelection,
 /// joins by being named here. A default-constructed member compares equal to its defaults, which is how
 /// the writer and the palette tell a bare binding from a configured one.
 template <typename T>
-concept CommandBlockActionConcept =
-    core::oneOf<T,
-                SelectCommandBlock,
-                CopyCommandBlock,
-                CopyCommandLine,
-                RerunCommand,
-                ToggleCommandFold,
-                OpenCommandOutput>;
+concept CommandBlockActionConcept = core::oneOf<T,
+                                                SelectCommandBlock,
+                                                CopyCommandBlock,
+                                                CopyCommandLine,
+                                                RerunCommand,
+                                                ToggleCommandFold,
+                                                OpenCommandOutput>;
 
 /// Actions that must fire exactly once per physical keypress and be dropped on key auto-repeat.
 ///
