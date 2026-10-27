@@ -258,11 +258,24 @@ constexpr inline auto ScrollbarMarkKindList = [] {
                                     int64_t firstVisibleRow,
                                     ScrollbarMarkSources sources) noexcept;
 
+/// The most the native scrollbar's track tints the pane toward black or white (its ink at the larger of the
+/// light and dark alphas), as a fraction: a tick must stand off the pane and off the track over it.
+inline constexpr float ScrollbarTrackMaxTint = 0.10f;
+
+/// Whether @p color stands off @p pane, and off every track the scrollbar can draw over it (up to
+/// ScrollbarTrackMaxTint toward black or white), at MinimumMarkContrast.
+/// @param color The tick's colour.
+/// @param pane The pane's background.
+/// @return Whether a tick of @p color is visible wherever it is drawn.
+[[nodiscard]] bool marksOnScrollbarTrack(RGBColor color, RGBColor pane) noexcept;
+
 /// The colour a tick of @p kind is drawn in under @p palette.
 ///
 /// A kind that stands for command blocks takes the scheme's `block_status` colour of its outcome (the
 /// gutter's, so a block reads the same in both places); a search match takes the colour of the scheme's
-/// search highlight, opaque, and the scheme's own yellow where that highlight borrows the cell's colours; a
+/// search highlight, opaque, and the scheme's own yellow where that highlight borrows the cell's colours --
+/// or, where that does not stand off the pane and the scrollbar's track at MinimumMarkContrast, the scheme's
+/// bright yellow, or black or white, in that order; a
 /// user mark, which stands for no block, takes the fold column's hovered text colour -- the scheme's
 /// full-strength text colour unless it sets one -- apart from every outcome.
 /// @param palette The session's colour palette.

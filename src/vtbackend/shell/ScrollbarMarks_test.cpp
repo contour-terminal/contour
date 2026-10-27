@@ -310,7 +310,9 @@ TEST_CASE("ScrollbarMarks.kinds.searchIsYellowOnlyThere", "[scrollbar-marks]")
         auto const* const fill = std::get_if<RGBColor>(&palette.searchHighlight.background);
         auto const expected = fill ? *fill : palette.normalColor(3);
         auto const search = scrollbarMarkColor(palette, Kind::SearchMatch);
-        CHECK(search == expected);
+        // Yellow, unless it would not mark on the track (searchTickMarksOnTheTrack).
+        if (marksOnScrollbarTrack(expected, palette.defaultBackground))
+            CHECK(search == expected);
         for (auto const kind: ScrollbarMarkKindList)
             if (kind != Kind::SearchMatch)
             {
@@ -325,8 +327,23 @@ TEST_CASE("ScrollbarMarks.kinds.searchFallsBackToTheSchemesYellow", "[scrollbar-
     auto palette = ColorPalette {};
     palette.searchHighlight.background = CellForegroundColor {};
     CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == palette.normalColor(3));
-    palette.searchHighlight.background = RGBColor { 0x12, 0x34, 0x56 };
-    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == RGBColor { 0x12, 0x34, 0x56 });
+    palette.searchHighlight.background = RGBColor { 0xAA, 0xCC, 0xEE };
+    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == RGBColor { 0xAA, 0xCC, 0xEE });
+}
+
+TEST_CASE("ScrollbarMarks.kinds.searchFallsBackWhereYellowDoesNotMark", "[scrollbar-marks]")
+{
+    auto palette = ColorPalette {};
+    palette.defaultBackground = RGBColor { 0xFF, 0xFF, 0xFF };
+    palette.searchHighlight.background = CellForegroundColor {};
+    palette.palette.at(3) = RGBColor { 0xFF, 0xFF, 0x00 };
+    palette.palette.at(11) = RGBColor { 0xFF, 0xFF, 0x80 };
+    // Nothing in the scheme marks: black or white, whichever stands off the pane more.
+    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == RGBColor { 0x00, 0x00, 0x00 });
+
+    // The bright yellow, where it is the one that marks.
+    palette.palette.at(11) = RGBColor { 0x80, 0x60, 0x00 };
+    CHECK(scrollbarMarkColor(palette, Kind::SearchMatch) == RGBColor { 0x80, 0x60, 0x00 });
 }
 
 TEST_CASE("ScrollbarMarks.overlayHold.column", "[scrollbar-marks]")

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <contour/config/ChromeTokenGroups.hpp>
 
+#include <vtbackend/shell/ScrollbarMarks.hpp>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -1629,6 +1631,46 @@ TEST_CASE("chromeTokens.theTerminalRowsThumbMarksOnEveryPane", "[chrometokens]")
         for (auto const& chain: SchemeMarkChains)
             CHECK(markOn(colors, chain.slot, schemeOf(defaultName).defaultBackground)
                   == slotIn(colors, chain.slot));
+    }
+}
+
+TEST_CASE("chromeTokens.theSearchTickMarksOnTheTrack", "[chrometokens]")
+{
+    // The search tick is the scheme's yellow, which a light scheme's background swallows: on every bundled
+    // scheme, every chrome row and both appearances, it stands off the pane and off the track drawn over it
+    // at 3:1 -- the track being the row's scrollbar-track label ink, over the pane, at that appearance's
+    // alpha.
+    using namespace contour::config;
+    using enum ChromeColorRole;
+    for (auto const name: defaultColorPaletteNames())
+    {
+        INFO("scheme: " << name);
+        auto palette = ColorPalette {};
+        REQUIRE(defaultColorPalettes(name, palette));
+        auto const tick = vtbackend::scrollbarMarkColor(palette, vtbackend::ScrollbarMarkKind::SearchMatch);
+        CHECK(contrastRatio(tick, palette.defaultBackground) >= MinimumMarkContrast);
+        for (auto const index: allStyles())
+        {
+            auto const style = static_cast<ChromeStyle>(index);
+            CAPTURE(index);
+            auto const row = resolveChromeTokens(style, {});
+            auto const& source = row.colors[static_cast<size_t>(ScrollbarTrack)];
+            if (source.kind != ColorSourceKind::Label)
+                continue; // The Terminal row draws no track: the tick sits on the pane itself.
+            auto const& pair = LabelAlphas[static_cast<size_t>(source.level - 1)];
+            for (auto const dark: { false, true })
+            {
+                CAPTURE(dark);
+                // As the resolver computes it: a whole percentage.
+                auto const alpha =
+                    static_cast<float>((dark ? pair.dark : pair.light) * source.alphaPercent / 100) / 100.0f;
+                // The tint the fallback leaves room for covers every track the rows draw.
+                CHECK(alpha <= vtbackend::ScrollbarTrackMaxTint);
+                auto const ink = dark ? RGBColor { 0xFF, 0xFF, 0xFF } : RGBColor { 0x00, 0x00, 0x00 };
+                auto const track = mixColor(palette.defaultBackground, ink, alpha);
+                CHECK(contrastRatio(tick, track) >= MinimumMarkContrast);
+            }
+        }
     }
 }
 
