@@ -69,9 +69,15 @@ clicking a tab never draws it.
 | Either | Escape | Return to the terminal |
 
 A bare **F6** is never taken: it reaches the shell, so `mc`, `vim` and `htop` keep it. The three actions,
-`FocusNextArea`, `FocusPreviousArea` and `FocusToolbar`, can be bound to other chords. Closing a tab asks
-whenever its foreground program is not its shell, and also when Contour cannot tell (every pane of a
-daemon-hosted window), because closing the tab would end whatever runs in it.
+`FocusNextArea`, `FocusPreviousArea` and `FocusToolbar`, can be bound to other chords, on any key, and
+those chords keep working from inside the chrome. When the window shows no tab bar and no toolbar there is
+nowhere to go, and Ctrl+F6 reaches the program like any other key. Closing a tab asks whenever its
+foreground program is not its shell, and also when Contour cannot tell (every pane of a daemon-hosted
+window), because closing the tab would end whatever runs in it.
+
+While the chrome has focus, only those three chords and the keys in the table are taken. Every other
+binding, such as the command palette or opening a new tab, does nothing until you press Escape to return to
+the terminal.
 
 ## Things that are only announced
 
