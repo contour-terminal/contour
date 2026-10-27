@@ -1302,6 +1302,7 @@ if(CONTOUR_TESTING)
         session/CommandBlockTooltip_test.cpp
         session/LocalFileAction_test.cpp
         session/EndReason_test.cpp
+        platform/CaptionHitTest_test.cpp
         platform/FinishNotification_test.cpp
         platform/NotificationOccasion_test.cpp
         platform/SecureInputGate_test.cpp
