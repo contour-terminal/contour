@@ -3369,6 +3369,77 @@ TEST_CASE("SettingsController: a hand edit made before a scheme opens is kept", 
     CHECK(written->defaultForeground == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
 }
 
+namespace
+{
+/// Writes side-file profile `work` as a copy of `main`, reloads, then hand-edits it (maximized) without a
+/// reload, as an editor does between Settings' load and its next write. The profile is never opened.
+/// @return The hand-edited bytes.
+std::string handEditedUnopenedProfile(Fixture& fx)
+{
+    auto const* main = fx.cfg.findProfile("main");
+    REQUIRE(main != nullptr);
+    auto edited = *main; // a copy: the reload below replaces the configuration
+    REQUIRE(fx.store->write(config::profileFile("work"), config::emitProfileYaml(edited)).has_value());
+    fx.reload();
+    edited.maximized = true;
+    auto handEdited = config::emitProfileYaml(edited);
+    fx.handEdit(config::relativePathOf(config::profileFile("work")), handEdited);
+    return handEdited;
+}
+} // namespace
+
+TEST_CASE("SettingsController: renaming a profile that was never opened keeps a hand edit", "[settings]")
+{
+    // N1: the rename stages the configuration's bytes, so a hand edit made since the load is a conflict.
+    auto fx = Fixture(BasicConfig);
+    auto const handEdited = handEditedUnopenedProfile(fx);
+
+    REQUIRE(fx.controller->renameProfile("work", "office").has_value());
+    fx.fire();
+
+    CHECK(fx.fileContent(config::relativePathOf(config::profileFile("work"))) == handEdited);
+    CHECK_FALSE(fx.fileContent(config::relativePathOf(config::profileFile("office"))).has_value());
+    REQUIRE(fx.errors.size() == 1);
+    CHECK(fx.errors.front().contains("changed outside Settings"));
+}
+
+TEST_CASE("SettingsController: renaming a scheme that was never opened carries a hand edit", "[settings]")
+{
+    // N1: the rename reads the side file as it is, as opening it does, and records those same bytes.
+    auto fx = Fixture("default_profile: main\nprofiles:\n    main:\n        colors: mine\n");
+    auto palette = vtbackend::ColorPalette {};
+    REQUIRE(
+        fx.store->write(config::colorSchemeFile("mine"), config::emitColorSchemeYaml(palette)).has_value());
+    fx.reload();
+    palette.defaultForeground = vtbackend::RGBColor { 0x12, 0x34, 0x56 };
+    fx.handEdit(config::relativePathOf(config::colorSchemeFile("mine")),
+                config::emitColorSchemeYaml(palette));
+
+    REQUIRE(fx.controller->renameColorScheme("mine", "mine2").has_value());
+    fx.fire();
+
+    CHECK(fx.errors.isEmpty());
+    auto const renamed = fx.schemeFile("mine2");
+    REQUIRE(renamed.has_value());
+    CHECK(renamed->defaultForeground == vtbackend::RGBColor { 0x12, 0x34, 0x56 });
+    CHECK_FALSE(fx.fileContent(config::relativePathOf(config::colorSchemeFile("mine"))).has_value());
+}
+
+TEST_CASE("SettingsController: Use New keeps a hand edit of a profile that was never opened", "[settings]")
+{
+    // N1: Use New rewrites the side-file profiles that spell the old edition's status line, from the
+    // configuration's bytes.
+    auto fx = Fixture(BasicConfig);
+    auto const handEdited = handEditedUnopenedProfile(fx);
+
+    auto const written = fx.controller->writeGlobalOverride(
+        config::DefaultsEditionKey, config::configEnumToken(config::DefaultsEdition::Native2026));
+
+    REQUIRE_FALSE(written.has_value());
+    CHECK(written.error().kind == config::SettingsErrorKind::ChangedOnDisk);
+    CHECK(fx.fileContent(config::relativePathOf(config::profileFile("work"))) == handEdited);
+}
+
 TEST_CASE("SettingsController: a hand edit of settings.yml before Settings opens is not written over",
           "[settings]")
 {

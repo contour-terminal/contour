@@ -1217,6 +1217,12 @@ std::expected<void, SettingsError> SettingsController::renameProfile(QString con
     if (profile == nullptr)
         return refuse(SettingsErrorKind::UnknownSetting, "Open the profile to rename it.");
 
+    // The bytes below are the configuration's, so what the session saw of the old file is what the loader
+    // read: a hand edit made since is then a conflict, not lost with the removal.
+    if (_editingProfile != oldName)
+        _session->observe(config::profileFile(oldName.toStdString()),
+                          loadedBytesOf(config::profileFile(oldName.toStdString())));
+
     // One change: the new file, the old one's removal, and the default that follows it are written together
     // or not at all.
     auto files = std::vector<config::StagedFile> {
@@ -1533,6 +1539,10 @@ std::vector<config::StagedFile> SettingsController::profilesAdoptingEdition(conf
                 return indicator.*segment.spelled == statusLine.indicator.*segment.spelled;
             }))
             continue;
+        // A profile that is not open is rewritten from the configuration's copy: what the session saw of
+        // its file is what the loader read, so a hand edit made since is a conflict.
+        if (!isOpen)
+            _session->observe(config::profileFile(name), loadedBytesOf(config::profileFile(name)));
         statusLine.indicator = indicator;
         adopted.statusLine = statusLine;
         files.push_back({ .file = config::profileFile(name), .bytes = config::emitProfileYaml(adopted) });
@@ -1714,15 +1724,27 @@ std::expected<void, SettingsError> SettingsController::renameColorScheme(QString
     if (schemeNameTaken(trimmed.toStdString()))
         return refuse(SettingsErrorKind::NameTaken, "A color scheme with that name already exists.");
 
-    // The open draft carries what is staged for the scheme; another one is as its side file has it.
+    // The open draft carries what is staged for the scheme; another one is as its side file has it, read
+    // once: the palette is parsed from the very bytes the session records as seen, as opening it does.
     auto palette = std::optional<vtbackend::ColorPalette> {};
     if (_schemeAccess != DraftAccess::Closed && _editingScheme == oldName)
         palette = _schemeDraft;
-    else if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
-             it != _config().colorschemes.value().end())
-        palette = it->second;
     else
-        palette = sideFileScheme(oldName.toStdString());
+    {
+        auto const file = config::colorSchemeFile(oldName.toStdString());
+        auto const read = _services.store->read(file);
+        auto const bytes = read ? *read : std::nullopt;
+        if (bytes)
+        {
+            palette = config::parseColorSchemeYaml(
+                _config().configFile.parent_path() / config::relativePathOf(file), *bytes);
+            _session->observe(file, bytes);
+        }
+        if (!palette)
+            if (auto const it = _config().colorschemes.value().find(oldName.toStdString());
+                it != _config().colorschemes.value().end())
+                palette = it->second;
+    }
     if (!palette)
         return refuse(SettingsErrorKind::UnknownSetting, "Open the color scheme to rename it.");
 
